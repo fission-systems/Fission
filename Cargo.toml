@@ -33,7 +33,7 @@ goblin = "0.8"   # PE/ELF/Mach-O parsing
 iced-x86 = "1.21" # x86/x64 disassembly (fastest)
 
 # 4. Scripting (Python) - Optional, requires Python 3.x
-pyo3 = { version = "0.21", features = ["auto-initialize"], optional = true }
+pyo3 = { version = "0.24", features = ["auto-initialize"], optional = true }
 
 # 5. Utilities
 anyhow = "1.0"      # Error handling
