@@ -18,6 +18,8 @@ codegen-units = 1
 default = []
 # Enable Python scripting support (requires Python 3.x installed)
 python = ["pyo3"]
+# Enable native Ghidra decompiler (requires C++ toolchain)
+native_decomp = []
 
 [dependencies]
 # 1. GUI & Rendering
@@ -28,9 +30,9 @@ egui = "0.27"    # Immediate mode GUI
 reedline = "0.30" # NuShell's powerful CLI library (autocomplete, history)
 clap = { version = "4.5", features = ["derive"] } # Command line argument parsing
 
-# 3. Binary Parsing & Disassembly
+# 3. Binary Parsing
 goblin = "0.8"   # PE/ELF/Mach-O parsing
-iced-x86 = "1.21" # x86/x64 disassembly (fastest)
+# Note: iced-x86 removed - using Ghidra Sleigh for disassembly
 
 # 4. Scripting (Python) - Optional, requires Python 3.x
 pyo3 = { version = "0.24", features = ["auto-initialize"], optional = true }
@@ -57,3 +59,7 @@ windows = { version = "0.54", features = [
 # Linux debugging support
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.28", features = ["ptrace", "process"] }
+
+[build-dependencies]
+cc = "1.0"
+

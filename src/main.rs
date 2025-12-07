@@ -5,6 +5,7 @@
 
 mod app;
 mod core;
+mod decomp;
 mod disasm;
 mod script;
 mod ui;
