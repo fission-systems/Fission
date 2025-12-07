@@ -5,9 +5,13 @@
 
 pub mod engine;
 pub mod ffi;
+pub mod safe;
+pub mod client;
 
 #[cfg(test)]
 mod tests;
 
 pub use engine::{Decompiler, StubDecompiler, DecompiledFunction, DisassemblyResult};
+pub use safe::SafeDecompiler;
+
 

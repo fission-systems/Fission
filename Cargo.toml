@@ -7,7 +7,7 @@ description = "Next-Gen Dynamic Instrumentation Platform"
 license = "MIT"
 repository = "https://github.com/sjkim1127/Fission"
 
-# Release optimizations: strip debug symbols, aggressive optimization
+# Release optimizations
 [profile.release]
 opt-level = 3
 lto = true
@@ -16,50 +16,51 @@ codegen-units = 1
 
 [features]
 default = []
-# Enable Python scripting support (requires Python 3.x installed)
 python = ["pyo3"]
-# Enable native Ghidra decompiler (requires C++ toolchain)
 native_decomp = []
 
 [dependencies]
 # 1. GUI & Rendering
-eframe = "0.27"  # egui framework wrapper
-egui = "0.27"    # Immediate mode GUI
+eframe = "0.27"
+egui = "0.27"
 
 # 2. CLI & Input
-reedline = "0.30" # NuShell's powerful CLI library (autocomplete, history)
-clap = { version = "4.5", features = ["derive"] } # Command line argument parsing
+reedline = "0.30"
+clap = { version = "4.5", features = ["derive"] }
 
 # 3. Binary Parsing
-goblin = "0.8"   # PE/ELF/Mach-O parsing
-# Note: iced-x86 removed - using Ghidra Sleigh for disassembly
+goblin = "0.8"
 
-# 4. Scripting (Python) - Optional, requires Python 3.x
+# 4. Scripting
 pyo3 = { version = "0.24", features = ["auto-initialize"], optional = true }
 
 # 5. Utilities
-anyhow = "1.0"      # Error handling
-thiserror = "1.0"   # Custom error definitions
-log = "0.4"         # Logging interface
-env_logger = "0.11" # Logging implementation
-hex = "0.4"         # Hex dump utilities
-colored = "2.1"     # CLI color output
+anyhow = "1.0"
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.11"
+hex = "0.4"
+colored = "2.1"
 
-# System & Debugging (Windows Target)
-# Only enable required features for faster build times
+# 6. gRPC
+bytes = "1.5"
+tokio = { version = "1.36", features = ["full", "rt-multi-thread"] }
+tonic = "0.11"
+prost = "0.12"
+
+# System & Debugging
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.54", features = [
-    "Win32_System_Diagnostics_Debug", # DebugActiveProcess, WaitForDebugEvent
-    "Win32_System_Threading",         # OpenProcess, CreateRemoteThread
-    "Win32_System_Memory",            # VirtualAllocEx, WriteProcessMemory
-    "Win32_Foundation",               # BOOL, HANDLE
-    "Win32_Security",                 # Security attributes
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Threading",
+    "Win32_System_Memory",
+    "Win32_Foundation",
+    "Win32_Security",
 ] }
 
-# Linux debugging support
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.28", features = ["ptrace", "process"] }
 
 [build-dependencies]
 cc = "1.0"
-
+tonic-build = "0.11"

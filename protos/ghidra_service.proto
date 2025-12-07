@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package ghidra_service;
+
+// The decompiler service definition
+service DecompilerService {
+  // Load a binary into the server instance
+  rpc LoadBinary (LoadBinaryRequest) returns (LoadBinaryResponse);
+  
+  // Decompile a function at specific address
+  rpc Decompile (DecompileRequest) returns (DecompileResponse);
+  
+  // Disassemble instructions at specific address
+  rpc Disassemble (DisassembleRequest) returns (DisassembleResponse);
+  
+  // Check server health
+  rpc Ping (PingRequest) returns (PingResponse);
+}
+
+message LoadBinaryRequest {
+  bytes binary_content = 1;
+  uint64 base_address = 2;
+  string arch_spec = 3; // e.g., "x86:LE:64:default"
+  string sla_path = 4;  // Optional: override SLA path
+}
+
+message LoadBinaryResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message DecompileRequest {
+  uint64 address = 1;
+  uint32 timeout_ms = 2;
+}
+
+message DecompileResponse {
+  bool success = 1;
+  string c_code = 2;
+  string error_message = 3;
+  uint64 execution_time_ms = 4;
+}
+
+message DisassembleRequest {
+  uint64 address = 1;
+  uint32 length = 2;
+}
+
+message DisassembleResponse {
+  bool success = 1;
+  repeated Instruction instructions = 2;
+  string error_message = 3;
+}
+
+message Instruction {
+  uint64 address = 1;
+  uint32 length = 2;
+  string mnemonic = 3;
+  string operands = 4;
+  bytes raw_bytes = 5;
+}
+
+message PingRequest {}
+
+message PingResponse {
+  bool alive = 1;
+  uint32 memory_usage = 2;
+}
