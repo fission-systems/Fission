@@ -1,6 +1,6 @@
 /* ###
  * IP: GHIDRA
- * NOTE: Interface to GNU BFD library which is GPL 3
+ * NOTE: Stub header for systems without GNU BFD library
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,37 +14,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// Use the GNU bfd library to manipulate a load image
+// Stub for systems without GNU BFD library
 
 #ifndef __LOADIMAGE_BFD_HH__
 #define __LOADIMAGE_BFD_HH__
 
 #include "loadimage.hh"
-
-// bfd.h requires PACKAGE/PACKAGE_VERSION to be defined
-// https://sourceware.org/bugzilla/show_bug.cgi?id=14243
-
-#ifndef PACKAGE
-  #define PACKAGE
-  #define __LOADIMAGE_BFD__DEFINED_PACKAGE
-#endif
-
-#ifndef PACKAGE_VERSION
-  #define PACKAGE_VERSION
-  #define __LOADIMAGE_BFD__DEFINED_PACKAGE_VERSION
-#endif
-
-#include <bfd.h>
-
-#ifdef __LOADIMAGE_BFD__DEFINED_PACKAGE
-  #undef PACKAGE
-  #undef __LOADIMAGE_BFD__DEFINED_PACKAGE
-#endif
-
-#ifdef __LOADIMAGE_BFD__DEFINED_PACKAGE_VERSION
-  #undef PACKAGE_VERSION
-  #undef __LOADIMAGE_BFD__DEFINED_PACKAGE_VERSION
-#endif
 
 namespace ghidra {
 
@@ -56,38 +31,29 @@ struct ImportRecord {
   Address thunkaddress;
 };
 
+// Stub class when BFD is not available
+// Fission uses Rust's goblin crate for binary loading instead
 class LoadImageBfd : public LoadImage {
-  static int4 bfdinit;		// Is the library (globally) initialized
-  string target;		// File format (supported by BFD)
-  bfd *thebfd;
-  AddrSpace *spaceid;		// We need to map space id to segments but since
-				// we are currently ignoring segments anyway...
-  uintb bufoffset;		// Starting offset of byte buffer
-  uint4 bufsize;		// Number of bytes in the buffer
-  uint1 *buffer;		// The actual buffer
-  mutable asymbol **symbol_table;
-  mutable long number_of_symbols;
-  mutable long cursymbol;
-  mutable asection *secinfoptr;
-  asection *findSection(uintb offset,uintb &ssize) const; // Find section containing given offset
-  void advanceToNextSymbol(void) const;
 public:
-  LoadImageBfd(const string &f,const string &t);
-  void attachToSpace(AddrSpace *id) { spaceid = id; }
-  void open(void);		// Open any descriptors
-  void close(void);		// Close any descriptor
+  LoadImageBfd(const string &f, const string &t) : LoadImage(f) { (void)t; }
+  void attachToSpace(AddrSpace *id) { (void)id; }
+  void open(void) { throw LowlevelError("BFD not available - use Rust goblin instead"); }
+  void close(void) {}
   void getImportTable(vector<ImportRecord> &irec) { throw LowlevelError("Not implemented"); }
-  virtual ~LoadImageBfd(void);
-  virtual void loadFill(uint1 *ptr,int4 size,const Address &addr); // Load a chunk of image
-  virtual void openSymbols(void) const;
-  virtual void closeSymbols(void) const;
-  virtual bool getNextSymbol(LoadImageFunc &record) const;
-  virtual void openSectionInfo(void) const;
-  virtual void closeSectionInfo(void) const;
-  virtual bool getNextSection(LoadImageSection &sec) const;
-  virtual void getReadonly(RangeList &list) const;
-  virtual string getArchType(void) const;
-  virtual void adjustVma(long adjust);
+  virtual ~LoadImageBfd(void) {}
+  virtual void loadFill(uint1 *ptr, int4 size, const Address &addr) { 
+    (void)ptr; (void)size; (void)addr;
+    throw LowlevelError("BFD not available"); 
+  }
+  virtual void openSymbols(void) const {}
+  virtual void closeSymbols(void) const {}
+  virtual bool getNextSymbol(LoadImageFunc &record) const { (void)record; return false; }
+  virtual void openSectionInfo(void) const {}
+  virtual void closeSectionInfo(void) const {}
+  virtual bool getNextSection(LoadImageSection &sec) const { (void)sec; return false; }
+  virtual void getReadonly(RangeList &list) const { (void)list; }
+  virtual string getArchType(void) const { return "stub"; }
+  virtual void adjustVma(long adjust) { (void)adjust; }
 };
 
 } // End namespace ghidra

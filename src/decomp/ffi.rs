@@ -13,7 +13,7 @@ pub struct FissionDecompiler {
 
 // Only link native library when feature is enabled
 #[cfg(feature = "native_decomp")]
-#[link(name = "ghidra_decomp", kind = "static")]
+#[link(name = "ghidra_decompiler", kind = "static")]
 extern "C" {
     pub fn fission_decompiler_init(sla_dir: *const c_char) -> *mut FissionDecompiler;
     pub fn fission_decompiler_destroy(decomp: *mut FissionDecompiler);
