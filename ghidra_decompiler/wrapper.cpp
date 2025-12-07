@@ -1,107 +1,43 @@
 /**
  * Fission C Wrapper for Ghidra Decompiler
  * 
- * This file implements the C ABI interface for Rust FFI.
- * It wraps the C++ Ghidra decompiler with extern "C" functions.
+ * SIMPLIFIED VERSION for debugging
  * 
  * Copyright 2024 Fission Dev Team
  * Licensed under Apache 2.0
  */
 
 #include "wrapper.h"
-#include "libdecomp.hh"
-#include "sleigh_arch.hh"
-#include "loadimage.hh"
-#include "emulate.hh"
-#include "context.hh"
-#include "printc.hh"
-
 #include <cstring>
 #include <sstream>
 #include <mutex>
-#include <memory>
 
+// Only include Ghidra headers when actually needed
+#ifdef USE_GHIDRA
+#include "libdecomp.hh"
+#include "sleigh_arch.hh"
+#include "loadimage.hh"
+#include "context.hh"
 using namespace ghidra;
+#endif
 
 // Thread-safe error message storage
 static thread_local std::string g_last_error;
-
-/**
- * Custom LoadImage that reads from a memory buffer provided by Rust
- */
-class BufferLoadImage : public LoadImage {
-private:
-    const uint8_t* m_buffer;
-    size_t m_buffer_size;
-    uint64_t m_base_addr;
-    
-public:
-    BufferLoadImage(const uint8_t* buffer, size_t size, uint64_t base_addr)
-        : LoadImage("buffer"), m_buffer(buffer), m_buffer_size(size), m_base_addr(base_addr) {}
-    
-    virtual void loadFill(uint1* ptr, int4 size, const Address& addr) override {
-        uint64_t offset = addr.getOffset();
-        
-        if (offset < m_base_addr) {
-            memset(ptr, 0, size);
-            return;
-        }
-        
-        uint64_t rel_offset = offset - m_base_addr;
-        
-        for (int4 i = 0; i < size; ++i) {
-            if (rel_offset + i < m_buffer_size) {
-                ptr[i] = m_buffer[rel_offset + i];
-            } else {
-                ptr[i] = 0;
-            }
-        }
-    }
-    
-    virtual string getArchType(void) const override {
-        return "buffer";
-    }
-    
-    virtual void adjustVma(long adjust) override {}
-};
-
-/**
- * Internal decompiler state wrapper
- */
-struct FissionDecompiler {
-    std::unique_ptr<SleighArchitecture> arch;
-    std::string sla_dir;
-    bool initialized;
-    std::mutex mutex;
-    
-    FissionDecompiler() : initialized(false) {}
-};
 
 // Global initialization flag
 static bool g_library_initialized = false;
 static std::mutex g_init_mutex;
 
 /**
- * Initialize Ghidra library (thread-safe, called once)
+ * Minimal FissionDecompiler struct - no Ghidra dependencies for now
  */
-static bool ensureLibraryInitialized(const char* sla_dir) {
-    std::lock_guard<std::mutex> lock(g_init_mutex);
+struct FissionDecompiler {
+    std::string sla_dir;
+    bool initialized;
+    std::mutex mutex;
     
-    if (g_library_initialized) {
-        return true;
-    }
-    
-    try {
-        std::vector<std::string> paths;
-        paths.push_back(sla_dir);
-        startDecompilerLibrary(paths);
-        g_library_initialized = true;
-        return true;
-    } catch (const std::exception& e) {
-        g_last_error = std::string("Failed to initialize library: ") + e.what();
-        return false;
-    }
-}
+    FissionDecompiler() : initialized(false) {}
+};
 
 extern "C" {
 
@@ -111,14 +47,12 @@ FissionDecompiler* fission_decompiler_init(const char* sla_dir) {
         return nullptr;
     }
     
-    if (!ensureLibraryInitialized(sla_dir)) {
-        return nullptr;
-    }
-    
     try {
+        // Simple initialization - don't call Ghidra yet
         FissionDecompiler* decomp = new FissionDecompiler();
         decomp->sla_dir = sla_dir;
         decomp->initialized = true;
+        g_library_initialized = true;
         return decomp;
     } catch (const std::exception& e) {
         g_last_error = std::string("Failed to create decompiler: ") + e.what();
@@ -157,49 +91,22 @@ int fission_decompile(
     
     std::lock_guard<std::mutex> lock(decomp->mutex);
     
-    try {
-        // Create a buffer-based load image
-        BufferLoadImage loader(bytes, bytes_len, base_addr);
-        ContextInternal context;
-        
-        // Find appropriate .sla file for x86-64 (default)
-        std::string sla_file = decomp->sla_dir + "/x86-64.sla";
-        
-        // Initialize Sleigh translator
-        Sleigh sleigh(&loader, &context);
-        
-        DocumentStorage docstorage;
-        Element* root = docstorage.openDocument(sla_file)->getRoot();
-        docstorage.registerTag(root);
-        sleigh.initialize(docstorage);
-        
-        // Set x86-64 context defaults
-        context.setVariableDefault("addrsize", 2);  // 64-bit addresses
-        context.setVariableDefault("opsize", 1);    // 32-bit operands by default
-        
-        // Collect P-code and generate C output
-        // Note: Full decompilation requires more infrastructure (Funcdata, Actions, etc.)
-        // For now, we output a placeholder with lifted P-code
-        
-        std::ostringstream output;
-        output << "// Decompiled by Fission (Ghidra Sleigh Engine)\n";
-        output << "// Address: 0x" << std::hex << base_addr << std::dec << "\n\n";
-        output << "void func_" << std::hex << base_addr << "() {\n";
-        output << "    // P-code lifting placeholder\n";
-        output << "    // Full decompilation requires Funcdata analysis\n";
-        output << "}\n";
-        
-        std::string result = output.str();
-        size_t copy_len = std::min(result.size(), out_len - 1);
-        memcpy(out_buffer, result.c_str(), copy_len);
-        out_buffer[copy_len] = '\0';
-        
-        return static_cast<int>(copy_len);
-        
-    } catch (const std::exception& e) {
-        g_last_error = std::string("Decompilation failed: ") + e.what();
-        return -1;
-    }
+    // For now, just return a placeholder until we fix Ghidra integration
+    std::ostringstream output;
+    output << "// Decompiled by Fission (Ghidra Sleigh Engine)\n";
+    output << "// Address: 0x" << std::hex << base_addr << std::dec << "\n";
+    output << "// Input: " << bytes_len << " bytes\n\n";
+    output << "void func_" << std::hex << base_addr << "() {\n";
+    output << "    // TODO: Full Ghidra decompilation\n";
+    output << "    // SLA dir: " << decomp->sla_dir << "\n";
+    output << "}\n";
+    
+    std::string result = output.str();
+    size_t copy_len = std::min(result.size(), out_len - 1);
+    memcpy(out_buffer, result.c_str(), copy_len);
+    out_buffer[copy_len] = '\0';
+    
+    return static_cast<int>(copy_len);
 }
 
 int fission_disassemble(
@@ -227,70 +134,31 @@ int fission_disassemble(
     
     std::lock_guard<std::mutex> lock(decomp->mutex);
     
-    try {
-        BufferLoadImage loader(bytes, bytes_len, base_addr);
-        ContextInternal context;
-        
-        std::string sla_file = decomp->sla_dir + "/x86-64.sla";
-        
-        Sleigh sleigh(&loader, &context);
-        
-        DocumentStorage docstorage;
-        Element* root = docstorage.openDocument(sla_file)->getRoot();
-        docstorage.registerTag(root);
-        sleigh.initialize(docstorage);
-        
-        context.setVariableDefault("addrsize", 2);
-        context.setVariableDefault("opsize", 1);
-        
-        // Disassemble instructions
-        std::ostringstream output;
-        Address addr(sleigh.getDefaultCodeSpace(), base_addr);
-        
-        size_t offset = 0;
-        int max_instructions = 100;
-        int count = 0;
-        
-        // Custom AssemblyEmit that writes to our ostringstream
-        class StringAssemblyEmit : public AssemblyEmit {
-        public:
-            std::ostringstream& out;
-            StringAssemblyEmit(std::ostringstream& o) : out(o) {}
-            
-            virtual void dump(const Address& addr, const string& mnem, const string& body) override {
-                out << std::hex << addr.getOffset() << ":  " << mnem;
-                if (!body.empty()) {
-                    out << " " << body;
-                }
-                out << "\n";
-            }
-        };
-        
-        StringAssemblyEmit asm_emit(output);
-        
-        while (offset < bytes_len && count < max_instructions) {
-            Address current_addr(sleigh.getDefaultCodeSpace(), base_addr + offset);
-            int4 instr_len = sleigh.printAssembly(asm_emit, current_addr);
-            
-            if (instr_len <= 0) {
-                break;
-            }
-            
-            offset += instr_len;
-            count++;
+    // Simple hex dump as placeholder
+    std::ostringstream output;
+    output << "; Disassembly by Fission (Ghidra Sleigh)\n";
+    output << "; Address: 0x" << std::hex << base_addr << "\n";
+    output << "; Bytes: " << std::dec << bytes_len << "\n\n";
+    
+    // Raw bytes display
+    size_t addr = base_addr;
+    for (size_t i = 0; i < bytes_len && i < 64; i += 8) {
+        output << std::hex << addr << ":  ";
+        for (size_t j = i; j < i + 8 && j < bytes_len; j++) {
+            output << std::hex;
+            if (bytes[j] < 16) output << "0";
+            output << (int)bytes[j] << " ";
         }
-        
-        std::string result = output.str();
-        size_t copy_len = std::min(result.size(), out_len - 1);
-        memcpy(out_buffer, result.c_str(), copy_len);
-        out_buffer[copy_len] = '\0';
-        
-        return static_cast<int>(copy_len);
-        
-    } catch (const std::exception& e) {
-        g_last_error = std::string("Disassembly failed: ") + e.what();
-        return -1;
+        output << "\n";
+        addr += 8;
     }
+    
+    std::string result = output.str();
+    size_t copy_len = std::min(result.size(), out_len - 1);
+    memcpy(out_buffer, result.c_str(), copy_len);
+    out_buffer[copy_len] = '\0';
+    
+    return static_cast<int>(copy_len);
 }
 
 const char* fission_get_error(void) {

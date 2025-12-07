@@ -6,4 +6,8 @@
 pub mod engine;
 pub mod ffi;
 
+#[cfg(test)]
+mod tests;
+
 pub use engine::{Decompiler, StubDecompiler, DecompiledFunction, DisassemblyResult};
+
