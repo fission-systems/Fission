@@ -7,13 +7,12 @@ service DecompilerService {
   // Load a binary into the server instance
   rpc LoadBinary (LoadBinaryRequest) returns (LoadBinaryResponse);
   
-  // Decompile a function at specific address
-  rpc Decompile (DecompileRequest) returns (DecompileResponse);
+  // Full analysis of a function: returns C code, Assembly, and CFG
+  rpc DecompileFunction (DecompileRequest) returns (DecompileResponse);
   
-  // Disassemble instructions at specific address
-  rpc Disassemble (DisassembleRequest) returns (DisassembleResponse);
+  // Quick disassembly (for non-function code)
+  rpc DisassembleRange (DisassembleRequest) returns (DisassembleResponse);
   
-  // Check server health
   rpc Ping (PingRequest) returns (PingResponse);
 }
 
@@ -21,7 +20,7 @@ message LoadBinaryRequest {
   bytes binary_content = 1;
   uint64 base_address = 2;
   string arch_spec = 3; // e.g., "x86:LE:64:default"
-  string sla_path = 4;  // Optional: override SLA path
+  string sla_path = 4;
 }
 
 message LoadBinaryResponse {
@@ -30,17 +29,42 @@ message LoadBinaryResponse {
 }
 
 message DecompileRequest {
-  uint64 address = 1;
-  uint32 timeout_ms = 2;
+  uint64 address = 1;      // Function entry point
+  bool include_asm = 2;    // Include detailed assembly/CFG?
+  bool include_pcode = 3;  // Include P-code ops?
+  uint32 timeout_ms = 4;
 }
 
 message DecompileResponse {
   bool success = 1;
-  string c_code = 2;
-  string error_message = 3;
-  uint64 execution_time_ms = 4;
+  string error_message = 2;
+  
+  // High-level Result
+  string c_code = 3;
+  string signature = 4;
+  
+  // Control Flow Graph & Instructions (Bulk Data)
+  repeated BasicBlock blocks = 5;
 }
 
+message BasicBlock {
+  uint64 start_addr = 1;
+  uint64 end_addr = 2;     // Exclusive
+  uint64 id = 3;           // Block ID
+  repeated uint64 out_branches = 4; // IDs of target blocks
+  repeated Instruction instructions = 5;
+}
+
+message Instruction {
+  uint64 address = 1;
+  uint32 length = 2;
+  string mnemonic = 3;
+  string operands = 4;
+  bytes raw_bytes = 5;
+  string pcode_text = 6;   // e.g. "COPY RAM[0x10], EAX"
+}
+
+// Legacy/Range Disassembly
 message DisassembleRequest {
   uint64 address = 1;
   uint32 length = 2;
@@ -52,17 +76,7 @@ message DisassembleResponse {
   string error_message = 3;
 }
 
-message Instruction {
-  uint64 address = 1;
-  uint32 length = 2;
-  string mnemonic = 3;
-  string operands = 4;
-  bytes raw_bytes = 5;
-}
-
 message PingRequest {}
-
 message PingResponse {
   bool alive = 1;
-  uint32 memory_usage = 2;
 }

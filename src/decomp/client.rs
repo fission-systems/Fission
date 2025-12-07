@@ -20,35 +20,29 @@ use ghidra_service::{DecompileRequest, DisassembleRequest, LoadBinaryRequest, Pi
 pub struct GhidraClient {
     client: DecompilerServiceClient<Channel>,
     server_process: Option<Child>,
-    port: u16,
 }
 
 impl GhidraClient {
     const DEFAULT_PORT: u16 = 50051;
     const MAX_RETRIES: u32 = 5;
 
-    /// Connect to Ghidra Server (starting it if needed)
     pub async fn connect() -> Result<Self> {
         let uri = format!("http://[::1]:{}", Self::DEFAULT_PORT);
         
-        // Try to connect
         if let Ok(channel) = Channel::from_shared(uri.clone())?.connect().await {
             return Ok(Self {
                 client: DecompilerServiceClient::new(channel),
-                server_process: None, // Already running
-                port: Self::DEFAULT_PORT,
+                server_process: None,
             });
         }
 
-        // Not running, spawn server
         log::info!("Starting Ghidra Server...");
-        let child = Command::new("ghidra_server.exe") // Assumes in PATH or same dir
+        let child = Command::new("ghidra_server.exe")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| anyhow!("Failed to spawn ghidra_server: {}", e))?;
 
-        // Wait for server to start
         let mut client = None;
         for i in 0..Self::MAX_RETRIES {
             sleep(Duration::from_millis(500 * (i as u64 + 1))).await;
@@ -67,17 +61,15 @@ impl GhidraClient {
         Ok(Self {
             client,
             server_process: Some(child),
-            port: Self::DEFAULT_PORT,
         })
     }
 
-    /// Load binary into server
     pub async fn load_binary(&mut self, data: Vec<u8>, base_addr: u64, arch: &str) -> Result<()> {
         let request = tonic::Request::new(LoadBinaryRequest {
             binary_content: data,
             base_address: base_addr,
             arch_spec: arch.to_string(),
-            sla_path: "".to_string(), // TODO: Configurable
+            sla_path: "".to_string(),
         });
 
         let response = self.client.load_binary(request).await?.into_inner();
@@ -89,46 +81,24 @@ impl GhidraClient {
         }
     }
 
-    /// Decompile function
-    pub async fn decompile(&mut self, address: u64) -> Result<String> {
+    /// Full function analysis
+    pub async fn decompile_function(&mut self, address: u64) -> Result<ghidra_service::DecompileResponse> {
         let request = tonic::Request::new(DecompileRequest {
             address,
+            include_asm: true,
+            include_pcode: true,
             timeout_ms: 30000,
         });
 
-        let response = self.client.decompile(request).await?.into_inner();
+        let response = self.client.decompile_function(request).await?.into_inner();
         
         if response.success {
-            Ok(response.c_code)
+            Ok(response)
         } else {
             Err(anyhow!("Decompilation failed: {}", response.error_message))
         }
     }
 
-    /// Disassemble instructions
-    pub async fn disassemble(&mut self, address: u64, length: u32) -> Result<String> {
-        let request = tonic::Request::new(DisassembleRequest {
-            address,
-            length,
-        });
-
-        let response = self.client.disassemble(request).await?.into_inner();
-        
-        if response.success {
-            let mut output = String::new();
-            for instr in response.instructions {
-                output.push_str(&format!(
-                    "{:08x}: {}\t{}\n", 
-                    instr.address, instr.mnemonic, instr.operands
-                ));
-            }
-            Ok(output)
-        } else {
-            Err(anyhow!("Disassembly failed: {}", response.error_message))
-        }
-    }
-
-    /// Check health
     pub async fn ping(&mut self) -> Result<bool> {
         let response = self.client.ping(tonic::Request::new(PingRequest {})).await?;
         Ok(response.into_inner().alive)
@@ -137,7 +107,6 @@ impl GhidraClient {
 
 impl Drop for GhidraClient {
     fn drop(&mut self) {
-        // Kill server if we started it
         if let Some(mut child) = self.server_process.take() {
             let _ = child.kill();
         }
