@@ -4,8 +4,8 @@
 //! Currently disabled - will be enabled when build environment is set up.
 
 fn main() {
-    println!("cargo:rerun-if-changed=cpp/wrapper.cpp");
-    println!("cargo:rerun-if-changed=cpp/wrapper.h");
+    println!("cargo:rerun-if-changed=ghidra_decompiler/wrapper.cpp");
+    println!("cargo:rerun-if-changed=ghidra_decompiler/wrapper.h");
 
     // C++ compilation is currently disabled
     // To enable:
@@ -29,8 +29,8 @@ fn main() {
 fn build_native_library() {
     use std::path::PathBuf;
 
-    let cpp_dir = PathBuf::from("cpp");
-    let wrapper_src = cpp_dir.join("wrapper.cpp");
+    let ghidra_dir = PathBuf::from("ghidra_decompiler");
+    let wrapper_src = ghidra_dir.join("wrapper.cpp");
 
     if !wrapper_src.exists() {
         println!("cargo:warning=C++ wrapper not found - native decompiler disabled");
@@ -38,7 +38,7 @@ fn build_native_library() {
     }
 
     // Collect Ghidra C++ source files
-    let ghidra_sources: Vec<PathBuf> = std::fs::read_dir(&cpp_dir)
+    let ghidra_sources: Vec<PathBuf> = std::fs::read_dir(&ghidra_dir)
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -68,7 +68,7 @@ fn build_native_library() {
     
     build
         .cpp(true)
-        .include(&cpp_dir)
+        .include(&ghidra_dir)
         .define("__TERMINAL__", None)
         .warnings(false)
         .extra_warnings(false);
