@@ -11,6 +11,7 @@ mod app;
 mod core;
 mod decomp;
 mod disasm;
+mod loader;
 mod script;
 mod ui;
 
