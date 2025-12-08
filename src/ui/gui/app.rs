@@ -6,7 +6,7 @@
 use eframe::egui;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::loader::{LoadedBinary, FunctionInfo};
+use crate::analysis::loader::{LoadedBinary, FunctionInfo};
 
 // Message types for async operations
 enum AsyncMessage {
@@ -167,7 +167,7 @@ impl FissionApp {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                match crate::decomp::client::GhidraClient::connect().await {
+                match crate::analysis::decomp::client::GhidraClient::connect().await {
                     Ok(mut client) => {
                         // Load the binary bytes
                         if let Err(e) = client.load_binary(bytes, address, &arch).await {

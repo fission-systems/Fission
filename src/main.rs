@@ -7,16 +7,13 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
-mod cli;
-mod core;
-mod decomp;
-mod disasm;
-mod gui;
-mod loader;
+mod app;
+mod analysis;
+mod debug;
 mod script;
+mod ui;
 
 use clap::Parser;
-use std::thread;
 
 /// Fission: Hybrid Dynamic Analysis Platform
 #[derive(Parser, Debug)]
@@ -58,7 +55,7 @@ fn main() -> anyhow::Result<()> {
     if args.headless {
         // CLI mode: Run REPL in main thread
         println!("[*] Fission v{} - Headless Mode", env!("CARGO_PKG_VERSION"));
-        cli::run_cli()?;
+        ui::cli::run_cli()?;
     } else {
         // GUI mode: Run GUI in main thread
         println!("[*] Fission v{} - GUI Mode", env!("CARGO_PKG_VERSION"));
@@ -78,7 +75,7 @@ fn main() -> anyhow::Result<()> {
             Box::new(|cc| {
                 // Enable dark mode by default
                 cc.egui_ctx.set_visuals(egui::Visuals::dark());
-                Box::new(gui::FissionApp::default())
+                Box::new(ui::gui::FissionApp::default())
             }),
         )
         .map_err(|e| anyhow::anyhow!("GUI Error: {}", e))?;
