@@ -25,6 +25,7 @@ eframe = "0.27"
 egui = "0.27"
 rfd = "0.14"  # Native file dialogs
 egui_extras = "0.27" # For TableBuilder
+once_cell = "1.19"
 
 # 2. CLI & Input
 reedline = "0.30"
@@ -60,6 +61,7 @@ windows = { version = "0.54", features = [
     "Win32_System_Memory",
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_System_ProcessStatus",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

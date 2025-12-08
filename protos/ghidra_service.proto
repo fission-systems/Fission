@@ -26,6 +26,7 @@ message LoadBinaryRequest {
 message LoadBinaryResponse {
   bool success = 1;
   string error_message = 2;
+  repeated FunctionMeta functions = 3;
 }
 
 message DecompileRequest {
@@ -62,6 +63,13 @@ message Instruction {
   string operands = 4;
   bytes raw_bytes = 5;
   string pcode_text = 6;   // e.g. "COPY RAM[0x10], EAX"
+}
+
+message FunctionMeta {
+  uint64 address = 1;
+  uint32 size = 2;
+  string name = 3;
+  bool is_import = 4;
 }
 
 // Legacy/Range Disassembly

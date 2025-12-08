@@ -1611,6 +1611,7 @@ dependencies = [
  "log",
  "nix 0.28.0",
  "object",
+ "once_cell",
  "prost",
  "prost-build",
  "pyo3",

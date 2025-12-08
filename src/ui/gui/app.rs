@@ -4,11 +4,23 @@
 //! Individual panels are defined in the `panels` module.
 
 use eframe::egui;
+use std::fs;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+use crate::analysis::decomp::client::GhidraClient;
+use crate::analysis::decomp::client::BinaryId;
+use crate::analysis::decomp::client::ghidra_service::FunctionMeta;
 use crate::analysis::loader::{LoadedBinary, FunctionInfo};
 use crate::analysis::disasm::DisasmEngine;
+#[cfg(target_os = "windows")]
+use crate::debug::PlatformDebugger;
+#[cfg(target_os = "windows")]
+use crate::debug::Debugger;
+use std::sync::{Arc, Mutex};
+use once_cell::sync::Lazy;
+use tokio::runtime::Runtime;
+use tokio::time::sleep;
 
 use super::state::{AppState, CachedDecompile};
 use super::messages::AsyncMessage;
@@ -27,7 +39,21 @@ pub struct FissionApp {
     
     /// Channel sender (cloned for async tasks)
     tx: Sender<AsyncMessage>,
+
+    /// Platform debugger (Windows only)
+    #[cfg(target_os = "windows")]
+    debugger: Option<PlatformDebugger>,
+
+    /// Shared Ghidra client to avoid reconnect cost
+    ghidra_client: Arc<Mutex<Option<GhidraClient>>>,
+
+    /// Cached binary id of what is loaded on the server (to skip re-load)
+    current_binary_id: Option<BinaryId>,
 }
+
+static TOKIO_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
+    Runtime::new().expect("Failed to create global Tokio runtime")
+});
 
 impl Default for FissionApp {
     fn default() -> Self {
@@ -36,11 +62,75 @@ impl Default for FissionApp {
             state: AppState::default(),
             rx,
             tx,
+            #[cfg(target_os = "windows")]
+            debugger: Some(PlatformDebugger::default()),
+            ghidra_client: Arc::new(Mutex::new(None)),
+            current_binary_id: None,
         }
     }
 }
 
 impl FissionApp {
+    /// Ensure server has the current binary loaded and cache functions from server metadata.
+    fn preload_server_binary(&mut self) {
+        let Some(binary) = self.state.loaded_binary.as_ref() else {
+            return;
+        };
+
+        let arch = binary.arch_spec.clone();
+        let bin_size = binary.data.len() as u64;
+        let bin_mtime = fs::metadata(&binary.path).ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        let bin_id = BinaryId::new(Some(binary.path.clone()), bin_size, arch.clone(), bin_mtime);
+        let bin_bytes = binary.data.clone();
+        let bin_base = binary.image_base;
+
+        let shared_client = self.ghidra_client.clone();
+        let funcs = TOKIO_RUNTIME.block_on(async move {
+            let mut guard = shared_client.lock().unwrap();
+            if guard.is_none() {
+                *guard = Self::connect_with_backoff().await;
+            }
+            let Some(client) = guard.as_mut() else { return None; };
+            match client.load_binary_if_needed(bin_bytes, bin_base, &arch, bin_id).await {
+                Ok((_, metas)) => Some(metas.to_vec()),
+                Err(_) => None,
+            }
+        });
+
+        if let Some(server_funcs) = funcs {
+            if !server_funcs.is_empty() {
+                let converted: Vec<FunctionInfo> = server_funcs.into_iter().map(Self::convert_meta).collect();
+                self.state.loaded_binary.as_mut().map(|b| b.functions = converted);
+            }
+        }
+    }
+
+    fn convert_meta(m: FunctionMeta) -> FunctionInfo {
+        FunctionInfo {
+            name: m.name,
+            address: m.address,
+            size: m.size as u64,
+            is_export: false,
+            is_import: m.is_import,
+        }
+    }
+
+    async fn connect_with_backoff() -> Option<GhidraClient> {
+        let delays = [Duration::from_millis(0), Duration::from_millis(200), Duration::from_millis(500)];
+        for d in delays {
+            if d.as_millis() > 0 {
+                sleep(d).await;
+            }
+            if let Ok(c) = GhidraClient::connect().await {
+                return Some(c);
+            }
+        }
+        None
+    }
+
     /// Process pending async messages from background threads
     fn process_messages(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
@@ -53,6 +143,7 @@ impl FissionApp {
                         binary.entry_point));
                     self.state.log(format!("    {} functions found", binary.functions.len()));
                     self.state.loaded_binary = Some(binary);
+                    self.preload_server_binary();
                 }
                 AsyncMessage::BinaryLoaded(Err(e)) => {
                     self.state.log(format!("[✗] Failed to load binary: {}", e));
@@ -197,6 +288,8 @@ impl FissionApp {
             return;
         }
         
+        let start_time = Instant::now();
+
         // Check cache first
         let address = func.address;
         if let Some(cached) = self.state.decompile_cache.get(&address) {
@@ -213,21 +306,33 @@ impl FissionApp {
             return;
         }
         
-        let binary = self.state.loaded_binary.as_ref().unwrap();
-        let arch = binary.arch_spec.clone();
-        
-        // Get function bytes (estimate 4KB for function body)
-        let func_size = if func.size > 0 { func.size as usize } else { 4096 };
-        let bytes = match binary.get_bytes(address, func_size) {
-            Some(b) => b,
-            None => {
-                self.state.log(format!("[!] Cannot read bytes at 0x{:x}", address));
-                return;
-            }
+        let (arch, bin_id, bin_bytes, bin_base, bytes, is_64bit) = {
+            let binary = self.state.loaded_binary.as_ref().unwrap();
+            let arch = binary.arch_spec.clone();
+            let bin_size = binary.data.len() as u64;
+            let bin_mtime = fs::metadata(&binary.path).ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs());
+            let bin_id = BinaryId::new(Some(binary.path.clone()), bin_size, arch.clone(), bin_mtime);
+            let bin_bytes = binary.data.clone();
+            let bin_base = binary.image_base;
+            
+            // Get function bytes (estimate 4KB for function body)
+            let func_size = if func.size > 0 { func.size as usize } else { 4096 };
+            let bytes = match binary.get_bytes(address, func_size) {
+                Some(b) => b,
+                None => {
+                    self.state.log(format!("[!] Cannot read bytes at 0x{:x}", address));
+                    return;
+                }
+            };
+            (arch, bin_id, bin_bytes, bin_base, bytes, binary.is_64bit)
         };
         
         // Disassemble bytes
-        match DisasmEngine::new(binary.is_64bit) {
+        let disasm_start = Instant::now();
+        match DisasmEngine::new(is_64bit) {
             Ok(engine) => {
                 match engine.disassemble(&bytes, address) {
                     Ok(insns) => {
@@ -251,40 +356,85 @@ impl FissionApp {
         self.state.log(format!("[*] Decompiling 0x{:x} ({} bytes)", address, bytes.len()));
         
         // Spawn async task for decompilation
+        let shared_client = self.ghidra_client.clone();
+        let bin_bytes_clone = bin_bytes.clone();
+        let bin_id_clone = bin_id.clone();
+        let arch_clone = arch.clone();
+        let handle = TOKIO_RUNTIME.handle().clone();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async {
-                match crate::analysis::decomp::client::GhidraClient::connect().await {
-                    Ok(mut client) => {
-                        // Load the binary bytes
-                        if let Err(e) = client.load_binary(bytes, address, &arch).await {
-                            let _ = tx.send(AsyncMessage::DecompileError { 
-                                address, 
-                                error: e.to_string() 
-                            });
-                            return;
+            handle.block_on(async {
+
+                let mut guard = shared_client.lock().unwrap();
+
+                // Try reuse; if missing or failed ensure, reconnect with short backoff
+                let mut need_new = guard.is_none();
+                if !need_new {
+                    if let Some(client) = guard.as_mut() {
+                        if client.ensure_connected().await.is_err() {
+                            need_new = true;
                         }
-                        
-                        // Decompile
-                        match client.decompile_function(address).await {
-                            Ok(result) => {
-                                let _ = tx.send(AsyncMessage::DecompileResult { 
-                                    address, 
-                                    c_code: result.c_code 
-                                });
-                            }
-                            Err(e) => {
-                                let _ = tx.send(AsyncMessage::DecompileError { 
-                                    address, 
-                                    error: e.to_string() 
-                                });
-                            }
+                    }
+                }
+
+                if need_new {
+                    let (prev_id, prev_funcs) = guard
+                        .as_ref()
+                        .map(|c| c.snapshot_state())
+                        .unwrap_or((None, Vec::new()));
+
+                    let mut new_client = None;
+                    let delays = [Duration::from_millis(0), Duration::from_millis(200), Duration::from_millis(500)];
+                    for d in delays {
+                        if d.as_millis() > 0 {
+                            sleep(d).await;
                         }
+                        match GhidraClient::connect().await {
+                            Ok(mut c) => {
+                                c.restore_state(prev_id.clone(), prev_funcs.clone());
+                                new_client = Some(c);
+                                break;
+                            }
+                            Err(_) => continue,
+                        }
+                    }
+
+                    if let Some(c) = new_client {
+                        *guard = Some(c);
+                    } else {
+                        let _ = tx.send(AsyncMessage::DecompileError { 
+                            address, 
+                            error: "Server reconnection failed".to_string() 
+                        });
+                        return;
+                    }
+                }
+
+                let client = guard.as_mut().unwrap();
+
+                // Load the binary bytes only if needed
+                if let Err(e) = match client.load_binary_if_needed(bin_bytes_clone.clone(), bin_base, &arch_clone, bin_id_clone.clone()).await {
+                    Ok(_) => Ok(()),
+                    Err(err) => Err(err),
+                } {
+                    let _ = tx.send(AsyncMessage::DecompileError { 
+                        address, 
+                        error: e.to_string() 
+                    });
+                    return;
+                }
+                
+                // Decompile
+                match client.decompile_function(address).await {
+                    Ok(result) => {
+                        let _ = tx.send(AsyncMessage::DecompileResult { 
+                            address, 
+                            c_code: result.c_code 
+                        });
                     }
                     Err(e) => {
                         let _ = tx.send(AsyncMessage::DecompileError { 
                             address, 
-                            error: format!("Server connection failed: {}", e) 
+                            error: e.to_string() 
                         });
                     }
                 }
@@ -341,10 +491,13 @@ impl eframe::App for FissionApp {
         // Render menu bar and handle actions
         match menu::render(ctx, &mut self.state) {
             MenuAction::OpenFile => self.open_file_dialog(),
-            MenuAction::ToggleDebug => {
-                self.state.is_debugging = !self.state.is_debugging;
-                let status = if self.state.is_debugging { "started" } else { "stopped" };
-                self.state.log(format!("[*] Debugging {}", status));
+            MenuAction::AttachToProcess => {
+                self.state.show_attach_dialog = true;
+                // Refresh process list
+                self.state.process_list = crate::debug::enumerate_processes();
+            }
+            MenuAction::DetachProcess => {
+                self.detach_process();
             }
             MenuAction::ClearConsole => {
                 self.state.clear_logs();
@@ -384,6 +537,128 @@ impl eframe::App for FissionApp {
         if let Some(func) = clicked_func {
             self.state.selected_function = Some(func.clone());
             self.decompile_function(&func);
+        }
+        // Render attach dialog
+        self.render_attach_dialog(ctx);
+    }
+
+
+}
+
+impl FissionApp {
+    /// Attach to a process (Windows builds only)
+    fn attach_to_process(&mut self, pid: u32) {
+        #[cfg(target_os = "windows")]
+        {
+            let dbg = self.debugger.get_or_insert_with(PlatformDebugger::default);
+            self.state.log(format!("[*] Attaching to PID {}...", pid));
+            match dbg.attach(pid) {
+                Ok(_) => {
+                    self.state.is_debugging = true;
+                    self.state.debug_state = dbg.state().clone();
+                    self.state.log(format!("[✓] Attached to PID {}", pid));
+                }
+                Err(e) => {
+                    self.state.is_debugging = false;
+                    self.state.log(format!("[✗] Attach failed: {}", e));
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = pid;
+            self.state
+                .log("[!] Debug attach is only supported on Windows builds right now.");
+        }
+    }
+
+    /// Detach from the current process (Windows builds only)
+    fn detach_process(&mut self) {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(dbg) = self.debugger.as_mut() {
+                if let Some(pid) = dbg.attached_pid() {
+                    self.state.log(format!("[*] Detaching from PID {}...", pid));
+                } else {
+                    self.state.log("[!] Not attached to any process");
+                    return;
+                }
+
+                match dbg.detach() {
+                    Ok(_) => {
+                        self.state.is_debugging = false;
+                        self.state.debug_state = dbg.state().clone();
+                        self.state.show_attach_dialog = false;
+                        self.state.log("[*] Detached from process");
+                    }
+                    Err(e) => {
+                        self.state.log(format!("[✗] Detach failed: {}", e));
+                    }
+                }
+            } else {
+                self.state.log("[!] Debugger not initialized");
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.state
+                .log("[!] Debug detach is only supported on Windows builds right now.");
+        }
+    }
+
+    /// Render "Attach to Process" dialog
+    fn render_attach_dialog(&mut self, ctx: &egui::Context) {
+        if !self.state.show_attach_dialog {
+            return;
+        }
+
+        let mut open = self.state.show_attach_dialog;
+        let mut attached_pid = None;
+
+        egui::Window::new("Attach to Process")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(400.0)
+            .default_height(500.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("🔄 Refresh").clicked() {
+                        self.state.process_list = crate::debug::enumerate_processes();
+                    }
+                    ui.label(format!("{} processes found", self.state.process_list.len()));
+                });
+                
+                ui.separator();
+                
+                // Process list
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::Grid::new("process_list")
+                        .striped(true)
+                        .num_columns(3)
+                        .show(ui, |ui| {
+                            ui.strong("PID");
+                            ui.strong("Name");
+                            ui.strong("Action");
+                            ui.end_row();
+
+                            for process in &self.state.process_list {
+                                ui.label(format!("{}", process.pid));
+                                ui.label(&process.name);
+                                if ui.button("Attach").clicked() {
+                                    attached_pid = Some(process.pid);
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+            });
+
+        self.state.show_attach_dialog = open;
+
+        if let Some(pid) = attached_pid {
+            self.state.show_attach_dialog = false;
+            self.attach_to_process(pid);
         }
     }
 }

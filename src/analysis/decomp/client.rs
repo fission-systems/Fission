@@ -8,13 +8,14 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
 use tonic::transport::Channel;
+use std::time::SystemTime;
 
 pub mod ghidra_service {
     tonic::include_proto!("ghidra_service");
 }
 
 use ghidra_service::decompiler_service_client::DecompilerServiceClient;
-use ghidra_service::{DecompileRequest, LoadBinaryRequest, PingRequest};
+use ghidra_service::{DecompileRequest, LoadBinaryRequest, PingRequest, FunctionMeta};
 
 // ============================================
 // Custom Error Types
@@ -127,6 +128,8 @@ pub struct GhidraClient {
     server_process: Option<Child>,
     config: ClientConfig,
     uri: String,
+    current_binary_id: Option<BinaryId>,
+    loaded_functions: Vec<FunctionMeta>,
 }
 
 impl GhidraClient {
@@ -160,6 +163,8 @@ impl GhidraClient {
                 server_process: None,
                 config,
                 uri,
+                current_binary_id: None,
+                loaded_functions: Vec::new(),
             });
         }
 
@@ -175,6 +180,8 @@ impl GhidraClient {
             server_process: Some(child),
             config,
             uri,
+            current_binary_id: None,
+            loaded_functions: Vec::new(),
         })
     }
 
@@ -258,8 +265,8 @@ impl GhidraClient {
         }
     }
 
-    /// Load a binary into the server for analysis
-    pub async fn load_binary(&mut self, data: Vec<u8>, base_addr: u64, arch: &str) -> Result<()> {
+    /// Load a binary into the server for analysis. Updates current_binary_id and function cache.
+    pub async fn load_binary(&mut self, data: Vec<u8>, base_addr: u64, arch: &str, id: BinaryId) -> Result<(bool, &[FunctionMeta])> {
         let request = tonic::Request::new(LoadBinaryRequest {
             binary_content: data,
             base_address: base_addr,
@@ -270,10 +277,22 @@ impl GhidraClient {
         let response = self.client.load_binary(request).await?.into_inner();
         
         if response.success {
-            Ok(())
+            self.current_binary_id = Some(id);
+            self.loaded_functions = response.functions;
+            Ok((true, &self.loaded_functions))
         } else {
             Err(GhidraError::LoadError(response.error_message))
         }
+    }
+
+    /// Load only when the binary id has changed
+    pub async fn load_binary_if_needed(&mut self, data: Vec<u8>, base_addr: u64, arch: &str, id: BinaryId) -> Result<(bool, &[FunctionMeta])> {
+        if let Some(current) = &self.current_binary_id {
+            if current == &id {
+                return Ok((false, &self.loaded_functions));
+            }
+        }
+        self.load_binary(data, base_addr, arch, id).await
     }
 
     /// Decompile a function at the given address
@@ -309,6 +328,17 @@ impl GhidraClient {
     pub fn owns_server(&self) -> bool {
         self.server_process.is_some()
     }
+
+    /// Snapshot current loaded binary state
+    pub fn snapshot_state(&self) -> (Option<BinaryId>, Vec<FunctionMeta>) {
+        (self.current_binary_id.clone(), self.loaded_functions.clone())
+    }
+
+    /// Restore loaded binary state (used after reconnect)
+    pub fn restore_state(&mut self, id: Option<BinaryId>, funcs: Vec<FunctionMeta>) {
+        self.current_binary_id = id;
+        self.loaded_functions = funcs;
+    }
 }
 
 impl Drop for GhidraClient {
@@ -333,7 +363,23 @@ pub async fn quick_decompile(
     arch: &str
 ) -> Result<String> {
     let mut client = GhidraClient::connect().await?;
-    client.load_binary(binary, base_addr, arch).await?;
+    let id = BinaryId::new(None, binary.len() as u64, arch.to_string(), None);
+    client.load_binary(binary, base_addr, arch, id).await?;
     let result = client.decompile_function(func_addr).await?;
     Ok(result.c_code)
+}
+
+/// Identifier for a loaded binary to decide when to reload server-side
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BinaryId {
+    pub path: Option<String>,
+    pub size: u64,
+    pub arch: String,
+    pub mtime: Option<u64>,
+}
+
+impl BinaryId {
+    pub fn new(path: Option<String>, size: u64, arch: String, mtime: Option<u64>) -> Self {
+        Self { path, size, arch, mtime }
+    }
 }
