@@ -1,0 +1,76 @@
+name: Coverage
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: "-Cinstrument-coverage"
+      LLVM_PROFILE_FILE: "coverage/%p-%m.profraw"
+      CARGO_INCREMENTAL: 0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable) with llvm-tools-preview
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-
+
+      - name: Install grcov
+        run: cargo install grcov
+
+      - name: Run tests with coverage
+        run: |
+          mkdir -p coverage
+          cargo test --all --locked
+
+      - name: Generate coverage report
+        run: |
+          grcov . \
+            --binary-path target/debug/ \
+            --source-dir . \
+            --output-type lcov \
+            --branch \
+            --ignore-not-existing \
+            --ignore "/*tests/*" \
+            --ignore "/*target/*" \
+            --output-path coverage/lcov.info
+          grcov . \
+            --binary-path target/debug/ \
+            --source-dir . \
+            --output-type html \
+            --branch \
+            --ignore-not-existing \
+            --ignore "/*tests/*" \
+            --ignore "/*target/*" \
+            --output-path coverage/html
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage
+
