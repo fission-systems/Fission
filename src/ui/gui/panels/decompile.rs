@@ -1,10 +1,10 @@
-//! Decompiled code panel - displays C-like decompiled output.
+//! Decompiled code panel - displays C-like decompiled output (fixed right panel).
 
 use eframe::egui;
 use super::super::state::AppState;
 
-/// Render the decompiled code panel on the right side.
-pub fn render(ctx: &egui::Context, state: &AppState) {
+/// Render the decompiled code as a fixed right panel.
+pub fn render(ctx: &egui::Context, state: &mut AppState) {
     egui::SidePanel::right("decompile_panel")
         .resizable(true)
         .default_width(350.0)

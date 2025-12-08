@@ -59,6 +59,47 @@ pub struct AppState {
 
     /// Server recovery in progress
     pub recovering: bool,
+
+    // ========== Bottom Panel Tab ==========
+    /// Currently selected bottom tab
+    pub bottom_tab: BottomTab,
+
+    // ========== Hex View State ==========
+    /// Current offset in hex view
+    pub hex_offset: u64,
+
+    // ========== Strings State ==========
+    /// Extracted strings from binary
+    pub extracted_strings: Vec<ExtractedString>,
+    /// Filter for strings view
+    pub strings_filter: String,
+}
+
+/// Extracted string from binary
+#[derive(Clone)]
+pub struct ExtractedString {
+    /// Offset in binary
+    pub offset: u64,
+    /// String value
+    pub value: String,
+    /// String encoding type
+    pub encoding: StringEncoding,
+}
+
+/// String encoding type
+#[derive(Clone, Copy, PartialEq)]
+pub enum StringEncoding {
+    Ascii,
+    Utf16Le,
+}
+
+/// Bottom panel tab selection
+#[derive(Clone, Copy, PartialEq, Default)]
+pub enum BottomTab {
+    #[default]
+    Console,
+    HexView,
+    Strings,
 }
 
 impl Default for AppState {
@@ -84,6 +125,13 @@ impl Default for AppState {
             decompile_cache: HashMap::new(),
             last_binary_path: None,
             recovering: false,
+            // Bottom panel tab
+            bottom_tab: BottomTab::Console,
+            // Hex view state
+            hex_offset: 0,
+            // Strings state
+            extracted_strings: Vec::new(),
+            strings_filter: String::new(),
         }
     }
 }

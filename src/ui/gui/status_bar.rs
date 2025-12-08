@@ -9,11 +9,11 @@ pub fn render(ctx: &egui::Context, state: &AppState) {
         ui.horizontal(|ui| {
             // Server status (with recovery indicator)
             let (server_color, server_text) = if state.recovering {
-                (egui::Color32::YELLOW, "🔄 Recovering...")
+                (egui::Color32::YELLOW, "Recovering...")
             } else if state.server_connected {
-                (egui::Color32::from_rgb(100, 200, 100), "⚡ Server")
+                (egui::Color32::from_rgb(100, 200, 100), "Server")
             } else {
-                (egui::Color32::from_rgb(150, 150, 150), "🔌 Offline")
+                (egui::Color32::from_rgb(150, 150, 150), "Offline")
             };
             ui.colored_label(server_color, server_text);
             

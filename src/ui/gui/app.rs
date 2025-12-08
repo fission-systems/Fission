@@ -14,8 +14,8 @@ use super::state::{AppState, CachedDecompile};
 use super::messages::AsyncMessage;
 use super::menu::{self, MenuAction};
 use super::status_bar;
-use super::panels::{functions, console, assembly, decompile};
-use super::panels::console::ConsoleAction;
+use super::panels::{functions, assembly, decompile, bottom_tabs};
+use super::panels::bottom_tabs::ConsoleAction;
 
 /// Main application struct that implements eframe::App
 pub struct FissionApp {
@@ -368,12 +368,16 @@ impl eframe::App for FissionApp {
         // Render panels
         let clicked_func = functions::render(ctx, &mut self.state);
         
-        match console::render(ctx, &mut self.state) {
+        // Bottom tabbed panel (Console, Hex View, Strings)
+        match bottom_tabs::render(ctx, &mut self.state) {
             ConsoleAction::Command(cmd) => self.process_command(&cmd),
             ConsoleAction::None => {}
         }
         
-        decompile::render(ctx, &self.state);
+        // Fixed right panel - Decompile
+        decompile::render(ctx, &mut self.state);
+        
+        // Main content - Assembly
         assembly::render(ctx, &self.state);
 
         // Handle function click
