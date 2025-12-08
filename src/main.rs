@@ -7,17 +7,16 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 
-mod app;
+mod cli;
 mod core;
 mod decomp;
 mod disasm;
+mod gui;
 mod loader;
 mod script;
-mod ui;
 
 use clap::Parser;
 use std::thread;
-use ui::cli::run_cli;
 
 /// Fission: Hybrid Dynamic Analysis Platform
 #[derive(Parser, Debug)]
@@ -59,17 +58,10 @@ fn main() -> anyhow::Result<()> {
     if args.headless {
         // CLI mode: Run REPL in main thread
         println!("[*] Fission v{} - Headless Mode", env!("CARGO_PKG_VERSION"));
-        run_cli()?;
+        cli::run_cli()?;
     } else {
-        // GUI mode: CLI runs in background thread, GUI in main thread
+        // GUI mode: Run GUI in main thread
         println!("[*] Fission v{} - GUI Mode", env!("CARGO_PKG_VERSION"));
-
-        // Spawn CLI thread for background REPL
-        thread::spawn(|| {
-            if let Err(e) = run_cli() {
-                log::error!("CLI Error: {}", e);
-            }
-        });
 
         // Run GUI main loop (wgpu/eframe)
         let native_options = eframe::NativeOptions {
@@ -86,7 +78,7 @@ fn main() -> anyhow::Result<()> {
             Box::new(|cc| {
                 // Enable dark mode by default
                 cc.egui_ctx.set_visuals(egui::Visuals::dark());
-                Box::new(app::FissionApp::default())
+                Box::new(gui::FissionApp::default())
             }),
         )
         .map_err(|e| anyhow::anyhow!("GUI Error: {}", e))?;
