@@ -42,6 +42,37 @@ using grpc::Status;
 using namespace ghidra_service;
 using namespace ghidra;
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// Get directory containing the executable
+static std::string getExecutableDir() {
+#ifdef _WIN32
+    char path[MAX_PATH];
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    std::string exePath(path);
+    size_t lastSlash = exePath.find_last_of("\\/");
+    if (lastSlash != std::string::npos) {
+        return exePath.substr(0, lastSlash);
+    }
+    return ".";
+#else
+    // Linux/Mac: read /proc/self/exe or use argv[0]
+    char path[4096];
+    ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (len != -1) {
+        path[len] = '\0';
+        std::string exePath(path);
+        size_t lastSlash = exePath.find_last_of("/");
+        if (lastSlash != std::string::npos) {
+            return exePath.substr(0, lastSlash);
+        }
+    }
+    return ".";
+#endif
+}
+
 // Custom LoadImage - feeds bytes to Sleigh
 class MemoryLoadImage : public LoadImage {
     std::string data_;
@@ -101,10 +132,44 @@ class DecompilerServiceImpl final : public DecompilerService::Service {
     
 public:
     DecompilerServiceImpl() {
+        // Get executable directory and compute paths relative to it
+        std::string exeDir = getExecutableDir();
+        
+        // Try multiple possible locations for the languages folder:
+        // 1. <exe_dir>/../../ghidra_decompiler/languages (when exe is in build/Release)
+        // 2. <exe_dir>/../ghidra_decompiler/languages (when exe is in build)
+        // 3. <exe_dir>/languages (deployed scenario)
+        std::vector<std::pair<std::string, std::string>> searchPaths = {
+            {exeDir + "/../../ghidra_decompiler", exeDir + "/../../ghidra_decompiler/languages"},
+            {exeDir + "/../ghidra_decompiler", exeDir + "/../ghidra_decompiler/languages"},
+            {exeDir, exeDir + "/languages"}
+        };
+        
+        std::string baseDir;
+        std::string langDir;
+        
+        for (const auto& paths : searchPaths) {
+            std::ifstream test(paths.second + "/x86.ldefs");
+            if (test.good()) {
+                baseDir = paths.first;
+                langDir = paths.second;
+                break;
+            }
+        }
+        
+        if (langDir.empty()) {
+            std::cerr << "[Server] ERROR: Could not find languages directory!" << std::endl;
+            std::cerr << "[Server] Searched from: " << exeDir << std::endl;
+            return;
+        }
+        
+        std::cout << "[Server] Base directory: " << baseDir << std::endl;
+        std::cout << "[Server] Languages directory: " << langDir << std::endl;
+        
         // Initialize Ghidra library (registers print languages, capabilities, etc.)
-        startDecompilerLibrary("F:/Fission/ghidra_decompiler");
+        startDecompilerLibrary(baseDir.c_str());
         // Manually add the languages directory to specpaths
-        SleighArchitecture::specpaths.addDir2Path("F:/Fission/ghidra_decompiler/languages");
+        SleighArchitecture::specpaths.addDir2Path(langDir);
         // Parse .ldefs files by calling getDescriptions()
         try {
             SleighArchitecture::getDescriptions();
