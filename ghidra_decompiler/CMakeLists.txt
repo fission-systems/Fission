@@ -10,6 +10,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
     add_compile_options(/W0 /EHsc /bigobj)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    # Avoid Windows API macro collisions with Ghidra classes
+    # NOGDI prevents LoadImage and other GDI macros from being defined
+    add_definitions(-DWIN32_LEAN_AND_MEAN -DNOMINMAX -DNOGDI)
 else()
     add_compile_options(-w -Wno-sign-compare)
     add_definitions(-D__TERMINAL__)
@@ -33,7 +36,7 @@ add_custom_command(
     ARGS --grpc_out="${CMAKE_CURRENT_BINARY_DIR}"
          --cpp_out="${CMAKE_CURRENT_BINARY_DIR}"
          -I "${PROTO_DIR}"
-         --plugin=protoc-gen-grpc=$<TARGET_FILE:gM::grpc_cpp_plugin>
+         --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
          "${PROTO_DIR}/ghidra_service.proto"
     DEPENDS "${PROTO_DIR}/ghidra_service.proto"
 )
@@ -57,7 +60,6 @@ set(CORE_SOURCES
 # Wrapper/Server Sources
 set(SERVER_SOURCES
     server_main.cc
-    # loadimage_bfd.hh is a stub now, so we don't include BFD sources
 )
 
 # Executable

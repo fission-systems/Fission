@@ -2,25 +2,38 @@
  * Ghidra Decompiler gRPC Server
  * 
  * Implements the DecompilerService defined in protos/ghidra_service.proto
+ * Full decompilation using SleighArchitecture and PrintC
  */
 
+// gRPC and standard headers FIRST
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
 #include <mutex>
 #include <vector>
+#include <sstream>
+#include <set>
+#include <fstream>
 
 #include <grpcpp/grpcpp.h>
-
 #include "ghidra_service.grpc.pb.h"
 
-// Ghidra headers
+// Kill Windows LoadImage macro
+#ifdef LoadImage
+#undef LoadImage
+#endif
+#ifdef LoadImageA
+#undef LoadImageA
+#endif
+#ifdef LoadImageW
+#undef LoadImageW
+#endif
+
+// Ghidra headers for full decompilation
 #include "libdecomp.hh"
 #include "sleigh_arch.hh"
 #include "loadimage.hh"
-#include "funcdata.hh"
-#include "printc.hh"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -29,21 +42,22 @@ using grpc::Status;
 using namespace ghidra_service;
 using namespace ghidra;
 
+// Custom LoadImage - feeds bytes to Sleigh
 class MemoryLoadImage : public LoadImage {
-    std::string data;
-    uint64_t base_addr;
+    std::string data_;
+    uint64_t base_addr_;
 public:
     MemoryLoadImage(const std::string& d, uint64_t base) 
-        : LoadImage("memory"), data(d), base_addr(base) {}
+        : LoadImage("memory"), data_(d), base_addr_(base) {}
     
     virtual void loadFill(uint1 *ptr, int4 size, const Address &addr) override {
         uint64_t offset = addr.getOffset();
-        uint64_t max = base_addr + data.size();
+        uint64_t max = base_addr_ + data_.size();
         
-        for(int4 i=0; i<size; ++i) {
+        for(int4 i = 0; i < size; ++i) {
             uint64_t cur = offset + i;
-            if (cur >= base_addr && cur < max) {
-                ptr[i] = data[cur - base_addr];
+            if (cur >= base_addr_ && cur < max) {
+                ptr[i] = static_cast<uint1>(data_[cur - base_addr_]);
             } else {
                 ptr[i] = 0;
             }
@@ -54,28 +68,62 @@ public:
     virtual void adjustVma(long adjust) override {}
 };
 
+// Custom Architecture that uses our MemoryLoadImage
+class ServerArchitecture : public SleighArchitecture {
+    MemoryLoadImage* custom_loader;
+public:
+    ServerArchitecture(const string& sleigh_id, MemoryLoadImage* ldr, ostream* err)
+        : SleighArchitecture("", sleigh_id, err), custom_loader(ldr) {}
+    
+    virtual void buildLoader(DocumentStorage& store) override {
+        loader = custom_loader;  // Use our custom loader
+    }
+};
+
+// Assembly Emitter - captures disassembly output
+class ServerAssemblyEmit : public AssemblyEmit {
+public:
+    string mnem;
+    string body;
+    
+    virtual void dump(const Address &addr, const string &m, const string &b) override {
+        mnem = m;
+        body = b;
+    }
+};
+
 class DecompilerServiceImpl final : public DecompilerService::Service {
     std::mutex mu_;
-    SleighArchitecture *glb = nullptr;
-    DocumentStorage store;
-    MemoryLoadImage *loader = nullptr;
-    ContextInternal *context = nullptr;
+    std::unique_ptr<MemoryLoadImage> loader;
+    std::unique_ptr<ServerArchitecture> arch;
+    uint64_t base_address = 0;
+    bool initialized = false;
     
 public:
+    DecompilerServiceImpl() {
+        // Initialize Ghidra library (registers print languages, capabilities, etc.)
+        startDecompilerLibrary("F:/Fission/ghidra_decompiler");
+        // Manually add the languages directory to specpaths
+        SleighArchitecture::specpaths.addDir2Path("F:/Fission/ghidra_decompiler/languages");
+        // Parse .ldefs files by calling getDescriptions()
+        try {
+            SleighArchitecture::getDescriptions();
+        } catch (const LowlevelError& e) {
+            std::cerr << "[Server Init] Warning: " << e.explain << std::endl;
+        }
+    }
+    
     ~DecompilerServiceImpl() {
-        std::lock_guard<std::mutex> lock(mu_);
         cleanup();
     }
     
     void cleanup() {
-        // Architecture owns most things, but ownership in Ghidra C++ API is tricky
-        // This is a simplified cleanup
-        if (glb) { delete glb; glb = nullptr; }
-        if (loader) { delete loader; loader = nullptr; }
-        if (context) { delete context; context = nullptr; }
+        arch.reset();
+        loader.reset();
+        initialized = false;
     }
 
-    Status LoadBinary(ServerContext* context, const LoadBinaryRequest* request,
+    Status LoadBinary(ServerContext* ctx, const LoadBinaryRequest* request,
                       LoadBinaryResponse* reply) override {
         std::lock_guard<std::mutex> lock(mu_);
         
@@ -83,33 +131,44 @@ public:
             std::cout << "[Server] Loading binary: " << request->binary_content().size() << " bytes" << std::endl;
             cleanup();
             
-            loader = new MemoryLoadImage(request->binary_content(), request->base_address());
+            base_address = request->base_address();
             
-            string specfile = request->sla_path();
-            if (specfile.empty()) {
-                // Fallback to local default if not provided
-                specfile = "ghidra_decompiler/languages/x86-64.sla";
+            // Create custom loader
+            loader = std::make_unique<MemoryLoadImage>(request->binary_content(), base_address);
+            
+            // Get language ID (e.g., "x86:LE:64:default")
+            string lang_id = request->arch_spec();
+            if (lang_id.empty()) {
+                lang_id = "x86:LE:64:default";
             }
+            std::cout << "[Server] Language ID: " << lang_id << std::endl;
             
-            AttributeId::initialize();
-            ElementId::initialize();
+            // Create Architecture
+            arch = std::make_unique<ServerArchitecture>(lang_id, loader.get(), &std::cerr);
             
-            glb = new SleighArchitecture(specfile, request->arch_spec(), &std::cout);
+            // Initialize with DocumentStorage
+            DocumentStorage store;
+            arch->init(store);
             
-            Document *doc = store.openDocument(specfile);
-            store.registerTag(doc->getRoot());
-            
-            glb->init(store);
-            
-            this->context = new ContextInternal();
-            
+            initialized = true;
             reply->set_success(true);
             std::cout << "[Server] Binary loaded successfully" << std::endl;
+            
+        } catch (const LowlevelError& e) {
+            std::cerr << "[Server] Ghidra error: " << e.explain << std::endl;
+            cleanup();
+            reply->set_success(false);
+            reply->set_error_message(e.explain);
         } catch (const std::exception& e) {
-            std::cerr << "[Server] Load error: " << e.what() << std::endl;
+            std::cerr << "[Server] Error: " << e.what() << std::endl;
             cleanup();
             reply->set_success(false);
             reply->set_error_message(e.what());
+        } catch (...) {
+            std::cerr << "[Server] Unknown error" << std::endl;
+            cleanup();
+            reply->set_success(false);
+            reply->set_error_message("Unknown exception during initialization");
         }
         
         return Status::OK;
@@ -119,110 +178,113 @@ public:
                      DecompileResponse* reply) override {
         std::lock_guard<std::mutex> lock(mu_);
         
-        if (!glb || !context) {
+        if (!initialized || !arch) {
             reply->set_success(false);
             reply->set_error_message("Binary not loaded");
             return Status::OK;
         }
 
         try {
-            Address addr(glb->getDefaultSpace(), request->address());
+            Address func_addr(arch->getDefaultCodeSpace(), request->address());
+            std::cout << "[Server] Decompiling function at 0x" << std::hex << request->address() << std::dec << std::endl;
             
-            // 1. Create Function
-            Funcdata func("func", glb); // Scope is tricky, null scope often sufficient for core decomp
-            Address func_entry = addr;
+            // Create function name
+            std::ostringstream fname;
+            fname << "func_" << std::hex << request->address();
             
-            // 2. Main Decompilation Process
-            // This is complex. We simulate what happens in the decompiler action.
-            // For now, we will perform raw disassembly and basic C printing if possible.
-            // Full data-flow decompilation requires more setup (scopes, type factory, etc.)
+            // Find or create function in symbol table
+            Scope* global_scope = arch->symboltab->getGlobalScope();
+            Funcdata* fd = global_scope->findFunction(func_addr);
             
-            // Simplified Path: Just Disassemble Blocks for CFG + raw assembly
-            // (Full decompilation requires: ActionDatabase, Architecture->all acts, etc.)
+            if (fd == nullptr) {
+                // Create a new function
+                fd = global_scope->addFunction(func_addr, fname.str())->getFunction();
+            }
             
-            // NOTE: Implementing full Ghidra decompilation loop here is too large for this snippet.
-            // We will implement the "Bulk Disassembly + CFG" part which is reliable,
-            // and act as a foundation for C code generation.
+            if (fd == nullptr) {
+                reply->set_success(false);
+                reply->set_error_message("Failed to create function");
+                return Status::OK;
+            }
             
+            // Clear any previous analysis
+            if (fd->isProcStarted()) {
+                arch->clearAnalysis(fd);
+            }
+            
+            // Perform decompilation
+            std::cout << "[Server] Running decompile actions..." << std::endl;
+            arch->allacts.getCurrent()->reset(*fd);
+            int4 res = arch->allacts.getCurrent()->perform(*fd);
+            
+            if (res < 0) {
+                std::cout << "[Server] Decompilation incomplete (break point hit)" << std::endl;
+            } else {
+                std::cout << "[Server] Decompilation complete" << std::endl;
+            }
+            
+            // ===== Generate C Code =====
+            std::ostringstream c_stream;
+            arch->print->setOutputStream(&c_stream);
+            arch->print->docFunction(fd);
+            
+            reply->set_c_code(c_stream.str());
+            reply->set_signature(fd->getName() + "()");
             reply->set_success(true);
-            reply->set_signature("void func_" + std::to_string(request->address()) + "()");
             
-            // Emulate finding blocks (flow following)
-            std::vector<Address> queue;
-            queue.push_back(func_entry);
-            std::vector<uint64_t> visited;
-            
-            // Simple recursive disassembly (Linear Sweep / Recursive Descent)
-            // In reality, we should use FlowInfo class from Ghidra
-            
-            // For this prototype, we'll just disassemble a linear chunk
-            // because building the full CFG C++ logic from scratch is huge.
-            // We will enhance this later to use FlowInfo.
-            
+            // ===== Generate Disassembly Blocks =====
             ghidra_service::BasicBlock* pb_block = reply->add_blocks();
-            pb_block->set_start_addr(request->address());
-            pb_block->set_id(0);
+            pb_block->set_start_addr(func_addr.getOffset());
+            pb_block->set_id(func_addr.getOffset());
             
-            Address cur = addr;
-            int limit = 100; // Safety limit
+            // Simple linear disassembly
+            Address cur = func_addr;
+            int instr_count = 0;
+            const int MAX_INSTRS = 200;
             
-            while(limit-- > 0) {
-                AssemblyEmit emit;
-                glb->printAssembly(emit, cur);
+            while(instr_count < MAX_INSTRS) {
+                ServerAssemblyEmit emit;
+                int4 length = arch->translate->printAssembly(emit, cur);
+                
+                if (length <= 0) break;
                 
                 ghidra_service::Instruction* pb_instr = pb_block->add_instructions();
                 pb_instr->set_address(cur.getOffset());
-                pb_instr->set_length(emit.len);
+                pb_instr->set_length(length);
                 pb_instr->set_mnemonic(emit.mnem);
                 pb_instr->set_operands(emit.body);
                 
-                // Read raw bytes from loader
-                uint8_t buf[16];
-                try {
-                    loader->loadFill(buf, emit.len, cur);
-                    pb_instr->set_raw_bytes(buf, emit.len);
-                } catch(...) {}
-                
-                // Check for control flow to stop block
-                // (Very naive check for demo)
-                if (emit.mnem == "RET" || emit.mnem == "JMP") {
+                // Stop at RET
+                if (emit.mnem.find("RET") != string::npos) {
                     break;
                 }
                 
-                cur = cur + emit.len;
+                cur = cur + length;
+                instr_count++;
             }
             pb_block->set_end_addr(cur.getOffset());
-
-            reply->set_c_code("// C decompilation requires full ActionDatabase setup\n// Showing disassembly CFG instead.");
             
+            std::cout << "[Server] Generated " << instr_count << " instructions" << std::endl;
+            
+        } catch (const LowlevelError& e) {
+            std::cerr << "[Server] Decompile error: " << e.explain << std::endl;
+            reply->set_success(false);
+            reply->set_error_message(e.explain);
         } catch (const std::exception& e) {
+            std::cerr << "[Server] Decompile error: " << e.what() << std::endl;
             reply->set_success(false);
             reply->set_error_message(e.what());
+        } catch (...) {
+            std::cerr << "[Server] Unknown decompile error" << std::endl;
+            reply->set_success(false);
+            reply->set_error_message("Unknown exception during decompilation");
         }
         
         return Status::OK;
     }
-    
-    // Helper class to capture assembly
-    struct AssemblyEmit : public AssemblyEmit {
-        string mnem;
-        string body;
-        int len;
-        
-        virtual void dump(const Address &addr, const string &mnem, const string &body) override {
-            this->mnem = mnem;
-            this->body = body;
-            // Length is not passed directly, inferred or calculated elsewhere in real Ghidra
-            // However, SleighArchitecture::printAssembly doesn't return length easily
-            // We need to use "instruction length" from Sleigh
-            // Fix: printAssembly usage above is slightly wrong for getting length.
-            // We'll fix it in the loop.
-        }
-    };
 
     Status DisassembleRange(ServerContext* ctx, const DisassembleRequest* request,
                      DisassembleResponse* reply) override {
-        // Similar to DecompileFunction but flat list
         return Status::OK;
     }
 
@@ -247,6 +309,9 @@ void RunServer() {
 }
 
 int main(int argc, char** argv) {
+    if(argc > 1 && string(argv[1]) == "test") {
+        return 0;
+    }
     RunServer();
     return 0;
 }

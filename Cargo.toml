@@ -64,3 +64,4 @@ nix = { version = "0.28", features = ["ptrace", "process"] }
 [build-dependencies]
 cc = "1.0"
 tonic-build = "0.11"
+prost-build = "0.12"

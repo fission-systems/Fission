@@ -37,11 +37,30 @@ impl GhidraClient {
         }
 
         log::info!("Starting Ghidra Server...");
-        let child = Command::new("ghidra_server.exe")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| anyhow!("Failed to spawn ghidra_server: {}", e))?;
+        // Try multiple paths to find the server executable
+        let paths = [
+            "ghidra_server.exe",                 // PATH
+            "build/Release/ghidra_server.exe",   // CMake Release (Windows)
+            "build/Debug/ghidra_server.exe",     // CMake Debug (Windows)
+            "build/ghidra_server",               // CMake (Unix)
+        ];
+        
+        let mut child_res = Err(anyhow!("None tried"));
+        for path in paths {
+             match Command::new(path)
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn() {
+                    Ok(c) => { 
+                        log::info!("Spawned server from: {}", path);
+                        child_res = Ok(c); 
+                        break; 
+                    }
+                    Err(_) => continue,
+                }
+        }
+
+        let child = child_res.map_err(|_| anyhow!("Failed to spawn ghidra_server: checked {:?}", paths))?;
 
         let mut client = None;
         for i in 0..Self::MAX_RETRIES {

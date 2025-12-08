@@ -3,6 +3,10 @@
 //! Entry point that handles CLI argument parsing and mode switching
 //! between headless CLI and full GUI modes.
 
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 mod app;
 mod core;
 mod decomp;

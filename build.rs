@@ -7,6 +7,14 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=protos/ghidra_service.proto");
 
+    // Set protoc path from vcpkg if not already set
+    if std::env::var("PROTOC").is_err() {
+        let vcpkg_protoc = "C:/vcpkg/installed/x64-windows/tools/protobuf/protoc.exe";
+        if std::path::Path::new(vcpkg_protoc).exists() {
+            std::env::set_var("PROTOC", vcpkg_protoc);
+        }
+    }
+
     // 1. Generate gRPC code
     tonic_build::configure()
         .build_server(false)

@@ -1,17 +1,12 @@
-//! Decompiler Module - Ghidra Sleigh Integration
+//! Decompiler Module - Ghidra gRPC Integration
 //!
-//! Provides decompilation and advanced disassembly via the Ghidra C++ engine.
-//! Falls back to stub output when native library unavailable.
+//! Provides decompilation and advanced disassembly via gRPC communication
+//! with the native Ghidra C++ server.
 
-pub mod engine;
-pub mod ffi;
-pub mod safe;
 pub mod client;
 
 #[cfg(test)]
 mod tests;
 
-pub use engine::{Decompiler, StubDecompiler, DecompiledFunction, DisassemblyResult};
-pub use safe::SafeDecompiler;
-
-
+// Re-export the gRPC client for external use
+pub use client::GhidraClient;

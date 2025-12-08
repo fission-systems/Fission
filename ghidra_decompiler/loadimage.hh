@@ -19,6 +19,20 @@
 #ifndef __LOADIMAGE_HH__
 #define __LOADIMAGE_HH__
 
+// Windows winuser.h defines LoadImage as LoadImageA/LoadImageW macro
+// which conflicts with our LoadImage class. Undef it here.
+#ifdef _WIN32
+#ifdef LoadImage
+#undef LoadImage
+#endif
+#ifdef LoadImageA
+#undef LoadImageA
+#endif
+#ifdef LoadImageW
+#undef LoadImageW
+#endif
+#endif
+
 #include "address.hh"
 
 namespace ghidra {
