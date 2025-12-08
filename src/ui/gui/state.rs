@@ -60,6 +60,14 @@ pub struct AppState {
     /// Server recovery in progress
     pub recovering: bool,
 
+    // ========== Debug State ==========
+    /// Debugger state
+    pub debug_state: crate::debug::types::DebugState,
+    /// Show attach dialog
+    pub show_attach_dialog: bool,
+    /// Cached process list for dialog
+    pub process_list: Vec<crate::debug::types::ProcessInfo>,
+
     // ========== Bottom Panel Tab ==========
     /// Currently selected bottom tab
     pub bottom_tab: BottomTab,
@@ -73,8 +81,39 @@ pub struct AppState {
     pub extracted_strings: Vec<ExtractedString>,
     /// Filter for strings view
     pub strings_filter: String,
+
+    /// Dynamic mode (on/off)
+    pub dynamic_mode: bool,
+
+    /// Pending debug control action from UI
+    pub pending_debug_action: Option<DebugAction>,
+
+    /// Pending breakpoint action from UI
+    pub pending_bp_action: Option<DebugBpAction>,
+    /// Temporary input for breakpoint address
+    pub breakpoint_input: String,
+
+    /// Memory view address input (hex)
+    pub mem_addr_input: String,
+    /// Memory view length input (decimal)
+    pub mem_len_input: String,
+    /// Last memory dump text
+    pub mem_dump: String,
 }
 
+/// Debug control actions requested from UI
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugAction {
+    Continue,
+    Step,
+}
+
+/// Breakpoint actions requested from UI
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DebugBpAction {
+    Add(u64),
+    Remove(u64),
+}
 /// Extracted string from binary
 #[derive(Clone)]
 pub struct ExtractedString {
@@ -100,6 +139,8 @@ pub enum BottomTab {
     Console,
     HexView,
     Strings,
+    Imports,
+    Debug,
 }
 
 impl Default for AppState {
@@ -125,6 +166,10 @@ impl Default for AppState {
             decompile_cache: HashMap::new(),
             last_binary_path: None,
             recovering: false,
+            // Debug state
+            debug_state: crate::debug::types::DebugState::default(),
+            show_attach_dialog: false,
+            process_list: Vec::new(),
             // Bottom panel tab
             bottom_tab: BottomTab::Console,
             // Hex view state
@@ -132,6 +177,13 @@ impl Default for AppState {
             // Strings state
             extracted_strings: Vec::new(),
             strings_filter: String::new(),
+            dynamic_mode: true,
+            pending_debug_action: None,
+            pending_bp_action: None,
+            breakpoint_input: String::new(),
+            mem_addr_input: String::new(),
+            mem_len_input: "64".to_string(),
+            mem_dump: String::new(),
         }
     }
 }

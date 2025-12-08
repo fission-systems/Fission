@@ -17,12 +17,14 @@ use crate::analysis::disasm::DisasmEngine;
 use crate::debug::PlatformDebugger;
 #[cfg(target_os = "windows")]
 use crate::debug::Debugger;
+#[cfg(target_os = "windows")]
+use crate::debug::types::DebugStatus;
 use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
 use tokio::runtime::Runtime;
 use tokio::time::sleep;
 
-use super::state::{AppState, CachedDecompile};
+use super::state::{AppState, CachedDecompile, DebugAction, DebugBpAction};
 use super::messages::AsyncMessage;
 use super::menu::{self, MenuAction};
 use super::status_bar;
@@ -44,11 +46,21 @@ pub struct FissionApp {
     #[cfg(target_os = "windows")]
     debugger: Option<PlatformDebugger>,
 
+    /// Debug event receiver (Windows)
+    #[cfg(target_os = "windows")]
+    dbg_event_rx: Option<std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>>,
+    /// Debug event loop stop sender
+    #[cfg(target_os = "windows")]
+    dbg_stop_tx: Option<std::sync::mpsc::Sender<()>>,
+
     /// Shared Ghidra client to avoid reconnect cost
     ghidra_client: Arc<Mutex<Option<GhidraClient>>>,
 
     /// Cached binary id of what is loaded on the server (to skip re-load)
     current_binary_id: Option<BinaryId>,
+
+    /// Theme initialization flag
+    theme_initialized: bool,
 }
 
 static TOKIO_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
@@ -64,71 +76,64 @@ impl Default for FissionApp {
             tx,
             #[cfg(target_os = "windows")]
             debugger: Some(PlatformDebugger::default()),
+            #[cfg(target_os = "windows")]
+            dbg_event_rx: None,
+            #[cfg(target_os = "windows")]
+            dbg_stop_tx: None,
             ghidra_client: Arc::new(Mutex::new(None)),
             current_binary_id: None,
+            theme_initialized: false,
         }
     }
 }
 
 impl FissionApp {
-    /// Ensure server has the current binary loaded and cache functions from server metadata.
-    fn preload_server_binary(&mut self) {
-        let Some(binary) = self.state.loaded_binary.as_ref() else {
-            return;
-        };
-
-        let arch = binary.arch_spec.clone();
-        let bin_size = binary.data.len() as u64;
-        let bin_mtime = fs::metadata(&binary.path).ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs());
-        let bin_id = BinaryId::new(Some(binary.path.clone()), bin_size, arch.clone(), bin_mtime);
-        let bin_bytes = binary.data.clone();
-        let bin_base = binary.image_base;
-
-        let shared_client = self.ghidra_client.clone();
-        let funcs = TOKIO_RUNTIME.block_on(async move {
-            let mut guard = shared_client.lock().unwrap();
-            if guard.is_none() {
-                *guard = Self::connect_with_backoff().await;
+    fn handle_debug_event(&mut self, evt: crate::debug::types::DebugEvent) {
+        use crate::debug::types::DebugEvent::*;
+        match evt {
+            ProcessCreated { pid, main_thread_id } => {
+                self.state.debug_state.attached_pid = Some(pid);
+                self.state.debug_state.main_thread_id = Some(main_thread_id);
+                self.state.debug_state.last_thread_id = Some(main_thread_id);
+                self.state.debug_state.status = crate::debug::types::DebugStatus::Running;
+                self.state.log(format!("[*] Process created pid={} tid={}", pid, main_thread_id));
             }
-            let Some(client) = guard.as_mut() else { return None; };
-            match client.load_binary_if_needed(bin_bytes, bin_base, &arch, bin_id).await {
-                Ok((_, metas)) => Some(metas.to_vec()),
-                Err(_) => None,
+            ProcessExited { exit_code } => {
+                self.state.debug_state.status = crate::debug::types::DebugStatus::Terminated;
+                self.state.log(format!("[*] Process exited code={}", exit_code));
             }
-        });
-
-        if let Some(server_funcs) = funcs {
-            if !server_funcs.is_empty() {
-                let converted: Vec<FunctionInfo> = server_funcs.into_iter().map(Self::convert_meta).collect();
-                self.state.loaded_binary.as_mut().map(|b| b.functions = converted);
+            ThreadCreated { thread_id } => {
+                self.state.log(format!("[*] Thread created tid={}", thread_id));
             }
-        }
-    }
-
-    fn convert_meta(m: FunctionMeta) -> FunctionInfo {
-        FunctionInfo {
-            name: m.name,
-            address: m.address,
-            size: m.size as u64,
-            is_export: false,
-            is_import: m.is_import,
-        }
-    }
-
-    async fn connect_with_backoff() -> Option<GhidraClient> {
-        let delays = [Duration::from_millis(0), Duration::from_millis(200), Duration::from_millis(500)];
-        for d in delays {
-            if d.as_millis() > 0 {
-                sleep(d).await;
+            ThreadExited { thread_id } => {
+                self.state.log(format!("[*] Thread exited tid={}", thread_id));
             }
-            if let Ok(c) = GhidraClient::connect().await {
-                return Some(c);
+            DllLoaded { base_address, name } => {
+                self.state.log(format!("[*] DLL loaded {name} @0x{base_address:016x}"));
+            }
+            BreakpointHit { address, thread_id } => {
+                self.state.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+                self.state.debug_state.last_thread_id = Some(thread_id);
+                self.state.debug_state.last_event = Some(format!("BP hit 0x{address:016x} tid={thread_id}"));
+                self.state.log(self.state.debug_state.last_event.clone().unwrap_or_default());
+            }
+            SingleStep { thread_id } => {
+                self.state.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+                self.state.debug_state.last_thread_id = Some(thread_id);
+                self.state.debug_state.last_event = Some(format!("[*] Single step tid={}", thread_id));
+                self.state.log(self.state.debug_state.last_event.clone().unwrap_or_default());
+            }
+            Exception { code, address, first_chance } => {
+                self.state.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+                self.state.debug_state.last_event = Some(format!(
+                    "[!] Exception code=0x{:x} addr=0x{:016x} first_chance={}",
+                    code, address, first_chance
+                ));
+                self.state.log(
+                    self.state.debug_state.last_event.clone().unwrap_or_default()
+                );
             }
         }
-        None
     }
 
     /// Process pending async messages from background threads
@@ -202,8 +207,84 @@ impl FissionApp {
                     self.state.recovering = false;
                     self.state.log(format!("[✗] Server recovery failed: {}", reason));
                 }
+                AsyncMessage::DebugEvent(evt) => {
+                    self.handle_debug_event(evt);
+                }
             }
         }
+
+        #[cfg(target_os = "windows")]
+        {
+            let mut pending = Vec::new();
+            if let Some(rx) = &self.dbg_event_rx {
+                while let Ok(evt) = rx.try_recv() {
+                    pending.push(evt);
+                }
+            }
+            for evt in pending {
+                self.handle_debug_event(evt);
+            }
+        }
+    }
+
+    /// Ensure server has the current binary loaded and cache functions from server metadata.
+    fn preload_server_binary(&mut self) {
+        let Some(binary) = self.state.loaded_binary.as_ref() else {
+            return;
+        };
+
+        let arch = binary.arch_spec.clone();
+        let bin_size = binary.data.len() as u64;
+        let bin_mtime = fs::metadata(&binary.path).ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs());
+        let bin_id = BinaryId::new(Some(binary.path.clone()), bin_size, arch.clone(), bin_mtime);
+        let bin_bytes = binary.data.clone();
+        let bin_base = binary.image_base;
+
+        let shared_client = self.ghidra_client.clone();
+        let funcs = TOKIO_RUNTIME.block_on(async move {
+            let mut guard = shared_client.lock().unwrap();
+            if guard.is_none() {
+                *guard = Self::connect_with_backoff().await;
+            }
+            let Some(client) = guard.as_mut() else { return None; };
+            match client.load_binary_if_needed(bin_bytes, bin_base, &arch, bin_id).await {
+                Ok((_, metas)) => Some(metas.to_vec()),
+                Err(_) => None,
+            }
+        });
+
+        if let Some(server_funcs) = funcs {
+            if !server_funcs.is_empty() {
+                let converted: Vec<FunctionInfo> = server_funcs.into_iter().map(Self::convert_meta).collect();
+                self.state.loaded_binary.as_mut().map(|b| b.functions = converted);
+            }
+        }
+    }
+
+    fn convert_meta(m: FunctionMeta) -> FunctionInfo {
+        FunctionInfo {
+            name: m.name,
+            address: m.address,
+            size: m.size as u64,
+            is_export: false,
+            is_import: m.is_import,
+        }
+    }
+
+    async fn connect_with_backoff() -> Option<GhidraClient> {
+        let delays = [Duration::from_millis(0), Duration::from_millis(200), Duration::from_millis(500)];
+        for d in delays {
+            if d.as_millis() > 0 {
+                sleep(d).await;
+            }
+            if let Ok(c) = GhidraClient::connect().await {
+                return Some(c);
+            }
+        }
+        None
     }
 
     /// Attempt to recover server connection with exponential backoff
@@ -485,6 +566,12 @@ impl FissionApp {
 
 impl eframe::App for FissionApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Initialize theme on first frame
+        if !self.theme_initialized {
+            super::theme::init(ctx);
+            self.theme_initialized = true;
+        }
+
         // Process async messages
         self.process_messages();
 
@@ -521,10 +608,18 @@ impl eframe::App for FissionApp {
         // Render panels
         let clicked_func = functions::render(ctx, &mut self.state);
         
-        // Bottom tabbed panel (Console, Hex View, Strings)
+        // Bottom tabbed panel (Console, Hex View, Strings, Debug)
         match bottom_tabs::render(ctx, &mut self.state) {
             ConsoleAction::Command(cmd) => self.process_command(&cmd),
             ConsoleAction::None => {}
+        }
+
+        // Process pending debug control requests
+        if let Some(action) = self.state.pending_debug_action.take() {
+            self.handle_debug_action(action);
+        }
+        if let Some(bp_action) = self.state.pending_bp_action.take() {
+            self.handle_bp_action(bp_action);
         }
         
         // Fixed right panel - Decompile
@@ -557,6 +652,13 @@ impl FissionApp {
                     self.state.is_debugging = true;
                     self.state.debug_state = dbg.state().clone();
                     self.state.log(format!("[✓] Attached to PID {}", pid));
+
+                    // Start event loop
+                    let (tx_evt, rx_evt) = std::sync::mpsc::channel();
+                    let (tx_stop, rx_stop) = std::sync::mpsc::channel();
+                    self.dbg_event_rx = Some(rx_evt);
+                    self.dbg_stop_tx = Some(tx_stop);
+                    crate::debug::windows::start_event_loop(pid, tx_evt, rx_stop);
                 }
                 Err(e) => {
                     self.state.is_debugging = false;
@@ -590,6 +692,9 @@ impl FissionApp {
                         self.state.debug_state = dbg.state().clone();
                         self.state.show_attach_dialog = false;
                         self.state.log("[*] Detached from process");
+                        if let Some(stop) = self.dbg_stop_tx.take() {
+                            let _ = stop.send(());
+                        }
                     }
                     Err(e) => {
                         self.state.log(format!("[✗] Detach failed: {}", e));
@@ -603,6 +708,64 @@ impl FissionApp {
         {
             self.state
                 .log("[!] Debug detach is only supported on Windows builds right now.");
+        }
+    }
+
+    /// Handle debug control actions (Windows only)
+    fn handle_debug_action(&mut self, action: DebugAction) {
+        #[cfg(target_os = "windows")]
+        {
+            if !self.state.dynamic_mode {
+                self.state.log("[!] Debug control is disabled in static mode");
+                return;
+            }
+            if let Some(dbg) = self.debugger.as_mut() {
+                let result = match action {
+                    DebugAction::Continue => dbg.continue_execution(),
+                    DebugAction::Step => dbg.single_step(),
+                };
+                if let Err(e) = result {
+                    self.state.log(format!("[✗] Debug action failed: {}", e));
+                } else {
+                    self.state.log("[*] Debug action sent");
+                }
+            } else {
+                self.state.log("[!] Debugger not initialized");
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = action;
+            self.state
+                .log("[!] Debug control is only supported on Windows builds right now.");
+        }
+    }
+
+    /// Handle breakpoint actions (Windows only)
+    fn handle_bp_action(&mut self, action: DebugBpAction) {
+        #[cfg(target_os = "windows")]
+        {
+            if !self.state.dynamic_mode {
+                self.state.log("[!] Breakpoints are disabled in static mode");
+                return;
+            }
+            if let Some(dbg) = self.debugger.as_mut() {
+                let result = match action {
+                    DebugBpAction::Add(addr) => dbg.set_sw_breakpoint(addr),
+                    DebugBpAction::Remove(addr) => dbg.remove_sw_breakpoint(addr),
+                };
+                match result {
+                    Ok(_) => self.state.log("[*] Breakpoint action applied"),
+                    Err(e) => self.state.log(format!("[✗] Breakpoint action failed: {}", e)),
+                }
+            } else {
+                self.state.log("[!] Debugger not initialized");
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = action;
+            self.state.log("[!] Breakpoints are only supported on Windows builds right now.");
         }
     }
 

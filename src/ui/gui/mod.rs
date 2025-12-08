@@ -9,6 +9,7 @@ mod menu;
 mod status_bar;
 mod panels;
 mod widgets;
+pub mod theme;
 
 pub use app::FissionApp;
 pub use state::AppState;

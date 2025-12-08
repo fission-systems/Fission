@@ -3,6 +3,7 @@
 //! These messages are sent from background threads to the main UI thread.
 
 use crate::analysis::loader::LoadedBinary;
+use crate::debug::types::DebugEvent;
 
 /// Message types for async operations between threads and UI
 pub enum AsyncMessage {
@@ -35,4 +36,7 @@ pub enum AsyncMessage {
     
     /// Server recovery failed
     RecoveryFailed(String),
+
+    /// Debug event from debugger loop
+    DebugEvent(DebugEvent),
 }
