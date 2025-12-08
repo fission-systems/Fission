@@ -23,6 +23,8 @@ native_decomp = []
 # 1. GUI & Rendering
 eframe = "0.27"
 egui = "0.27"
+rfd = "0.14"  # Native file dialogs
+egui_extras = "0.27" # For TableBuilder
 
 # 2. CLI & Input
 reedline = "0.30"
@@ -30,6 +32,8 @@ clap = { version = "4.5", features = ["derive"] }
 
 # 3. Binary Parsing
 goblin = "0.8"
+object = "0.32"
+capstone = "0.11" # For disassembly
 
 # 4. Scripting
 pyo3 = { version = "0.24", features = ["auto-initialize"], optional = true }

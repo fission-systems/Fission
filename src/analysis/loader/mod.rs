@@ -108,87 +108,119 @@ impl LoadedBinary {
 
     /// Parse PE (Windows executable)
     fn parse_pe(data: Vec<u8>, path: String) -> Result<Self> {
-        let pe = goblin::pe::PE::parse(&data)?;
-        
-        let is_64bit = pe.is_64;
-        let image_base = pe.image_base as u64;
-        let entry_point = image_base + pe.entry as u64;
+        // Try parsing with goblin first
+        match goblin::pe::PE::parse(&data) {
+            Ok(pe) => {
+                let is_64bit = pe.is_64;
+                let image_base = pe.image_base as u64;
+                let entry_point = image_base + pe.entry as u64;
 
-        // Determine architecture
-        let arch_spec = if is_64bit {
-            "x86:LE:64:default"
-        } else {
-            "x86:LE:32:default"
-        };
+                // Determine architecture
+                let arch_spec = if is_64bit {
+                    "x86:LE:64:default"
+                } else {
+                    "x86:LE:32:default"
+                };
 
-        // Collect sections
-        let mut sections = Vec::new();
-        for section in &pe.sections {
-            let name = String::from_utf8_lossy(&section.name)
-                .trim_end_matches('\0')
-                .to_string();
-            
-            let characteristics = section.characteristics;
-            sections.push(SectionInfo {
-                name,
-                virtual_address: image_base + section.virtual_address as u64,
-                virtual_size: section.virtual_size as u64,
-                file_offset: section.pointer_to_raw_data as u64,
-                file_size: section.size_of_raw_data as u64,
-                is_executable: (characteristics & 0x20000000) != 0,
-                is_readable: (characteristics & 0x40000000) != 0,
-                is_writable: (characteristics & 0x80000000) != 0,
-            });
-        }
+                // Collect sections
+                let mut sections = Vec::new();
+                for section in &pe.sections {
+                    let name = String::from_utf8_lossy(&section.name)
+                        .trim_end_matches('\0')
+                        .to_string();
+                    
+                    let characteristics = section.characteristics;
+                    sections.push(SectionInfo {
+                        name,
+                        virtual_address: image_base + section.virtual_address as u64,
+                        virtual_size: section.virtual_size as u64,
+                        file_offset: section.pointer_to_raw_data as u64,
+                        file_size: section.size_of_raw_data as u64,
+                        is_executable: (characteristics & 0x20000000) != 0,
+                        is_readable: (characteristics & 0x40000000) != 0,
+                        is_writable: (characteristics & 0x80000000) != 0,
+                    });
+                }
 
-        // Collect functions from exports
-        let mut functions = Vec::new();
-        for export in &pe.exports {
-            if let Some(name) = &export.name {
-                functions.push(FunctionInfo {
-                    name: name.to_string(),
-                    address: image_base + export.rva as u64,
-                    size: 0,
-                    is_export: true,
-                    is_import: false,
-                });
+                // Collect functions from exports
+                let mut functions = Vec::new();
+                for export in &pe.exports {
+                    if let Some(name) = &export.name {
+                        functions.push(FunctionInfo {
+                            name: name.to_string(),
+                            address: image_base + export.rva as u64,
+                            size: 0,
+                            is_export: true,
+                            is_import: false,
+                        });
+                    }
+                }
+
+                // Add imports
+                for import in &pe.imports {
+                    functions.push(FunctionInfo {
+                        name: import.name.to_string(),
+                        address: image_base + import.rva as u64,
+                        size: 0,
+                        is_export: false,
+                        is_import: true,
+                    });
+                }
+
+                // Add entry point
+                let has_entry = functions.iter().any(|f| f.address == entry_point);
+                if !has_entry {
+                    functions.push(FunctionInfo {
+                        name: "_start".to_string(),
+                        address: entry_point,
+                        size: 0,
+                        is_export: false,
+                        is_import: false,
+                    });
+                }
+
+                Ok(Self {
+                    path,
+                    data,
+                    arch_spec: arch_spec.to_string(),
+                    entry_point,
+                    image_base,
+                    functions,
+                    sections,
+                    is_64bit,
+                    format: "PE".to_string(),
+                })
+            }
+            Err(e) => {
+                // Fallback to 'object' crate if goblin fails
+                // Note: We need to import object features here or at top level
+                use object::{Object, File};
+                
+                let file = File::parse(&*data).map_err(|e| anyhow!("Failed fallback parsing: {}", e))?;
+                
+                let is_64bit = file.is_64();
+                let entry_point = file.entry();
+                let image_base = file.relative_address_base();
+                let sections: Vec<SectionInfo> = Vec::new(); // Basic info only for fallback
+                
+                // object crate gives limited section info easily, this is a minimal fallback
+                
+                // Just return minimal info to allow loading
+                let arch_spec = if is_64bit { "x86:LE:64:default" } else { "x86:LE:32:default" };
+                
+                Ok(Self {
+                    path,
+                    data,
+                    arch_spec: arch_spec.to_string(),
+                    entry_point,
+                    image_base,
+                    functions: Vec::new(), // Minimal info
+                    sections,
+                    is_64bit,
+                    format: "PE (Fallback)".to_string(),
+                })
             }
         }
-
-        // Add imports
-        for import in &pe.imports {
-            functions.push(FunctionInfo {
-                name: import.name.to_string(),
-                address: image_base + import.rva as u64,
-                size: 0,
-                is_export: false,
-                is_import: true,
-            });
-        }
-
-        // Add entry point
-        let has_entry = functions.iter().any(|f| f.address == entry_point);
-        if !has_entry {
-            functions.push(FunctionInfo {
-                name: "_start".to_string(),
-                address: entry_point,
-                size: 0,
-                is_export: false,
-                is_import: false,
-            });
-        }
-
-        Ok(Self {
-            path,
-            data,
-            arch_spec: arch_spec.to_string(),
-            entry_point,
-            image_base,
-            functions,
-            sections,
-            is_64bit,
-            format: "PE".to_string(),
-        })
     }
 
     /// Parse ELF (Linux executable)

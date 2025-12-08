@@ -7,6 +7,8 @@ use eframe::egui;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::analysis::loader::{LoadedBinary, FunctionInfo};
+use crate::analysis::disasm::{DisasmEngine, DisassembledInstruction};
+use egui_extras::{TableBuilder, Column};
 
 // Message types for async operations
 enum AsyncMessage {
@@ -14,6 +16,7 @@ enum AsyncMessage {
     DecompileResult { address: u64, c_code: String },
     DecompileError { address: u64, error: String },
     ServerStatus(bool),
+    FileSelected(Option<String>),
 }
 
 /// Main application state container
@@ -35,6 +38,9 @@ pub struct FissionApp {
 
     /// Current decompiled C code
     decompiled_code: String,
+
+    /// Current assembly instructions
+    asm_instructions: Vec<DisassembledInstruction>,
 
     /// Is decompilation in progress?
     decompiling: bool,
@@ -69,6 +75,7 @@ impl Default for FissionApp {
             is_debugging: false,
             selected_function: None,
             decompiled_code: "// Select a function to decompile".into(),
+            asm_instructions: Vec::new(),
             decompiling: false,
             server_connected: false,
             rx,
@@ -118,8 +125,30 @@ impl FissionApp {
                 AsyncMessage::ServerStatus(connected) => {
                     self.server_connected = connected;
                 }
+                AsyncMessage::FileSelected(Some(path)) => {
+                    self.load_binary(&path);
+                }
+                AsyncMessage::FileSelected(None) => {
+                    // User cancelled
+                }
             }
         }
+    }
+
+    /// Open native file dialog to select a binary
+    fn open_file_dialog(&mut self) {
+        let tx = self.tx.clone();
+        
+        std::thread::spawn(move || {
+            let file = rfd::FileDialog::new()
+                .set_title("Open Binary")
+                .add_filter("Executables", &["exe", "dll", "so", "dylib", "bin"])
+                .add_filter("All Files", &["*"])
+                .pick_file();
+            
+            let path = file.map(|p| p.to_string_lossy().to_string());
+            let _ = tx.send(AsyncMessage::FileSelected(path));
+        });
     }
 
     /// Load a binary file
@@ -139,6 +168,16 @@ impl FissionApp {
 
     /// Decompile a function (async)
     fn decompile_function(&mut self, func: &FunctionInfo) {
+        // Skip import functions (no actual code)
+        if func.is_import {
+            self.log(format!("[!] {} is an import function (no code to decompile)", func.name));
+            self.decompiled_code = format!(
+                "// {} is an imported function\n// Address: 0x{:x}\n// No code available - this is a stub pointing to external library",
+                func.name, func.address
+            );
+            return;
+        }
+        
         if self.loaded_binary.is_none() {
             self.log("[!] No binary loaded");
             return;
@@ -158,6 +197,25 @@ impl FissionApp {
             }
         };
         
+        // Disassemble bytes
+        match DisasmEngine::new(binary.is_64bit) {
+            Ok(engine) => {
+                match engine.disassemble(&bytes, address) {
+                    Ok(insns) => {
+                        self.asm_instructions = insns;
+                    }
+                    Err(e) => {
+                        self.log(format!("[!] Disassembly error: {}", e));
+                        self.asm_instructions.clear();
+                    }
+                }
+            }
+            Err(e) => {
+                self.log(format!("[!] Failed to initialize disassembler: {}", e));
+                self.asm_instructions.clear();
+            }
+        }
+
         let tx = self.tx.clone();
         self.decompiling = true;
         self.decompiled_code = format!("// Decompiling 0x{:x}...", address);
@@ -207,12 +265,13 @@ impl FissionApp {
 
     /// Render the top menu bar
     fn render_menu_bar(&mut self, ctx: &egui::Context) {
+        let mut open_file = false;
+        
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Open Binary...").clicked() {
-                        // Simple path input for now
-                        self.log("[*] Enter path in console: load <path>");
+                        open_file = true;
                         ui.close_menu();
                     }
                     ui.separator();
@@ -247,6 +306,11 @@ impl FissionApp {
                 });
             });
         });
+        
+        // Open file dialog outside of closure
+        if open_file {
+            self.open_file_dialog();
+        }
     }
 
     /// Render the status bar at the bottom
@@ -289,7 +353,7 @@ impl FissionApp {
 
     /// Render the main content area
     fn render_main_content(&mut self, ctx: &egui::Context) {
-        // Left Panel: Function List
+        // 1. Left Panel: Function List
         let mut clicked_func: Option<FunctionInfo> = None;
         
         egui::SidePanel::left("functions_panel")
@@ -324,16 +388,83 @@ impl FissionApp {
                 }
             });
 
-        // Handle function click outside of closure
+        // Handle function click
         if let Some(func) = clicked_func {
             self.selected_function = Some(func.clone());
             self.decompile_function(&func);
         }
 
-        // Right Panel: Decompiled Code
+        // 2. Bottom Panel: Console (Moved from Center)
+        egui::TopBottomPanel::bottom("console_panel")
+            .resizable(true)
+            .default_height(200.0)
+            .show(ctx, |ui| {
+                ui.heading("[Console]");
+                ui.separator();
+
+                // Scrollable log area
+                let text_style = egui::TextStyle::Monospace;
+                let row_height = ui.text_style_height(&text_style);
+
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .stick_to_bottom(true)
+                    .max_height(ui.available_height() - 35.0)
+                    .show_rows(ui, row_height, self.log_buffer.len(), |ui, row_range| {
+                        for row in row_range {
+                            if let Some(log) = self.log_buffer.get(row) {
+                                // Color code log messages
+                                let color = if log.starts_with("[✓]") {
+                                    egui::Color32::from_rgb(100, 200, 100)
+                                } else if log.starts_with("[✗]") || log.starts_with("[!]") {
+                                    egui::Color32::from_rgb(255, 100, 100)
+                                } else if log.starts_with("[*]") {
+                                    egui::Color32::from_rgb(100, 150, 255)
+                                } else {
+                                    egui::Color32::GRAY
+                                };
+                                ui.colored_label(color, log);
+                            }
+                        }
+                    });
+
+                ui.separator();
+
+                // CLI input at the bottom
+                ui.horizontal(|ui| {
+                    ui.label(">");
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.cli_input)
+                            .desired_width(ui.available_width() - 60.0)
+                            .font(egui::TextStyle::Monospace)
+                            .hint_text("Enter command..."),
+                    );
+
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        let cmd = self.cli_input.trim().to_string();
+                        if !cmd.is_empty() {
+                            self.log(format!("> {}", cmd));
+                            self.process_command(&cmd);
+                            self.cli_input.clear();
+                        }
+                        response.request_focus();
+                    }
+
+                    if ui.button("Run").clicked() {
+                        let cmd = self.cli_input.trim().to_string();
+                        if !cmd.is_empty() {
+                            self.log(format!("> {}", cmd));
+                            self.process_command(&cmd);
+                            self.cli_input.clear();
+                        }
+                    }
+                });
+            });
+
+        // 3. Right Panel: Decompiled Code
         egui::SidePanel::right("decompile_panel")
             .resizable(true)
-            .default_width(400.0)
+            .default_width(500.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("[Decompiled Code]");
@@ -344,78 +475,82 @@ impl FissionApp {
                 ui.separator();
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    // Syntax highlighted C code would be nice, but for now just monospace
                     ui.add(
                         egui::TextEdit::multiline(&mut self.decompiled_code.as_str())
                             .font(egui::TextStyle::Monospace)
                             .desired_width(f32::INFINITY)
-                            .desired_rows(30)
+                            .desired_rows(40)
                     );
                 });
             });
 
-        // Center Panel: Console
+        // 4. Central Panel: Assembly View (New)
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("[Console]");
+            ui.heading("[Assembly]");
             ui.separator();
 
-            // Scrollable log area
-            let text_style = egui::TextStyle::Monospace;
-            let row_height = ui.text_style_height(&text_style);
+            TableBuilder::new(ui)
+                .striped(true)
+                .resizable(true)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::initial(80.0).resizable(true))  // Address
+                .column(Column::initial(120.0).resizable(true)) // Bytes
+                .column(Column::initial(60.0).resizable(true))  // Mnemonic
+                .column(Column::remainder())                    // Operands
+                .header(20.0, |mut header| {
+                    header.col(|ui| { ui.label("Address"); });
+                    header.col(|ui| { ui.label("Bytes"); });
+                    header.col(|ui| { ui.label("Mnemonic"); });
+                    header.col(|ui| { ui.label("Operands"); });
+                })
+                .body(|mut body| {
+                    let mut asm_iter = self.asm_instructions.iter();
+                    body.rows(18.0, self.asm_instructions.len(), |mut row| {
+                        if let Some(insn) = asm_iter.next() {
+                            // 1. Address
+                            row.col(|ui| {
+                                ui.label(egui::RichText::new(format!("{:08X}", insn.address))
+                                    .color(egui::Color32::GRAY)
+                                    .monospace());
+                            });
 
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .stick_to_bottom(true)
-                .max_height(ui.available_height() - 35.0)
-                .show_rows(ui, row_height, self.log_buffer.len(), |ui, row_range| {
-                    for row in row_range {
-                        if let Some(log) = self.log_buffer.get(row) {
-                            // Color code log messages
-                            let color = if log.starts_with("[✓]") {
-                                egui::Color32::from_rgb(100, 200, 100)
-                            } else if log.starts_with("[✗]") || log.starts_with("[!]") {
-                                egui::Color32::from_rgb(255, 100, 100)
-                            } else if log.starts_with("[*]") {
-                                egui::Color32::from_rgb(100, 150, 255)
-                            } else {
-                                egui::Color32::GRAY
-                            };
-                            ui.colored_label(color, log);
+                            // 2. Bytes
+                            row.col(|ui| {
+                                let mut bytes_str = String::new();
+                                for b in &insn.bytes {
+                                    use std::fmt::Write;
+                                    write!(bytes_str, "{:02X} ", b).unwrap();
+                                }
+                                ui.label(egui::RichText::new(bytes_str)
+                                    .color(egui::Color32::from_rgb(100, 100, 100))
+                                    .monospace());
+                            });
+
+                            // 3. Mnemonic
+                            row.col(|ui| {
+                                let color = if insn.is_flow_control {
+                                    egui::Color32::from_rgb(255, 100, 100) // Red for jumps/calls
+                                } else {
+                                    egui::Color32::from_rgb(100, 150, 255) // Blue for instructions
+                                };
+                                ui.label(egui::RichText::new(&insn.mnemonic)
+                                    .color(color)
+                                    .strong()
+                                    .monospace());
+                            });
+
+                            // 4. Operands
+                            row.col(|ui| {
+                                // Basic highlighting for operands (registers vs values)
+                                // This is a simple heuristic, proper parsing would be better
+                                let ops = &insn.operands;
+                                ui.label(egui::RichText::new(ops)
+                                    .color(egui::Color32::WHITE)
+                                    .monospace());
+                            });
                         }
-                    }
+                    });
                 });
-
-            ui.separator();
-
-            // CLI input at the bottom
-            ui.horizontal(|ui| {
-                ui.label(">");
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.cli_input)
-                        .desired_width(ui.available_width() - 60.0)
-                        .font(egui::TextStyle::Monospace)
-                        .hint_text("Enter command..."),
-                );
-
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    let cmd = self.cli_input.trim().to_string();
-                    if !cmd.is_empty() {
-                        self.log(format!("> {}", cmd));
-                        self.process_command(&cmd);
-                        self.cli_input.clear();
-                    }
-                    response.request_focus();
-                }
-
-                if ui.button("Run").clicked() {
-                    let cmd = self.cli_input.trim().to_string();
-                    if !cmd.is_empty() {
-                        self.log(format!("> {}", cmd));
-                        self.process_command(&cmd);
-                        self.cli_input.clear();
-                    }
-                }
-            });
         });
     }
 
