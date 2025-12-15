@@ -6,10 +6,12 @@ use super::super::theme::{catppuccin, code};
 
 /// Render the decompiled code as a fixed right panel.
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
+    let max_w = ctx.screen_rect().width() * 0.6; // Up to 60% of screen
     egui::SidePanel::right("decompile_panel")
         .resizable(true)
-        .default_width(400.0)
-        .min_width(250.0)
+        .default_width(350.0)
+        .min_width(150.0)
+        .max_width(max_w.max(400.0))
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(egui::RichText::new("Decompiled").color(catppuccin::LAVENDER));
@@ -41,7 +43,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
             }
 
             // Code view with syntax highlighting
-            egui::ScrollArea::vertical()
+            egui::ScrollArea::both()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     // Render code with basic syntax highlighting
@@ -54,6 +56,12 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
 fn render_highlighted_code(ui: &mut egui::Ui, code_text: &str) {
     let lines: Vec<&str> = code_text.lines().collect();
     
+    // Calculate required width based on longest line
+    let max_line_len = lines.iter().map(|l| l.len()).max().unwrap_or(80);
+    let min_width = (max_line_len as f32 * 8.0).max(400.0); // ~8px per char
+    
+    ui.set_min_width(min_width);
+    
     for (line_num, line) in lines.iter().enumerate() {
         ui.horizontal(|ui| {
             // Line number
@@ -63,9 +71,9 @@ fn render_highlighted_code(ui: &mut egui::Ui, code_text: &str) {
             
             ui.separator();
             
-            // Highlighted code line
+            // Highlighted code line (no wrapping)
             let highlighted = highlight_c_line(line);
-            ui.label(highlighted);
+            ui.add(egui::Label::new(highlighted).extend());
         });
     }
 }

@@ -34,6 +34,7 @@
 #include "libdecomp.hh"
 #include "sleigh_arch.hh"
 #include "loadimage.hh"
+#include "flow.hh"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -215,6 +216,11 @@ public:
             DocumentStorage store;
             arch->init(store);
             
+            // Increase max instructions limit for large functions (default is 100000)
+            arch->max_instructions = 200000;
+            // Remove error flag - just truncate instead of throwing
+            arch->flowoptions &= ~FlowInfo::error_toomanyinstructions;
+            
             initialized = true;
             reply->set_success(true);
             std::cout << "[Server] Binary loaded successfully" << std::endl;
@@ -364,9 +370,14 @@ void RunServer() {
     std::string server_address("0.0.0.0:50051");
     DecompilerServiceImpl service;
 
+    // 50MB message size limit for large binaries
+    const int MAX_MESSAGE_SIZE = 50 * 1024 * 1024;
+    
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
+    builder.SetMaxReceiveMessageSize(MAX_MESSAGE_SIZE);
+    builder.SetMaxSendMessageSize(MAX_MESSAGE_SIZE);
     
     std::unique_ptr<Server> server(builder.BuildAndStart());
     std::cout << "Server listening on " << server_address << std::endl;

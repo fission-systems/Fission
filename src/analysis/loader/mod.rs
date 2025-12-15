@@ -65,6 +65,10 @@ pub struct LoadedBinary {
     pub sections: Vec<SectionInfo>,
     /// Is this a 64-bit binary?
     pub is_64bit: bool,
+    /// Does the image contain a CLR (.NET) runtime header?
+    pub is_dotnet: bool,
+    /// Reported CLR metadata version string (e.g. "v4.0.30319")
+    pub dotnet_runtime_version: Option<String>,
     /// Binary format (PE, ELF, Mach-O)
     pub format: String,
 }
@@ -114,6 +118,39 @@ impl LoadedBinary {
                 let is_64bit = pe.is_64;
                 let image_base = pe.image_base as u64;
                 let entry_point = image_base + pe.entry as u64;
+                let mut is_dotnet = false;
+                let mut dotnet_runtime_version = None;
+
+                if let Some(optional_header) = pe.header.optional_header {
+                    if let Some(clr_dir) = optional_header
+                        .data_directories
+                        .get_clr_runtime_header()
+                    {
+                        if clr_dir.virtual_address != 0 && clr_dir.size != 0 {
+                            is_dotnet = true;
+                            // Try to read runtime version from COR20 header
+                            // Find section containing this RVA
+                            for section in &pe.sections {
+                                let start = section.virtual_address;
+                                let size = if section.virtual_size == 0 {
+                                    section.size_of_raw_data
+                                } else {
+                                    section.virtual_size
+                                };
+                                if clr_dir.virtual_address >= start && clr_dir.virtual_address < start + size {
+                                    let delta = clr_dir.virtual_address - start;
+                                    let cor20_offset = section.pointer_to_raw_data as usize + delta as usize;
+                                    if cor20_offset + 8 < data.len() {
+                                        let major = u16::from_le_bytes([data[cor20_offset + 4], data[cor20_offset + 5]]);
+                                        let minor = u16::from_le_bytes([data[cor20_offset + 6], data[cor20_offset + 7]]);
+                                        dotnet_runtime_version = Some(format!("v{}.{}", major, minor));
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Determine architecture
                 let arch_spec = if is_64bit {
@@ -188,6 +225,8 @@ impl LoadedBinary {
                     functions,
                     sections,
                     is_64bit,
+                    is_dotnet,
+                    dotnet_runtime_version,
                     format: "PE".to_string(),
                 })
             }
@@ -217,6 +256,8 @@ impl LoadedBinary {
                     functions: Vec::new(), // Minimal info
                     sections,
                     is_64bit,
+                    is_dotnet: false,
+                    dotnet_runtime_version: None,
                     format: "PE (Fallback)".to_string(),
                 })
             }
@@ -315,6 +356,8 @@ impl LoadedBinary {
             functions,
             sections,
             is_64bit,
+            is_dotnet: false,
+            dotnet_runtime_version: None,
             format: "ELF".to_string(),
         })
     }
@@ -381,6 +424,8 @@ impl LoadedBinary {
                     functions,
                     sections,
                     is_64bit,
+                    is_dotnet: false,
+                    dotnet_runtime_version: None,
                     format: "Mach-O".to_string(),
                 })
             }
@@ -441,15 +486,43 @@ impl LoadedBinary {
             "{} {} binary\n\
              Entry: 0x{:x}\n\
              Image Base: 0x{:x}\n\
+             .NET: {}{}\n\
              Sections: {}\n\
              Functions: {}",
             if self.is_64bit { "64-bit" } else { "32-bit" },
             self.format,
             self.entry_point,
             self.image_base,
+            if self.is_dotnet { "yes" } else { "no" },
+            self.dotnet_runtime_version
+                .as_ref()
+                .map(|v| format!(" (runtime {v})"))
+                .unwrap_or_default(),
             self.sections.len(),
             self.functions.len()
         )
+    }
+    
+    /// Convert a virtual address to file offset using section table
+    pub fn va_to_file_offset(&self, va: u64) -> Option<usize> {
+        // Convert VA to RVA
+        let rva = va.checked_sub(self.image_base)? as u32;
+        
+        // Find section containing this RVA
+        for section in &self.sections {
+            let section_rva = (section.virtual_address - self.image_base) as u32;
+            let section_size = if section.virtual_size > 0 {
+                section.virtual_size as u32
+            } else {
+                section.file_size as u32
+            };
+            
+            if rva >= section_rva && rva < section_rva + section_size {
+                let offset_in_section = rva - section_rva;
+                return Some(section.file_offset as usize + offset_in_section as usize);
+            }
+        }
+        None
     }
 }
 

@@ -1,22 +1,16 @@
-//! Disassembly Engine using Capstone
+//! Disassembly Engine using iced-x86
 //!
-//! Provides local disassembly capabilities for immediate feedback.
+//! Provides fast, accurate x86/x64 disassembly for immediate feedback.
 
 use thiserror::Error;
-use capstone::prelude::*;
+use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, IntelFormatter, Mnemonic};
 
 #[derive(Error, Debug)]
 pub enum DisasmError {
-    #[error("Capstone error: {0}")]
-    CapstoneError(String),
+    #[error("Disassembly error: {0}")]
+    DisassemblyError(String),
     #[error("Unsupported architecture/mode")]
     UnsupportedArch,
-}
-
-impl From<capstone::Error> for DisasmError {
-    fn from(err: capstone::Error) -> Self {
-        DisasmError::CapstoneError(err.to_string())
-    }
 }
 
 /// A single disassembled instruction structure optimized for UI rendering
@@ -47,58 +41,87 @@ impl DisassembledInstruction {
 }
 
 pub struct DisasmEngine {
-    cs: Capstone,
+    bitness: u32,
 }
 
 impl DisasmEngine {
     pub fn new(is_64bit: bool) -> Result<Self, DisasmError> {
-        let mode = if is_64bit {
-            capstone::arch::x86::ArchMode::Mode64
-        } else {
-            capstone::arch::x86::ArchMode::Mode32
-        };
-
-        let mut cs = Capstone::new()
-            .x86()
-            .mode(mode)
-            .detail(true)
-            .build()?;
-            
-        // Enable SKIPDATA to handle invalid bytes gracefully
-        cs.set_skipdata(true)?;
-
-        Ok(Self { cs })
+        let bitness = if is_64bit { 64 } else { 32 };
+        Ok(Self { bitness })
     }
 
     /// Disassemble a byte slice starting at address
     pub fn disassemble(&self, bytes: &[u8], address: u64) -> Result<Vec<DisassembledInstruction>, DisasmError> {
-        let insns = self.cs.disasm_all(bytes, address)?;
+        let mut decoder = Decoder::with_ip(self.bitness, bytes, address, DecoderOptions::NONE);
+        let mut formatter = IntelFormatter::new();
         
-        let result = insns.iter().map(|insn| {
-            let is_flow_control = if let Ok(detail) = self.cs.insn_detail(&insn) {
-                let groups = detail.groups();
-                groups.iter().any(|g| {
-                    let g_u8: u8 = g.0;
-                    g_u8 == capstone::InsnGroupType::CS_GRP_JUMP as u8 || 
-                    g_u8 == capstone::InsnGroupType::CS_GRP_CALL as u8 || 
-                    g_u8 == capstone::InsnGroupType::CS_GRP_RET as u8
-                })
+        // Customize formatter for readability
+        formatter.options_mut().set_uppercase_mnemonics(false);
+        formatter.options_mut().set_uppercase_registers(false);
+        formatter.options_mut().set_space_after_operand_separator(true);
+        formatter.options_mut().set_hex_prefix("0x");
+        formatter.options_mut().set_hex_suffix("");
+        
+        let mut results = Vec::new();
+        let mut instruction = Instruction::default();
+        
+        let mut offset = 0usize;
+        while decoder.can_decode() {
+            decoder.decode_out(&mut instruction);
+            
+            let insn_len = instruction.len();
+            let insn_bytes = if offset + insn_len <= bytes.len() {
+                bytes[offset..offset + insn_len].to_vec()
             } else {
-                // Fallback heuristic if detail fails
-                let m = insn.mnemonic().unwrap_or("");
-                m.starts_with('j') || m.starts_with("call") || m.starts_with("ret")
+                vec![]
             };
-
-            DisassembledInstruction {
-                address: insn.address(),
-                bytes: insn.bytes().to_vec(),
-                mnemonic: insn.mnemonic().unwrap_or("???").to_string(),
-                operands: insn.op_str().unwrap_or("").to_string(),
-                length: insn.len(),
+            offset += insn_len;
+            
+            // Format the instruction
+            let mut output = String::new();
+            formatter.format(&instruction, &mut output);
+            
+            // Split mnemonic and operands
+            let (mnemonic, operands) = if let Some(space_idx) = output.find(' ') {
+                (output[..space_idx].to_string(), output[space_idx + 1..].to_string())
+            } else {
+                (output.clone(), String::new())
+            };
+            
+            // Check if flow control
+            let is_flow_control = is_flow_control_mnemonic(instruction.mnemonic());
+            
+            results.push(DisassembledInstruction {
+                address: instruction.ip(),
+                bytes: insn_bytes,
+                mnemonic,
+                operands,
+                length: insn_len,
                 is_flow_control,
-            }
-        }).collect();
-
-        Ok(result)
+            });
+        }
+        
+        Ok(results)
     }
+}
+
+/// Check if mnemonic is a flow control instruction (jump/call/ret)
+fn is_flow_control_mnemonic(mnemonic: Mnemonic) -> bool {
+    use Mnemonic::*;
+    matches!(mnemonic,
+        // Jumps
+        Jmp | 
+        Jo | Jno | Jb | Jae | Je | Jne | Jbe | Ja |
+        Js | Jns | Jp | Jnp | Jl | Jge | Jle | Jg |
+        Jcxz | Jecxz | Jrcxz |
+        // Calls
+        Call |
+        // Returns
+        Ret | Retf |
+        Iret | Iretd | Iretq |
+        // Loop
+        Loop | Loope | Loopne |
+        // System
+        Syscall | Sysret | Sysenter | Sysexit | Int | Int1 | Int3
+    )
 }

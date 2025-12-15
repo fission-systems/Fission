@@ -146,7 +146,7 @@ pub fn apply_catppuccin_theme(ctx: &egui::Context) {
     visuals.error_fg_color = RED;
     
     // Text cursor
-    visuals.text_cursor.width = 2.0;
+    visuals.text_cursor.stroke.width = 2.0;
     
     // Popup shadow
     visuals.popup_shadow = egui::epaint::Shadow {

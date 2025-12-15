@@ -151,6 +151,9 @@ impl GhidraClient {
     pub async fn connect_with_config(config: ClientConfig) -> Result<Self> {
         let uri = format!("http://[::1]:{}", config.port);
         
+        // 50MB message size limit for large binaries
+        const MAX_MESSAGE_SIZE: usize = 50 * 1024 * 1024;
+        
         // Try connecting to existing server first
         if let Ok(channel) = Channel::from_shared(uri.clone())
             .map_err(|e| GhidraError::TransportError(e.to_string()))?
@@ -158,8 +161,11 @@ impl GhidraClient {
             .await 
         {
             log::info!("Connected to existing Ghidra server");
+            let client = DecompilerServiceClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_SIZE)
+                .max_encoding_message_size(MAX_MESSAGE_SIZE);
             return Ok(Self {
-                client: DecompilerServiceClient::new(channel),
+                client,
                 server_process: None,
                 config,
                 uri,
@@ -209,6 +215,7 @@ impl GhidraClient {
     /// Wait for server to become ready with exponential backoff
     async fn wait_for_server(uri: &str, config: &ClientConfig) -> Result<DecompilerServiceClient<Channel>> {
         let mut last_error = String::new();
+        const MAX_MESSAGE_SIZE: usize = 50 * 1024 * 1024;
         
         for attempt in 0..config.max_retries {
             let delay = config.initial_retry_delay_ms * (1 << attempt); // Exponential backoff
@@ -221,7 +228,9 @@ impl GhidraClient {
             {
                 Ok(channel) => {
                     log::info!("Server ready after {} attempts", attempt + 1);
-                    return Ok(DecompilerServiceClient::new(channel));
+                    return Ok(DecompilerServiceClient::new(channel)
+                        .max_decoding_message_size(MAX_MESSAGE_SIZE)
+                        .max_encoding_message_size(MAX_MESSAGE_SIZE));
                 }
                 Err(e) => {
                     last_error = e.to_string();
