@@ -228,12 +228,14 @@ pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option
                         ui.end_row();
 
                         for process in &state.process_list {
-                            ui.label(format!("{}", process.pid));
-                            ui.label(&process.name);
-                            if ui.button("Attach").clicked() {
-                                attached_pid = Some(process.pid);
-                            }
-                            ui.end_row();
+                            ui.push_id(process.pid, |ui| {
+                                ui.label(format!("{}", process.pid));
+                                ui.label(&process.name);
+                                if ui.button("Attach").clicked() {
+                                    attached_pid = Some(process.pid);
+                                }
+                                ui.end_row();
+                            });
                         }
                     });
             });

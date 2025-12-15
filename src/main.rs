@@ -75,7 +75,7 @@ fn main() -> anyhow::Result<()> {
             Box::new(|cc| {
                 // Enable dark mode by default
                 cc.egui_ctx.set_visuals(egui::Visuals::dark());
-                Box::new(ui::gui::FissionApp::default())
+                Ok(Box::new(ui::gui::FissionApp::default()))
             }),
         )
         .map_err(|e| anyhow::anyhow!("GUI Error: {}", e))?;

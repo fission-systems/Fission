@@ -185,6 +185,66 @@ impl FissionApp {
     }
 
     fn decompile_function(&mut self, func: &FunctionInfo) {
+        // Check if this is a .NET binary
+        let is_dotnet = self.state.loaded_binary.as_ref().map(|b| b.is_dotnet).unwrap_or(false);
+        
+        if is_dotnet {
+            // .NET binaries: show native disassembly instead of Ghidra decompilation
+            // Ghidra often fails on .NET stubs with "Unable to resolve constructor"
+            
+            if func.is_import {
+                self.state.log(format!("[!] {} is an import function", func.name));
+                self.state.decompiled_code = format!(
+                    "// {} is an imported function\n// This is a .NET binary\n// The actual managed code is in IL format",
+                    func.name
+                );
+                return;
+            }
+            
+            self.state.log(format!("[*] .NET binary - disassembling native stub at 0x{:X}", func.address));
+            
+            // Use iced-x86 to disassemble native code
+            if let Some(ref binary) = self.state.loaded_binary {
+                let is_64bit = binary.is_64bit;
+                match crate::analysis::disasm::DisasmEngine::new(is_64bit) {
+                    Ok(engine) => {
+                        // Convert VA to file offset using section table
+                        let file_offset = binary.va_to_file_offset(func.address);
+                        let size = if func.size > 0 { func.size as usize } else { 256 };
+                        
+                        if let Some(offset) = file_offset {
+                            if let Some(code_bytes) = binary.data.get(offset..offset.saturating_add(size)) {
+                            match engine.disassemble(code_bytes, func.address) {
+                                Ok(instructions) => {
+                                    let mut output = format!("// Native Disassembly: {}\n", func.name);
+                                    output.push_str(&format!("// Address: 0x{:08X}\n", func.address));
+                                    output.push_str("// (.NET binary - showing JIT stub code)\n\n");
+                                    
+                                    for insn in &instructions {
+                                        output.push_str(&format!("{}\n", insn.format_full()));
+                                    }
+                                    self.state.decompiled_code = output;
+                                    self.state.log(format!("[✓] Disassembled {} instructions", instructions.len()));
+                                    return;
+                                }
+                                Err(e) => {
+                                    self.state.log(format!("[✗] Disassembly failed: {}", e));
+                                }
+                            }
+                        }
+                        }
+                    }
+                    Err(e) => {
+                        self.state.log(format!("[✗] Failed to create disassembler: {}", e));
+                    }
+                }
+            }
+            
+            self.state.decompiled_code = "// Disassembly failed".to_string();
+            return;
+        }
+        
+        // Native binary - use Ghidra decompiler
         decompiler::decompile_function(
             &mut self.state,
             self.tx.clone(),

@@ -14,8 +14,9 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo>
     
     egui::SidePanel::left("functions_panel")
         .resizable(true)
-        .default_width(220.0)
-        .min_width(150.0)
+        .default_width(180.0)
+        .min_width(120.0)
+        .max_width(350.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading(egui::RichText::new("Functions").color(catppuccin::LAVENDER));
