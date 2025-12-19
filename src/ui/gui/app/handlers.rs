@@ -3,7 +3,6 @@
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use crate::analysis::decomp::client::GhidraClient;
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::messages::AsyncMessage;
 
@@ -16,7 +15,7 @@ pub fn process_messages(
     state: &mut AppState,
     rx: &Receiver<AsyncMessage>,
     tx: &Sender<AsyncMessage>,
-    ghidra_client: Arc<Mutex<Option<GhidraClient>>>,
+    native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
     #[cfg(target_os = "windows")]
     dbg_event_rx: &Option<std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>>,
 ) {
@@ -30,7 +29,7 @@ pub fn process_messages(
                     binary.entry_point));
                 state.log(format!("    {} functions found", binary.functions.len()));
                 state.loaded_binary = Some(binary);
-                file_ops::preload_server_binary(state, ghidra_client.clone());
+                file_ops::preload_server_binary(state, native_decompiler.clone());
             }
             AsyncMessage::BinaryLoaded(Err(e)) => {
                 state.log(format!("[✗] Failed to load binary: {}", e));
@@ -43,40 +42,12 @@ pub fn process_messages(
                 state.decompiled_code = format!("// Error: {}", error);
                 state.decompiling = false;
                 state.log(format!("[✗] Decompile error: {}", error));
-                
-                // Check if this is a connection error
-                if error.contains("transport") || error.contains("connection") {
-                    let _ = tx.send(AsyncMessage::ServerDisconnected);
-                }
-            }
-            AsyncMessage::ServerStatus(connected) => {
-                state.server_connected = connected;
             }
             AsyncMessage::FileSelected(Some(path)) => {
                 file_ops::load_binary(state, tx.clone(), &path);
             }
             AsyncMessage::FileSelected(None) => {
                 // User cancelled
-            }
-            AsyncMessage::ServerDisconnected => {
-                state.server_connected = false;
-                state.log("[!] Server disconnected. Attempting recovery...");
-                file_ops::attempt_server_recovery(state, tx.clone());
-            }
-            AsyncMessage::ServerRecovered => {
-                state.server_connected = true;
-                state.recovering = false;
-                state.log("[✓] Server reconnected successfully");
-                
-                // Reload binary if we had one loaded
-                if let Some(path) = state.last_binary_path.clone() {
-                    state.log("[*] Reloading binary...");
-                    file_ops::load_binary(state, tx.clone(), &path);
-                }
-            }
-            AsyncMessage::RecoveryFailed(reason) => {
-                state.recovering = false;
-                state.log(format!("[✗] Server recovery failed: {}", reason));
             }
             AsyncMessage::DebugEvent(evt) => {
                 debug_ops::handle_debug_event(state, evt);

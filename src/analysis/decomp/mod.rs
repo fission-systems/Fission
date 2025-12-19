@@ -1,12 +1,8 @@
-//! Decompiler Module - Ghidra gRPC Integration
+//! Decompiler Module - Ghidra Native FFI Integration
 //!
-//! Provides decompilation and advanced disassembly via gRPC communication
-//! with the native Ghidra C++ server.
+//! Provides high-performance decompilation via native shared library (FFI).
 
-pub mod client;
+pub mod native;
 
-#[cfg(test)]
-mod tests;
-
-// Re-export the gRPC client for external use
-pub use client::GhidraClient;
+// Re-export native interface
+pub use native::NativeDecompiler;

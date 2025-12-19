@@ -22,21 +22,9 @@ pub enum AsyncMessage {
         error: String,
     },
     
-    /// Server connection status changed
-    ServerStatus(bool),
-    
     /// File was selected from dialog (None if cancelled)
     FileSelected(Option<String>),
     
-    /// Server connection was lost
-    ServerDisconnected,
-    
-    /// Server recovery completed successfully
-    ServerRecovered,
-    
-    /// Server recovery failed
-    RecoveryFailed(String),
-
     /// Debug event from debugger loop
     DebugEvent(DebugEvent),
 }

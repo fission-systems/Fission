@@ -51,4 +51,13 @@ pub trait Debugger {
 
     /// Remove a software breakpoint
     fn remove_sw_breakpoint(&mut self, address: u64) -> Result<(), String>;
+
+    /// Read memory from the process
+    fn read_memory(&self, address: u64, size: usize) -> Result<Vec<u8>, String>;
+
+    /// Write memory to the process
+    fn write_memory(&mut self, address: u64, data: &[u8]) -> Result<(), String>;
+
+    /// Fetch registers for a thread
+    fn fetch_registers(&mut self, thread_id: u32) -> Result<types::RegisterState, String>;
 }

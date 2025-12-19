@@ -13,42 +13,47 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
         .min_width(150.0)
         .max_width(max_w.max(400.0))
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(egui::RichText::new("Decompiled").color(catppuccin::LAVENDER));
-                
-                if state.decompiling {
-                    ui.spinner();
-                    ui.label(egui::RichText::new("Processing...")
-                        .color(catppuccin::YELLOW).small());
-                } else if let Some(ref func) = state.selected_function {
-                    ui.separator();
-                    ui.label(egui::RichText::new(&func.name)
-                        .color(catppuccin::BLUE).small());
-                }
-            });
+            render_inside(ui, state);
+        });
+}
+
+/// Render decompiled code inside an existing UI.
+pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.horizontal(|ui| {
+        ui.heading(egui::RichText::new("Decompiled").color(catppuccin::LAVENDER));
+        
+        if state.decompiling {
+            ui.spinner();
+            ui.label(egui::RichText::new("Processing...")
+                .color(catppuccin::YELLOW).small());
+        } else if let Some(ref func) = state.selected_function {
             ui.separator();
+            ui.label(egui::RichText::new(&func.name)
+                .color(catppuccin::BLUE).small());
+        }
+    });
+    ui.separator();
 
-            if state.decompiled_code.is_empty() && !state.decompiling {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(60.0);
-                    ui.label(egui::RichText::new("No decompilation available")
-                        .color(catppuccin::OVERLAY0)
-                        .size(14.0));
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Select a function to decompile")
-                        .color(catppuccin::OVERLAY0)
-                        .small());
-                });
-                return;
-            }
+    if state.decompiled_code.is_empty() && !state.decompiling {
+        ui.vertical_centered(|ui| {
+            ui.add_space(60.0);
+            ui.label(egui::RichText::new("No decompilation available")
+                .color(catppuccin::OVERLAY0)
+                .size(14.0));
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Select a function to decompile")
+                .color(catppuccin::OVERLAY0)
+                .small());
+        });
+        return;
+    }
 
-            // Code view with syntax highlighting
-            egui::ScrollArea::both()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    // Render code with basic syntax highlighting
-                    render_highlighted_code(ui, &state.decompiled_code);
-                });
+    // Code view with syntax highlighting
+    egui::ScrollArea::both()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            // Render code with basic syntax highlighting
+            render_highlighted_code(ui, &state.decompiled_code);
         });
 }
 

@@ -12,16 +12,16 @@ use eframe::egui;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use crate::analysis::decomp::client::GhidraClient;
 use crate::analysis::loader::FunctionInfo;
+use crate::debug::Debugger;
 #[cfg(target_os = "windows")]
 use crate::debug::PlatformDebugger;
 
-use super::state::AppState;
+use super::state::{AppState, EditorTab, Activity};
 use super::messages::AsyncMessage;
 use super::menu::{self, MenuAction};
 use super::status_bar;
-use super::panels::{functions, assembly, decompile, bottom_tabs};
+use super::panels::{functions, assembly, decompile, bottom_tabs, activity_bar, side_bar, editor};
 use super::panels::bottom_tabs::ConsoleAction;
 
 use once_cell::sync::Lazy;
@@ -54,8 +54,8 @@ pub struct FissionApp {
     #[cfg(target_os = "windows")]
     dbg_stop_tx: Option<std::sync::mpsc::Sender<()>>,
 
-    /// Shared Ghidra client to avoid reconnect cost
-    ghidra_client: Arc<Mutex<Option<GhidraClient>>>,
+    /// Native FFI decompiler (high performance)
+    native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
 
     /// Theme initialization flag
     theme_initialized: bool,
@@ -74,7 +74,7 @@ impl Default for FissionApp {
             dbg_event_rx: None,
             #[cfg(target_os = "windows")]
             dbg_stop_tx: None,
-            ghidra_client: Arc::new(Mutex::new(None)),
+            native_decompiler: Arc::new(Mutex::new(None)),
             theme_initialized: false,
         }
     }
@@ -94,7 +94,7 @@ impl eframe::App for FissionApp {
             &mut self.state,
             &self.rx,
             &self.tx,
-            self.ghidra_client.clone(),
+            self.native_decompiler.clone(),
             &self.dbg_event_rx,
         );
         #[cfg(not(target_os = "windows"))]
@@ -102,7 +102,7 @@ impl eframe::App for FissionApp {
             &mut self.state,
             &self.rx,
             &self.tx,
-            self.ghidra_client.clone(),
+            self.native_decompiler.clone(),
         );
 
         // Render menu bar and handle actions
@@ -112,32 +112,38 @@ impl eframe::App for FissionApp {
         // Render status bar
         status_bar::render(ctx, &self.state);
 
-        // Render panels
-        let clicked_func = functions::render(ctx, &mut self.state);
+        // VS CODE STYLE LAYOUT
         
-        // Bottom tabbed panel (Console, Hex View, Strings, Debug)
-        match bottom_tabs::render(ctx, &mut self.state) {
-            ConsoleAction::Command(cmd) => {
-                handlers::process_command(&mut self.state, self.tx.clone(), &cmd);
-            }
-            ConsoleAction::None => {}
+        // 1. Activity Bar (Far left)
+        activity_bar::render(ctx, &mut self.state);
+        
+        // 2. Side Bar (Left)
+        if let Some(func) = side_bar::render(ctx, &mut self.state) {
+            self.open_function_tabs(&func);
         }
+        
+        // 3. Bottom Panel (Terminal/Output style)
+        if self.state.panel_visible {
+            match bottom_tabs::render(ctx, &mut self.state) {
+                ConsoleAction::Command(cmd) => {
+                    handlers::process_command(&mut self.state, self.tx.clone(), &cmd);
+                }
+                ConsoleAction::None => {}
+            }
+        }
+
+        // 4. Editor Area (Central)
+        editor::render(ctx, &mut self.state);
+
+        // Update debug state (registers, memory) if suspended
+        self.update_debug_state();
 
         // Process pending debug control requests
         self.handle_pending_debug_actions();
         
-        // Fixed right panel - Decompile
-        decompile::render(ctx, &mut self.state);
+        // Handle function click from Explorer/Functions panel
+        // (functions::render is now called inside side_bar)
         
-        // Main content - Assembly
-        assembly::render(ctx, &self.state);
-
-        // Handle function click
-        if let Some(func) = clicked_func {
-            self.state.selected_function = Some(func.clone());
-            self.decompile_function(&func);
-        }
-
         // Render attach dialog
         self.render_attach_dialog(ctx);
     }
@@ -169,6 +175,29 @@ impl FissionApp {
         }
     }
 
+    fn open_function_tabs(&mut self, func: &FunctionInfo) {
+        let asm_tab = EditorTab::Assembly(func.name.clone());
+        let decomp_tab = EditorTab::Decompiled(func.name.clone());
+        
+        // Open Assembly tab if not open
+        if !self.state.open_tabs.contains(&asm_tab) {
+            self.state.open_tabs.push(asm_tab.clone());
+        }
+        
+        // Open Decompiled tab if not open
+        if !self.state.open_tabs.contains(&decomp_tab) {
+            self.state.open_tabs.push(decomp_tab.clone());
+        }
+        
+        // Focus Decompiled tab by default
+        if let Some(pos) = self.state.open_tabs.iter().position(|t| t == &decomp_tab) {
+            self.state.active_tab_index = Some(pos);
+        }
+        
+        self.state.selected_function = Some(func.clone());
+        self.decompile_function(func);
+    }
+
     fn handle_pending_debug_actions(&mut self) {
         if let Some(action) = self.state.pending_debug_action.take() {
             #[cfg(target_os = "windows")]
@@ -185,72 +214,40 @@ impl FissionApp {
     }
 
     fn decompile_function(&mut self, func: &FunctionInfo) {
-        // Check if this is a .NET binary
-        let is_dotnet = self.state.loaded_binary.as_ref().map(|b| b.is_dotnet).unwrap_or(false);
-        
-        if is_dotnet {
-            // .NET binaries: show native disassembly instead of Ghidra decompilation
-            // Ghidra often fails on .NET stubs with "Unable to resolve constructor"
-            
-            if func.is_import {
-                self.state.log(format!("[!] {} is an import function", func.name));
-                self.state.decompiled_code = format!(
-                    "// {} is an imported function\n// This is a .NET binary\n// The actual managed code is in IL format",
-                    func.name
-                );
-                return;
-            }
-            
-            self.state.log(format!("[*] .NET binary - disassembling native stub at 0x{:X}", func.address));
-            
-            // Use iced-x86 to disassemble native code
-            if let Some(ref binary) = self.state.loaded_binary {
-                let is_64bit = binary.is_64bit;
-                match crate::analysis::disasm::DisasmEngine::new(is_64bit) {
-                    Ok(engine) => {
-                        // Convert VA to file offset using section table
-                        let file_offset = binary.va_to_file_offset(func.address);
-                        let size = if func.size > 0 { func.size as usize } else { 256 };
-                        
-                        if let Some(offset) = file_offset {
-                            if let Some(code_bytes) = binary.data.get(offset..offset.saturating_add(size)) {
-                            match engine.disassemble(code_bytes, func.address) {
-                                Ok(instructions) => {
-                                    let mut output = format!("// Native Disassembly: {}\n", func.name);
-                                    output.push_str(&format!("// Address: 0x{:08X}\n", func.address));
-                                    output.push_str("// (.NET binary - showing JIT stub code)\n\n");
-                                    
-                                    for insn in &instructions {
-                                        output.push_str(&format!("{}\n", insn.format_full()));
-                                    }
-                                    self.state.decompiled_code = output;
-                                    self.state.log(format!("[✓] Disassembled {} instructions", instructions.len()));
-                                    return;
-                                }
-                                Err(e) => {
-                                    self.state.log(format!("[✗] Disassembly failed: {}", e));
-                                }
-                            }
-                        }
-                        }
-                    }
-                    Err(e) => {
-                        self.state.log(format!("[✗] Failed to create disassembler: {}", e));
-                    }
-                }
-            }
-            
-            self.state.decompiled_code = "// Disassembly failed".to_string();
-            return;
-        }
-        
-        // Native binary - use Ghidra decompiler
         decompiler::decompile_function(
             &mut self.state,
             self.tx.clone(),
-            self.ghidra_client.clone(),
+            self.native_decompiler.clone(),
             func,
         );
+    }
+
+    fn update_debug_state(&mut self) {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(dbg) = self.debugger.as_mut() {
+                // Update registers if suspended
+                if self.state.debug_state.status == crate::debug::types::DebugStatus::Suspended {
+                    if let Some(tid) = self.state.debug_state.last_thread_id.or(self.state.debug_state.main_thread_id) {
+                        if let Ok(regs) = dbg.fetch_registers(tid) {
+                            self.state.debug_state.registers = Some(regs);
+                        }
+                    }
+                }
+
+                // Handle pending memory read
+                if let Some((addr, len)) = self.state.pending_mem_read.take() {
+                    match dbg.read_memory(addr, len) {
+                        Ok(data) => {
+                            self.state.mem_dump = format_hexdump(addr, &data);
+                        }
+                        Err(e) => {
+                            self.state.mem_dump = format!("Error reading memory: {}", e);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -285,5 +282,24 @@ impl FissionApp {
     fn attach_to_process(&mut self, pid: u32) {
         debug_ops::attach_to_process(&mut self.state, pid);
     }
+}
+
+fn format_hexdump(addr: u64, data: &[u8]) -> String {
+    let mut output = String::new();
+    for chunk in data.chunks(16) {
+        output.push_str(&format!("{:016X}: ", addr + (output.len() as u64 / 75 * 16)));
+        for b in chunk {
+            output.push_str(&format!("{:02X} ", b));
+        }
+        if chunk.len() < 16 {
+            for _ in 0..(16 - chunk.len()) { output.push_str("   "); }
+        }
+        output.push_str(" | ");
+        for b in chunk {
+            output.push(if *b >= 0x20 && *b <= 0x7E { *b as char } else { '.' });
+        }
+        output.push('\n');
+    }
+    output
 }
 

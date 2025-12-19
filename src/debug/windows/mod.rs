@@ -13,20 +13,39 @@ use std::time::Duration;
 
 use windows::Win32::System::Diagnostics::Debug::{
     DebugActiveProcess, DebugActiveProcessStop, WaitForDebugEvent, ContinueDebugEvent,
+    ReadProcessMemory, WriteProcessMemory, GetThreadContext, SetThreadContext, CONTEXT,
     DEBUG_EVENT, EXCEPTION_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT,
     EXIT_THREAD_DEBUG_EVENT, CREATE_PROCESS_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT,
-    LOAD_DLL_DEBUG_EVENT,
+    LOAD_DLL_DEBUG_EVENT, CONTEXT_FLAGS,
 };
-use windows::Win32::Foundation::NTSTATUS;
+use windows::Win32::System::Threading::{
+    OpenProcess, OpenThread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
+};
+use windows::Win32::System::Memory::{
+    VirtualProtectEx, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS,
+};
+use windows::Win32::Foundation::{NTSTATUS, HANDLE, CloseHandle};
+use std::ffi::c_void;
 
 const DBG_CONTINUE: NTSTATUS = NTSTATUS(0x00010002i32);
 const EXCEPTION_BREAKPOINT_CODE: u32 = 0x80000003;
 const EXCEPTION_SINGLE_STEP_CODE: u32 = 0x80000004;
 
+const CONTEXT_AMD64: u32 = 0x100000;
+const CONTEXT_CONTROL: u32 = CONTEXT_AMD64 | 0x1;
+const CONTEXT_INTEGER: u32 = CONTEXT_AMD64 | 0x2;
+const CONTEXT_SEGMENTS: u32 = CONTEXT_AMD64 | 0x4;
+const CONTEXT_FLOATING_POINT: u32 = CONTEXT_AMD64 | 0x8;
+const CONTEXT_DEBUG_REGISTERS: u32 = CONTEXT_AMD64 | 0x10;
+const CONTEXT_FULL: u32 = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT;
+const CONTEXT_ALL: u32 = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS | CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS;
+
 /// Windows debugger implementation
 pub struct WindowsDebugger {
     /// Current debug state
     state: DebugState,
+    /// Handle to the attached process
+    process_handle: Option<HANDLE>,
 }
 
 impl WindowsDebugger {
@@ -34,12 +53,27 @@ impl WindowsDebugger {
     pub fn new() -> Self {
         Self {
             state: DebugState::default(),
+            process_handle: None,
         }
     }
 
     /// Get current state
     pub fn state(&self) -> &DebugState {
         &self.state
+    }
+
+    /// Ensure process handle is available
+    fn ensure_process_handle(&mut self) -> Result<HANDLE, String> {
+        if let Some(h) = self.process_handle {
+            return Ok(h);
+        }
+        let pid = self.state.attached_pid.ok_or("Not attached")?;
+        unsafe {
+            let h = OpenProcess(PROCESS_ALL_ACCESS, false, pid)
+                .map_err(|e| format!("OpenProcess failed: {:?}", e))?;
+            self.process_handle = Some(h);
+            Ok(h)
+        }
     }
 }
 
@@ -135,6 +169,9 @@ impl Debugger for WindowsDebugger {
         self.state.status = DebugStatus::Running;
         self.state.last_event = Some(format!("Attached to PID {}", pid));
         
+        // Open process handle immediately
+        let _ = self.ensure_process_handle();
+        
         Ok(())
     }
 
@@ -145,6 +182,10 @@ impl Debugger for WindowsDebugger {
         unsafe {
             DebugActiveProcessStop(pid)
                 .map_err(|e| format!("Failed to detach from process {}: {:?}", pid, e))?;
+        }
+        
+        if let Some(h) = self.process_handle.take() {
+            unsafe { let _ = CloseHandle(h); }
         }
         
         self.state.attached_pid = None;
@@ -167,6 +208,7 @@ impl Debugger for WindowsDebugger {
     fn continue_execution(&mut self) -> Result<(), String> {
         let pid = self.state.attached_pid.ok_or("Not attached")?;
         let tid = self.state.last_thread_id.or(self.state.main_thread_id).ok_or("No thread id")?;
+        
         unsafe {
             ContinueDebugEvent(pid, tid, DBG_CONTINUE)
                 .map_err(|e| format!("Continue failed: {:?}", e))?;
@@ -176,25 +218,164 @@ impl Debugger for WindowsDebugger {
     }
 
     fn single_step(&mut self) -> Result<(), String> {
-        // Fallback: just continue (no trap flag without extra kernel feature)
-        self.continue_execution()
+        let tid = self.state.last_thread_id.or(self.state.main_thread_id).ok_or("No thread id")?;
+        unsafe {
+            let h_thread = OpenThread(THREAD_ALL_ACCESS, false, tid)
+                .map_err(|e| format!("OpenThread failed: {:?}", e))?;
+            
+            let mut ctx: CONTEXT = std::mem::zeroed();
+            ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
+            GetThreadContext(h_thread, &mut ctx)
+                .map_err(|e| format!("GetThreadContext failed: {:?}", e))?;
+            
+            ctx.EFlags |= 0x100; // Set Trap Flag
+            
+            SetThreadContext(h_thread, &ctx)
+                .map_err(|e| format!("SetThreadContext failed: {:?}", e))?;
+            
+            let _ = CloseHandle(h_thread);
+        }
+        
+        // Continue to let the CPU execute one instruction and hit the trap
+        let pid = self.state.attached_pid.ok_or("Not attached")?;
+        let tid = self.state.last_thread_id.or(self.state.main_thread_id).ok_or("No thread id")?;
+        unsafe {
+            ContinueDebugEvent(pid, tid, DBG_CONTINUE)
+                .map_err(|e| format!("Continue for step failed: {:?}", e))?;
+        }
+        
+        self.state.status = DebugStatus::Running;
+        Ok(())
     }
 
-    fn set_sw_breakpoint(&mut self, _address: u64) -> Result<(), String> {
-        // Placeholder: record breakpoint in state without patching memory
+    fn set_sw_breakpoint(&mut self, address: u64) -> Result<(), String> {
+        // Read original byte
+        let original_byte = self.read_memory(address, 1)?[0];
+        if original_byte == 0xCC {
+            return Err("Breakpoint already exists at this address".into());
+        }
+        
+        // Patch with INT3 (0xCC)
+        self.write_memory(address, &[0xCC])?;
+        
         let bp = super::types::Breakpoint {
-            address: _address,
-            original_byte: 0,
+            address,
+            original_byte,
             enabled: true,
         };
-        self.state.breakpoints.insert(_address, bp);
-        self.state.last_event = Some(format!("Breakpoint set 0x{:016x}", _address));
+        self.state.breakpoints.insert(address, bp);
+        self.state.last_event = Some(format!("Breakpoint set 0x{:016x}", address));
         Ok(())
     }
 
-    fn remove_sw_breakpoint(&mut self, _address: u64) -> Result<(), String> {
-        self.state.breakpoints.remove(&_address);
-        self.state.last_event = Some(format!("Breakpoint removed 0x{:016x}", _address));
+    fn remove_sw_breakpoint(&mut self, address: u64) -> Result<(), String> {
+        let bp = self.state.breakpoints.get(&address).ok_or("Breakpoint not found")?;
+        
+        // Restore original byte
+        self.write_memory(address, &[bp.original_byte])?;
+        
+        self.state.breakpoints.remove(&address);
+        self.state.last_event = Some(format!("Breakpoint removed 0x{:016x}", address));
         Ok(())
+    }
+
+    fn read_memory(&self, address: u64, size: usize) -> Result<Vec<u8>, String> {
+        let h_process = self.process_handle.ok_or("Process handle not available")?;
+        unsafe {
+            let mut buffer = vec![0u8; size];
+            let mut bytes_read = 0;
+            
+            let res = ReadProcessMemory(
+                h_process,
+                address as *const c_void,
+                buffer.as_mut_ptr() as *mut c_void,
+                size,
+                Some(&mut bytes_read),
+            );
+            
+            res.map_err(|e| format!("ReadProcessMemory failed at 0x{:x}: {:?}", address, e))?;
+            
+            buffer.truncate(bytes_read);
+            Ok(buffer)
+        }
+    }
+
+    fn write_memory(&mut self, address: u64, data: &[u8]) -> Result<(), String> {
+        let h_process = self.ensure_process_handle()?;
+        unsafe {
+            // Change protection to allow writing
+            let mut old_protect = PAGE_PROTECTION_FLAGS::default();
+            VirtualProtectEx(
+                h_process,
+                address as *const c_void,
+                data.len(),
+                PAGE_EXECUTE_READWRITE,
+                &mut old_protect,
+            ).map_err(|e| format!("VirtualProtectEx failed: {:?}", e))?;
+            
+            let mut bytes_written = 0;
+            let res = WriteProcessMemory(
+                h_process,
+                address as *const c_void,
+                data.as_ptr() as *const c_void,
+                data.len(),
+                Some(&mut bytes_written),
+            );
+            
+            // Restore protection
+            let mut _unused = PAGE_PROTECTION_FLAGS::default();
+            let _ = VirtualProtectEx(
+                h_process,
+                address as *const c_void,
+                data.len(),
+                old_protect,
+                &mut _unused,
+            );
+            
+            res.map_err(|e| format!("WriteProcessMemory failed at 0x{:x}: {:?}", address, e))?;
+            
+            if bytes_written != data.len() {
+                return Err(format!("Incomplete write at 0x{:x}: {}/{}", address, bytes_written, data.len()));
+            }
+            
+            Ok(())
+        }
+    }
+
+    fn fetch_registers(&mut self, thread_id: u32) -> Result<super::types::RegisterState, String> {
+        unsafe {
+            let h_thread = OpenThread(THREAD_ALL_ACCESS, false, thread_id)
+                .map_err(|e| format!("OpenThread failed: {:?}", e))?;
+            
+            let mut ctx: CONTEXT = std::mem::zeroed();
+            ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
+            
+            let res = GetThreadContext(h_thread, &mut ctx);
+            let _ = CloseHandle(h_thread);
+            
+            res.map_err(|e| format!("GetThreadContext failed: {:?}", e))?;
+            
+            // Map Windows CONTEXT to our RegisterState (x64)
+            Ok(super::types::RegisterState {
+                rax: ctx.Rax,
+                rbx: ctx.Rbx,
+                rcx: ctx.Rcx,
+                rdx: ctx.Rdx,
+                rsi: ctx.Rsi,
+                rdi: ctx.Rdi,
+                rbp: ctx.Rbp,
+                rsp: ctx.Rsp,
+                r8: ctx.R8,
+                r9: ctx.R9,
+                r10: ctx.R10,
+                r11: ctx.R11,
+                r12: ctx.R12,
+                r13: ctx.R13,
+                r14: ctx.R14,
+                r15: ctx.R15,
+                rip: ctx.Rip,
+                rflags: ctx.EFlags as u64,
+            })
+        }
     }
 }
