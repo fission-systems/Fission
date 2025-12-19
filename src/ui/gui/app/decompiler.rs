@@ -1,25 +1,20 @@
-//! Decompiler operations - Function decompilation with caching.
+//! Decompiler operations - Function decompilation using native FFI.
 
 use std::fs;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tokio::time::sleep;
+use std::time::Instant;
 
-use crate::analysis::decomp::client::{GhidraClient, BinaryId};
 use crate::analysis::disasm::DisasmEngine;
 use crate::analysis::loader::FunctionInfo;
 use crate::ui::gui::state::{AppState, CachedDecompile};
 use crate::ui::gui::messages::AsyncMessage;
 
-use super::TOKIO_RUNTIME;
-use super::file_ops::connect_with_backoff;
-
 /// Decompile a function
 pub fn decompile_function(
     state: &mut AppState,
     tx: Sender<AsyncMessage>,
-    ghidra_client: Arc<Mutex<Option<GhidraClient>>>,
+    native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
     func: &FunctionInfo,
 ) {
     // Skip import functions
@@ -32,8 +27,6 @@ pub fn decompile_function(
         return;
     }
     
-    let _start_time = Instant::now();
-
     // Check cache first
     let address = func.address;
     if let Some(cached) = state.decompile_cache.get(&address) {
@@ -50,19 +43,10 @@ pub fn decompile_function(
         return;
     }
     
-    let (arch, bin_id, bin_bytes, bin_base, bytes, is_64bit) = {
+    let (_, _, _, _, bytes, is_64bit) = {
         let binary = state.loaded_binary.as_ref().unwrap();
-        let arch = binary.arch_spec.clone();
-        let bin_size = binary.data.len() as u64;
-        let bin_mtime = fs::metadata(&binary.path).ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs());
-        let bin_id = BinaryId::new(Some(binary.path.clone()), bin_size, arch.clone(), bin_mtime);
-        let bin_bytes = binary.data.clone();
-        let bin_base = binary.image_base;
         
-        // Get function bytes (estimate 4KB for function body)
+        // Get function bytes (estimate 4KB for function body if size is 0)
         let func_size = if func.size > 0 { func.size as usize } else { 4096 };
         let bytes = match binary.get_bytes(address, func_size) {
             Some(b) => b,
@@ -71,11 +55,10 @@ pub fn decompile_function(
                 return;
             }
         };
-        (arch, bin_id, bin_bytes, bin_base, bytes, binary.is_64bit)
+        ("", (), (), (), bytes, binary.is_64bit)
     };
     
     // Disassemble bytes
-    let _disasm_start = Instant::now();
     match DisasmEngine::new(is_64bit) {
         Ok(engine) => {
             match engine.disassemble(&bytes, address) {
@@ -98,91 +81,43 @@ pub fn decompile_function(
     state.decompiled_code = format!("// Decompiling 0x{:x}...", address);
     state.log(format!("[*] Decompiling 0x{:x} ({} bytes)", address, bytes.len()));
     
-    // Spawn async task for decompilation
-    let shared_client = ghidra_client;
-    let bin_bytes_clone = bin_bytes.clone();
-    let bin_id_clone = bin_id.clone();
-    let arch_clone = arch.clone();
-    let handle = TOKIO_RUNTIME.handle().clone();
-    std::thread::spawn(move || {
-        handle.block_on(async {
-
-            let mut guard = shared_client.lock().unwrap();
-
-            // Try reuse; if missing or failed ensure, reconnect with short backoff
-            let mut need_new = guard.is_none();
-            if !need_new {
-                if let Some(client) = guard.as_mut() {
-                    if client.ensure_connected().await.is_err() {
-                        need_new = true;
+    // Use Native FFI
+    {
+        let mut native_guard = native_decompiler.lock().unwrap();
+        if native_guard.is_none() {
+            // Attempt to load library if not already initialized
+            if let Some(lib_path) = crate::analysis::decomp::native::find_library() {
+                let sla_dir = std::env::current_dir().unwrap().join("ghidra_decompiler").to_string_lossy().into_owned();
+                match crate::analysis::decomp::NativeDecompiler::new(lib_path, &sla_dir) {
+                    Ok(nd) => {
+                        state.log("[✓] Native decompiler initialized");
+                        *native_guard = Some(nd);
+                    }
+                    Err(e) => {
+                        state.log(format!("[✗] Native decompiler init failed: {}", e));
                     }
                 }
             }
+        }
 
-            if need_new {
-                let (prev_id, prev_funcs) = guard
-                    .as_ref()
-                    .map(|c| c.snapshot_state())
-                    .unwrap_or((None, Vec::new()));
-
-                let mut new_client = None;
-                let delays = [Duration::from_millis(0), Duration::from_millis(200), Duration::from_millis(500)];
-                for d in delays {
-                    if d.as_millis() > 0 {
-                        sleep(d).await;
-                    }
-                    match GhidraClient::connect().await {
-                        Ok(mut c) => {
-                            c.restore_state(prev_id.clone(), prev_funcs.clone());
-                            new_client = Some(c);
-                            break;
-                        }
-                        Err(_) => continue,
-                    }
-                }
-
-                if let Some(c) = new_client {
-                    *guard = Some(c);
-                } else {
-                    let _ = tx.send(AsyncMessage::DecompileError { 
-                        address, 
-                        error: "Server reconnection failed".to_string() 
-                    });
-                    return;
-                }
-            }
-
-            let client = guard.as_mut().unwrap();
-
-            // Load the binary bytes only if needed
-            if let Err(e) = match client.load_binary_if_needed(bin_bytes_clone.clone(), bin_base, &arch_clone, bin_id_clone.clone()).await {
-                Ok(_) => Ok(()),
-                Err(err) => Err(err),
-            } {
-                let _ = tx.send(AsyncMessage::DecompileError { 
-                    address, 
-                    error: e.to_string() 
-                });
-                return;
-            }
-            
-            // Decompile
-            match client.decompile_function(address).await {
-                Ok(result) => {
-                    let _ = tx.send(AsyncMessage::DecompileResult { 
-                        address, 
-                        c_code: result.c_code 
-                    });
+        if let Some(nd) = native_guard.as_ref() {
+            match nd.decompile(&bytes, address) {
+                Ok(c_code) => {
+                    cache_decompile_result(state, address, c_code.clone());
+                    state.log("[✓] Decompile successful");
                 }
                 Err(e) => {
-                    let _ = tx.send(AsyncMessage::DecompileError { 
-                        address, 
-                        error: e.to_string() 
-                    });
+                    state.log(format!("[✗] Decompile failed: {}", e));
+                    state.decompiled_code = format!("// Decompile error: {}", e);
+                    state.decompiling = false;
                 }
             }
-        });
-    });
+        } else {
+            state.log("[!] Native decompiler not available");
+            state.decompiled_code = "// Native decompiler not available".to_string();
+            state.decompiling = false;
+        }
+    }
 }
 
 /// Store decompile result in cache
@@ -199,4 +134,3 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
     state.decompiled_code = c_code;
     state.decompiling = false;
 }
-

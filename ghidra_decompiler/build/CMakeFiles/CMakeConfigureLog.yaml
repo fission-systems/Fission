@@ -1,0 +1,1199 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineSystem.cmake:212 (message)"
+      - "CMakeLists.txt:4 (project)"
+    message: |
+      The system is: Windows - 10.0.26100 - AMD64
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:462 (find_file)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:500 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCXXCompilerId.cpp.in"
+    candidate_directories:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/"
+    found: "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeCXXCompilerId.cpp.in"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\cursor\\resources\\app\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "%NVM_HOME%"
+        - "%NVM_SYMLINK%"
+        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
+        - "C:\\Program Files\\Bandizip\\"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "C:\\Users\\freex\\.cargo\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
+        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\nvm"
+        - "C:\\nvm4w\\nodejs"
+        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:4 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler:  
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      msbuild 踰꾩쟾 17.14.23+b0019275e(.NET Framework??
+      鍮뚮뱶 ?쒖옉: 2025-12-20 ?ㅼ쟾 12:26:31
+      
+      1 ?몃뱶??"F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\4.2.0\\CompilerIdCXX\\CompilerIdCXX.vcxproj" ?꾨줈?앺듃(湲곕낯 ?\xc2\x80???낅땲??
+      PrepareForBuild:
+        "Debug\\" ?붾젆?곕━瑜?留뚮뱾怨??덉뒿?덈떎.
+        援ъ“??異쒕젰???ъ슜?????덉뒿?덈떎. 而댄뙆?쇰윭 吏꾨떒???쒖떇?\xc2\x80 ?ㅻ쪟 怨꾩링 援ъ“瑜?諛섏쁺?⑸땲?? ?먯꽭???댁슜?\xc2\x80 https://aka.ms/cpp/structured-output??李몄“?섏꽭??
+        "Debug\\CompilerIdCXX.tlog\\" ?붾젆?곕━瑜?留뚮뱾怨??덉뒿?덈떎.
+      InitializeBuildStatus:
+        "AlwaysCreate"??媛\xc2\x80) 吏\xc2\x80?뺣릺?덇린 ?뚮Ц??"Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild"??瑜? 留뚮뱾怨??덉뒿?덈떎.
+        "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild"???곌껐(touching)?섍퀬 ?덉뒿?덈떎.
+      ClCompile:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /nologo /W0 /WX- /diagnostics:column /Od /D _MBCS /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Debug\\\\" /Fd"Debug\\vc143.pdb" /external:W0 /Gd /TP /FC /errorReport:queue CMakeCXXCompilerId.cpp
+        CMakeCXXCompilerId.cpp
+      Link:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /ERRORREPORT:QUEUE /OUT:".\\CompilerIdCXX.exe" /INCREMENTAL:NO /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:".\\CompilerIdCXX.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:".\\CompilerIdCXX.lib" /MACHINE:X64 Debug\\CMakeCXXCompilerId.obj
+        CompilerIdCXX.vcxproj -> F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\4.2.0\\CompilerIdCXX\\CompilerIdCXX.exe
+      PostBuildEvent:
+        for %%i in (cl.exe) do @echo CMAKE_CXX_COMPILER=%%~$PATH:i
+        :VCEnd
+        CMAKE_CXX_COMPILER=C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe
+      FinalizeBuildStatus:
+        "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild" ?뚯씪????젣?섍퀬 ?덉뒿?덈떎.
+        "Debug\\CompilerIdCXX.tlog\\CompilerIdCXX.lastbuildstate"???곌껐(touching)?섍퀬 ?덉뒿?덈떎.
+      "F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\4.2.0\\CompilerIdCXX\\CompilerIdCXX.vcxproj" ?꾨줈?앺듃瑜?鍮뚮뱶?덉뒿?덈떎(湲곕낯 ?\xc2\x80??.
+      
+      鍮뚮뱶?덉뒿?덈떎.
+          寃쎄퀬 0媛?
+          ?ㅻ쪟 0媛?
+      
+      寃쎄낵 ?쒓컙: 00:00:01.45
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.exe"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.vcxproj"
+      
+      The CXX compiler identification is MSVC, found in:
+        F:/Fission/ghidra_decompiler/build/CMakeFiles/4.2.0/CompilerIdCXX/CompilerIdCXX.exe
+      
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:103 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/cursor/resources/app/bin/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
+      - "C:/Program Files/Docker/Docker/resources/bin/"
+      - "C:/Program Files/Bandizip/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
+      - "C:/Users/freex/.cargo/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/freex/AppData/Local/nvm/"
+      - "C:/nvm4w/nodejs/"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\cursor\\resources\\app\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "%NVM_HOME%"
+        - "%NVM_SYMLINK%"
+        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
+        - "C:\\Program Files\\Bandizip\\"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "C:\\Users\\freex\\.cargo\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
+        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\nvm"
+        - "C:\\nvm4w\\nodejs"
+        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:104 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lld-link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/cursor/resources/app/bin/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
+      - "C:/Program Files/Docker/Docker/resources/bin/"
+      - "C:/Program Files/Bandizip/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
+      - "C:/Users/freex/.cargo/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/freex/AppData/Local/nvm/"
+      - "C:/nvm4w/nodejs/"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.com"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/lld-link.com"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/lld-link.exe"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/lld-link"
+      - "C:/Windows/System32/lld-link.com"
+      - "C:/Windows/System32/lld-link.exe"
+      - "C:/Windows/System32/lld-link"
+      - "C:/Windows/lld-link.com"
+      - "C:/Windows/lld-link.exe"
+      - "C:/Windows/lld-link"
+      - "C:/Windows/System32/wbem/lld-link.com"
+      - "C:/Windows/System32/wbem/lld-link.exe"
+      - "C:/Windows/System32/wbem/lld-link"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link"
+      - "C:/Windows/System32/OpenSSH/lld-link.com"
+      - "C:/Windows/System32/OpenSSH/lld-link.exe"
+      - "C:/Windows/System32/OpenSSH/lld-link"
+      - "C:/Program Files/cursor/resources/app/bin/lld-link.com"
+      - "C:/Program Files/cursor/resources/app/bin/lld-link.exe"
+      - "C:/Program Files/cursor/resources/app/bin/lld-link"
+      - "C:/ProgramData/chocolatey/bin/lld-link.com"
+      - "C:/ProgramData/chocolatey/bin/lld-link.exe"
+      - "C:/ProgramData/chocolatey/bin/lld-link"
+      - "C:/Program Files/Git/cmd/lld-link.com"
+      - "C:/Program Files/Git/cmd/lld-link.exe"
+      - "C:/Program Files/Git/cmd/lld-link"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/lld-link.com"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/lld-link.exe"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/lld-link"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/lld-link.com"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/lld-link.exe"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/lld-link"
+      - "C:/Program Files/Docker/Docker/resources/bin/lld-link.com"
+      - "C:/Program Files/Docker/Docker/resources/bin/lld-link.exe"
+      - "C:/Program Files/Docker/Docker/resources/bin/lld-link"
+      - "C:/Program Files/Bandizip/lld-link.com"
+      - "C:/Program Files/Bandizip/lld-link.exe"
+      - "C:/Program Files/Bandizip/lld-link"
+      - "C:/Program Files/CMake/bin/lld-link.com"
+      - "C:/Program Files/CMake/bin/lld-link.exe"
+      - "C:/Program Files/CMake/bin/lld-link"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link.com"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link"
+      - "C:/Users/freex/.cargo/bin/lld-link.com"
+      - "C:/Users/freex/.cargo/bin/lld-link.exe"
+      - "C:/Users/freex/.cargo/bin/lld-link"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/lld-link.com"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/lld-link.exe"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/lld-link"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/lld-link.com"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/lld-link.exe"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/lld-link"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/lld-link.com"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/lld-link.exe"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/lld-link"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/lld-link.com"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/lld-link.exe"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/lld-link"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/lld-link.com"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/lld-link.exe"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/lld-link"
+      - "C:/Users/freex/AppData/Local/nvm/lld-link.com"
+      - "C:/Users/freex/AppData/Local/nvm/lld-link.exe"
+      - "C:/Users/freex/AppData/Local/nvm/lld-link"
+      - "C:/nvm4w/nodejs/lld-link.com"
+      - "C:/nvm4w/nodejs/lld-link.exe"
+      - "C:/nvm4w/nodejs/lld-link"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/lld-link.com"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/lld-link.exe"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/lld-link"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\cursor\\resources\\app\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "%NVM_HOME%"
+        - "%NVM_SYMLINK%"
+        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
+        - "C:\\Program Files\\Bandizip\\"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "C:\\Users\\freex\\.cargo\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
+        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\nvm"
+        - "C:\\nvm4w\\nodejs"
+        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_LINKER"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/cursor/resources/app/bin/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
+      - "C:/Program Files/Docker/Docker/resources/bin/"
+      - "C:/Program Files/Bandizip/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
+      - "C:/Users/freex/.cargo/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/freex/AppData/Local/nvm/"
+      - "C:/nvm4w/nodejs/"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\cursor\\resources\\app\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "%NVM_HOME%"
+        - "%NVM_SYMLINK%"
+        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
+        - "C:\\Program Files\\Bandizip\\"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "C:\\Users\\freex\\.cargo\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
+        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\nvm"
+        - "C:\\nvm4w\\nodejs"
+        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_MT"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "mt"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/cursor/resources/app/bin/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
+      - "C:/Program Files/Docker/Docker/resources/bin/"
+      - "C:/Program Files/Bandizip/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
+      - "C:/Users/freex/.cargo/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/freex/AppData/Local/nvm/"
+      - "C:/nvm4w/nodejs/"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt.com"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt.exe"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/mt.com"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/mt.exe"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/mt"
+      - "C:/Windows/System32/mt.com"
+      - "C:/Windows/System32/mt.exe"
+      - "C:/Windows/System32/mt"
+      - "C:/Windows/mt.com"
+      - "C:/Windows/mt.exe"
+      - "C:/Windows/mt"
+      - "C:/Windows/System32/wbem/mt.com"
+      - "C:/Windows/System32/wbem/mt.exe"
+      - "C:/Windows/System32/wbem/mt"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt"
+      - "C:/Windows/System32/OpenSSH/mt.com"
+      - "C:/Windows/System32/OpenSSH/mt.exe"
+      - "C:/Windows/System32/OpenSSH/mt"
+      - "C:/Program Files/cursor/resources/app/bin/mt.com"
+      - "C:/Program Files/cursor/resources/app/bin/mt.exe"
+      - "C:/Program Files/cursor/resources/app/bin/mt"
+      - "C:/ProgramData/chocolatey/bin/mt.com"
+      - "C:/ProgramData/chocolatey/bin/mt.exe"
+      - "C:/ProgramData/chocolatey/bin/mt"
+      - "C:/Program Files/Git/cmd/mt.com"
+      - "C:/Program Files/Git/cmd/mt.exe"
+      - "C:/Program Files/Git/cmd/mt"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/mt.com"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/mt.exe"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/mt"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/mt.com"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/mt.exe"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/mt"
+      - "C:/Program Files/Docker/Docker/resources/bin/mt.com"
+      - "C:/Program Files/Docker/Docker/resources/bin/mt.exe"
+      - "C:/Program Files/Docker/Docker/resources/bin/mt"
+      - "C:/Program Files/Bandizip/mt.com"
+      - "C:/Program Files/Bandizip/mt.exe"
+      - "C:/Program Files/Bandizip/mt"
+      - "C:/Program Files/CMake/bin/mt.com"
+      - "C:/Program Files/CMake/bin/mt.exe"
+      - "C:/Program Files/CMake/bin/mt"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/mt.com"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/mt.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/mt"
+      - "C:/Users/freex/.cargo/bin/mt.com"
+      - "C:/Users/freex/.cargo/bin/mt.exe"
+      - "C:/Users/freex/.cargo/bin/mt"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/mt.com"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/mt.exe"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/mt"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/mt.com"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/mt.exe"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/mt"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/mt.com"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/mt.exe"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/mt"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/mt.com"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/mt.exe"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/mt"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/mt.com"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/mt.exe"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/mt"
+      - "C:/Users/freex/AppData/Local/nvm/mt.com"
+      - "C:/Users/freex/AppData/Local/nvm/mt.exe"
+      - "C:/Users/freex/AppData/Local/nvm/mt"
+      - "C:/nvm4w/nodejs/mt.com"
+      - "C:/nvm4w/nodejs/mt.exe"
+      - "C:/nvm4w/nodejs/mt"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/mt.com"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/mt.exe"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/mt"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\cursor\\resources\\app\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "%NVM_HOME%"
+        - "%NVM_SYMLINK%"
+        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
+        - "C:\\Program Files\\Bandizip\\"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "C:\\Users\\freex\\.cargo\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
+        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\nvm"
+        - "C:\\nvm4w\\nodejs"
+        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_AR"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lib"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/cursor/resources/app/bin/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
+      - "C:/Program Files/Docker/Docker/resources/bin/"
+      - "C:/Program Files/Bandizip/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
+      - "C:/Users/freex/.cargo/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/freex/AppData/Local/nvm/"
+      - "C:/nvm4w/nodejs/"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\cursor\\resources\\app\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "%NVM_HOME%"
+        - "%NVM_SYMLINK%"
+        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
+        - "C:\\Program Files\\Bandizip\\"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "C:\\Users\\freex\\.cargo\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
+        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\nvm"
+        - "C:\\nvm4w\\nodejs"
+        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineRCCompiler.cmake:40 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/Platform/Windows-MSVC.cmake:580 (enable_language)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/Platform/Windows-MSVC.cmake:553 (__windows_compiler_msvc_enable_rc)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/Platform/Windows-MSVC-CXX.cmake:6 (__windows_compiler_msvc)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeCXXInformation.cmake:48 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_RC_COMPILER"
+    description: "RC compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "rc"
+    candidate_directories:
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/cursor/resources/app/bin/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
+      - "C:/Program Files/Docker/Docker/resources/bin/"
+      - "C:/Program Files/Bandizip/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
+      - "C:/Users/freex/.cargo/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/freex/AppData/Local/nvm/"
+      - "C:/nvm4w/nodejs/"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/ghidra_decompiler/bin/"
+      - "C:/Program Files (x86)/ghidra_decompiler/sbin/"
+      - "C:/Program Files (x86)/ghidra_decompiler/"
+    searched_directories:
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/rc.com"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/rc.exe"
+      - "C:/Program Files/Common Files/Oracle/Java/javapath/rc"
+      - "C:/Windows/System32/rc.com"
+      - "C:/Windows/System32/rc.exe"
+      - "C:/Windows/System32/rc"
+      - "C:/Windows/rc.com"
+      - "C:/Windows/rc.exe"
+      - "C:/Windows/rc"
+      - "C:/Windows/System32/wbem/rc.com"
+      - "C:/Windows/System32/wbem/rc.exe"
+      - "C:/Windows/System32/wbem/rc"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc"
+      - "C:/Windows/System32/OpenSSH/rc.com"
+      - "C:/Windows/System32/OpenSSH/rc.exe"
+      - "C:/Windows/System32/OpenSSH/rc"
+      - "C:/Program Files/cursor/resources/app/bin/rc.com"
+      - "C:/Program Files/cursor/resources/app/bin/rc.exe"
+      - "C:/Program Files/cursor/resources/app/bin/rc"
+      - "C:/ProgramData/chocolatey/bin/rc.com"
+      - "C:/ProgramData/chocolatey/bin/rc.exe"
+      - "C:/ProgramData/chocolatey/bin/rc"
+      - "C:/Program Files/Git/cmd/rc.com"
+      - "C:/Program Files/Git/cmd/rc.exe"
+      - "C:/Program Files/Git/cmd/rc"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/rc.com"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/rc.exe"
+      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/rc"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/rc.com"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/rc.exe"
+      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/rc"
+      - "C:/Program Files/Docker/Docker/resources/bin/rc.com"
+      - "C:/Program Files/Docker/Docker/resources/bin/rc.exe"
+      - "C:/Program Files/Docker/Docker/resources/bin/rc"
+      - "C:/Program Files/Bandizip/rc.com"
+      - "C:/Program Files/Bandizip/rc.exe"
+      - "C:/Program Files/Bandizip/rc"
+      - "C:/Program Files/CMake/bin/rc.com"
+      - "C:/Program Files/CMake/bin/rc.exe"
+      - "C:/Program Files/CMake/bin/rc"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/rc.com"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/rc.exe"
+      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/rc"
+      - "C:/Users/freex/.cargo/bin/rc.com"
+      - "C:/Users/freex/.cargo/bin/rc.exe"
+      - "C:/Users/freex/.cargo/bin/rc"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/rc.com"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/rc.exe"
+      - "C:/Users/freex/.pyenv/pyenv-win/bin/rc"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/rc.com"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/rc.exe"
+      - "C:/Users/freex/.pyenv/pyenv-win/shims/rc"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/rc.com"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/rc.exe"
+      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/rc"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/rc.com"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/rc.exe"
+      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/rc"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/rc.com"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/rc.exe"
+      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/rc"
+      - "C:/Users/freex/AppData/Local/nvm/rc.com"
+      - "C:/Users/freex/AppData/Local/nvm/rc.exe"
+      - "C:/Users/freex/AppData/Local/nvm/rc"
+      - "C:/nvm4w/nodejs/rc.com"
+      - "C:/nvm4w/nodejs/rc.exe"
+      - "C:/nvm4w/nodejs/rc"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/rc.com"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/rc.exe"
+      - "C:/Users/freex/AppData/Roaming/Python/Scripts/rc"
+      - "C:/Program Files/bin/rc.com"
+      - "C:/Program Files/bin/rc.exe"
+      - "C:/Program Files/bin/rc"
+      - "C:/Program Files/sbin/rc.com"
+      - "C:/Program Files/sbin/rc.exe"
+      - "C:/Program Files/sbin/rc"
+      - "C:/Program Files/rc.com"
+      - "C:/Program Files/rc.exe"
+      - "C:/Program Files/rc"
+      - "C:/Program Files (x86)/bin/rc.com"
+      - "C:/Program Files (x86)/bin/rc.exe"
+      - "C:/Program Files (x86)/bin/rc"
+      - "C:/Program Files (x86)/sbin/rc.com"
+      - "C:/Program Files (x86)/sbin/rc.exe"
+      - "C:/Program Files (x86)/sbin/rc"
+      - "C:/Program Files (x86)/rc.com"
+      - "C:/Program Files (x86)/rc.exe"
+      - "C:/Program Files (x86)/rc"
+      - "C:/Program Files/CMake/bin/rc.com"
+      - "C:/Program Files/CMake/bin/rc.exe"
+      - "C:/Program Files/CMake/bin/rc"
+      - "C:/Program Files/CMake/sbin/rc.com"
+      - "C:/Program Files/CMake/sbin/rc.exe"
+      - "C:/Program Files/CMake/sbin/rc"
+      - "C:/Program Files/CMake/rc.com"
+      - "C:/Program Files/CMake/rc.exe"
+      - "C:/Program Files/CMake/rc"
+      - "C:/Program Files (x86)/ghidra_decompiler/bin/rc.com"
+      - "C:/Program Files (x86)/ghidra_decompiler/bin/rc.exe"
+      - "C:/Program Files (x86)/ghidra_decompiler/bin/rc"
+      - "C:/Program Files (x86)/ghidra_decompiler/sbin/rc.com"
+      - "C:/Program Files (x86)/ghidra_decompiler/sbin/rc.exe"
+      - "C:/Program Files (x86)/ghidra_decompiler/sbin/rc"
+      - "C:/Program Files (x86)/ghidra_decompiler/rc.com"
+      - "C:/Program Files (x86)/ghidra_decompiler/rc.exe"
+      - "C:/Program Files (x86)/ghidra_decompiler/rc"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\cursor\\resources\\app\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "%NVM_HOME%"
+        - "%NVM_SYMLINK%"
+        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
+        - "C:\\Program Files\\Bandizip\\"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "C:\\Users\\freex\\.cargo\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
+        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\nvm"
+        - "C:\\nvm4w\\nodejs"
+        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/ghidra_decompiler"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/ghidra_decompiler"
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:4 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp"
+      binary: "F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /GR /EHsc"
+      CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_84c47.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        msbuild 踰꾩쟾 17.14.23+b0019275e(.NET Framework??
+        鍮뚮뱶 ?쒖옉: 2025-12-20 ?ㅼ쟾 12:26:33
+        
+        1 ?몃뱶??"F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\cmTC_84c47.vcxproj" ?꾨줈?앺듃(湲곕낯 ?\xc2\x80???낅땲??
+        PrepareForBuild:
+          援ъ“??異쒕젰???ъ슜?????덉뒿?덈떎. 而댄뙆?쇰윭 吏꾨떒???쒖떇?\xc2\x80 ?ㅻ쪟 怨꾩링 援ъ“瑜?諛섏쁺?⑸땲?? ?먯꽭???댁슜?\xc2\x80 https://aka.ms/cpp/structured-output??李몄“?섏꽭??
+          "F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\Debug\\" ?붾젆?곕━瑜?留뚮뱾怨??덉뒿?덈떎.
+          "cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\" ?붾젆?곕━瑜?留뚮뱾怨??덉뒿?덈떎.
+        InitializeBuildStatus:
+          "AlwaysCreate"??媛\xc2\x80) 吏\xc2\x80?뺣릺?덇린 ?뚮Ц??"cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\unsuccessfulbuild"??瑜? 留뚮뱾怨??덉뒿?덈떎.
+          "cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\unsuccessfulbuild"???곌껐(touching)?섍퀬 ?덉뒿?덈떎.
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /GR /Fo"cmTC_84c47.dir\\Debug\\\\" /Fd"cmTC_84c47.dir\\Debug\\vc143.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCXXCompilerABI.cpp"
+          Microsoft (R) C/C++ 理쒖쟻??而댄뙆?쇰윭 踰꾩쟾 19.44.35222(x64)
+          Copyright (c) Microsoft Corporation. All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /GR /Fo"cmTC_84c47.dir\\Debug\\\\" /Fd"cmTC_84c47.dir\\Debug\\vc143.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCXXCompilerABI.cpp"
+          CMakeCXXCompilerABI.cpp
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\Debug\\cmTC_84c47.exe" /INCREMENTAL /ILK:"cmTC_84c47.dir\\Debug\\cmTC_84c47.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp/Debug/cmTC_84c47.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp/Debug/cmTC_84c47.lib" /MACHINE:X64  /machine:x64 cmTC_84c47.dir\\Debug\\CMakeCXXCompilerABI.obj
+          cmTC_84c47.vcxproj -> F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\Debug\\cmTC_84c47.exe
+        FinalizeBuildStatus:
+          "cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\unsuccessfulbuild" ?뚯씪????젣?섍퀬 ?덉뒿?덈떎.
+          "cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\cmTC_84c47.lastbuildstate"???곌껐(touching)?섍퀬 ?덉뒿?덈떎.
+        "F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\cmTC_84c47.vcxproj" ?꾨줈?앺듃瑜?鍮뚮뱶?덉뒿?덈떎(湲곕낯 ?\xc2\x80??.
+        
+        鍮뚮뱶?덉뒿?덈떎.
+            寃쎄퀬 0媛?
+            ?ㅻ쪟 0媛?
+        
+        寃쎄낵 ?쒓컙: 00:00:00.53
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:4 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
+        linker tool for 'CXX': C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:4 (project)"
+    message: |
+      Running the CXX compiler's linker: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe" "-v"
+      Microsoft (R) Incremental Linker Version 14.44.35222.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+  -
+    kind: "find_package-v1"
+    backtrace:
+      - "CMakeLists.txt:20 (find_package)"
+    name: "gRPC"
+    configs:
+      -
+        filename: "gRPCConfig.cmake"
+        kind: "cmake"
+      -
+        filename: "grpc-config.cmake"
+        kind: "cmake"
+    version_request:
+      exact: false
+    settings:
+      required: "required_explicit"
+      quiet: false
+      global: false
+      policy_scope: true
+      bypass_provider: false
+      names:
+        - "gRPC"
+      path_suffixes:
+        - ""
+      paths:
+        CMAKE_FIND_USE_CMAKE_PATH: true
+        CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+        CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+        CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+        CMAKE_FIND_USE_INSTALL_PREFIX: true
+        CMAKE_FIND_USE_PACKAGE_ROOT_PATH: true
+        CMAKE_FIND_USE_CMAKE_PACKAGE_REGISTRY: true
+        CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY: true
+        CMAKE_FIND_ROOT_PATH_MODE: "BOTH"
+    candidates:
+      -
+        path: "F:/Fission/ghidra_decompiler/build/CMakeFiles/pkgRedirects/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "F:/Fission/ghidra_decompiler/build/CMakeFiles/pkgRedirects/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Common Files/Oracle/Java/javapath/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Common Files/Oracle/Java/javapath/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/wbem/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/wbem/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/WindowsPowerShell/v1.0/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/WindowsPowerShell/v1.0/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/OpenSSH/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Windows/System32/OpenSSH/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/cursor/resources/app/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/cursor/resources/app/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/ProgramData/chocolatey/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/ProgramData/chocolatey/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Git/cmd/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Git/cmd/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Docker/Docker/resources/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Docker/Docker/resources/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Bandizip/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/Bandizip/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/.cargo/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/.cargo/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/.pyenv/pyenv-win/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/.pyenv/pyenv-win/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/.pyenv/pyenv-win/shims/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/.pyenv/pyenv-win/shims/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Local/Programs/Antigravity/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Local/Programs/Antigravity/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Local/nvm/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Local/nvm/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/nvm4w/nodejs/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/nvm4w/nodejs/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Roaming/Python/Scripts/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Users/freex/AppData/Roaming/Python/Scripts/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files/CMake/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/gRPCConfig.cmake"
+        mode: "config"
+        reason: "no_exist"
+      -
+        path: "C:/Program Files (x86)/grpc-config.cmake"
+        mode: "config"
+        reason: "no_exist"
+    found: null
+    search_context:
+      ENV{PATH}:
+        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\cursor\\resources\\app\\bin"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "%NVM_HOME%"
+        - "%NVM_SYMLINK%"
+        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
+        - "C:\\Program Files\\Bandizip\\"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
+        - "C:\\Users\\freex\\.cargo\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
+        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
+        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\freex\\AppData\\Local\\nvm"
+        - "C:\\nvm4w\\nodejs"
+        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/ghidra_decompiler"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/ghidra_decompiler"
+...

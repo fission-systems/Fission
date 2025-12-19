@@ -45,9 +45,6 @@ pub struct AppState {
     /// Is decompilation in progress?
     pub decompiling: bool,
 
-    /// Server connection status
-    pub server_connected: bool,
-
     /// File dialog path (unused currently)
     pub file_dialog_path: String,
 
@@ -56,9 +53,6 @@ pub struct AppState {
 
     /// Last loaded binary path (for recovery reload)
     pub last_binary_path: Option<String>,
-
-    /// Server recovery in progress
-    pub recovering: bool,
 
     // ========== Debug State ==========
     /// Debugger state
@@ -93,12 +87,56 @@ pub struct AppState {
     /// Temporary input for breakpoint address
     pub breakpoint_input: String,
 
+    /// Pending memory read action
+    pub pending_mem_read: Option<(u64, usize)>,
+
     /// Memory view address input (hex)
     pub mem_addr_input: String,
     /// Memory view length input (decimal)
     pub mem_len_input: String,
     /// Last memory dump text
     pub mem_dump: String,
+
+    // ========== VS Code Style Layout State ==========
+    /// Active side bar activity
+    pub active_activity: Activity,
+    /// Side bar visible?
+    pub sidebar_visible: bool,
+    /// Bottom panel visible?
+    pub panel_visible: bool,
+    /// Open editor tabs
+    pub open_tabs: Vec<EditorTab>,
+    /// Currently active tab index
+    pub active_tab_index: Option<usize>,
+}
+
+/// Activities in the Activity Bar
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Activity {
+    Explorer,
+    Search,
+    Debug,
+    Settings,
+}
+
+/// Tabs in the central editor area
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorTab {
+    Assembly(String),   // Function name or "Main"
+    Decompiled(String), // Function name
+    HexView,
+    Welcome,
+}
+
+impl EditorTab {
+    pub fn title(&self) -> String {
+        match self {
+            EditorTab::Assembly(name) => format!("Asm: {}", name),
+            EditorTab::Decompiled(name) => format!("C: {}", name),
+            EditorTab::HexView => "Hex View".to_string(),
+            EditorTab::Welcome => "Welcome".to_string(),
+        }
+    }
 }
 
 /// Debug control actions requested from UI
@@ -161,11 +199,9 @@ impl Default for AppState {
             decompiled_code: "// Select a function to decompile".into(),
             asm_instructions: Vec::new(),
             decompiling: false,
-            server_connected: false,
             file_dialog_path: String::new(),
             decompile_cache: HashMap::new(),
             last_binary_path: None,
-            recovering: false,
             // Debug state
             debug_state: crate::debug::types::DebugState::default(),
             show_attach_dialog: false,
@@ -180,10 +216,17 @@ impl Default for AppState {
             dynamic_mode: true,
             pending_debug_action: None,
             pending_bp_action: None,
+            pending_mem_read: None,
             breakpoint_input: String::new(),
             mem_addr_input: String::new(),
             mem_len_input: "64".to_string(),
             mem_dump: String::new(),
+            // VS Code Layout
+            active_activity: Activity::Explorer,
+            sidebar_visible: true,
+            panel_visible: true,
+            open_tabs: vec![EditorTab::Welcome],
+            active_tab_index: Some(0),
         }
     }
 }

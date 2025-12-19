@@ -2,7 +2,7 @@
 
 > **"Split the Binary, Fuse the Power."**
 
-**Fission** is a next-generation hybrid dynamic analysis platform that unifies the best features of x64dbg, Frida, Radare2, and Ghidra into a single Rust-powered binary.
+**Fission** is a next-generation hybrid dynamic analysis platform that unifies the best features of x64dbg, Frida, Radare2, and Ghidra into a single high-performance Rust-powered binary.
 
 ![Fission Screenshot](docs/screenshot.png)
 
@@ -14,38 +14,36 @@
 
 ## ✨ Core Features
 
-- **x64dbg-Style GUI**: Multi-panel layout with Assembly, Decompiled Code, Functions, and Console views
-- **Ghidra-Powered Decompiler**: Full C code decompilation via gRPC server ✅
+- **VS Code Style GUI**: Modern multi-panel layout with Activity Bar, Side Bar, Tabbed Editor, and Panel Area.
+- **Ghidra-Powered Decompiler**: High-performance C code decompilation via native FFI (Foreign Function Interface) ✅
 - **iced-x86 Disassembler**: High-performance pure Rust x86/x64 disassembly with syntax highlighting
 - **.NET Binary Support**: CLR metadata parsing, IL disassembly, and native stub analysis ✅
 - **Decompile Caching**: Results are cached for instant re-access
-- **Auto Server Recovery**: Automatic reconnection with binary reload on server crash
 - **Cross-Platform**: Windows (PE) and Linux (ELF) binary support
-- **Debug Support**: Process attach/detach with Windows debugging API ✅
+- **Debug Support**: Process attach/detach, breakpoints, and register/memory access via Windows debugging API ✅
 
 ## 🖥️ GUI Panels
 
 | Panel | Description |
 |-------|-------------|
-| **[Functions]** | Clickable list of detected functions (imports/exports) |
-| **[Assembly]** | x64dbg-style disassembly with address, bytes, mnemonic, operands |
-| **[Decompiled Code]** | Ghidra-generated C code with syntax highlighting |
-| **[Console]** | Colored log output with CLI input, Copy All / Clear buttons |
-| **[Registers]** | CPU register state during debugging |
-| **[Memory]** | Memory view and hex dump |
+| **[Explorer]** | Function list (imports/exports) with virtual scrolling |
+| **[Editor]** | Tabbed interface for Assembly and Decompiled C code |
+| **[Console]** | Colored log output with integrated CLI input |
+| **[Debug]** | Execution control, event timeline, breakpoints, and registers |
+| **[Hex View]** | High-performance binary hex dump viewer |
 
 ## 🛠️ Tech Stack
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| Language | Rust 2021 | Memory safety, C++ performance |
+| Language | Rust 2021 | Memory safety, native performance |
 | GUI | egui + eframe | GPU-accelerated, immediate mode |
+| Theme | Catppuccin | Modern, eye-friendly color palette |
 | Disassembler | iced-x86 | Pure Rust x86/x64 instruction decoding |
-| Decompiler | Ghidra C++ (gRPC) | Full C code generation |
+| Decompiler | Ghidra C++ (FFI) | Direct high-performance C code generation |
 | Binary Parsing | goblin + object | PE/ELF with fallback support |
 | .NET Parsing | Custom Rust | CLR metadata & IL disassembly |
-| Async | tokio + tonic | gRPC client communication |
-| Debugging | Windows API | Process attach, breakpoints |
+| Debugging | Windows API | Process attach, breakpoints, registers |
 
 ## 🔧 Architecture
 
@@ -53,24 +51,17 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                    Fission (Rust)                           │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   GUI       │  │   CLI       │  │   Client (tonic)    │  │
-│  │  (egui)     │  │ (reedline)  │  │                     │  │
+│  │   GUI       │  │   CLI       │  │   Native FFI        │  │
+│  │  (egui)     │  │ (reedline)  │  │   (libloading)      │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
 │         │                │                     │             │
 │         └────────────────┴─────────────────────┘             │
-│                          │ gRPC                              │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │                 .NET Analysis Module                     │ │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │ │
-│  │  │ CLR Detect  │  │  Metadata   │  │  IL Disasm      │  │ │
-│  │  │             │  │  Parser     │  │                 │  │ │
-│  │  └─────────────┘  └─────────────┘  └─────────────────┘  │ │
-│  └─────────────────────────────────────────────────────────┘ │
+│                          │ direct call                       │
 └──────────────────────────┼───────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│               Ghidra Server (C++)                            │
+│               Ghidra Engine (C++)                           │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │ SleighArch  │  │  Funcdata   │  │      PrintC         │  │
 │  │ (Disasm)    │  │ (Analysis)  │  │   (C Code Gen)      │  │
@@ -82,133 +73,66 @@
 
 ### Prerequisites
 
-- Rust 1.70+
+- Rust 1.75+
 - CMake 3.16+
-- vcpkg with gRPC and protobuf installed
+- vcpkg (for ZLIB)
 - Visual Studio 2022 (Windows)
 
 ### Build
 
 ```bash
-# Build Ghidra gRPC Server
-cmake -S ghidra_decompiler -B build -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+# 1. Build Ghidra Native Library
+cd ghidra_decompiler
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=[PATH_TO_VCPKG]/scripts/buildsystems/vcpkg.cmake
 cmake --build build --config Release
 
-# Build Rust client
-cargo build --release
-
-# Run GUI
-cargo run
-
-# Run tests
-cargo test --bin fission decomp::tests -- --nocapture
+# 2. Build and Run Fission
+cd ..
+cargo run --release
 ```
 
 ### Usage
 
-1. Launch Fission: `cargo run` or `fission.exe`
+1. Launch Fission: `cargo run`
 2. **File → Open Binary** to load an executable
-3. Click a function in the left panel to decompile
-4. View assembly in center, decompiled C code on the right
-5. Use console commands: `help`, `funcs`, `clear`, `exit`
-
-### .NET Binary Support
-
-Fission automatically detects .NET binaries and provides:
-- CLR runtime version detection
-- Native entry point stub disassembly (x64dbg-style)
-- IL metadata parsing (TypeDef, MethodDef, Field tables)
+3. Use the **Explorer** (left side) to browse functions
+4. Double-click a function to open **Assembly** and **Decompiled** tabs
+5. Use the **Debug** tab (bottom) to attach to processes and control execution
 
 ## 📁 Project Structure
 
 ```
 Fission/
 ├── Cargo.toml              # Rust dependencies
-├── build.rs                # Proto generation
-├── protos/
-│   └── ghidra_service.proto  # gRPC service definition
-├── ghidra_decompiler/      # C++ Ghidra server
+├── build.rs                # Build configuration
+├── ghidra_decompiler/      # C++ Ghidra Core & FFI Wrapper
 │   ├── CMakeLists.txt
-│   ├── server_main.cc      # gRPC service implementation
-│   └── languages/          # .sla, .ldefs, .pspec, .cspec files
+│   ├── wrapper.cpp         # C ABI implementation
+│   └── languages/          # Sleigh (.sla) files
 ├── src/
 │   ├── main.rs             # Entry point
 │   ├── analysis/           # Analysis modules
 │   │   ├── loader/         # Binary parsing (PE/ELF)
 │   │   ├── disasm/         # iced-x86 disassembler
-│   │   ├── decomp/         # Ghidra gRPC client
-│   │   └── dotnet/         # .NET/CLR analysis ✅
-│   │       ├── mod.rs      # Entry point, RVA→offset
-│   │       ├── metadata.rs # CLR metadata parser
-│   │       └── il_disasm.rs # IL instruction decoder
-│   ├── debug/              # Debugging support ✅
-│   │   ├── mod.rs          # Debugger trait
-│   │   ├── types.rs        # DebugEvent, DebugState
-│   │   └── windows/        # Windows-specific debugger
+│   │   ├── decomp/         # Native FFI interface
+│   │   └── dotnet/         # .NET/CLR analysis
+│   ├── debug/              # Debugging core (Win32/Linux)
 │   └── ui/
-│       └── gui/            # Modular GUI
-│           ├── app/        # App modules
-│           │   ├── mod.rs  # Main orchestrator
-│           │   ├── decompiler.rs
-│           │   └── debug_ops.rs
-│           ├── state.rs    # Shared AppState
-│           ├── messages.rs # Async message types
-│           ├── menu.rs     # Menu bar
-│           ├── status_bar.rs
-│           └── panels/     # UI panels
-│               ├── functions.rs
-│               ├── console.rs
-│               ├── assembly.rs
-│               ├── decompile.rs
-│               └── bottom_tabs/
+│       └── gui/            # VS Code style GUI
+│           ├── app/        # App logic modules
+│           ├── theme.rs    # Catppuccin styling
+│           └── panels/     # UI components
 ```
 
 ## 📅 Development Roadmap
 
 - [x] **Phase 1**: CLI Base - Binary loader, disassembler, REPL
-- [x] **Phase 2**: Ghidra Integration - gRPC-based C decompilation ✅
-- [x] **Phase 3**: x64dbg-Style GUI - Multi-panel layout, caching, recovery ✅
-- [x] **Phase 3.5**: .NET Support - CLR detection, metadata parsing, IL disassembly ✅
-- [x] **Phase 3.6**: Disassembler Migration - Capstone → iced-x86 ✅
-- [ ] **Phase 4**: Debug Loop - Attach ✅, detach ✅, breakpoints (WIP)
-- [ ] **Phase 5**: Python Scripting - Full Python API
-- [ ] **Phase 6**: Advanced Features - Time travel debugging, plugins
-
-## 🔗 gRPC API
-
-### Services
-
-| RPC | Description |
-|-----|-------------|
-| `Ping` | Health check |
-| `LoadBinary` | Load binary data with architecture spec |
-| `DecompileFunction` | Decompile function at address, returns C code |
-| `DisassembleRange` | Disassemble address range |
-
-### Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `max_instructions` | 200,000 | Maximum instructions per function |
-| `max_message_size` | 50 MB | gRPC message size limit |
-
-### Example Usage (Rust)
-
-```rust
-let mut client = GhidraClient::connect().await?;
-client.load_binary(bytes, 0x1000, "x86:LE:64:default").await?;
-let result = client.decompile_function(0x1000).await?;
-println!("{}", result.c_code);
-```
-
-## 🆕 Recent Changes (v0.1.0)
-
-- **iced-x86**: Migrated from Capstone to iced-x86 for faster, pure-Rust disassembly
-- **.NET Support**: Added CLR binary detection and IL disassembly
-- **gRPC Limits**: Increased message size to 50MB for large binaries
-- **Flow Limits**: Increased max instructions to 200K, truncation instead of error
-- **VA→FileOffset**: Fixed address translation for correct disassembly display
-- **Debug Infrastructure**: Added process attach/detach dialogs
+- [x] **Phase 2**: Ghidra Integration - Native FFI C decompilation ✅
+- [x] **Phase 3**: VS Code Style GUI - Tabs, Activity Bar, Catppuccin theme ✅
+- [x] **Phase 4**: .NET Support - CLR detection, metadata, IL disassembly ✅
+- [x] **Phase 5**: Debugging - Attach, breakpoints, registers, memory ✅
+- [ ] **Phase 6**: Python Scripting - Full Python API
+- [ ] **Phase 7**: Advanced Features - Time travel debugging, plugins
 
 ## 📜 License
 
@@ -218,5 +142,5 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 - [Ghidra](https://ghidra-sre.org/) - NSA's software reverse engineering framework
 - [iced-x86](https://github.com/icedland/iced) - High-performance x86/x64 disassembler
-- [gRPC](https://grpc.io/) - High-performance RPC framework
 - [egui](https://github.com/emilk/egui) - Immediate mode GUI library
+- [Catppuccin](https://github.com/catppuccin/catppuccin) - Soothing pastel theme

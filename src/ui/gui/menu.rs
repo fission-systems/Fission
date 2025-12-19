@@ -78,6 +78,15 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                 });
 
                 ui.menu_button(egui::RichText::new("View").color(catppuccin::TEXT), |ui| {
+                    if ui.button(egui::RichText::new(if state.sidebar_visible { "Hide Side Bar" } else { "Show Side Bar" }).color(catppuccin::TEXT)).clicked() {
+                        state.sidebar_visible = !state.sidebar_visible;
+                        ui.close_menu();
+                    }
+                    if ui.button(egui::RichText::new(if state.panel_visible { "Hide Panel" } else { "Show Panel" }).color(catppuccin::TEXT)).clicked() {
+                        state.panel_visible = !state.panel_visible;
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     ui.label(egui::RichText::new("Bottom Panel:")
                         .color(catppuccin::SUBTEXT0).small());
                     use super::state::BottomTab;

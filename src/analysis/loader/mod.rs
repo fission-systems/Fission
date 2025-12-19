@@ -230,21 +230,92 @@ impl LoadedBinary {
                     format: "PE".to_string(),
                 })
             }
-            Err(e) => {
+            Err(_e) => {
                 // Fallback to 'object' crate if goblin fails
-                // Note: We need to import object features here or at top level
-                use object::{Object, File};
+                use object::{Object, ObjectSection, ObjectSymbol};
                 
-                let file = File::parse(&*data).map_err(|e| anyhow!("Failed fallback parsing: {}", e))?;
+                let file = object::File::parse(&*data).map_err(|e| anyhow!("Failed fallback parsing: {}", e))?;
                 
                 let is_64bit = file.is_64();
                 let entry_point = file.entry();
                 let image_base = file.relative_address_base();
-                let sections: Vec<SectionInfo> = Vec::new(); // Basic info only for fallback
                 
-                // object crate gives limited section info easily, this is a minimal fallback
+                // Extract sections
+                let mut sections = Vec::new();
+                for section in file.sections() {
+                    if let Ok(name) = section.name() {
+                        sections.push(SectionInfo {
+                            name: name.to_string(),
+                            virtual_address: section.address(),
+                            virtual_size: section.size(),
+                            file_offset: section.file_range().map(|(start, _)| start).unwrap_or(0),
+                            file_size: section.file_range().map(|(_, len)| len).unwrap_or(0),
+                            is_executable: section.kind() == object::SectionKind::Text,
+                            is_readable: true,
+                            is_writable: section.kind() == object::SectionKind::Data,
+                        });
+                    }
+                }
                 
-                // Just return minimal info to allow loading
+                // Extract functions from symbols
+                let mut functions = Vec::new();
+                for symbol in file.symbols() {
+                    if symbol.is_definition() && symbol.kind() == object::SymbolKind::Text {
+                        if let Ok(name) = symbol.name() {
+                            functions.push(FunctionInfo {
+                                name: name.to_string(),
+                                address: symbol.address(),
+                                size: symbol.size() as u64,
+                                is_export: true,
+                                is_import: false,
+                            });
+                        }
+                    }
+                }
+                
+                // Try exports
+                if let Ok(exports) = file.exports() {
+                    for export in exports {
+                        let name = String::from_utf8_lossy(export.name()).to_string();
+                        let addr = export.address();
+                        if !functions.iter().any(|f| f.address == addr) {
+                            functions.push(FunctionInfo {
+                                name,
+                                address: addr,
+                                size: 0,
+                                is_export: true,
+                                is_import: false,
+                            });
+                        }
+                    }
+                }
+                
+                // Try imports
+                if let Ok(imports) = file.imports() {
+                    for import in imports {
+                        let name = String::from_utf8_lossy(import.name()).to_string();
+                        functions.push(FunctionInfo {
+                            name,
+                            address: 0, // Imports don't have fixed addresses in file
+                            size: 0,
+                            is_export: false,
+                            is_import: true,
+                        });
+                    }
+                }
+                
+                // Add entry point if not already present
+                let has_entry = functions.iter().any(|f| f.address == entry_point);
+                if !has_entry && entry_point != 0 {
+                    functions.push(FunctionInfo {
+                        name: "_start".to_string(),
+                        address: entry_point,
+                        size: 0,
+                        is_export: false,
+                        is_import: false,
+                    });
+                }
+                
                 let arch_spec = if is_64bit { "x86:LE:64:default" } else { "x86:LE:32:default" };
                 
                 Ok(Self {
@@ -253,7 +324,7 @@ impl LoadedBinary {
                     arch_spec: arch_spec.to_string(),
                     entry_point,
                     image_base,
-                    functions: Vec::new(), // Minimal info
+                    functions,
                     sections,
                     is_64bit,
                     is_dotnet: false,

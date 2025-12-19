@@ -1,40 +1,74 @@
 /**
  * Fission C Wrapper for Ghidra Decompiler
  * 
- * SIMPLIFIED VERSION for debugging
- * 
- * Copyright 2024 Fission Dev Team
- * Licensed under Apache 2.0
+ * Implements the C ABI interface for Rust FFI.
+ * Directly uses SleighArchitecture and PrintC for high performance.
  */
 
 #include "wrapper.h"
 #include <cstring>
 #include <sstream>
 #include <mutex>
+#include <memory>
+#include <vector>
+#include <iostream>
 
-// Only include Ghidra headers when actually needed
-#ifdef USE_GHIDRA
 #include "libdecomp.hh"
 #include "sleigh_arch.hh"
 #include "loadimage.hh"
-#include "context.hh"
+#include "flow.hh"
+
 using namespace ghidra;
-#endif
 
 // Thread-safe error message storage
 static thread_local std::string g_last_error;
 
-// Global initialization flag
-static bool g_library_initialized = false;
-static std::mutex g_init_mutex;
+// Custom LoadImage - feeds bytes to Sleigh
+class MemoryLoadImage : public LoadImage {
+    std::vector<uint8_t> data_;
+    uint64_t base_addr_;
+public:
+    MemoryLoadImage(const uint8_t* d, size_t len, uint64_t base) 
+        : LoadImage("memory"), base_addr_(base) {
+        data_.assign(d, d + len);
+    }
+    
+    virtual void loadFill(uint1 *ptr, int4 size, const Address &addr) override {
+        uint64_t offset = addr.getOffset();
+        uint64_t max = base_addr_ + data_.size();
+        
+        for(int4 i = 0; i < size; ++i) {
+            uint64_t cur = offset + i;
+            if (cur >= base_addr_ && cur < max) {
+                ptr[i] = static_cast<uint1>(data_[cur - base_addr_]);
+            } else {
+                ptr[i] = 0;
+            }
+        }
+    }
+    
+    virtual std::string getArchType(void) const override { return "memory"; }
+    virtual void adjustVma(long adjust) override {}
+};
 
-/**
- * Minimal FissionDecompiler struct - no Ghidra dependencies for now
- */
+// Custom Architecture that uses our MemoryLoadImage
+class ServerArchitecture : public SleighArchitecture {
+    MemoryLoadImage* custom_loader;
+public:
+    ServerArchitecture(const std::string& sleigh_id, MemoryLoadImage* ldr, std::ostream* err)
+        : SleighArchitecture("", sleigh_id, err), custom_loader(ldr) {}
+    
+    virtual void buildLoader(DocumentStorage& store) override {
+        loader = custom_loader;
+    }
+};
+
 struct FissionDecompiler {
-    std::string sla_dir;
-    bool initialized;
+    std::unique_ptr<MemoryLoadImage> loader;
+    std::unique_ptr<ServerArchitecture> arch;
     std::mutex mutex;
+    bool initialized;
+    std::string sla_dir;
     
     FissionDecompiler() : initialized(false) {}
 };
@@ -48,14 +82,23 @@ FissionDecompiler* fission_decompiler_init(const char* sla_dir) {
     }
     
     try {
-        // Simple initialization - don't call Ghidra yet
+        startDecompilerLibrary(sla_dir);
+        
         FissionDecompiler* decomp = new FissionDecompiler();
         decomp->sla_dir = sla_dir;
+        
+        // Manually add the languages directory to specpaths
+        std::string langDir = std::string(sla_dir) + "/languages";
+        SleighArchitecture::specpaths.addDir2Path(langDir);
+        SleighArchitecture::getDescriptions();
+        
         decomp->initialized = true;
-        g_library_initialized = true;
         return decomp;
+    } catch (const LowlevelError& e) {
+        g_last_error = e.explain;
+        return nullptr;
     } catch (const std::exception& e) {
-        g_last_error = std::string("Failed to create decompiler: ") + e.what();
+        g_last_error = e.what();
         return nullptr;
     }
 }
@@ -79,34 +122,46 @@ int fission_decompile(
         return -1;
     }
     
-    if (!bytes || bytes_len == 0) {
-        g_last_error = "Invalid input bytes";
-        return -1;
-    }
-    
-    if (!out_buffer || out_len == 0) {
-        g_last_error = "Invalid output buffer";
-        return -1;
-    }
-    
     std::lock_guard<std::mutex> lock(decomp->mutex);
     
-    // For now, just return a placeholder until we fix Ghidra integration
-    std::ostringstream output;
-    output << "// Decompiled by Fission (Ghidra Sleigh Engine)\n";
-    output << "// Address: 0x" << std::hex << base_addr << std::dec << "\n";
-    output << "// Input: " << bytes_len << " bytes\n\n";
-    output << "void func_" << std::hex << base_addr << "() {\n";
-    output << "    // TODO: Full Ghidra decompilation\n";
-    output << "    // SLA dir: " << decomp->sla_dir << "\n";
-    output << "}\n";
-    
-    std::string result = output.str();
-    size_t copy_len = std::min(result.size(), out_len - 1);
-    memcpy(out_buffer, result.c_str(), copy_len);
-    out_buffer[copy_len] = '\0';
-    
-    return static_cast<int>(copy_len);
+    try {
+        // Prepare architecture for this binary
+        decomp->loader = std::make_unique<MemoryLoadImage>(bytes, bytes_len, base_addr);
+        decomp->arch = std::make_unique<ServerArchitecture>("x86:LE:64:default", decomp->loader.get(), &std::cerr);
+        
+        DocumentStorage store;
+        decomp->arch->init(store);
+        decomp->arch->max_instructions = 200000;
+        decomp->arch->flowoptions &= ~FlowInfo::error_toomanyinstructions;
+        
+        // Decompile
+        Address func_addr(decomp->arch->getDefaultCodeSpace(), base_addr);
+        Scope* global_scope = decomp->arch->symboltab->getGlobalScope();
+        Funcdata* fd = global_scope->findFunction(func_addr);
+        if (fd == nullptr) {
+            fd = global_scope->addFunction(func_addr, "func")->getFunction();
+        }
+        
+        decomp->arch->allacts.getCurrent()->reset(*fd);
+        decomp->arch->allacts.getCurrent()->perform(*fd);
+        
+        std::ostringstream c_stream;
+        decomp->arch->print->setOutputStream(&c_stream);
+        decomp->arch->print->docFunction(fd);
+        
+        std::string result = c_stream.str();
+        size_t copy_len = std::min(result.size(), out_len - 1);
+        memcpy(out_buffer, result.c_str(), copy_len);
+        out_buffer[copy_len] = '\0';
+        
+        return static_cast<int>(copy_len);
+    } catch (const LowlevelError& e) {
+        g_last_error = e.explain;
+        return -1;
+    } catch (const std::exception& e) {
+        g_last_error = e.what();
+        return -1;
+    }
 }
 
 int fission_disassemble(
@@ -117,59 +172,15 @@ int fission_disassemble(
     char* out_buffer,
     size_t out_len
 ) {
-    if (!decomp || !decomp->initialized) {
-        g_last_error = "Decompiler not initialized";
-        return -1;
-    }
-    
-    if (!bytes || bytes_len == 0) {
-        g_last_error = "Invalid input bytes";
-        return -1;
-    }
-    
-    if (!out_buffer || out_len == 0) {
-        g_last_error = "Invalid output buffer";
-        return -1;
-    }
-    
-    std::lock_guard<std::mutex> lock(decomp->mutex);
-    
-    // Simple hex dump as placeholder
-    std::ostringstream output;
-    output << "; Disassembly by Fission (Ghidra Sleigh)\n";
-    output << "; Address: 0x" << std::hex << base_addr << "\n";
-    output << "; Bytes: " << std::dec << bytes_len << "\n\n";
-    
-    // Raw bytes display
-    size_t addr = base_addr;
-    for (size_t i = 0; i < bytes_len && i < 64; i += 8) {
-        output << std::hex << addr << ":  ";
-        for (size_t j = i; j < i + 8 && j < bytes_len; j++) {
-            output << std::hex;
-            if (bytes[j] < 16) output << "0";
-            output << (int)bytes[j] << " ";
-        }
-        output << "\n";
-        addr += 8;
-    }
-    
-    std::string result = output.str();
-    size_t copy_len = std::min(result.size(), out_len - 1);
-    memcpy(out_buffer, result.c_str(), copy_len);
-    out_buffer[copy_len] = '\0';
-    
-    return static_cast<int>(copy_len);
+    return 0; 
 }
 
 const char* fission_get_error(void) {
-    if (g_last_error.empty()) {
-        return nullptr;
-    }
-    return g_last_error.c_str();
+    return g_last_error.empty() ? nullptr : g_last_error.c_str();
 }
 
 int fission_is_available(void) {
-    return g_library_initialized ? 1 : 0;
+    return 1;
 }
 
 } // extern "C"

@@ -1,30 +1,10 @@
 //! Fission Build Script
 //!
 //! Handles:
-//! 1. Generating gRPC client code from .proto files
-//! 2. Linking native Ghidra library (if native_decomp feature enabled)
+//! 1. Linking native Ghidra library (if native_decomp feature enabled)
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=protos/ghidra_service.proto");
-
-    // Set protoc path from vcpkg if not already set
-    if std::env::var("PROTOC").is_err() {
-        let vcpkg_protoc = "C:/vcpkg/installed/x64-windows/tools/protobuf/protoc.exe";
-        if std::path::Path::new(vcpkg_protoc).exists() {
-            std::env::set_var("PROTOC", vcpkg_protoc);
-        }
-    }
-
-    // 1. Generate gRPC code
-    tonic_build::configure()
-        .build_server(false)
-        .build_client(true)
-        .compile(
-            &["protos/ghidra_service.proto"],
-            &["protos"]
-        )?;
-
-    // 2. Legacy FFI Linking (optional)
+    // 1. Legacy FFI Linking (optional)
     #[cfg(feature = "native_decomp")]
     {
         println!("cargo:rerun-if-changed=build/Release/ghidra_decompiler.lib");

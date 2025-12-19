@@ -10,19 +10,6 @@ pub fn render(ctx: &egui::Context, state: &AppState) {
         .exact_height(24.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                // Server status (with recovery indicator)
-                let (server_color, server_icon, server_text) = if state.recovering {
-                    (catppuccin::YELLOW, "◉", "Recovering")
-                } else if state.server_connected {
-                    (catppuccin::GREEN, "●", "Connected")
-                } else {
-                    (catppuccin::OVERLAY0, "○", "Offline")
-                };
-                ui.label(egui::RichText::new(server_icon).color(server_color).small());
-                ui.label(egui::RichText::new(server_text).color(server_color).small());
-                
-                ui.separator();
-
                 // Debugger status indicator
                 let (debug_color, debug_icon, debug_text) = if state.is_debugging {
                     (catppuccin::GREEN, "▶", "Debugging")

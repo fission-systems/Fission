@@ -49,12 +49,18 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> ConsoleAction {
                         state.bottom_tab = tab;
                     }
                 }
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new(" × ").small()).frame(false)).clicked() {
+                        state.panel_visible = false;
+                    }
+                });
             });
             ui.separator();
 
             // Tab content - allocate remaining space to prevent collapse
             let content_rect = ui.available_rect_before_wrap();
-            ui.allocate_ui_at_rect(content_rect, |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(content_rect), |ui| {
                 match state.bottom_tab {
                     BottomTab::Console => {
                         action = console::render(ui, state);

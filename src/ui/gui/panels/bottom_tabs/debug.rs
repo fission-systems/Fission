@@ -92,7 +92,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     // ═══════════════════════════════════════════════════════════════
     // MAIN CONTENT - 3 Column Layout
     // ═══════════════════════════════════════════════════════════════
-    let content_height = (available_height - 50.0).max(80.0);
+    let content_height = (available_height - 80.0).max(80.0);
     
     ui.horizontal(|ui| {
         let panel_width = (ui.available_width() - 16.0) / 3.0;
@@ -116,6 +116,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         // ─────────────────────────────────────────────────────────
         render_registers_column(ui, state, panel_width, content_height);
     });
+
+    ui.separator();
+    render_memory_section(ui, state);
 }
 
 fn render_events_column(ui: &mut egui::Ui, state: &AppState, panel_width: f32, content_height: f32) {
@@ -268,7 +271,7 @@ fn render_registers_column(ui: &mut egui::Ui, state: &AppState, panel_width: f32
             
             if let Some(regs) = &state.debug_state.registers {
                 egui::ScrollArea::vertical()
-                    .id_source("registers_scroll")
+                    .id_salt("registers_scroll")
                     .max_height(content_height - 30.0)
                     .show(ui, |ui| {
                         egui::Grid::new("regs_grid")
@@ -312,6 +315,35 @@ fn render_registers_column(ui: &mut egui::Ui, state: &AppState, panel_width: f32
         });
 }
 
+fn render_memory_section(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("🔍 Memory").color(catppuccin::SKY).strong());
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Addr:").color(catppuccin::SUBTEXT0).small());
+        ui.add(egui::TextEdit::singleline(&mut state.mem_addr_input)
+            .desired_width(120.0)
+            .font(egui::TextStyle::Monospace));
+        ui.label(egui::RichText::new("Size:").color(catppuccin::SUBTEXT0).small());
+        ui.add(egui::TextEdit::singleline(&mut state.mem_len_input)
+            .desired_width(60.0));
+        
+        if ui.button(egui::RichText::new("Read").color(catppuccin::BLUE)).clicked() {
+            if let (Ok(addr), Ok(len)) = (
+                u64::from_str_radix(state.mem_addr_input.trim_start_matches("0x"), 16),
+                state.mem_len_input.parse::<usize>()
+            ) {
+                state.pending_mem_read = Some((addr, len));
+            }
+        }
+    });
+
+    if !state.mem_dump.is_empty() {
+        egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+            ui.monospace(&state.mem_dump);
+        });
+    }
+}
+
 fn get_log_style(log: &str) -> (&'static str, egui::Color32) {
     if log.contains("BP hit") || log.contains("Breakpoint") {
         ("🔴", catppuccin::RED)
@@ -333,4 +365,3 @@ fn get_log_style(log: &str) -> (&'static str, egui::Color32) {
         ("·", catppuccin::SUBTEXT0)
     }
 }
-

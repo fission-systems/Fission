@@ -1,45 +1,23 @@
-# CMakeLists.txt for Ghidra Decompiler gRPC Server
+# CMakeLists.txt for Ghidra Decompiler Native Shared Library (FFI)
 
 cmake_minimum_required(VERSION 3.16)
-project(ghidra_server CXX)
+project(fission_native CXX)
 
-set(CMAKE_CXX_STANDARD 17) # gRPC requires C++14 or higher
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Platform settings
 if(MSVC)
     add_compile_options(/W0 /EHsc /bigobj)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    # Avoid Windows API macro collisions with Ghidra classes
-    # NOGDI prevents LoadImage and other GDI macros from being defined
     add_definitions(-DWIN32_LEAN_AND_MEAN -DNOMINMAX -DNOGDI)
 else()
-    add_compile_options(-w -Wno-sign-compare)
+    add_compile_options(-w -Wno-sign-compare -fPIC)
     add_definitions(-D__TERMINAL__)
 endif()
 
-# Find dependencie via vcpkg
-find_package(gRPC CONFIG REQUIRED)
-find_package(Protobuf CONFIG REQUIRED)
-find_package(ZLIB REQUIRED) # Now we have zlib!
-
-# Protocol Buffers setup
-set(PROTO_DIR "../protos")
-set(PROTO_SRC "${CMAKE_CURRENT_BINARY_DIR}/ghidra_service.pb.cc")
-set(PROTO_HDR "${CMAKE_CURRENT_BINARY_DIR}/ghidra_service.pb.h")
-set(GRPC_SRC "${CMAKE_CURRENT_BINARY_DIR}/ghidra_service.grpc.pb.cc")
-set(GRPC_HDR "${CMAKE_CURRENT_BINARY_DIR}/ghidra_service.grpc.pb.h")
-
-add_custom_command(
-    OUTPUT "${PROTO_SRC}" "${PROTO_HDR}" "${GRPC_SRC}" "${GRPC_HDR}"
-    COMMAND protobuf::protoc
-    ARGS --grpc_out="${CMAKE_CURRENT_BINARY_DIR}"
-         --cpp_out="${CMAKE_CURRENT_BINARY_DIR}"
-         -I "${PROTO_DIR}"
-         --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
-         "${PROTO_DIR}/ghidra_service.proto"
-    DEPENDS "${PROTO_DIR}/ghidra_service.proto"
-)
+# Find dependencies via vcpkg
+find_package(ZLIB REQUIRED)
 
 # Ghidra Core Sources
 set(CORE_SOURCES
@@ -57,34 +35,19 @@ set(CORE_SOURCES
     codedata.cc testfunction.cc rulecompile.cc
 )
 
-# Wrapper/Server Sources
-set(SERVER_SOURCES
-    server_main.cc
-)
-
-# Executable
-add_executable(ghidra_server 
-    ${SERVER_SOURCES} 
+# Shared Library (for FFI)
+add_library(fission_decompiler SHARED
+    wrapper.cpp
     ${CORE_SOURCES}
-    ${PROTO_SRC}
-    ${GRPC_SRC}
 )
 
-target_include_directories(ghidra_server PUBLIC 
+target_include_directories(fission_decompiler PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# Start with minimal linking
-target_link_libraries(ghidra_server 
+target_link_libraries(fission_decompiler 
     PRIVATE 
-    gRPC::grpc++ 
-    protobuf::libprotobuf
     ZLIB::ZLIB
 )
 
-if(MSVC)
-    target_link_options(ghidra_server PRIVATE /SUBSYSTEM:CONSOLE)
-endif()
-
-message(STATUS "Ghidra Server Configured")
+message(STATUS "Ghidra FFI Library Configured")
