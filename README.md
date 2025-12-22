@@ -21,6 +21,7 @@
 - **Decompile Caching**: Results are cached for instant re-access
 - **Cross-Platform**: Windows (PE) and Linux (ELF) binary support
 - **Debug Support**: Process attach/detach, breakpoints, and register/memory access via Windows debugging API ✅
+- **Python Scripting API**: Access binary info, functions, and sections via PyO3 (In Progress) 🔄
 
 ## 🖥️ GUI Panels
 
@@ -44,6 +45,7 @@
 | Binary Parsing | goblin + object | PE/ELF with fallback support |
 | .NET Parsing | Custom Rust | CLR metadata & IL disassembly |
 | Debugging | Windows API | Process attach, breakpoints, registers |
+| Scripting | PyO3 | Python API for automation |
 
 ## 🔧 Architecture
 
@@ -131,7 +133,7 @@ Fission/
 - [x] **Phase 3**: VS Code Style GUI - Tabs, Activity Bar, Catppuccin theme ✅
 - [x] **Phase 4**: .NET Support - CLR detection, metadata, IL disassembly ✅
 - [x] **Phase 5**: Debugging - Attach, breakpoints, registers, memory ✅
-- [ ] **Phase 6**: Python Scripting - Full Python API
+- [~] **Phase 6**: Python Scripting - Basic API implemented (binary, functions, sections) 🔄
 - [ ] **Phase 7**: Advanced Features - Time travel debugging, plugins
 
 ## 📜 License
