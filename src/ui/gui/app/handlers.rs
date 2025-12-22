@@ -21,7 +21,10 @@ pub fn process_messages(
 ) {
     while let Ok(msg) = rx.try_recv() {
         match msg {
-            AsyncMessage::BinaryLoaded(Ok(binary)) => {
+            AsyncMessage::BinaryLoaded(Ok(mut binary)) => {
+                // Discover internal functions from CALL instructions
+                binary.discover_internal_functions();
+                
                 state.log(format!("[✓] Loaded: {}", binary.path));
                 state.log(format!("    {} {} | Entry: 0x{:x}", 
                     if binary.is_64bit { "64-bit" } else { "32-bit" },

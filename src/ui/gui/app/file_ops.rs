@@ -69,7 +69,7 @@ pub fn preload_server_binary(
                     }
                 }
             } else {
-                state.log("[!] Could not find native decompiler library (fission_decompiler.dll/so)");
+                state.log("[!] Could not find native decompiler library (fission_decompiler.dll/so/dylib)");
             }
         }
     }

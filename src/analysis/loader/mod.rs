@@ -47,7 +47,7 @@ pub struct SectionInfo {
 }
 
 /// Parsed binary information
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LoadedBinary {
     /// Original file path
     pub path: String,
@@ -594,6 +594,72 @@ impl LoadedBinary {
             }
         }
         None
+    }
+    
+    /// Discover internal functions by scanning executable code for CALL instructions
+    /// This finds functions that are called but not exported/imported
+    pub fn discover_internal_functions(&mut self) {
+        use crate::analysis::disasm::DisasmEngine;
+        use std::collections::HashSet;
+        
+        // Collect existing function addresses to avoid duplicates
+        let existing_addrs: HashSet<u64> = self.functions.iter().map(|f| f.address).collect();
+        
+        // Create disassembler for this binary's architecture
+        let engine = match DisasmEngine::new(self.is_64bit) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        
+        let mut discovered: HashSet<u64> = HashSet::new();
+        
+        // Scan all executable sections
+        for section in &self.sections {
+            if !section.is_executable {
+                continue;
+            }
+            
+            // Get section bytes
+            let start = section.file_offset as usize;
+            let size = section.file_size as usize;
+            if start + size > self.data.len() {
+                continue;
+            }
+            let bytes = &self.data[start..start + size];
+            
+            // Discover call targets in this section
+            let targets = engine.discover_call_targets(bytes, section.virtual_address);
+            
+            for target in targets {
+                // Only add if not already known and within our address space
+                if !existing_addrs.contains(&target) && !discovered.contains(&target) {
+                    // Verify target is within an executable section
+                    let in_code = self.sections.iter().any(|s| {
+                        s.is_executable 
+                            && target >= s.virtual_address 
+                            && target < s.virtual_address + s.virtual_size as u64
+                    });
+                    
+                    if in_code {
+                        discovered.insert(target);
+                    }
+                }
+            }
+        }
+        
+        // Add discovered functions
+        for addr in discovered {
+            self.functions.push(FunctionInfo {
+                name: format!("sub_{:x}", addr),
+                address: addr,
+                size: 0,
+                is_export: false,
+                is_import: false,
+            });
+        }
+        
+        // Sort functions by address
+        self.functions.sort_by_key(|f| f.address);
     }
 }
 

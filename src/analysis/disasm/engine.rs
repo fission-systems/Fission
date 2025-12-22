@@ -103,6 +103,38 @@ impl DisasmEngine {
         
         Ok(results)
     }
+    
+    /// Discover call targets by scanning code for CALL instructions
+    /// Returns a set of unique addresses that are called (potential function entries)
+    pub fn discover_call_targets(&self, bytes: &[u8], base_address: u64) -> Vec<u64> {
+        use std::collections::HashSet;
+        
+        let mut decoder = Decoder::with_ip(self.bitness, bytes, base_address, DecoderOptions::NONE);
+        let mut instruction = Instruction::default();
+        let mut targets: HashSet<u64> = HashSet::new();
+        
+        while decoder.can_decode() {
+            decoder.decode_out(&mut instruction);
+            
+            // Check if this is a CALL instruction
+            if instruction.mnemonic() == Mnemonic::Call {
+                // Get the target address if it's a near call (direct)
+                // For direct calls, near_branch_target() returns the target address
+                if instruction.is_call_near() {
+                    let target = instruction.near_branch_target();
+                    // Only add if target is within a reasonable range (not 0, not too far)
+                    if target != 0 && target >= base_address {
+                        targets.insert(target);
+                    }
+                }
+            }
+        }
+        
+        // Sort and return
+        let mut result: Vec<u64> = targets.into_iter().collect();
+        result.sort();
+        result
+    }
 }
 
 /// Check if mnemonic is a flow control instruction (jump/call/ret)

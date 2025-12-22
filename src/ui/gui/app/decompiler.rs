@@ -47,7 +47,24 @@ pub fn decompile_function(
         let binary = state.loaded_binary.as_ref().unwrap();
         
         // Get function bytes (estimate 4KB for function body if size is 0)
-        let func_size = if func.size > 0 { func.size as usize } else { 4096 };
+        let mut func_size = if func.size > 0 { func.size as usize } else { 4096 };
+        
+        // Limit function size to not exceed section bounds
+        // Find the section containing this address
+        for section in &binary.sections {
+            if section.is_executable 
+                && address >= section.virtual_address 
+                && address < section.virtual_address + section.virtual_size as u64 
+            {
+                let max_size = (section.virtual_address + section.virtual_size as u64 - address) as usize;
+                func_size = func_size.min(max_size);
+                break;
+            }
+        }
+        
+        // Ensure minimum size of 16 bytes, max of 64KB
+        func_size = func_size.max(16).min(65536);
+        
         let bytes = match binary.get_bytes(address, func_size) {
             Some(b) => b,
             None => {
@@ -101,7 +118,7 @@ pub fn decompile_function(
         }
 
         if let Some(nd) = native_guard.as_ref() {
-            match nd.decompile(&bytes, address) {
+            match nd.decompile(&bytes, address, is_64bit) {
                 Ok(c_code) => {
                     cache_decompile_result(state, address, c_code.clone());
                     state.log("[✓] Decompile successful");

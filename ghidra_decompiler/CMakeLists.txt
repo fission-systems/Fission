@@ -50,4 +50,19 @@ target_link_libraries(fission_decompiler
     ZLIB::ZLIB
 )
 
-message(STATUS "Ghidra FFI Library Configured")
+# CLI Executable (for subprocess decompilation)
+add_executable(fission_decomp
+    fission_decomp.cpp
+    ${CORE_SOURCES}
+)
+
+target_include_directories(fission_decomp PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(fission_decomp 
+    PRIVATE 
+    ZLIB::ZLIB
+)
+
+message(STATUS "Ghidra FFI Library and CLI Configured")

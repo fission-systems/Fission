@@ -136,6 +136,14 @@ impl MemoryManager {
         {
             self.read_linux(address, buffer)
         }
+
+        #[cfg(target_os = "macos")]
+        {
+            Err(MemoryError::ReadFailed {
+                address,
+                reason: "macOS memory reading not yet implemented".into(),
+            })
+        }
     }
 
     /// Write memory to the target process
@@ -148,6 +156,14 @@ impl MemoryManager {
         #[cfg(target_os = "linux")]
         {
             self.write_linux(address, data)
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            Err(MemoryError::WriteFailed {
+                address,
+                reason: "macOS memory writing not yet implemented".into(),
+            })
         }
     }
 

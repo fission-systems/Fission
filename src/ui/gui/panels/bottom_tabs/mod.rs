@@ -1,4 +1,4 @@
-//! Bottom tabbed panel - Console, Hex View, Strings, Imports, Debug tabs.
+//! Bottom tabbed panel - Console, Hex View, Strings, Imports, Debug, Script tabs.
 //!
 //! This module organizes the bottom panel into separate sub-modules for each tab.
 
@@ -6,18 +6,21 @@ mod console;
 mod debug;
 mod hexview;
 mod imports;
+mod script;
 mod strings;
 
 use eframe::egui;
 use crate::ui::gui::state::{AppState, BottomTab};
 use crate::ui::gui::theme::catppuccin;
 
-// Re-export ConsoleAction for external use
+// Re-export actions for external use
 pub use console::ConsoleAction;
+pub use script::ScriptAction;
 
 /// Render the bottom tabbed panel.
-pub fn render(ctx: &egui::Context, state: &mut AppState) -> ConsoleAction {
-    let mut action = ConsoleAction::None;
+pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, ScriptAction) {
+    let mut console_action = ConsoleAction::None;
+    let mut script_action = ScriptAction::None;
     
     egui::TopBottomPanel::bottom("bottom_panel")
         .resizable(true)
@@ -36,6 +39,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> ConsoleAction {
                     (BottomTab::Strings, "Strings", catppuccin::GREEN),
                     (BottomTab::Imports, "Imports", catppuccin::MAUVE),
                     (BottomTab::Debug, "Debug", catppuccin::RED),
+                    (BottomTab::Script, "Script", catppuccin::YELLOW),
                 ];
                 
                 for (tab, label, accent) in tabs {
@@ -63,7 +67,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> ConsoleAction {
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(content_rect), |ui| {
                 match state.bottom_tab {
                     BottomTab::Console => {
-                        action = console::render(ui, state);
+                        console_action = console::render(ui, state);
                     }
                     BottomTab::HexView => {
                         hexview::render(ui, state);
@@ -77,10 +81,13 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> ConsoleAction {
                     BottomTab::Debug => {
                         debug::render(ui, state);
                     }
+                    BottomTab::Script => {
+                        script_action = script::render(ui, state);
+                    }
                 }
             });
         });
     
-    action
+    (console_action, script_action)
 }
 

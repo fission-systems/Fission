@@ -114,6 +114,7 @@ int fission_decompile(
     const uint8_t* bytes,
     size_t bytes_len,
     uint64_t base_addr,
+    int is_64bit,
     char* out_buffer,
     size_t out_len
 ) {
@@ -125,9 +126,16 @@ int fission_decompile(
     std::lock_guard<std::mutex> lock(decomp->mutex);
     
     try {
+        // Reset previous state to avoid memory issues
+        decomp->arch.reset();
+        decomp->loader.reset();
+        
+        // Select architecture based on binary type
+        const char* arch_id = is_64bit ? "x86:LE:64:default" : "x86:LE:32:default";
+        
         // Prepare architecture for this binary
         decomp->loader = std::make_unique<MemoryLoadImage>(bytes, bytes_len, base_addr);
-        decomp->arch = std::make_unique<ServerArchitecture>("x86:LE:64:default", decomp->loader.get(), &std::cerr);
+        decomp->arch = std::make_unique<ServerArchitecture>(arch_id, decomp->loader.get(), &std::cerr);
         
         DocumentStorage store;
         decomp->arch->init(store);

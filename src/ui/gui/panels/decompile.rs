@@ -31,6 +31,15 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) {
             ui.label(egui::RichText::new(&func.name)
                 .color(catppuccin::BLUE).small());
         }
+        
+        // Copy button on the right
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if !state.decompiled_code.is_empty() {
+                if ui.small_button(egui::RichText::new("📋 Copy").color(catppuccin::TEAL)).clicked() {
+                    ui.output_mut(|o| o.copied_text = state.decompiled_code.clone());
+                }
+            }
+        });
     });
     ui.separator();
 

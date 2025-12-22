@@ -40,39 +40,55 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                 });
 
                 ui.menu_button(egui::RichText::new("Debug").color(catppuccin::TEXT), |ui| {
-                    if state.debug_state.attached_pid.is_some() {
-                        if ui.button(egui::RichText::new("⏹ Detach")
-                            .color(catppuccin::RED)).clicked() {
-                            action = MenuAction::DetachProcess;
-                            ui.close_menu();
-                        }
+                    // macOS: Static analysis only (no dynamic debugging)
+                    #[cfg(target_os = "macos")]
+                    {
+                        ui.label(egui::RichText::new("⚠ macOS: Static Analysis Only")
+                            .color(catppuccin::YELLOW));
                         ui.separator();
-                        let mode_text = if state.dynamic_mode {
-                            "○ Switch to Static Mode"
+                        ui.add_enabled(false, egui::Button::new(
+                            egui::RichText::new("🔗 Attach to Process...")
+                                .color(catppuccin::OVERLAY0)));
+                        ui.label(egui::RichText::new("(Dynamic debugging requires Windows)")
+                            .color(catppuccin::SUBTEXT0).small());
+                    }
+                    
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        if state.debug_state.attached_pid.is_some() {
+                            if ui.button(egui::RichText::new("⏹ Detach")
+                                .color(catppuccin::RED)).clicked() {
+                                action = MenuAction::DetachProcess;
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            let mode_text = if state.dynamic_mode {
+                                "○ Switch to Static Mode"
+                            } else {
+                                "● Switch to Dynamic Mode"
+                            };
+                            if ui.button(egui::RichText::new(mode_text)
+                                .color(catppuccin::TEAL)).clicked() {
+                                state.dynamic_mode = !state.dynamic_mode;
+                                ui.close_menu();
+                            }
                         } else {
-                            "● Switch to Dynamic Mode"
-                        };
-                        if ui.button(egui::RichText::new(mode_text)
-                            .color(catppuccin::TEAL)).clicked() {
-                            state.dynamic_mode = !state.dynamic_mode;
-                            ui.close_menu();
-                        }
-                    } else {
-                        if ui.button(egui::RichText::new("🔗 Attach to Process...")
-                            .color(catppuccin::GREEN)).clicked() {
-                            action = MenuAction::AttachToProcess;
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        let mode_text = if state.dynamic_mode {
-                            "○ Switch to Static Mode"
-                        } else {
-                            "● Switch to Dynamic Mode"
-                        };
-                        if ui.button(egui::RichText::new(mode_text)
-                            .color(catppuccin::TEAL)).clicked() {
-                            state.dynamic_mode = !state.dynamic_mode;
-                            ui.close_menu();
+                            if ui.button(egui::RichText::new("🔗 Attach to Process...")
+                                .color(catppuccin::GREEN)).clicked() {
+                                action = MenuAction::AttachToProcess;
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            let mode_text = if state.dynamic_mode {
+                                "○ Switch to Static Mode"
+                            } else {
+                                "● Switch to Dynamic Mode"
+                            };
+                            if ui.button(egui::RichText::new(mode_text)
+                                .color(catppuccin::TEAL)).clicked() {
+                                state.dynamic_mode = !state.dynamic_mode;
+                                ui.close_menu();
+                            }
                         }
                     }
                 });

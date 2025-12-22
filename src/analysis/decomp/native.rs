@@ -1,137 +1,96 @@
-//! Native FFI bindings for Ghidra Decompiler.
+//! Subprocess-based Ghidra Decompiler interface.
 //!
-//! Loads the `fission_decompiler` shared library at runtime and provides
-//! a safe Rust interface for high-performance decompilation.
+//! Spawns `fission_decomp` CLI for each decompilation request to avoid
+//! Ghidra global state issues that cause crashes on subsequent calls.
 
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::ffi::{CString, CStr};
-use std::os::raw::{c_char, c_int};
-use libloading::{Library, Symbol};
+use std::process::{Command, Stdio};
+use std::io::Write;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use anyhow::{anyhow, Result};
 
-/// Opaque pointer to FissionDecompiler in C++
-type DecompilerHandle = *mut std::ffi::c_void;
-
-/// Function signatures matching wrapper.h
-type FissionInitFn = unsafe extern "C" fn(sla_dir: *const c_char) -> DecompilerHandle;
-type FissionDestroyFn = unsafe extern "C" fn(handle: DecompilerHandle);
-type FissionDecompileFn = unsafe extern "C" fn(
-    handle: DecompilerHandle,
-    bytes: *const u8,
-    bytes_len: usize,
-    base_addr: u64,
-    out_buffer: *mut c_char,
-    out_len: usize
-) -> c_int;
-type FissionGetErrorFn = unsafe extern "C" fn() -> *const c_char;
-
-/// Shared library interface
+/// Subprocess-based decompiler interface
 pub struct NativeDecompiler {
-    lib: Library,
-    handle: DecompilerHandle,
-    // Store symbols to avoid lookup overhead
-    f_decompile: Symbol<'static, FissionDecompileFn>,
-    f_get_error: Symbol<'static, FissionGetErrorFn>,
-    f_destroy: Symbol<'static, FissionDestroyFn>,
+    cli_path: std::path::PathBuf,
+    sla_dir: String,
 }
 
-// Safety: FissionDecompiler has a mutex in C++ for thread safety
-unsafe impl Send for NativeDecompiler {}
-unsafe impl Sync for NativeDecompiler {}
-
 impl NativeDecompiler {
-    /// Load library and initialize decompiler
-    pub fn new<P: AsRef<std::ffi::OsStr>>(lib_path: P, sla_dir: &str) -> Result<Self> {
-        let lib = unsafe { Library::new(lib_path)? };
-        
-        let handle = unsafe {
-            let f_init: Symbol<FissionInitFn> = lib.get(b"fission_decompiler_init")?;
-            let c_sla_dir = CString::new(sla_dir)?;
-            let h = f_init(c_sla_dir.as_ptr());
-            if h.is_null() {
-                let f_err: Symbol<FissionGetErrorFn> = lib.get(b"fission_get_error")?;
-                let err_ptr = f_err();
-                let msg = if err_ptr.is_null() {
-                    "Unknown error during init".to_string()
-                } else {
-                    CStr::from_ptr(err_ptr).to_string_lossy().into_owned()
-                };
-                return Err(anyhow!("FFI Init Failed: {}", msg));
-            }
-            h
-        };
-
-        // Leak symbols to 'static lifetime as they are bound to the library's lifetime
-        // and we own the library in this struct.
-        let f_decompile = unsafe { std::mem::transmute(lib.get::<FissionDecompileFn>(b"fission_decompile")?) };
-        let f_get_error = unsafe { std::mem::transmute(lib.get::<FissionGetErrorFn>(b"fission_get_error")?) };
-        let f_destroy = unsafe { std::mem::transmute(lib.get::<FissionDestroyFn>(b"fission_decompiler_destroy")?) };
-
+    /// Create new decompiler with path to CLI binary and SLA directory
+    pub fn new<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str) -> Result<Self> {
+        let path = cli_path.as_ref().to_path_buf();
+        if !path.exists() {
+            return Err(anyhow!("Decompiler CLI not found: {:?}", path));
+        }
         Ok(Self {
-            lib,
-            handle,
-            f_decompile,
-            f_get_error,
-            f_destroy,
+            cli_path: path,
+            sla_dir: sla_dir.to_string(),
         })
     }
 
-    /// Decompile bytes
-    pub fn decompile(&self, bytes: &[u8], base_addr: u64) -> Result<String> {
-        let mut buffer = vec![0u8; 1024 * 512]; // 1MB buffer for C code
+    /// Decompile bytes by spawning subprocess
+    pub fn decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
+        // Encode bytes as base64
+        let bytes_b64 = BASE64.encode(bytes);
         
-        let res = unsafe {
-            (self.f_decompile)(
-                self.handle,
-                bytes.as_ptr(),
-                bytes.len(),
-                base_addr,
-                buffer.as_mut_ptr() as *mut c_char,
-                buffer.len()
-            )
-        };
-
-        if res < 0 {
-            let err_ptr = unsafe { (self.f_get_error)() };
-            let msg = if err_ptr.is_null() {
-                "Unknown error during decompilation".to_string()
-            } else {
-                unsafe { CStr::from_ptr(err_ptr).to_string_lossy().into_owned() }
-            };
-            return Err(anyhow!("Decompile error: {}", msg));
+        // Create JSON input
+        let input = format!(
+            r#"{{"bytes":"{}","address":{},"is_64bit":{},"sla_dir":"{}"}}"#,
+            bytes_b64,
+            base_addr,
+            if is_64bit { "true" } else { "false" },
+            self.sla_dir
+        );
+        
+        // Spawn subprocess
+        let mut child = Command::new(&self.cli_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| anyhow!("Failed to spawn decompiler: {}", e))?;
+        
+        // Write input to stdin
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(input.as_bytes())
+                .map_err(|e| anyhow!("Failed to write to decompiler stdin: {}", e))?;
         }
-
-        let code = unsafe { CStr::from_ptr(buffer.as_ptr() as *const c_char) }
-            .to_string_lossy()
-            .into_owned();
-            
-        Ok(code)
+        
+        // Wait for completion and get output
+        let output = child.wait_with_output()
+            .map_err(|e| anyhow!("Failed to wait for decompiler: {}", e))?;
+        
+        // Check for errors in stderr
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.is_empty() && stderr.contains("error") {
+            return Err(anyhow!("Decompiler error: {}", stderr.trim()));
+        }
+        
+        // Return stdout as result
+        let result = String::from_utf8_lossy(&output.stdout).to_string();
+        if result.is_empty() {
+            return Err(anyhow!("Decompiler produced no output"));
+        }
+        
+        Ok(result)
     }
 }
 
-impl Drop for NativeDecompiler {
-    fn drop(&mut self) {
-        unsafe {
-            (self.f_destroy)(self.handle);
-        }
-    }
-}
-
-/// Helper to find the decompiler library in the project structure
-pub fn find_library() -> Option<std::path::PathBuf> {
+/// Helper to find the decompiler CLI in the project structure
+pub fn find_cli() -> Option<std::path::PathBuf> {
     let base = std::env::current_dir().ok()?;
-    let lib_name = if cfg!(target_os = "windows") {
-        "fission_decompiler.dll"
-    } else {
-        "libfission_decompiler.so"
-    };
+    
+    #[cfg(target_os = "windows")]
+    let cli_name = "fission_decomp.exe";
+    
+    #[cfg(not(target_os = "windows"))]
+    let cli_name = "fission_decomp";
 
     let paths = [
-        base.join("build/Release").join(lib_name),
-        base.join("build/Debug").join(lib_name),
-        base.join("build").join(lib_name),
-        base.join(lib_name),
+        base.join(cli_name),
+        base.join("build/Release").join(cli_name),
+        base.join("build/Debug").join(cli_name),
+        base.join("build").join(cli_name),
+        base.join("ghidra_decompiler/build").join(cli_name),
     ];
 
     for p in &paths {
@@ -142,3 +101,7 @@ pub fn find_library() -> Option<std::path::PathBuf> {
     None
 }
 
+// Keep old function name for compatibility
+pub fn find_library() -> Option<std::path::PathBuf> {
+    find_cli()
+}

@@ -5,9 +5,11 @@
 
 #[cfg(feature = "python")]
 pub mod bridge;
+#[cfg(feature = "python")]
+pub mod types;
 
 #[cfg(feature = "python")]
-pub use bridge::PythonBridge;
+pub use bridge::{PythonBridge, SharedScriptState, SharedState};
 
 /// Stub PythonBridge for when Python feature is disabled
 #[cfg(not(feature = "python"))]
