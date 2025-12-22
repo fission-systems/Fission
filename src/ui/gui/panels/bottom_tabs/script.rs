@@ -41,14 +41,14 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ScriptAction {
         
         // Toolbar
         ui.horizontal(|ui| {
-            let run_text = if state.script_running {
+            let run_text = if state.script.script_running {
                 egui::RichText::new("⏳ Running...").color(catppuccin::YELLOW)
             } else {
                 egui::RichText::new("▶ Run").color(catppuccin::GREEN)
             };
             
-            if ui.add_enabled(!state.script_running, egui::Button::new(run_text)).clicked() {
-                let code = state.script_code.clone();
+            if ui.add_enabled(!state.script.script_running, egui::Button::new(run_text)).clicked() {
+                let code = state.script.script_code.clone();
                 if !code.trim().is_empty() {
                     action = ScriptAction::Execute(code);
                 }
@@ -67,11 +67,11 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ScriptAction {
             ui.separator();
             
             if ui.small_button(egui::RichText::new("Clear Output").color(catppuccin::RED)).clicked() {
-                state.script_output.clear();
+                state.script.script_output.clear();
             }
             
             // Show current file path if any
-            if let Some(ref path) = state.script_path {
+            if let Some(ref path) = state.script.script_path {
                 let filename = std::path::Path::new(path)
                     .file_name()
                     .map(|s| s.to_string_lossy().to_string())
@@ -111,7 +111,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ScriptAction {
                 .max_height(editor_height - 25.0)
                 .show(ui, |ui| {
                     let response = ui.add(
-                        egui::TextEdit::multiline(&mut state.script_code)
+                        egui::TextEdit::multiline(&mut state.script.script_code)
                             .desired_width(ui.available_width())
                             .desired_rows(10)
                             .font(egui::TextStyle::Monospace)
@@ -120,7 +120,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ScriptAction {
                     
                     // Ctrl+Enter to execute
                     if response.has_focus() && ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter)) {
-                        let code = state.script_code.clone();
+                        let code = state.script.script_code.clone();
                         if !code.trim().is_empty() {
                             action = ScriptAction::Execute(code);
                         }
@@ -138,7 +138,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ScriptAction {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("Output").color(catppuccin::TEAL).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("{} lines", state.script_output.len()))
+                    ui.label(egui::RichText::new(format!("{} lines", state.script.script_output.len()))
                         .color(catppuccin::SUBTEXT0).small());
                 });
             });
@@ -148,12 +148,12 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ScriptAction {
                 .max_height(output_height - 25.0)
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
-                    for line in &state.script_output {
+                    for line in &state.script.script_output {
                         let color = get_output_color(line);
                         ui.label(egui::RichText::new(line).color(color).monospace());
                     }
                     
-                    if state.script_output.is_empty() {
+                    if state.script.script_output.is_empty() {
                         ui.label(egui::RichText::new("No output yet. Run a script to see results.")
                             .color(catppuccin::OVERLAY0).italics());
                     }

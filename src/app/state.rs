@@ -7,7 +7,7 @@ use crate::analysis::loader::{LoadedBinary, FunctionInfo};
 /// Shared application state
 pub struct AppState {
     /// Currently loaded binary
-    pub binary: Option<LoadedBinary>,
+    pub binary: Option<std::sync::Arc<LoadedBinary>>,
     /// Selected function for decompilation
     pub selected_function: Option<FunctionInfo>,
     /// Current decompiled C code

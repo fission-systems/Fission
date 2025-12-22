@@ -129,7 +129,7 @@ impl eframe::App for FissionApp {
         }
         
         // 3. Bottom Panel (Terminal/Output style)
-        if self.state.panel_visible {
+        if self.state.ui.panel_visible {
             let (console_action, script_action) = bottom_tabs::render(ctx, &mut self.state);
             match console_action {
                 ConsoleAction::Command(cmd) => {
@@ -162,8 +162,8 @@ impl FissionApp {
         match action {
             MenuAction::OpenFile => file_ops::open_file_dialog(self.tx.clone()),
             MenuAction::AttachToProcess => {
-                self.state.show_attach_dialog = true;
-                self.state.process_list = crate::debug::enumerate_processes();
+                self.state.ui.show_attach_dialog = true;
+                self.state.debug.process_list = crate::debug::enumerate_processes();
             }
             MenuAction::DetachProcess => self.detach_process(),
             MenuAction::ClearConsole => {
@@ -171,8 +171,8 @@ impl FissionApp {
                 self.state.log("[*] Console cleared");
             }
             MenuAction::ClearCache => {
-                let count = self.state.decompile_cache.len();
-                self.state.decompile_cache.clear();
+                let count = self.state.analysis.decompile_cache.len();
+                self.state.analysis.decompile_cache.clear();
                 self.state.log(format!("[*] Cleared {} cached items", count));
             }
             MenuAction::ShowAbout => {
@@ -206,19 +206,19 @@ impl FissionApp {
         {
             match std::fs::read_to_string(&path) {
                 Ok(content) => {
-                    self.state.script_code = content;
-                    self.state.script_path = Some(path.display().to_string());
-                    self.state.script_output.push(format!("[✓] Loaded: {}", path.display()));
+                    self.state.script.script_code = content;
+                    self.state.script.script_path = Some(path.display().to_string());
+                    self.state.script.script_output.push(format!("[✓] Loaded: {}", path.display()));
                 }
                 Err(e) => {
-                    self.state.script_output.push(format!("[Error] Failed to load: {}", e));
+                    self.state.script.script_output.push(format!("[Error] Failed to load: {}", e));
                 }
             }
         }
     }
 
     fn save_script_file(&mut self) {
-        let default_path = self.state.script_path.as_ref()
+        let default_path = self.state.script.script_path.as_ref()
             .map(|p| std::path::PathBuf::from(p))
             .unwrap_or_else(|| std::path::PathBuf::from("script.py"));
         
@@ -227,13 +227,13 @@ impl FissionApp {
             .set_file_name(default_path.file_name().unwrap_or_default().to_str().unwrap_or("script.py"))
             .save_file()
         {
-            match std::fs::write(&path, &self.state.script_code) {
+            match std::fs::write(&path, &self.state.script.script_code) {
                 Ok(_) => {
-                    self.state.script_path = Some(path.display().to_string());
-                    self.state.script_output.push(format!("[✓] Saved: {}", path.display()));
+                    self.state.script.script_path = Some(path.display().to_string());
+                    self.state.script.script_output.push(format!("[✓] Saved: {}", path.display()));
                 }
                 Err(e) => {
-                    self.state.script_output.push(format!("[Error] Failed to save: {}", e));
+                    self.state.script.script_output.push(format!("[Error] Failed to save: {}", e));
                 }
             }
         }
@@ -241,35 +241,35 @@ impl FissionApp {
 
     #[cfg(feature = "python")]
     fn execute_python_script(&mut self, code: &str) {
-        self.state.script_running = true;
-        self.state.script_output.push(format!(">>> Executing script..."));
+        self.state.script.script_running = true;
+        self.state.script.script_output.push(format!(">>> Executing script..."));
         
         // Initialize Python if needed
         if let Err(e) = self.python_bridge.initialize() {
-            self.state.script_output.push(format!("[Error] Failed to initialize Python: {}", e));
-            self.state.script_running = false;
+            self.state.script.script_output.push(format!("[Error] Failed to initialize Python: {}", e));
+            self.state.script.script_running = false;
             return;
         }
 
         // Sync loaded binary to Python bridge
-        self.python_bridge.set_binary(self.state.loaded_binary.clone());
+        self.python_bridge.set_binary(self.state.analysis.loaded_binary.clone());
         
         // Execute the script
         match self.python_bridge.run(code) {
             Ok(_) => {
-                self.state.script_output.push("[✓] Script executed successfully".into());
+                self.state.script.script_output.push("[✓] Script executed successfully".into());
             }
             Err(e) => {
-                self.state.script_output.push(format!("[Error] {}", e));
+                self.state.script.script_output.push(format!("[Error] {}", e));
             }
         }
         
-        self.state.script_running = false;
+        self.state.script.script_running = false;
     }
 
     #[cfg(not(feature = "python"))]
     fn execute_python_script(&mut self, _code: &str) {
-        self.state.script_output.push("[Error] Python support not enabled. Build with --features python".into());
+        self.state.script.script_output.push("[Error] Python support not enabled. Build with --features python".into());
     }
 
     fn open_function_tabs(&mut self, func: &FunctionInfo) {
@@ -277,32 +277,32 @@ impl FissionApp {
         let decomp_tab = EditorTab::Decompiled(func.name.clone());
         
         // Open Assembly tab if not open
-        if !self.state.open_tabs.contains(&asm_tab) {
-            self.state.open_tabs.push(asm_tab.clone());
+        if !self.state.ui.open_tabs.contains(&asm_tab) {
+            self.state.ui.open_tabs.push(asm_tab.clone());
         }
         
         // Open Decompiled tab if not open
-        if !self.state.open_tabs.contains(&decomp_tab) {
-            self.state.open_tabs.push(decomp_tab.clone());
+        if !self.state.ui.open_tabs.contains(&decomp_tab) {
+            self.state.ui.open_tabs.push(decomp_tab.clone());
         }
         
         // Focus Decompiled tab by default
-        if let Some(pos) = self.state.open_tabs.iter().position(|t| t == &decomp_tab) {
-            self.state.active_tab_index = Some(pos);
+        if let Some(pos) = self.state.ui.open_tabs.iter().position(|t| t == &decomp_tab) {
+            self.state.ui.active_tab_index = Some(pos);
         }
         
-        self.state.selected_function = Some(func.clone());
+        self.state.analysis.selected_function = Some(func.clone());
         self.decompile_function(func);
     }
 
     fn handle_pending_debug_actions(&mut self) {
-        if let Some(action) = self.state.pending_debug_action.take() {
+        if let Some(action) = self.state.debug.pending_debug_action.take() {
             #[cfg(target_os = "windows")]
             debug_ops::handle_debug_action(&mut self.state, &mut self.debugger, action);
             #[cfg(not(target_os = "windows"))]
             debug_ops::handle_debug_action(&mut self.state, action);
         }
-        if let Some(bp_action) = self.state.pending_bp_action.take() {
+        if let Some(bp_action) = self.state.debug.pending_bp_action.take() {
             #[cfg(target_os = "windows")]
             debug_ops::handle_bp_action(&mut self.state, &mut self.debugger, bp_action);
             #[cfg(not(target_os = "windows"))]
@@ -324,22 +324,22 @@ impl FissionApp {
         {
             if let Some(dbg) = self.debugger.as_mut() {
                 // Update registers if suspended
-                if self.state.debug_state.status == crate::debug::types::DebugStatus::Suspended {
-                    if let Some(tid) = self.state.debug_state.last_thread_id.or(self.state.debug_state.main_thread_id) {
+                if self.state.debug.debug_state.status == crate::debug::types::DebugStatus::Suspended {
+                    if let Some(tid) = self.state.debug.debug_state.last_thread_id.or(self.state.debug.debug_state.main_thread_id) {
                         if let Ok(regs) = dbg.fetch_registers(tid) {
-                            self.state.debug_state.registers = Some(regs);
+                            self.state.debug.debug_state.registers = Some(regs);
                         }
                     }
                 }
 
                 // Handle pending memory read
-                if let Some((addr, len)) = self.state.pending_mem_read.take() {
+                if let Some((addr, len)) = self.state.debug.pending_mem_read.take() {
                     match dbg.read_memory(addr, len) {
                         Ok(data) => {
-                            self.state.mem_dump = format_hexdump(addr, &data);
+                            self.state.debug.mem_dump = format_hexdump(addr, &data);
                         }
                         Err(e) => {
-                            self.state.mem_dump = format!("Error reading memory: {}", e);
+                            self.state.debug.mem_dump = format!("Error reading memory: {}", e);
                         }
                     }
                 }
@@ -359,7 +359,7 @@ impl FissionApp {
 
     fn render_attach_dialog(&mut self, ctx: &egui::Context) {
         if let Some(pid) = debug_ops::render_attach_dialog(&mut self.state, ctx) {
-            self.state.show_attach_dialog = false;
+            self.state.ui.show_attach_dialog = false;
             self.attach_to_process(pid);
         }
     }

@@ -7,7 +7,7 @@ use crate::ui::gui::theme::{catppuccin, code};
 
 /// Render hex view tab content with virtual scrolling
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
-    let Some(ref binary) = state.loaded_binary else {
+    let Some(ref binary) = state.analysis.loaded_binary else {
         ui.vertical_centered(|ui| {
             ui.add_space(20.0);
             ui.label(egui::RichText::new("No binary loaded")
@@ -24,35 +24,35 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     // Controls
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Offset:").color(catppuccin::SUBTEXT0));
-        let mut offset_str = format!("{:08X}", state.hex_offset);
+        let mut offset_str = format!("{:08X}", state.analysis.hex_offset);
         if ui.add(
             egui::TextEdit::singleline(&mut offset_str)
                 .desired_width(80.0)
                 .font(egui::TextStyle::Monospace)
         ).changed() {
             if let Ok(new_offset) = u64::from_str_radix(&offset_str, 16) {
-                state.hex_offset = (new_offset / 16) * 16;
-                state.hex_offset = state.hex_offset.min(data_len.saturating_sub(16));
+                state.analysis.hex_offset = (new_offset / 16) * 16;
+                state.analysis.hex_offset = state.analysis.hex_offset.min(data_len.saturating_sub(16));
             }
         }
         
         ui.separator();
         
-        if ui.small_button("⬆").clicked() && state.hex_offset >= 0x100 {
-            state.hex_offset -= 0x100;
+        if ui.small_button("⬆").clicked() && state.analysis.hex_offset >= 0x100 {
+            state.analysis.hex_offset -= 0x100;
         }
         if ui.small_button("⬇").clicked() {
-            state.hex_offset = (state.hex_offset + 0x100).min(data_len.saturating_sub(16));
+            state.analysis.hex_offset = (state.analysis.hex_offset + 0x100).min(data_len.saturating_sub(16));
         }
         if ui.small_button("Top").clicked() {
-            state.hex_offset = 0;
+            state.analysis.hex_offset = 0;
         }
         if ui.small_button("End").clicked() {
-            state.hex_offset = (total_rows.saturating_sub(rows_per_page as u64)) * 16;
+            state.analysis.hex_offset = (total_rows.saturating_sub(rows_per_page as u64)) * 16;
         }
         
         ui.separator();
-        ui.label(egui::RichText::new(format!("{} / {} bytes", state.hex_offset, data_len))
+        ui.label(egui::RichText::new(format!("{} / {} bytes", state.analysis.hex_offset, data_len))
             .color(catppuccin::SUBTEXT0).small());
     });
 
@@ -62,7 +62,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     let row_height = 18.0;
     
     // Calculate which rows to show based on current offset
-    let start_row = (state.hex_offset / 16) as usize;
+    let start_row = (state.analysis.hex_offset / 16) as usize;
     let visible_rows = ((available_height / row_height) as usize).min(rows_per_page).max(8);
     let end_row = (start_row + visible_rows).min(total_rows as usize);
     let display_rows = end_row - start_row;

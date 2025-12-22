@@ -55,21 +55,21 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                     
                     #[cfg(not(target_os = "macos"))]
                     {
-                        if state.debug_state.attached_pid.is_some() {
+                        if state.debug.debug_state.attached_pid.is_some() {
                             if ui.button(egui::RichText::new("⏹ Detach")
                                 .color(catppuccin::RED)).clicked() {
                                 action = MenuAction::DetachProcess;
                                 ui.close_menu();
                             }
                             ui.separator();
-                            let mode_text = if state.dynamic_mode {
+                            let mode_text = if state.ui.dynamic_mode {
                                 "○ Switch to Static Mode"
                             } else {
                                 "● Switch to Dynamic Mode"
                             };
                             if ui.button(egui::RichText::new(mode_text)
                                 .color(catppuccin::TEAL)).clicked() {
-                                state.dynamic_mode = !state.dynamic_mode;
+                                state.ui.dynamic_mode = !state.ui.dynamic_mode;
                                 ui.close_menu();
                             }
                         } else {
@@ -79,14 +79,14 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                                 ui.close_menu();
                             }
                             ui.separator();
-                            let mode_text = if state.dynamic_mode {
+                            let mode_text = if state.ui.dynamic_mode {
                                 "○ Switch to Static Mode"
                             } else {
                                 "● Switch to Dynamic Mode"
                             };
                             if ui.button(egui::RichText::new(mode_text)
                                 .color(catppuccin::TEAL)).clicked() {
-                                state.dynamic_mode = !state.dynamic_mode;
+                                state.ui.dynamic_mode = !state.ui.dynamic_mode;
                                 ui.close_menu();
                             }
                         }
@@ -94,12 +94,12 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                 });
 
                 ui.menu_button(egui::RichText::new("View").color(catppuccin::TEXT), |ui| {
-                    if ui.button(egui::RichText::new(if state.sidebar_visible { "Hide Side Bar" } else { "Show Side Bar" }).color(catppuccin::TEXT)).clicked() {
-                        state.sidebar_visible = !state.sidebar_visible;
+                    if ui.button(egui::RichText::new(if state.ui.sidebar_visible { "Hide Side Bar" } else { "Show Side Bar" }).color(catppuccin::TEXT)).clicked() {
+                        state.ui.sidebar_visible = !state.ui.sidebar_visible;
                         ui.close_menu();
                     }
-                    if ui.button(egui::RichText::new(if state.panel_visible { "Hide Panel" } else { "Show Panel" }).color(catppuccin::TEXT)).clicked() {
-                        state.panel_visible = !state.panel_visible;
+                    if ui.button(egui::RichText::new(if state.ui.panel_visible { "Hide Panel" } else { "Show Panel" }).color(catppuccin::TEXT)).clicked() {
+                        state.ui.panel_visible = !state.ui.panel_visible;
                         ui.close_menu();
                     }
                     ui.separator();
@@ -116,14 +116,14 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                     ];
                     
                     for (tab, label, color) in tabs {
-                        let is_selected = state.bottom_tab == tab;
+                        let is_selected = state.ui.bottom_tab == tab;
                         let text = if is_selected {
                             egui::RichText::new(format!("● {}", label)).color(color)
                         } else {
                             egui::RichText::new(format!("  {}", label)).color(catppuccin::SUBTEXT0)
                         };
                         if ui.selectable_label(is_selected, text).clicked() {
-                            state.bottom_tab = tab;
+                            state.ui.bottom_tab = tab;
                             ui.close_menu();
                         }
                     }

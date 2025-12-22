@@ -9,7 +9,7 @@ use super::functions;
 /// Render the side bar panel.
 pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo> {
     let mut selected_func = None;
-    if !state.sidebar_visible {
+    if !state.ui.sidebar_visible {
         return None;
     }
 
@@ -23,7 +23,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo>
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
-                let title = match state.active_activity {
+                let title = match state.ui.active_activity {
                     Activity::Explorer => "EXPLORER",
                     Activity::Search => "SEARCH",
                     Activity::Debug => "RUN AND DEBUG",
@@ -34,7 +34,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo>
             ui.add_space(4.0);
             
             // Content
-            match state.active_activity {
+            match state.ui.active_activity {
                 Activity::Explorer => {
                     // Use the existing functions panel logic but as part of this panel
                     if let Some(func) = functions::render_inside(ui, state) {
@@ -70,10 +70,10 @@ fn render_debug_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.add_space(8.0);
     ui.collapsing(egui::RichText::new("BREAKPOINTS").small().strong(), |ui| {
         // Breakpoint list (abbreviated)
-        if state.debug_state.breakpoints.is_empty() {
+        if state.debug.debug_state.breakpoints.is_empty() {
             ui.label(egui::RichText::new("No breakpoints").color(catppuccin::OVERLAY0).small());
         } else {
-            for (addr, _bp) in &state.debug_state.breakpoints {
+            for (addr, _bp) in &state.debug.debug_state.breakpoints {
                 ui.label(egui::RichText::new(format!("0x{:016x}", addr)).small().monospace());
             }
         }

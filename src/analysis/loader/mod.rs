@@ -71,6 +71,8 @@ pub struct LoadedBinary {
     pub dotnet_runtime_version: Option<String>,
     /// Binary format (PE, ELF, Mach-O)
     pub format: String,
+    /// IAT address to symbol name mapping for decompiler output
+    pub iat_symbols: std::collections::HashMap<u64, String>,
 }
 
 impl LoadedBinary {
@@ -193,8 +195,20 @@ impl LoadedBinary {
                     }
                 }
 
-                // Add imports
+                // Add imports and build IAT symbol map
+                // For PE imports:
+                // - offset: file offset of the IAT entry, also acts as RVA for IAT
+                // - Ghidra uses image_base + offset as the pointer address
+                let mut iat_symbols = std::collections::HashMap::new();
                 for import in &pe.imports {
+                    // IAT address = image_base + offset (this is what Ghidra uses)
+                    let iat_va = image_base + import.offset as u64;
+                    
+                    // Debug: print IAT address mapping
+                    eprintln!("[DEBUG IAT] {} -> 0x{:08x} (offset: 0x{:x}, rva: 0x{:x})", 
+                        import.name, iat_va, import.offset, import.rva);
+                    
+                    iat_symbols.insert(iat_va, import.name.to_string());
                     functions.push(FunctionInfo {
                         name: import.name.to_string(),
                         address: image_base + import.rva as u64,
@@ -228,6 +242,7 @@ impl LoadedBinary {
                     is_dotnet,
                     dotnet_runtime_version,
                     format: "PE".to_string(),
+                    iat_symbols,
                 })
             }
             Err(_e) => {
@@ -330,6 +345,7 @@ impl LoadedBinary {
                     is_dotnet: false,
                     dotnet_runtime_version: None,
                     format: "PE (Fallback)".to_string(),
+                    iat_symbols: std::collections::HashMap::new(),
                 })
             }
         }
@@ -430,6 +446,7 @@ impl LoadedBinary {
             is_dotnet: false,
             dotnet_runtime_version: None,
             format: "ELF".to_string(),
+            iat_symbols: std::collections::HashMap::new(),
         })
     }
 
@@ -498,6 +515,7 @@ impl LoadedBinary {
                     is_dotnet: false,
                     dotnet_runtime_version: None,
                     format: "Mach-O".to_string(),
+                    iat_symbols: std::collections::HashMap::new(),
                 })
             }
             goblin::mach::Mach::Fat(_) => Err(anyhow!("Fat Mach-O binaries not yet supported")),

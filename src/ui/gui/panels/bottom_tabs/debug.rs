@@ -19,20 +19,20 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 // Mode toggle with icon
-                let (mode_icon, mode_text, mode_color) = if state.dynamic_mode {
+                let (mode_icon, mode_text, mode_color) = if state.ui.dynamic_mode {
                     ("⚡", "Dynamic", catppuccin::GREEN)
                 } else {
                     ("📖", "Static", catppuccin::OVERLAY1)
                 };
                 if ui.button(egui::RichText::new(format!("{} {}", mode_icon, mode_text))
                     .color(mode_color).strong()).clicked() {
-                    state.dynamic_mode = !state.dynamic_mode;
+                    state.ui.dynamic_mode = !state.ui.dynamic_mode;
                 }
                 
                 ui.add_space(8.0);
                 
                 // Status badge
-                let (status_icon, status_text, status_color) = match state.debug_state.status {
+                let (status_icon, status_text, status_color) = match state.debug.debug_state.status {
                     crate::debug::types::DebugStatus::Running => ("▶", "Running", catppuccin::GREEN),
                     crate::debug::types::DebugStatus::Suspended => ("⏸", "Suspended", catppuccin::YELLOW),
                     crate::debug::types::DebugStatus::Terminated => ("⏹", "Terminated", catppuccin::RED),
@@ -50,14 +50,14 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     });
                 
                 // PID if attached
-                if let Some(pid) = state.debug_state.attached_pid {
+                if let Some(pid) = state.debug.debug_state.attached_pid {
                     ui.add_space(4.0);
                     ui.label(egui::RichText::new(format!("PID: {}", pid))
                         .color(catppuccin::SUBTEXT0).small());
                 }
                 
                 // Last event (truncated)
-                if let Some(ev) = &state.debug_state.last_event {
+                if let Some(ev) = &state.debug.debug_state.last_event {
                     ui.add_space(8.0);
                     let display = if ev.len() > 40 { format!("{}...", &ev[..40]) } else { ev.clone() };
                     ui.label(egui::RichText::new(display)
@@ -71,7 +71,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                         egui::RichText::new("⏭ Step").color(catppuccin::SAPPHIRE))
                         .fill(catppuccin::SURFACE1)
                     ).clicked() {
-                        state.pending_debug_action = Some(DebugAction::Step);
+                        state.debug.pending_debug_action = Some(DebugAction::Step);
                     }
                     
                     ui.add_space(4.0);
@@ -81,7 +81,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                         egui::RichText::new("▶ Continue").color(catppuccin::GREEN))
                         .fill(catppuccin::SURFACE1)
                     ).clicked() {
-                        state.pending_debug_action = Some(DebugAction::Continue);
+                        state.debug.pending_debug_action = Some(DebugAction::Continue);
                     }
                 });
             });
@@ -174,7 +174,7 @@ fn render_breakpoints_column(ui: &mut egui::Ui, state: &mut AppState, panel_widt
                 ui.label(egui::RichText::new("🎯 Breakpoints")
                     .color(catppuccin::PEACH).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("{}", state.debug_state.breakpoints.len()))
+                    ui.label(egui::RichText::new(format!("{}", state.debug.debug_state.breakpoints.len()))
                         .color(catppuccin::OVERLAY0).small());
                 });
             });
@@ -185,7 +185,7 @@ fn render_breakpoints_column(ui: &mut egui::Ui, state: &mut AppState, panel_widt
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("0x").color(catppuccin::OVERLAY1).monospace());
                 let response = ui.add(
-                    egui::TextEdit::singleline(&mut state.breakpoint_input)
+                    egui::TextEdit::singleline(&mut state.debug.breakpoint_input)
                         .id(egui::Id::new("bp_addr_input"))
                         .desired_width(ui.available_width() - 30.0)
                         .font(egui::TextStyle::Monospace)
@@ -197,10 +197,10 @@ fn render_breakpoints_column(ui: &mut egui::Ui, state: &mut AppState, panel_widt
                     .min_size(egui::vec2(24.0, 20.0))
                 ).clicked() || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                     if let Ok(addr) = u64::from_str_radix(
-                        state.breakpoint_input.trim_start_matches("0x"), 16
+                        state.debug.breakpoint_input.trim_start_matches("0x"), 16
                     ) {
-                        state.pending_bp_action = Some(DebugBpAction::Add(addr));
-                        state.breakpoint_input.clear();
+                        state.debug.pending_bp_action = Some(DebugBpAction::Add(addr));
+                        state.debug.breakpoint_input.clear();
                     }
                 }
             });
@@ -218,7 +218,7 @@ fn render_breakpoints_column(ui: &mut egui::Ui, state: &mut AppState, panel_widt
                     .min_scrolled_height(0.0)
                     .max_scroll_height(content_height - 60.0)
                     .body(|body| {
-                        let bps: Vec<_> = state.debug_state.breakpoints.iter().collect();
+                        let bps: Vec<_> = state.debug.debug_state.breakpoints.iter().collect();
                         body.rows(20.0, bps.len(), |mut row| {
                             let (addr, bp) = bps[row.index()];
                             
@@ -239,14 +239,14 @@ fn render_breakpoints_column(ui: &mut egui::Ui, state: &mut AppState, panel_widt
                             row.col(|ui| {
                                 if ui.small_button(egui::RichText::new("×")
                                     .color(catppuccin::RED)).clicked() {
-                                    state.pending_bp_action = Some(DebugBpAction::Remove(*addr));
+                                    state.debug.pending_bp_action = Some(DebugBpAction::Remove(*addr));
                                 }
                             });
                         });
                     });
             });
             
-            if state.debug_state.breakpoints.is_empty() {
+            if state.debug.debug_state.breakpoints.is_empty() {
                 ui.vertical_centered(|ui| {
                     ui.add_space(20.0);
                     ui.label(egui::RichText::new("No breakpoints set")
@@ -269,7 +269,7 @@ fn render_registers_column(ui: &mut egui::Ui, state: &AppState, panel_width: f32
             
             ui.separator();
             
-            if let Some(regs) = &state.debug_state.registers {
+            if let Some(regs) = &state.debug.debug_state.registers {
                 egui::ScrollArea::vertical()
                     .id_salt("registers_scroll")
                     .max_height(content_height - 30.0)
@@ -320,26 +320,26 @@ fn render_memory_section(ui: &mut egui::Ui, state: &mut AppState) {
         ui.label(egui::RichText::new("🔍 Memory").color(catppuccin::SKY).strong());
         ui.add_space(8.0);
         ui.label(egui::RichText::new("Addr:").color(catppuccin::SUBTEXT0).small());
-        ui.add(egui::TextEdit::singleline(&mut state.mem_addr_input)
+        ui.add(egui::TextEdit::singleline(&mut state.debug.mem_addr_input)
             .desired_width(120.0)
             .font(egui::TextStyle::Monospace));
         ui.label(egui::RichText::new("Size:").color(catppuccin::SUBTEXT0).small());
-        ui.add(egui::TextEdit::singleline(&mut state.mem_len_input)
+        ui.add(egui::TextEdit::singleline(&mut state.debug.mem_len_input)
             .desired_width(60.0));
         
         if ui.button(egui::RichText::new("Read").color(catppuccin::BLUE)).clicked() {
             if let (Ok(addr), Ok(len)) = (
-                u64::from_str_radix(state.mem_addr_input.trim_start_matches("0x"), 16),
-                state.mem_len_input.parse::<usize>()
+                u64::from_str_radix(state.debug.mem_addr_input.trim_start_matches("0x"), 16),
+                state.debug.mem_len_input.parse::<usize>()
             ) {
-                state.pending_mem_read = Some((addr, len));
+                state.debug.pending_mem_read = Some((addr, len));
             }
         }
     });
 
-    if !state.mem_dump.is_empty() {
+    if !state.debug.mem_dump.is_empty() {
         egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
-            ui.monospace(&state.mem_dump);
+            ui.monospace(&state.debug.mem_dump);
         });
     }
 }

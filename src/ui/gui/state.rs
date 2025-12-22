@@ -1,6 +1,7 @@
 //! Shared application state for the Fission GUI.
 //!
 //! Contains all state that needs to be shared across UI panels.
+//! Organized into domain-specific sub-states for maintainability.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -8,96 +9,15 @@ use std::time::Instant;
 use crate::analysis::loader::{LoadedBinary, FunctionInfo};
 use crate::analysis::disasm::DisassembledInstruction;
 
-/// Cached decompile result for performance optimization
-#[derive(Clone)]
-pub struct CachedDecompile {
-    pub c_code: String,
-    pub asm_instructions: Vec<DisassembledInstruction>,
-    #[allow(dead_code)]
-    pub timestamp: Instant,
-}
+// ============================================================================
+// Sub-state structures
+// ============================================================================
 
-/// Main application state container
-/// 
-/// This struct holds all shared state that panels need to read/modify.
-pub struct AppState {
-    /// Log buffer for the output console
-    pub log_buffer: Vec<String>,
-
-    /// Current command input in the integrated CLI
-    pub cli_input: String,
-
-    /// Currently loaded binary (if any)
-    pub loaded_binary: Option<LoadedBinary>,
-
-    /// Debugger running state
-    pub is_debugging: bool,
-
-    /// Selected function (for decompilation view)
-    pub selected_function: Option<FunctionInfo>,
-
-    /// Current decompiled C code
-    pub decompiled_code: String,
-
-    /// Current assembly instructions
-    pub asm_instructions: Vec<DisassembledInstruction>,
-
-    /// Is decompilation in progress?
-    pub decompiling: bool,
-
-    /// File dialog path (unused currently)
-    pub file_dialog_path: String,
-
-    /// Decompile result cache (address -> result)
-    pub decompile_cache: HashMap<u64, CachedDecompile>,
-
-    /// Last loaded binary path (for recovery reload)
-    pub last_binary_path: Option<String>,
-
-    // ========== Debug State ==========
-    /// Debugger state
-    pub debug_state: crate::debug::types::DebugState,
-    /// Show attach dialog
-    pub show_attach_dialog: bool,
-    /// Cached process list for dialog
-    pub process_list: Vec<crate::debug::types::ProcessInfo>,
-
-    // ========== Bottom Panel Tab ==========
+/// UI-related state (tabs, visibility, layout)
+/// UI-related state (tabs, visibility, layout)
+pub struct UIState {
     /// Currently selected bottom tab
     pub bottom_tab: BottomTab,
-
-    // ========== Hex View State ==========
-    /// Current offset in hex view
-    pub hex_offset: u64,
-
-    // ========== Strings State ==========
-    /// Extracted strings from binary
-    pub extracted_strings: Vec<ExtractedString>,
-    /// Filter for strings view
-    pub strings_filter: String,
-
-    /// Dynamic mode (on/off)
-    pub dynamic_mode: bool,
-
-    /// Pending debug control action from UI
-    pub pending_debug_action: Option<DebugAction>,
-
-    /// Pending breakpoint action from UI
-    pub pending_bp_action: Option<DebugBpAction>,
-    /// Temporary input for breakpoint address
-    pub breakpoint_input: String,
-
-    /// Pending memory read action
-    pub pending_mem_read: Option<(u64, usize)>,
-
-    /// Memory view address input (hex)
-    pub mem_addr_input: String,
-    /// Memory view length input (decimal)
-    pub mem_len_input: String,
-    /// Last memory dump text
-    pub mem_dump: String,
-
-    // ========== VS Code Style Layout State ==========
     /// Active side bar activity
     pub active_activity: Activity,
     /// Side bar visible?
@@ -108,8 +28,63 @@ pub struct AppState {
     pub open_tabs: Vec<EditorTab>,
     /// Currently active tab index
     pub active_tab_index: Option<usize>,
+    /// Dynamic mode (on/off)
+    pub dynamic_mode: bool,
+    /// Show attach dialog
+    pub show_attach_dialog: bool,
+}
 
-    // ========== Script State ==========
+/// Analysis-related state (binary, functions, decompilation)
+pub struct AnalysisState {
+    /// Currently loaded binary (if any)
+    pub loaded_binary: Option<std::sync::Arc<LoadedBinary>>,
+    /// Selected function (for decompilation view)
+    pub selected_function: Option<FunctionInfo>,
+    /// Current decompiled C code
+    pub decompiled_code: String,
+    /// Current assembly instructions
+    pub asm_instructions: Vec<DisassembledInstruction>,
+    /// Is decompilation in progress?
+    pub decompiling: bool,
+    /// Decompile result cache (address -> result)
+    pub decompile_cache: HashMap<u64, CachedDecompile>,
+    /// Last loaded binary path (for recovery reload)
+    pub last_binary_path: Option<String>,
+    /// Extracted strings from binary
+    pub extracted_strings: Vec<ExtractedString>,
+    /// Filter for strings view
+    pub strings_filter: String,
+    /// Current offset in hex view
+    pub hex_offset: u64,
+}
+
+/// Debug-related state (debugger, breakpoints, memory)
+/// Debug-related state (debugger, breakpoints, memory)
+pub struct DebugStateUI {
+    /// Is debugger running?
+    pub is_debugging: bool,
+    /// Debugger state
+    pub debug_state: crate::debug::types::DebugState,
+    /// Cached process list for dialog
+    pub process_list: Vec<crate::debug::types::ProcessInfo>,
+    /// Pending debug control action from UI
+    pub pending_debug_action: Option<DebugAction>,
+    /// Pending breakpoint action from UI
+    pub pending_bp_action: Option<DebugBpAction>,
+    /// Temporary input for breakpoint address
+    pub breakpoint_input: String,
+    /// Pending memory read action
+    pub pending_mem_read: Option<(u64, usize)>,
+    /// Memory view address input (hex)
+    pub mem_addr_input: String,
+    /// Memory view length input (decimal)
+    pub mem_len_input: String,
+    /// Last memory dump text
+    pub mem_dump: String,
+}
+
+/// Script-related state (Python scripting)
+pub struct ScriptState {
     /// Python script input code
     pub script_code: String,
     /// Script execution output
@@ -120,9 +95,53 @@ pub struct AppState {
     pub script_path: Option<String>,
 }
 
+// ============================================================================
+// Cached decompile result
+// ============================================================================
+
+/// Cached decompile result for performance optimization
+#[derive(Clone)]
+pub struct CachedDecompile {
+    pub c_code: String,
+    pub asm_instructions: Vec<DisassembledInstruction>,
+    #[allow(dead_code)]
+    pub timestamp: Instant,
+}
+
+// ============================================================================
+// Main AppState (composed of sub-states)
+// ============================================================================
+
+/// Main application state container
+/// 
+/// This struct holds all shared state that panels need to read/modify.
+/// Organized into domain-specific sub-states for better maintainability.
+pub struct AppState {
+    /// Log buffer for the output console
+    pub log_buffer: Vec<String>,
+    /// Current command input in the integrated CLI
+    pub cli_input: String,
+    /// File dialog path (unused currently)
+    pub file_dialog_path: String,
+
+    /// UI state (tabs, visibility, layout)
+    pub ui: UIState,
+    /// Analysis state (binary, functions, decompilation)
+    pub analysis: AnalysisState,
+    /// Debug state (debugger, breakpoints, memory)
+    pub debug: DebugStateUI,
+    /// Script state (Python scripting)
+    pub script: ScriptState,
+}
+
+// ============================================================================
+// Enums and helper types
+// ============================================================================
+
 /// Activities in the Activity Bar
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Activity {
+    #[default]
     Explorer,
     Search,
     Debug,
@@ -162,6 +181,7 @@ pub enum DebugBpAction {
     Add(u64),
     Remove(u64),
 }
+
 /// Extracted string from binary
 #[derive(Clone)]
 pub struct ExtractedString {
@@ -192,6 +212,70 @@ pub enum BottomTab {
     Script,
 }
 
+// ============================================================================
+// Default implementations
+// ============================================================================
+
+impl Default for AnalysisState {
+    fn default() -> Self {
+        Self {
+            loaded_binary: None,
+            selected_function: None,
+            decompiled_code: "// Select a function to decompile".into(),
+            asm_instructions: Vec::new(),
+            decompiling: false,
+            decompile_cache: HashMap::new(),
+            last_binary_path: None,
+            extracted_strings: Vec::new(),
+            strings_filter: String::new(),
+            hex_offset: 0,
+        }
+    }
+}
+
+impl Default for DebugStateUI {
+    fn default() -> Self {
+        Self {
+            is_debugging: false,
+            debug_state: crate::debug::types::DebugState::default(),
+            process_list: Vec::new(),
+            pending_debug_action: None,
+            pending_bp_action: None,
+            breakpoint_input: String::new(),
+            pending_mem_read: None,
+            mem_addr_input: String::new(),
+            mem_len_input: "64".to_string(),
+            mem_dump: String::new(),
+        }
+    }
+}
+
+impl Default for ScriptState {
+    fn default() -> Self {
+        Self {
+            script_code: "# Fission Python Script\n# Use 'api' to access the Fission API\n\nbinary = api.get_binary()\nif binary:\n    api.log(f\"Loaded: {binary.name}\")\n    api.log(f\"Functions: {len(api.get_functions())}\")\nelse:\n    api.log(\"No binary loaded\")\n".into(),
+            script_output: Vec::new(),
+            script_running: false,
+            script_path: None,
+        }
+    }
+}
+
+impl Default for UIState {
+    fn default() -> Self {
+        Self {
+            bottom_tab: BottomTab::Console,
+            active_activity: Activity::Explorer,
+            sidebar_visible: true,
+            panel_visible: true,
+            open_tabs: vec![EditorTab::Welcome],
+            active_tab_index: Some(0),
+            dynamic_mode: true,
+            show_attach_dialog: false,
+        }
+    }
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self {
@@ -204,45 +288,11 @@ impl Default for AppState {
                 "[*] Ready. Load a binary to begin analysis.".into(),
             ],
             cli_input: String::new(),
-            loaded_binary: None,
-            is_debugging: false,
-            selected_function: None,
-            decompiled_code: "// Select a function to decompile".into(),
-            asm_instructions: Vec::new(),
-            decompiling: false,
             file_dialog_path: String::new(),
-            decompile_cache: HashMap::new(),
-            last_binary_path: None,
-            // Debug state
-            debug_state: crate::debug::types::DebugState::default(),
-            show_attach_dialog: false,
-            process_list: Vec::new(),
-            // Bottom panel tab
-            bottom_tab: BottomTab::Console,
-            // Hex view state
-            hex_offset: 0,
-            // Strings state
-            extracted_strings: Vec::new(),
-            strings_filter: String::new(),
-            dynamic_mode: true,
-            pending_debug_action: None,
-            pending_bp_action: None,
-            pending_mem_read: None,
-            breakpoint_input: String::new(),
-            mem_addr_input: String::new(),
-            mem_len_input: "64".to_string(),
-            mem_dump: String::new(),
-            // VS Code Layout
-            active_activity: Activity::Explorer,
-            sidebar_visible: true,
-            panel_visible: true,
-            open_tabs: vec![EditorTab::Welcome],
-            active_tab_index: Some(0),
-            // Script state
-            script_code: "# Fission Python Script\n# Use 'api' to access the Fission API\n\nbinary = api.get_binary()\nif binary:\n    api.log(f\"Loaded: {binary.name}\")\n    api.log(f\"Functions: {len(api.get_functions())}\")\nelse:\n    api.log(\"No binary loaded\")\n".into(),
-            script_output: Vec::new(),
-            script_running: false,
-            script_path: None,
+            ui: UIState::default(),
+            analysis: AnalysisState::default(),
+            debug: DebugStateUI::default(),
+            script: ScriptState::default(),
         }
     }
 }

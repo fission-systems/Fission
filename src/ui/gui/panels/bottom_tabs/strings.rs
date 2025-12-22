@@ -11,7 +11,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Filter:").color(catppuccin::SUBTEXT0));
         let response = ui.add(
-            egui::TextEdit::singleline(&mut state.strings_filter)
+            egui::TextEdit::singleline(&mut state.analysis.strings_filter)
                 .desired_width(200.0)
                 .hint_text("Search strings...")
         );
@@ -22,14 +22,14 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         }
         
         ui.separator();
-        ui.label(egui::RichText::new(format!("{} strings", state.extracted_strings.len()))
+        ui.label(egui::RichText::new(format!("{} strings", state.analysis.extracted_strings.len()))
             .color(catppuccin::SUBTEXT0).small());
     });
 
-    if state.extracted_strings.is_empty() {
+    if state.analysis.extracted_strings.is_empty() {
         ui.vertical_centered(|ui| {
             ui.add_space(20.0);
-            if state.loaded_binary.is_some() {
+            if state.analysis.loaded_binary.is_some() {
                 ui.label(egui::RichText::new("Click 'Extract' to find strings")
                     .color(catppuccin::OVERLAY0));
             } else {
@@ -41,8 +41,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     }
 
     // Filter strings
-    let filter = state.strings_filter.to_lowercase();
-    let filtered_strings: Vec<_> = state.extracted_strings.iter()
+    let filter = state.analysis.strings_filter.to_lowercase();
+    let filtered_strings: Vec<_> = state.analysis.extracted_strings.iter()
         .filter(|s| filter.is_empty() || s.value.to_lowercase().contains(&filter))
         .collect();
 
@@ -107,9 +107,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
 
 /// Extract strings from binary
 pub fn extract_strings_from_binary(state: &mut AppState) {
-    state.extracted_strings.clear();
+    state.analysis.extracted_strings.clear();
     
-    let Some(ref binary) = state.loaded_binary else { return; };
+    let Some(ref binary) = state.analysis.loaded_binary else { return; };
     
     let min_len = 4;
     let data = &binary.data;
@@ -124,7 +124,7 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
             current_string.push(byte as char);
         } else {
             if current_string.len() >= min_len {
-                state.extracted_strings.push(ExtractedString {
+                state.analysis.extracted_strings.push(ExtractedString {
                     offset: start_offset,
                     value: current_string.clone(),
                     encoding: StringEncoding::Ascii,
@@ -134,7 +134,7 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
         }
     }
     
-    state.extracted_strings.sort_by_key(|s| s.offset);
-    state.log_buffer.push(format!("[✓] Extracted {} strings", state.extracted_strings.len()));
+    state.analysis.extracted_strings.sort_by_key(|s| s.offset);
+    state.log_buffer.push(format!("[✓] Extracted {} strings", state.analysis.extracted_strings.len()));
 }
 

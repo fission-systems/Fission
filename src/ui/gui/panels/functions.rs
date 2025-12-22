@@ -31,14 +31,14 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             ui.heading(egui::RichText::new("Functions").color(catppuccin::LAVENDER));
-            if let Some(ref binary) = state.loaded_binary {
+            if let Some(ref binary) = state.analysis.loaded_binary {
                 ui.label(egui::RichText::new(format!("({})", binary.functions.len()))
                     .color(catppuccin::SUBTEXT0).small());
             }
         });
         ui.separator();
 
-        if let Some(ref binary) = state.loaded_binary {
+        if let Some(ref binary) = state.analysis.loaded_binary {
             // Search filter
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new("🔍").color(catppuccin::OVERLAY0));
@@ -78,7 +78,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
                                 format!("{} {}", icon, func.name)
                             };
                             
-                            let is_selected = state.selected_function
+                            let is_selected = state.analysis.selected_function
                                 .as_ref()
                                 .map(|f| f.address == func.address)
                                 .unwrap_or(false);

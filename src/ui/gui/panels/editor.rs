@@ -24,8 +24,8 @@ fn render_tabs(ui: &mut egui::Ui, state: &mut AppState) {
         
         let mut close_tab = None;
         
-        for (i, tab) in state.open_tabs.iter().enumerate() {
-            let is_active = state.active_tab_index == Some(i);
+        for (i, tab) in state.ui.open_tabs.iter().enumerate() {
+            let is_active = state.ui.active_tab_index == Some(i);
             
             let bg = if is_active { catppuccin::BASE } else { catppuccin::MANTLE };
             let text_color = if is_active { catppuccin::TEXT } else { catppuccin::OVERLAY1 };
@@ -36,7 +36,7 @@ fn render_tabs(ui: &mut egui::Ui, state: &mut AppState) {
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         if ui.selectable_label(is_active, egui::RichText::new(tab.title()).color(text_color)).clicked() {
-                            state.active_tab_index = Some(i);
+                            state.ui.active_tab_index = Some(i);
                         }
                         
                         if ui.add(egui::Button::new(egui::RichText::new(" × ").small()).frame(false)).clicked() {
@@ -58,14 +58,14 @@ fn render_tabs(ui: &mut egui::Ui, state: &mut AppState) {
         }
         
         if let Some(i) = close_tab {
-            state.open_tabs.remove(i);
-            if state.open_tabs.is_empty() {
-                state.active_tab_index = None;
-            } else if state.active_tab_index == Some(i) {
-                state.active_tab_index = Some(i.saturating_sub(1));
-            } else if let Some(idx) = state.active_tab_index {
+            state.ui.open_tabs.remove(i);
+            if state.ui.open_tabs.is_empty() {
+                state.ui.active_tab_index = None;
+            } else if state.ui.active_tab_index == Some(i) {
+                state.ui.active_tab_index = Some(i.saturating_sub(1));
+            } else if let Some(idx) = state.ui.active_tab_index {
                 if idx > i {
-                    state.active_tab_index = Some(idx - 1);
+                    state.ui.active_tab_index = Some(idx - 1);
                 }
             }
         }
@@ -73,12 +73,12 @@ fn render_tabs(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 fn render_active_tab_content(ui: &mut egui::Ui, state: &mut AppState) {
-    let Some(idx) = state.active_tab_index else {
+    let Some(idx) = state.ui.active_tab_index else {
         render_empty_state(ui);
         return;
     };
     
-    let tab = &state.open_tabs[idx].clone(); // Clone to avoid borrow issues
+    let tab = &state.ui.open_tabs[idx].clone(); // Clone to avoid borrow issues
     
     match tab {
         EditorTab::Assembly(_name) => {

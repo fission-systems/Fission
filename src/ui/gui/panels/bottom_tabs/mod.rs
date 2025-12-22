@@ -43,20 +43,20 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                 ];
                 
                 for (tab, label, accent) in tabs {
-                    let is_selected = state.bottom_tab == tab;
+                    let is_selected = state.ui.bottom_tab == tab;
                     let text = if is_selected {
                         egui::RichText::new(label).color(accent).strong()
                     } else {
                         egui::RichText::new(label).color(catppuccin::SUBTEXT0)
                     };
                     if ui.selectable_label(is_selected, text).clicked() {
-                        state.bottom_tab = tab;
+                        state.ui.bottom_tab = tab;
                     }
                 }
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add(egui::Button::new(egui::RichText::new(" × ").small()).frame(false)).clicked() {
-                        state.panel_visible = false;
+                        state.ui.panel_visible = false;
                     }
                 });
             });
@@ -65,7 +65,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
             // Tab content - allocate remaining space to prevent collapse
             let content_rect = ui.available_rect_before_wrap();
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(content_rect), |ui| {
-                match state.bottom_tab {
+                match state.ui.bottom_tab {
                     BottomTab::Console => {
                         console_action = console::render(ui, state);
                     }
