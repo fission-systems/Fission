@@ -43,6 +43,7 @@ void fission_decompiler_destroy(FissionDecompiler* decomp);
  * @param bytes Raw machine code bytes
  * @param bytes_len Length of bytes buffer
  * @param base_addr Virtual address of the function
+ * @param is_64bit 1 for 64-bit binary, 0 for 32-bit
  * @param out_buffer Buffer to write decompiled C code
  * @param out_len Maximum size of output buffer
  * @return Number of bytes written to out_buffer, or -1 on error
@@ -52,6 +53,7 @@ int fission_decompile(
     const uint8_t* bytes,
     size_t bytes_len,
     uint64_t base_addr,
+    int is_64bit,
     char* out_buffer,
     size_t out_len
 );

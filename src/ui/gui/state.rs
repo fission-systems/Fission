@@ -108,6 +108,16 @@ pub struct AppState {
     pub open_tabs: Vec<EditorTab>,
     /// Currently active tab index
     pub active_tab_index: Option<usize>,
+
+    // ========== Script State ==========
+    /// Python script input code
+    pub script_code: String,
+    /// Script execution output
+    pub script_output: Vec<String>,
+    /// Is script currently executing?
+    pub script_running: bool,
+    /// Current script file path (for save/load)
+    pub script_path: Option<String>,
 }
 
 /// Activities in the Activity Bar
@@ -179,6 +189,7 @@ pub enum BottomTab {
     Strings,
     Imports,
     Debug,
+    Script,
 }
 
 impl Default for AppState {
@@ -227,6 +238,11 @@ impl Default for AppState {
             panel_visible: true,
             open_tabs: vec![EditorTab::Welcome],
             active_tab_index: Some(0),
+            // Script state
+            script_code: "# Fission Python Script\n# Use 'api' to access the Fission API\n\nbinary = api.get_binary()\nif binary:\n    api.log(f\"Loaded: {binary.name}\")\n    api.log(f\"Functions: {len(api.get_functions())}\")\nelse:\n    api.log(\"No binary loaded\")\n".into(),
+            script_output: Vec::new(),
+            script_running: false,
+            script_path: None,
         }
     }
 }

@@ -21,6 +21,12 @@ pub use windows::WindowsDebugger as PlatformDebugger;
 #[cfg(target_os = "windows")]
 pub use windows::enumerate_processes;
 
+#[cfg(not(target_os = "windows"))]
+pub fn enumerate_processes() -> Vec<types::ProcessInfo> {
+    // Stub for non-Windows platforms
+    Vec::new()
+}
+
 use types::ProcessInfo;
 
 /// Platform-agnostic debugger trait

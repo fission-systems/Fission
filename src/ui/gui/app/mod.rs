@@ -22,7 +22,7 @@ use super::messages::AsyncMessage;
 use super::menu::{self, MenuAction};
 use super::status_bar;
 use super::panels::{functions, assembly, decompile, bottom_tabs, activity_bar, side_bar, editor};
-use super::panels::bottom_tabs::ConsoleAction;
+use super::panels::bottom_tabs::{ConsoleAction, ScriptAction};
 
 use once_cell::sync::Lazy;
 use tokio::runtime::Runtime;
@@ -59,6 +59,10 @@ pub struct FissionApp {
 
     /// Theme initialization flag
     theme_initialized: bool,
+
+    /// Python scripting bridge
+    #[cfg(feature = "python")]
+    python_bridge: crate::script::PythonBridge,
 }
 
 impl Default for FissionApp {
@@ -76,6 +80,8 @@ impl Default for FissionApp {
             dbg_stop_tx: None,
             native_decompiler: Arc::new(Mutex::new(None)),
             theme_initialized: false,
+            #[cfg(feature = "python")]
+            python_bridge: crate::script::PythonBridge::new(),
         }
     }
 }
@@ -124,12 +130,14 @@ impl eframe::App for FissionApp {
         
         // 3. Bottom Panel (Terminal/Output style)
         if self.state.panel_visible {
-            match bottom_tabs::render(ctx, &mut self.state) {
+            let (console_action, script_action) = bottom_tabs::render(ctx, &mut self.state);
+            match console_action {
                 ConsoleAction::Command(cmd) => {
                     handlers::process_command(&mut self.state, self.tx.clone(), &cmd);
                 }
                 ConsoleAction::None => {}
             }
+            self.handle_script_action(script_action);
         }
 
         // 4. Editor Area (Central)
@@ -173,6 +181,95 @@ impl FissionApp {
             MenuAction::Exit => std::process::exit(0),
             MenuAction::None => {}
         }
+    }
+
+    fn handle_script_action(&mut self, action: ScriptAction) {
+        match action {
+            ScriptAction::Execute(code) => {
+                self.execute_python_script(&code);
+            }
+            ScriptAction::Load => {
+                self.load_script_file();
+            }
+            ScriptAction::Save => {
+                self.save_script_file();
+            }
+            ScriptAction::None => {}
+        }
+    }
+
+    fn load_script_file(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Python", &["py"])
+            .add_filter("All Files", &["*"])
+            .pick_file()
+        {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    self.state.script_code = content;
+                    self.state.script_path = Some(path.display().to_string());
+                    self.state.script_output.push(format!("[✓] Loaded: {}", path.display()));
+                }
+                Err(e) => {
+                    self.state.script_output.push(format!("[Error] Failed to load: {}", e));
+                }
+            }
+        }
+    }
+
+    fn save_script_file(&mut self) {
+        let default_path = self.state.script_path.as_ref()
+            .map(|p| std::path::PathBuf::from(p))
+            .unwrap_or_else(|| std::path::PathBuf::from("script.py"));
+        
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Python", &["py"])
+            .set_file_name(default_path.file_name().unwrap_or_default().to_str().unwrap_or("script.py"))
+            .save_file()
+        {
+            match std::fs::write(&path, &self.state.script_code) {
+                Ok(_) => {
+                    self.state.script_path = Some(path.display().to_string());
+                    self.state.script_output.push(format!("[✓] Saved: {}", path.display()));
+                }
+                Err(e) => {
+                    self.state.script_output.push(format!("[Error] Failed to save: {}", e));
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "python")]
+    fn execute_python_script(&mut self, code: &str) {
+        self.state.script_running = true;
+        self.state.script_output.push(format!(">>> Executing script..."));
+        
+        // Initialize Python if needed
+        if let Err(e) = self.python_bridge.initialize() {
+            self.state.script_output.push(format!("[Error] Failed to initialize Python: {}", e));
+            self.state.script_running = false;
+            return;
+        }
+
+        // Sync loaded binary to Python bridge
+        self.python_bridge.set_binary(self.state.loaded_binary.clone());
+        
+        // Execute the script
+        match self.python_bridge.run(code) {
+            Ok(_) => {
+                self.state.script_output.push("[✓] Script executed successfully".into());
+            }
+            Err(e) => {
+                self.state.script_output.push(format!("[Error] {}", e));
+            }
+        }
+        
+        self.state.script_running = false;
+    }
+
+    #[cfg(not(feature = "python"))]
+    fn execute_python_script(&mut self, _code: &str) {
+        self.state.script_output.push("[Error] Python support not enabled. Build with --features python".into());
     }
 
     fn open_function_tabs(&mut self, func: &FunctionInfo) {
