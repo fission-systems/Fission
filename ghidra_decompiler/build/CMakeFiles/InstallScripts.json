@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/sjkim1127/Fission/ghidra_decompiler/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

@@ -16,7 +16,7 @@ use crate::analysis::loader::LoadedBinary;
 #[derive(Default)]
 pub struct SharedScriptState {
     /// Currently loaded binary (if any)
-    pub binary: Option<LoadedBinary>,
+    pub binary: Option<std::sync::Arc<LoadedBinary>>,
 }
 
 /// Thread-safe reference to shared state
@@ -278,7 +278,7 @@ impl PythonBridge {
     }
 
     /// Update the loaded binary in shared state
-    pub fn set_binary(&self, binary: Option<LoadedBinary>) {
+    pub fn set_binary(&self, binary: Option<std::sync::Arc<LoadedBinary>>) {
         if let Ok(mut state) = self.state.write() {
             state.binary = binary;
         }

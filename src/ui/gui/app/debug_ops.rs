@@ -13,14 +13,14 @@ pub fn handle_debug_event(state: &mut AppState, evt: crate::debug::types::DebugE
     use crate::debug::types::DebugEvent::*;
     match evt {
         ProcessCreated { pid, main_thread_id } => {
-            state.debug_state.attached_pid = Some(pid);
-            state.debug_state.main_thread_id = Some(main_thread_id);
-            state.debug_state.last_thread_id = Some(main_thread_id);
-            state.debug_state.status = crate::debug::types::DebugStatus::Running;
+            state.debug.debug_state.attached_pid = Some(pid);
+            state.debug.debug_state.main_thread_id = Some(main_thread_id);
+            state.debug.debug_state.last_thread_id = Some(main_thread_id);
+            state.debug.debug_state.status = crate::debug::types::DebugStatus::Running;
             state.log(format!("[*] Process created pid={} tid={}", pid, main_thread_id));
         }
         ProcessExited { exit_code } => {
-            state.debug_state.status = crate::debug::types::DebugStatus::Terminated;
+            state.debug.debug_state.status = crate::debug::types::DebugStatus::Terminated;
             state.log(format!("[*] Process exited code={}", exit_code));
         }
         ThreadCreated { thread_id } => {
@@ -33,24 +33,24 @@ pub fn handle_debug_event(state: &mut AppState, evt: crate::debug::types::DebugE
             state.log(format!("[*] DLL loaded {name} @0x{base_address:016x}"));
         }
         BreakpointHit { address, thread_id } => {
-            state.debug_state.status = crate::debug::types::DebugStatus::Suspended;
-            state.debug_state.last_thread_id = Some(thread_id);
-            state.debug_state.last_event = Some(format!("BP hit 0x{address:016x} tid={thread_id}"));
-            state.log(state.debug_state.last_event.clone().unwrap_or_default());
+            state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+            state.debug.debug_state.last_thread_id = Some(thread_id);
+            state.debug.debug_state.last_event = Some(format!("BP hit 0x{address:016x} tid={thread_id}"));
+            state.log(state.debug.debug_state.last_event.clone().unwrap_or_default());
         }
         SingleStep { thread_id } => {
-            state.debug_state.status = crate::debug::types::DebugStatus::Suspended;
-            state.debug_state.last_thread_id = Some(thread_id);
-            state.debug_state.last_event = Some(format!("[*] Single step tid={}", thread_id));
-            state.log(state.debug_state.last_event.clone().unwrap_or_default());
+            state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+            state.debug.debug_state.last_thread_id = Some(thread_id);
+            state.debug.debug_state.last_event = Some(format!("[*] Single step tid={}", thread_id));
+            state.log(state.debug.debug_state.last_event.clone().unwrap_or_default());
         }
         Exception { code, address, first_chance, .. } => {
-            state.debug_state.status = crate::debug::types::DebugStatus::Suspended;
-            state.debug_state.last_event = Some(format!(
+            state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+            state.debug.debug_state.last_event = Some(format!(
                 "[!] Exception code=0x{:x} addr=0x{:016x} first_chance={}",
                 code, address, first_chance
             ));
-            state.log(state.debug_state.last_event.clone().unwrap_or_default());
+            state.log(state.debug.debug_state.last_event.clone().unwrap_or_default());
         }
     }
 }
@@ -68,8 +68,8 @@ pub fn attach_to_process(
     state.log(format!("[*] Attaching to PID {}...", pid));
     match dbg.attach(pid) {
         Ok(_) => {
-            state.is_debugging = true;
-            state.debug_state = dbg.state().clone();
+            state.debug.is_debugging = true;
+            state.debug.debug_state = dbg.state().clone();
             state.log(format!("[✓] Attached to PID {}", pid));
 
             // Start event loop
@@ -80,7 +80,7 @@ pub fn attach_to_process(
             crate::debug::windows::start_event_loop(pid, tx_evt, rx_stop);
         }
         Err(e) => {
-            state.is_debugging = false;
+            state.debug.is_debugging = false;
             state.log(format!("[✗] Attach failed: {}", e));
         }
     }
@@ -108,9 +108,9 @@ pub fn detach_process(
 
         match dbg.detach() {
             Ok(_) => {
-                state.is_debugging = false;
-                state.debug_state = dbg.state().clone();
-                state.show_attach_dialog = false;
+                state.debug.is_debugging = false;
+                state.debug.debug_state = dbg.state().clone();
+                state.ui.show_attach_dialog = false;
                 state.log("[*] Detached from process");
                 if let Some(stop) = dbg_stop_tx.take() {
                     let _ = stop.send(());
@@ -137,7 +137,7 @@ pub fn handle_debug_action(
     debugger: &mut Option<PlatformDebugger>,
     action: DebugAction,
 ) {
-    if !state.dynamic_mode {
+    if !state.ui.dynamic_mode {
         state.log("[!] Debug control is disabled in static mode");
         return;
     }
@@ -168,7 +168,7 @@ pub fn handle_bp_action(
     debugger: &mut Option<PlatformDebugger>,
     action: DebugBpAction,
 ) {
-    if !state.dynamic_mode {
+    if !state.ui.dynamic_mode {
         state.log("[!] Breakpoints are disabled in static mode");
         return;
     }
@@ -193,11 +193,11 @@ pub fn handle_bp_action(state: &mut AppState, _action: DebugBpAction) {
 
 /// Render "Attach to Process" dialog
 pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option<u32> {
-    if !state.show_attach_dialog {
+    if !state.ui.show_attach_dialog {
         return None;
     }
 
-    let mut open = state.show_attach_dialog;
+    let mut open = state.ui.show_attach_dialog;
     let mut attached_pid = None;
 
     egui::Window::new("Attach to Process")
@@ -209,9 +209,9 @@ pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("🔄 Refresh").clicked() {
-                    state.process_list = crate::debug::enumerate_processes();
+                    state.debug.process_list = crate::debug::enumerate_processes();
                 }
-                ui.label(format!("{} processes found", state.process_list.len()));
+                ui.label(format!("{} processes found", state.debug.process_list.len()));
             });
             
             ui.separator();
@@ -227,7 +227,7 @@ pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option
                         ui.strong("Action");
                         ui.end_row();
 
-                        for process in &state.process_list {
+                        for process in &state.debug.process_list {
                             ui.push_id(process.pid, |ui| {
                                 ui.label(format!("{}", process.pid));
                                 ui.label(&process.name);
@@ -241,7 +241,7 @@ pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option
             });
         });
 
-    state.show_attach_dialog = open;
+    state.ui.show_attach_dialog = open;
     attached_pid
 }
 

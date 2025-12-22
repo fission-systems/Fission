@@ -2,27 +2,302 @@
 ---
 events:
   -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineSystem.cmake:12 (find_program)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_UNAME"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "uname"
+    candidate_directories:
+      - "/opt/homebrew/opt/zlib/bin/"
+      - "/opt/homebrew/opt/zlib/sbin/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    searched_directories:
+      - "/opt/homebrew/opt/zlib/bin/uname"
+      - "/opt/homebrew/opt/zlib/sbin/uname"
+      - "/opt/homebrew/opt/zlib/uname"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/uname"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/uname"
+      - "/Users/sjkim1127/.pyenv/shims/uname"
+      - "/opt/homebrew/bin/uname"
+      - "/opt/homebrew/sbin/uname"
+      - "/usr/local/bin/uname"
+      - "/System/Cryptexes/App/usr/bin/uname"
+    found: "/usr/bin/uname"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
     kind: "message-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineSystem.cmake:212 (message)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineSystem.cmake:212 (message)"
       - "CMakeLists.txt:4 (project)"
     message: |
-      The system is: Windows - 10.0.26100 - AMD64
+      The system is: Darwin - 25.1.0 - arm64
   -
     kind: "find-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:462 (find_file)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:500 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeUnixFindMake.cmake:5 (find_program)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_MAKE_PROGRAM"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "gmake"
+      - "make"
+      - "smake"
+    candidate_directories:
+      - "/opt/homebrew/opt/zlib/bin/"
+      - "/opt/homebrew/opt/zlib/sbin/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    searched_directories:
+      - "/opt/homebrew/opt/zlib/bin/gmake"
+      - "/opt/homebrew/opt/zlib/sbin/gmake"
+      - "/opt/homebrew/opt/zlib/gmake"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/gmake"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/gmake"
+      - "/Users/sjkim1127/.pyenv/shims/gmake"
+      - "/opt/homebrew/bin/gmake"
+      - "/opt/homebrew/sbin/gmake"
+      - "/usr/local/bin/gmake"
+      - "/System/Cryptexes/App/usr/bin/gmake"
+      - "/usr/bin/gmake"
+      - "/bin/gmake"
+      - "/usr/sbin/gmake"
+      - "/sbin/gmake"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/gmake"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/gmake"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/gmake"
+      - "/opt/pmk/env/global/bin/gmake"
+      - "/usr/local/share/dotnet/gmake"
+      - "/Users/sjkim1127/.dotnet/tools/gmake"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/gmake"
+      - "/Users/sjkim1127/.cargo/bin/gmake"
+      - "/Users/sjkim1127/.orbstack/bin/gmake"
+      - "/opt/homebrew/opt/zlib/bin/make"
+      - "/opt/homebrew/opt/zlib/sbin/make"
+      - "/opt/homebrew/opt/zlib/make"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/make"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/make"
+      - "/Users/sjkim1127/.pyenv/shims/make"
+      - "/opt/homebrew/bin/make"
+      - "/opt/homebrew/sbin/make"
+      - "/usr/local/bin/make"
+      - "/System/Cryptexes/App/usr/bin/make"
+    found: "/usr/bin/make"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompiler.cmake:73 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:69 (_cmake_find_compiler)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_CXX_COMPILER"
+    description: "CXX compiler"
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "c++"
+      - "g++"
+      - "cl"
+      - "bcc"
+      - "icpx"
+      - "icx"
+      - "clang++"
+    candidate_directories:
+      - "/opt/homebrew/opt/zlib/bin/"
+      - "/opt/homebrew/opt/zlib/sbin/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    searched_directories:
+      - "/opt/homebrew/opt/zlib/bin/c++"
+      - "/opt/homebrew/opt/zlib/sbin/c++"
+      - "/opt/homebrew/opt/zlib/c++"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/c++"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/c++"
+      - "/Users/sjkim1127/.pyenv/shims/c++"
+      - "/opt/homebrew/bin/c++"
+      - "/opt/homebrew/sbin/c++"
+      - "/usr/local/bin/c++"
+      - "/System/Cryptexes/App/usr/bin/c++"
+    found: "/usr/bin/c++"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerId.cmake:462 (find_file)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerId.cmake:500 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
       - "CMakeLists.txt:4 (project)"
     mode: "file"
     variable: "src_in"
     description: "Path to a file."
     settings:
-      SearchFramework: "NEVER"
-      SearchAppBundle: "NEVER"
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
       CMAKE_FIND_USE_CMAKE_PATH: true
       CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
       CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
@@ -31,1169 +306,1933 @@ events:
     names:
       - "CMakeCXXCompilerId.cpp.in"
     candidate_directories:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/"
-    found: "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeCXXCompilerId.cpp.in"
+      - "/opt/homebrew/share/cmake/Modules/"
+    found: "/opt/homebrew/share/cmake/Modules/CMakeCXXCompilerId.cpp.in"
     search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
       ENV{PATH}:
-        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
-        - "C:\\WINDOWS\\system32"
-        - "C:\\WINDOWS"
-        - "C:\\WINDOWS\\System32\\Wbem"
-        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
-        - "C:\\WINDOWS\\System32\\OpenSSH\\"
-        - "C:\\Program Files\\cursor\\resources\\app\\bin"
-        - "C:\\ProgramData\\chocolatey\\bin"
-        - "C:\\Program Files\\Git\\cmd"
-        - "%NVM_HOME%"
-        - "%NVM_SYMLINK%"
-        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
-        - "C:\\Program Files\\Bandizip\\"
-        - "C:\\Program Files\\CMake\\bin"
-        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
-        - "C:\\Users\\freex\\.cargo\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
-        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\nvm"
-        - "C:\\nvm4w\\nodejs"
-        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
   -
     kind: "message-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
       - "CMakeLists.txt:4 (project)"
     message: |
       Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
-      Compiler:  
+      Compiler: /usr/bin/c++ 
       Build flags: 
       Id flags:  
       
       The output was:
       0
-      msbuild 踰꾩쟾 17.14.23+b0019275e(.NET Framework??
-      鍮뚮뱶 ?쒖옉: 2025-12-20 ?ㅼ쟾 12:26:31
-      
-      1 ?몃뱶??"F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\4.2.0\\CompilerIdCXX\\CompilerIdCXX.vcxproj" ?꾨줈?앺듃(湲곕낯 ?\xc2\x80???낅땲??
-      PrepareForBuild:
-        "Debug\\" ?붾젆?곕━瑜?留뚮뱾怨??덉뒿?덈떎.
-        援ъ“??異쒕젰???ъ슜?????덉뒿?덈떎. 而댄뙆?쇰윭 吏꾨떒???쒖떇?\xc2\x80 ?ㅻ쪟 怨꾩링 援ъ“瑜?諛섏쁺?⑸땲?? ?먯꽭???댁슜?\xc2\x80 https://aka.ms/cpp/structured-output??李몄“?섏꽭??
-        "Debug\\CompilerIdCXX.tlog\\" ?붾젆?곕━瑜?留뚮뱾怨??덉뒿?덈떎.
-      InitializeBuildStatus:
-        "AlwaysCreate"??媛\xc2\x80) 吏\xc2\x80?뺣릺?덇린 ?뚮Ц??"Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild"??瑜? 留뚮뱾怨??덉뒿?덈떎.
-        "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild"???곌껐(touching)?섍퀬 ?덉뒿?덈떎.
-      ClCompile:
-        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /nologo /W0 /WX- /diagnostics:column /Od /D _MBCS /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Debug\\\\" /Fd"Debug\\vc143.pdb" /external:W0 /Gd /TP /FC /errorReport:queue CMakeCXXCompilerId.cpp
-        CMakeCXXCompilerId.cpp
-      Link:
-        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /ERRORREPORT:QUEUE /OUT:".\\CompilerIdCXX.exe" /INCREMENTAL:NO /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:".\\CompilerIdCXX.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:".\\CompilerIdCXX.lib" /MACHINE:X64 Debug\\CMakeCXXCompilerId.obj
-        CompilerIdCXX.vcxproj -> F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\4.2.0\\CompilerIdCXX\\CompilerIdCXX.exe
-      PostBuildEvent:
-        for %%i in (cl.exe) do @echo CMAKE_CXX_COMPILER=%%~$PATH:i
-        :VCEnd
-        CMAKE_CXX_COMPILER=C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe
-      FinalizeBuildStatus:
-        "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild" ?뚯씪????젣?섍퀬 ?덉뒿?덈떎.
-        "Debug\\CompilerIdCXX.tlog\\CompilerIdCXX.lastbuildstate"???곌껐(touching)?섍퀬 ?덉뒿?덈떎.
-      "F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\4.2.0\\CompilerIdCXX\\CompilerIdCXX.vcxproj" ?꾨줈?앺듃瑜?鍮뚮뱶?덉뒿?덈떎(湲곕낯 ?\xc2\x80??.
-      
-      鍮뚮뱶?덉뒿?덈떎.
-          寃쎄퀬 0媛?
-          ?ㅻ쪟 0媛?
-      
-      寃쎄낵 ?쒓컙: 00:00:01.45
       
       
-      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.exe"
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
       
-      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.vcxproj"
-      
-      The CXX compiler identification is MSVC, found in:
-        F:/Fission/ghidra_decompiler/build/CMakeFiles/4.2.0/CompilerIdCXX/CompilerIdCXX.exe
+      The CXX compiler identification is AppleClang, found in:
+        /Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/4.2.1/CompilerIdCXX/a.out
       
   -
-    kind: "find-v1"
+    kind: "message-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:103 (__resolve_linker_path)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerId.cmake:290 (message)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
       - "CMakeLists.txt:4 (project)"
-    mode: "program"
-    variable: "_CMAKE_TOOL_WITH_PATH"
-    description: "Path to a program."
-    settings:
-      SearchFramework: "NEVER"
-      SearchAppBundle: "NEVER"
-      CMAKE_FIND_USE_CMAKE_PATH: false
-      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
-      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
-      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
-      CMAKE_FIND_USE_INSTALL_PREFIX: true
-    names:
-      - "link"
-    candidate_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
-      - "C:/Windows/System32/"
-      - "C:/Windows/"
-      - "C:/Windows/System32/wbem/"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
-      - "C:/Windows/System32/OpenSSH/"
-      - "C:/Program Files/cursor/resources/app/bin/"
-      - "C:/ProgramData/chocolatey/bin/"
-      - "C:/Program Files/Git/cmd/"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
-      - "C:/Program Files/Docker/Docker/resources/bin/"
-      - "C:/Program Files/Bandizip/"
-      - "C:/Program Files/CMake/bin/"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
-      - "C:/Users/freex/.cargo/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
-      - "C:/Users/freex/AppData/Local/nvm/"
-      - "C:/nvm4w/nodejs/"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
-    searched_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
-    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
-    search_context:
-      ENV{PATH}:
-        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
-        - "C:\\WINDOWS\\system32"
-        - "C:\\WINDOWS"
-        - "C:\\WINDOWS\\System32\\Wbem"
-        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
-        - "C:\\WINDOWS\\System32\\OpenSSH\\"
-        - "C:\\Program Files\\cursor\\resources\\app\\bin"
-        - "C:\\ProgramData\\chocolatey\\bin"
-        - "C:\\Program Files\\Git\\cmd"
-        - "%NVM_HOME%"
-        - "%NVM_SYMLINK%"
-        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
-        - "C:\\Program Files\\Bandizip\\"
-        - "C:\\Program Files\\CMake\\bin"
-        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
-        - "C:\\Users\\freex\\.cargo\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
-        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\nvm"
-        - "C:\\nvm4w\\nodejs"
-        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+    message: |
+      Detecting CXX compiler apple sysroot: "/usr/bin/c++" "-E" "apple-sdk.cpp"
+        # 1 "apple-sdk.cpp"
+        # 1 "<built-in>" 1
+        # 1 "<built-in>" 3
+        # 514 "<built-in>" 3
+        # 1 "<command line>" 1
+        # 1 "<built-in>" 2
+        # 1 "apple-sdk.cpp" 2
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityMacros.h" 1 3 4
+        # 89 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityMacros.h" 3 4
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityVersions.h" 1 3 4
+        # 90 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityMacros.h" 2 3 4
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/TargetConditionals.h" 1 3 4
+        # 91 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityMacros.h" 2 3 4
+        # 207 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityMacros.h" 3 4
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/Availability.h" 1 3 4
+        # 196 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/Availability.h" 3 4
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityVersions.h" 1 3 4
+        # 197 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/Availability.h" 2 3 4
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityInternal.h" 1 3 4
+        # 33 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityInternal.h" 3 4
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityVersions.h" 1 3 4
+        # 34 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityInternal.h" 2 3 4
+        # 198 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/Availability.h" 2 3 4
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityInternalLegacy.h" 1 3 4
+        # 34 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityInternalLegacy.h" 3 4
+        # 1 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityInternal.h" 1 3 4
+        # 35 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityInternalLegacy.h" 2 3 4
+        # 199 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/Availability.h" 2 3 4
+        # 208 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityMacros.h" 2 3 4
+        # 2 "apple-sdk.cpp" 2
+        
+        
+      Found apple sysroot: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
   -
     kind: "find-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:104 (__resolve_linker_path)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
-      - "CMakeLists.txt:4 (project)"
-    mode: "program"
-    variable: "_CMAKE_TOOL_WITH_PATH"
-    description: "Path to a program."
-    settings:
-      SearchFramework: "NEVER"
-      SearchAppBundle: "NEVER"
-      CMAKE_FIND_USE_CMAKE_PATH: false
-      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
-      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
-      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
-      CMAKE_FIND_USE_INSTALL_PREFIX: true
-    names:
-      - "lld-link"
-    candidate_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
-      - "C:/Windows/System32/"
-      - "C:/Windows/"
-      - "C:/Windows/System32/wbem/"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
-      - "C:/Windows/System32/OpenSSH/"
-      - "C:/Program Files/cursor/resources/app/bin/"
-      - "C:/ProgramData/chocolatey/bin/"
-      - "C:/Program Files/Git/cmd/"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
-      - "C:/Program Files/Docker/Docker/resources/bin/"
-      - "C:/Program Files/Bandizip/"
-      - "C:/Program Files/CMake/bin/"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
-      - "C:/Users/freex/.cargo/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
-      - "C:/Users/freex/AppData/Local/nvm/"
-      - "C:/nvm4w/nodejs/"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
-    searched_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.com"
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.exe"
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/lld-link.com"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/lld-link.exe"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/lld-link"
-      - "C:/Windows/System32/lld-link.com"
-      - "C:/Windows/System32/lld-link.exe"
-      - "C:/Windows/System32/lld-link"
-      - "C:/Windows/lld-link.com"
-      - "C:/Windows/lld-link.exe"
-      - "C:/Windows/lld-link"
-      - "C:/Windows/System32/wbem/lld-link.com"
-      - "C:/Windows/System32/wbem/lld-link.exe"
-      - "C:/Windows/System32/wbem/lld-link"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.com"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.exe"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link"
-      - "C:/Windows/System32/OpenSSH/lld-link.com"
-      - "C:/Windows/System32/OpenSSH/lld-link.exe"
-      - "C:/Windows/System32/OpenSSH/lld-link"
-      - "C:/Program Files/cursor/resources/app/bin/lld-link.com"
-      - "C:/Program Files/cursor/resources/app/bin/lld-link.exe"
-      - "C:/Program Files/cursor/resources/app/bin/lld-link"
-      - "C:/ProgramData/chocolatey/bin/lld-link.com"
-      - "C:/ProgramData/chocolatey/bin/lld-link.exe"
-      - "C:/ProgramData/chocolatey/bin/lld-link"
-      - "C:/Program Files/Git/cmd/lld-link.com"
-      - "C:/Program Files/Git/cmd/lld-link.exe"
-      - "C:/Program Files/Git/cmd/lld-link"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/lld-link.com"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/lld-link.exe"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/lld-link"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/lld-link.com"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/lld-link.exe"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/lld-link"
-      - "C:/Program Files/Docker/Docker/resources/bin/lld-link.com"
-      - "C:/Program Files/Docker/Docker/resources/bin/lld-link.exe"
-      - "C:/Program Files/Docker/Docker/resources/bin/lld-link"
-      - "C:/Program Files/Bandizip/lld-link.com"
-      - "C:/Program Files/Bandizip/lld-link.exe"
-      - "C:/Program Files/Bandizip/lld-link"
-      - "C:/Program Files/CMake/bin/lld-link.com"
-      - "C:/Program Files/CMake/bin/lld-link.exe"
-      - "C:/Program Files/CMake/bin/lld-link"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link.com"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link.exe"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/lld-link"
-      - "C:/Users/freex/.cargo/bin/lld-link.com"
-      - "C:/Users/freex/.cargo/bin/lld-link.exe"
-      - "C:/Users/freex/.cargo/bin/lld-link"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/lld-link.com"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/lld-link.exe"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/lld-link"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/lld-link.com"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/lld-link.exe"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/lld-link"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/lld-link.com"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/lld-link.exe"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/lld-link"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/lld-link.com"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/lld-link.exe"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/lld-link"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/lld-link.com"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/lld-link.exe"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/lld-link"
-      - "C:/Users/freex/AppData/Local/nvm/lld-link.com"
-      - "C:/Users/freex/AppData/Local/nvm/lld-link.exe"
-      - "C:/Users/freex/AppData/Local/nvm/lld-link"
-      - "C:/nvm4w/nodejs/lld-link.com"
-      - "C:/nvm4w/nodejs/lld-link.exe"
-      - "C:/nvm4w/nodejs/lld-link"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/lld-link.com"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/lld-link.exe"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/lld-link"
-    found: false
-    search_context:
-      ENV{PATH}:
-        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
-        - "C:\\WINDOWS\\system32"
-        - "C:\\WINDOWS"
-        - "C:\\WINDOWS\\System32\\Wbem"
-        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
-        - "C:\\WINDOWS\\System32\\OpenSSH\\"
-        - "C:\\Program Files\\cursor\\resources\\app\\bin"
-        - "C:\\ProgramData\\chocolatey\\bin"
-        - "C:\\Program Files\\Git\\cmd"
-        - "%NVM_HOME%"
-        - "%NVM_SYMLINK%"
-        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
-        - "C:\\Program Files\\Bandizip\\"
-        - "C:\\Program Files\\CMake\\bin"
-        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
-        - "C:\\Users\\freex\\.cargo\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
-        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\nvm"
-        - "C:\\nvm4w\\nodejs"
-        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
-  -
-    kind: "find-v1"
-    backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
-      - "CMakeLists.txt:4 (project)"
-    mode: "program"
-    variable: "CMAKE_LINKER"
-    description: "Path to a program."
-    settings:
-      SearchFramework: "NEVER"
-      SearchAppBundle: "NEVER"
-      CMAKE_FIND_USE_CMAKE_PATH: false
-      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
-      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
-      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
-      CMAKE_FIND_USE_INSTALL_PREFIX: true
-    names:
-      - "link"
-    candidate_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
-      - "C:/Windows/System32/"
-      - "C:/Windows/"
-      - "C:/Windows/System32/wbem/"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
-      - "C:/Windows/System32/OpenSSH/"
-      - "C:/Program Files/cursor/resources/app/bin/"
-      - "C:/ProgramData/chocolatey/bin/"
-      - "C:/Program Files/Git/cmd/"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
-      - "C:/Program Files/Docker/Docker/resources/bin/"
-      - "C:/Program Files/Bandizip/"
-      - "C:/Program Files/CMake/bin/"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
-      - "C:/Users/freex/.cargo/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
-      - "C:/Users/freex/AppData/Local/nvm/"
-      - "C:/nvm4w/nodejs/"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
-    searched_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
-    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
-    search_context:
-      ENV{PATH}:
-        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
-        - "C:\\WINDOWS\\system32"
-        - "C:\\WINDOWS"
-        - "C:\\WINDOWS\\System32\\Wbem"
-        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
-        - "C:\\WINDOWS\\System32\\OpenSSH\\"
-        - "C:\\Program Files\\cursor\\resources\\app\\bin"
-        - "C:\\ProgramData\\chocolatey\\bin"
-        - "C:\\Program Files\\Git\\cmd"
-        - "%NVM_HOME%"
-        - "%NVM_SYMLINK%"
-        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
-        - "C:\\Program Files\\Bandizip\\"
-        - "C:\\Program Files\\CMake\\bin"
-        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
-        - "C:\\Users\\freex\\.cargo\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
-        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\nvm"
-        - "C:\\nvm4w\\nodejs"
-        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
-  -
-    kind: "find-v1"
-    backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
-      - "CMakeLists.txt:4 (project)"
-    mode: "program"
-    variable: "CMAKE_MT"
-    description: "Path to a program."
-    settings:
-      SearchFramework: "NEVER"
-      SearchAppBundle: "NEVER"
-      CMAKE_FIND_USE_CMAKE_PATH: false
-      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
-      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
-      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
-      CMAKE_FIND_USE_INSTALL_PREFIX: true
-    names:
-      - "mt"
-    candidate_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
-      - "C:/Windows/System32/"
-      - "C:/Windows/"
-      - "C:/Windows/System32/wbem/"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
-      - "C:/Windows/System32/OpenSSH/"
-      - "C:/Program Files/cursor/resources/app/bin/"
-      - "C:/ProgramData/chocolatey/bin/"
-      - "C:/Program Files/Git/cmd/"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
-      - "C:/Program Files/Docker/Docker/resources/bin/"
-      - "C:/Program Files/Bandizip/"
-      - "C:/Program Files/CMake/bin/"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
-      - "C:/Users/freex/.cargo/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
-      - "C:/Users/freex/AppData/Local/nvm/"
-      - "C:/nvm4w/nodejs/"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
-    searched_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt.com"
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt.exe"
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/mt.com"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/mt.exe"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/mt"
-      - "C:/Windows/System32/mt.com"
-      - "C:/Windows/System32/mt.exe"
-      - "C:/Windows/System32/mt"
-      - "C:/Windows/mt.com"
-      - "C:/Windows/mt.exe"
-      - "C:/Windows/mt"
-      - "C:/Windows/System32/wbem/mt.com"
-      - "C:/Windows/System32/wbem/mt.exe"
-      - "C:/Windows/System32/wbem/mt"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt.com"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt.exe"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt"
-      - "C:/Windows/System32/OpenSSH/mt.com"
-      - "C:/Windows/System32/OpenSSH/mt.exe"
-      - "C:/Windows/System32/OpenSSH/mt"
-      - "C:/Program Files/cursor/resources/app/bin/mt.com"
-      - "C:/Program Files/cursor/resources/app/bin/mt.exe"
-      - "C:/Program Files/cursor/resources/app/bin/mt"
-      - "C:/ProgramData/chocolatey/bin/mt.com"
-      - "C:/ProgramData/chocolatey/bin/mt.exe"
-      - "C:/ProgramData/chocolatey/bin/mt"
-      - "C:/Program Files/Git/cmd/mt.com"
-      - "C:/Program Files/Git/cmd/mt.exe"
-      - "C:/Program Files/Git/cmd/mt"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/mt.com"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/mt.exe"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/mt"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/mt.com"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/mt.exe"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/mt"
-      - "C:/Program Files/Docker/Docker/resources/bin/mt.com"
-      - "C:/Program Files/Docker/Docker/resources/bin/mt.exe"
-      - "C:/Program Files/Docker/Docker/resources/bin/mt"
-      - "C:/Program Files/Bandizip/mt.com"
-      - "C:/Program Files/Bandizip/mt.exe"
-      - "C:/Program Files/Bandizip/mt"
-      - "C:/Program Files/CMake/bin/mt.com"
-      - "C:/Program Files/CMake/bin/mt.exe"
-      - "C:/Program Files/CMake/bin/mt"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/mt.com"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/mt.exe"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/mt"
-      - "C:/Users/freex/.cargo/bin/mt.com"
-      - "C:/Users/freex/.cargo/bin/mt.exe"
-      - "C:/Users/freex/.cargo/bin/mt"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/mt.com"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/mt.exe"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/mt"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/mt.com"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/mt.exe"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/mt"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/mt.com"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/mt.exe"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/mt"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/mt.com"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/mt.exe"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/mt"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/mt.com"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/mt.exe"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/mt"
-      - "C:/Users/freex/AppData/Local/nvm/mt.com"
-      - "C:/Users/freex/AppData/Local/nvm/mt.exe"
-      - "C:/Users/freex/AppData/Local/nvm/mt"
-      - "C:/nvm4w/nodejs/mt.com"
-      - "C:/nvm4w/nodejs/mt.exe"
-      - "C:/nvm4w/nodejs/mt"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/mt.com"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/mt.exe"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/mt"
-    found: false
-    search_context:
-      ENV{PATH}:
-        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
-        - "C:\\WINDOWS\\system32"
-        - "C:\\WINDOWS"
-        - "C:\\WINDOWS\\System32\\Wbem"
-        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
-        - "C:\\WINDOWS\\System32\\OpenSSH\\"
-        - "C:\\Program Files\\cursor\\resources\\app\\bin"
-        - "C:\\ProgramData\\chocolatey\\bin"
-        - "C:\\Program Files\\Git\\cmd"
-        - "%NVM_HOME%"
-        - "%NVM_SYMLINK%"
-        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
-        - "C:\\Program Files\\Bandizip\\"
-        - "C:\\Program Files\\CMake\\bin"
-        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
-        - "C:\\Users\\freex\\.cargo\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
-        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\nvm"
-        - "C:\\nvm4w\\nodejs"
-        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
-  -
-    kind: "find-v1"
-    backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
       - "CMakeLists.txt:4 (project)"
     mode: "program"
     variable: "CMAKE_AR"
     description: "Path to a program."
     settings:
-      SearchFramework: "NEVER"
-      SearchAppBundle: "NEVER"
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
       CMAKE_FIND_USE_CMAKE_PATH: false
       CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
       CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
       CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
       CMAKE_FIND_USE_INSTALL_PREFIX: true
     names:
-      - "lib"
+      - "ar"
     candidate_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
-      - "C:/Windows/System32/"
-      - "C:/Windows/"
-      - "C:/Windows/System32/wbem/"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
-      - "C:/Windows/System32/OpenSSH/"
-      - "C:/Program Files/cursor/resources/app/bin/"
-      - "C:/ProgramData/chocolatey/bin/"
-      - "C:/Program Files/Git/cmd/"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
-      - "C:/Program Files/Docker/Docker/resources/bin/"
-      - "C:/Program Files/Bandizip/"
-      - "C:/Program Files/CMake/bin/"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
-      - "C:/Users/freex/.cargo/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
-      - "C:/Users/freex/AppData/Local/nvm/"
-      - "C:/nvm4w/nodejs/"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
-    searched_directories:
-      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.com"
-    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.exe"
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    found: "/usr/bin/ar"
     search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
       ENV{PATH}:
-        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
-        - "C:\\WINDOWS\\system32"
-        - "C:\\WINDOWS"
-        - "C:\\WINDOWS\\System32\\Wbem"
-        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
-        - "C:\\WINDOWS\\System32\\OpenSSH\\"
-        - "C:\\Program Files\\cursor\\resources\\app\\bin"
-        - "C:\\ProgramData\\chocolatey\\bin"
-        - "C:\\Program Files\\Git\\cmd"
-        - "%NVM_HOME%"
-        - "%NVM_SYMLINK%"
-        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
-        - "C:\\Program Files\\Bandizip\\"
-        - "C:\\Program Files\\CMake\\bin"
-        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
-        - "C:\\Users\\freex\\.cargo\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
-        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\nvm"
-        - "C:\\nvm4w\\nodejs"
-        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
   -
     kind: "find-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineRCCompiler.cmake:40 (find_program)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/Platform/Windows-MSVC.cmake:580 (enable_language)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/Platform/Windows-MSVC.cmake:553 (__windows_compiler_msvc_enable_rc)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/Platform/Windows-MSVC-CXX.cmake:6 (__windows_compiler_msvc)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeCXXInformation.cmake:48 (include)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
       - "CMakeLists.txt:4 (project)"
     mode: "program"
-    variable: "CMAKE_RC_COMPILER"
-    description: "RC compiler"
+    variable: "CMAKE_RANLIB"
+    description: "Path to a program."
     settings:
-      SearchFramework: "NEVER"
-      SearchAppBundle: "NEVER"
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "ranlib"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    found: "/usr/bin/ranlib"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_STRIP"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "strip"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    found: "/usr/bin/strip"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_LINKER"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "ld"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    found: "/usr/bin/ld"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_NM"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "nm"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    found: "/usr/bin/nm"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_OBJDUMP"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "objdump"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    found: "/usr/bin/objdump"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_OBJCOPY"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "objcopy"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    searched_directories:
+      - "/usr/bin/objcopy"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/objcopy"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/objcopy"
+      - "/Users/sjkim1127/.pyenv/shims/objcopy"
+      - "/opt/homebrew/bin/objcopy"
+      - "/opt/homebrew/sbin/objcopy"
+      - "/usr/local/bin/objcopy"
+      - "/System/Cryptexes/App/usr/bin/objcopy"
+      - "/bin/objcopy"
+      - "/usr/sbin/objcopy"
+      - "/sbin/objcopy"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/objcopy"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/objcopy"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/objcopy"
+      - "/opt/pmk/env/global/bin/objcopy"
+      - "/usr/local/share/dotnet/objcopy"
+      - "/Users/sjkim1127/.dotnet/tools/objcopy"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/objcopy"
+      - "/Users/sjkim1127/.cargo/bin/objcopy"
+      - "/Users/sjkim1127/.orbstack/bin/objcopy"
+    found: false
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_READELF"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "readelf"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    searched_directories:
+      - "/usr/bin/readelf"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/readelf"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/readelf"
+      - "/Users/sjkim1127/.pyenv/shims/readelf"
+      - "/opt/homebrew/bin/readelf"
+      - "/opt/homebrew/sbin/readelf"
+      - "/usr/local/bin/readelf"
+      - "/System/Cryptexes/App/usr/bin/readelf"
+      - "/bin/readelf"
+      - "/usr/sbin/readelf"
+      - "/sbin/readelf"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/readelf"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/readelf"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/readelf"
+      - "/opt/pmk/env/global/bin/readelf"
+      - "/usr/local/share/dotnet/readelf"
+      - "/Users/sjkim1127/.dotnet/tools/readelf"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/readelf"
+      - "/Users/sjkim1127/.cargo/bin/readelf"
+      - "/Users/sjkim1127/.orbstack/bin/readelf"
+    found: false
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_DLLTOOL"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "dlltool"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    searched_directories:
+      - "/usr/bin/dlltool"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/dlltool"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/dlltool"
+      - "/Users/sjkim1127/.pyenv/shims/dlltool"
+      - "/opt/homebrew/bin/dlltool"
+      - "/opt/homebrew/sbin/dlltool"
+      - "/usr/local/bin/dlltool"
+      - "/System/Cryptexes/App/usr/bin/dlltool"
+      - "/bin/dlltool"
+      - "/usr/sbin/dlltool"
+      - "/sbin/dlltool"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/dlltool"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/dlltool"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/dlltool"
+      - "/opt/pmk/env/global/bin/dlltool"
+      - "/usr/local/share/dotnet/dlltool"
+      - "/Users/sjkim1127/.dotnet/tools/dlltool"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/dlltool"
+      - "/Users/sjkim1127/.cargo/bin/dlltool"
+      - "/Users/sjkim1127/.orbstack/bin/dlltool"
+    found: false
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_ADDR2LINE"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "addr2line"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    searched_directories:
+      - "/usr/bin/addr2line"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/addr2line"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/addr2line"
+      - "/Users/sjkim1127/.pyenv/shims/addr2line"
+      - "/opt/homebrew/bin/addr2line"
+      - "/opt/homebrew/sbin/addr2line"
+      - "/usr/local/bin/addr2line"
+      - "/System/Cryptexes/App/usr/bin/addr2line"
+      - "/bin/addr2line"
+      - "/usr/sbin/addr2line"
+      - "/sbin/addr2line"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/addr2line"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/addr2line"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/addr2line"
+      - "/opt/pmk/env/global/bin/addr2line"
+      - "/usr/local/share/dotnet/addr2line"
+      - "/Users/sjkim1127/.dotnet/tools/addr2line"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/addr2line"
+      - "/Users/sjkim1127/.cargo/bin/addr2line"
+      - "/Users/sjkim1127/.orbstack/bin/addr2line"
+    found: false
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_TAPI"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "tapi"
+    candidate_directories:
+      - "/usr/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+    searched_directories:
+      - "/usr/bin/tapi"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/tapi"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/tapi"
+      - "/Users/sjkim1127/.pyenv/shims/tapi"
+      - "/opt/homebrew/bin/tapi"
+      - "/opt/homebrew/sbin/tapi"
+      - "/usr/local/bin/tapi"
+      - "/System/Cryptexes/App/usr/bin/tapi"
+      - "/bin/tapi"
+      - "/usr/sbin/tapi"
+      - "/sbin/tapi"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/tapi"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/tapi"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/tapi"
+      - "/opt/pmk/env/global/bin/tapi"
+      - "/usr/local/share/dotnet/tapi"
+      - "/Users/sjkim1127/.dotnet/tools/tapi"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/tapi"
+      - "/Users/sjkim1127/.cargo/bin/tapi"
+      - "/Users/sjkim1127/.orbstack/bin/tapi"
+    found: false
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/Platform/Darwin.cmake:76 (find_program)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeSystemSpecificInformation.cmake:32 (include)"
+      - "CMakeLists.txt:4 (project)"
+    mode: "program"
+    variable: "CMAKE_INSTALL_NAME_TOOL"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
       CMAKE_FIND_USE_CMAKE_PATH: true
       CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
       CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
       CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
       CMAKE_FIND_USE_INSTALL_PREFIX: true
     names:
-      - "rc"
+      - "install_name_tool"
     candidate_directories:
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/"
-      - "C:/Windows/System32/"
-      - "C:/Windows/"
-      - "C:/Windows/System32/wbem/"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
-      - "C:/Windows/System32/OpenSSH/"
-      - "C:/Program Files/cursor/resources/app/bin/"
-      - "C:/ProgramData/chocolatey/bin/"
-      - "C:/Program Files/Git/cmd/"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/"
-      - "C:/Program Files/Docker/Docker/resources/bin/"
-      - "C:/Program Files/Bandizip/"
-      - "C:/Program Files/CMake/bin/"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/"
-      - "C:/Users/freex/.cargo/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/"
-      - "C:/Users/freex/AppData/Local/nvm/"
-      - "C:/nvm4w/nodejs/"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/"
-      - "C:/Program Files/bin/"
-      - "C:/Program Files/sbin/"
-      - "C:/Program Files/"
-      - "C:/Program Files (x86)/bin/"
-      - "C:/Program Files (x86)/sbin/"
-      - "C:/Program Files (x86)/"
-      - "C:/Program Files/CMake/bin/"
-      - "C:/Program Files/CMake/sbin/"
-      - "C:/Program Files/CMake/"
-      - "C:/Program Files (x86)/ghidra_decompiler/bin/"
-      - "C:/Program Files (x86)/ghidra_decompiler/sbin/"
-      - "C:/Program Files (x86)/ghidra_decompiler/"
+      - "/opt/homebrew/opt/zlib/bin/"
+      - "/opt/homebrew/opt/zlib/sbin/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
     searched_directories:
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/rc.com"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/rc.exe"
-      - "C:/Program Files/Common Files/Oracle/Java/javapath/rc"
-      - "C:/Windows/System32/rc.com"
-      - "C:/Windows/System32/rc.exe"
-      - "C:/Windows/System32/rc"
-      - "C:/Windows/rc.com"
-      - "C:/Windows/rc.exe"
-      - "C:/Windows/rc"
-      - "C:/Windows/System32/wbem/rc.com"
-      - "C:/Windows/System32/wbem/rc.exe"
-      - "C:/Windows/System32/wbem/rc"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc.com"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc.exe"
-      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc"
-      - "C:/Windows/System32/OpenSSH/rc.com"
-      - "C:/Windows/System32/OpenSSH/rc.exe"
-      - "C:/Windows/System32/OpenSSH/rc"
-      - "C:/Program Files/cursor/resources/app/bin/rc.com"
-      - "C:/Program Files/cursor/resources/app/bin/rc.exe"
-      - "C:/Program Files/cursor/resources/app/bin/rc"
-      - "C:/ProgramData/chocolatey/bin/rc.com"
-      - "C:/ProgramData/chocolatey/bin/rc.exe"
-      - "C:/ProgramData/chocolatey/bin/rc"
-      - "C:/Program Files/Git/cmd/rc.com"
-      - "C:/Program Files/Git/cmd/rc.exe"
-      - "C:/Program Files/Git/cmd/rc"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/rc.com"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/rc.exe"
-      - "F:/Fission/ghidra_decompiler/%NVM_HOME%/rc"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/rc.com"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/rc.exe"
-      - "F:/Fission/ghidra_decompiler/%NVM_SYMLINK%/rc"
-      - "C:/Program Files/Docker/Docker/resources/bin/rc.com"
-      - "C:/Program Files/Docker/Docker/resources/bin/rc.exe"
-      - "C:/Program Files/Docker/Docker/resources/bin/rc"
-      - "C:/Program Files/Bandizip/rc.com"
-      - "C:/Program Files/Bandizip/rc.exe"
-      - "C:/Program Files/Bandizip/rc"
-      - "C:/Program Files/CMake/bin/rc.com"
-      - "C:/Program Files/CMake/bin/rc.exe"
-      - "C:/Program Files/CMake/bin/rc"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/rc.com"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/rc.exe"
-      - "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/rc"
-      - "C:/Users/freex/.cargo/bin/rc.com"
-      - "C:/Users/freex/.cargo/bin/rc.exe"
-      - "C:/Users/freex/.cargo/bin/rc"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/rc.com"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/rc.exe"
-      - "C:/Users/freex/.pyenv/pyenv-win/bin/rc"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/rc.com"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/rc.exe"
-      - "C:/Users/freex/.pyenv/pyenv-win/shims/rc"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/rc.com"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/rc.exe"
-      - "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/rc"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/rc.com"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/rc.exe"
-      - "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/bin/rc"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/rc.com"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/rc.exe"
-      - "C:/Users/freex/AppData/Local/Programs/Antigravity/bin/rc"
-      - "C:/Users/freex/AppData/Local/nvm/rc.com"
-      - "C:/Users/freex/AppData/Local/nvm/rc.exe"
-      - "C:/Users/freex/AppData/Local/nvm/rc"
-      - "C:/nvm4w/nodejs/rc.com"
-      - "C:/nvm4w/nodejs/rc.exe"
-      - "C:/nvm4w/nodejs/rc"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/rc.com"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/rc.exe"
-      - "C:/Users/freex/AppData/Roaming/Python/Scripts/rc"
-      - "C:/Program Files/bin/rc.com"
-      - "C:/Program Files/bin/rc.exe"
-      - "C:/Program Files/bin/rc"
-      - "C:/Program Files/sbin/rc.com"
-      - "C:/Program Files/sbin/rc.exe"
-      - "C:/Program Files/sbin/rc"
-      - "C:/Program Files/rc.com"
-      - "C:/Program Files/rc.exe"
-      - "C:/Program Files/rc"
-      - "C:/Program Files (x86)/bin/rc.com"
-      - "C:/Program Files (x86)/bin/rc.exe"
-      - "C:/Program Files (x86)/bin/rc"
-      - "C:/Program Files (x86)/sbin/rc.com"
-      - "C:/Program Files (x86)/sbin/rc.exe"
-      - "C:/Program Files (x86)/sbin/rc"
-      - "C:/Program Files (x86)/rc.com"
-      - "C:/Program Files (x86)/rc.exe"
-      - "C:/Program Files (x86)/rc"
-      - "C:/Program Files/CMake/bin/rc.com"
-      - "C:/Program Files/CMake/bin/rc.exe"
-      - "C:/Program Files/CMake/bin/rc"
-      - "C:/Program Files/CMake/sbin/rc.com"
-      - "C:/Program Files/CMake/sbin/rc.exe"
-      - "C:/Program Files/CMake/sbin/rc"
-      - "C:/Program Files/CMake/rc.com"
-      - "C:/Program Files/CMake/rc.exe"
-      - "C:/Program Files/CMake/rc"
-      - "C:/Program Files (x86)/ghidra_decompiler/bin/rc.com"
-      - "C:/Program Files (x86)/ghidra_decompiler/bin/rc.exe"
-      - "C:/Program Files (x86)/ghidra_decompiler/bin/rc"
-      - "C:/Program Files (x86)/ghidra_decompiler/sbin/rc.com"
-      - "C:/Program Files (x86)/ghidra_decompiler/sbin/rc.exe"
-      - "C:/Program Files (x86)/ghidra_decompiler/sbin/rc"
-      - "C:/Program Files (x86)/ghidra_decompiler/rc.com"
-      - "C:/Program Files (x86)/ghidra_decompiler/rc.exe"
-      - "C:/Program Files (x86)/ghidra_decompiler/rc"
-    found: false
+      - "/opt/homebrew/opt/zlib/bin/install_name_tool"
+      - "/opt/homebrew/opt/zlib/sbin/install_name_tool"
+      - "/opt/homebrew/opt/zlib/install_name_tool"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/install_name_tool"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/install_name_tool"
+      - "/Users/sjkim1127/.pyenv/shims/install_name_tool"
+      - "/opt/homebrew/bin/install_name_tool"
+      - "/opt/homebrew/sbin/install_name_tool"
+      - "/usr/local/bin/install_name_tool"
+      - "/System/Cryptexes/App/usr/bin/install_name_tool"
+    found: "/usr/bin/install_name_tool"
     search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
       ENV{PATH}:
-        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
-        - "C:\\WINDOWS\\system32"
-        - "C:\\WINDOWS"
-        - "C:\\WINDOWS\\System32\\Wbem"
-        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
-        - "C:\\WINDOWS\\System32\\OpenSSH\\"
-        - "C:\\Program Files\\cursor\\resources\\app\\bin"
-        - "C:\\ProgramData\\chocolatey\\bin"
-        - "C:\\Program Files\\Git\\cmd"
-        - "%NVM_HOME%"
-        - "%NVM_SYMLINK%"
-        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
-        - "C:\\Program Files\\Bandizip\\"
-        - "C:\\Program Files\\CMake\\bin"
-        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
-        - "C:\\Users\\freex\\.cargo\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
-        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\nvm"
-        - "C:\\nvm4w\\nodejs"
-        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
-      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/ghidra_decompiler"
-      CMAKE_SYSTEM_PREFIX_PATH:
-        - "C:/Program Files"
-        - "C:/Program Files (x86)"
-        - "C:/Program Files/CMake"
-        - "C:/Program Files (x86)/ghidra_decompiler"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
   -
     kind: "try_compile-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
       - "CMakeLists.txt:4 (project)"
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp"
-      binary: "F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp"
+      source: "/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-N8FBc1"
+      binary: "/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-N8FBc1"
     cmakeVariables:
-      CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /GR /EHsc"
-      CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
       CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
-      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: ""
     buildResult:
       variable: "CMAKE_CXX_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp'
+        Change Dir: '/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-N8FBc1'
         
-        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_84c47.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
-        msbuild 踰꾩쟾 17.14.23+b0019275e(.NET Framework??
-        鍮뚮뱶 ?쒖옉: 2025-12-20 ?ㅼ쟾 12:26:33
-        
-        1 ?몃뱶??"F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\cmTC_84c47.vcxproj" ?꾨줈?앺듃(湲곕낯 ?\xc2\x80???낅땲??
-        PrepareForBuild:
-          援ъ“??異쒕젰???ъ슜?????덉뒿?덈떎. 而댄뙆?쇰윭 吏꾨떒???쒖떇?\xc2\x80 ?ㅻ쪟 怨꾩링 援ъ“瑜?諛섏쁺?⑸땲?? ?먯꽭???댁슜?\xc2\x80 https://aka.ms/cpp/structured-output??李몄“?섏꽭??
-          "F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\Debug\\" ?붾젆?곕━瑜?留뚮뱾怨??덉뒿?덈떎.
-          "cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\" ?붾젆?곕━瑜?留뚮뱾怨??덉뒿?덈떎.
-        InitializeBuildStatus:
-          "AlwaysCreate"??媛\xc2\x80) 吏\xc2\x80?뺣릺?덇린 ?뚮Ц??"cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\unsuccessfulbuild"??瑜? 留뚮뱾怨??덉뒿?덈떎.
-          "cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\unsuccessfulbuild"???곌껐(touching)?섍퀬 ?덉뒿?덈떎.
-        ClCompile:
-          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /GR /Fo"cmTC_84c47.dir\\Debug\\\\" /Fd"cmTC_84c47.dir\\Debug\\vc143.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCXXCompilerABI.cpp"
-          Microsoft (R) C/C++ 理쒖쟻??而댄뙆?쇰윭 踰꾩쟾 19.44.35222(x64)
-          Copyright (c) Microsoft Corporation. All rights reserved.
-          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /GR /Fo"cmTC_84c47.dir\\Debug\\\\" /Fd"cmTC_84c47.dir\\Debug\\vc143.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCXXCompilerABI.cpp"
-          CMakeCXXCompilerABI.cpp
-        Link:
-          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\Debug\\cmTC_84c47.exe" /INCREMENTAL /ILK:"cmTC_84c47.dir\\Debug\\cmTC_84c47.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp/Debug/cmTC_84c47.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"F:/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-w0v2pp/Debug/cmTC_84c47.lib" /MACHINE:X64  /machine:x64 cmTC_84c47.dir\\Debug\\CMakeCXXCompilerABI.obj
-          cmTC_84c47.vcxproj -> F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\Debug\\cmTC_84c47.exe
-        FinalizeBuildStatus:
-          "cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\unsuccessfulbuild" ?뚯씪????젣?섍퀬 ?덉뒿?덈떎.
-          "cmTC_84c47.dir\\Debug\\cmTC_84c47.tlog\\cmTC_84c47.lastbuildstate"???곌껐(touching)?섍퀬 ?덉뒿?덈떎.
-        "F:\\Fission\\ghidra_decompiler\\build\\CMakeFiles\\CMakeScratch\\TryCompile-w0v2pp\\cmTC_84c47.vcxproj" ?꾨줈?앺듃瑜?鍮뚮뱶?덉뒿?덈떎(湲곕낯 ?\xc2\x80??.
-        
-        鍮뚮뱶?덉뒿?덈떎.
-            寃쎄퀬 0媛?
-            ?ㅻ쪟 0媛?
-        
-        寃쎄낵 ?쒓컙: 00:00:00.53
+        Run Build Command(s): /opt/homebrew/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_228fa/fast
+        /Library/Developer/CommandLineTools/usr/bin/make  -f CMakeFiles/cmTC_228fa.dir/build.make CMakeFiles/cmTC_228fa.dir/build
+        Building CXX object CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/c++   -arch arm64   -v -Wl,-v -MD -MT CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -c /opt/homebrew/share/cmake/Modules/CMakeCXXCompilerABI.cpp
+        Apple clang version 17.0.0 (clang-1700.4.4.1)
+        Target: arm64-apple-darwin25.1.0
+        Thread model: posix
+        InstalledDir: /Library/Developer/CommandLineTools/usr/bin
+        clang++: warning: -Wl,-v: 'linker' input unused [-Wunused-command-line-argument]
+        ignoring nonexistent directory "/Library/Developer/CommandLineTools/usr/bin/../include/c++/v1"
+         "/Library/Developer/CommandLineTools/usr/bin/clang" -cc1 -triple arm64-apple-macosx26.0.0 -Wundef-prefix=TARGET_OS_ -Wdeprecated-objc-isa-usage -Werror=deprecated-objc-isa-usage -Werror=implicit-function-declaration -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -mframe-pointer=non-leaf -fno-strict-return -ffp-contract=on -fno-rounding-math -funwind-tables=1 -fobjc-msgsend-selector-stubs -target-sdk-version=26.1 -fvisibility-inlines-hidden-static-local-var -fdefine-target-os-macros -fno-assume-unique-vtables -fno-modulemap-allow-subdirectory-search -target-cpu apple-m1 -target-feature +zcm -target-feature +zcz -target-feature +v8.5a -target-feature +aes -target-feature +altnzcv -target-feature +ccdp -target-feature +complxnum -target-feature +crc -target-feature +dotprod -target-feature +fp-armv8 -target-feature +fp16fml -target-feature +fptoint -target-feature +fullfp16 -target-feature +jsconv -target-feature +lse -target-feature +neon -target-feature +pauth -target-feature +perfmon -target-feature +predres -target-feature +ras -target-feature +rcpc -target-feature +rdm -target-feature +sb -target-feature +sha2 -target-feature +sha3 -target-feature +specrestrict -target-feature +ssbs -target-abi darwinpcs -debugger-tuning=lldb -fdebug-compilation-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-N8FBc1 -target-linker-version 1230.1 -v -fcoverage-compilation-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-N8FBc1 -resource-dir /Library/Developer/CommandLineTools/usr/lib/clang/17 -dependency-file CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o.d -skip-unused-modulemap-deps -MT CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -I/usr/local/include -internal-isystem /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1 -internal-isystem /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/local/include -internal-isystem /Library/Developer/CommandLineTools/usr/lib/clang/17/include -internal-externc-isystem /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include -internal-externc-isystem /Library/Developer/CommandLineTools/usr/include -internal-iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks -internal-iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/SubFrameworks -internal-iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks -Wno-reorder-init-list -Wno-implicit-int-float-conversion -Wno-c99-designator -Wno-final-dtor-non-final-class -Wno-extra-semi-stmt -Wno-misleading-indentation -Wno-quoted-include-in-framework-header -Wno-implicit-fallthrough -Wno-enum-enum-conversion -Wno-enum-float-conversion -Wno-elaborated-enum-base -fdeprecated-macro -ferror-limit 19 -stack-protector 1 -fstack-check -mdarwin-stkchk-strong-link -fblocks -fencode-extended-block-signature -fregister-global-dtors-with-atexit -fgnuc-version=4.2.1 -fno-cxx-modules -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -fmax-type-align=16 -fcommon -clang-vendor-feature=+disableNonDependentMemberExprInCurrentInstantiation -fno-odr-hash-protocols -clang-vendor-feature=+enableAggressiveVLAFolding -clang-vendor-feature=+revert09abecef7bbf -clang-vendor-feature=+thisNoAlignAttr -clang-vendor-feature=+thisNoNullAttr -clang-vendor-feature=+disableAtImportPrivateFrameworkInImplementationError -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -x c++ /opt/homebrew/share/cmake/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 17.0.0 (clang-1700.4.4.1) default target arm64-apple-darwin25.1.0
+        ignoring nonexistent directory "/usr/local/include"
+        ignoring nonexistent directory "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/local/include"
+        ignoring nonexistent directory "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1
+         /Library/Developer/CommandLineTools/usr/lib/clang/17/include
+         /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include
+         /Library/Developer/CommandLineTools/usr/include
+         /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks (framework directory)
+         /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/SubFrameworks (framework directory)
+        End of search list.
+        Linking CXX executable cmTC_228fa
+        /opt/homebrew/bin/cmake -E cmake_link_script CMakeFiles/cmTC_228fa.dir/link.txt --verbose=1
+        Apple clang version 17.0.0 (clang-1700.4.4.1)
+        Target: arm64-apple-darwin25.1.0
+        Thread model: posix
+        InstalledDir: /Library/Developer/CommandLineTools/usr/bin
+         "/Library/Developer/CommandLineTools/usr/bin/ld" -demangle -lto_library /Library/Developer/CommandLineTools/usr/lib/libLTO.dylib -dynamic -arch arm64 -platform_version macos 26.0.0 26.1 -syslibroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -mllvm -enable-linkonceodr-outlining -o cmTC_228fa -L/usr/local/lib -search_paths_first -headerpad_max_install_names -v CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -lc++ -lSystem /Library/Developer/CommandLineTools/usr/lib/clang/17/lib/darwin/libclang_rt.osx.a
+        @(#)PROGRAM:ld PROJECT:ld-1230.1
+        BUILD 16:18:08 Oct 17 2025
+        configured to support archs: armv6 armv7 armv7s arm64 arm64e arm64_32 i386 x86_64 x86_64h armv6m armv7k armv7m armv7em armv8m.main armv8.1m.main
+        will use ld-classic for: armv6 armv7 armv7s i386 armv6m armv7k armv7m armv7em
+        LTO support using: LLVM version 17.0.0 (static support for 29, runtime is 29)
+        TAPI support using: Apple TAPI version 17.0.0 (tapi-1700.3.8)
+        Library search paths:
+        	/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib
+        	/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/swift
+        Framework search paths:
+        	/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks
+        /usr/bin/c++  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names  -v -Wl,-v CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_228fa
         
       exitCode: 0
   -
     kind: "message-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:122 (message)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
       - "CMakeLists.txt:4 (project)"
     message: |
-      Parsed CXX implicit link information:
-        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
-        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
-        linker tool for 'CXX': C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe
-        implicit libs: []
-        implicit objs: []
-        implicit dirs: []
-        implicit fwks: []
+      Effective list of requested architectures (possibly empty)  : ""
+      Effective list of architectures found in the ABI info binary: "arm64"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:217 (message)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:4 (project)"
+    message: |
+      Parsed CXX implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1]
+          add: [/Library/Developer/CommandLineTools/usr/lib/clang/17/include]
+          add: [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include]
+          add: [/Library/Developer/CommandLineTools/usr/include]
+        end of search list found
+        collapse include dir [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1] ==> [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1]
+        collapse include dir [/Library/Developer/CommandLineTools/usr/lib/clang/17/include] ==> [/Library/Developer/CommandLineTools/usr/lib/clang/17/include]
+        collapse include dir [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include] ==> [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include]
+        collapse include dir [/Library/Developer/CommandLineTools/usr/include] ==> [/Library/Developer/CommandLineTools/usr/include]
+        implicit include dirs: [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1;/Library/Developer/CommandLineTools/usr/lib/clang/17/include;/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include;/Library/Developer/CommandLineTools/usr/include]
       
       
   -
     kind: "message-v1"
     backtrace:
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
-      - "C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
       - "CMakeLists.txt:4 (project)"
     message: |
-      Running the CXX compiler's linker: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe" "-v"
-      Microsoft (R) Incremental Linker Version 14.44.35222.0
-      Copyright (C) Microsoft Corporation.  All rights reserved.
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)))("|,| |$)]
+        ignore line: [Change Dir: '/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-N8FBc1']
+        ignore line: []
+        ignore line: [Run Build Command(s): /opt/homebrew/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_228fa/fast]
+        ignore line: [/Library/Developer/CommandLineTools/usr/bin/make  -f CMakeFiles/cmTC_228fa.dir/build.make CMakeFiles/cmTC_228fa.dir/build]
+        ignore line: [Building CXX object CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/usr/bin/c++   -arch arm64   -v -Wl -v -MD -MT CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -c /opt/homebrew/share/cmake/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [Apple clang version 17.0.0 (clang-1700.4.4.1)]
+        ignore line: [Target: arm64-apple-darwin25.1.0]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: /Library/Developer/CommandLineTools/usr/bin]
+        ignore line: [clang++: warning: -Wl -v: 'linker' input unused [-Wunused-command-line-argument]]
+        ignore line: [ignoring nonexistent directory "/Library/Developer/CommandLineTools/usr/bin/../include/c++/v1"]
+        ignore line: [ "/Library/Developer/CommandLineTools/usr/bin/clang" -cc1 -triple arm64-apple-macosx26.0.0 -Wundef-prefix=TARGET_OS_ -Wdeprecated-objc-isa-usage -Werror=deprecated-objc-isa-usage -Werror=implicit-function-declaration -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -mframe-pointer=non-leaf -fno-strict-return -ffp-contract=on -fno-rounding-math -funwind-tables=1 -fobjc-msgsend-selector-stubs -target-sdk-version=26.1 -fvisibility-inlines-hidden-static-local-var -fdefine-target-os-macros -fno-assume-unique-vtables -fno-modulemap-allow-subdirectory-search -target-cpu apple-m1 -target-feature +zcm -target-feature +zcz -target-feature +v8.5a -target-feature +aes -target-feature +altnzcv -target-feature +ccdp -target-feature +complxnum -target-feature +crc -target-feature +dotprod -target-feature +fp-armv8 -target-feature +fp16fml -target-feature +fptoint -target-feature +fullfp16 -target-feature +jsconv -target-feature +lse -target-feature +neon -target-feature +pauth -target-feature +perfmon -target-feature +predres -target-feature +ras -target-feature +rcpc -target-feature +rdm -target-feature +sb -target-feature +sha2 -target-feature +sha3 -target-feature +specrestrict -target-feature +ssbs -target-abi darwinpcs -debugger-tuning=lldb -fdebug-compilation-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-N8FBc1 -target-linker-version 1230.1 -v -fcoverage-compilation-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles/CMakeScratch/TryCompile-N8FBc1 -resource-dir /Library/Developer/CommandLineTools/usr/lib/clang/17 -dependency-file CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o.d -skip-unused-modulemap-deps -MT CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -I/usr/local/include -internal-isystem /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1 -internal-isystem /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/local/include -internal-isystem /Library/Developer/CommandLineTools/usr/lib/clang/17/include -internal-externc-isystem /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include -internal-externc-isystem /Library/Developer/CommandLineTools/usr/include -internal-iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks -internal-iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/SubFrameworks -internal-iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks -Wno-reorder-init-list -Wno-implicit-int-float-conversion -Wno-c99-designator -Wno-final-dtor-non-final-class -Wno-extra-semi-stmt -Wno-misleading-indentation -Wno-quoted-include-in-framework-header -Wno-implicit-fallthrough -Wno-enum-enum-conversion -Wno-enum-float-conversion -Wno-elaborated-enum-base -fdeprecated-macro -ferror-limit 19 -stack-protector 1 -fstack-check -mdarwin-stkchk-strong-link -fblocks -fencode-extended-block-signature -fregister-global-dtors-with-atexit -fgnuc-version=4.2.1 -fno-cxx-modules -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -fmax-type-align=16 -fcommon -clang-vendor-feature=+disableNonDependentMemberExprInCurrentInstantiation -fno-odr-hash-protocols -clang-vendor-feature=+enableAggressiveVLAFolding -clang-vendor-feature=+revert09abecef7bbf -clang-vendor-feature=+thisNoAlignAttr -clang-vendor-feature=+thisNoNullAttr -clang-vendor-feature=+disableAtImportPrivateFrameworkInImplementationError -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -x c++ /opt/homebrew/share/cmake/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [clang -cc1 version 17.0.0 (clang-1700.4.4.1) default target arm64-apple-darwin25.1.0]
+        ignore line: [ignoring nonexistent directory "/usr/local/include"]
+        ignore line: [ignoring nonexistent directory "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/local/include"]
+        ignore line: [ignoring nonexistent directory "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1]
+        ignore line: [ /Library/Developer/CommandLineTools/usr/lib/clang/17/include]
+        ignore line: [ /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include]
+        ignore line: [ /Library/Developer/CommandLineTools/usr/include]
+        ignore line: [ /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks (framework directory)]
+        ignore line: [ /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/SubFrameworks (framework directory)]
+        ignore line: [End of search list.]
+        ignore line: [Linking CXX executable cmTC_228fa]
+        ignore line: [/opt/homebrew/bin/cmake -E cmake_link_script CMakeFiles/cmTC_228fa.dir/link.txt --verbose=1]
+        ignore line: [Apple clang version 17.0.0 (clang-1700.4.4.1)]
+        ignore line: [Target: arm64-apple-darwin25.1.0]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: /Library/Developer/CommandLineTools/usr/bin]
+        link line: [ "/Library/Developer/CommandLineTools/usr/bin/ld" -demangle -lto_library /Library/Developer/CommandLineTools/usr/lib/libLTO.dylib -dynamic -arch arm64 -platform_version macos 26.0.0 26.1 -syslibroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk -mllvm -enable-linkonceodr-outlining -o cmTC_228fa -L/usr/local/lib -search_paths_first -headerpad_max_install_names -v CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o -lc++ -lSystem /Library/Developer/CommandLineTools/usr/lib/clang/17/lib/darwin/libclang_rt.osx.a]
+          arg [/Library/Developer/CommandLineTools/usr/bin/ld] ==> ignore
+          arg [-demangle] ==> ignore
+          arg [-lto_library] ==> ignore, skip following value
+          arg [/Library/Developer/CommandLineTools/usr/lib/libLTO.dylib] ==> skip value of -lto_library
+          arg [-dynamic] ==> ignore
+          arg [-arch] ==> ignore
+          arg [arm64] ==> ignore
+          arg [-platform_version] ==> ignore
+          arg [macos] ==> ignore
+          arg [26.0.0] ==> ignore
+          arg [26.1] ==> ignore
+          arg [-syslibroot] ==> ignore
+          arg [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk] ==> ignore
+          arg [-mllvm] ==> ignore
+          arg [-enable-linkonceodr-outlining] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_228fa] ==> ignore
+          arg [-L/usr/local/lib] ==> dir [/usr/local/lib]
+          arg [-search_paths_first] ==> ignore
+          arg [-headerpad_max_install_names] ==> ignore
+          arg [-v] ==> ignore
+          arg [CMakeFiles/cmTC_228fa.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+          arg [-lc++] ==> lib [c++]
+          arg [-lSystem] ==> lib [System]
+          arg [/Library/Developer/CommandLineTools/usr/lib/clang/17/lib/darwin/libclang_rt.osx.a] ==> lib [/Library/Developer/CommandLineTools/usr/lib/clang/17/lib/darwin/libclang_rt.osx.a]
+        linker tool for 'CXX': /Library/Developer/CommandLineTools/usr/bin/ld
+        Library search paths: [;/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib;/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/swift]
+        Framework search paths: [;/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks]
+        remove lib [System]
+        remove lib [/Library/Developer/CommandLineTools/usr/lib/clang/17/lib/darwin/libclang_rt.osx.a]
+        collapse library dir [/usr/local/lib] ==> [/usr/local/lib]
+        collapse library dir [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib] ==> [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib]
+        collapse library dir [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/swift] ==> [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/swift]
+        collapse framework dir [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks] ==> [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks]
+        implicit libs: [c++]
+        implicit objs: []
+        implicit dirs: [/usr/local/lib;/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib;/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/swift]
+        implicit fwks: [/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks]
+      
+      
   -
-    kind: "find_package-v1"
+    kind: "message-v1"
     backtrace:
+      - "/opt/homebrew/share/cmake/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "/opt/homebrew/share/cmake/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:4 (project)"
+    message: |
+      Running the CXX compiler's linker: "/Library/Developer/CommandLineTools/usr/bin/ld" "-v"
+      @(#)PROGRAM:ld PROJECT:ld-1230.1
+      BUILD 16:18:08 Oct 17 2025
+      configured to support archs: armv6 armv7 armv7s arm64 arm64e arm64_32 i386 x86_64 x86_64h armv6m armv7k armv7m armv7em armv8m.main armv8.1m.main
+      will use ld-classic for: armv6 armv7 armv7s i386 armv6m armv7k armv7m armv7em
+      LTO support using: LLVM version 17.0.0 (static support for 29, runtime is 29)
+      TAPI support using: Apple TAPI version 17.0.0 (tapi-1700.3.8)
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/FindZLIB.cmake:165 (find_path)"
       - "CMakeLists.txt:20 (find_package)"
-    name: "gRPC"
-    configs:
-      -
-        filename: "gRPCConfig.cmake"
-        kind: "cmake"
-      -
-        filename: "grpc-config.cmake"
-        kind: "cmake"
-    version_request:
-      exact: false
+    mode: "path"
+    variable: "ZLIB_INCLUDE_DIR"
+    description: "Path to a file."
     settings:
-      required: "required_explicit"
-      quiet: false
-      global: false
-      policy_scope: true
-      bypass_provider: false
-      names:
-        - "gRPC"
-      path_suffixes:
-        - ""
-      paths:
-        CMAKE_FIND_USE_CMAKE_PATH: true
-        CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
-        CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
-        CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
-        CMAKE_FIND_USE_INSTALL_PREFIX: true
-        CMAKE_FIND_USE_PACKAGE_ROOT_PATH: true
-        CMAKE_FIND_USE_CMAKE_PACKAGE_REGISTRY: true
-        CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY: true
-        CMAKE_FIND_ROOT_PATH_MODE: "BOTH"
-    candidates:
-      -
-        path: "F:/Fission/ghidra_decompiler/build/CMakeFiles/pkgRedirects/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "F:/Fission/ghidra_decompiler/build/CMakeFiles/pkgRedirects/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/Common Files/Oracle/Java/javapath/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/Common Files/Oracle/Java/javapath/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/System32/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/System32/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/System32/wbem/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/System32/wbem/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/System32/WindowsPowerShell/v1.0/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/System32/WindowsPowerShell/v1.0/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/System32/OpenSSH/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Windows/System32/OpenSSH/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/cursor/resources/app/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/cursor/resources/app/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/ProgramData/chocolatey/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/ProgramData/chocolatey/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/Git/cmd/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/Git/cmd/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/Docker/Docker/resources/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/Docker/Docker/resources/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/Bandizip/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/Bandizip/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/CMake/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/CMake/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/.cargo/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/.cargo/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/.pyenv/pyenv-win/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/.pyenv/pyenv-win/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/.pyenv/pyenv-win/shims/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/.pyenv/pyenv-win/shims/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Local/Microsoft/WindowsApps/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Local/Programs/Microsoft VS Code/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Local/Programs/Antigravity/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Local/Programs/Antigravity/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Local/nvm/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Local/nvm/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/nvm4w/nodejs/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/nvm4w/nodejs/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Roaming/Python/Scripts/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Users/freex/AppData/Roaming/Python/Scripts/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/CMake/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files/CMake/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files (x86)/gRPCConfig.cmake"
-        mode: "config"
-        reason: "no_exist"
-      -
-        path: "C:/Program Files (x86)/grpc-config.cmake"
-        mode: "config"
-        reason: "no_exist"
-    found: null
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "zlib.h"
+    candidate_directories:
+      - "/opt/homebrew/opt/zlib/include/include/"
+      - "/opt/homebrew/opt/zlib/include/"
+      - "/opt/homebrew/opt/zlib/include/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/include/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/include/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/include/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/include/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/include/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/include/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/include/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/usr/bin/include/"
+      - "/usr/bin/"
+      - "/bin/include/"
+      - "/bin/"
+      - "/usr/sbin/include/"
+      - "/usr/sbin/"
+      - "/sbin/include/"
+      - "/sbin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/include/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/include/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/include/"
+      - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/opt/pmk/env/global/bin/include/"
+      - "/opt/pmk/env/global/bin/"
+      - "/usr/local/share/dotnet/include/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.dotnet/tools/include/"
+      - "/Users/sjkim1127/.dotnet/tools/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/include/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/include/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/include/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/include/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/opt/homebrew/include/include/"
+      - "/opt/homebrew/include/"
+      - "/opt/homebrew/include/"
+      - "/opt/homebrew/"
+      - "/usr/local/include/include/"
+      - "/usr/local/include/"
+      - "/usr/local/include/"
+      - "/usr/local/"
+      - "/usr/include/include/"
+      - "/usr/include/"
+      - "/usr/include/"
+      - "/usr/"
+      - "/include/include/"
+      - "/include/"
+      - "/usr/X11R6/include/include/"
+      - "/usr/X11R6/include/"
+      - "/usr/X11R6/include/"
+      - "/usr/X11R6/"
+      - "/usr/pkg/include/include/"
+      - "/usr/pkg/include/"
+      - "/usr/pkg/include/"
+      - "/usr/pkg/"
+      - "/opt/include/include/"
+      - "/opt/include/"
+      - "/opt/include/"
+      - "/opt/"
+      - "/sw/include/include/"
+      - "/sw/include/"
+      - "/sw/include/"
+      - "/sw/"
+      - "/opt/local/include/include/"
+      - "/opt/local/include/"
+      - "/opt/local/include/"
+      - "/opt/local/"
+      - "/usr/include/X11/include/"
+      - "/usr/include/X11/"
+      - "/Users/sjkim1127/Library/Frameworks/include/"
+      - "/Users/sjkim1127/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks/include/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Network/Library/Frameworks/include/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Network/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/include/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/include/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Frameworks/include/"
+      - "/Library/Frameworks/"
+      - "/Network/Library/Frameworks/include/"
+      - "/Network/Library/Frameworks/"
+      - "/System/Library/Frameworks/include/"
+      - "/System/Library/Frameworks/"
+      - "/zlib/include/"
+      - "/zlib/"
+    searched_directories:
+      - "/opt/homebrew/opt/zlib/include/include/zlib.h"
+    found: "/opt/homebrew/opt/zlib/include/"
     search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
       ENV{PATH}:
-        - "C:\\Program Files\\Common Files\\Oracle\\Java\\javapath"
-        - "C:\\WINDOWS\\system32"
-        - "C:\\WINDOWS"
-        - "C:\\WINDOWS\\System32\\Wbem"
-        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
-        - "C:\\WINDOWS\\System32\\OpenSSH\\"
-        - "C:\\Program Files\\cursor\\resources\\app\\bin"
-        - "C:\\ProgramData\\chocolatey\\bin"
-        - "C:\\Program Files\\Git\\cmd"
-        - "%NVM_HOME%"
-        - "%NVM_SYMLINK%"
-        - "C:\\Program Files\\Docker\\Docker\\resources\\bin"
-        - "C:\\Program Files\\Bandizip\\"
-        - "C:\\Program Files\\CMake\\bin"
-        - "C:\\Program Files (x86)\\Windows Kits\\10\\Windows Performance Toolkit\\"
-        - "C:\\Users\\freex\\.cargo\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\bin"
-        - "C:\\Users\\freex\\.pyenv\\pyenv-win\\shims"
-        - "C:\\Users\\freex\\AppData\\Local\\Microsoft\\WindowsApps"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\Programs\\Antigravity\\bin"
-        - "C:\\Users\\freex\\AppData\\Local\\nvm"
-        - "C:\\nvm4w\\nodejs"
-        - "C:\\Users\\freex\\AppData\\Roaming\\Python\\Scripts"
-      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/ghidra_decompiler"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
       CMAKE_SYSTEM_PREFIX_PATH:
-        - "C:/Program Files"
-        - "C:/Program Files (x86)"
-        - "C:/Program Files/CMake"
-        - "C:/Program Files (x86)/ghidra_decompiler"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr"
+        - "/opt/homebrew"
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/opt/homebrew"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+        - "/sw"
+        - "/opt/local"
+      CMAKE_SYSTEM_INCLUDE_PATH:
+        - "/usr/include/X11"
+      CMAKE_SYSTEM_FRAMEWORK_PATH:
+        - "~/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Network/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/Library/Frameworks"
+        - "/Library/Frameworks"
+        - "/Network/Library/Frameworks"
+        - "/System/Library/Frameworks"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/FindZLIB.cmake:195 (find_library)"
+      - "CMakeLists.txt:20 (find_package)"
+    mode: "library"
+    variable: "ZLIB_LIBRARY_RELEASE"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "z"
+      - "zlib"
+      - "zdll"
+      - "zlib1"
+      - "zlibstatic"
+      - "zlibwapi"
+      - "zlibvc"
+      - "zlibstat"
+    candidate_directories:
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/"
+      - "/usr/local/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/"
+      - "/opt/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+    found: "/opt/homebrew/opt/zlib/lib/libz.dylib"
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr"
+        - "/opt/homebrew"
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/opt/homebrew"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+        - "/sw"
+        - "/opt/local"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+      CMAKE_SYSTEM_FRAMEWORK_PATH:
+        - "~/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Network/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/Library/Frameworks"
+        - "/Library/Frameworks"
+        - "/Network/Library/Frameworks"
+        - "/System/Library/Frameworks"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/FindZLIB.cmake:196 (find_library)"
+      - "CMakeLists.txt:20 (find_package)"
+    mode: "library"
+    variable: "ZLIB_LIBRARY_DEBUG"
+    description: "Path to a library."
+    settings:
+      SearchFramework: "FIRST"
+      SearchAppBundle: "FIRST"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "zd"
+      - "zlibd"
+      - "zdlld"
+      - "zlibd1"
+      - "zlib1d"
+      - "zlibstaticd"
+      - "zlibwapid"
+      - "zlibvcd"
+      - "zlibstatd"
+    candidate_directories:
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/usr/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/"
+      - "/usr/local/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/"
+      - "/opt/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+    searched_directories:
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/lib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/opt/homebrew/opt/zlib/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.antigravity/antigravity/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/Users/sjkim1127/.pyenv/shims/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/bin/"
+      - "/opt/homebrew/sbin/"
+      - "/opt/homebrew/sbin/"
+      - "/opt/homebrew/sbin/"
+      - "/opt/homebrew/sbin/"
+      - "/opt/homebrew/sbin/"
+      - "/opt/homebrew/sbin/"
+      - "/opt/homebrew/sbin/"
+      - "/opt/homebrew/sbin/"
+      - "/opt/homebrew/sbin/"
+      - "/usr/local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/bin/"
+      - "/usr/local/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/System/Cryptexes/App/usr/bin/"
+      - "/usr/bin/"
+      - "/usr/bin/"
+      - "/usr/bin/"
+      - "/usr/bin/"
+      - "/usr/bin/"
+      - "/usr/bin/"
+      - "/usr/bin/"
+      - "/usr/bin/"
+      - "/usr/bin/"
+      - "/bin/"
+      - "/bin/"
+      - "/bin/"
+      - "/bin/"
+      - "/bin/"
+      - "/bin/"
+      - "/bin/"
+      - "/bin/"
+      - "/bin/"
+      - "/usr/sbin/"
+      - "/usr/sbin/"
+      - "/usr/sbin/"
+      - "/usr/sbin/"
+      - "/usr/sbin/"
+      - "/usr/sbin/"
+      - "/usr/sbin/"
+      - "/usr/sbin/"
+      - "/usr/sbin/"
+      - "/sbin/"
+      - "/sbin/"
+      - "/sbin/"
+      - "/sbin/"
+      - "/sbin/"
+      - "/sbin/"
+      - "/sbin/"
+      - "/sbin/"
+      - "/sbin/"
+      - "/usr/local/share/dotnet/"
+      - "/usr/local/share/dotnet/"
+      - "/usr/local/share/dotnet/"
+      - "/usr/local/share/dotnet/"
+      - "/usr/local/share/dotnet/"
+      - "/usr/local/share/dotnet/"
+      - "/usr/local/share/dotnet/"
+      - "/usr/local/share/dotnet/"
+      - "/usr/local/share/dotnet/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.sdkman/candidates/java/current/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.cargo/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Users/sjkim1127/.orbstack/bin/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/lib/"
+      - "/opt/homebrew/"
+      - "/opt/homebrew/"
+      - "/opt/homebrew/"
+      - "/opt/homebrew/"
+      - "/opt/homebrew/"
+      - "/opt/homebrew/"
+      - "/opt/homebrew/"
+      - "/opt/homebrew/"
+      - "/opt/homebrew/"
+      - "/usr/local/"
+      - "/usr/local/"
+      - "/usr/local/"
+      - "/usr/local/"
+      - "/usr/local/"
+      - "/usr/local/"
+      - "/usr/local/"
+      - "/usr/local/"
+      - "/usr/local/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/lib/"
+      - "/usr/"
+      - "/usr/"
+      - "/usr/"
+      - "/usr/"
+      - "/usr/"
+      - "/usr/"
+      - "/usr/"
+      - "/usr/"
+      - "/usr/"
+      - "/opt/"
+      - "/opt/"
+      - "/opt/"
+      - "/opt/"
+      - "/opt/"
+      - "/opt/"
+      - "/opt/"
+      - "/opt/"
+      - "/opt/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Developer/CommandLineTools/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+      - "/System/Library/Frameworks/"
+    found: false
+    search_context:
+      CMAKE_PREFIX_PATH:
+        - "/opt/homebrew/opt/zlib"
+      ENV{PATH}:
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.pyenv/shims"
+        - "/opt/homebrew/bin"
+        - "/opt/homebrew/sbin"
+        - "/usr/local/bin"
+        - "/System/Cryptexes/App/usr/bin"
+        - "/usr/bin"
+        - "/bin"
+        - "/usr/sbin"
+        - "/sbin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
+        - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/opt/pmk/env/global/bin"
+        - "/usr/local/share/dotnet"
+        - "~/.dotnet/tools"
+        - "/Users/sjkim1127/.antigravity/antigravity/bin"
+        - "/Users/sjkim1127/.nvm/versions/node/v24.11.1/bin"
+        - "/Users/sjkim1127/.sdkman/candidates/java/current/bin"
+        - "/Users/sjkim1127/.cargo/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+        - "/Users/sjkim1127/.orbstack/bin"
+      CMAKE_INSTALL_PREFIX: "/usr/local"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr"
+        - "/opt/homebrew"
+        - "/usr/local"
+        - "/usr"
+        - "/"
+        - "/opt/homebrew"
+        - "/usr/local"
+        - "/usr/X11R6"
+        - "/usr/pkg"
+        - "/opt"
+        - "/sw"
+        - "/opt/local"
+      CMAKE_SYSTEM_LIBRARY_PATH:
+        - "/usr/lib/X11"
+      CMAKE_SYSTEM_FRAMEWORK_PATH:
+        - "~/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/Network/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/Library/Frameworks"
+        - "/Library/Developer/CommandLineTools/Library/Frameworks"
+        - "/Library/Frameworks"
+        - "/Network/Library/Frameworks"
+        - "/System/Library/Frameworks"
 ...

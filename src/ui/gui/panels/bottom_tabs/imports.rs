@@ -7,7 +7,7 @@ use crate::ui::gui::theme::{catppuccin, code};
 
 /// Render imports tab content with virtual scrolling
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
-    let Some(ref binary) = state.loaded_binary else {
+    let Some(ref binary) = state.analysis.loaded_binary else {
         ui.vertical_centered(|ui| {
             ui.add_space(20.0);
             ui.label(egui::RichText::new("Load a binary to view imports")

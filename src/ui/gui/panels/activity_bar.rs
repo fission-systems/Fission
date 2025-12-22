@@ -36,7 +36,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
 }
 
 fn activity_button(ui: &mut egui::Ui, state: &mut AppState, activity: Activity, icon: &str, tooltip: &str) {
-    let is_active = state.active_activity == activity && state.sidebar_visible;
+    let is_active = state.ui.active_activity == activity && state.ui.sidebar_visible;
     
     let tint = if is_active {
         catppuccin::TEXT
@@ -60,11 +60,11 @@ fn activity_button(ui: &mut egui::Ui, state: &mut AppState, activity: Activity, 
     }
     
     if response.clicked() {
-        if state.active_activity == activity && state.sidebar_visible {
-            state.sidebar_visible = false;
+        if state.ui.active_activity == activity && state.ui.sidebar_visible {
+            state.ui.sidebar_visible = false;
         } else {
-            state.active_activity = activity;
-            state.sidebar_visible = true;
+            state.ui.active_activity = activity;
+            state.ui.sidebar_visible = true;
         }
     }
     

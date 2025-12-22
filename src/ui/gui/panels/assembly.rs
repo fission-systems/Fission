@@ -17,13 +17,13 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
     ui.horizontal(|ui| {
         ui.heading(egui::RichText::new("Assembly").color(catppuccin::LAVENDER));
         ui.separator();
-        ui.label(egui::RichText::new(format!("{} instructions", state.asm_instructions.len()))
+        ui.label(egui::RichText::new(format!("{} instructions", state.analysis.asm_instructions.len()))
             .color(catppuccin::SUBTEXT0)
             .small());
     });
     ui.separator();
 
-    if state.asm_instructions.is_empty() {
+    if state.analysis.asm_instructions.is_empty() {
         ui.vertical_centered(|ui| {
             ui.add_space(40.0);
             ui.label(egui::RichText::new("No disassembly available")
@@ -39,7 +39,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
 
     let available_height = ui.available_height();
     let row_height = 20.0;
-    let total_rows = state.asm_instructions.len();
+    let total_rows = state.analysis.asm_instructions.len();
 
     // Use TableBuilder for efficient virtual scrolling
     TableBuilder::new(ui)
@@ -77,7 +77,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
         .body(|body| {
             body.rows(row_height, total_rows, |mut row| {
                 let row_index = row.index();
-                let insn = &state.asm_instructions[row_index];
+                let insn = &state.analysis.asm_instructions[row_index];
                 
                 // Address column
                 row.col(|ui| {

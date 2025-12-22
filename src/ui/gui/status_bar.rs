@@ -11,7 +11,7 @@ pub fn render(ctx: &egui::Context, state: &AppState) {
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 // Debugger status indicator
-                let (debug_color, debug_icon, debug_text) = if state.is_debugging {
+                let (debug_color, debug_icon, debug_text) = if state.debug.is_debugging {
                     (catppuccin::GREEN, "▶", "Debugging")
                 } else {
                     (catppuccin::OVERLAY0, "■", "Idle")
@@ -21,7 +21,7 @@ pub fn render(ctx: &egui::Context, state: &AppState) {
 
                 // Mode indicator
                 ui.separator();
-                if state.dynamic_mode {
+                if state.ui.dynamic_mode {
                     ui.label(egui::RichText::new("● Dynamic").color(catppuccin::TEAL).small());
                 } else {
                     ui.label(egui::RichText::new("○ Static").color(catppuccin::OVERLAY0).small());
@@ -30,7 +30,7 @@ pub fn render(ctx: &egui::Context, state: &AppState) {
                 ui.separator();
 
                 // Loaded binary info
-                if let Some(ref binary) = state.loaded_binary {
+                if let Some(ref binary) = state.analysis.loaded_binary {
                     let arch = if binary.is_64bit { "x64" } else { "x86" };
                     ui.label(egui::RichText::new(format!("{} | {} | {} funcs", 
                         truncate_path(&binary.path, 30), arch, binary.functions.len()))
@@ -43,7 +43,7 @@ pub fn render(ctx: &egui::Context, state: &AppState) {
                     ui.label(egui::RichText::new("Fission v0.1.0")
                         .color(catppuccin::LAVENDER).small());
                     ui.separator();
-                    ui.label(egui::RichText::new(format!("Cache: {}", state.decompile_cache.len()))
+                    ui.label(egui::RichText::new(format!("Cache: {}", state.analysis.decompile_cache.len()))
                         .color(catppuccin::SUBTEXT0).small());
                 });
             });

@@ -21,9 +21,9 @@ pub fn process_messages(
 ) {
     while let Ok(msg) = rx.try_recv() {
         match msg {
-            AsyncMessage::BinaryLoaded(Ok(mut binary)) => {
-                // Discover internal functions from CALL instructions
-                binary.discover_internal_functions();
+            AsyncMessage::BinaryLoaded(Ok(binary)) => {
+                // Note: Internal function discovery now disabled for fast loading
+                // Can be triggered separately via "Analyze" button
                 
                 state.log(format!("[✓] Loaded: {}", binary.path));
                 state.log(format!("    {} {} | Entry: 0x{:x}", 
@@ -31,7 +31,7 @@ pub fn process_messages(
                     binary.format,
                     binary.entry_point));
                 state.log(format!("    {} functions found", binary.functions.len()));
-                state.loaded_binary = Some(binary);
+                state.analysis.loaded_binary = Some(binary);
                 file_ops::preload_server_binary(state, native_decompiler.clone());
             }
             AsyncMessage::BinaryLoaded(Err(e)) => {
@@ -42,8 +42,8 @@ pub fn process_messages(
                 state.log(format!("[✓] Decompiled 0x{:x} (cached)", address));
             }
             AsyncMessage::DecompileError { address: _, error } => {
-                state.decompiled_code = format!("// Error: {}", error);
-                state.decompiling = false;
+                state.analysis.decompiled_code = format!("// Error: {}", error);
+                state.analysis.decompiling = false;
                 state.log(format!("[✗] Decompile error: {}", error));
             }
             AsyncMessage::FileSelected(Some(path)) => {
@@ -87,7 +87,7 @@ pub fn process_command(
             state.log("  exit         : Quit Fission");
         }
         "funcs" | "functions" => {
-            if let Some(ref binary) = state.loaded_binary {
+            if let Some(ref binary) = state.analysis.loaded_binary {
                 let funcs: Vec<_> = binary.functions.iter()
                     .map(|f| (f.address, f.name.clone()))
                     .collect();

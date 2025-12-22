@@ -20,7 +20,7 @@ pub fn decompile_function(
     // Skip import functions
     if func.is_import {
         state.log(format!("[!] {} is an import function (no code to decompile)", func.name));
-        state.decompiled_code = format!(
+        state.analysis.decompiled_code = format!(
             "// {} is an imported function\n// Address: 0x{:x}\n// No code available - this is a stub pointing to external library",
             func.name, func.address
         );
@@ -29,22 +29,22 @@ pub fn decompile_function(
     
     // Check cache first
     let address = func.address;
-    if let Some(cached) = state.decompile_cache.get(&address) {
+    if let Some(cached) = state.analysis.decompile_cache.get(&address) {
         let c_code = cached.c_code.clone();
         let asm = cached.asm_instructions.clone();
         state.log(format!("[*] Using cached result for 0x{:x}", address));
-        state.decompiled_code = c_code;
-        state.asm_instructions = asm;
+        state.analysis.decompiled_code = c_code;
+        state.analysis.asm_instructions = asm;
         return;
     }
     
-    if state.loaded_binary.is_none() {
+    if state.analysis.loaded_binary.is_none() {
         state.log("[!] No binary loaded");
         return;
     }
     
     let (_, _, _, _, bytes, is_64bit) = {
-        let binary = state.loaded_binary.as_ref().unwrap();
+        let binary = state.analysis.loaded_binary.as_ref().unwrap();
         
         // Get function bytes (estimate 4KB for function body if size is 0)
         let mut func_size = if func.size > 0 { func.size as usize } else { 4096 };
@@ -80,74 +80,133 @@ pub fn decompile_function(
         Ok(engine) => {
             match engine.disassemble(&bytes, address) {
                 Ok(insns) => {
-                    state.asm_instructions = insns;
+                    state.analysis.asm_instructions = insns;
                 }
                 Err(e) => {
                     state.log(format!("[!] Disassembly error: {}", e));
-                    state.asm_instructions.clear();
+                    state.analysis.asm_instructions.clear();
                 }
             }
         }
         Err(e) => {
             state.log(format!("[!] Failed to initialize disassembler: {}", e));
-            state.asm_instructions.clear();
+            state.analysis.asm_instructions.clear();
         }
     }
 
-    state.decompiling = true;
-    state.decompiled_code = format!("// Decompiling 0x{:x}...", address);
+    state.analysis.decompiling = true;
+    state.analysis.decompiled_code = format!("// Decompiling 0x{:x}...", address);
     state.log(format!("[*] Decompiling 0x{:x} ({} bytes)", address, bytes.len()));
     
-    // Use Native FFI
-    {
-        let mut native_guard = native_decompiler.lock().unwrap();
+    // Clone data needed for background thread
+    let tx_clone = tx.clone();
+    let bytes_clone = bytes.clone();
+    let native_decompiler_clone = Arc::clone(&native_decompiler);
+    
+    // Spawn background thread for decompilation (prevents GUI freezing)
+    std::thread::spawn(move || {
+        // Initialize decompiler if needed
+        let mut native_guard = native_decompiler_clone.lock().unwrap();
         if native_guard.is_none() {
-            // Attempt to load library if not already initialized
-            if let Some(lib_path) = crate::analysis::decomp::native::find_library() {
-                let sla_dir = std::env::current_dir().unwrap().join("ghidra_decompiler").to_string_lossy().into_owned();
-                match crate::analysis::decomp::NativeDecompiler::new(lib_path, &sla_dir) {
+            if let Some(cli_path) = crate::analysis::decomp::native::find_library() {
+                let sla_dir = std::env::current_dir()
+                    .unwrap()
+                    .join("ghidra_decompiler")
+                    .to_string_lossy()
+                    .into_owned();
+                match crate::analysis::decomp::NativeDecompiler::new(cli_path, &sla_dir) {
                     Ok(nd) => {
-                        state.log("[✓] Native decompiler initialized");
                         *native_guard = Some(nd);
                     }
                     Err(e) => {
-                        state.log(format!("[✗] Native decompiler init failed: {}", e));
+                        let _ = tx_clone.send(AsyncMessage::DecompileError {
+                            address,
+                            error: format!("Failed to init decompiler: {}", e),
+                        });
+                        return;
                     }
                 }
+            } else {
+                let _ = tx_clone.send(AsyncMessage::DecompileError {
+                    address,
+                    error: "Decompiler CLI not found".to_string(),
+                });
+                return;
             }
         }
 
+        // Perform decompilation
         if let Some(nd) = native_guard.as_ref() {
-            match nd.decompile(&bytes, address, is_64bit) {
+            match nd.decompile(&bytes_clone, address, is_64bit) {
                 Ok(c_code) => {
-                    cache_decompile_result(state, address, c_code.clone());
-                    state.log("[✓] Decompile successful");
+                    let _ = tx_clone.send(AsyncMessage::DecompileResult {
+                        address,
+                        c_code,
+                    });
                 }
                 Err(e) => {
-                    state.log(format!("[✗] Decompile failed: {}", e));
-                    state.decompiled_code = format!("// Decompile error: {}", e);
-                    state.decompiling = false;
+                    let _ = tx_clone.send(AsyncMessage::DecompileError {
+                        address,
+                        error: e.to_string(),
+                    });
                 }
             }
-        } else {
-            state.log("[!] Native decompiler not available");
-            state.decompiled_code = "// Native decompiler not available".to_string();
-            state.decompiling = false;
         }
-    }
+    });
 }
 
 /// Store decompile result in cache
 pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String) {
-    if let Some(func) = &state.selected_function {
+    // Apply IAT symbol replacement if binary is loaded
+    let processed_code = if let Some(ref binary) = state.analysis.loaded_binary {
+        apply_iat_symbols(&c_code, &binary.iat_symbols)
+    } else {
+        c_code.clone()
+    };
+    
+    if let Some(func) = &state.analysis.selected_function {
         if func.address == address {
-            state.decompile_cache.insert(address, CachedDecompile {
-                c_code: c_code.clone(),
-                asm_instructions: state.asm_instructions.clone(),
+            state.analysis.decompile_cache.insert(address, CachedDecompile {
+                c_code: processed_code.clone(),
+                asm_instructions: state.analysis.asm_instructions.clone(),
                 timestamp: Instant::now(),
             });
         }
     }
-    state.decompiled_code = c_code;
-    state.decompiling = false;
+    state.analysis.decompiled_code = processed_code;
+    state.analysis.decompiling = false;
+}
+
+/// Replace pcRamXXXXXXXX patterns with actual IAT symbol names
+fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, String>) -> String {
+    use std::collections::HashMap;
+    
+    if iat_symbols.is_empty() {
+        return code.to_string();
+    }
+    
+    let mut result = code.to_string();
+    
+    // Build replacement map: pcRam00403050 -> MessageBoxA
+    let mut replacements: HashMap<String, String> = HashMap::new();
+    for (addr, name) in iat_symbols {
+        // Ghidra uses pcRamXXXXXXXX format for memory pointers
+        let pcram_pattern = format!("pcRam{:08x}", addr);
+        replacements.insert(pcram_pattern.clone(), name.clone());
+        
+        // Also try uppercase variant
+        let pcram_upper = format!("pcRam{:08X}", addr);
+        replacements.insert(pcram_upper, name.clone());
+        
+        // Also handle func_0xXXXXXXXX patterns
+        let func_pattern = format!("func_0x{:08x}", addr);
+        replacements.insert(func_pattern.clone(), name.clone());
+    }
+    
+    // Apply replacements
+    for (pattern, replacement) in &replacements {
+        result = result.replace(pattern, replacement);
+    }
+    
+    result
 }

@@ -27,15 +27,15 @@ pub fn load_binary(state: &mut AppState, tx: Sender<AsyncMessage>, path: &str) {
     let path = path.to_string();
     
     // Clear cache on new binary load
-    state.decompile_cache.clear();
+    state.analysis.decompile_cache.clear();
     // Save path
-    state.last_binary_path = Some(path.clone());
+    state.analysis.last_binary_path = Some(path.clone());
     
     state.log(format!("[*] Loading {}...", path));
     
     std::thread::spawn(move || {
         match LoadedBinary::from_file(&path) {
-            Ok(binary) => { let _ = tx.send(AsyncMessage::BinaryLoaded(Ok(binary))); }
+            Ok(binary) => { let _ = tx.send(AsyncMessage::BinaryLoaded(Ok(std::sync::Arc::new(binary)))); }
             Err(e) => { let _ = tx.send(AsyncMessage::BinaryLoaded(Err(e.to_string()))); }
         }
     });
@@ -46,7 +46,7 @@ pub fn preload_server_binary(
     state: &mut AppState,
     native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
 ) {
-    let Some(binary) = state.loaded_binary.as_ref() else {
+    let Some(binary) = state.analysis.loaded_binary.as_ref() else {
         return;
     };
 

@@ -22,11 +22,11 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         ui.heading(egui::RichText::new("Decompiled").color(catppuccin::LAVENDER));
         
-        if state.decompiling {
+        if state.analysis.decompiling {
             ui.spinner();
             ui.label(egui::RichText::new("Processing...")
                 .color(catppuccin::YELLOW).small());
-        } else if let Some(ref func) = state.selected_function {
+        } else if let Some(ref func) = state.analysis.selected_function {
             ui.separator();
             ui.label(egui::RichText::new(&func.name)
                 .color(catppuccin::BLUE).small());
@@ -34,16 +34,16 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) {
         
         // Copy button on the right
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if !state.decompiled_code.is_empty() {
+            if !state.analysis.decompiled_code.is_empty() {
                 if ui.small_button(egui::RichText::new("📋 Copy").color(catppuccin::TEAL)).clicked() {
-                    ui.output_mut(|o| o.copied_text = state.decompiled_code.clone());
+                    ui.output_mut(|o| o.copied_text = state.analysis.decompiled_code.clone());
                 }
             }
         });
     });
     ui.separator();
 
-    if state.decompiled_code.is_empty() && !state.decompiling {
+    if state.analysis.decompiled_code.is_empty() && !state.analysis.decompiling {
         ui.vertical_centered(|ui| {
             ui.add_space(60.0);
             ui.label(egui::RichText::new("No decompilation available")
@@ -62,7 +62,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             // Render code with basic syntax highlighting
-            render_highlighted_code(ui, &state.decompiled_code);
+            render_highlighted_code(ui, &state.analysis.decompiled_code);
         });
 }
 
