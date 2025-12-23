@@ -10,6 +10,7 @@
 mod app;
 mod analysis;
 mod debug;
+mod plugin;
 mod script;
 mod ui;
 

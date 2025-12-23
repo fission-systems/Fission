@@ -1,4 +1,4 @@
-//! Bottom tabbed panel - Console, Hex View, Strings, Imports, Debug, Script, Timeline tabs.
+//! Bottom tabbed panel - Console, Hex View, Strings, Imports, Debug, Script, Timeline, Plugins tabs.
 //!
 //! This module organizes the bottom panel into separate sub-modules for each tab.
 
@@ -6,6 +6,7 @@ mod console;
 mod debug;
 mod hexview;
 mod imports;
+pub mod plugins;
 mod script;
 mod strings;
 mod timeline;
@@ -42,6 +43,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                     (BottomTab::Debug, "Debug", catppuccin::RED),
                     (BottomTab::Script, "Script", catppuccin::YELLOW),
                     (BottomTab::Timeline, "Timeline", catppuccin::TEAL),
+                    (BottomTab::Plugins, "Plugins", catppuccin::PINK),
                 ];
                 
                 for (tab, label, accent) in tabs {
@@ -88,6 +90,9 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                     }
                     BottomTab::Timeline => {
                         timeline::render(ui, &mut state.debug.timeline);
+                    }
+                    BottomTab::Plugins => {
+                        plugins::render(ui, &mut state.plugin_manager, &mut state.plugin_panel_state);
                     }
                 }
             });
