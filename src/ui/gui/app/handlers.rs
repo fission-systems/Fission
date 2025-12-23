@@ -31,6 +31,30 @@ pub fn process_messages(
                     binary.format,
                     binary.entry_point));
                 state.log(format!("    {} functions found", binary.functions.len()));
+                
+                // Run detection (DiE-style)
+                let detection = crate::analysis::detector::detect(&binary);
+                if !detection.detections.is_empty() {
+                    state.log("[*] Detection results:".to_string());
+                    for d in &detection.detections {
+                        state.log(format!("    {} {} {}", 
+                            match d.detection_type {
+                                crate::analysis::DetectionType::Packer => "📦",
+                                crate::analysis::DetectionType::Protector => "🛡️",
+                                crate::analysis::DetectionType::Compiler => "🔧",
+                                crate::analysis::DetectionType::Language => "💻",
+                                crate::analysis::DetectionType::Library => "📚",
+                                crate::analysis::DetectionType::Linker => "🔗",
+                                crate::analysis::DetectionType::Installer => "📥",
+                                crate::analysis::DetectionType::SFX => "📁",
+                            },
+                            d.display(),
+                            if d.confidence == crate::analysis::Confidence::High { "✓" } else { "" }
+                        ));
+                    }
+                    state.analysis.detection_result = Some(detection);
+                }
+                
                 state.analysis.loaded_binary = Some(binary);
                 file_ops::preload_server_binary(state, native_decompiler.clone());
             }

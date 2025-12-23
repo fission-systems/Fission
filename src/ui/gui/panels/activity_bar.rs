@@ -26,6 +26,10 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
                 activity_button(ui, state, Activity::Debug, "🪲", "Run and Debug");
                 ui.add_space(12.0);
                 
+                // Plugins
+                activity_button(ui, state, Activity::Plugins, "🧩", "Extensions");
+                ui.add_space(12.0);
+                
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
                     // Settings at the bottom

@@ -191,57 +191,138 @@ pub fn handle_bp_action(state: &mut AppState, _action: DebugBpAction) {
     state.log("[!] Breakpoints are only supported on Windows builds right now.");
 }
 
-/// Render "Attach to Process" dialog
-pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option<u32> {
+/// Render "Attach to Process" dialog - returns selected process info for binary loading
+pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option<crate::debug::types::ProcessInfo> {
+    use crate::ui::gui::theme::catppuccin;
+    
     if !state.ui.show_attach_dialog {
         return None;
     }
 
     let mut open = state.ui.show_attach_dialog;
-    let mut attached_pid = None;
+    let mut selected_process = None;
 
-    egui::Window::new("Attach to Process")
+    egui::Window::new("🔗 Attach to Process")
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
-        .default_width(400.0)
-        .default_height(500.0)
+        .default_width(550.0)
+        .default_height(400.0)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
+            // Controls bar
             ui.horizontal(|ui| {
                 if ui.button("🔄 Refresh").clicked() {
                     state.debug.process_list = crate::debug::enumerate_processes();
                 }
-                ui.label(format!("{} processes found", state.debug.process_list.len()));
+                
+                ui.separator();
+                
+                // Search filter
+                ui.label("🔍");
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.debug.process_filter)
+                        .desired_width(150.0)
+                        .hint_text("Filter...")
+                );
+                
+                ui.separator();
+                
+                ui.label(egui::RichText::new(format!("{} processes", state.debug.process_list.len()))
+                    .color(catppuccin::SUBTEXT0).small());
             });
             
             ui.separator();
             
-            // Process list
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                egui::Grid::new("process_list")
-                    .striped(true)
-                    .num_columns(3)
-                    .show(ui, |ui| {
-                        ui.strong("PID");
-                        ui.strong("Name");
-                        ui.strong("Action");
-                        ui.end_row();
-
-                        for process in &state.debug.process_list {
-                            ui.push_id(process.pid, |ui| {
-                                ui.label(format!("{}", process.pid));
-                                ui.label(&process.name);
-                                if ui.button("Attach").clicked() {
-                                    attached_pid = Some(process.pid);
+            // Process list with fixed columns
+            egui::ScrollArea::vertical()
+                .max_height(300.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("process_list_grid")
+                        .striped(true)
+                        .num_columns(4)
+                        .min_col_width(0.0)
+                        .show(ui, |ui| {
+                            // Header
+                            ui.label(egui::RichText::new("PID").strong().color(catppuccin::SUBTEXT1));
+                            ui.label(egui::RichText::new("Name").strong().color(catppuccin::SUBTEXT1));
+                            ui.label(egui::RichText::new("Path").strong().color(catppuccin::SUBTEXT1));
+                            ui.label("");
+                            ui.end_row();
+                            
+                            let filter = state.debug.process_filter.to_lowercase();
+                            
+                            for process in &state.debug.process_list {
+                                // Apply filter
+                                if !filter.is_empty() {
+                                    let matches_name = process.name.to_lowercase().contains(&filter);
+                                    let matches_pid = process.pid.to_string().contains(&filter);
+                                    let matches_path = process.exe_path.as_ref()
+                                        .map_or(false, |p| p.to_lowercase().contains(&filter));
+                                    
+                                    if !matches_name && !matches_pid && !matches_path {
+                                        continue;
+                                    }
                                 }
-                                ui.end_row();
-                            });
-                        }
-                    });
+                                
+                                ui.push_id(process.pid, |ui| {
+                                    // PID (fixed width)
+                                    ui.add_sized([60.0, 18.0], 
+                                        egui::Label::new(egui::RichText::new(format!("{}", process.pid))
+                                            .monospace().color(catppuccin::SAPPHIRE)));
+                                    
+                                    // Name (fixed width)
+                                    let name_display = if process.name.len() > 25 {
+                                        format!("{}...", &process.name[..22])
+                                    } else {
+                                        process.name.clone()
+                                    };
+                                    ui.add_sized([180.0, 18.0],
+                                        egui::Label::new(egui::RichText::new(name_display)
+                                            .color(catppuccin::TEXT)));
+                                    
+                                    // Path (truncated, tooltip shows full)
+                                    let path_display = if let Some(ref path) = process.exe_path {
+                                        // Show just filename or last part
+                                        let short = std::path::Path::new(path)
+                                            .file_name()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or(path);
+                                        short.to_string()
+                                    } else {
+                                        "—".to_string()
+                                    };
+                                    let path_label = ui.add_sized([200.0, 18.0],
+                                        egui::Label::new(egui::RichText::new(&path_display)
+                                            .color(catppuccin::OVERLAY1).small()));
+                                    if let Some(ref path) = process.exe_path {
+                                        path_label.on_hover_text(path);
+                                    }
+                                    
+                                    // Attach button
+                                    if ui.add_sized([60.0, 18.0],
+                                        egui::Button::new(egui::RichText::new("Attach")
+                                            .color(catppuccin::GREEN))
+                                    ).clicked() {
+                                        selected_process = Some(process.clone());
+                                    }
+                                    
+                                    ui.end_row();
+                                });
+                            }
+                        });
+                });
+                
+            ui.separator();
+            
+            // Hint
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("💡 Tip: Attach will also load the binary for static analysis")
+                    .color(catppuccin::OVERLAY0).small().italics());
             });
         });
 
     state.ui.show_attach_dialog = open;
-    attached_pid
+    selected_process
 }
 
