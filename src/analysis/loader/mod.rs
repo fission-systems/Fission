@@ -700,6 +700,65 @@ impl LoadedBinary {
         // Sort functions by address
         self.functions.sort_by_key(|f| f.address);
     }
+    
+    // ========================================================================
+    // Binary Patching
+    // ========================================================================
+    
+    /// Patch bytes at a file offset
+    /// Returns the original bytes that were replaced
+    pub fn patch_bytes(&mut self, offset: u64, new_bytes: &[u8]) -> Option<Vec<u8>> {
+        let offset = offset as usize;
+        let end = offset + new_bytes.len();
+        
+        if end > self.data.len() {
+            return None;
+        }
+        
+        // Save original bytes
+        let original = self.data[offset..end].to_vec();
+        
+        // Apply patch
+        self.data[offset..end].copy_from_slice(new_bytes);
+        
+        Some(original)
+    }
+    
+    /// Patch bytes at a virtual address
+    /// Converts VA to file offset and applies the patch
+    pub fn patch_bytes_va(&mut self, va: u64, new_bytes: &[u8]) -> Option<Vec<u8>> {
+        let offset = self.va_to_file_offset(va)?;
+        self.patch_bytes(offset as u64, new_bytes)
+    }
+    
+    /// Get bytes at a file offset (for displaying original)
+    pub fn get_bytes_at_offset(&self, offset: u64, size: usize) -> Option<Vec<u8>> {
+        let offset = offset as usize;
+        let end = offset + size;
+        
+        if end > self.data.len() {
+            return None;
+        }
+        
+        Some(self.data[offset..end].to_vec())
+    }
+    
+    /// Save the (potentially patched) binary to a file
+    pub fn save_as<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        std::fs::write(path, &self.data)?;
+        Ok(())
+    }
+    
+    /// Apply a quick patch at a file offset
+    pub fn apply_quick_patch(&mut self, offset: u64, patch_type: super::patch::QuickPatch) -> Option<Vec<u8>> {
+        self.patch_bytes(offset, &patch_type.bytes())
+    }
+    
+    /// Apply a quick patch at a virtual address
+    pub fn apply_quick_patch_va(&mut self, va: u64, patch_type: super::patch::QuickPatch) -> Option<Vec<u8>> {
+        let offset = self.va_to_file_offset(va)?;
+        self.patch_bytes(offset as u64, &patch_type.bytes())
+    }
 }
 
 #[cfg(test)]
