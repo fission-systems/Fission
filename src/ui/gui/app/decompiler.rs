@@ -1,20 +1,20 @@
 //! Decompiler operations - Function decompilation using native FFI.
 
-use std::fs;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::analysis::disasm::DisasmEngine;
 use crate::analysis::loader::FunctionInfo;
 use crate::ui::gui::state::{AppState, CachedDecompile};
-use crate::ui::gui::messages::AsyncMessage;
+use super::decomp_worker::DecompileRequest;
 
-/// Decompile a function
+/// Decompile a function (sends request to worker thread)
 pub fn decompile_function(
     state: &mut AppState,
-    tx: Sender<AsyncMessage>,
-    native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
+    decomp_tx: &Sender<DecompileRequest>,
+    latest_request_id: &Arc<AtomicU64>,
     func: &FunctionInfo,
 ) {
     // Skip import functions
@@ -43,14 +43,13 @@ pub fn decompile_function(
         return;
     }
     
-    let (_, _, _, _, bytes, is_64bit) = {
+    let (bytes, is_64bit) = {
         let binary = state.analysis.loaded_binary.as_ref().unwrap();
         
         // Get function bytes (estimate 4KB for function body if size is 0)
         let mut func_size = if func.size > 0 { func.size as usize } else { 4096 };
         
         // Limit function size to not exceed section bounds
-        // Find the section containing this address
         for section in &binary.sections {
             if section.is_executable 
                 && address >= section.virtual_address 
@@ -72,10 +71,10 @@ pub fn decompile_function(
                 return;
             }
         };
-        ("", (), (), (), bytes, binary.is_64bit)
+        (bytes, binary.is_64bit)
     };
     
-    // Disassemble bytes
+    // Disassemble bytes (synchronous, fast)
     match DisasmEngine::new(is_64bit) {
         Ok(engine) => {
             match engine.disassemble(&bytes, address) {
@@ -98,61 +97,22 @@ pub fn decompile_function(
     state.analysis.decompiled_code = format!("// Decompiling 0x{:x}...", address);
     state.log(format!("[*] Decompiling 0x{:x} ({} bytes)", address, bytes.len()));
     
-    // Clone data needed for background thread
-    let tx_clone = tx.clone();
-    let bytes_clone = bytes.clone();
-    let native_decompiler_clone = Arc::clone(&native_decompiler);
+    // Generate new request ID (for debouncing)
+    let request_id = latest_request_id.fetch_add(1, Ordering::SeqCst) + 1;
+    latest_request_id.store(request_id, Ordering::SeqCst);
     
-    // Spawn background thread for decompilation (prevents GUI freezing)
-    std::thread::spawn(move || {
-        // Initialize decompiler if needed
-        let mut native_guard = native_decompiler_clone.lock().unwrap();
-        if native_guard.is_none() {
-            if let Some(cli_path) = crate::analysis::decomp::native::find_library() {
-                let sla_dir = std::env::current_dir()
-                    .unwrap()
-                    .join("ghidra_decompiler")
-                    .to_string_lossy()
-                    .into_owned();
-                match crate::analysis::decomp::NativeDecompiler::new(cli_path, &sla_dir) {
-                    Ok(nd) => {
-                        *native_guard = Some(nd);
-                    }
-                    Err(e) => {
-                        let _ = tx_clone.send(AsyncMessage::DecompileError {
-                            address,
-                            error: format!("Failed to init decompiler: {}", e),
-                        });
-                        return;
-                    }
-                }
-            } else {
-                let _ = tx_clone.send(AsyncMessage::DecompileError {
-                    address,
-                    error: "Decompiler CLI not found".to_string(),
-                });
-                return;
-            }
-        }
-
-        // Perform decompilation
-        if let Some(nd) = native_guard.as_ref() {
-            match nd.decompile(&bytes_clone, address, is_64bit) {
-                Ok(c_code) => {
-                    let _ = tx_clone.send(AsyncMessage::DecompileResult {
-                        address,
-                        c_code,
-                    });
-                }
-                Err(e) => {
-                    let _ = tx_clone.send(AsyncMessage::DecompileError {
-                        address,
-                        error: e.to_string(),
-                    });
-                }
-            }
-        }
-    });
+    // Send request to worker thread (non-blocking)
+    let request = DecompileRequest {
+        request_id,
+        bytes,
+        address,
+        is_64bit,
+    };
+    
+    if let Err(e) = decomp_tx.send(request) {
+        state.log(format!("[!] Failed to send decompile request: {}", e));
+        state.analysis.decompiling = false;
+    }
 }
 
 /// Store decompile result in cache
@@ -178,35 +138,47 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
 }
 
 /// Replace pcRamXXXXXXXX patterns with actual IAT symbol names
+/// Uses regex for O(N) complexity instead of O(N*M)
 fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, String>) -> String {
-    use std::collections::HashMap;
+    use regex::Regex;
+    use once_cell::sync::Lazy;
     
     if iat_symbols.is_empty() {
         return code.to_string();
     }
     
-    let mut result = code.to_string();
+    // Regex patterns for Ghidra memory references
+    // pcRam00403050 or pcRam00403050 (lowercase/uppercase hex)
+    static PCRAM_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"pcRam([0-9a-fA-F]{8})").unwrap()
+    });
     
-    // Build replacement map: pcRam00403050 -> MessageBoxA
-    let mut replacements: HashMap<String, String> = HashMap::new();
-    for (addr, name) in iat_symbols {
-        // Ghidra uses pcRamXXXXXXXX format for memory pointers
-        let pcram_pattern = format!("pcRam{:08x}", addr);
-        replacements.insert(pcram_pattern.clone(), name.clone());
-        
-        // Also try uppercase variant
-        let pcram_upper = format!("pcRam{:08X}", addr);
-        replacements.insert(pcram_upper, name.clone());
-        
-        // Also handle func_0xXXXXXXXX patterns
-        let func_pattern = format!("func_0x{:08x}", addr);
-        replacements.insert(func_pattern.clone(), name.clone());
-    }
+    // func_0x00403050 pattern
+    static FUNC_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"func_0x([0-9a-fA-F]{8})").unwrap()
+    });
     
-    // Apply replacements
-    for (pattern, replacement) in &replacements {
-        result = result.replace(pattern, replacement);
-    }
+    // Single pass replacement for pcRam patterns
+    let result = PCRAM_RE.replace_all(code, |caps: &regex::Captures| {
+        let addr_str = &caps[1];
+        if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
+            if let Some(name) = iat_symbols.get(&addr) {
+                return name.clone();
+            }
+        }
+        caps[0].to_string()
+    });
     
-    result
+    // Single pass replacement for func_ patterns
+    let result = FUNC_RE.replace_all(&result, |caps: &regex::Captures| {
+        let addr_str = &caps[1];
+        if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
+            if let Some(name) = iat_symbols.get(&addr) {
+                return name.clone();
+            }
+        }
+        caps[0].to_string()
+    });
+    
+    result.into_owned()
 }

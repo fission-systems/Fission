@@ -1,7 +1,6 @@
 //! Subprocess-based Ghidra Decompiler interface.
 //!
-//! Spawns `fission_decomp` CLI for each decompilation request to avoid
-//! Ghidra global state issues that cause crashes on subsequent calls.
+//! Spawns `fission_decomp` CLI for each decompilation request.
 
 use std::process::{Command, Stdio};
 use std::io::Write;
@@ -28,7 +27,7 @@ impl NativeDecompiler {
     }
 
     /// Decompile bytes by spawning subprocess
-    pub fn decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
+    pub fn decompile(&mut self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
         // Encode bytes as base64
         let bytes_b64 = BASE64.encode(bytes);
         
@@ -59,19 +58,59 @@ impl NativeDecompiler {
         let output = child.wait_with_output()
             .map_err(|e| anyhow!("Failed to wait for decompiler: {}", e))?;
         
-        // Check for errors in stderr
+        // Capture stderr for error messages
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.is_empty() && stderr.contains("error") {
-            return Err(anyhow!("Decompiler error: {}", stderr.trim()));
+        
+        // Parse stdout for JSON response FIRST (process may crash on cleanup but still produce valid output)
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        
+        // Try to extract result even if process crashed during cleanup
+        if stdout.contains("\"status\":\"ok\"") {
+            if let Some(start) = stdout.find("\"code\":\"") {
+                let start = start + 8;
+                let chars: Vec<char> = stdout.chars().collect();
+                let mut end = start;
+                while end < chars.len() {
+                    if chars[end] == '"' && (end == start || chars[end - 1] != '\\') {
+                        break;
+                    }
+                    end += 1;
+                }
+                let code = &stdout[start..end];
+                let code = code
+                    .replace("\\n", "\n")
+                    .replace("\\r", "\r")
+                    .replace("\\t", "\t")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\");
+                return Ok(code);
+            }
         }
         
-        // Return stdout as result
-        let result = String::from_utf8_lossy(&output.stdout).to_string();
-        if result.is_empty() {
-            return Err(anyhow!("Decompiler produced no output"));
+        // Check for error status in JSON
+        if stdout.contains("\"status\":\"error\"") {
+            if let Some(start) = stdout.find("\"message\":\"") {
+                let start = start + 11;
+                if let Some(end) = stdout[start..].find("\"") {
+                    let msg = &stdout[start..start + end];
+                    return Err(anyhow!("Decompiler error: {}", msg));
+                }
+            }
+            return Err(anyhow!("Decompiler error: {}", stdout));
         }
         
-        Ok(result)
+        // Check exit code only if no valid JSON output
+        if !output.status.success() {
+            return Err(anyhow!("Decompiler failed (exit {}): {}", 
+                output.status.code().unwrap_or(-1), stderr.trim()));
+        }
+        
+        // Fallback: return raw stdout (old format compatibility)
+        if !stdout.is_empty() && !stdout.starts_with("{") {
+            return Ok(stdout);
+        }
+        
+        Err(anyhow!("Invalid response format: {}", stdout))
     }
 }
 

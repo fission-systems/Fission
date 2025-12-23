@@ -5,8 +5,10 @@
 //! - Breakpoint management
 //! - Register/memory access
 //! - Step execution
+//! - Time Travel Debugging (TTD)
 
 pub mod types;
+pub mod ttd;
 
 #[cfg(target_os = "windows")]
 pub mod windows;

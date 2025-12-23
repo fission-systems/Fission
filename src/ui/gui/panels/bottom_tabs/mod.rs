@@ -1,4 +1,4 @@
-//! Bottom tabbed panel - Console, Hex View, Strings, Imports, Debug, Script tabs.
+//! Bottom tabbed panel - Console, Hex View, Strings, Imports, Debug, Script, Timeline tabs.
 //!
 //! This module organizes the bottom panel into separate sub-modules for each tab.
 
@@ -8,6 +8,7 @@ mod hexview;
 mod imports;
 mod script;
 mod strings;
+mod timeline;
 
 use eframe::egui;
 use crate::ui::gui::state::{AppState, BottomTab};
@@ -40,6 +41,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                     (BottomTab::Imports, "Imports", catppuccin::MAUVE),
                     (BottomTab::Debug, "Debug", catppuccin::RED),
                     (BottomTab::Script, "Script", catppuccin::YELLOW),
+                    (BottomTab::Timeline, "Timeline", catppuccin::TEAL),
                 ];
                 
                 for (tab, label, accent) in tabs {
@@ -83,6 +85,9 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                     }
                     BottomTab::Script => {
                         script_action = script::render(ui, state);
+                    }
+                    BottomTab::Timeline => {
+                        timeline::render(ui, &mut state.debug.timeline);
                     }
                 }
             });

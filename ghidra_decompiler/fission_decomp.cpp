@@ -5,7 +5,7 @@
  * Each invocation is a fresh process, avoiding Ghidra global state issues.
  * 
  * Input (stdin): {"bytes":"BASE64_ENCODED_BYTES","address":12345,"is_64bit":true,"sla_dir":"/path"}
- * Output (stdout): Decompiled C code or {"error":"message"}
+ * Output (stdout): {"status":"ok","code":"..."} or {"status":"error","message":"..."}
  */
 
 #include <iostream>
@@ -14,6 +14,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>  // for _exit
 
 #include "libdecomp.hh"
 #include "sleigh_arch.hh"
@@ -76,6 +77,23 @@ bool extract_json_bool(const std::string& json, const std::string& key) {
     return (json.substr(pos, 4) == "true");
 }
 
+// Escape string for JSON output
+std::string json_escape(const std::string& s) {
+    std::string result;
+    result.reserve(s.size() * 2);
+    for (char c : s) {
+        switch (c) {
+            case '"': result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default: result += c; break;
+        }
+    }
+    return result;
+}
+
 // Custom LoadImage for memory
 class MemoryLoadImage : public LoadImage {
     std::vector<uint8_t> data_;
@@ -113,15 +131,21 @@ public:
 };
 
 int main(int argc, char** argv) {
+    // Disable stdout buffering to ensure output is visible before potential crash
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr << "[fission_decomp] Starting..." << std::endl;
+    
     // Read all of stdin
     std::stringstream buffer;
     buffer << std::cin.rdbuf();
     std::string input = buffer.str();
     
     if (input.empty()) {
-        std::cerr << "{\"error\":\"No input provided\"}" << std::endl;
+        std::cout << "{\"status\":\"error\",\"message\":\"No input provided\"}" << std::endl;
         return 1;
     }
+    
+    std::cerr << "[fission_decomp] Parsing input..." << std::endl;
     
     // Parse JSON input
     std::string bytes_b64 = extract_json_string(input, "bytes");
@@ -130,24 +154,30 @@ int main(int argc, char** argv) {
     std::string sla_dir = extract_json_string(input, "sla_dir");
     
     if (bytes_b64.empty() || sla_dir.empty()) {
-        std::cerr << "{\"error\":\"Missing required fields: bytes, sla_dir\"}" << std::endl;
+        std::cout << "{\"status\":\"error\",\"message\":\"Missing required fields: bytes, sla_dir\"}" << std::endl;
         return 1;
     }
     
     // Decode bytes
     std::vector<uint8_t> bytes = base64_decode(bytes_b64);
     if (bytes.empty()) {
-        std::cerr << "{\"error\":\"Failed to decode bytes\"}" << std::endl;
+        std::cout << "{\"status\":\"error\",\"message\":\"Failed to decode bytes\"}" << std::endl;
         return 1;
     }
     
+    std::cerr << "[fission_decomp] Decoded " << bytes.size() << " bytes at 0x" << std::hex << address << std::endl;
+    
     try {
+        std::cerr << "[fission_decomp] Initializing Ghidra..." << std::endl;
+        
         // Initialize Ghidra
         startDecompilerLibrary(sla_dir.c_str());
         
         std::string langDir = sla_dir + "/languages";
         SleighArchitecture::specpaths.addDir2Path(langDir);
         SleighArchitecture::getDescriptions();
+        
+        std::cerr << "[fission_decomp] Creating architecture..." << std::endl;
         
         // Select architecture
         const char* arch_id = is_64bit ? "x86:LE:64:default" : "x86:LE:32:default";
@@ -160,6 +190,8 @@ int main(int argc, char** argv) {
         arch.init(store);
         arch.max_instructions = 200000;
         arch.flowoptions &= ~FlowInfo::error_toomanyinstructions;
+        
+        std::cerr << "[fission_decomp] Decompiling..." << std::endl;
         
         // Decompile
         Address func_addr(arch.getDefaultCodeSpace(), address);
@@ -176,15 +208,19 @@ int main(int argc, char** argv) {
         arch.print->setOutputStream(&c_stream);
         arch.print->docFunction(fd);
         
-        // Output result
-        std::cout << c_stream.str();
-        return 0;
+        std::cerr << "[fission_decomp] Success!" << std::endl;
+        
+        // Output result as JSON
+        std::cout << "{\"status\":\"ok\",\"code\":\"" << json_escape(c_stream.str()) << "\"}" << std::endl;
+        std::cout.flush();  // Ensure output is written
+        std::cerr.flush();
+        _exit(0);  // Skip cleanup to avoid Ghidra memory corruption crash
         
     } catch (const LowlevelError& e) {
-        std::cerr << "{\"error\":\"" << e.explain << "\"}" << std::endl;
+        std::cout << "{\"status\":\"error\",\"message\":\"" << json_escape(e.explain) << "\"}" << std::endl;
         return 1;
     } catch (const std::exception& e) {
-        std::cerr << "{\"error\":\"" << e.what() << "\"}" << std::endl;
+        std::cout << "{\"status\":\"error\",\"message\":\"" << json_escape(e.what()) << "\"}" << std::endl;
         return 1;
     }
 }

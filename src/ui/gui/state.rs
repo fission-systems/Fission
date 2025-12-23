@@ -81,6 +81,8 @@ pub struct DebugStateUI {
     pub mem_len_input: String,
     /// Last memory dump text
     pub mem_dump: String,
+    /// Time Travel Debugging timeline
+    pub timeline: crate::debug::ttd::Timeline,
 }
 
 /// Script-related state (Python scripting)
@@ -210,6 +212,7 @@ pub enum BottomTab {
     Imports,
     Debug,
     Script,
+    Timeline,
 }
 
 // ============================================================================
@@ -246,6 +249,7 @@ impl Default for DebugStateUI {
             mem_addr_input: String::new(),
             mem_len_input: "64".to_string(),
             mem_dump: String::new(),
+            timeline: crate::debug::ttd::Timeline::default(),
         }
     }
 }

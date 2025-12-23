@@ -92,12 +92,16 @@ impl LoadedBinary {
         
         // Check for PE (MZ header)
         if data.len() > 2 && data[0] == 0x4D && data[1] == 0x5A {
-            return Self::parse_pe(data, path);
+            let mut binary = Self::parse_pe(data, path)?;
+            binary.sort_sections();
+            return Ok(binary);
         }
         
         // Check for ELF
         if data.len() > 4 && data[0..4] == [0x7F, b'E', b'L', b'F'] {
-            return Self::parse_elf(data, path);
+            let mut binary = Self::parse_elf(data, path)?;
+            binary.sort_sections();
+            return Ok(binary);
         }
         
         // Check for Mach-O
@@ -105,11 +109,18 @@ impl LoadedBinary {
             let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
             if magic == 0xFEEDFACE || magic == 0xFEEDFACF || 
                magic == 0xCEFAEDFE || magic == 0xCFFAEDFE {
-                return Self::parse_macho(data, path);
+                let mut binary = Self::parse_macho(data, path)?;
+                binary.sort_sections();
+                return Ok(binary);
             }
         }
         
         Err(anyhow!("Unknown binary format"))
+    }
+    
+    /// Sort sections by virtual address for binary search
+    fn sort_sections(&mut self) {
+        self.sections.sort_by_key(|s| s.virtual_address);
     }
 
     /// Parse PE (Windows executable)
@@ -203,10 +214,6 @@ impl LoadedBinary {
                 for import in &pe.imports {
                     // IAT address = image_base + offset (this is what Ghidra uses)
                     let iat_va = image_base + import.offset as u64;
-                    
-                    // Debug: print IAT address mapping
-                    eprintln!("[DEBUG IAT] {} -> 0x{:08x} (offset: 0x{:x}, rva: 0x{:x})", 
-                        import.name, iat_va, import.offset, import.rva);
                     
                     iat_symbols.insert(iat_va, import.name.to_string());
                     functions.push(FunctionInfo {
@@ -522,20 +529,29 @@ impl LoadedBinary {
         }
     }
 
-    /// Get bytes at a given address
+    /// Get bytes at a given address using binary search for O(log N) lookup
     pub fn get_bytes(&self, address: u64, size: usize) -> Option<Vec<u8>> {
-        for section in &self.sections {
-            if address >= section.virtual_address 
-                && address < section.virtual_address + section.virtual_size 
-            {
-                let offset_in_section = address - section.virtual_address;
-                let file_offset = section.file_offset + offset_in_section;
-                let end = (file_offset as usize + size).min(self.data.len());
-                let start = file_offset as usize;
-                
-                if start < self.data.len() {
-                    return Some(self.data[start..end].to_vec());
-                }
+        // Binary search to find the section containing this address
+        // Sections must be sorted by virtual_address (done during parsing)
+        let idx = self.sections.binary_search_by(|section| {
+            if address < section.virtual_address {
+                std::cmp::Ordering::Greater
+            } else if address >= section.virtual_address + section.virtual_size {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+        
+        if let Ok(idx) = idx {
+            let section = &self.sections[idx];
+            let offset_in_section = address - section.virtual_address;
+            let file_offset = section.file_offset + offset_in_section;
+            let end = (file_offset as usize + size).min(self.data.len());
+            let start = file_offset as usize;
+            
+            if start < self.data.len() {
+                return Some(self.data[start..end].to_vec());
             }
         }
         None
@@ -592,24 +608,29 @@ impl LoadedBinary {
         )
     }
     
-    /// Convert a virtual address to file offset using section table
+    /// Convert a virtual address to file offset using binary search for O(log N) lookup
     pub fn va_to_file_offset(&self, va: u64) -> Option<usize> {
-        // Convert VA to RVA
-        let rva = va.checked_sub(self.image_base)? as u32;
-        
-        // Find section containing this RVA
-        for section in &self.sections {
-            let section_rva = (section.virtual_address - self.image_base) as u32;
+        // Binary search to find the section containing this VA
+        let idx = self.sections.binary_search_by(|section| {
             let section_size = if section.virtual_size > 0 {
-                section.virtual_size as u32
+                section.virtual_size
             } else {
-                section.file_size as u32
+                section.file_size
             };
             
-            if rva >= section_rva && rva < section_rva + section_size {
-                let offset_in_section = rva - section_rva;
-                return Some(section.file_offset as usize + offset_in_section as usize);
+            if va < section.virtual_address {
+                std::cmp::Ordering::Greater
+            } else if va >= section.virtual_address + section_size {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
             }
+        });
+        
+        if let Ok(idx) = idx {
+            let section = &self.sections[idx];
+            let offset_in_section = va - section.virtual_address;
+            return Some(section.file_offset as usize + offset_in_section as usize);
         }
         None
     }

@@ -3,12 +3,19 @@
 use eframe::egui;
 use crate::ui::gui::state::{AppState, Activity};
 use crate::ui::gui::theme::catppuccin;
-use crate::analysis::loader::FunctionInfo;
-use super::functions;
+use super::functions::{self, FunctionAction};
+
+/// Result from side bar render
+pub enum SideBarAction {
+    /// User selected a function
+    SelectFunction(crate::analysis::loader::FunctionInfo),
+    /// User requested function analysis
+    AnalyzeFunctions,
+}
 
 /// Render the side bar panel.
-pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo> {
-    let mut selected_func = None;
+pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction> {
+    let mut result = None;
     if !state.ui.sidebar_visible {
         return None;
     }
@@ -37,8 +44,11 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo>
             match state.ui.active_activity {
                 Activity::Explorer => {
                     // Use the existing functions panel logic but as part of this panel
-                    if let Some(func) = functions::render_inside(ui, state) {
-                        selected_func = Some(func);
+                    if let Some(action) = functions::render_inside(ui, state) {
+                        result = Some(match action {
+                            FunctionAction::Select(func) => SideBarAction::SelectFunction(func),
+                            FunctionAction::Analyze => SideBarAction::AnalyzeFunctions,
+                        });
                     }
                 }
                 Activity::Search => {
@@ -61,7 +71,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo>
             }
         });
     
-    selected_func
+    result
 }
 
 fn render_debug_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
@@ -79,4 +89,3 @@ fn render_debug_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
         }
     });
 }
-

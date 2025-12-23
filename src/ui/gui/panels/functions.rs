@@ -4,13 +4,21 @@ use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use crate::analysis::loader::FunctionInfo;
 use super::super::state::AppState;
-use super::super::theme::{catppuccin, code};
+use super::super::theme::catppuccin;
+
+/// Action returned from functions panel
+pub enum FunctionAction {
+    /// User clicked on a function
+    Select(FunctionInfo),
+    /// User clicked Analyze button
+    Analyze,
+}
 
 /// Render the functions list panel on the left side.
 /// 
-/// Returns the clicked function if any.
-pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo> {
-    let mut clicked_func: Option<FunctionInfo> = None;
+/// Returns the action if any.
+pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionAction> {
+    let mut action: Option<FunctionAction> = None;
     
     egui::SidePanel::left("functions_panel")
         .resizable(true)
@@ -18,15 +26,15 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionInfo>
         .min_width(120.0)
         .max_width(350.0)
         .show(ctx, |ui| {
-            clicked_func = render_inside(ui, state);
+            action = render_inside(ui, state);
         });
     
-    clicked_func
+    action
 }
 
 /// Render functions list inside an existing UI.
-pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<FunctionInfo> {
-    let mut clicked_func: Option<FunctionInfo> = None;
+pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<FunctionAction> {
+    let mut action: Option<FunctionAction> = None;
     
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
@@ -34,17 +42,16 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
             if let Some(ref binary) = state.analysis.loaded_binary {
                 ui.label(egui::RichText::new(format!("({})", binary.functions.len()))
                     .color(catppuccin::SUBTEXT0).small());
+                
+                // Analyze button for discovering internal functions
+                if ui.small_button("🔍 Analyze").on_hover_text("Discover internal functions from CALL instructions").clicked() {
+                    action = Some(FunctionAction::Analyze);
+                }
             }
         });
         ui.separator();
 
         if let Some(ref binary) = state.analysis.loaded_binary {
-            // Search filter
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("🔍").color(catppuccin::OVERLAY0));
-                // Could add a filter input here
-            });
-            
             let available_height = ui.available_height();
             let row_height = 22.0;
             let total_rows = binary.functions.len();
@@ -90,7 +97,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
                             };
                             
                             if ui.selectable_label(is_selected, text).clicked() {
-                                clicked_func = Some(func.clone());
+                                action = Some(FunctionAction::Select(func.clone()));
                             }
                         });
                     });
@@ -109,5 +116,5 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
         }
     });
     
-    clicked_func
+    action
 }
