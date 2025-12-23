@@ -134,6 +134,10 @@ pub struct AppState {
     pub debug: DebugStateUI,
     /// Script state (Python scripting)
     pub script: ScriptState,
+    /// Plugin manager
+    pub plugin_manager: crate::plugin::PluginManager,
+    /// Plugin panel state
+    pub plugin_panel_state: crate::ui::gui::panels::bottom_tabs::plugins::PluginPanelState,
 }
 
 // ============================================================================
@@ -213,6 +217,7 @@ pub enum BottomTab {
     Debug,
     Script,
     Timeline,
+    Plugins,
 }
 
 // ============================================================================
@@ -297,6 +302,8 @@ impl Default for AppState {
             analysis: AnalysisState::default(),
             debug: DebugStateUI::default(),
             script: ScriptState::default(),
+            plugin_manager: crate::plugin::PluginManager::default(),
+            plugin_panel_state: Default::default(),
         }
     }
 }
