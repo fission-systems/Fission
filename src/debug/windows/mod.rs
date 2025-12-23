@@ -6,8 +6,10 @@ pub use process::enumerate_processes;
 
 use super::types::{DebugState, DebugStatus, ProcessInfo};
 use super::Debugger;
+use super::ttd::Timeline;
 
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -46,6 +48,8 @@ pub struct WindowsDebugger {
     state: DebugState,
     /// Handle to the attached process
     process_handle: Option<HANDLE>,
+    /// TTD Timeline for auto-recording (shared with UI)
+    pub ttd_timeline: Option<Arc<Mutex<Timeline>>>,
 }
 
 impl WindowsDebugger {
@@ -54,7 +58,13 @@ impl WindowsDebugger {
         Self {
             state: DebugState::default(),
             process_handle: None,
+            ttd_timeline: None,
         }
+    }
+    
+    /// Set the TTD timeline for auto-recording during debugging
+    pub fn set_ttd_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
+        self.ttd_timeline = Some(timeline);
     }
 
     /// Get current state
@@ -73,6 +83,17 @@ impl WindowsDebugger {
                 .map_err(|e| format!("OpenProcess failed: {:?}", e))?;
             self.process_handle = Some(h);
             Ok(h)
+        }
+    }
+    
+    /// Record a TTD snapshot if recording is active
+    fn record_ttd_snapshot(&self, thread_id: u32, registers: &super::types::RegisterState) {
+        if let Some(timeline_arc) = &self.ttd_timeline {
+            if let Ok(mut timeline) = timeline_arc.lock() {
+                if timeline.recorder().is_recording() {
+                    timeline.recorder_mut().record_step(registers.clone(), thread_id);
+                }
+            }
         }
     }
 }
@@ -227,6 +248,29 @@ impl Debugger for WindowsDebugger {
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
             GetThreadContext(h_thread, &mut ctx)
                 .map_err(|e| format!("GetThreadContext failed: {:?}", e))?;
+            
+            // Record TTD snapshot before step (if recording is active)
+            let registers = super::types::RegisterState {
+                rax: ctx.Rax,
+                rbx: ctx.Rbx,
+                rcx: ctx.Rcx,
+                rdx: ctx.Rdx,
+                rsi: ctx.Rsi,
+                rdi: ctx.Rdi,
+                rbp: ctx.Rbp,
+                rsp: ctx.Rsp,
+                r8: ctx.R8,
+                r9: ctx.R9,
+                r10: ctx.R10,
+                r11: ctx.R11,
+                r12: ctx.R12,
+                r13: ctx.R13,
+                r14: ctx.R14,
+                r15: ctx.R15,
+                rip: ctx.Rip,
+                rflags: ctx.EFlags as u64,
+            };
+            self.record_ttd_snapshot(tid, &registers);
             
             ctx.EFlags |= 0x100; // Set Trap Flag
             
