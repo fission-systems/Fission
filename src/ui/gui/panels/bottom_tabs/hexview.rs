@@ -1,13 +1,27 @@
-//! Hex View tab panel - Binary hex dump viewer.
+//! Hex View tab panel - Binary hex dump viewer with patching support.
 
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::theme::{catppuccin, code};
+use crate::analysis::patch::QuickPatch;
+
+/// Pending patch action to apply after UI rendering
+enum PatchAction {
+    None,
+    ApplyBytes { offset: u64, bytes: Vec<u8> },
+    QuickPatch { offset: u64, patch_type: QuickPatch },
+    SaveAs,
+}
 
 /// Render hex view tab content with virtual scrolling
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
-    let Some(ref binary) = state.analysis.loaded_binary else {
+    // Check if binary is loaded and get data length
+    let (data_len, total_rows) = if let Some(ref binary) = state.analysis.loaded_binary {
+        let len = binary.data.len() as u64;
+        let rows = (len / 16) + if len % 16 != 0 { 1 } else { 0 };
+        (len, rows)
+    } else {
         ui.vertical_centered(|ui| {
             ui.add_space(20.0);
             ui.label(egui::RichText::new("No binary loaded")
@@ -17,11 +31,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     };
 
-    let data_len = binary.data.len() as u64;
     let rows_per_page = 64;
-    let total_rows = (data_len / 16) + if data_len % 16 != 0 { 1 } else { 0 };
     
-    // Controls
+    // Navigation Controls
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Offset:").color(catppuccin::SUBTEXT0));
         let mut offset_str = format!("{:08X}", state.analysis.hex_offset);
@@ -55,6 +67,124 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         ui.label(egui::RichText::new(format!("{} / {} bytes", state.analysis.hex_offset, data_len))
             .color(catppuccin::SUBTEXT0).small());
     });
+    
+    // Patch Controls - collect action first, apply later
+    let mut patch_action = PatchAction::None;
+    
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new("📝 Patch:").color(catppuccin::MAUVE));
+        
+        // Patch offset input
+        ui.label("@");
+        ui.add(
+            egui::TextEdit::singleline(&mut state.analysis.patch_offset_input)
+                .desired_width(70.0)
+                .hint_text("offset")
+                .font(egui::TextStyle::Monospace)
+        );
+        
+        // Patch bytes input
+        ui.label("→");
+        ui.add(
+            egui::TextEdit::singleline(&mut state.analysis.patch_bytes_input)
+                .desired_width(100.0)
+                .hint_text("90 90 90")
+                .font(egui::TextStyle::Monospace)
+        );
+        
+        // Patch button
+        if ui.button("Apply").clicked() {
+            if let Ok(offset) = u64::from_str_radix(
+                state.analysis.patch_offset_input.trim().trim_start_matches("0x"), 16
+            ) {
+                let bytes: Vec<u8> = state.analysis.patch_bytes_input
+                    .split_whitespace()
+                    .filter_map(|s| u8::from_str_radix(s, 16).ok())
+                    .collect();
+                
+                if !bytes.is_empty() {
+                    patch_action = PatchAction::ApplyBytes { offset, bytes };
+                }
+            }
+        }
+        
+        ui.separator();
+        
+        // Quick patches dropdown
+        egui::ComboBox::from_id_salt("quick_patch")
+            .selected_text("Quick Patch")
+            .width(100.0)
+            .show_ui(ui, |ui| {
+                let offset_result = u64::from_str_radix(
+                    state.analysis.patch_offset_input.trim().trim_start_matches("0x"), 16
+                );
+                
+                if let Ok(offset) = offset_result {
+                    if ui.selectable_label(false, "NOP (0x90)").clicked() {
+                        patch_action = PatchAction::QuickPatch { offset, patch_type: QuickPatch::Nop };
+                    }
+                    if ui.selectable_label(false, "JE→JNE (0x74→0x75)").clicked() {
+                        patch_action = PatchAction::QuickPatch { offset, patch_type: QuickPatch::JeToJne };
+                    }
+                    if ui.selectable_label(false, "JNE→JE (0x75→0x74)").clicked() {
+                        patch_action = PatchAction::QuickPatch { offset, patch_type: QuickPatch::JneToJe };
+                    }
+                    if ui.selectable_label(false, "JMP short (0xEB)").clicked() {
+                        patch_action = PatchAction::QuickPatch { offset, patch_type: QuickPatch::JmpShort };
+                    }
+                    if ui.selectable_label(false, "RET (0xC3)").clicked() {
+                        patch_action = PatchAction::QuickPatch { offset, patch_type: QuickPatch::Ret };
+                    }
+                } else {
+                    ui.label(egui::RichText::new("Enter offset first").color(catppuccin::OVERLAY0).small());
+                }
+            });
+        
+        ui.separator();
+        
+        // Save button
+        if ui.button(egui::RichText::new("💾 Save As...").color(catppuccin::GREEN)).clicked() {
+            patch_action = PatchAction::SaveAs;
+        }
+    });
+    
+    // Apply patch action - use Arc::make_mut for mutable access
+    match patch_action {
+        PatchAction::ApplyBytes { offset, bytes } => {
+            if let Some(ref mut binary_arc) = state.analysis.loaded_binary {
+                let binary = std::sync::Arc::make_mut(binary_arc);
+                if binary.patch_bytes(offset, &bytes).is_some() {
+                    state.log(format!("✅ Patched {} bytes at 0x{:X}", bytes.len(), offset));
+                    state.analysis.patch_bytes_input.clear();
+                } else {
+                    state.log(format!("❌ Patch failed: invalid offset 0x{:X}", offset));
+                }
+            }
+        }
+        PatchAction::QuickPatch { offset, patch_type } => {
+            if let Some(ref mut binary_arc) = state.analysis.loaded_binary {
+                let binary = std::sync::Arc::make_mut(binary_arc);
+                if binary.apply_quick_patch(offset, patch_type).is_some() {
+                    state.log(format!("✅ Applied {} at 0x{:X}", patch_type.description(), offset));
+                }
+            }
+        }
+        PatchAction::SaveAs => {
+            if let Some(ref binary) = state.analysis.loaded_binary {
+                let original_path = std::path::Path::new(&binary.path);
+                let stem = original_path.file_stem().and_then(|s| s.to_str()).unwrap_or("binary");
+                let ext = original_path.extension().and_then(|s| s.to_str()).unwrap_or("exe");
+                let patched_name = format!("{}_patched.{}", stem, ext);
+                let output_path = original_path.with_file_name(&patched_name);
+                
+                match binary.save_as(&output_path) {
+                    Ok(()) => state.log(format!("💾 Saved patched binary to: {}", output_path.display())),
+                    Err(e) => state.log(format!("❌ Save failed: {}", e)),
+                }
+            }
+        }
+        PatchAction::None => {}
+    }
 
     ui.separator();
 
@@ -66,6 +196,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     let visible_rows = ((available_height / row_height) as usize).min(rows_per_page).max(8);
     let end_row = (start_row + visible_rows).min(total_rows as usize);
     let display_rows = end_row - start_row;
+    
+    // Get binary data reference for table
+    let Some(ref binary) = state.analysis.loaded_binary else { return; };
 
     // Use TableBuilder for virtual scrolling hex view
     TableBuilder::new(ui)
@@ -151,4 +284,3 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             });
         });
 }
-

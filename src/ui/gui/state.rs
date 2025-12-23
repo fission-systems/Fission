@@ -56,6 +56,10 @@ pub struct AnalysisState {
     pub strings_filter: String,
     /// Current offset in hex view
     pub hex_offset: u64,
+    /// Patch offset input (hex string)
+    pub patch_offset_input: String,
+    /// Patch bytes input (hex string like "90 90 90")
+    pub patch_bytes_input: String,
 }
 
 /// Debug-related state (debugger, breakpoints, memory)
@@ -237,6 +241,8 @@ impl Default for AnalysisState {
             extracted_strings: Vec::new(),
             strings_filter: String::new(),
             hex_offset: 0,
+            patch_offset_input: String::new(),
+            patch_bytes_input: String::new(),
         }
     }
 }
