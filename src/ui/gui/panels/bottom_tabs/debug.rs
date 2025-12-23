@@ -66,9 +66,24 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                 
                 // Right-aligned control buttons
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let is_attached = state.debug.debug_state.attached_pid.is_some();
+                    let is_suspended = state.debug.debug_state.status == crate::debug::types::DebugStatus::Suspended;
+                    
+                    // Detach button (only when attached)
+                    if is_attached {
+                        if ui.add(egui::Button::new(
+                            egui::RichText::new("⏏ Detach").color(catppuccin::RED))
+                            .fill(catppuccin::SURFACE1)
+                        ).clicked() {
+                            state.debug.pending_debug_action = Some(DebugAction::Detach);
+                        }
+                        ui.add_space(4.0);
+                    }
+                    
                     // Step button
-                    if ui.add(egui::Button::new(
-                        egui::RichText::new("⏭ Step").color(catppuccin::SAPPHIRE))
+                    let step_enabled = is_attached && is_suspended;
+                    if ui.add_enabled(step_enabled, egui::Button::new(
+                        egui::RichText::new("⏭ Step").color(if step_enabled { catppuccin::SAPPHIRE } else { catppuccin::OVERLAY0 }))
                         .fill(catppuccin::SURFACE1)
                     ).clicked() {
                         state.debug.pending_debug_action = Some(DebugAction::Step);
@@ -76,12 +91,26 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     
                     ui.add_space(4.0);
                     
-                    // Continue button
-                    if ui.add(egui::Button::new(
-                        egui::RichText::new("▶ Continue").color(catppuccin::GREEN))
+                    // Continue/Run button
+                    let run_enabled = is_attached && is_suspended;
+                    if ui.add_enabled(run_enabled, egui::Button::new(
+                        egui::RichText::new("▶ Continue").color(if run_enabled { catppuccin::GREEN } else { catppuccin::OVERLAY0 }))
                         .fill(catppuccin::SURFACE1)
                     ).clicked() {
                         state.debug.pending_debug_action = Some(DebugAction::Continue);
+                    }
+                    
+                    ui.add_space(4.0);
+                    
+                    // Attach button (only when not attached)
+                    if !is_attached {
+                        if ui.add(egui::Button::new(
+                            egui::RichText::new("🔗 Attach").color(catppuccin::GREEN))
+                            .fill(catppuccin::SURFACE1)
+                        ).clicked() {
+                            state.ui.show_attach_dialog = true;
+                            state.debug.process_list = crate::debug::enumerate_processes();
+                        }
                     }
                 });
             });

@@ -60,6 +60,8 @@ pub struct AnalysisState {
     pub patch_offset_input: String,
     /// Patch bytes input (hex string like "90 90 90")
     pub patch_bytes_input: String,
+    /// Detection results (packer/compiler/language)
+    pub detection_result: Option<crate::analysis::detector::DetectionResult>,
 }
 
 /// Debug-related state (debugger, breakpoints, memory)
@@ -87,6 +89,8 @@ pub struct DebugStateUI {
     pub mem_dump: String,
     /// Time Travel Debugging timeline
     pub timeline: crate::debug::ttd::Timeline,
+    /// Process filter for attach dialog
+    pub process_filter: String,
 }
 
 /// Script-related state (Python scripting)
@@ -155,6 +159,7 @@ pub enum Activity {
     Explorer,
     Search,
     Debug,
+    Plugins,
     Settings,
 }
 
@@ -183,6 +188,7 @@ impl EditorTab {
 pub enum DebugAction {
     Continue,
     Step,
+    Detach,
 }
 
 /// Breakpoint actions requested from UI
@@ -243,6 +249,7 @@ impl Default for AnalysisState {
             hex_offset: 0,
             patch_offset_input: String::new(),
             patch_bytes_input: String::new(),
+            detection_result: None,
         }
     }
 }
@@ -261,6 +268,7 @@ impl Default for DebugStateUI {
             mem_len_input: "64".to_string(),
             mem_dump: String::new(),
             timeline: crate::debug::ttd::Timeline::default(),
+            process_filter: String::new(),
         }
     }
 }

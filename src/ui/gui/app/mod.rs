@@ -19,7 +19,7 @@ use crate::debug::Debugger;
 #[cfg(target_os = "windows")]
 use crate::debug::PlatformDebugger;
 
-use super::state::{AppState, EditorTab, Activity};
+use super::state::{AppState, EditorTab, Activity, DebugAction};
 use super::messages::AsyncMessage;
 use super::menu::{self, MenuAction};
 use super::status_bar;
@@ -326,10 +326,24 @@ impl FissionApp {
 
     fn handle_pending_debug_actions(&mut self) {
         if let Some(action) = self.state.debug.pending_debug_action.take() {
-            #[cfg(target_os = "windows")]
-            debug_ops::handle_debug_action(&mut self.state, &mut self.debugger, action);
-            #[cfg(not(target_os = "windows"))]
-            debug_ops::handle_debug_action(&mut self.state, action);
+            match action {
+                DebugAction::Detach => {
+                    #[cfg(target_os = "windows")]
+                    debug_ops::detach_process(
+                        &mut self.state,
+                        &mut self.debugger,
+                        &mut self.dbg_stop_tx,
+                    );
+                    #[cfg(not(target_os = "windows"))]
+                    debug_ops::detach_process(&mut self.state);
+                }
+                _ => {
+                    #[cfg(target_os = "windows")]
+                    debug_ops::handle_debug_action(&mut self.state, &mut self.debugger, action);
+                    #[cfg(not(target_os = "windows"))]
+                    debug_ops::handle_debug_action(&mut self.state, action);
+                }
+            }
         }
         if let Some(bp_action) = self.state.debug.pending_bp_action.take() {
             #[cfg(target_os = "windows")]
@@ -387,9 +401,17 @@ impl FissionApp {
     }
 
     fn render_attach_dialog(&mut self, ctx: &egui::Context) {
-        if let Some(pid) = debug_ops::render_attach_dialog(&mut self.state, ctx) {
+        if let Some(process) = debug_ops::render_attach_dialog(&mut self.state, ctx) {
             self.state.ui.show_attach_dialog = false;
-            self.attach_to_process(pid);
+            
+            // Load binary if exe_path is available
+            if let Some(ref exe_path) = process.exe_path {
+                self.state.log(format!("[*] Loading binary from: {}", exe_path));
+                file_ops::load_binary(&mut self.state, self.tx.clone(), exe_path);
+            }
+            
+            // Attach to process
+            self.attach_to_process(process.pid);
         }
     }
 

@@ -9,6 +9,8 @@ pub struct ProcessInfo {
     pub pid: u32,
     /// Process name (executable name)
     pub name: String,
+    /// Full path to the executable (if available)
+    pub exe_path: Option<String>,
 }
 
 /// Debug event received from the debugger

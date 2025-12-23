@@ -7,7 +7,8 @@ use windows::Win32::System::ProcessStatus::{
     EnumProcesses, GetModuleBaseNameW,
 };
 use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+    PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 /// Enumerate all running processes
@@ -33,22 +34,31 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
                 continue;
             }
 
-            // Try to open process
+            // Try to open process with query info rights
             let handle = match OpenProcess(
                 PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
                 false,
                 pid,
             ) {
                 Ok(h) => h,
-                Err(_) => continue, // Skip processes we can't access
+                Err(_) => {
+                    // Try with limited info
+                    match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                        Ok(h) => h,
+                        Err(_) => continue,
+                    }
+                }
             };
 
             // Get process name
             let name = get_process_name(handle).unwrap_or_else(|| format!("<PID {}>", pid));
             
+            // Get executable path
+            let exe_path = get_process_exe_path(handle);
+            
             let _ = CloseHandle(handle);
 
-            processes.push(ProcessInfo { pid, name });
+            processes.push(ProcessInfo { pid, name, exe_path });
         }
     }
 
@@ -70,5 +80,24 @@ fn get_process_name(handle: HANDLE) -> Option<String> {
         }
 
         Some(String::from_utf16_lossy(&name_buf[..len as usize]))
+    }
+}
+
+/// Get the full executable path from handle
+fn get_process_exe_path(handle: HANDLE) -> Option<String> {
+    let mut path_buf = [0u16; MAX_PATH as usize * 2];
+    let mut size = path_buf.len() as u32;
+
+    unsafe {
+        if QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(path_buf.as_mut_ptr()),
+            &mut size,
+        ).is_ok() && size > 0 {
+            Some(String::from_utf16_lossy(&path_buf[..size as usize]))
+        } else {
+            None
+        }
     }
 }
