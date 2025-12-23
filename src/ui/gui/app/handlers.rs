@@ -36,15 +36,17 @@ pub fn process_messages(
             }
             AsyncMessage::BinaryLoaded(Err(e)) => {
                 state.log(format!("[✗] Failed to load binary: {}", e));
+                state.log("    → Ensure the file is a valid PE/ELF/Mach-O executable".to_string());
             }
             AsyncMessage::DecompileResult { address, c_code } => {
                 decompiler::cache_decompile_result(state, address, c_code.clone());
                 state.log(format!("[✓] Decompiled 0x{:x} (cached)", address));
             }
             AsyncMessage::DecompileError { address: _, error } => {
-                state.analysis.decompiled_code = format!("// Error: {}", error);
+                state.analysis.decompiled_code = format!("// Decompilation failed\n// Error: {}\n\n// Possible causes:\n// - Function may not exist at this address\n// - fission_decomp CLI may not be built\n// - Try running: cd ghidra_decompiler/build && cmake .. && make", error);
                 state.analysis.decompiling = false;
                 state.log(format!("[✗] Decompile error: {}", error));
+                state.log("    → Check if ghidra_decompiler/build/fission_decomp exists".to_string());
             }
             AsyncMessage::FileSelected(Some(path)) => {
                 file_ops::load_binary(state, tx.clone(), &path);

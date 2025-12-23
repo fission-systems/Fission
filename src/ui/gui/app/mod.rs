@@ -5,12 +5,14 @@
 
 pub mod debug_ops;
 pub mod decompiler;
+pub mod decomp_worker;
 pub mod file_ops;
 pub mod handlers;
 
 use eframe::egui;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicU64;
 
 use crate::analysis::loader::FunctionInfo;
 use crate::debug::Debugger;
@@ -57,6 +59,12 @@ pub struct FissionApp {
     /// Native FFI decompiler (high performance)
     native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
 
+    /// Decompile request sender (to worker thread)
+    decomp_request_tx: Sender<decomp_worker::DecompileRequest>,
+    
+    /// Latest request ID for debouncing
+    latest_request_id: Arc<AtomicU64>,
+
     /// Theme initialization flag
     theme_initialized: bool,
 
@@ -68,6 +76,18 @@ pub struct FissionApp {
 impl Default for FissionApp {
     fn default() -> Self {
         let (tx, rx) = channel();
+        let (decomp_tx, decomp_rx) = channel();
+        let native_decompiler = Arc::new(Mutex::new(None));
+        let latest_request_id = Arc::new(AtomicU64::new(0));
+        
+        // Spawn the decompiler worker thread
+        decomp_worker::spawn_worker(
+            decomp_rx,
+            tx.clone(),
+            native_decompiler.clone(),
+            latest_request_id.clone(),
+        );
+        
         Self {
             state: AppState::default(),
             rx,
@@ -78,7 +98,9 @@ impl Default for FissionApp {
             dbg_event_rx: None,
             #[cfg(target_os = "windows")]
             dbg_stop_tx: None,
-            native_decompiler: Arc::new(Mutex::new(None)),
+            native_decompiler,
+            decomp_request_tx: decomp_tx,
+            latest_request_id,
             theme_initialized: false,
             #[cfg(feature = "python")]
             python_bridge: crate::script::PythonBridge::new(),
@@ -124,8 +146,15 @@ impl eframe::App for FissionApp {
         activity_bar::render(ctx, &mut self.state);
         
         // 2. Side Bar (Left)
-        if let Some(func) = side_bar::render(ctx, &mut self.state) {
-            self.open_function_tabs(&func);
+        if let Some(action) = side_bar::render(ctx, &mut self.state) {
+            match action {
+                side_bar::SideBarAction::SelectFunction(func) => {
+                    self.open_function_tabs(&func);
+                }
+                side_bar::SideBarAction::AnalyzeFunctions => {
+                    self.analyze_functions();
+                }
+            }
         }
         
         // 3. Bottom Panel (Terminal/Output style)
@@ -313,8 +342,8 @@ impl FissionApp {
     fn decompile_function(&mut self, func: &FunctionInfo) {
         decompiler::decompile_function(
             &mut self.state,
-            self.tx.clone(),
-            self.native_decompiler.clone(),
+            &self.decomp_request_tx,
+            &self.latest_request_id,
             func,
         );
     }
@@ -400,3 +429,32 @@ fn format_hexdump(addr: u64, data: &[u8]) -> String {
     output
 }
 
+impl FissionApp {
+    /// Analyze the loaded binary to discover internal functions from CALL instructions
+    fn analyze_functions(&mut self) {
+        // Clone the Arc first to avoid borrow checker issues
+        let binary_opt = self.state.analysis.loaded_binary.clone();
+        
+        if let Some(binary_arc) = binary_opt {
+            self.state.log("[*] Analyzing binary for internal functions...");
+            
+            // Clone the inner LoadedBinary to get a mutable copy
+            let mut binary = (*binary_arc).clone();
+            let before_count = binary.functions.len();
+            
+            // Discover internal functions
+            binary.discover_internal_functions();
+            
+            let after_count = binary.functions.len();
+            let discovered = after_count - before_count;
+            
+            // Replace with new Arc
+            self.state.analysis.loaded_binary = Some(std::sync::Arc::new(binary));
+            
+            self.state.log(format!("[✓] Found {} new internal functions ({} total)", 
+                discovered, after_count));
+        } else {
+            self.state.log("[!] No binary loaded");
+        }
+    }
+}

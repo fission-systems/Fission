@@ -66,10 +66,13 @@ pub fn preload_server_binary(
                     }
                     Err(e) => {
                         state.log(format!("[✗] Native decompiler init failed: {}", e));
+                        state.log("    → Try: cd ghidra_decompiler/build && cmake .. && make".to_string());
                     }
                 }
             } else {
-                state.log("[!] Could not find native decompiler library (fission_decompiler.dll/so/dylib)");
+                state.log("[!] Native decompiler not found".to_string());
+                state.log("    → Build with: cd ghidra_decompiler/build && cmake .. && make".to_string());
+                state.log("    → Expected: fission_decomp executable".to_string());
             }
         }
     }
