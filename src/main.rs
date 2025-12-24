@@ -9,15 +9,18 @@
 
 mod app;
 mod analysis;
-mod config;
-mod constants;
+mod core;
 mod debug;
-mod errors;
-mod logging;
 mod plugin;
-mod prelude;
 mod script;
 mod ui;
+
+// Re-export core utilities at crate level for convenience
+pub use crate::core::config;
+pub use crate::core::constants;
+pub use crate::core::errors;
+pub use crate::core::logging;
+pub use crate::core::prelude;
 
 use clap::Parser;
 
