@@ -9,6 +9,7 @@
 mod signatures;
 
 use crate::analysis::loader::LoadedBinary;
+use crate::config::CONFIG;
 
 /// Detection confidence level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -323,8 +324,8 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
 
 /// Detect by strings in binary
 fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
-    // Search in first 256KB for better detection (PyInstaller strings are often deeper)
-    let search_limit = (256 * 1024).min(binary.data.len());
+    // Search in configurable range for better detection
+    let search_limit = CONFIG.analysis.max_string_search_size.min(binary.data.len());
     let data = &binary.data[..search_limit];
     
     // Convert to string for pattern matching

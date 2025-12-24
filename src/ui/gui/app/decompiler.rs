@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use crate::analysis::disasm::DisasmEngine;
 use crate::analysis::loader::FunctionInfo;
+use crate::config::CONFIG;
 use crate::ui::gui::state::{AppState, CachedDecompile};
 use super::decomp_worker::DecompileRequest;
 
@@ -46,8 +47,12 @@ pub fn decompile_function(
     let (bytes, is_64bit) = {
         let binary = state.analysis.loaded_binary.as_ref().unwrap();
         
-        // Get function bytes (estimate 4KB for function body if size is 0)
-        let mut func_size = if func.size > 0 { func.size as usize } else { 4096 };
+        // Get function bytes (use config default if size is unknown)
+        let mut func_size = if func.size > 0 { 
+            func.size as usize 
+        } else { 
+            CONFIG.decompiler.default_function_size 
+        };
         
         // Limit function size to not exceed section bounds
         for section in &binary.sections {
@@ -61,8 +66,10 @@ pub fn decompile_function(
             }
         }
         
-        // Ensure minimum size of 16 bytes, max of 64KB
-        func_size = func_size.max(16).min(65536);
+        // Clamp to configured min/max sizes
+        func_size = func_size
+            .max(CONFIG.decompiler.min_function_size)
+            .min(CONFIG.decompiler.max_function_size);
         
         let bytes = match binary.get_bytes(address, func_size) {
             Some(b) => b,

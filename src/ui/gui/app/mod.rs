@@ -25,6 +25,7 @@ use super::menu::{self, MenuAction};
 use super::status_bar;
 use super::panels::{functions, assembly, decompile, bottom_tabs, activity_bar, side_bar, editor};
 use super::panels::bottom_tabs::{ConsoleAction, ScriptAction};
+use crate::config::CONFIG;
 
 use once_cell::sync::Lazy;
 use tokio::runtime::Runtime;
@@ -451,8 +452,9 @@ impl FissionApp {
         
         // Find function containing or starting at this address
         for func in &functions {
-            // Check if address is within function range (rough heuristic: within 4KB)
-            if addr >= func.address && addr < func.address + 4096 {
+            // Check if address is within function range (configurable)
+            let range = CONFIG.analysis.function_address_range as u64;
+            if addr >= func.address && addr < func.address + range {
                 self.state.log(format!("[*] Navigating to function: {} at 0x{:08X}", func.name, func.address));
                 self.state.analysis.selected_function = Some(func.clone());
                 self.state.ui.selected_xref_addr = Some(func.address);
