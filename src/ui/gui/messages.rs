@@ -28,4 +28,7 @@ pub enum AsyncMessage {
     
     /// Debug event from debugger loop
     DebugEvent(DebugEvent),
+    
+    /// System-wide event from EventBus
+    Event(crate::core::events::FissionEvent),
 }

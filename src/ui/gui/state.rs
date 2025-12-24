@@ -152,6 +152,10 @@ pub struct AppState {
     pub plugin_manager: crate::plugin::PluginManager,
     /// Plugin panel state
     pub plugin_panel_state: crate::ui::gui::panels::bottom_tabs::plugins::PluginPanelState,
+    /// System-wide Event Bus
+    pub event_bus: std::sync::Arc<crate::core::events::EventBus>,
+    /// Undo/Redo Command Manager
+    pub command_manager: crate::ui::gui::commands::CommandManager,
 }
 
 // ============================================================================
@@ -310,6 +314,10 @@ impl Default for UIState {
 
 impl Default for AppState {
     fn default() -> Self {
+        let mut plugin_manager = crate::plugin::PluginManager::default();
+        let event_bus = std::sync::Arc::new(crate::core::events::EventBus::new());
+        plugin_manager.set_event_bus(event_bus.clone());
+        
         Self {
             log_buffer: vec![
                 "==============================================================".into(),
@@ -325,8 +333,10 @@ impl Default for AppState {
             analysis: AnalysisState::default(),
             debug: DebugStateUI::default(),
             script: ScriptState::default(),
-            plugin_manager: crate::plugin::PluginManager::default(),
+            plugin_manager,
             plugin_panel_state: Default::default(),
+            event_bus,
+            command_manager: crate::ui::gui::commands::CommandManager::default(),
         }
     }
 }

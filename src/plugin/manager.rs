@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use crate::core::events::EventBus;
 use super::hooks::{PluginEvent, PluginEventType, PluginHook, HookPriority};
 use super::api::{PluginInfo, PluginType, PluginAPI, BinaryInfo};
 use super::traits::{FissionPlugin, PluginContext};
@@ -36,6 +37,8 @@ pub struct PluginManager {
     search_paths: Vec<PathBuf>,
     /// Shared API instance
     api: Option<Arc<dyn PluginAPI>>,
+    /// System-wide Event Bus
+    event_bus: Option<Arc<EventBus>>,
 }
 
 impl PluginManager {
@@ -50,12 +53,18 @@ impl PluginManager {
                 PathBuf::from("~/.fission/plugins"),
             ],
             api: None,
+            event_bus: None,
         }
     }
     
     /// Set the API instance for plugins to use
     pub fn set_api(&mut self, api: Arc<dyn PluginAPI>) {
         self.api = Some(api);
+    }
+
+    /// Set the Event Bus for plugins to use
+    pub fn set_event_bus(&mut self, event_bus: Arc<EventBus>) {
+        self.event_bus = Some(event_bus);
     }
     
     /// Add a plugin search path
@@ -73,7 +82,7 @@ impl PluginManager {
         
         // Initialize plugin logic
         if let Some(api) = &self.api {
-            let ctx = PluginContext::new(api.clone());
+            let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
             if let Err(e) = plugin.on_load(&ctx) {
                 return Err(format!("Failed to load plugin '{}': {:?}", id, e));
             }
@@ -154,7 +163,7 @@ impl PluginManager {
             // Call on_unload if it's a native plugin
             if let Some(mut instance) = plugin.instance.take() {
                 if let Some(api) = &self.api {
-                    let ctx = PluginContext::new(api.clone());
+                    let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
                     let _ = instance.on_unload(&ctx);
                 }
             }
@@ -217,7 +226,7 @@ impl PluginManager {
     pub fn emit_event(&self, event: &PluginEvent) {
         // 1. Dispatch to trait-based plugins
         if let Some(api) = &self.api {
-            let ctx = PluginContext::new(api.clone());
+            let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
             
             for plugin in self.plugins.values() {
                 if !plugin.info.enabled { continue; }
@@ -380,5 +389,61 @@ mod tests {
         // Unregister hook
         pm.unregister_hook(hook_id).unwrap();
         assert_eq!(pm.hook_count(), 0);
+    }
+
+    struct EventBusPlugin {
+        id: String,
+    }
+
+    impl FissionPlugin for EventBusPlugin {
+        fn id(&self) -> &str { &self.id }
+        fn name(&self) -> &str { "EventBus Plugin" }
+        fn on_load(&mut self, ctx: &PluginContext) -> crate::core::prelude::Result<()> {
+            if let Some(bus) = &ctx.event_bus {
+                bus.publish(crate::core::events::FissionEvent::LogMessage { 
+                    level: "info".into(),
+                    message: "Plugin loaded".into(),
+                    target: "plugin".into(),
+                });
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_plugin_event_bus() {
+        let mut pm = PluginManager::new();
+        let event_bus = Arc::new(crate::core::events::EventBus::new());
+        pm.set_event_bus(event_bus.clone());
+        
+        // Mock API is needed for on_load to be called
+        struct MockApi;
+        impl PluginAPI for MockApi {
+            fn get_binary(&self) -> Option<BinaryInfo> { None }
+            fn get_functions(&self) -> Vec<crate::analysis::loader::FunctionInfo> { Vec::new() }
+            fn read_binary_bytes(&self, _addr: u64, _size: usize) -> Option<Vec<u8>> { None }
+            fn log(&self, _msg: &str) {}
+            fn log_error(&self, _msg: &str) {}
+            fn decompile(&self, _addr: u64) -> Option<String> { None }
+            fn get_current_decompiled_code(&self) -> Option<String> { None }
+            fn disassemble(&self, _addr: u64, _size: usize) -> Vec<String> { Vec::new() }
+        }
+        pm.set_api(Arc::new(MockApi));
+
+        // Subscribe to verify event
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_clone = counter.clone();
+        event_bus.subscribe(move |event| {
+            if let crate::core::events::FissionEvent::LogMessage { message, .. } = event {
+                if message == "Plugin loaded" {
+                    counter_clone.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+
+        let plugin = EventBusPlugin { id: "eb_plugin".into() };
+        pm.register_native_plugin(Box::new(plugin)).unwrap();
+
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 }

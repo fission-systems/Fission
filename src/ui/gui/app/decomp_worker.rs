@@ -56,11 +56,11 @@ enum DecompilerBackend {
 }
 
 impl DecompilerBackend {
-    fn decompile(&mut self, bytes: &[u8], address: u64, is_64bit: bool) -> anyhow::Result<String> {
+    fn decompile(&mut self, bytes: &[u8], address: u64, is_64bit: bool) -> crate::core::prelude::Result<String> {
         match self {
-            DecompilerBackend::Pool(pool) => pool.decompile(bytes, address, is_64bit),
-            DecompilerBackend::Server(server) => server.decompile(bytes, address, is_64bit),
-            DecompilerBackend::Legacy(legacy) => legacy.decompile(bytes, address, is_64bit),
+            DecompilerBackend::Pool(pool) => pool.decompile(bytes, address, is_64bit).map_err(Into::into),
+            DecompilerBackend::Server(server) => server.decompile(bytes, address, is_64bit).map_err(Into::into),
+            DecompilerBackend::Legacy(legacy) => legacy.decompile(bytes, address, is_64bit).map_err(Into::into),
         }
     }
 }
@@ -173,9 +173,9 @@ fn worker_loop(
         
         // Perform decompilation using pool
         let result = if let Some(ref p) = decompiler_pool {
-            p.decompile(&request.bytes, request.address, request.is_64bit)
+            p.decompile(&request.bytes, request.address, request.is_64bit).map_err(|e| crate::core::errors::FissionError::from(e))
         } else {
-            Err(anyhow::anyhow!("Decompiler pool not available"))
+            Err(crate::err!(decompiler, "Decompiler pool not available"))
         };
         
         // Send result only if still latest

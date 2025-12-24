@@ -3,7 +3,7 @@
 //! Provides a powerful command-line interface with autocomplete,
 //! syntax highlighting, and history support.
 
-use anyhow::Result;
+use crate::core::prelude::Result;
 use colored::Colorize;
 use reedline::{
     Prompt, PromptHistorySearch, PromptHistorySearchStatus,
@@ -185,7 +185,7 @@ fn parse_command(input: &str) -> ParsedCommand {
 }
 
 /// Parse an address string (supports 0x prefix and decimal)
-fn parse_address(s: &str) -> Result<u64, std::num::ParseIntError> {
+fn parse_address(s: &str) -> std::result::Result<u64, std::num::ParseIntError> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         u64::from_str_radix(hex, 16)

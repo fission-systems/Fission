@@ -87,6 +87,24 @@ pub fn process_messages(
             AsyncMessage::DebugEvent(evt) => {
                 debug_ops::handle_debug_event(state, evt);
             }
+            AsyncMessage::Event(evt) => {
+                match evt {
+                    crate::core::events::FissionEvent::LogMessage { level, message, target } => {
+                        state.log(format!("[{}] {} - {}", level.to_uppercase(), target, message));
+                    }
+                    crate::core::events::FissionEvent::Progress { task_id: _, current, total, message } => {
+                        // TODO: Update status bar progress
+                        state.log(format!("[Progress] {:.1}% - {}", (current as f64 / total as f64) * 100.0, message));
+                    }
+                    crate::core::events::FissionEvent::SelectionChanged { address } => {
+                        if let Some(addr) = address {
+                            state.log(format!("[Selection] 0x{:08X}", addr));
+                            state.ui.selected_xref_addr = Some(addr);
+                        }
+                    }
+                    _ => {} // Ignore others for now (or handle specifically)
+                }
+            }
         }
     }
 
@@ -137,6 +155,89 @@ pub fn process_command(
         }
         "exit" | "quit" => {
             std::process::exit(0);
+        }
+        "undo" => {
+            let mut mgr = std::mem::take(&mut state.command_manager);
+            match mgr.undo(state) {
+                Ok(msg) => state.log(format!("[✓] {}", msg)),
+                Err(e) => state.log(format!("[!] Undo failed: {}", e)),
+            }
+            state.command_manager = mgr;
+        }
+        "redo" => {
+            let mut mgr = std::mem::take(&mut state.command_manager);
+            match mgr.redo(state) {
+                Ok(msg) => state.log(format!("[✓] {}", msg)),
+                Err(e) => state.log(format!("[!] Redo failed: {}", e)),
+            }
+            state.command_manager = mgr;
+        }
+        _ if cmd.starts_with("patch ") => {
+            // patch <addr> <byte1> <byte2> ...
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            if parts.len() < 3 {
+                 state.log("[!] Usage: patch <address> <hex_byte1> [hex_byte2 ...]");
+            } else {
+                let addr_str = parts[1].trim_start_matches("0x");
+                match u64::from_str_radix(addr_str, 16) {
+                    Ok(addr) => {
+                        let mut bytes = Vec::new();
+                        let mut valid = true;
+                        
+                        for s in &parts[2..] {
+                            match u8::from_str_radix(s, 16) {
+                                Ok(b) => bytes.push(b),
+                                Err(_) => {
+                                    state.log(format!("[!] Invalid byte: {}", s));
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if valid {
+                            let command = Box::new(crate::ui::gui::commands::PatchBytesCommand {
+                                address: addr,
+                                old_bytes: Vec::new(),
+                                new_bytes: bytes,
+                            });
+                            
+                            let mut mgr = std::mem::take(&mut state.command_manager);
+                            if let Err(e) = mgr.execute(command, state) {
+                                state.log(format!("[!] Patch failed: {}", e));
+                            }
+                            state.command_manager = mgr;
+                        }
+                    }
+                    Err(_) => state.log(format!("[!] Invalid address: {}", parts[1])),
+                }
+            }
+        }
+        _ if cmd.starts_with("rename ") => {
+            // rename <addr> <new_name>
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            if parts.len() != 3 {
+                state.log("[!] Usage: rename <address> <new_name>");
+            } else {
+                let addr_str = parts[1].trim_start_matches("0x");
+                match u64::from_str_radix(addr_str, 16) {
+                    Ok(addr) => {
+                        let new_name = parts[2].to_string();
+                        let command = Box::new(crate::ui::gui::commands::RenameFunctionCommand {
+                            address: addr,
+                            old_name: String::new(), // Will be filled by execute
+                            new_name,
+                        });
+                        
+                        let mut mgr = std::mem::take(&mut state.command_manager);
+                        if let Err(e) = mgr.execute(command, state) {
+                            state.log(format!("[!] Rename failed: {}", e));
+                        }
+                        state.command_manager = mgr;
+                    }
+                    Err(_) => state.log(format!("[!] Invalid address: {}", parts[1])),
+                }
+            }
         }
         _ if cmd.starts_with("load ") => {
             let path = cmd.trim_start_matches("load ").trim();

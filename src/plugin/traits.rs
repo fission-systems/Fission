@@ -7,15 +7,19 @@ use std::sync::Arc;
 use crate::core::prelude::*;
 use crate::plugin::api::{PluginAPI, BinaryInfo};
 
+use crate::core::events::EventBus;
+
 /// Context provided to plugins during callbacks
 pub struct PluginContext {
     /// Access to Fission API
     pub api: Arc<dyn PluginAPI>,
+    /// System-wide Event Bus
+    pub event_bus: Option<Arc<EventBus>>,
 }
 
 impl PluginContext {
-    pub fn new(api: Arc<dyn PluginAPI>) -> Self {
-        Self { api }
+    pub fn new(api: Arc<dyn PluginAPI>, event_bus: Option<Arc<EventBus>>) -> Self {
+        Self { api, event_bus }
     }
 }
 

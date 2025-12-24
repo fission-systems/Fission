@@ -89,8 +89,17 @@ impl Default for FissionApp {
             latest_request_id.clone(),
         );
         
+        // Initialize state early to access event bus
+        let state = AppState::default();
+        
+        // Bridge EventBus to UI AsyncMessage channel
+        let tx_clone = tx.clone();
+        state.event_bus.subscribe(move |event| {
+            let _ = tx_clone.send(AsyncMessage::Event(event.clone()));
+        });
+        
         Self {
-            state: AppState::default(),
+            state,
             rx,
             tx,
             #[cfg(target_os = "windows")]

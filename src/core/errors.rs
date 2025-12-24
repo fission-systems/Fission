@@ -131,6 +131,18 @@ impl From<anyhow::Error> for FissionError {
     }
 }
 
+impl From<std::num::ParseIntError> for FissionError {
+    fn from(err: std::num::ParseIntError) -> Self {
+        FissionError::Other(err.to_string())
+    }
+}
+
+impl From<goblin::error::Error> for FissionError {
+    fn from(err: goblin::error::Error) -> Self {
+        FissionError::Loader(err.to_string())
+    }
+}
+
 // Helper to convert to anyhow::Error (avoids orphan rule conflict)
 impl FissionError {
     pub fn to_anyhow(self) -> anyhow::Error {

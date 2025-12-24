@@ -6,6 +6,7 @@ mod app;
 mod state;
 mod messages;
 mod menu;
+pub mod commands;
 mod status_bar;
 mod panels;
 mod widgets;
