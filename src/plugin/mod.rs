@@ -6,6 +6,7 @@
 pub mod hooks;
 pub mod manager;
 pub mod api;
+pub mod traits;
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -13,3 +14,4 @@ pub mod python;
 pub use hooks::{PluginEvent, PluginHook};
 pub use manager::PluginManager;
 pub use api::PluginAPI;
+pub use traits::{FissionPlugin, PluginContext};
