@@ -2,14 +2,16 @@
 //!
 //! Common imports for convenience. Use with:
 //! ```
+//! use crate::core::prelude::*;
+//! // or
 //! use crate::prelude::*;
 //! ```
 
 // Re-export config
-pub use crate::config::CONFIG;
+pub use super::config::CONFIG;
 
 // Re-export error types
-pub use crate::errors::{FissionError, Result};
+pub use super::errors::{FissionError, Result};
 pub use crate::err;
 
 // Re-export common analysis types
