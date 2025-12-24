@@ -32,6 +32,10 @@ pub struct UIState {
     pub dynamic_mode: bool,
     /// Show attach dialog
     pub show_attach_dialog: bool,
+    /// Show cross-references window
+    pub show_xrefs_window: bool,
+    /// Selected address for xrefs viewing
+    pub selected_xref_addr: Option<u64>,
 }
 
 /// Analysis-related state (binary, functions, decompilation)
@@ -62,6 +66,8 @@ pub struct AnalysisState {
     pub patch_bytes_input: String,
     /// Detection results (packer/compiler/language)
     pub detection_result: Option<crate::analysis::detector::DetectionResult>,
+    /// Cross-references database
+    pub xref_db: Option<crate::analysis::xrefs::XrefDatabase>,
 }
 
 /// Debug-related state (debugger, breakpoints, memory)
@@ -250,6 +256,7 @@ impl Default for AnalysisState {
             patch_offset_input: String::new(),
             patch_bytes_input: String::new(),
             detection_result: None,
+            xref_db: None,
         }
     }
 }
@@ -295,6 +302,8 @@ impl Default for UIState {
             active_tab_index: Some(0),
             dynamic_mode: true,
             show_attach_dialog: false,
+            show_xrefs_window: false,
+            selected_xref_addr: None,
         }
     }
 }

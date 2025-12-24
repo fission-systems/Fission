@@ -143,11 +143,12 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
                             ui.horizontal(|ui| {
                                 // Plugin type icon
                                 let icon = match plugin.plugin_type {
-                                    PluginType::Python => "🐍",
-                                    PluginType::Lua => "🌙",
-                                    PluginType::Native => "⚡",
+                                    PluginType::Python => "Py",
+                                    PluginType::Lua => "Lu",
+                                    PluginType::Native => "Na",
                                 };
-                                ui.label(egui::RichText::new(icon).size(16.0));
+                                ui.label(egui::RichText::new(icon).size(14.0).strong().color(catppuccin::OVERLAY1));
+                                ui.add_space(4.0);
                                 
                                 ui.vertical(|ui| {
                                     ui.label(egui::RichText::new(&plugin.name)

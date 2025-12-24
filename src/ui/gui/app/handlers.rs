@@ -55,6 +55,12 @@ pub fn process_messages(
                     state.analysis.detection_result = Some(detection);
                 }
                 
+                // Build cross-references database
+                let xref_db = crate::analysis::xrefs::XrefDatabase::build_from_binary(&binary);
+                let xref_count = xref_db.total_refs();
+                state.log(format!("[*] 🔗 Built {} cross-references", xref_count));
+                state.analysis.xref_db = Some(xref_db);
+                
                 state.analysis.loaded_binary = Some(binary);
                 file_ops::preload_server_binary(state, native_decompiler.clone());
             }

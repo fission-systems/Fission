@@ -23,11 +23,11 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
                 ui.add_space(12.0);
                 
                 // Debug
-                activity_button(ui, state, Activity::Debug, "🪲", "Run and Debug");
+                activity_button(ui, state, Activity::Debug, "▶", "Run and Debug");
                 ui.add_space(12.0);
                 
                 // Plugins
-                activity_button(ui, state, Activity::Plugins, "🧩", "Extensions");
+                activity_button(ui, state, Activity::Plugins, "📦", "Extensions");
                 ui.add_space(12.0);
                 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {

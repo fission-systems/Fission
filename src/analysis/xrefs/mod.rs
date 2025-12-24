@@ -1,0 +1,204 @@
+//! Cross-References (Xrefs) analysis module.
+//!
+//! Analyzes binary code to find call/jump/data references between addresses.
+
+use std::collections::HashMap;
+
+/// Type of cross-reference
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XrefType {
+    /// Function call (CALL instruction)
+    Call,
+    /// Jump (JMP, Jcc instructions)
+    Jump,
+    /// Data reference (MOV, LEA with address)
+    Data,
+}
+
+/// A single cross-reference
+#[derive(Debug, Clone)]
+pub struct Xref {
+    /// Source address (where the reference originates)
+    pub from_addr: u64,
+    /// Target address (where the reference points to)
+    pub to_addr: u64,
+    /// Type of reference
+    pub xref_type: XrefType,
+}
+
+/// Database of all cross-references in a binary
+#[derive(Debug, Clone, Default)]
+pub struct XrefDatabase {
+    /// References TO an address (key = target address)
+    refs_to: HashMap<u64, Vec<Xref>>,
+    /// References FROM an address (key = source address)
+    refs_from: HashMap<u64, Vec<Xref>>,
+}
+
+impl XrefDatabase {
+    /// Create a new empty database
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a cross-reference
+    pub fn add_xref(&mut self, xref: Xref) {
+        self.refs_to
+            .entry(xref.to_addr)
+            .or_default()
+            .push(xref.clone());
+        self.refs_from
+            .entry(xref.from_addr)
+            .or_default()
+            .push(xref);
+    }
+
+    /// Get all references TO an address (who calls/references this address?)
+    pub fn get_refs_to(&self, addr: u64) -> &[Xref] {
+        self.refs_to.get(&addr).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Get all references FROM an address (what does this address call/reference?)
+    pub fn get_refs_from(&self, addr: u64) -> &[Xref] {
+        self.refs_from.get(&addr).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Total number of cross-references
+    pub fn total_refs(&self) -> usize {
+        self.refs_to.values().map(|v| v.len()).sum()
+    }
+
+    /// Build xref database from disassembled code
+    pub fn build_from_binary(binary: &crate::analysis::loader::LoadedBinary) -> Self {
+        let mut db = Self::new();
+        
+        // Get image base for address calculation
+        let image_base = binary.image_base;
+        
+        // Analyze each section that might contain code
+        for section in &binary.sections {
+            // Skip non-executable sections (heuristic: .text, CODE, etc.)
+            let name_lower = section.name.to_lowercase();
+            if !name_lower.contains("text") && !name_lower.contains("code") && section.name != ".text" {
+                continue;
+            }
+
+            // Disassemble and find references
+            let start = section.file_offset as usize;
+            let end = start + section.file_size as usize;
+            if let Some(code) = binary.data.get(start..end) {
+                db.analyze_code(code, section.virtual_address + image_base);
+            }
+        }
+
+        db
+    }
+
+    /// Analyze code bytes to find cross-references
+    fn analyze_code(&mut self, code: &[u8], base_addr: u64) {
+        use iced_x86::{Decoder, DecoderOptions, FlowControl, OpKind};
+
+        // Try 64-bit first, then 32-bit
+        for bitness in [64, 32] {
+            let mut decoder = Decoder::with_ip(bitness, code, base_addr, DecoderOptions::NONE);
+
+            for instr in &mut decoder {
+                if instr.is_invalid() {
+                    continue;
+                }
+
+                let from_addr = instr.ip();
+
+                match instr.flow_control() {
+                    FlowControl::Call | FlowControl::IndirectCall => {
+                        // Direct call target
+                        if instr.op_count() > 0 {
+                            if let OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64 = instr.op0_kind() {
+                                let to_addr = instr.near_branch_target();
+                                self.add_xref(Xref {
+                                    from_addr,
+                                    to_addr,
+                                    xref_type: XrefType::Call,
+                                });
+                            }
+                        }
+                    }
+                    FlowControl::UnconditionalBranch | FlowControl::ConditionalBranch => {
+                        // Jump target
+                        if instr.op_count() > 0 {
+                            if let OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64 = instr.op0_kind() {
+                                let to_addr = instr.near_branch_target();
+                                self.add_xref(Xref {
+                                    from_addr,
+                                    to_addr,
+                                    xref_type: XrefType::Jump,
+                                });
+                            }
+                        }
+                    }
+                    _ => {
+                        // Check for memory references (LEA, MOV with immediate addresses)
+                        for i in 0..instr.op_count() {
+                            match instr.op_kind(i) {
+                                OpKind::Memory => {
+                                    // Memory operand with displacement
+                                    let disp = instr.memory_displacement64();
+                                    if disp > base_addr && disp < base_addr + code.len() as u64 * 2 {
+                                        self.add_xref(Xref {
+                                            from_addr,
+                                            to_addr: disp,
+                                            xref_type: XrefType::Data,
+                                        });
+                                    }
+                                }
+                                OpKind::Immediate64 | OpKind::Immediate32to64 => {
+                                    let imm = instr.immediate64();
+                                    // Heuristic: if immediate looks like an address
+                                    if imm > base_addr && imm < base_addr + code.len() as u64 * 2 {
+                                        self.add_xref(Xref {
+                                            from_addr,
+                                            to_addr: imm,
+                                            xref_type: XrefType::Data,
+                                        });
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // If we found refs in 64-bit mode, don't try 32-bit
+            if self.total_refs() > 0 {
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_xref_database() {
+        let mut db = XrefDatabase::new();
+        
+        db.add_xref(Xref {
+            from_addr: 0x1000,
+            to_addr: 0x2000,
+            xref_type: XrefType::Call,
+        });
+        
+        db.add_xref(Xref {
+            from_addr: 0x1100,
+            to_addr: 0x2000,
+            xref_type: XrefType::Call,
+        });
+
+        assert_eq!(db.get_refs_to(0x2000).len(), 2);
+        assert_eq!(db.get_refs_from(0x1000).len(), 1);
+        assert_eq!(db.total_refs(), 2);
+    }
+}
