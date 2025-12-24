@@ -3,6 +3,7 @@
 use std::time::Instant;
 use super::snapshot::{ExecutionSnapshot, MemoryDelta, SnapshotStats};
 use super::super::types::RegisterState;
+use crate::config::CONFIG;
 
 /// Recording status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +41,7 @@ impl TTDRecorder {
             snapshots: Vec::new(),
             current_step: 0,
             start_time: None,
-            max_snapshots: 10000, // Default: keep last 10k steps
+            max_snapshots: CONFIG.debug.max_snapshots,
             prev_registers: None,
         }
     }

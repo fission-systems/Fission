@@ -2,6 +2,7 @@
 
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
+use crate::config::CONFIG;
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::theme::{catppuccin, code};
 use crate::analysis::patch::QuickPatch;
@@ -31,7 +32,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     };
 
-    let rows_per_page = 64;
+    let rows_per_page = CONFIG.ui.hex_rows_per_page;
     
     // Navigation Controls
     ui.horizontal(|ui| {

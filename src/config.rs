@@ -75,6 +75,8 @@ pub struct UiConfig {
     pub auto_scroll_entry: bool,
     /// Maximum log entries to keep
     pub max_log_entries: usize,
+    /// Hex view rows per page
+    pub hex_rows_per_page: usize,
 }
 
 impl Default for Config {
@@ -144,6 +146,7 @@ impl Default for UiConfig {
             show_performance: false,
             auto_scroll_entry: true,
             max_log_entries: 1000,
+            hex_rows_per_page: 64,
         }
     }
 }
