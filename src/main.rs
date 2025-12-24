@@ -13,6 +13,7 @@ mod config;
 mod debug;
 mod errors;
 mod plugin;
+mod prelude;
 mod script;
 mod ui;
 
