@@ -2,6 +2,7 @@
 
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
+use crate::config::CONFIG;
 use crate::ui::gui::state::{AppState, ExtractedString, StringEncoding};
 use crate::ui::gui::theme::{catppuccin, code};
 
@@ -111,7 +112,7 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
     
     let Some(ref binary) = state.analysis.loaded_binary else { return; };
     
-    let min_len = 4;
+    let min_len = CONFIG.analysis.min_string_length;
     let data = &binary.data;
     
     // ASCII strings
