@@ -183,6 +183,13 @@ impl eframe::App for FissionApp {
         
         // Render attach dialog
         self.render_attach_dialog(ctx);
+        
+        // Render xrefs window
+        use super::panels::xrefs;
+        if let xrefs::XrefAction::NavigateTo(addr) = xrefs::render(ctx, &mut self.state) {
+            // Navigate to address - find function containing this address
+            self.navigate_to_address(addr);
+        }
     }
 }
 
@@ -206,6 +213,9 @@ impl FissionApp {
             }
             MenuAction::ShowAbout => {
                 self.state.log("[*] Fission v0.1.0 - Ghidra-Powered Analysis Platform");
+            }
+            MenuAction::ShowXrefs => {
+                self.state.ui.show_xrefs_window = true;
             }
             MenuAction::Exit => std::process::exit(0),
             MenuAction::None => {}
@@ -429,6 +439,32 @@ impl FissionApp {
     #[cfg(not(target_os = "windows"))]
     fn attach_to_process(&mut self, pid: u32) {
         debug_ops::attach_to_process(&mut self.state, pid);
+    }
+
+    /// Navigate to an address - find function containing this address and select it
+    fn navigate_to_address(&mut self, addr: u64) {
+        // Clone the functions list to avoid borrow issues
+        let functions: Vec<FunctionInfo> = self.state.analysis.loaded_binary
+            .as_ref()
+            .map(|b| b.functions.clone())
+            .unwrap_or_default();
+        
+        // Find function containing or starting at this address
+        for func in &functions {
+            // Check if address is within function range (rough heuristic: within 4KB)
+            if addr >= func.address && addr < func.address + 4096 {
+                self.state.log(format!("[*] Navigating to function: {} at 0x{:08X}", func.name, func.address));
+                self.state.analysis.selected_function = Some(func.clone());
+                self.state.ui.selected_xref_addr = Some(func.address);
+                self.decompile_function(func);
+                return;
+            }
+        }
+        
+        // If no function found, just log
+        if !functions.is_empty() {
+            self.state.log(format!("[!] No function found at address 0x{:08X}", addr));
+        }
     }
 }
 

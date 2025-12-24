@@ -12,6 +12,7 @@ pub enum MenuAction {
     ClearConsole,
     ClearCache,
     ShowAbout,
+    ShowXrefs,
     Exit,
     None,
 }
@@ -100,6 +101,12 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                     }
                     if ui.button(egui::RichText::new(if state.ui.panel_visible { "Hide Panel" } else { "Show Panel" }).color(catppuccin::TEXT)).clicked() {
                         state.ui.panel_visible = !state.ui.panel_visible;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button(egui::RichText::new("🔗 Cross-References")
+                        .color(catppuccin::LAVENDER)).clicked() {
+                        action = MenuAction::ShowXrefs;
                         ui.close_menu();
                     }
                     ui.separator();
