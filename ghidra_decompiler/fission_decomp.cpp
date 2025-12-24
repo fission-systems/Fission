@@ -208,29 +208,34 @@ std::string process_request(ServerState& state, const std::string& input) {
         // Select architecture
         const char* arch_id = is_64bit ? "x86:LE:64:default" : "x86:LE:32:default";
         
-        // Create or reuse loader and architecture
-        MemoryLoadImage loader(bytes, address);
-        CliArchitecture arch(arch_id, &loader, &std::cerr);
+        // IMPORTANT: Allocate on heap and intentionally don't delete
+        // Ghidra's destructors have memory management issues that cause crashes
+        // This is a controlled memory leak but keeps the server stable
+        MemoryLoadImage* loader = new MemoryLoadImage(bytes, address);
+        CliArchitecture* arch = new CliArchitecture(arch_id, loader, &std::cerr);
         
         DocumentStorage store;
-        arch.init(store);
-        arch.max_instructions = 200000;
-        arch.flowoptions &= ~FlowInfo::error_toomanyinstructions;
+        arch->init(store);
+        arch->max_instructions = 200000;
+        arch->flowoptions &= ~FlowInfo::error_toomanyinstructions;
         
         // Decompile
-        Address func_addr(arch.getDefaultCodeSpace(), address);
-        Scope* global_scope = arch.symboltab->getGlobalScope();
+        Address func_addr(arch->getDefaultCodeSpace(), address);
+        Scope* global_scope = arch->symboltab->getGlobalScope();
         Funcdata* fd = global_scope->findFunction(func_addr);
         if (fd == nullptr) {
             fd = global_scope->addFunction(func_addr, "func")->getFunction();
         }
         
-        arch.allacts.getCurrent()->reset(*fd);
-        arch.allacts.getCurrent()->perform(*fd);
+        arch->allacts.getCurrent()->reset(*fd);
+        arch->allacts.getCurrent()->perform(*fd);
         
         std::ostringstream c_stream;
-        arch.print->setOutputStream(&c_stream);
-        arch.print->docFunction(fd);
+        arch->print->setOutputStream(&c_stream);
+        arch->print->docFunction(fd);
+        
+        // Note: We intentionally don't delete arch and loader here
+        // to avoid Ghidra's destructor memory corruption issues
         
         return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_stream.str()) + "\"}";
         

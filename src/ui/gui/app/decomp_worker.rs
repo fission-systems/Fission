@@ -110,21 +110,29 @@ fn worker_loop(
                     .to_string_lossy()
                     .into_owned();
                 
-                // Use legacy mode (server mode has Ghidra memory management issues)
-                // TODO: Fix server mode memory corruption in fission_decomp.cpp
-                match NativeDecompiler::new(&cli_path, &sla_dir) {
-                    Ok(legacy) => {
-                        eprintln!("[decomp-worker] Using legacy mode");
-                        backend = Some(DecompilerBackend::Legacy(legacy));
+                // Try server mode first (faster - keeps process alive)
+                match DecompilerServer::new(&cli_path, &sla_dir) {
+                    Ok(server) => {
+                        eprintln!("[decomp-worker] Using server mode (fast)");
+                        backend = Some(DecompilerBackend::Server(server));
                     }
-                    Err(e) => {
-                        if !request.is_prefetch {
-                            let _ = result_tx.send(AsyncMessage::DecompileError {
-                                address: request.address,
-                                error: format!("Failed to init decompiler: {}", e),
-                            });
+                    Err(_) => {
+                        // Fall back to legacy mode
+                        match NativeDecompiler::new(&cli_path, &sla_dir) {
+                            Ok(legacy) => {
+                                eprintln!("[decomp-worker] Using legacy mode");
+                                backend = Some(DecompilerBackend::Legacy(legacy));
+                            }
+                            Err(e) => {
+                                if !request.is_prefetch {
+                                    let _ = result_tx.send(AsyncMessage::DecompileError {
+                                        address: request.address,
+                                        error: format!("Failed to init decompiler: {}", e),
+                                    });
+                                }
+                                continue;
+                            }
                         }
-                        continue;
                     }
                 }
             } else {
