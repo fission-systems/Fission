@@ -11,6 +11,7 @@ mod app;
 mod analysis;
 mod config;
 mod debug;
+mod errors;
 mod plugin;
 mod script;
 mod ui;
