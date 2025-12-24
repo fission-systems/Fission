@@ -272,3 +272,102 @@ pub fn find_cli() -> Option<std::path::PathBuf> {
 pub fn find_library() -> Option<std::path::PathBuf> {
     find_cli()
 }
+
+/// Pool of decompiler server processes for parallel decompilation
+pub struct DecompilerPool {
+    workers: Vec<Mutex<DecompilerServer>>,
+    next_worker: std::sync::atomic::AtomicUsize,
+}
+
+impl DecompilerPool {
+    /// Create a new pool with N worker processes
+    pub fn new<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str, num_workers: usize) -> Result<Self> {
+        let num_workers = num_workers.max(1); // At least 1 worker
+        let mut workers = Vec::with_capacity(num_workers);
+        
+        for i in 0..num_workers {
+            match DecompilerServer::new(&cli_path, sla_dir) {
+                Ok(server) => {
+                    eprintln!("[DecompilerPool] Created worker {}/{}", i + 1, num_workers);
+                    workers.push(Mutex::new(server));
+                }
+                Err(e) => {
+                    // If we can't create all workers, use what we have
+                    if workers.is_empty() {
+                        return Err(e);
+                    }
+                    eprintln!("[DecompilerPool] Warning: Could not create worker {}: {}", i + 1, e);
+                    break;
+                }
+            }
+        }
+        
+        eprintln!("[DecompilerPool] Initialized with {} workers", workers.len());
+        
+        Ok(Self {
+            workers,
+            next_worker: std::sync::atomic::AtomicUsize::new(0),
+        })
+    }
+    
+    /// Create pool with default number of workers (CPU cores, max 4)
+    pub fn new_default<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str) -> Result<Self> {
+        let num_cpus = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(2);
+        let num_workers = num_cpus.min(4); // Max 4 workers to avoid memory issues
+        Self::new(cli_path, sla_dir, num_workers)
+    }
+    
+    /// Decompile bytes using next available worker (round-robin)
+    pub fn decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
+        // Round-robin worker selection
+        let worker_idx = self.next_worker.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % self.workers.len();
+        
+        // Lock the selected worker
+        let mut worker = self.workers[worker_idx].lock()
+            .map_err(|_| anyhow!("Worker mutex poisoned"))?;
+        
+        worker.decompile(bytes, base_addr, is_64bit)
+    }
+    
+    /// Try to decompile without blocking (returns None if all workers busy)
+    pub fn try_decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Option<Result<String>> {
+        // Try each worker, return first one that's available
+        for worker in &self.workers {
+            if let Ok(mut guard) = worker.try_lock() {
+                return Some(guard.decompile(bytes, base_addr, is_64bit));
+            }
+        }
+        None // All workers busy
+    }
+    
+    /// Number of workers in the pool
+    pub fn num_workers(&self) -> usize {
+        self.workers.len()
+    }
+    
+    /// Shutdown all workers
+    pub fn shutdown(&self) {
+        for worker in &self.workers {
+            if let Ok(mut guard) = worker.lock() {
+                guard.shutdown();
+            }
+        }
+    }
+}
+
+impl Drop for DecompilerPool {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+/// Thread-safe shared pool
+pub type SharedDecompilerPool = Arc<DecompilerPool>;
+
+/// Create a shared decompiler pool
+pub fn create_pool<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str, num_workers: usize) -> Result<SharedDecompilerPool> {
+    let pool = DecompilerPool::new(cli_path, sla_dir, num_workers)?;
+    Ok(Arc::new(pool))
+}
