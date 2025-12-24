@@ -2,10 +2,17 @@
  * Fission Decompiler CLI
  * 
  * Standalone subprocess decompiler that reads JSON from stdin and outputs C code to stdout.
- * Each invocation is a fresh process, avoiding Ghidra global state issues.
+ * 
+ * Modes:
+ *   - Single-shot (default): Process one request and exit
+ *   - Server (--server): Keep running and process multiple requests (line-delimited JSON)
  * 
  * Input (stdin): {"bytes":"BASE64_ENCODED_BYTES","address":12345,"is_64bit":true,"sla_dir":"/path"}
  * Output (stdout): {"status":"ok","code":"..."} or {"status":"error","message":"..."}
+ * 
+ * Server mode special commands:
+ *   - {"cmd":"quit"} - Shutdown server
+ *   - {"cmd":"ping"} - Health check, responds with {"status":"ok","message":"pong"}
  */
 
 #include <iostream>
@@ -14,7 +21,8 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
-#include <cstdlib>  // for _exit
+#include <cstdlib>
+#include <memory>
 
 #include "libdecomp.hh"
 #include "sleigh_arch.hh"
@@ -102,6 +110,11 @@ public:
     MemoryLoadImage(const std::vector<uint8_t>& d, uint64_t base)
         : LoadImage("memory"), data_(d), base_addr_(base) {}
     
+    void updateData(const std::vector<uint8_t>& d, uint64_t base) {
+        data_ = d;
+        base_addr_ = base;
+    }
+    
     virtual void loadFill(uint1 *ptr, int4 size, const Address &addr) override {
         uint64_t offset = addr.getOffset();
         uint64_t max = base_addr_ + data_.size();
@@ -130,22 +143,45 @@ public:
     }
 };
 
-int main(int argc, char** argv) {
-    // Disable stdout buffering to ensure output is visible before potential crash
-    std::cout.setf(std::ios::unitbuf);
-    std::cerr << "[fission_decomp] Starting..." << std::endl;
-    
-    // Read all of stdin
-    std::stringstream buffer;
-    buffer << std::cin.rdbuf();
-    std::string input = buffer.str();
-    
-    if (input.empty()) {
-        std::cout << "{\"status\":\"error\",\"message\":\"No input provided\"}" << std::endl;
-        return 1;
+// Global state for server mode (reuse across requests)
+struct ServerState {
+    bool initialized = false;
+    std::string sla_dir;
+    std::unique_ptr<MemoryLoadImage> loader_64bit;
+    std::unique_ptr<MemoryLoadImage> loader_32bit;
+    std::unique_ptr<CliArchitecture> arch_64bit;
+    std::unique_ptr<CliArchitecture> arch_32bit;
+};
+
+// Initialize Ghidra (called once in server mode)
+bool init_ghidra(ServerState& state, const std::string& sla_dir) {
+    if (state.initialized && state.sla_dir == sla_dir) {
+        return true;
     }
     
-    std::cerr << "[fission_decomp] Parsing input..." << std::endl;
+    try {
+        startDecompilerLibrary(sla_dir.c_str());
+        std::string langDir = sla_dir + "/languages";
+        SleighArchitecture::specpaths.addDir2Path(langDir);
+        SleighArchitecture::getDescriptions();
+        state.sla_dir = sla_dir;
+        state.initialized = true;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Process a single decompilation request
+std::string process_request(ServerState& state, const std::string& input) {
+    // Check for special commands
+    std::string cmd = extract_json_string(input, "cmd");
+    if (cmd == "quit") {
+        return "__QUIT__";
+    }
+    if (cmd == "ping") {
+        return "{\"status\":\"ok\",\"message\":\"pong\"}";
+    }
     
     // Parse JSON input
     std::string bytes_b64 = extract_json_string(input, "bytes");
@@ -154,35 +190,25 @@ int main(int argc, char** argv) {
     std::string sla_dir = extract_json_string(input, "sla_dir");
     
     if (bytes_b64.empty() || sla_dir.empty()) {
-        std::cout << "{\"status\":\"error\",\"message\":\"Missing required fields: bytes, sla_dir\"}" << std::endl;
-        return 1;
+        return "{\"status\":\"error\",\"message\":\"Missing required fields: bytes, sla_dir\"}";
+    }
+    
+    // Initialize Ghidra if needed
+    if (!init_ghidra(state, sla_dir)) {
+        return "{\"status\":\"error\",\"message\":\"Failed to initialize Ghidra\"}";
     }
     
     // Decode bytes
     std::vector<uint8_t> bytes = base64_decode(bytes_b64);
     if (bytes.empty()) {
-        std::cout << "{\"status\":\"error\",\"message\":\"Failed to decode bytes\"}" << std::endl;
-        return 1;
+        return "{\"status\":\"error\",\"message\":\"Failed to decode bytes\"}";
     }
     
-    std::cerr << "[fission_decomp] Decoded " << bytes.size() << " bytes at 0x" << std::hex << address << std::endl;
-    
     try {
-        std::cerr << "[fission_decomp] Initializing Ghidra..." << std::endl;
-        
-        // Initialize Ghidra
-        startDecompilerLibrary(sla_dir.c_str());
-        
-        std::string langDir = sla_dir + "/languages";
-        SleighArchitecture::specpaths.addDir2Path(langDir);
-        SleighArchitecture::getDescriptions();
-        
-        std::cerr << "[fission_decomp] Creating architecture..." << std::endl;
-        
         // Select architecture
         const char* arch_id = is_64bit ? "x86:LE:64:default" : "x86:LE:32:default";
         
-        // Create loader and architecture
+        // Create or reuse loader and architecture
         MemoryLoadImage loader(bytes, address);
         CliArchitecture arch(arch_id, &loader, &std::cerr);
         
@@ -190,8 +216,6 @@ int main(int argc, char** argv) {
         arch.init(store);
         arch.max_instructions = 200000;
         arch.flowoptions &= ~FlowInfo::error_toomanyinstructions;
-        
-        std::cerr << "[fission_decomp] Decompiling..." << std::endl;
         
         // Decompile
         Address func_addr(arch.getDefaultCodeSpace(), address);
@@ -208,19 +232,77 @@ int main(int argc, char** argv) {
         arch.print->setOutputStream(&c_stream);
         arch.print->docFunction(fd);
         
-        std::cerr << "[fission_decomp] Success!" << std::endl;
-        
-        // Output result as JSON
-        std::cout << "{\"status\":\"ok\",\"code\":\"" << json_escape(c_stream.str()) << "\"}" << std::endl;
-        std::cout.flush();  // Ensure output is written
-        std::cerr.flush();
-        _exit(0);  // Skip cleanup to avoid Ghidra memory corruption crash
+        return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_stream.str()) + "\"}";
         
     } catch (const LowlevelError& e) {
-        std::cout << "{\"status\":\"error\",\"message\":\"" << json_escape(e.explain) << "\"}" << std::endl;
-        return 1;
+        return "{\"status\":\"error\",\"message\":\"" + json_escape(e.explain) + "\"}";
     } catch (const std::exception& e) {
-        std::cout << "{\"status\":\"error\",\"message\":\"" << json_escape(e.what()) << "\"}" << std::endl;
+        return "{\"status\":\"error\",\"message\":\"" + json_escape(e.what()) + "\"}";
+    }
+}
+
+// Server mode: process multiple requests
+int run_server() {
+    std::cerr << "[fission_decomp] Server mode started" << std::endl;
+    std::cout.setf(std::ios::unitbuf);
+    
+    ServerState state;
+    std::string line;
+    
+    while (std::getline(std::cin, line)) {
+        if (line.empty()) continue;
+        
+        std::string response = process_request(state, line);
+        
+        if (response == "__QUIT__") {
+            std::cout << "{\"status\":\"ok\",\"message\":\"goodbye\"}" << std::endl;
+            break;
+        }
+        
+        std::cout << response << std::endl;
+        std::cout.flush();
+    }
+    
+    std::cerr << "[fission_decomp] Server shutting down" << std::endl;
+    return 0;
+}
+
+// Single-shot mode: process one request and exit
+int run_single() {
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr << "[fission_decomp] Starting..." << std::endl;
+    
+    // Read all of stdin
+    std::stringstream buffer;
+    buffer << std::cin.rdbuf();
+    std::string input = buffer.str();
+    
+    if (input.empty()) {
+        std::cout << "{\"status\":\"error\",\"message\":\"No input provided\"}" << std::endl;
         return 1;
+    }
+    
+    ServerState state;
+    std::string response = process_request(state, input);
+    std::cout << response << std::endl;
+    std::cout.flush();
+    std::cerr.flush();
+    _exit(0);  // Skip cleanup to avoid Ghidra memory corruption crash
+}
+
+int main(int argc, char** argv) {
+    // Check for --server flag
+    bool server_mode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--server") == 0 || strcmp(argv[i], "-s") == 0) {
+            server_mode = true;
+            break;
+        }
+    }
+    
+    if (server_mode) {
+        return run_server();
+    } else {
+        return run_single();
     }
 }

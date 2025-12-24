@@ -306,12 +306,25 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
+    
+    // Python runtime detection (embedded Python - PyInstaller, py2exe, etc.)
+    let python_dll = imports.iter().find(|s| 
+        s.to_lowercase().contains("python") && s.to_lowercase().ends_with(".dll")
+    );
+    if python_dll.is_some() {
+        result.add(Detection::new(
+            DetectionType::Language,
+            "Python (Embedded)",
+            None,
+            Confidence::High,
+        ).with_details("Python runtime embedded (likely PyInstaller/py2exe)"));
+    }
 }
 
 /// Detect by strings in binary
 fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
-    // Only search in first 64KB and executable sections for performance
-    let search_limit = 65536.min(binary.data.len());
+    // Search in first 256KB for better detection (PyInstaller strings are often deeper)
+    let search_limit = (256 * 1024).min(binary.data.len());
     let data = &binary.data[..search_limit];
     
     // Convert to string for pattern matching
@@ -349,11 +362,49 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
         ));
     }
     
-    // Python detection (PyInstaller, py2exe)
-    if data_str.contains("PYZ-00") || data_str.contains("_MEIPASS") {
+    // Python detection (PyInstaller, py2exe, cx_Freeze)
+    let has_pyinstaller = data_str.contains("PYZ-00") 
+        || data_str.contains("_MEIPASS") 
+        || data_str.contains("PyInstaller")
+        || data_str.contains("pyi-runtime")
+        || data_str.contains("PYTHONHOME");
+    
+    if has_pyinstaller {
         result.add(Detection::new(
             DetectionType::Packer,
             "PyInstaller",
+            None,
+            Confidence::High,
+        ).with_details("Python application packaged with PyInstaller"));
+        result.add(Detection::new(
+            DetectionType::Language,
+            "Python",
+            None,
+            Confidence::High,
+        ));
+    }
+    
+    // py2exe detection
+    if data_str.contains("py2exe") || data_str.contains("PYTHONSCRIPT") {
+        result.add(Detection::new(
+            DetectionType::Packer,
+            "py2exe",
+            None,
+            Confidence::High,
+        ));
+        result.add(Detection::new(
+            DetectionType::Language,
+            "Python",
+            None,
+            Confidence::High,
+        ));
+    }
+    
+    // cx_Freeze detection
+    if data_str.contains("cx_Freeze") {
+        result.add(Detection::new(
+            DetectionType::Packer,
+            "cx_Freeze",
             None,
             Confidence::High,
         ));
