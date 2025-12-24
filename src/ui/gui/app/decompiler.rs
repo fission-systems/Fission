@@ -107,6 +107,7 @@ pub fn decompile_function(
         bytes,
         address,
         is_64bit,
+        is_prefetch: false,
     };
     
     if let Err(e) = decomp_tx.send(request) {
