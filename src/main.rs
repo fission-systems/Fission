@@ -10,6 +10,7 @@
 mod app;
 mod analysis;
 mod config;
+mod constants;
 mod debug;
 mod errors;
 mod logging;
