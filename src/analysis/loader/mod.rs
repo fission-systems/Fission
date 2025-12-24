@@ -6,7 +6,7 @@
 //! - Sections with code
 //! - Symbol information
 
-use anyhow::{anyhow, Result};
+use crate::core::prelude::*;
 use std::fs;
 use std::path::Path;
 
@@ -75,6 +75,118 @@ pub struct LoadedBinary {
     pub iat_symbols: std::collections::HashMap<u64, String>,
 }
 
+/// Builder for LoadedBinary
+pub struct LoadedBinaryBuilder {
+    path: String,
+    data: Vec<u8>,
+    arch_spec: String,
+    entry_point: u64,
+    image_base: u64,
+    functions: Vec<FunctionInfo>,
+    sections: Vec<SectionInfo>,
+    is_64bit: bool,
+    is_dotnet: bool,
+    dotnet_runtime_version: Option<String>,
+    format: String,
+    iat_symbols: std::collections::HashMap<u64, String>,
+}
+
+impl LoadedBinaryBuilder {
+    pub fn new(path: String, data: Vec<u8>) -> Self {
+        Self {
+            path,
+            data,
+            arch_spec: "unknown".to_string(),
+            entry_point: 0,
+            image_base: 0,
+            functions: Vec::new(),
+            sections: Vec::new(),
+            is_64bit: false,
+            is_dotnet: false,
+            dotnet_runtime_version: None,
+            format: "unknown".to_string(),
+            iat_symbols: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn arch_spec(mut self, arch_spec: impl Into<String>) -> Self {
+        self.arch_spec = arch_spec.into();
+        self
+    }
+
+    pub fn entry_point(mut self, entry_point: u64) -> Self {
+        self.entry_point = entry_point;
+        self
+    }
+
+    pub fn image_base(mut self, image_base: u64) -> Self {
+        self.image_base = image_base;
+        self
+    }
+
+    pub fn is_64bit(mut self, is_64bit: bool) -> Self {
+        self.is_64bit = is_64bit;
+        self
+    }
+    
+    pub fn is_dotnet(mut self, is_dotnet: bool) -> Self {
+        self.is_dotnet = is_dotnet;
+        self
+    }
+    
+    pub fn dotnet_runtime_version(mut self, version: Option<String>) -> Self {
+        self.dotnet_runtime_version = version;
+        self
+    }
+
+    pub fn format(mut self, format: impl Into<String>) -> Self {
+        self.format = format.into();
+        self
+    }
+
+    pub fn add_function(mut self, function: FunctionInfo) -> Self {
+        self.functions.push(function);
+        self
+    }
+
+    pub fn add_functions(mut self, functions: impl IntoIterator<Item = FunctionInfo>) -> Self {
+        self.functions.extend(functions);
+        self
+    }
+
+    pub fn add_section(mut self, section: SectionInfo) -> Self {
+        self.sections.push(section);
+        self
+    }
+    
+    pub fn add_sections(mut self, sections: impl IntoIterator<Item = SectionInfo>) -> Self {
+        self.sections.extend(sections);
+        self
+    }
+    
+    pub fn add_iat_symbol(mut self, va: u64, name: String) -> Self {
+        self.iat_symbols.insert(va, name);
+        self
+    }
+
+    pub fn build(self) -> Result<LoadedBinary> {
+        Ok(LoadedBinary {
+            path: self.path,
+            data: self.data,
+            arch_spec: self.arch_spec,
+            entry_point: self.entry_point,
+            image_base: self.image_base,
+            functions: self.functions,
+            sections: self.sections,
+            is_64bit: self.is_64bit,
+            is_dotnet: self.is_dotnet,
+            dotnet_runtime_version: self.dotnet_runtime_version,
+            format: self.format,
+            iat_symbols: self.iat_symbols,
+        })
+    }
+}
+
 impl LoadedBinary {
     /// Load and parse a binary file
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -87,7 +199,7 @@ impl LoadedBinary {
     pub fn from_bytes(data: Vec<u8>, path: String) -> Result<Self> {
         // Check magic bytes to determine format
         if data.len() < 4 {
-            return Err(anyhow!("File too small"));
+            return Err(err!(loader, "File too small"));
         }
         
         // Check for PE (MZ header)
@@ -115,7 +227,7 @@ impl LoadedBinary {
             }
         }
         
-        Err(anyhow!("Unknown binary format"))
+        Err(err!(loader, "Unknown binary format"))
     }
     
     /// Sort sections by virtual address for binary search
@@ -128,11 +240,18 @@ impl LoadedBinary {
         // Try parsing with goblin first
         match goblin::pe::PE::parse(&data) {
             Ok(pe) => {
+                // Extract all data we need first to avoid borrowing conflicts
+                // We need to act on `pe` which borrows from `data`
+                
                 let is_64bit = pe.is_64;
                 let image_base = pe.image_base as u64;
                 let entry_point = image_base + pe.entry as u64;
                 let mut is_dotnet = false;
                 let mut dotnet_runtime_version = None;
+                
+                let mut sections_info = Vec::new();
+                let mut functions_info = Vec::new();
+                let mut iat_symbols_map = std::collections::HashMap::new();
 
                 if let Some(optional_header) = pe.header.optional_header {
                     if let Some(clr_dir) = optional_header
@@ -173,14 +292,13 @@ impl LoadedBinary {
                 };
 
                 // Collect sections
-                let mut sections = Vec::new();
                 for section in &pe.sections {
                     let name = String::from_utf8_lossy(&section.name)
                         .trim_end_matches('\0')
                         .to_string();
                     
                     let characteristics = section.characteristics;
-                    sections.push(SectionInfo {
+                    sections_info.push(SectionInfo {
                         name,
                         virtual_address: image_base + section.virtual_address as u64,
                         virtual_size: section.virtual_size as u64,
@@ -192,11 +310,11 @@ impl LoadedBinary {
                     });
                 }
 
+
                 // Collect functions from exports
-                let mut functions = Vec::new();
                 for export in &pe.exports {
                     if let Some(name) = &export.name {
-                        functions.push(FunctionInfo {
+                        functions_info.push(FunctionInfo {
                             name: name.to_string(),
                             address: image_base + export.rva as u64,
                             size: 0,
@@ -207,16 +325,13 @@ impl LoadedBinary {
                 }
 
                 // Add imports and build IAT symbol map
-                // For PE imports:
-                // - offset: file offset of the IAT entry, also acts as RVA for IAT
-                // - Ghidra uses image_base + offset as the pointer address
-                let mut iat_symbols = std::collections::HashMap::new();
                 for import in &pe.imports {
                     // IAT address = image_base + offset (this is what Ghidra uses)
                     let iat_va = image_base + import.offset as u64;
                     
-                    iat_symbols.insert(iat_va, import.name.to_string());
-                    functions.push(FunctionInfo {
+                    iat_symbols_map.insert(iat_va, import.name.to_string());
+                    
+                    functions_info.push(FunctionInfo {
                         name: import.name.to_string(),
                         address: image_base + import.rva as u64,
                         size: 0,
@@ -226,9 +341,9 @@ impl LoadedBinary {
                 }
 
                 // Add entry point
-                let has_entry = functions.iter().any(|f| f.address == entry_point);
+                let has_entry = functions_info.iter().any(|f| f.address == entry_point);
                 if !has_entry {
-                    functions.push(FunctionInfo {
+                    functions_info.push(FunctionInfo {
                         name: "_start".to_string(),
                         address: entry_point,
                         size: 0,
@@ -237,36 +352,35 @@ impl LoadedBinary {
                     });
                 }
 
-                Ok(Self {
-                    path,
-                    data,
-                    arch_spec: arch_spec.to_string(),
-                    entry_point,
-                    image_base,
-                    functions,
-                    sections,
-                    is_64bit,
-                    is_dotnet,
-                    dotnet_runtime_version,
-                    format: "PE".to_string(),
-                    iat_symbols,
-                })
+                // Now construct builder after we are done reading from pe (data borrow)
+                LoadedBinaryBuilder::new(path, data)
+                    .format("PE")
+                    .arch_spec(arch_spec)
+                    .entry_point(entry_point)
+                    .image_base(image_base)
+                    .is_64bit(is_64bit)
+                    .is_dotnet(is_dotnet)
+                    .dotnet_runtime_version(dotnet_runtime_version)
+                    .add_sections(sections_info)
+                    .add_functions(functions_info)
+                    .build()
             }
             Err(_e) => {
                 // Fallback to 'object' crate if goblin fails
                 use object::{Object, ObjectSection, ObjectSymbol};
                 
-                let file = object::File::parse(&*data).map_err(|e| anyhow!("Failed fallback parsing: {}", e))?;
+                let file = object::File::parse(&*data).map_err(|e| err!(loader, "Failed fallback parsing: {}", e))?;
                 
                 let is_64bit = file.is_64();
                 let entry_point = file.entry();
                 let image_base = file.relative_address_base();
+                let arch_spec = if is_64bit { "x86:LE:64:default" } else { "x86:LE:32:default" };
                 
-                // Extract sections
-                let mut sections = Vec::new();
+                // Extract all data first
+                let mut sections_info = Vec::new();
                 for section in file.sections() {
                     if let Ok(name) = section.name() {
-                        sections.push(SectionInfo {
+                        sections_info.push(SectionInfo {
                             name: name.to_string(),
                             virtual_address: section.address(),
                             virtual_size: section.size(),
@@ -280,11 +394,11 @@ impl LoadedBinary {
                 }
                 
                 // Extract functions from symbols
-                let mut functions = Vec::new();
+                let mut functions_info = Vec::new();
                 for symbol in file.symbols() {
                     if symbol.is_definition() && symbol.kind() == object::SymbolKind::Text {
                         if let Ok(name) = symbol.name() {
-                            functions.push(FunctionInfo {
+                            functions_info.push(FunctionInfo {
                                 name: name.to_string(),
                                 address: symbol.address(),
                                 size: symbol.size() as u64,
@@ -300,8 +414,8 @@ impl LoadedBinary {
                     for export in exports {
                         let name = String::from_utf8_lossy(export.name()).to_string();
                         let addr = export.address();
-                        if !functions.iter().any(|f| f.address == addr) {
-                            functions.push(FunctionInfo {
+                        if !functions_info.iter().any(|f| f.address == addr) {
+                            functions_info.push(FunctionInfo {
                                 name,
                                 address: addr,
                                 size: 0,
@@ -316,7 +430,7 @@ impl LoadedBinary {
                 if let Ok(imports) = file.imports() {
                     for import in imports {
                         let name = String::from_utf8_lossy(import.name()).to_string();
-                        functions.push(FunctionInfo {
+                        functions_info.push(FunctionInfo {
                             name,
                             address: 0, // Imports don't have fixed addresses in file
                             size: 0,
@@ -327,9 +441,9 @@ impl LoadedBinary {
                 }
                 
                 // Add entry point if not already present
-                let has_entry = functions.iter().any(|f| f.address == entry_point);
+                let has_entry = functions_info.iter().any(|f| f.address == entry_point);
                 if !has_entry && entry_point != 0 {
-                    functions.push(FunctionInfo {
+                    functions_info.push(FunctionInfo {
                         name: "_start".to_string(),
                         address: entry_point,
                         size: 0,
@@ -338,22 +452,15 @@ impl LoadedBinary {
                     });
                 }
                 
-                let arch_spec = if is_64bit { "x86:LE:64:default" } else { "x86:LE:32:default" };
-                
-                Ok(Self {
-                    path,
-                    data,
-                    arch_spec: arch_spec.to_string(),
-                    entry_point,
-                    image_base,
-                    functions,
-                    sections,
-                    is_64bit,
-                    is_dotnet: false,
-                    dotnet_runtime_version: None,
-                    format: "PE (Fallback)".to_string(),
-                    iat_symbols: std::collections::HashMap::new(),
-                })
+                LoadedBinaryBuilder::new(path, data)
+                    .format("PE (Fallback)")
+                    .arch_spec(arch_spec)
+                    .entry_point(entry_point)
+                    .image_base(image_base)
+                    .is_64bit(is_64bit)
+                    .add_sections(sections_info)
+                    .add_functions(functions_info)
+                    .build()
             }
         }
     }
@@ -382,11 +489,11 @@ impl LoadedBinary {
             .unwrap_or(0);
 
         // Collect sections
-        let mut sections = Vec::new();
+        let mut sections_info = Vec::new();
         for section in &elf.section_headers {
             let name = elf.shdr_strtab.get_at(section.sh_name).unwrap_or("").to_string();
             let flags = section.sh_flags;
-            sections.push(SectionInfo {
+            sections_info.push(SectionInfo {
                 name,
                 virtual_address: section.sh_addr,
                 virtual_size: section.sh_size,
@@ -399,11 +506,11 @@ impl LoadedBinary {
         }
 
         // Collect functions from symbols
-        let mut functions = Vec::new();
+        let mut functions_info = Vec::new();
         for sym in &elf.syms {
             if sym.st_type() == goblin::elf::sym::STT_FUNC && sym.st_value != 0 {
                 let name = elf.strtab.get_at(sym.st_name).unwrap_or("").to_string();
-                functions.push(FunctionInfo {
+                functions_info.push(FunctionInfo {
                     name,
                     address: sym.st_value,
                     size: sym.st_size,
@@ -417,8 +524,8 @@ impl LoadedBinary {
         for sym in &elf.dynsyms {
             if sym.st_type() == goblin::elf::sym::STT_FUNC && sym.st_value != 0 {
                 let name = elf.dynstrtab.get_at(sym.st_name).unwrap_or("").to_string();
-                if !functions.iter().any(|f| f.address == sym.st_value) {
-                    functions.push(FunctionInfo {
+                if !functions_info.iter().any(|f| f.address == sym.st_value) {
+                    functions_info.push(FunctionInfo {
                         name,
                         address: sym.st_value,
                         size: sym.st_size,
@@ -430,9 +537,9 @@ impl LoadedBinary {
         }
 
         // Add entry point
-        let has_entry = functions.iter().any(|f| f.address == entry_point);
+        let has_entry = functions_info.iter().any(|f| f.address == entry_point);
         if !has_entry && entry_point != 0 {
-            functions.push(FunctionInfo {
+            functions_info.push(FunctionInfo {
                 name: "_start".to_string(),
                 address: entry_point,
                 size: 0,
@@ -441,20 +548,15 @@ impl LoadedBinary {
             });
         }
 
-        Ok(Self {
-            path,
-            data,
-            arch_spec: arch_spec.to_string(),
-            entry_point,
-            image_base,
-            functions,
-            sections,
-            is_64bit,
-            is_dotnet: false,
-            dotnet_runtime_version: None,
-            format: "ELF".to_string(),
-            iat_symbols: std::collections::HashMap::new(),
-        })
+        LoadedBinaryBuilder::new(path, data)
+            .format("ELF")
+            .arch_spec(arch_spec)
+            .entry_point(entry_point)
+            .image_base(image_base)
+            .is_64bit(is_64bit)
+            .add_sections(sections_info)
+            .add_functions(functions_info)
+            .build()
     }
 
     /// Parse Mach-O (macOS executable)
@@ -472,10 +574,10 @@ impl LoadedBinary {
                     "x86:LE:32:default"
                 };
 
-                let mut sections = Vec::new();
+                let mut sections_info = Vec::new();
                 for segment in &macho.segments {
                     let name = segment.name().unwrap_or("").to_string();
-                    sections.push(SectionInfo {
+                    sections_info.push(SectionInfo {
                         name,
                         virtual_address: segment.vmaddr,
                         virtual_size: segment.vmsize,
@@ -487,10 +589,10 @@ impl LoadedBinary {
                     });
                 }
 
-                let mut functions = Vec::new();
+                let mut functions_info = Vec::new();
                 if let Ok(exports) = macho.exports() {
                     for export in exports {
-                        functions.push(FunctionInfo {
+                        functions_info.push(FunctionInfo {
                             name: export.name.to_string(),
                             address: export.offset,
                             size: 0,
@@ -501,7 +603,7 @@ impl LoadedBinary {
                 }
 
                 if entry_point != 0 {
-                    functions.push(FunctionInfo {
+                    functions_info.push(FunctionInfo {
                         name: "_main".to_string(),
                         address: entry_point,
                         size: 0,
@@ -510,22 +612,16 @@ impl LoadedBinary {
                     });
                 }
 
-                Ok(Self {
-                    path,
-                    data,
-                    arch_spec: arch_spec.to_string(),
-                    entry_point,
-                    image_base: 0,
-                    functions,
-                    sections,
-                    is_64bit,
-                    is_dotnet: false,
-                    dotnet_runtime_version: None,
-                    format: "Mach-O".to_string(),
-                    iat_symbols: std::collections::HashMap::new(),
-                })
+                LoadedBinaryBuilder::new(path, data)
+                    .format("Mach-O")
+                    .arch_spec(arch_spec)
+                    .entry_point(entry_point)
+                    .is_64bit(is_64bit)
+                    .add_sections(sections_info)
+                    .add_functions(functions_info)
+                    .build()
             }
-            goblin::mach::Mach::Fat(_) => Err(anyhow!("Fat Mach-O binaries not yet supported")),
+            goblin::mach::Mach::Fat(_) => Err(err!(loader, "Fat Mach-O binaries not yet supported")),
         }
     }
 
@@ -782,5 +878,44 @@ mod tests {
         } else {
             println!("Could not parse self: {:?}", result);
         }
+    }
+
+    #[test]
+    fn test_loaded_binary_builder() {
+        let builder = LoadedBinaryBuilder::new("test.bin".to_string(), vec![0x90; 100])
+            .format("RAW")
+            .entry_point(0x1000)
+            .image_base(0x1000)
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "main".to_string(),
+                address: 0x1000,
+                size: 20,
+                is_export: true,
+                is_import: false,
+            })
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 100,
+                file_offset: 0,
+                file_size: 100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            });
+            
+        let binary = builder.build().expect("Failed to build LoadedBinary");
+        
+        assert_eq!(binary.path, "test.bin");
+        assert_eq!(binary.data.len(), 100);
+        assert_eq!(binary.entry_point, 0x1000);
+        assert_eq!(binary.format, "RAW");
+        assert!(binary.is_64bit);
+        assert_eq!(binary.functions.len(), 1);
+        assert_eq!(binary.sections.len(), 1);
+        
+        let func = binary.find_function("main").unwrap();
+        assert_eq!(func.address, 0x1000);
     }
 }

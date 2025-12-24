@@ -10,6 +10,7 @@
 pub mod config;
 pub mod constants;
 pub mod errors;
+pub mod events;
 pub mod logging;
 pub mod prelude;
 

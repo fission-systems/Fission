@@ -41,30 +41,31 @@ struct Args {
     verbose: u8,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> crate::prelude::Result<()> {
     // 1. Initialize logger with verbosity level
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(
-        match std::env::args().filter(|a| a == "-v").count() {
-            0 => "warn",
-            1 => "info",
-            2 => "debug",
-            _ => "trace",
-        },
-    ))
-    .init();
+    // ... (logger logic)
+    crate::core::logging::init(match std::env::args().filter(|a| a == "-v").count() {
+        0 => crate::core::logging::LogLevel::Warn,
+        1 => crate::core::logging::LogLevel::Info,
+        2 => crate::core::logging::LogLevel::Debug,
+        _ => crate::core::logging::LogLevel::Trace,
+    });
+    
+    // Also init env_logger for dependencies if needed (optional)
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     // 2. Parse command line arguments
     let args = Args::parse();
 
-    log::info!("Fission Core Initialized");
-    log::debug!("Target: {:?}", args.target);
-    log::debug!("Headless: {}", args.headless);
+    crate::core::logging::info("Fission Core Initialized");
+    crate::core::logging::debug(&format!("Target: {:?}", args.target));
+    crate::core::logging::debug(&format!("Headless: {}", args.headless));
 
     // 3. Branch based on execution mode
     if args.headless {
         // CLI mode: Run REPL in main thread
         println!("[*] Fission v{} - Headless Mode", env!("CARGO_PKG_VERSION"));
-        ui::cli::run_cli()?;
+        ui::cli::run_cli().map_err(|e| crate::core::errors::FissionError::Other(e.to_string()))?;
     } else {
         // GUI mode: Run GUI in main thread
         println!("[*] Fission v{} - GUI Mode", env!("CARGO_PKG_VERSION"));
@@ -87,7 +88,7 @@ fn main() -> anyhow::Result<()> {
                 Ok(Box::new(ui::gui::FissionApp::default()))
             }),
         )
-        .map_err(|e| anyhow::anyhow!("GUI Error: {}", e))?;
+        .map_err(|e| crate::core::errors::FissionError::Ui(e.to_string()))?;
     }
 
     Ok(())
