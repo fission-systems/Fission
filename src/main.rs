@@ -12,6 +12,7 @@ mod analysis;
 mod config;
 mod debug;
 mod errors;
+mod logging;
 mod plugin;
 mod prelude;
 mod script;
