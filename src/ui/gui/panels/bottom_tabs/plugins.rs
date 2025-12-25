@@ -3,7 +3,7 @@
 //! Displays loaded plugins, allows loading new plugins, and shows plugin status.
 
 use eframe::egui;
-use crate::plugin::{PluginManager, PluginEvent};
+use crate::plugin::PluginManager;
 use crate::plugin::api::PluginType;
 use crate::ui::gui::theme::catppuccin;
 

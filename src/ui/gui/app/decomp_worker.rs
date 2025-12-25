@@ -10,6 +10,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
 use crate::analysis::decomp::{DecompilerPool, DecompilerServer};
 use crate::config::{CONFIG, DecompilerMode};
+use crate::core::errors::FissionError;
 use crate::ui::gui::messages::AsyncMessage;
 
 /// Request to decompile a function
@@ -79,8 +80,8 @@ impl DecompilerBackend {
         match self {
             DecompilerBackend::Pool(pool) => pool.decompile(bytes, address, is_64bit).map_err(Into::into),
             DecompilerBackend::Server(server) => {
-                let mut guard = server.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-                guard.decompile(bytes, address, is_64bit).map_err(Into::into)
+                let mut guard = server.lock().map_err(|e| FissionError::decompiler(format!("Lock error: {}", e)))?;
+                guard.decompile(bytes, address, is_64bit)
             }
         }
     }
@@ -117,7 +118,7 @@ pub fn spawn_worker(
             .expect("Failed to spawn decompiler worker thread");
     }
     
-    eprintln!("[decomp-worker] Spawned {} worker threads (auto-detected)", num_workers);
+    crate::core::logging::info(&format!("[decomp-worker] Spawned {} worker threads (auto-detected)", num_workers));
 }
 
 fn worker_loop(
@@ -137,7 +138,7 @@ fn worker_loop(
             let rx = match request_rx.lock() {
                 Ok(guard) => guard,
                 Err(poisoned) => {
-                    eprintln!("[decomp-worker-{}] Request queue mutex poisoned, recovering...", worker_id);
+                    crate::core::logging::warn(&format!("[decomp-worker-{}] Request queue mutex poisoned, recovering...", worker_id));
                     poisoned.into_inner()
                 }
             };
@@ -154,7 +155,7 @@ fn worker_loop(
                 let mut pool_guard = match pool.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => {
-                        eprintln!("[decomp-worker-{}] Pool mutex poisoned, recovering...", worker_id);
+                        crate::core::logging::warn(&format!("[decomp-worker-{}] Pool mutex poisoned, recovering...", worker_id));
                         poisoned.into_inner()
                     }
                 };
@@ -191,9 +192,9 @@ fn worker_loop(
                 // Ideally, `load_binary` should be called when no other work is happening (e.g. file load).
                 
                 if let Err(e) = p.load_binary(&request.bytes, &sla_dir, request.image_base) {
-                     eprintln!("[decomp-worker] Failed to load binary: {}", e);
+                     crate::core::logging::error(&format!("[decomp-worker] Failed to load binary: {}", e));
                 } else {
-                     eprintln!("[decomp-worker] Binary loaded successfully");
+                     crate::core::logging::info("[decomp-worker] Binary loaded successfully");
                 }
             }
             continue;
@@ -263,7 +264,7 @@ fn worker_loop(
                     
                     match DecompilerPool::new(&cli_path, &sla_dir, num_workers) {
                         Ok(new_pool) => {
-                            eprintln!("[decomp-worker-{}] Pool initialized with {} workers", worker_id, num_workers);
+                            crate::core::logging::info(&format!("[decomp-worker-{}] Pool initialized with {} workers", worker_id, num_workers));
                             *pool_guard = Some(Arc::new(new_pool));
                         }
                         Err(e) => {
@@ -293,7 +294,7 @@ fn worker_loop(
         let result = if let Some(ref p) = local_pool {
             p.decompile(&request.bytes, request.address, request.is_64bit)
         } else {
-            Err(anyhow::anyhow!("Decompiler pool not available"))
+            Err(FissionError::decompiler("Decompiler pool not available"))
         };
         
         // Send result only if still latest

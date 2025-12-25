@@ -250,7 +250,7 @@ pub fn load_jetbrains_mono(ctx: &egui::Context) {
                 .or_default()
                 .insert(0, "JetBrainsMono".to_owned());
             
-            log::info!("Loaded JetBrains Mono from {}", path);
+            crate::core::logging::info(&format!("Loaded JetBrains Mono from {}", path));
             font_loaded = true;
             break;
         }

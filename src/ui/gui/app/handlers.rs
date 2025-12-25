@@ -184,10 +184,10 @@ pub fn process_command(
         }
         _ if cmd.starts_with("plugin load ") => {
             let path = cmd.trim_start_matches("plugin load ").trim();
-            let result = if let Ok(mut mgr) = state.plugin_manager.write() {
+            let result = if let Ok(mut mgr) = state.plugin_manager().write() {
                 match mgr.load_plugin(path) {
                     Ok(id) => Some(Ok(id)),
-                    Err(e) => Some(Err(e.to_string())),
+                    Err(e) => Some(Err(e)),
                 }
             } else {
                 None
@@ -200,7 +200,7 @@ pub fn process_command(
             }
         }
         _ if cmd.starts_with("plugin list") => {
-            let plugins = if let Ok(mgr) = state.plugin_manager.read() {
+            let plugins = if let Ok(mgr) = state.plugin_manager().read() {
                 let mut p: Vec<_> = mgr.list_plugins().into_iter().cloned().collect();
                 p.sort_by_key(|p| p.id.clone());
                 p

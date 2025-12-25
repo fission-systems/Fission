@@ -99,12 +99,12 @@ impl Default for FissionApp {
         
         // Bridge EventBus to UI AsyncMessage channel
         let tx_clone = tx.clone();
-        state.event_bus.subscribe(move |event| {
+        state.event_bus().subscribe(move |event| {
             let _ = tx_clone.send(AsyncMessage::Event(event.clone()));
         });
         
         // Initialize Module Manager with lifecycle management
-        let mut module_manager = ModuleManager::new(state.event_bus.clone());
+        let mut module_manager = ModuleManager::new(state.event_bus().clone());
         
         // Register PluginModule
         let plugin_manager = Arc::new(Mutex::new(PluginManager::new()));
@@ -112,10 +112,10 @@ impl Default for FissionApp {
         
         // Run lifecycle: init -> start
         if let Err(e) = module_manager.init_all() {
-            eprintln!("[FissionApp] Module init failed: {}", e);
+            crate::core::logging::warn(&format!("[FissionApp] Module init failed: {}", e));
         }
         if let Err(e) = module_manager.start_all() {
-            eprintln!("[FissionApp] Module start failed: {}", e);
+            crate::core::logging::warn(&format!("[FissionApp] Module start failed: {}", e));
         }
         
         Self {
@@ -143,7 +143,7 @@ impl Drop for FissionApp {
     fn drop(&mut self) {
         // Shutdown all modules gracefully
         if let Err(e) = self.module_manager.shutdown_all() {
-            eprintln!("[FissionApp] Module shutdown failed: {}", e);
+            crate::core::logging::warn(&format!("[FissionApp] Module shutdown failed: {}", e));
         }
     }
 }
@@ -246,9 +246,9 @@ impl eframe::App for FissionApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         if let Err(e) = crate::core::config_store::save(&self.state.settings) {
-            log::error!("Failed to save settings: {}", e);
+            crate::core::logging::error(&format!("Failed to save settings: {}", e));
         } else {
-            log::info!("Settings saved successfully");
+            crate::core::logging::info("Settings saved successfully");
         }
     }
 }

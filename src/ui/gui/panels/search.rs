@@ -1,3 +1,8 @@
+//! Search Panel - Provides search functionality for functions, strings, and symbols.
+//!
+//! Integrates with the side bar to allow searching across the loaded binary's
+//! functions and strings with real-time filtering.
+
 use eframe::egui;
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::theme::catppuccin;

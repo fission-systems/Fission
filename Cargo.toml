@@ -7,6 +7,14 @@ description = "Next-Gen Dynamic Instrumentation Platform"
 license = "MIT"
 repository = "https://github.com/sjkim1127/Fission"
 
+[lib]
+name = "fission"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fission"
+path = "src/main.rs"
+
 # Release optimizations
 [profile.release]
 opt-level = 3

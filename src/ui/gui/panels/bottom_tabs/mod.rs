@@ -92,11 +92,18 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                         timeline::render(ui, &mut state.debug.timeline);
                     }
                     BottomTab::Plugins => {
-                        if let Ok(mut mgr) = state.plugin_manager.write() {
-                            plugins::render(ui, &mut mgr, &mut state.plugin_panel_state);
-                        } else {
-                            ui.label("Failed to access Plugin Manager");
-                        }
+                        // Access plugin_manager directly from ctx
+                        // Use a separate scope to ensure proper drop order
+                        let pm_arc = state.ctx.plugin_manager.clone();
+                        let result = pm_arc.write();
+                        match result {
+                            Ok(mut mgr) => {
+                                plugins::render(ui, &mut mgr, &mut state.plugin_panel_state);
+                            }
+                            Err(_) => {
+                                ui.label("Failed to access Plugin Manager");
+                            }
+                        };
                     }
                 }
             });

@@ -1,342 +1,504 @@
-//! CLI - reedline-based REPL interface
+//! CLI Module - Headless command-line interface
 //!
-//! Provides a powerful command-line interface with autocomplete,
-//! syntax highlighting, and history support.
+//! Provides a REPL (Read-Eval-Print Loop) for headless binary analysis.
+//! Uses reedline for readline-style input with history and completion.
 
-use crate::core::prelude::Result;
+use std::sync::Arc;
 use colored::Colorize;
-use reedline::{
-    Prompt, PromptHistorySearch, PromptHistorySearchStatus,
-    Reedline, Signal,
-};
-use std::borrow::Cow;
+use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
-/// Custom prompt for Fission CLI
-pub struct FissionPrompt {
-    /// Current working address (for navigation commands)
-    current_address: u64,
-    /// Whether a debugging session is active
-    is_debugging: bool,
+use crate::core::errors::{Result, FissionError};
+
+use crate::analysis::loader::LoadedBinary;
+use crate::analysis::disasm::DisasmEngine;
+
+pub mod commands;
+
+use commands::{Command, parse_command};
+
+/// CLI session state
+struct CliState {
+    /// Currently loaded binary
+    binary: Option<Arc<LoadedBinary>>,
+    /// Disassembler engine (lazy initialized)
+    disasm: Option<DisasmEngine>,
 }
 
-impl FissionPrompt {
-    pub fn new() -> Self {
-        Self {
-            current_address: 0,
-            is_debugging: false,
-        }
-    }
-
-    pub fn set_address(&mut self, addr: u64) {
-        self.current_address = addr;
-    }
-
-    pub fn set_debugging(&mut self, debugging: bool) {
-        self.is_debugging = debugging;
-    }
-}
-
-impl Default for FissionPrompt {
+impl Default for CliState {
     fn default() -> Self {
-        Self::new()
+        Self {
+            binary: None,
+            disasm: None,
+        }
     }
 }
 
-impl Prompt for FissionPrompt {
-    fn render_prompt_left(&self) -> Cow<'_, str> {
-        let status = if self.is_debugging { "dbg" } else { "---" };
-        Cow::Owned(format!("[{}:{:#x}]", status, self.current_address))
-    }
-
-    fn render_prompt_right(&self) -> Cow<'_, str> {
-        Cow::Borrowed("")
-    }
-
-    fn render_prompt_indicator(&self, _prompt_mode: reedline::PromptEditMode) -> Cow<'_, str> {
-        Cow::Borrowed("> ")
-    }
-
-    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
-        Cow::Borrowed("... ")
-    }
-
-    fn render_prompt_history_search_indicator(
-        &self,
-        history_search: PromptHistorySearch,
-    ) -> Cow<'_, str> {
-        let prefix = match history_search.status {
-            PromptHistorySearchStatus::Passing => "",
-            PromptHistorySearchStatus::Failing => "(failed) ",
-        };
-        Cow::Owned(format!("(search: {}{}) ", prefix, history_search.term))
-    }
-}
-
-/// Command parsing result
-#[derive(Debug)]
-pub enum ParsedCommand {
-    /// Navigate to address: s <addr>
-    Seek(u64),
-    /// Print disassembly at function: pdf @ <name>
-    PrintDisasmFunction(String),
-    /// Print N instructions: pd <n>
-    PrintDisasm(usize),
-    /// Show memory map: dm
-    MemoryMap,
-    /// Show registers: dr
-    Registers,
-    /// Set breakpoint: db <addr>
-    BreakpointSet(u64),
-    /// Delete breakpoint: db- <addr>
-    BreakpointDelete(u64),
-    /// Continue execution: dc
-    Continue,
-    /// Step instruction: ds
-    StepInto,
-    /// Step over: dso
-    StepOver,
-    /// Load binary: o <path>
-    Open(String),
-    /// Python passthrough: .<code>
-    Python(String),
-    /// Help: ? or help
-    Help,
-    /// Quit: q or exit
-    Quit,
-    /// Unknown command
-    Unknown(String),
-}
-
-/// Parse a command string into a structured command
-fn parse_command(input: &str) -> ParsedCommand {
-    let input = input.trim();
-
-    // Python passthrough (starts with .)
-    if let Some(code) = input.strip_prefix('.') {
-        return ParsedCommand::Python(code.to_string());
-    }
-
-    let parts: Vec<&str> = input.splitn(2, ' ').collect();
-    let cmd = parts.first().unwrap_or(&"");
-    let arg = parts.get(1).map(|s| s.trim());
-
-    match *cmd {
-        // Navigation
-        "s" | "seek" => {
-            if let Some(addr_str) = arg {
-                if let Ok(addr) = parse_address(addr_str) {
-                    return ParsedCommand::Seek(addr);
-                }
+impl CliState {
+    /// Get or create disassembler for the current binary
+    fn get_disasm(&mut self) -> Option<&DisasmEngine> {
+        if self.disasm.is_none() {
+            if let Some(ref binary) = self.binary {
+                self.disasm = DisasmEngine::new(binary.is_64bit).ok();
             }
-            ParsedCommand::Unknown(input.to_string())
         }
-
-        // Disassembly
-        "pd" => {
-            let count = arg.and_then(|s| s.parse().ok()).unwrap_or(10);
-            ParsedCommand::PrintDisasm(count)
-        }
-        "pdf" => {
-            // pdf @ main -> function name is after @
-            if let Some(func_spec) = arg {
-                let func_name = func_spec.strip_prefix("@ ").unwrap_or(func_spec);
-                return ParsedCommand::PrintDisasmFunction(func_name.to_string());
-            }
-            ParsedCommand::PrintDisasmFunction("main".to_string())
-        }
-
-        // Memory
-        "dm" => ParsedCommand::MemoryMap,
-
-        // Debug
-        "dr" | "regs" => ParsedCommand::Registers,
-        "db" => {
-            if let Some(addr_str) = arg {
-                if let Some(addr_str) = addr_str.strip_prefix('-') {
-                    if let Ok(addr) = parse_address(addr_str.trim()) {
-                        return ParsedCommand::BreakpointDelete(addr);
-                    }
-                } else if let Ok(addr) = parse_address(addr_str) {
-                    return ParsedCommand::BreakpointSet(addr);
-                }
-            }
-            ParsedCommand::Unknown(input.to_string())
-        }
-        "dc" | "continue" | "c" => ParsedCommand::Continue,
-        "ds" | "step" => ParsedCommand::StepInto,
-        "dso" | "next" | "n" => ParsedCommand::StepOver,
-
-        // File operations
-        "o" | "open" | "load" => {
-            if let Some(path) = arg {
-                return ParsedCommand::Open(path.to_string());
-            }
-            ParsedCommand::Unknown(input.to_string())
-        }
-
-        // Help
-        "?" | "help" => ParsedCommand::Help,
-
-        // Quit
-        "q" | "quit" | "exit" => ParsedCommand::Quit,
-
-        _ => ParsedCommand::Unknown(input.to_string()),
-    }
-}
-
-/// Parse an address string (supports 0x prefix and decimal)
-fn parse_address(s: &str) -> std::result::Result<u64, std::num::ParseIntError> {
-    let s = s.trim();
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u64::from_str_radix(hex, 16)
-    } else {
-        s.parse()
-    }
-}
-
-/// Print the help message
-fn print_help() {
-    println!("{}", "Fission CLI Commands".bold().cyan());
-    println!("{}", "═".repeat(50).cyan());
-
-    println!("\n{}", "Navigation:".bold().yellow());
-    println!("  {}         Seek to address", "s <addr>".green());
-
-    println!("\n{}", "Disassembly:".bold().yellow());
-    println!("  {}          Print N disassembly lines", "pd <n>".green());
-    println!(
-        "  {}  Print disassembly of function",
-        "pdf @ <func>".green()
-    );
-
-    println!("\n{}", "Debugging:".bold().yellow());
-    println!("  {}             Show registers", "dr".green());
-    println!("  {}      Set breakpoint", "db <addr>".green());
-    println!("  {}     Delete breakpoint", "db- <addr>".green());
-    println!("  {}             Continue execution", "dc".green());
-    println!("  {}             Step into", "ds".green());
-    println!("  {}            Step over", "dso".green());
-
-    println!("\n{}", "Memory:".bold().yellow());
-    println!("  {}             Show memory map", "dm".green());
-
-    println!("\n{}", "Files:".bold().yellow());
-    println!("  {}      Open/load binary", "o <path>".green());
-
-    println!("\n{}", "Scripting:".bold().yellow());
-    println!("  {}     Execute Python code", ".<code>".green());
-
-    println!("\n{}", "Other:".bold().yellow());
-    println!("  {}            Show this help", "?".green());
-    println!("  {}            Quit Fission", "q".green());
-}
-
-/// Execute a parsed command
-fn execute_command(cmd: ParsedCommand) {
-    match cmd {
-        ParsedCommand::Seek(addr) => {
-            println!("[*] Seeking to {:#x}", addr);
-            // TODO: Update disassembly view
-        }
-        ParsedCommand::PrintDisasm(count) => {
-            println!("[*] Disassembling {} instructions...", count);
-            // TODO: Use DisassemblyEngine
-            println!("    (not implemented yet)");
-        }
-        ParsedCommand::PrintDisasmFunction(name) => {
-            println!("[*] Disassembling function: {}", name);
-            // TODO: Look up function and disassemble
-            println!("    (not implemented yet)");
-        }
-        ParsedCommand::MemoryMap => {
-            println!("[*] Memory Map:");
-            println!("    {}", "(not implemented yet)".dimmed());
-        }
-        ParsedCommand::Registers => {
-            println!("[*] Registers:");
-            println!("    RAX = {:#018x}", 0u64);
-            println!("    RBX = {:#018x}", 0u64);
-            println!("    RCX = {:#018x}", 0u64);
-            println!("    RDX = {:#018x}", 0u64);
-            println!("    RSI = {:#018x}", 0u64);
-            println!("    RDI = {:#018x}", 0u64);
-            println!("    RBP = {:#018x}", 0u64);
-            println!("    RSP = {:#018x}", 0u64);
-            println!("    RIP = {:#018x}", 0u64);
-        }
-        ParsedCommand::BreakpointSet(addr) => {
-            println!("[*] Breakpoint set at {:#x}", addr);
-        }
-        ParsedCommand::BreakpointDelete(addr) => {
-            println!("[*] Breakpoint deleted at {:#x}", addr);
-        }
-        ParsedCommand::Continue => {
-            println!("[*] Continuing execution...");
-        }
-        ParsedCommand::StepInto => {
-            println!("[*] Stepping into...");
-        }
-        ParsedCommand::StepOver => {
-            println!("[*] Stepping over...");
-        }
-        ParsedCommand::Open(path) => {
-            println!("[*] Loading binary: {}", path);
-            // TODO: Use goblin to parse
-        }
-        ParsedCommand::Python(code) => {
-            println!("[*] Executing Python: {}", code);
-            // TODO: Use PythonBridge
-        }
-        ParsedCommand::Help => {
-            print_help();
-        }
-        ParsedCommand::Quit => {
-            println!("[*] Shutting down...");
-            std::process::exit(0);
-        }
-        ParsedCommand::Unknown(input) => {
-            println!("{} Unknown command: '{}'", "[!]".red(), input);
-            println!("    Type '?' for help");
-        }
+        self.disasm.as_ref()
     }
 }
 
 /// Run the CLI REPL
 pub fn run_cli() -> Result<()> {
+    print_banner();
+    
     let mut line_editor = Reedline::create();
-    let prompt = FissionPrompt::new();
-
-    println!(
-        "{}",
-        "╔══════════════════════════════════════════════════════════════╗".cyan()
-    );
-    println!(
-        "{}",
-        "║  Fission CLI - Type '?' for help, 'q' to quit                ║".cyan()
-    );
-    println!(
-        "{}",
-        "╚══════════════════════════════════════════════════════════════╝".cyan()
-    );
-
+    let prompt = create_prompt();
+    let mut state = CliState::default();
+    
+    println!("{}", "Type 'help' for available commands.".dimmed());
+    println!();
+    
     loop {
-        let sig = line_editor.read_line(&prompt)?;
-        match sig {
-            Signal::Success(buffer) => {
-                let input = buffer.trim();
-                if input.is_empty() {
+        match line_editor.read_line(&prompt) {
+            Ok(Signal::Success(line)) => {
+                let line = line.trim();
+                if line.is_empty() {
                     continue;
                 }
-
-                let cmd = parse_command(input);
-                execute_command(cmd);
+                
+                match parse_command(line) {
+                    Command::Load(path) => cmd_load(&mut state, &path),
+                    Command::Info => cmd_info(&state),
+                    Command::Functions => cmd_functions(&state),
+                    Command::Disasm { addr, count } => cmd_disasm(&mut state, addr, count),
+                    Command::Decompile(addr) => cmd_decompile(&state, addr),
+                    Command::Strings => cmd_strings(&state),
+                    Command::Sections => cmd_sections(&state),
+                    Command::Analyze => cmd_analyze(&mut state),
+                    Command::Help => cmd_help(),
+                    Command::Clear => cmd_clear(),
+                    Command::Quit => {
+                        println!("{}", "Goodbye!".cyan());
+                        break;
+                    }
+                    Command::Unknown(cmd) => {
+                        println!("{} Unknown command: '{}'. Type 'help' for available commands.", 
+                            "Error:".red(), cmd);
+                    }
+                }
             }
-            Signal::CtrlD | Signal::CtrlC => {
-                println!("\n[*] Interrupted");
+            Ok(Signal::CtrlC) => {
+                println!("{}", "Use 'quit' or Ctrl-D to exit.".dimmed());
+            }
+            Ok(Signal::CtrlD) => {
+                println!("{}", "\nGoodbye!".cyan());
                 break;
+            }
+            Err(e) => {
+                println!("{} {}", "Error:".red(), e);
             }
         }
     }
-
+    
     Ok(())
+}
+
+fn print_banner() {
+    println!();
+    println!("{}", "═══════════════════════════════════════════════════════════".cyan());
+    println!("  {} v{}", 
+        "Fission".bold().cyan(), 
+        env!("CARGO_PKG_VERSION"));
+    println!("  {}", "Next-Gen Dynamic Instrumentation Platform".dimmed());
+    println!("  {}", "\"Split the Binary, Fuse the Power.\"".italic().dimmed());
+    println!("{}", "═══════════════════════════════════════════════════════════".cyan());
+    println!();
+}
+
+fn create_prompt() -> DefaultPrompt {
+    DefaultPrompt::new(
+        DefaultPromptSegment::Basic("fission".to_string()),
+        DefaultPromptSegment::Empty,
+    )
+}
+
+// ============================================================================
+// Command Implementations
+// ============================================================================
+
+fn cmd_load(state: &mut CliState, path: &str) {
+    println!("{} Loading '{}'...", "[*]".blue(), path);
+    
+    match LoadedBinary::from_file(path) {
+        Ok(binary) => {
+            println!("{} {}", "[✓]".green(), "Binary loaded successfully".green());
+            println!();
+            println!("  {} {}", "Format:".bold(), binary.format);
+            println!("  {} {}", "Architecture:".bold(), 
+                if binary.is_64bit { "64-bit" } else { "32-bit" });
+            println!("  {} 0x{:X}", "Entry Point:".bold(), binary.entry_point);
+            println!("  {} 0x{:X}", "Image Base:".bold(), binary.image_base);
+            println!("  {} {}", "Sections:".bold(), binary.sections.len());
+            println!("  {} {}", "Functions:".bold(), binary.functions.len());
+            
+            if binary.is_dotnet {
+                println!("  {} {}", ".NET:".bold(), 
+                    binary.dotnet_runtime_version.as_deref().unwrap_or("yes"));
+            }
+            
+            state.binary = Some(Arc::new(binary));
+            state.disasm = None; // Reset disassembler for new binary
+        }
+        Err(e) => {
+            println!("{} Failed to load binary: {}", "[!]".red(), e);
+        }
+    }
+}
+
+fn cmd_info(state: &CliState) {
+    match &state.binary {
+        Some(binary) => {
+            println!();
+            println!("{}", "Binary Information".bold().underline());
+            println!();
+            println!("  {} {}", "Path:".bold(), binary.path);
+            println!("  {} {}", "Format:".bold(), binary.format);
+            println!("  {} {}", "Architecture:".bold(), binary.arch_spec);
+            println!("  {} {}", "Bitness:".bold(), 
+                if binary.is_64bit { "64-bit" } else { "32-bit" });
+            println!("  {} 0x{:016X}", "Entry Point:".bold(), binary.entry_point);
+            println!("  {} 0x{:016X}", "Image Base:".bold(), binary.image_base);
+            println!("  {} {} bytes", "File Size:".bold(), binary.data.len());
+            println!("  {} {}", "Sections:".bold(), binary.sections.len());
+            println!("  {} {}", "Functions:".bold(), binary.functions.len());
+            
+            if binary.is_dotnet {
+                println!("  {} {}", ".NET Runtime:".bold(), 
+                    binary.dotnet_runtime_version.as_deref().unwrap_or("unknown"));
+            }
+            println!();
+        }
+        None => {
+            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+        }
+    }
+}
+
+fn cmd_functions(state: &CliState) {
+    match &state.binary {
+        Some(binary) => {
+            let funcs = binary.functions_sorted();
+            
+            if funcs.is_empty() {
+                println!("{} No functions found.", "[!]".yellow());
+                return;
+            }
+            
+            println!();
+            println!("{} ({} total)", "Functions".bold().underline(), funcs.len());
+            println!();
+            println!("  {:<18} {:<8} {:<6} {}", 
+                "Address".bold(), "Size".bold(), "Type".bold(), "Name".bold());
+            println!("  {}", "─".repeat(60));
+            
+            for func in funcs.iter().take(50) {
+                let type_str = if func.is_import { 
+                    "IMP".yellow() 
+                } else if func.is_export { 
+                    "EXP".green() 
+                } else { 
+                    "INT".dimmed() 
+                };
+                
+                println!("  0x{:016X} {:>8} {:^6} {}", 
+                    func.address, 
+                    if func.size > 0 { format!("{}", func.size) } else { "-".to_string() },
+                    type_str,
+                    func.name);
+            }
+            
+            if funcs.len() > 50 {
+                println!("  {}", format!("... and {} more", funcs.len() - 50).dimmed());
+            }
+            println!();
+        }
+        None => {
+            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+        }
+    }
+}
+
+fn cmd_disasm(state: &mut CliState, addr: u64, count: usize) {
+    let binary = match &state.binary {
+        Some(b) => b.clone(),
+        None => {
+            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+            return;
+        }
+    };
+    
+    // Get bytes at address
+    let max_bytes = count * 15; // max instruction size is ~15 bytes
+    let bytes = match binary.get_bytes(addr, max_bytes) {
+        Some(b) => b,
+        None => {
+            println!("{} Cannot read memory at 0x{:X}", "[!]".red(), addr);
+            return;
+        }
+    };
+    
+    // Create or reuse disassembler
+    let disasm = match state.get_disasm() {
+        Some(d) => d,
+        None => {
+            println!("{} Failed to initialize disassembler", "[!]".red());
+            return;
+        }
+    };
+    
+    match disasm.disassemble(&bytes, addr) {
+        Ok(instructions) => {
+            println!();
+            println!("{} @ 0x{:X}", "Disassembly".bold().underline(), addr);
+            println!();
+            
+            for insn in instructions.iter().take(count) {
+                let bytes_str: String = insn.bytes.iter()
+                    .map(|b| format!("{:02X}", b))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                
+                let mnemonic = if insn.is_flow_control {
+                    insn.mnemonic.cyan().to_string()
+                } else {
+                    insn.mnemonic.clone()
+                };
+                
+                println!("  {:016X}  {:<24} {} {}", 
+                    insn.address, 
+                    bytes_str.dimmed(),
+                    mnemonic,
+                    insn.operands);
+            }
+            println!();
+        }
+        Err(e) => {
+            println!("{} Disassembly failed: {}", "[!]".red(), e);
+        }
+    }
+}
+
+fn cmd_decompile(state: &CliState, addr: u64) {
+    match &state.binary {
+        Some(binary) => {
+            // Find function at address
+            let func = binary.functions.iter()
+                .find(|f| f.address == addr || 
+                    (f.size > 0 && addr >= f.address && addr < f.address + f.size));
+            
+            let func_name = func.map(|f| f.name.as_str()).unwrap_or("unknown");
+            
+            println!();
+            println!("{} {} @ 0x{:X}", "Decompile".bold().underline(), func_name, addr);
+            println!();
+            
+            // Try to use the decompiler
+            use crate::analysis::decomp::native::{find_cli, DecompilerServer};
+            
+            match find_cli() {
+                Some(cli_path) => {
+                    println!("{} Using decompiler at {:?}", "[*]".blue(), cli_path);
+                    
+                    // Get SLA directory
+                    let sla_dir = cli_path.parent()
+                        .and_then(|p| p.parent())
+                        .map(|p| p.join("ghidra_decompiler/processors"))
+                        .unwrap_or_default();
+                    
+                    match DecompilerServer::new(&cli_path, sla_dir.to_str().unwrap_or("")) {
+                        Ok(mut server) => {
+                            // Load binary into decompiler
+                            let mapped_data = binary.get_memory_mapped_data();
+                            if let Err(e) = server.load_binary(&mapped_data, binary.arch_spec.as_str(), binary.image_base) {
+                                println!("{} Failed to load binary into decompiler: {}", "[!]".red(), e);
+                                return;
+                            }
+                            
+                            // Decompile
+                            match server.decompile(&[], addr, binary.is_64bit) {
+                                Ok(code) => {
+                                    println!("{}", code);
+                                }
+                                Err(e) => {
+                                    println!("{} Decompilation failed: {}", "[!]".red(), e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("{} Failed to start decompiler: {}", "[!]".red(), e);
+                        }
+                    }
+                }
+                None => {
+                    println!("{} Decompiler CLI not found. Build the decompiler first.", "[!]".yellow());
+                    println!("  Run: cd ghidra_decompiler && mkdir build && cd build && cmake .. && make");
+                }
+            }
+            println!();
+        }
+        None => {
+            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+        }
+    }
+}
+
+fn cmd_strings(state: &CliState) {
+    match &state.binary {
+        Some(binary) => {
+            let min_len = 4;
+            let mut strings = Vec::new();
+            
+            // Simple ASCII string extraction
+            let mut current_string = String::new();
+            let mut start_offset = 0usize;
+            
+            for (i, &byte) in binary.data.iter().enumerate() {
+                if byte >= 0x20 && byte <= 0x7E {
+                    if current_string.is_empty() {
+                        start_offset = i;
+                    }
+                    current_string.push(byte as char);
+                } else {
+                    if current_string.len() >= min_len {
+                        strings.push((start_offset, current_string.clone()));
+                    }
+                    current_string.clear();
+                }
+            }
+            
+            println!();
+            println!("{} ({} found, min length: {})", 
+                "Strings".bold().underline(), strings.len(), min_len);
+            println!();
+            
+            for (offset, s) in strings.iter().take(100) {
+                let display = if s.len() > 60 {
+                    format!("{}...", &s[..57])
+                } else {
+                    s.clone()
+                };
+                println!("  {:08X}  {}", offset, display.green());
+            }
+            
+            if strings.len() > 100 {
+                println!("  {}", format!("... and {} more", strings.len() - 100).dimmed());
+            }
+            println!();
+        }
+        None => {
+            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+        }
+    }
+}
+
+fn cmd_sections(state: &CliState) {
+    match &state.binary {
+        Some(binary) => {
+            println!();
+            println!("{}", "Sections".bold().underline());
+            println!();
+            println!("  {:<12} {:<18} {:<12} {}", 
+                "Name".bold(), "Virtual Addr".bold(), "Size".bold(), "Flags".bold());
+            println!("  {}", "─".repeat(60));
+            
+            for section in &binary.sections {
+                let flags = format!("{}{}{}",
+                    if section.is_readable { "R" } else { "-" },
+                    if section.is_writable { "W" } else { "-" },
+                    if section.is_executable { "X" } else { "-" });
+                
+                let flags_colored = if section.is_executable {
+                    flags.red()
+                } else if section.is_writable {
+                    flags.yellow()
+                } else {
+                    flags.normal()
+                };
+                
+                println!("  {:<12} 0x{:016X} {:>10} {}", 
+                    section.name, 
+                    section.virtual_address,
+                    section.virtual_size,
+                    flags_colored);
+            }
+            println!();
+        }
+        None => {
+            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+        }
+    }
+}
+
+fn cmd_analyze(state: &mut CliState) {
+    // Clone and modify
+    let binary_opt = state.binary.clone();
+    
+    match binary_opt {
+        Some(binary_arc) => {
+            println!("{} Analyzing binary for internal functions...", "[*]".blue());
+            
+            let mut binary = (*binary_arc).clone();
+            let before = binary.functions.len();
+            
+            binary.discover_internal_functions();
+            
+            let after = binary.functions.len();
+            let discovered = after - before;
+            
+            state.binary = Some(Arc::new(binary));
+            state.disasm = None; // Reset disassembler
+            
+            println!("{} Found {} new internal functions ({} total)", 
+                "[✓]".green(), discovered, after);
+        }
+        None => {
+            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+        }
+    }
+}
+
+fn cmd_help() {
+    println!();
+    println!("{}", "Available Commands".bold().underline());
+    println!();
+    println!("  {}         {}  Load a binary file for analysis",
+        "load <path>".cyan(), "".dimmed());
+    println!("  {}               {}  Show binary information",
+        "info".cyan(), "".dimmed());
+    println!("  {}              {}  List discovered functions",
+        "funcs".cyan(), "".dimmed());
+    println!("  {}           {}  Show section table",
+        "sections".cyan(), "".dimmed());
+    println!("  {}            {}  Extract ASCII strings",
+        "strings".cyan(), "".dimmed());
+    println!("  {}            {}  Analyze and discover functions",
+        "analyze".cyan(), "".dimmed());
+    println!();
+    println!("  {} {}  Disassemble at address",
+        "disasm".cyan(), "<addr> [count]".dimmed());
+    println!("  {}      {}  Decompile function at address",
+        "decompile".cyan(), "<addr>".dimmed());
+    println!();
+    println!("  {}              {}  Clear the screen",
+        "clear".cyan(), "".dimmed());
+    println!("  {}               {}  Show this help message",
+        "help".cyan(), "".dimmed());
+    println!("  {}               {}  Exit the program",
+        "quit".cyan(), "".dimmed());
+    println!();
+    println!("{}", "Address formats: 0x1234, 1234 (hex if >4 digits)".dimmed());
+    println!();
+}
+
+fn cmd_clear() {
+    // ANSI escape to clear screen and move cursor to top-left
+    print!("\x1B[2J\x1B[1;1H");
 }

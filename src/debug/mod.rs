@@ -1,4 +1,4 @@
-//! Debug module - Dynamic analysis and debugging functionality.
+//! Debug Module - Dynamic analysis and debugging functionality.
 //!
 //! Provides cross-platform debugging capabilities:
 //! - Process attach/detach
@@ -6,66 +6,78 @@
 //! - Register/memory access
 //! - Step execution
 //! - Time Travel Debugging (TTD)
+//!
+//! # Architecture
+//!
+//! ```text
+//! debug/
+//! ├── mod.rs       # This file - re-exports and platform selection
+//! ├── traits.rs    # Platform-agnostic Debugger trait
+//! ├── types.rs     # Shared types (DebugEvent, RegisterState, etc.)
+//! ├── memory.rs    # Cross-platform memory operations
+//! ├── windows/     # Windows-specific implementation
+//! ├── linux.rs     # Linux-specific implementation (ptrace)
+//! ├── macos.rs     # macOS-specific implementation (Mach API stub)
+//! └── ttd/         # Time Travel Debugging
+//! ```
 
+// Core modules
+pub mod traits;
 pub mod types;
+pub mod platform;
+pub mod memory;
 pub mod ttd;
 
+// Platform-specific implementations
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-// Legacy modules (to be refactored)
-pub mod debugger;
-pub mod memory;
+#[cfg(target_os = "linux")]
+pub mod linux;
 
+#[cfg(target_os = "macos")]
+pub mod macos;
+
+// Re-export the Debugger trait
+pub use traits::Debugger;
+
+// Re-export commonly used types
+pub use types::{
+    DebugEvent, DebugState, DebugStatus, 
+    Breakpoint, RegisterState, ProcessInfo
+};
+
+// ============================================================================
+// Platform-specific exports
+// ============================================================================
+
+/// Windows: Use WindowsDebugger as the platform debugger
 #[cfg(target_os = "windows")]
 pub use windows::WindowsDebugger as PlatformDebugger;
 
 #[cfg(target_os = "windows")]
 pub use windows::enumerate_processes;
 
-#[cfg(not(target_os = "windows"))]
-pub fn enumerate_processes() -> Vec<types::ProcessInfo> {
-    // Stub for non-Windows platforms
+/// Linux: Use LinuxDebugger as the platform debugger
+#[cfg(target_os = "linux")]
+pub use linux::LinuxDebugger as PlatformDebugger;
+
+#[cfg(target_os = "linux")]
+pub use linux::enumerate_processes;
+
+/// macOS: Use MacOSDebugger as the platform debugger (stub)
+#[cfg(target_os = "macos")]
+pub use macos::MacOSDebugger as PlatformDebugger;
+
+#[cfg(target_os = "macos")]
+pub use macos::enumerate_processes;
+
+// ============================================================================
+// Fallback for unsupported platforms
+// ============================================================================
+
+/// Fallback for unsupported platforms - returns empty process list
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+pub fn enumerate_processes() -> Vec<ProcessInfo> {
     Vec::new()
-}
-
-use types::ProcessInfo;
-
-/// Platform-agnostic debugger trait
-pub trait Debugger {
-    /// Enumerate running processes
-    fn enumerate_processes() -> Vec<ProcessInfo>;
-    
-    /// Attach to a process by PID
-    fn attach(&mut self, pid: u32) -> Result<(), String>;
-    
-    /// Detach from the current process
-    fn detach(&mut self) -> Result<(), String>;
-    
-    /// Check if currently attached
-    fn is_attached(&self) -> bool;
-    
-    /// Get the attached process ID
-    fn attached_pid(&self) -> Option<u32>;
-
-    /// Continue execution after a debug event
-    fn continue_execution(&mut self) -> Result<(), String>;
-
-    /// Single step (best-effort)
-    fn single_step(&mut self) -> Result<(), String>;
-
-    /// Set a software breakpoint
-    fn set_sw_breakpoint(&mut self, address: u64) -> Result<(), String>;
-
-    /// Remove a software breakpoint
-    fn remove_sw_breakpoint(&mut self, address: u64) -> Result<(), String>;
-
-    /// Read memory from the process
-    fn read_memory(&self, address: u64, size: usize) -> Result<Vec<u8>, String>;
-
-    /// Write memory to the process
-    fn write_memory(&mut self, address: u64, data: &[u8]) -> Result<(), String>;
-
-    /// Fetch registers for a thread
-    fn fetch_registers(&mut self, thread_id: u32) -> Result<types::RegisterState, String>;
 }

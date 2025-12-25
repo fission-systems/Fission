@@ -3,15 +3,31 @@ use std::collections::HashMap;
 use std::any::Any;
 
 use crate::analysis::loader::LoadedBinary;
+use crate::debug::types::RegisterState;
 
 /// System-wide events for Fission
+/// 
+/// This is the unified event system for the entire application.
+/// Both core components and plugins subscribe to these events.
 #[derive(Debug, Clone)]
 pub enum FissionEvent {
+    // ===== Application Lifecycle =====
+    
+    /// Application has started
+    AppStarted,
+    
+    /// Application is shutting down
+    AppShutdown,
+    
+    // ===== Binary Analysis =====
+    
     /// A binary has been successfully loaded
     BinaryLoaded(Arc<LoadedBinary>),
     
     /// Binary loading failed
     BinaryLoadFailed(String),
+    
+    // ===== Decompilation =====
     
     /// Decompilation started for an address
     DecompilationStarted {
@@ -21,6 +37,8 @@ pub enum FissionEvent {
     /// Decompilation finished successfully
     DecompilationSuccess {
         address: u64,
+        /// Function name (if known)
+        function_name: Option<String>,
         code: String,
     },
     
@@ -29,6 +47,34 @@ pub enum FissionEvent {
         address: u64,
         error: String,
     },
+    
+    // ===== Debugging =====
+    
+    /// A breakpoint was hit
+    BreakpointHit {
+        address: u64,
+        thread_id: u32,
+    },
+    
+    /// A debug step was executed
+    DebugStep {
+        registers: RegisterState,
+        thread_id: u32,
+    },
+    
+    // ===== User Interaction =====
+    
+    /// User executed a command (CLI or UI)
+    CommandExecuted {
+        command: String,
+    },
+    
+    /// User interface focus/selection change
+    SelectionChanged {
+        address: Option<u64>,
+    },
+    
+    // ===== System Messages =====
     
     /// Log message to be displayed/stored
     LogMessage {
@@ -44,11 +90,47 @@ pub enum FissionEvent {
         total: usize,
         message: String,
     },
-    
-    /// User interface focus/selection change
-    SelectionChanged {
-        address: Option<u64>,
-    },
+}
+
+/// Event type identifiers for filtering/subscribing to specific events
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FissionEventType {
+    AppStarted,
+    AppShutdown,
+    BinaryLoaded,
+    BinaryLoadFailed,
+    DecompilationStarted,
+    DecompilationSuccess,
+    DecompilationFailed,
+    BreakpointHit,
+    DebugStep,
+    CommandExecuted,
+    SelectionChanged,
+    LogMessage,
+    Progress,
+    /// Subscribe to all events
+    All,
+}
+
+impl FissionEvent {
+    /// Get the event type for filtering
+    pub fn event_type(&self) -> FissionEventType {
+        match self {
+            FissionEvent::AppStarted => FissionEventType::AppStarted,
+            FissionEvent::AppShutdown => FissionEventType::AppShutdown,
+            FissionEvent::BinaryLoaded(_) => FissionEventType::BinaryLoaded,
+            FissionEvent::BinaryLoadFailed(_) => FissionEventType::BinaryLoadFailed,
+            FissionEvent::DecompilationStarted { .. } => FissionEventType::DecompilationStarted,
+            FissionEvent::DecompilationSuccess { .. } => FissionEventType::DecompilationSuccess,
+            FissionEvent::DecompilationFailed { .. } => FissionEventType::DecompilationFailed,
+            FissionEvent::BreakpointHit { .. } => FissionEventType::BreakpointHit,
+            FissionEvent::DebugStep { .. } => FissionEventType::DebugStep,
+            FissionEvent::CommandExecuted { .. } => FissionEventType::CommandExecuted,
+            FissionEvent::SelectionChanged { .. } => FissionEventType::SelectionChanged,
+            FissionEvent::LogMessage { .. } => FissionEventType::LogMessage,
+            FissionEvent::Progress { .. } => FissionEventType::Progress,
+        }
+    }
 }
 
 type EventHandler = Box<dyn Fn(&FissionEvent) + Send + Sync>;

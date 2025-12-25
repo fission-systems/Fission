@@ -115,7 +115,7 @@ impl Command for RenameFunctionCommand {
             state.analysis.loaded_binary = Some(new_arc.clone());
             
             // Publish event
-            state.event_bus.publish(FissionEvent::BinaryLoaded(new_arc));
+            state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
             state.log(format!("Renamed function 0x{:x} to '{}'", self.address, self.new_name));
             
             Ok(())
@@ -136,7 +136,7 @@ impl Command for RenameFunctionCommand {
             let new_arc = Arc::new(binary);
             state.analysis.loaded_binary = Some(new_arc.clone());
             
-            state.event_bus.publish(FissionEvent::BinaryLoaded(new_arc));
+            state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
             state.log(format!("Reverted rename of function 0x{:x} to '{}'", self.address, self.old_name));
             Ok(())
         } else {
@@ -188,7 +188,7 @@ impl Command for PatchBytesCommand {
         
         let new_arc = Arc::new(binary);
         state.analysis.loaded_binary = Some(new_arc.clone());
-        state.event_bus.publish(FissionEvent::BinaryLoaded(new_arc));
+        state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
         
         state.log(format!("Patched {} bytes at 0x{:x}", self.new_bytes.len(), self.address));
         Ok(())
@@ -212,7 +212,7 @@ impl Command for PatchBytesCommand {
         
         let new_arc = Arc::new(binary);
         state.analysis.loaded_binary = Some(new_arc.clone());
-        state.event_bus.publish(FissionEvent::BinaryLoaded(new_arc));
+        state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
         
         state.log(format!("Reverted patch at 0x{:x}", self.address));
         Ok(())

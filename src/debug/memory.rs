@@ -1,9 +1,10 @@
 //! Memory - Process memory operations
 //!
 //! Provides unified memory read/write/mapping operations across platforms.
+//! Uses platform-specific implementations via the `platform` module.
 
-use anyhow::Result;
 use thiserror::Error;
+use super::platform::{PlatformMemory, PlatformMemoryImpl};
 
 /// Memory operation errors
 #[derive(Error, Debug)]
@@ -72,14 +73,21 @@ pub struct MemoryRegion {
 }
 
 /// Memory manager for reading/writing process memory
+///
+/// This is a high-level wrapper around platform-specific memory operations.
+/// It provides convenience methods for common operations like reading primitives
+/// and strings.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut mem = MemoryManager::new();
+/// mem.open_process(1234)?;
+/// let value = mem.read_u64(0x7fff0000)?;
+/// ```
 pub struct MemoryManager {
-    /// Target process handle/PID
-    #[cfg(target_os = "windows")]
-    process_handle: Option<isize>,
-
-    #[cfg(target_os = "linux")]
-    target_pid: Option<u32>,
-
+    /// Platform-specific memory implementation
+    platform: PlatformMemoryImpl,
     /// Cached memory regions
     regions: Vec<MemoryRegion>,
 }
@@ -88,41 +96,19 @@ impl MemoryManager {
     /// Create a new memory manager
     pub fn new() -> Self {
         Self {
-            #[cfg(target_os = "windows")]
-            process_handle: None,
-            #[cfg(target_os = "linux")]
-            target_pid: None,
+            platform: PlatformMemoryImpl::new(),
             regions: Vec::new(),
         }
     }
 
     /// Open a process for memory operations
-    #[cfg(target_os = "windows")]
     pub fn open_process(&mut self, pid: u32) -> Result<(), MemoryError> {
-        use windows::Win32::System::Threading::{OpenProcess, PROCESS_ALL_ACCESS};
-
-        let handle = unsafe {
-            OpenProcess(PROCESS_ALL_ACCESS, false, pid).map_err(|e| MemoryError::ReadFailed {
-                address: 0,
-                reason: e.to_string(),
-            })?
-        };
-
-        self.process_handle = Some(handle.0 as isize);
-        Ok(())
+        self.platform.open_process(pid)
     }
 
-    #[cfg(target_os = "linux")]
-    pub fn open_process(&mut self, pid: u32) -> Result<(), MemoryError> {
-        self.target_pid = Some(pid);
-        Ok(())
-    }
-    
-    #[cfg(target_os = "macos")]
-    pub fn open_process(&mut self, _pid: u32) -> Result<(), MemoryError> {
-        // macOS memory operations require task_for_pid which needs special entitlements
-        // For now, this is a stub that allows the struct to be created
-        Ok(())
+    /// Check if a process is currently open
+    pub fn is_open(&self) -> bool {
+        self.platform.is_open()
     }
 
     /// Read memory from the target process
@@ -134,197 +120,18 @@ impl MemoryManager {
 
     /// Read memory into an existing buffer
     pub fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<usize, MemoryError> {
-        #[cfg(target_os = "windows")]
-        {
-            self.read_windows(address, buffer)
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            self.read_linux(address, buffer)
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            Err(MemoryError::ReadFailed {
-                address,
-                reason: "macOS memory reading not yet implemented".into(),
-            })
-        }
+        self.platform.read_into(address, buffer)
     }
 
     /// Write memory to the target process
     pub fn write(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {
-        #[cfg(target_os = "windows")]
-        {
-            self.write_windows(address, data)
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            self.write_linux(address, data)
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            Err(MemoryError::WriteFailed {
-                address,
-                reason: "macOS memory writing not yet implemented".into(),
-            })
-        }
+        self.platform.write(address, data)
     }
 
     /// Get memory regions of the target process
     pub fn query_regions(&mut self) -> Result<&[MemoryRegion], MemoryError> {
-        // Clear cached regions
-        self.regions.clear();
-        
-        #[cfg(target_os = "windows")]
-        {
-            self.query_regions_windows()?;
-        }
-        
-        #[cfg(target_os = "linux")]
-        {
-            self.query_regions_linux()?;
-        }
-        
-        #[cfg(target_os = "macos")]
-        {
-            self.query_regions_macos()?;
-        }
-        
+        self.regions = self.platform.query_regions()?;
         Ok(&self.regions)
-    }
-    
-    #[cfg(target_os = "windows")]
-    fn query_regions_windows(&mut self) -> Result<(), MemoryError> {
-        use windows::Win32::System::Memory::{
-            VirtualQueryEx, MEMORY_BASIC_INFORMATION, 
-            MEM_COMMIT, PAGE_EXECUTE, PAGE_EXECUTE_READ, 
-            PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
-            PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
-        };
-        use windows::Win32::Foundation::HANDLE;
-        
-        let handle_val = self.process_handle.ok_or(MemoryError::NoProcess)?;
-        let handle: HANDLE = unsafe { std::mem::transmute(handle_val) };
-        
-        let mut address: usize = 0;
-        let mut mbi: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
-        let mbi_size = std::mem::size_of::<MEMORY_BASIC_INFORMATION>();
-        
-        loop {
-            let result = unsafe {
-                VirtualQueryEx(
-                    handle,
-                    Some(address as *const std::ffi::c_void),
-                    &mut mbi,
-                    mbi_size,
-                )
-            };
-            
-            if result == 0 {
-                break;
-            }
-            
-            // Only include committed memory
-            if mbi.State == MEM_COMMIT {
-                let protection = match mbi.Protect {
-                    PAGE_EXECUTE => MemoryProtection { read: false, write: false, execute: true },
-                    PAGE_EXECUTE_READ => MemoryProtection::RX,
-                    PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY => MemoryProtection::RWX,
-                    PAGE_READONLY => MemoryProtection { read: true, write: false, execute: false },
-                    PAGE_READWRITE | PAGE_WRITECOPY => MemoryProtection::RW,
-                    _ => MemoryProtection::NONE,
-                };
-                
-                self.regions.push(MemoryRegion {
-                    base_address: mbi.BaseAddress as u64,
-                    size: mbi.RegionSize,
-                    protection,
-                    name: None, // Would need to call GetMappedFileName
-                });
-            }
-            
-            address = mbi.BaseAddress as usize + mbi.RegionSize;
-            
-            // Sanity check to avoid infinite loop
-            if address == 0 || mbi.RegionSize == 0 {
-                break;
-            }
-        }
-        
-        Ok(())
-    }
-    
-    #[cfg(target_os = "linux")]
-    fn query_regions_linux(&mut self) -> Result<(), MemoryError> {
-        let pid = self.target_pid.ok_or(MemoryError::NoProcess)?;
-        let maps_path = format!("/proc/{}/maps", pid);
-        
-        let content = std::fs::read_to_string(&maps_path)
-            .map_err(|e| MemoryError::ReadFailed {
-                address: 0,
-                reason: format!("Failed to read {}: {}", maps_path, e),
-            })?;
-        
-        for line in content.lines() {
-            if let Some(region) = self.parse_maps_line(line) {
-                self.regions.push(region);
-            }
-        }
-        
-        Ok(())
-    }
-    
-    #[cfg(target_os = "linux")]
-    fn parse_maps_line(&self, line: &str) -> Option<MemoryRegion> {
-        // Format: address-address perms offset dev inode pathname
-        // Example: 00400000-00452000 r-xp 00000000 08:02 173521 /usr/bin/dbus-daemon
-        
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 5 {
-            return None;
-        }
-        
-        // Parse address range
-        let addr_parts: Vec<&str> = parts[0].split('-').collect();
-        if addr_parts.len() != 2 {
-            return None;
-        }
-        
-        let start = u64::from_str_radix(addr_parts[0], 16).ok()?;
-        let end = u64::from_str_radix(addr_parts[1], 16).ok()?;
-        
-        // Parse permissions (rwxp)
-        let perms = parts[1];
-        let protection = MemoryProtection {
-            read: perms.contains('r'),
-            write: perms.contains('w'),
-            execute: perms.contains('x'),
-        };
-        
-        // Get pathname if available
-        let name = if parts.len() >= 6 {
-            Some(parts[5..].join(" "))
-        } else {
-            None
-        };
-        
-        Some(MemoryRegion {
-            base_address: start,
-            size: (end - start) as usize,
-            protection,
-            name,
-        })
-    }
-    
-    #[cfg(target_os = "macos")]
-    fn query_regions_macos(&mut self) -> Result<(), MemoryError> {
-        // macOS would use mach_vm_region API
-        // For now, return empty list
-        Ok(())
     }
 
     /// Read a null-terminated string from memory
@@ -341,140 +148,28 @@ impl MemoryManager {
         })
     }
 
-    /// Read a primitive value from memory
+    /// Read a u64 value from memory (little-endian)
     pub fn read_u64(&self, address: u64) -> Result<u64, MemoryError> {
         let data = self.read(address, 8)?;
         Ok(u64::from_le_bytes(data.try_into().unwrap()))
     }
 
+    /// Read a u32 value from memory (little-endian)
     pub fn read_u32(&self, address: u64) -> Result<u32, MemoryError> {
         let data = self.read(address, 4)?;
         Ok(u32::from_le_bytes(data.try_into().unwrap()))
     }
 
+    /// Read a u16 value from memory (little-endian)
     pub fn read_u16(&self, address: u64) -> Result<u16, MemoryError> {
         let data = self.read(address, 2)?;
         Ok(u16::from_le_bytes(data.try_into().unwrap()))
     }
 
+    /// Read a u8 value from memory
     pub fn read_u8(&self, address: u64) -> Result<u8, MemoryError> {
         let data = self.read(address, 1)?;
         Ok(data[0])
-    }
-}
-
-// Windows-specific implementations
-#[cfg(target_os = "windows")]
-impl MemoryManager {
-    fn read_windows(&self, address: u64, buffer: &mut [u8]) -> Result<usize, MemoryError> {
-        use windows::Win32::Foundation::HANDLE;
-        use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
-
-        let handle_val = self.process_handle.ok_or(MemoryError::NoProcess)?;
-        // SAFETY: HANDLE is repr(transparent) wrapper around isize
-        let handle: HANDLE = unsafe { std::mem::transmute(handle_val) };
-        let mut bytes_read = 0usize;
-
-        unsafe {
-            ReadProcessMemory(
-                handle,
-                address as *const std::ffi::c_void,
-                buffer.as_mut_ptr() as *mut std::ffi::c_void,
-                buffer.len(),
-                Some(&mut bytes_read),
-            )
-            .map_err(|e| MemoryError::ReadFailed {
-                address,
-                reason: e.to_string(),
-            })?;
-        }
-
-        Ok(bytes_read)
-    }
-
-    fn write_windows(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {
-        use windows::Win32::Foundation::HANDLE;
-        use windows::Win32::System::Diagnostics::Debug::WriteProcessMemory;
-
-        let handle_val = self.process_handle.ok_or(MemoryError::NoProcess)?;
-        // SAFETY: HANDLE is repr(transparent) wrapper around isize
-        let handle: HANDLE = unsafe { std::mem::transmute(handle_val) };
-        let mut bytes_written = 0usize;
-
-        unsafe {
-            WriteProcessMemory(
-                handle,
-                address as *const std::ffi::c_void,
-                data.as_ptr() as *const std::ffi::c_void,
-                data.len(),
-                Some(&mut bytes_written),
-            )
-            .map_err(|e| MemoryError::WriteFailed {
-                address,
-                reason: e.to_string(),
-            })?;
-        }
-
-        Ok(bytes_written)
-    }
-}
-
-// Linux-specific implementations
-#[cfg(target_os = "linux")]
-impl MemoryManager {
-    fn read_linux(&self, address: u64, buffer: &mut [u8]) -> Result<usize, MemoryError> {
-        use std::fs::File;
-        use std::io::{Read, Seek, SeekFrom};
-
-        let pid = self.target_pid.ok_or(MemoryError::NoProcess)?;
-        let mem_path = format!("/proc/{}/mem", pid);
-
-        let mut file = File::open(&mem_path).map_err(|e| MemoryError::ReadFailed {
-            address,
-            reason: e.to_string(),
-        })?;
-
-        file.seek(SeekFrom::Start(address))
-            .map_err(|e| MemoryError::ReadFailed {
-                address,
-                reason: e.to_string(),
-            })?;
-
-        let bytes_read = file.read(buffer).map_err(|e| MemoryError::ReadFailed {
-            address,
-            reason: e.to_string(),
-        })?;
-
-        Ok(bytes_read)
-    }
-
-    fn write_linux(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {
-        use std::fs::OpenOptions;
-        use std::io::{Seek, SeekFrom, Write};
-
-        let pid = self.target_pid.ok_or(MemoryError::NoProcess)?;
-        let mem_path = format!("/proc/{}/mem", pid);
-
-        let mut file = OpenOptions::new()
-            .write(true)
-            .open(&mem_path)
-            .map_err(|e| MemoryError::WriteFailed {
-                address,
-                reason: e.to_string(),
-            })?;
-
-        file.seek(SeekFrom::Start(address))
-            .map_err(|e| MemoryError::WriteFailed {
-                address,
-                reason: e.to_string(),
-            })?;
-
-        let bytes_written = file.write(data).map_err(|e| MemoryError::WriteFailed {
-            address,
-            reason: e.to_string(),
-        })?;
-
-        Ok(bytes_written)
     }
 }
 

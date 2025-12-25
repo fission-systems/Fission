@@ -90,11 +90,11 @@ impl ModuleManager {
             match entry.module.on_init(&mut self.context) {
                 Ok(()) => {
                     entry.state = ModuleState::Initialized;
-                    eprintln!("[ModuleManager] {} initialized", entry.module.name());
+                    crate::core::logging::info(&format!("[ModuleManager] {} initialized", entry.module.name()));
                 }
                 Err(e) => {
                     entry.state = ModuleState::Failed;
-                    eprintln!("[ModuleManager] {} failed to initialize: {}", entry.module.name(), e);
+                    crate::core::logging::error(&format!("[ModuleManager] {} failed to initialize: {}", entry.module.name(), e));
                     all_ok = false;
                     // Continue with other modules (graceful degradation)
                 }
@@ -113,11 +113,11 @@ impl ModuleManager {
             match entry.module.on_start(&mut self.context) {
                 Ok(()) => {
                     entry.state = ModuleState::Running;
-                    eprintln!("[ModuleManager] {} started", entry.module.name());
+                    crate::core::logging::info(&format!("[ModuleManager] {} started", entry.module.name()));
                 }
                 Err(e) => {
                     entry.state = ModuleState::Failed;
-                    eprintln!("[ModuleManager] {} failed to start: {}", entry.module.name(), e);
+                    crate::core::logging::error(&format!("[ModuleManager] {} failed to start: {}", entry.module.name(), e));
                     // Continue with other modules
                 }
             }
@@ -135,10 +135,10 @@ impl ModuleManager {
             match entry.module.on_shutdown(&mut self.context) {
                 Ok(()) => {
                     entry.state = ModuleState::Stopped;
-                    eprintln!("[ModuleManager] {} stopped", entry.module.name());
+                    crate::core::logging::info(&format!("[ModuleManager] {} stopped", entry.module.name()));
                 }
                 Err(e) => {
-                    eprintln!("[ModuleManager] {} failed to shutdown cleanly: {}", entry.module.name(), e);
+                    crate::core::logging::warn(&format!("[ModuleManager] {} failed to shutdown cleanly: {}", entry.module.name(), e));
                     entry.state = ModuleState::Stopped; // Mark stopped anyway
                 }
             }
