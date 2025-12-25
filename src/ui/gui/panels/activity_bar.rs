@@ -7,7 +7,7 @@ use crate::ui::gui::theme::catppuccin;
 /// Render the vertical activity bar on the far left.
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
     egui::SidePanel::left("activity_bar")
-        .frame(egui::Frame::none().fill(catppuccin::MANTLE))
+        .frame(egui::Frame::none().fill(ctx.style().visuals.extreme_bg_color))
         .exact_width(48.0)
         .resizable(false)
         .show(ctx, |ui| {
@@ -43,9 +43,9 @@ fn activity_button(ui: &mut egui::Ui, state: &mut AppState, activity: Activity, 
     let is_active = state.ui.active_activity == activity && state.ui.sidebar_visible;
     
     let tint = if is_active {
-        catppuccin::TEXT
+        ui.visuals().strong_text_color()
     } else {
-        catppuccin::OVERLAY1
+        ui.visuals().weak_text_color()
     };
     
     let response = ui.add(
@@ -59,7 +59,7 @@ fn activity_button(ui: &mut egui::Ui, state: &mut AppState, activity: Activity, 
         let rect = response.rect;
         ui.painter().line_segment(
             [egui::pos2(rect.left() + 2.0, rect.top() + 8.0), egui::pos2(rect.left() + 2.0, rect.bottom() - 8.0)],
-            egui::Stroke::new(2.0, catppuccin::BLUE)
+            egui::Stroke::new(2.0, ui.visuals().strong_text_color())
         );
     }
     

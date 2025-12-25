@@ -11,6 +11,8 @@ pub mod config;
 pub mod constants;
 pub mod errors;
 pub mod events;
+pub mod modules;
+pub mod config_store;
 pub mod logging;
 pub mod prelude;
 

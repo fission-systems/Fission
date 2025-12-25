@@ -52,12 +52,21 @@ pub fn preload_server_binary(
 
     // Initialize the native decompiler library
     {
-        let mut native_guard = native_decompiler.lock().unwrap();
+        let mut native_guard = match native_decompiler.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                state.log(format!("[!] Native decompiler lock poisoned: {}", e));
+                e.into_inner()
+            }
+        };
+        
         if native_guard.is_none() {
             if let Some(lib_path) = crate::analysis::decomp::native::find_library() {
                 // Determine SLA directory (usually same as library or relative to it)
                 // For now, assume it's in the ghidra_decompiler directory in current path
-                let sla_dir = std::env::current_dir().unwrap().join("ghidra_decompiler").to_string_lossy().into_owned();
+                let sla_dir = std::env::current_dir()
+                    .map(|p| p.join("ghidra_decompiler").to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| ".".to_string());
                 
                 match crate::analysis::decomp::NativeDecompiler::new(lib_path, &sla_dir) {
                     Ok(nd) => {

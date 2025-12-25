@@ -39,6 +39,9 @@ pub struct PluginManager {
     api: Option<Arc<dyn PluginAPI>>,
     /// System-wide Event Bus
     event_bus: Option<Arc<EventBus>>,
+    /// Python runtime (if enabled)
+    #[cfg(feature = "python")]
+    python_runtime: super::python::PythonRuntime,
 }
 
 impl PluginManager {
@@ -54,6 +57,8 @@ impl PluginManager {
             ],
             api: None,
             event_bus: None,
+            #[cfg(feature = "python")]
+            python_runtime: super::python::PythonRuntime::default(),
         }
     }
     
@@ -133,17 +138,30 @@ impl PluginManager {
             return Err(format!("Plugin '{}' already loaded", plugin_id));
         }
         
-        // Create plugin info
-        let info = PluginInfo {
-            id: plugin_id.clone(),
-            name: plugin_id.clone(),
-            version: "0.1.0".into(),
-            author: "Unknown".into(),
-            description: format!("Loaded from {:?}", path),
-            plugin_type,
-            enabled: true,
+        let info = if plugin_type == PluginType::Python {
+            #[cfg(feature = "python")]
+            {
+                 // Load into Python runtime
+                 self.python_runtime.load_plugin(path, &plugin_id)
+                     .map_err(|e| format!("Python load error: {}", e))?
+            }
+            #[cfg(not(feature = "python"))]
+            {
+                return Err("Python support disabled".into());
+            }
+        } else {
+             // Create basic plugin info for other types
+             PluginInfo {
+                id: plugin_id.clone(),
+                name: plugin_id.clone(),
+                version: "0.1.0".into(),
+                author: "Unknown".into(),
+                description: format!("Loaded from {:?}", path),
+                plugin_type,
+                enabled: true,
+            }
         };
-        
+
         // Create loaded plugin entry
         let loaded = LoadedPlugin {
             info,
@@ -244,9 +262,16 @@ impl PluginManager {
                     }
                 }
             }
+
         }
 
-        // 2. Dispatch to registered hooks
+        // 2. Dispatch to Python plugins
+        #[cfg(feature = "python")]
+        {
+             self.python_runtime.dispatch_event(event, self.event_bus.as_deref());
+        }
+
+        // 3. Dispatch to registered hooks
         let event_type = event.event_type();
         
         // Collect matching hooks and sort by priority

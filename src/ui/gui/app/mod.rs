@@ -26,6 +26,9 @@ use super::status_bar;
 use super::panels::{functions, assembly, decompile, bottom_tabs, activity_bar, side_bar, editor};
 use super::panels::bottom_tabs::{ConsoleAction, ScriptAction};
 use crate::config::CONFIG;
+use crate::core::modules::ModuleManager;
+use crate::plugin::module::PluginModule;
+use crate::plugin::PluginManager;
 
 use once_cell::sync::Lazy;
 use tokio::runtime::Runtime;
@@ -66,12 +69,18 @@ pub struct FissionApp {
     /// Latest request ID for debouncing
     latest_request_id: Arc<AtomicU64>,
 
-    /// Theme initialization flag
+    /// Theme initialization flag (legacy, now tracked by current_theme)
     theme_initialized: bool,
+    
+    /// Currently applied theme (to detect changes)
+    current_theme: Option<crate::ui::gui::state::ThemeMode>,
 
     /// Python scripting bridge
     #[cfg(feature = "python")]
     python_bridge: crate::script::PythonBridge,
+    
+    /// Module manager for lifecycle management
+    module_manager: ModuleManager,
 }
 
 impl Default for FissionApp {
@@ -85,7 +94,6 @@ impl Default for FissionApp {
         decomp_worker::spawn_worker(
             decomp_rx,
             tx.clone(),
-            native_decompiler.clone(),
             latest_request_id.clone(),
         );
         
@@ -97,6 +105,21 @@ impl Default for FissionApp {
         state.event_bus.subscribe(move |event| {
             let _ = tx_clone.send(AsyncMessage::Event(event.clone()));
         });
+        
+        // Initialize Module Manager with lifecycle management
+        let mut module_manager = ModuleManager::new(state.event_bus.clone());
+        
+        // Register PluginModule
+        let plugin_manager = Arc::new(Mutex::new(PluginManager::new()));
+        module_manager.register_module(Box::new(PluginModule::new(plugin_manager)));
+        
+        // Run lifecycle: init -> start
+        if let Err(e) = module_manager.init_all() {
+            eprintln!("[FissionApp] Module init failed: {}", e);
+        }
+        if let Err(e) = module_manager.start_all() {
+            eprintln!("[FissionApp] Module start failed: {}", e);
+        }
         
         Self {
             state,
@@ -112,19 +135,42 @@ impl Default for FissionApp {
             decomp_request_tx: decomp_tx,
             latest_request_id,
             theme_initialized: false,
+            current_theme: None,
             #[cfg(feature = "python")]
             python_bridge: crate::script::PythonBridge::new(),
+            module_manager,
+        }
+    }
+}
+
+impl Drop for FissionApp {
+    fn drop(&mut self) {
+        // Shutdown all modules gracefully
+        if let Err(e) = self.module_manager.shutdown_all() {
+            eprintln!("[FissionApp] Module shutdown failed: {}", e);
         }
     }
 }
 
 impl eframe::App for FissionApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Initialize theme on first frame
-        if !self.theme_initialized {
-            super::theme::init(ctx);
-            self.theme_initialized = true;
+        // Initialize or update theme if changed
+        let target_theme = self.state.settings.theme_mode;
+        if self.current_theme != Some(target_theme) {
+            super::theme::set_theme(ctx, target_theme);
+            self.current_theme = Some(target_theme);
+            
+            // Re-configure fonts as they might need reloading or style update
+            super::theme::configure_fonts(ctx);
+            // Only load fonts once if possible, or check if needed
+            if !self.theme_initialized {
+                super::theme::load_jetbrains_mono(ctx);
+                self.theme_initialized = true;
+            }
         }
+
+        // Apply UI Scale
+        ctx.set_pixels_per_point(self.state.settings.ui_scale);
 
         // Process async messages
         #[cfg(target_os = "windows")]
@@ -133,6 +179,7 @@ impl eframe::App for FissionApp {
             &self.rx,
             &self.tx,
             self.native_decompiler.clone(),
+            &self.decomp_request_tx,
             &self.dbg_event_rx,
         );
         #[cfg(not(target_os = "windows"))]
@@ -141,6 +188,7 @@ impl eframe::App for FissionApp {
             &self.rx,
             &self.tx,
             self.native_decompiler.clone(),
+            &self.decomp_request_tx,
         );
 
         // Render menu bar and handle actions
@@ -199,6 +247,14 @@ impl eframe::App for FissionApp {
         if let xrefs::XrefAction::NavigateTo(addr) = xrefs::render(ctx, &mut self.state) {
             // Navigate to address - find function containing this address
             self.navigate_to_address(addr);
+        }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let Err(e) = crate::core::config_store::save(&self.state.settings) {
+            log::error!("Failed to save settings: {}", e);
+        } else {
+            log::info!("Settings saved successfully");
         }
     }
 }

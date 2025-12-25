@@ -28,7 +28,7 @@ pub fn decompile_function(
         return;
     }
     
-    // Check cache first
+    // Check cache first (LruCache.get() updates access order)
     let address = func.address;
     if let Some(cached) = state.analysis.decompile_cache.get(&address) {
         let c_code = cached.c_code.clone();
@@ -109,12 +109,22 @@ pub fn decompile_function(
     latest_request_id.store(request_id, Ordering::SeqCst);
     
     // Send request to worker thread (non-blocking)
+    // Send request to worker thread (non-blocking)
+    // Optimization: If decompiler context is loaded, send empty bytes to use persistent memory
+    let request_bytes = if state.analysis.decompiler_context_loaded {
+        Vec::new()
+    } else {
+        bytes
+    };
+
     let request = DecompileRequest {
         request_id,
-        bytes,
+        bytes: request_bytes,
         address,
         is_64bit,
         is_prefetch: false,
+        is_binary_load: false,
+        image_base: 0,
     };
     
     if let Err(e) = decomp_tx.send(request) {
@@ -134,7 +144,8 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
     
     if let Some(func) = &state.analysis.selected_function {
         if func.address == address {
-            state.analysis.decompile_cache.insert(address, CachedDecompile {
+            // LruCache.put() automatically evicts oldest entry when at capacity
+            state.analysis.decompile_cache.put(address, CachedDecompile {
                 c_code: processed_code.clone(),
                 asm_instructions: state.analysis.asm_instructions.clone(),
                 timestamp: Instant::now(),
@@ -145,29 +156,24 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
     state.analysis.decompiling = false;
 }
 
-/// Replace pcRamXXXXXXXX patterns with actual IAT symbol names
-/// Uses regex for O(N) complexity instead of O(N*M)
+/// Replace pcRamXXXXXXXX and func_0xXXXXXXXX patterns with actual IAT symbol names
+/// Uses combined regex for single-pass O(N) complexity
 fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, String>) -> String {
     use regex::Regex;
     use once_cell::sync::Lazy;
-    
+
     if iat_symbols.is_empty() {
         return code.to_string();
     }
-    
-    // Regex patterns for Ghidra memory references
-    // pcRam00403050 or pcRam00403050 (lowercase/uppercase hex)
-    static PCRAM_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"pcRam([0-9a-fA-F]{8})").unwrap()
+
+    // Combined regex pattern for both pcRam and func_0x patterns
+    // Matches: pcRam00403050 or func_0x00403050
+    static COMBINED_RE: Lazy<Regex> = Lazy::new(|| {
+        Regex::new(r"(?:pcRam|func_0x)([0-9a-fA-F]{8})").unwrap()
     });
-    
-    // func_0x00403050 pattern
-    static FUNC_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"func_0x([0-9a-fA-F]{8})").unwrap()
-    });
-    
-    // Single pass replacement for pcRam patterns
-    let result = PCRAM_RE.replace_all(code, |caps: &regex::Captures| {
+
+    // Single pass replacement for both patterns
+    let result = COMBINED_RE.replace_all(code, |caps: &regex::Captures| {
         let addr_str = &caps[1];
         if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
             if let Some(name) = iat_symbols.get(&addr) {
@@ -176,17 +182,6 @@ fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, St
         }
         caps[0].to_string()
     });
-    
-    // Single pass replacement for func_ patterns
-    let result = FUNC_RE.replace_all(&result, |caps: &regex::Captures| {
-        let addr_str = &caps[1];
-        if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
-            if let Some(name) = iat_symbols.get(&addr) {
-                return name.clone();
-            }
-        }
-        caps[0].to_string()
-    });
-    
+
     result.into_owned()
 }

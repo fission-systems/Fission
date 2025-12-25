@@ -1,91 +1,120 @@
-# Fission 🔬
+# Fission
 
 > **"Split the Binary, Fuse the Power."**
 
-**Fission** is a next-generation hybrid dynamic analysis platform that unifies the best features of x64dbg, Frida, Radare2, and Ghidra into a single high-performance Rust-powered binary.
+A next-generation hybrid dynamic analysis platform that unifies the best features of x64dbg, Frida, Radare2, and Ghidra into a single high-performance Rust-powered binary.
 
 ![Fission Screenshot](docs/screenshot.png)
 
-## 🎯 Target Users
+## Target Users
 
 - Malware Analysts
-- Vulnerability Researchers  
+- Vulnerability Researchers
 - Reverse Engineers
 
-## ✨ Core Features
+## Features
 
-- **VS Code Style GUI**: Modern multi-panel layout with Activity Bar, Side Bar, Tabbed Editor, and Panel Area.
-- **Ghidra-Powered Decompiler**: High-performance C code decompilation via native FFI (Foreign Function Interface) ✅
-- **iced-x86 Disassembler**: High-performance pure Rust x86/x64 disassembly with syntax highlighting
-- **.NET Binary Support**: CLR metadata parsing, IL disassembly, and native stub analysis ✅
-- **Decompile Caching**: Results are cached for instant re-access
-- **Cross-Platform**: Windows (PE) and Linux (ELF) binary support
-- **Debug Support**: Process attach/detach, breakpoints, and register/memory access via Windows debugging API ✅
-- **Python Scripting API**: Access binary info, functions, and sections via PyO3 (In Progress) 🔄
+### Static Analysis
+- **Ghidra-Powered Decompiler** - High-performance C code decompilation via subprocess pool
+- **iced-x86 Disassembler** - Pure Rust x86/x64 disassembly with syntax highlighting
+- **.NET Binary Support** - CLR metadata parsing, IL disassembly, native stub analysis
+- **Cross-Platform** - Windows (PE) and Linux (ELF) binary support
 
-## 🖥️ GUI Panels
+### Dynamic Analysis
+- **Process Debugging** - Attach/detach, breakpoints, register/memory access
+- **Time Travel Debugging** - Execution timeline with snapshot navigation
+- **Live Memory Patching** - Modify running process memory
+
+### Performance
+- **Decompiler Pool** - Multi-process parallelization (auto-detects CPU cores)
+- **Architecture Caching** - Reuses Ghidra objects across requests
+- **LRU Result Cache** - Configurable cache with automatic eviction
+- **Smart Load Balancing** - Idle worker prioritization
+- **Background Prefetching** - Pre-decompiles adjacent functions
+
+### Extensibility
+- **Plugin System** - Native Rust and Python plugin support
+- **Event Bus** - Subscribe to binary load, decompile, debug events
+- **Hook Priority** - Control plugin execution order
+- **Python Scripting API** - Access binary info, functions, sections via PyO3
+
+## GUI Layout
 
 | Panel | Description |
 |-------|-------------|
-| **[Explorer]** | Function list (imports/exports) with virtual scrolling |
-| **[Editor]** | Tabbed interface for Assembly and Decompiled C code |
-| **[Console]** | Colored log output with integrated CLI input |
-| **[Debug]** | Execution control, event timeline, breakpoints, and registers |
-| **[Hex View]** | High-performance binary hex dump viewer |
+| **Explorer** | Function list (imports/exports) with virtual scrolling |
+| **Search** | Full-text search across functions and strings |
+| **Editor** | Tabbed interface for Assembly and Decompiled C code |
+| **Console** | Colored log output with integrated CLI |
+| **Debug** | Execution control, breakpoints, registers |
+| **Hex View** | Binary hex dump with patching support |
+| **Timeline** | Time travel debugging visualization |
+| **Plugins** | Plugin management and status |
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Language | Rust 2021 | Memory safety, native performance |
-| GUI | egui + eframe | GPU-accelerated, immediate mode |
-| Theme | Catppuccin | Modern, eye-friendly color palette |
-| Disassembler | iced-x86 | Pure Rust x86/x64 instruction decoding |
-| Decompiler | Ghidra C++ (FFI) | Direct high-performance C code generation |
-| Binary Parsing | goblin + object | PE/ELF with fallback support |
-| .NET Parsing | Custom Rust | CLR metadata & IL disassembly |
-| Debugging | Windows API | Process attach, breakpoints, registers |
-| Scripting | PyO3 | Python API for automation |
+| Component | Technology |
+|-----------|------------|
+| Language | Rust 2021 |
+| GUI | egui + eframe |
+| Theme | Catppuccin |
+| Disassembler | iced-x86 |
+| Decompiler | Ghidra C++ (subprocess) |
+| Binary Parsing | goblin + object |
+| .NET Parsing | Custom Rust |
+| Debugging | Windows API / ptrace |
+| Scripting | PyO3 |
+| Caching | lru crate |
 
-## 🔧 Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Fission (Rust)                           │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   GUI       │  │   CLI       │  │   Native FFI        │  │
-│  │  (egui)     │  │ (reedline)  │  │   (libloading)      │  │
-│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
-│         │                │                     │             │
-│         └────────────────┴─────────────────────┘             │
-│                          │ direct call                       │
-└──────────────────────────┼───────────────────────────────────┘
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│               Ghidra Engine (C++)                           │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ SleighArch  │  │  Funcdata   │  │      PrintC         │  │
-│  │ (Disasm)    │  │ (Analysis)  │  │   (C Code Gen)      │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                         Fission (Rust)                           │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
+│  │  GUI (egui)  │  │  CLI (repl)  │  │   Plugin Manager       │  │
+│  └──────┬───────┘  └──────┬───────┘  └───────────┬────────────┘  │
+│         │                 │                      │               │
+│         └─────────────────┴──────────────────────┘               │
+│                           │                                       │
+│  ┌────────────────────────┴────────────────────────────────────┐ │
+│  │                    Analysis Core                             │ │
+│  │  ┌─────────┐  ┌──────────┐  ┌─────────┐  ┌───────────────┐  │ │
+│  │  │ Loader  │  │ Disasm   │  │ Decomp  │  │ Debug Engine  │  │ │
+│  │  │ PE/ELF  │  │ iced-x86 │  │ Pool    │  │ Win32/ptrace  │  │ │
+│  │  └─────────┘  └──────────┘  └────┬────┘  └───────────────┘  │ │
+│  └──────────────────────────────────┼──────────────────────────┘ │
+└─────────────────────────────────────┼────────────────────────────┘
+                                      │ stdin/stdout (JSON)
+                    ┌─────────────────┼─────────────────┐
+                    │                 │                 │
+              ┌─────┴─────┐     ┌─────┴─────┐     ┌─────┴─────┐
+              │ Worker 1  │     │ Worker 2  │     │ Worker N  │
+              │ fission_  │     │ fission_  │     │ fission_  │
+              │ decomp    │     │ decomp    │     │ decomp    │
+              └───────────┘     └───────────┘     └───────────┘
+                    │                 │                 │
+              ┌─────┴─────────────────┴─────────────────┴─────┐
+              │              Ghidra Engine (C++)              │
+              │  SleighArch → Funcdata → PrintC → C Code     │
+              └───────────────────────────────────────────────┘
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
 - Rust 1.75+
 - CMake 3.16+
 - vcpkg (for ZLIB)
-- Visual Studio 2022 (Windows)
+- Visual Studio 2022 (Windows) or GCC/Clang (Linux/macOS)
 
 ### Build
 
 ```bash
-# 1. Build Ghidra Native Library
+# 1. Build Ghidra Native CLI
 cd ghidra_decompiler
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=[PATH_TO_VCPKG]/scripts/buildsystems/vcpkg.cmake
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=[VCPKG_PATH]/scripts/buildsystems/vcpkg.cmake
 cmake --build build --config Release
 
 # 2. Build and Run Fission
@@ -95,52 +124,80 @@ cargo run --release
 
 ### Usage
 
-1. Launch Fission: `cargo run`
+1. Launch: `cargo run --release`
 2. **File → Open Binary** to load an executable
-3. Use the **Explorer** (left side) to browse functions
-4. Double-click a function to open **Assembly** and **Decompiled** tabs
-5. Use the **Debug** tab (bottom) to attach to processes and control execution
+3. Use **Explorer** (left) to browse functions
+4. Double-click a function for Assembly/Decompiled tabs
+5. Use **Debug** tab (bottom) to attach and control execution
 
-## 📁 Project Structure
+## Configuration
+
+Key settings in `src/core/config.rs`:
+
+```rust
+DecompilerConfig {
+    num_workers: 0,              // 0 = auto (CPU cores, max 8)
+    timeout_ms: 30000,           // 30 second timeout
+    enable_prefetch: true,       // Pre-decompile adjacent functions
+    requests_before_restart: 500 // Restart subprocess to reclaim memory
+}
+
+AnalysisConfig {
+    decompile_cache_size: 100    // LRU cache entries
+}
+```
+
+## Project Structure
 
 ```
 Fission/
-├── Cargo.toml              # Rust dependencies
-├── build.rs                # Build configuration
-├── ghidra_decompiler/      # C++ Ghidra Core & FFI Wrapper
+├── Cargo.toml
+├── ghidra_decompiler/
 │   ├── CMakeLists.txt
-│   ├── wrapper.cpp         # C ABI implementation
-│   └── languages/          # Sleigh (.sla) files
+│   ├── fission_decomp.cpp   # Subprocess decompiler
+│   ├── wrapper.cpp          # FFI wrapper (legacy)
+│   └── languages/           # Sleigh (.sla) files
 ├── src/
-│   ├── main.rs             # Entry point
-│   ├── analysis/           # Analysis modules
-│   │   ├── loader/         # Binary parsing (PE/ELF)
-│   │   ├── disasm/         # iced-x86 disassembler
-│   │   ├── decomp/         # Native FFI interface
-│   │   └── dotnet/         # .NET/CLR analysis
-│   ├── debug/              # Debugging core (Win32/Linux)
-│   └── ui/
-│       └── gui/            # VS Code style GUI
-│           ├── app/        # App logic modules
-│           ├── theme.rs    # Catppuccin styling
-│           └── panels/     # UI components
+│   ├── main.rs
+│   ├── core/
+│   │   ├── config.rs        # Global configuration
+│   │   ├── events.rs        # Event bus system
+│   │   └── modules.rs       # Module lifecycle
+│   ├── analysis/
+│   │   ├── loader/          # PE/ELF parsing
+│   │   ├── disasm/          # iced-x86 wrapper
+│   │   ├── decomp/          # Decompiler pool
+│   │   └── dotnet/          # .NET/CLR analysis
+│   ├── debug/               # Debugger core
+│   ├── plugin/              # Plugin system
+│   │   ├── traits.rs        # FissionPlugin trait
+│   │   ├── manager.rs       # Plugin registry
+│   │   └── python.rs        # PyO3 integration
+│   └── ui/gui/
+│       ├── app/             # App logic
+│       │   ├── decomp_worker.rs  # Worker threads
+│       │   └── decompiler.rs     # Decompile API
+│       ├── panels/          # UI components
+│       └── theme.rs         # Catppuccin styling
 ```
 
-## 📅 Development Roadmap
+## Development Status
 
-- [x] **Phase 1**: CLI Base - Binary loader, disassembler, REPL
-- [x] **Phase 2**: Ghidra Integration - Native FFI C decompilation ✅
-- [x] **Phase 3**: VS Code Style GUI - Tabs, Activity Bar, Catppuccin theme ✅
-- [x] **Phase 4**: .NET Support - CLR detection, metadata, IL disassembly ✅
-- [x] **Phase 5**: Debugging - Attach, breakpoints, registers, memory ✅
-- [~] **Phase 6**: Python Scripting - Basic API implemented (binary, functions, sections) 🔄
-- [ ] **Phase 7**: Advanced Features - Time travel debugging, plugins
+- [x] CLI Base - Binary loader, disassembler, REPL
+- [x] Ghidra Integration - Native subprocess decompilation
+- [x] VS Code Style GUI - Tabs, Activity Bar, themes
+- [x] .NET Support - CLR detection, metadata, IL disassembly
+- [x] Debugging - Attach, breakpoints, registers, memory
+- [x] Plugin System - Native Rust and Python plugins
+- [x] Performance Optimization - Pool, caching, prefetch
+- [ ] Advanced TTD - Full time travel debugging
+- [ ] Remote Debugging - Network-based debug sessions
 
-## 📜 License
+## License
 
 MIT License - See [LICENSE](LICENSE) for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [Ghidra](https://ghidra-sre.org/) - NSA's software reverse engineering framework
 - [iced-x86](https://github.com/icedland/iced) - High-performance x86/x64 disassembler

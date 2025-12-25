@@ -21,9 +21,21 @@ pub struct Config {
     pub ui: UiConfig,
 }
 
+/// Decompiler mode selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DecompilerMode {
+    /// Single persistent server (memory efficient, sequential)
+    #[default]
+    Single,
+    /// Pool of workers (parallel, higher memory usage)
+    Pool,
+}
+
 /// Decompiler configuration
 #[derive(Debug, Clone)]
 pub struct DecompilerConfig {
+    /// Decompiler mode (Single = memory efficient, Pool = parallel)
+    pub mode: DecompilerMode,
     /// Number of decompiler worker threads (0 = auto based on CPU cores)
     pub num_workers: usize,
     /// Maximum workers (caps auto-detection)
@@ -40,6 +52,9 @@ pub struct DecompilerConfig {
     pub enable_prefetch: bool,
     /// Number of functions to prefetch
     pub prefetch_count: usize,
+    /// Restart decompiler subprocess after this many requests (0 = never)
+    /// This helps prevent memory leaks from accumulating in long sessions
+    pub requests_before_restart: u64,
 }
 
 /// Analysis configuration
@@ -93,6 +108,7 @@ impl Default for Config {
 impl Default for DecompilerConfig {
     fn default() -> Self {
         Self {
+            mode: DecompilerMode::default(), // Single mode by default
             num_workers: 0, // 0 = auto
             max_workers: 8,
             default_function_size: 4096, // 4KB
@@ -101,6 +117,7 @@ impl Default for DecompilerConfig {
             timeout_ms: 30000, // 30 seconds
             enable_prefetch: true,
             prefetch_count: 3,
+            requests_before_restart: 500, // Restart subprocess every 500 requests
         }
     }
 }

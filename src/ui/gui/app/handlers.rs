@@ -16,6 +16,7 @@ pub fn process_messages(
     rx: &Receiver<AsyncMessage>,
     tx: &Sender<AsyncMessage>,
     native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
+    decomp_tx: &Sender<super::decomp_worker::DecompileRequest>,
     #[cfg(target_os = "windows")]
     dbg_event_rx: &Option<std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>>,
 ) {
@@ -61,7 +62,19 @@ pub fn process_messages(
                 state.log(format!("[*] 🔗 Built {} cross-references", xref_count));
                 state.analysis.xref_db = Some(xref_db);
                 
-                state.analysis.loaded_binary = Some(binary);
+                state.analysis.loaded_binary = Some(binary.clone()); // Use clone for local reference if needed, but Arc is cheap
+                
+                // Trigger background binary load for decompiler context
+                // Use memory-mapped data so sections are at their virtual addresses
+                let request = super::decomp_worker::DecompileRequest::load_binary(binary.get_memory_mapped_data(), binary.image_base);
+                if let Err(e) = decomp_tx.send(request) {
+                    state.log(format!("[!] Failed to trigger decompiler binary load: {}", e));
+                    state.analysis.decompiler_context_loaded = false;
+                } else {
+                    state.log("[*] Initializing decompiler persistent context...");
+                    state.analysis.decompiler_context_loaded = true;
+                }
+
                 file_ops::preload_server_binary(state, native_decompiler.clone());
             }
             AsyncMessage::BinaryLoaded(Err(e)) => {
@@ -171,6 +184,47 @@ pub fn process_command(
                 Err(e) => state.log(format!("[!] Redo failed: {}", e)),
             }
             state.command_manager = mgr;
+        }
+        _ if cmd.starts_with("plugin load ") => {
+            let path = cmd.trim_start_matches("plugin load ").trim();
+            let result = if let Ok(mut mgr) = state.plugin_manager.write() {
+                match mgr.load_plugin(path) {
+                    Ok(id) => Some(Ok(id)),
+                    Err(e) => Some(Err(e.to_string())),
+                }
+            } else {
+                None
+            };
+
+            match result {
+                Some(Ok(id)) => state.log(format!("[✓] Plugin loaded: {}", id)),
+                Some(Err(e)) => state.log(format!("[!] Failed to load plugin: {}", e)),
+                None => state.log("[!] Failed to lock plugin manager"),
+            }
+        }
+        _ if cmd.starts_with("plugin list") => {
+            let plugins = if let Ok(mgr) = state.plugin_manager.read() {
+                let mut p: Vec<_> = mgr.list_plugins().into_iter().cloned().collect();
+                p.sort_by_key(|p| p.id.clone());
+                p
+            } else {
+                Vec::new()
+            };
+            
+            state.log("[*] Loaded Plugins:");
+            
+            if plugins.is_empty() {
+                state.log("    (none)");
+            } else {
+                for plugin in plugins {
+                    state.log(format!("    - {} ({}) v{} [{}]", 
+                        plugin.name, 
+                        plugin.id,
+                        plugin.version,
+                        if plugin.enabled { "Enabled" } else { "Disabled" }
+                    ));
+                }
+            }
         }
         _ if cmd.starts_with("patch ") => {
             // patch <addr> <byte1> <byte2> ...
