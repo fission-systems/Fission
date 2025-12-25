@@ -117,6 +117,13 @@ impl MemoryManager {
         self.target_pid = Some(pid);
         Ok(())
     }
+    
+    #[cfg(target_os = "macos")]
+    pub fn open_process(&mut self, _pid: u32) -> Result<(), MemoryError> {
+        // macOS memory operations require task_for_pid which needs special entitlements
+        // For now, this is a stub that allows the struct to be created
+        Ok(())
+    }
 
     /// Read memory from the target process
     pub fn read(&self, address: u64, size: usize) -> Result<Vec<u8>, MemoryError> {
@@ -169,8 +176,155 @@ impl MemoryManager {
 
     /// Get memory regions of the target process
     pub fn query_regions(&mut self) -> Result<&[MemoryRegion], MemoryError> {
-        // TODO: Implement platform-specific memory region enumeration
+        // Clear cached regions
+        self.regions.clear();
+        
+        #[cfg(target_os = "windows")]
+        {
+            self.query_regions_windows()?;
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            self.query_regions_linux()?;
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            self.query_regions_macos()?;
+        }
+        
         Ok(&self.regions)
+    }
+    
+    #[cfg(target_os = "windows")]
+    fn query_regions_windows(&mut self) -> Result<(), MemoryError> {
+        use windows::Win32::System::Memory::{
+            VirtualQueryEx, MEMORY_BASIC_INFORMATION, 
+            MEM_COMMIT, PAGE_EXECUTE, PAGE_EXECUTE_READ, 
+            PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY,
+            PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
+        };
+        use windows::Win32::Foundation::HANDLE;
+        
+        let handle_val = self.process_handle.ok_or(MemoryError::NoProcess)?;
+        let handle: HANDLE = unsafe { std::mem::transmute(handle_val) };
+        
+        let mut address: usize = 0;
+        let mut mbi: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        let mbi_size = std::mem::size_of::<MEMORY_BASIC_INFORMATION>();
+        
+        loop {
+            let result = unsafe {
+                VirtualQueryEx(
+                    handle,
+                    Some(address as *const std::ffi::c_void),
+                    &mut mbi,
+                    mbi_size,
+                )
+            };
+            
+            if result == 0 {
+                break;
+            }
+            
+            // Only include committed memory
+            if mbi.State == MEM_COMMIT {
+                let protection = match mbi.Protect {
+                    PAGE_EXECUTE => MemoryProtection { read: false, write: false, execute: true },
+                    PAGE_EXECUTE_READ => MemoryProtection::RX,
+                    PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY => MemoryProtection::RWX,
+                    PAGE_READONLY => MemoryProtection { read: true, write: false, execute: false },
+                    PAGE_READWRITE | PAGE_WRITECOPY => MemoryProtection::RW,
+                    _ => MemoryProtection::NONE,
+                };
+                
+                self.regions.push(MemoryRegion {
+                    base_address: mbi.BaseAddress as u64,
+                    size: mbi.RegionSize,
+                    protection,
+                    name: None, // Would need to call GetMappedFileName
+                });
+            }
+            
+            address = mbi.BaseAddress as usize + mbi.RegionSize;
+            
+            // Sanity check to avoid infinite loop
+            if address == 0 || mbi.RegionSize == 0 {
+                break;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    #[cfg(target_os = "linux")]
+    fn query_regions_linux(&mut self) -> Result<(), MemoryError> {
+        let pid = self.target_pid.ok_or(MemoryError::NoProcess)?;
+        let maps_path = format!("/proc/{}/maps", pid);
+        
+        let content = std::fs::read_to_string(&maps_path)
+            .map_err(|e| MemoryError::ReadFailed {
+                address: 0,
+                reason: format!("Failed to read {}: {}", maps_path, e),
+            })?;
+        
+        for line in content.lines() {
+            if let Some(region) = self.parse_maps_line(line) {
+                self.regions.push(region);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    #[cfg(target_os = "linux")]
+    fn parse_maps_line(&self, line: &str) -> Option<MemoryRegion> {
+        // Format: address-address perms offset dev inode pathname
+        // Example: 00400000-00452000 r-xp 00000000 08:02 173521 /usr/bin/dbus-daemon
+        
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 5 {
+            return None;
+        }
+        
+        // Parse address range
+        let addr_parts: Vec<&str> = parts[0].split('-').collect();
+        if addr_parts.len() != 2 {
+            return None;
+        }
+        
+        let start = u64::from_str_radix(addr_parts[0], 16).ok()?;
+        let end = u64::from_str_radix(addr_parts[1], 16).ok()?;
+        
+        // Parse permissions (rwxp)
+        let perms = parts[1];
+        let protection = MemoryProtection {
+            read: perms.contains('r'),
+            write: perms.contains('w'),
+            execute: perms.contains('x'),
+        };
+        
+        // Get pathname if available
+        let name = if parts.len() >= 6 {
+            Some(parts[5..].join(" "))
+        } else {
+            None
+        };
+        
+        Some(MemoryRegion {
+            base_address: start,
+            size: (end - start) as usize,
+            protection,
+            name,
+        })
+    }
+    
+    #[cfg(target_os = "macos")]
+    fn query_regions_macos(&mut self) -> Result<(), MemoryError> {
+        // macOS would use mach_vm_region API
+        // For now, return empty list
+        Ok(())
     }
 
     /// Read a null-terminated string from memory
