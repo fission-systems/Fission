@@ -52,6 +52,5 @@ set(CMAKE_MAKEFILE_PRODUCTS
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
-  "CMakeFiles/fission_decompiler.dir/DependInfo.cmake"
   "CMakeFiles/fission_decomp.dir/DependInfo.cmake"
   )

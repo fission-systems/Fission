@@ -25,7 +25,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         ui.horizontal(|ui| {
             ui.label("Theme:");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                egui::ComboBox::from_id_source("theme_combo")
+                egui::ComboBox::from_id_salt("theme_combo")
                     .selected_text(match state.settings.theme_mode {
                         ThemeMode::Dark => "Dark (Catppuccin)",
                         ThemeMode::Light => "Light",

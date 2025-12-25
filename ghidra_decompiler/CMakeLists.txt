@@ -1,4 +1,4 @@
-# CMakeLists.txt for Ghidra Decompiler Native Shared Library (FFI)
+# CMakeLists.txt for Ghidra Decompiler Native CLI
 
 cmake_minimum_required(VERSION 3.16)
 project(fission_native CXX)
@@ -35,21 +35,6 @@ set(CORE_SOURCES
     codedata.cc testfunction.cc rulecompile.cc
 )
 
-# Shared Library (for FFI)
-add_library(fission_decompiler SHARED
-    wrapper.cpp
-    ${CORE_SOURCES}
-)
-
-target_include_directories(fission_decompiler PUBLIC 
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-target_link_libraries(fission_decompiler 
-    PRIVATE 
-    ZLIB::ZLIB
-)
-
 # CLI Executable (for subprocess decompilation)
 add_executable(fission_decomp
     fission_decomp.cpp
@@ -65,4 +50,4 @@ target_link_libraries(fission_decomp
     ZLIB::ZLIB
 )
 
-message(STATUS "Ghidra FFI Library and CLI Configured")
+message(STATUS "Ghidra Decompiler CLI Configured")

@@ -89,7 +89,7 @@ impl IlDisassembler {
 
 fn parse_body_header(data: &[u8]) -> DotNetResult<(usize, usize)> {
     let first = *data
-        .get(0)
+        .first()
         .ok_or_else(|| DotNetError::Malformed("Empty method body".into()))?;
     match first & 0x3 {
         0x2 => {

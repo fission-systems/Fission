@@ -42,7 +42,7 @@ pub enum DetectionType {
     Language,
     Library,
     Installer,
-    SFX,
+    Sfx,
 }
 
 impl std::fmt::Display for DetectionType {
@@ -55,7 +55,7 @@ impl std::fmt::Display for DetectionType {
             DetectionType::Language => write!(f, "Language"),
             DetectionType::Library => write!(f, "Library"),
             DetectionType::Installer => write!(f, "Installer"),
-            DetectionType::SFX => write!(f, "SFX"),
+            DetectionType::Sfx => write!(f, "SFX"),
         }
     }
 }
@@ -243,7 +243,7 @@ fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
     }
     
     // NSIS installer detection
-    if section_names.iter().any(|s| *s == ".ndata") {
+    if section_names.contains(&".ndata") {
         result.add(Detection::new(
             DetectionType::Installer,
             "NSIS",
@@ -478,7 +478,7 @@ fn extract_gcc_version(data: &str) -> Option<String> {
             let snippet = &rest[..end];
             // Extract version number
             for word in snippet.split_whitespace() {
-                if word.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if word.chars().next().is_some_and(|c| c.is_ascii_digit()) {
                     return Some(word.to_string());
                 }
             }
