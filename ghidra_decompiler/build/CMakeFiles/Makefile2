@@ -63,12 +63,10 @@ CMAKE_BINARY_DIR = /Users/sjkim1127/Fission/ghidra_decompiler/build
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
-all: CMakeFiles/fission_decompiler.dir/all
 all: CMakeFiles/fission_decomp.dir/all
 .PHONY : all
 
 # The main recursive "codegen" target.
-codegen: CMakeFiles/fission_decompiler.dir/codegen
 codegen: CMakeFiles/fission_decomp.dir/codegen
 .PHONY : codegen
 
@@ -77,41 +75,8 @@ preinstall:
 .PHONY : preinstall
 
 # The main recursive "clean" target.
-clean: CMakeFiles/fission_decompiler.dir/clean
 clean: CMakeFiles/fission_decomp.dir/clean
 .PHONY : clean
-
-#=============================================================================
-# Target rules for target CMakeFiles/fission_decompiler.dir
-
-# All Build rule for target.
-CMakeFiles/fission_decompiler.dir/all:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fission_decompiler.dir/build.make CMakeFiles/fission_decompiler.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fission_decompiler.dir/build.make CMakeFiles/fission_decompiler.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles --progress-num=51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100 "Built target fission_decompiler"
-.PHONY : CMakeFiles/fission_decompiler.dir/all
-
-# Build rule for subdir invocation for target.
-CMakeFiles/fission_decompiler.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles 50
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/fission_decompiler.dir/all
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles 0
-.PHONY : CMakeFiles/fission_decompiler.dir/rule
-
-# Convenience name for target.
-fission_decompiler: CMakeFiles/fission_decompiler.dir/rule
-.PHONY : fission_decompiler
-
-# codegen rule for target.
-CMakeFiles/fission_decompiler.dir/codegen:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fission_decompiler.dir/build.make CMakeFiles/fission_decompiler.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles --progress-num=51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100 "Finished codegen for target fission_decompiler"
-.PHONY : CMakeFiles/fission_decompiler.dir/codegen
-
-# clean rule for target.
-CMakeFiles/fission_decompiler.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/fission_decompiler.dir/build.make CMakeFiles/fission_decompiler.dir/clean
-.PHONY : CMakeFiles/fission_decompiler.dir/clean
 
 #=============================================================================
 # Target rules for target CMakeFiles/fission_decomp.dir
@@ -120,12 +85,12 @@ CMakeFiles/fission_decompiler.dir/clean:
 CMakeFiles/fission_decomp.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fission_decomp.dir/build.make CMakeFiles/fission_decomp.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fission_decomp.dir/build.make CMakeFiles/fission_decomp.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50 "Built target fission_decomp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90 "Built target fission_decomp"
 .PHONY : CMakeFiles/fission_decomp.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/fission_decomp.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles 50
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles 90
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/fission_decomp.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles 0
 .PHONY : CMakeFiles/fission_decomp.dir/rule
@@ -137,7 +102,7 @@ fission_decomp: CMakeFiles/fission_decomp.dir/rule
 # codegen rule for target.
 CMakeFiles/fission_decomp.dir/codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fission_decomp.dir/build.make CMakeFiles/fission_decomp.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50 "Finished codegen for target fission_decomp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/sjkim1127/Fission/ghidra_decompiler/build/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90 "Finished codegen for target fission_decomp"
 .PHONY : CMakeFiles/fission_decomp.dir/codegen
 
 # clean rule for target.

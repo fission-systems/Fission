@@ -1,8 +1,8 @@
 //! Subprocess-based Ghidra Decompiler interface.
 //!
 //! Two modes:
-//! - `NativeDecompiler`: Spawns a new process per request (legacy)
 //! - `DecompilerServer`: Persistent server process for faster repeated requests
+//! - `DecompilerPool`: Pool of server processes for parallel decompilation
 
 use std::process::{Command, Stdio, Child, ChildStdin};
 use std::io::{Write, BufRead, BufReader};
@@ -23,63 +23,6 @@ struct DecompilerResponse {
     status: String,
     code: Option<String>,
     message: Option<String>,
-}
-
-/// Legacy subprocess-based decompiler (spawns new process each time)
-pub struct NativeDecompiler {
-    cli_path: std::path::PathBuf,
-    sla_dir: String,
-}
-
-impl NativeDecompiler {
-    /// Create new decompiler with path to CLI binary and SLA directory
-    pub fn new<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str) -> Result<Self> {
-        let path = cli_path.as_ref().to_path_buf();
-        if !path.exists() {
-            return Err(anyhow!("Decompiler CLI not found: {:?}", path));
-        }
-        Ok(Self {
-            cli_path: path,
-            sla_dir: sla_dir.to_string(),
-        })
-    }
-
-    /// Decompile bytes by spawning subprocess
-    pub fn decompile(&mut self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
-        let bytes_b64 = BASE64.encode(bytes);
-        
-        let input = format!(
-            r#"{{"bytes":"{}","address":{},"is_64bit":{},"sla_dir":"{}"}}"#,
-            bytes_b64,
-            base_addr,
-            if is_64bit { "true" } else { "false" },
-            self.sla_dir
-        );
-        
-        let mut child = Command::new(&self.cli_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| anyhow!("Failed to spawn decompiler: {}", e))?;
-        
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(input.as_bytes())
-                .map_err(|e| anyhow!("Failed to write to decompiler stdin: {}", e))?;
-        }
-        
-        let output = child.wait_with_output()
-            .map_err(|e| anyhow!("Failed to wait for decompiler: {}", e))?;
-        
-        // Log stderr on failure for debugging
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[NativeDecompiler] stderr: {}", stderr);
-        }
-        
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        parse_decompiler_response(&stdout)
-    }
 }
 
 /// Persistent decompiler server (reuses single process for multiple requests)

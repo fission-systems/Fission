@@ -15,7 +15,6 @@ pub fn process_messages(
     state: &mut AppState,
     rx: &Receiver<AsyncMessage>,
     tx: &Sender<AsyncMessage>,
-    native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
     decomp_tx: &Sender<super::decomp_worker::DecompileRequest>,
     #[cfg(target_os = "windows")]
     dbg_event_rx: &Option<std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>>,
@@ -47,7 +46,7 @@ pub fn process_messages(
                                 crate::analysis::DetectionType::Library => "📚",
                                 crate::analysis::DetectionType::Linker => "🔗",
                                 crate::analysis::DetectionType::Installer => "📥",
-                                crate::analysis::DetectionType::SFX => "📁",
+                                crate::analysis::DetectionType::Sfx => "📁",
                             },
                             d.display(),
                             if d.confidence == crate::analysis::Confidence::High { "✓" } else { "" }
@@ -74,8 +73,6 @@ pub fn process_messages(
                     state.log("[*] Initializing decompiler persistent context...");
                     state.analysis.decompiler_context_loaded = true;
                 }
-
-                file_ops::preload_server_binary(state, native_decompiler.clone());
             }
             AsyncMessage::BinaryLoaded(Err(e)) => {
                 state.log(format!("[✗] Failed to load binary: {}", e));

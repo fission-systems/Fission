@@ -258,7 +258,7 @@ pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option
                                     let matches_name = process.name.to_lowercase().contains(&filter);
                                     let matches_pid = process.pid.to_string().contains(&filter);
                                     let matches_path = process.exe_path.as_ref()
-                                        .map_or(false, |p| p.to_lowercase().contains(&filter));
+                                        .is_some_and(|p| p.to_lowercase().contains(&filter));
                                     
                                     if !matches_name && !matches_pid && !matches_path {
                                         continue;

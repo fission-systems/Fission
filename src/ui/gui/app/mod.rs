@@ -60,8 +60,6 @@ pub struct FissionApp {
     #[cfg(target_os = "windows")]
     dbg_stop_tx: Option<std::sync::mpsc::Sender<()>>,
 
-    /// Native FFI decompiler (high performance)
-    native_decompiler: Arc<Mutex<Option<crate::analysis::decomp::NativeDecompiler>>>,
 
     /// Decompile request sender (to worker thread)
     decomp_request_tx: Sender<decomp_worker::DecompileRequest>,
@@ -87,7 +85,6 @@ impl Default for FissionApp {
     fn default() -> Self {
         let (tx, rx) = channel();
         let (decomp_tx, decomp_rx) = channel();
-        let native_decompiler = Arc::new(Mutex::new(None));
         let latest_request_id = Arc::new(AtomicU64::new(0));
         
         // Spawn the decompiler worker thread
@@ -131,7 +128,6 @@ impl Default for FissionApp {
             dbg_event_rx: None,
             #[cfg(target_os = "windows")]
             dbg_stop_tx: None,
-            native_decompiler,
             decomp_request_tx: decomp_tx,
             latest_request_id,
             theme_initialized: false,
@@ -178,7 +174,6 @@ impl eframe::App for FissionApp {
             &mut self.state,
             &self.rx,
             &self.tx,
-            self.native_decompiler.clone(),
             &self.decomp_request_tx,
             &self.dbg_event_rx,
         );
@@ -187,7 +182,6 @@ impl eframe::App for FissionApp {
             &mut self.state,
             &self.rx,
             &self.tx,
-            self.native_decompiler.clone(),
             &self.decomp_request_tx,
         );
 
