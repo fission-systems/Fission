@@ -6,7 +6,7 @@ CXX_DEFINES = -D__TERMINAL__ -Dfission_decompiler_EXPORTS
 
 CXX_INCLUDES = -I/Users/sjkim1127/Fission/ghidra_decompiler -isystem /opt/homebrew/opt/zlib/include
 
-CXX_FLAGSarm64 = -std=gnu++17 -arch arm64 -fPIC -w -Wno-sign-compare -fPIC
+CXX_FLAGSarm64 = -O3 -DNDEBUG -std=gnu++17 -arch arm64 -fPIC -w -Wno-sign-compare -fPIC
 
-CXX_FLAGS = -std=gnu++17 -arch arm64 -fPIC -w -Wno-sign-compare -fPIC
+CXX_FLAGS = -O3 -DNDEBUG -std=gnu++17 -arch arm64 -fPIC -w -Wno-sign-compare -fPIC
 

@@ -112,7 +112,7 @@ impl PythonRuntime {
     }
     
     /// Dispatch an event to all plugins
-    pub fn dispatch_event(&self, event: &PluginEvent) {
+    pub fn dispatch_event(&self, event: &PluginEvent, event_bus: Option<&crate::core::events::EventBus>) {
         let hook_name = match event.event_type() {
             PluginEventType::BinaryLoaded => "on_binary_loaded",
             PluginEventType::FunctionDecompiled => "on_function_decompiled",
@@ -126,7 +126,16 @@ impl PythonRuntime {
         
         for plugin_id in self.modules.keys() {
             if let Err(e) = self.call_hook(plugin_id, hook_name, event) {
-                eprintln!("Plugin '{}' hook '{}' error: {:?}", plugin_id, hook_name, e);
+                let error_msg = format!("Plugin '{}' hook '{}' error: {:?}", plugin_id, hook_name, e);
+                eprintln!("{}", error_msg);
+                
+                if let Some(bus) = event_bus {
+                    bus.publish(crate::core::events::FissionEvent::LogMessage {
+                        level: "error".into(),
+                        message: error_msg,
+                        target: "plugin".into(),
+                    });
+                }
             }
         }
     }

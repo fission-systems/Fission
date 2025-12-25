@@ -4,10 +4,15 @@
 //! Organized into domain-specific sub-states for maintainability.
 
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::time::Instant;
+use std::sync::{Arc, RwLock};
+
+use lru::LruCache;
 
 use crate::analysis::loader::{LoadedBinary, FunctionInfo};
 use crate::analysis::disasm::DisassembledInstruction;
+use crate::config::CONFIG;
 
 // ============================================================================
 // Sub-state structures
@@ -48,10 +53,12 @@ pub struct AnalysisState {
     pub decompiled_code: String,
     /// Current assembly instructions
     pub asm_instructions: Vec<DisassembledInstruction>,
-    /// Is decompilation in progress?
+    /// Is the decompiler currently analyzing?
     pub decompiling: bool,
-    /// Decompile result cache (address -> result)
-    pub decompile_cache: HashMap<u64, CachedDecompile>,
+    /// Has the binary been loaded into the decompiler's persistent context?
+    pub decompiler_context_loaded: bool,
+    /// Cache of decompiled functions (LRU)
+    pub decompile_cache: LruCache<u64, CachedDecompile>,
     /// Last loaded binary path (for recovery reload)
     pub last_binary_path: Option<String>,
     /// Extracted strings from binary
@@ -111,6 +118,27 @@ pub struct ScriptState {
     pub script_path: Option<String>,
 }
 
+/// Settings and preferences state
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SettingsState {
+    /// UI Theme mode (Light/Dark/Auto)
+    pub theme_mode: ThemeMode,
+    /// UI Scale factor (0.5 to 2.0)
+    pub ui_scale: f32,
+    /// Show developer tools?
+    pub show_dev_tools: bool,
+    /// Code Editor font size
+    pub editor_font_size: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum ThemeMode {
+    #[default]
+    Dark,
+    Light,
+    System,
+}
+
 // ============================================================================
 // Cached decompile result
 // ============================================================================
@@ -148,8 +176,10 @@ pub struct AppState {
     pub debug: DebugStateUI,
     /// Script state (Python scripting)
     pub script: ScriptState,
-    /// Plugin manager
-    pub plugin_manager: crate::plugin::PluginManager,
+    /// Settings state
+    pub settings: SettingsState,
+    /// Plugin manager (shared with module system)
+    pub plugin_manager: Arc<RwLock<crate::plugin::PluginManager>>,
     /// Plugin panel state
     pub plugin_panel_state: crate::ui::gui::panels::bottom_tabs::plugins::PluginPanelState,
     /// System-wide Event Bus
@@ -246,13 +276,18 @@ pub enum BottomTab {
 
 impl Default for AnalysisState {
     fn default() -> Self {
+        // Use configured cache size or default to 100
+        let cache_size = NonZeroUsize::new(CONFIG.analysis.decompile_cache_size)
+            .unwrap_or(NonZeroUsize::new(100).unwrap());
+
         Self {
             loaded_binary: None,
             selected_function: None,
             decompiled_code: "// Select a function to decompile".into(),
             asm_instructions: Vec::new(),
             decompiling: false,
-            decompile_cache: HashMap::new(),
+            decompiler_context_loaded: false,
+            decompile_cache: LruCache::new(cache_size),
             last_binary_path: None,
             extracted_strings: Vec::new(),
             strings_filter: String::new(),
@@ -295,6 +330,17 @@ impl Default for ScriptState {
     }
 }
 
+impl Default for SettingsState {
+    fn default() -> Self {
+        Self {
+            theme_mode: ThemeMode::Dark,
+            ui_scale: 1.5,
+            show_dev_tools: false,
+            editor_font_size: 14,
+        }
+    }
+}
+
 impl Default for UIState {
     fn default() -> Self {
         Self {
@@ -314,9 +360,10 @@ impl Default for UIState {
 
 impl Default for AppState {
     fn default() -> Self {
-        let mut plugin_manager = crate::plugin::PluginManager::default();
+        let mut plugin_manager_inner = crate::plugin::PluginManager::default();
         let event_bus = std::sync::Arc::new(crate::core::events::EventBus::new());
-        plugin_manager.set_event_bus(event_bus.clone());
+        plugin_manager_inner.set_event_bus(event_bus.clone());
+        let plugin_manager = Arc::new(RwLock::new(plugin_manager_inner));
         
         Self {
             log_buffer: vec![
@@ -333,6 +380,7 @@ impl Default for AppState {
             analysis: AnalysisState::default(),
             debug: DebugStateUI::default(),
             script: ScriptState::default(),
+            settings: crate::core::config_store::load(),
             plugin_manager,
             plugin_panel_state: Default::default(),
             event_bus,

@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 use super::super::types::RegisterState;
-use crate::analysis::disasm::DisassembledInstruction;
+
 
 /// Memory change record for delta compression
 #[derive(Debug, Clone)]
@@ -38,12 +38,10 @@ pub struct ExecutionSnapshot {
     pub step_index: u64,
     /// Timestamp when this snapshot was taken
     pub timestamp: Instant,
-    /// CPU register state at this point
+    ///CPU register state at this point
     pub registers: RegisterState,
     /// Memory changes that occurred at this step
     pub memory_deltas: Vec<MemoryDelta>,
-    /// The instruction that was executed at this step (if available)
-    pub instruction: Option<DisassembledInstruction>,
     /// Thread ID that was executing
     pub thread_id: u32,
 }
@@ -60,7 +58,6 @@ impl ExecutionSnapshot {
             timestamp: Instant::now(),
             registers,
             memory_deltas: Vec::new(),
-            instruction: None,
             thread_id,
         }
     }
@@ -70,10 +67,7 @@ impl ExecutionSnapshot {
         self.memory_deltas.push(delta);
     }
     
-    /// Set the instruction that was executed
-    pub fn set_instruction(&mut self, instruction: DisassembledInstruction) {
-        self.instruction = Some(instruction);
-    }
+
     
     /// Get the instruction pointer (RIP) at this snapshot
     pub fn rip(&self) -> u64 {

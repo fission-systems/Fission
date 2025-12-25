@@ -126,15 +126,35 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
 
 /// Apply syntax highlighting to operands
 fn highlight_operands(operands: &str) -> egui::RichText {
-    // Simple highlighting - in a full implementation you'd parse and color each token
-    // For now, color registers differently
-    let color = if operands.contains("rax") || operands.contains("rbx") || 
-                   operands.contains("rcx") || operands.contains("rdx") ||
-                   operands.contains("rsi") || operands.contains("rdi") ||
-                   operands.contains("rbp") || operands.contains("rsp") ||
-                   operands.contains("eax") || operands.contains("ebx") {
+    // Optimized highlighting: Check tokens for registers or numbers
+    // This is faster and more accurate than "contains" which hits false positives
+    let mut is_reg = false;
+    let mut is_num = false;
+    
+    // Quick check using split iterator logic without allocating
+    for token in operands.split(|c: char| !c.is_alphanumeric() && c != '_') {
+        if token.is_empty() { continue; }
+        
+        if matches!(token, 
+            "rax" | "rbx" | "rcx" | "rdx" | "rsi" | "rdi" | "rbp" | "rsp" |
+            "r8"  | "r9"  | "r10" | "r11" | "r12" | "r13" | "r14" | "r15" |
+            "eax" | "ebx" | "ecx" | "edx" | "esi" | "edi" | "ebp" | "esp" |
+            "ax"  | "bx"  | "cx"  | "dx"  | "si"  | "di"  | "bp"  | "sp" |
+            "al"  | "bl"  | "cl"  | "dl"  | "sil" | "dil" | "bpl" | "spl" |
+            "rip"
+        ) {
+            is_reg = true;
+            break; // Prioritize register color
+        }
+        
+        if token.starts_with("0x") || token.chars().all(|c| c.is_ascii_digit()) {
+            is_num = true;
+        }
+    }
+
+    let color = if is_reg {
         code::REGISTER
-    } else if operands.starts_with("0x") || operands.contains("0x") {
+    } else if is_num {
         code::NUMBER
     } else {
         catppuccin::TEXT

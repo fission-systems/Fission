@@ -168,6 +168,11 @@ impl LoadedBinaryBuilder {
         self.iat_symbols.insert(va, name);
         self
     }
+    
+    pub fn add_iat_symbols(mut self, symbols: std::collections::HashMap<u64, String>) -> Self {
+        self.iat_symbols.extend(symbols);
+        self
+    }
 
     pub fn build(self) -> Result<LoadedBinary> {
         Ok(LoadedBinary {
@@ -363,6 +368,7 @@ impl LoadedBinary {
                     .dotnet_runtime_version(dotnet_runtime_version)
                     .add_sections(sections_info)
                     .add_functions(functions_info)
+                    .add_iat_symbols(iat_symbols_map)
                     .build()
             }
             Err(_e) => {
@@ -729,6 +735,49 @@ impl LoadedBinary {
             return Some(section.file_offset as usize + offset_in_section as usize);
         }
         None
+    }
+    
+    /// Create a memory-mapped representation of the binary for the decompiler.
+    /// This places each section at its virtual address offset (relative to image_base).
+    /// The returned Vec starts at image_base, so loadFill(VA) can use offset = VA - image_base.
+    pub fn get_memory_mapped_data(&self) -> Vec<u8> {
+        // Find the maximum virtual address extent to determine buffer size
+        let max_va_end = self.sections.iter()
+            .map(|s| {
+                let size = if s.virtual_size > 0 { s.virtual_size } else { s.file_size };
+                s.virtual_address + size
+            })
+            .max()
+            .unwrap_or(self.image_base);
+        
+        // Calculate required buffer size (max_va relative to image_base)
+        let buffer_size = if max_va_end > self.image_base {
+            (max_va_end - self.image_base) as usize
+        } else {
+            0
+        };
+        
+        // Create zeroed buffer
+        let mut mapped = vec![0u8; buffer_size];
+        
+        // Map each section into the buffer at its RVA offset
+        for section in &self.sections {
+            let rva = section.virtual_address.saturating_sub(self.image_base);
+            let file_start = section.file_offset as usize;
+            let file_end = (section.file_offset + section.file_size) as usize;
+            
+            if file_end <= self.data.len() {
+                let section_data = &self.data[file_start..file_end];
+                let dest_start = rva as usize;
+                let dest_end = dest_start + section_data.len();
+                
+                if dest_end <= mapped.len() {
+                    mapped[dest_start..dest_end].copy_from_slice(section_data);
+                }
+            }
+        }
+        
+        mapped
     }
     
     /// Discover internal functions by scanning executable code for CALL instructions

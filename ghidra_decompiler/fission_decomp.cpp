@@ -9,10 +9,6 @@
  * 
  * Input (stdin): {"bytes":"BASE64_ENCODED_BYTES","address":12345,"is_64bit":true,"sla_dir":"/path"}
  * Output (stdout): {"status":"ok","code":"..."} or {"status":"error","message":"..."}
- * 
- * Server mode special commands:
- *   - {"cmd":"quit"} - Shutdown server
- *   - {"cmd":"ping"} - Health check, responds with {"status":"ok","message":"pong"}
  */
 
 #include <iostream>
@@ -23,6 +19,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <memory>
+#include <algorithm>
 
 #include "libdecomp.hh"
 #include "sleigh_arch.hh"
@@ -30,6 +27,17 @@
 #include "flow.hh"
 
 using namespace ghidra;
+
+// Constants
+static const int MAX_INSTRUCTIONS = 200000;
+
+// Null buffer to silence logs
+class NullBuffer : public std::streambuf {
+public:
+    int overflow(int c) { return c; }
+};
+static NullBuffer null_buffer;
+static std::ostream null_stream(&null_buffer);
 
 // Simple base64 decoder
 static const std::string base64_chars =
@@ -41,7 +49,12 @@ std::vector<uint8_t> base64_decode(const std::string& encoded) {
     for (unsigned char c : encoded) {
         if (c == '=') break;
         size_t pos = base64_chars.find(c);
-        if (pos == std::string::npos) continue;
+        if (pos == std::string::npos) {
+            // Strict mode: fail on invalid chars (or just skip? User wants robust)
+            // Skipping is standard for whitespace, but invalid chars might indicate error.
+            // For now, continue to skip to be permissive but predictable.
+            continue; 
+        }
         val = (val << 6) + pos;
         bits += 6;
         if (bits >= 0) {
@@ -58,8 +71,17 @@ std::string extract_json_string(const std::string& json, const std::string& key)
     size_t pos = json.find(search);
     if (pos == std::string::npos) return "";
     pos += search.length();
-    size_t end = json.find("\"", pos);
-    if (end == std::string::npos) return "";
+    
+    // Robust parsing: handle escaped quotes
+    size_t end = pos;
+    while (end < json.length()) {
+        if (json[end] == '"' && end > 0 && json[end-1] != '\\') {
+            break;
+        }
+        end++;
+    }
+    
+    if (end >= json.length()) return ""; // Malformed or not found end quote
     return json.substr(pos, end - pos);
 }
 
@@ -118,12 +140,19 @@ public:
     virtual void loadFill(uint1 *ptr, int4 size, const Address &addr) override {
         uint64_t offset = addr.getOffset();
         uint64_t max = base_addr_ + data_.size();
-        for(int4 i = 0; i < size; ++i) {
-            uint64_t cur = offset + i;
-            if (cur >= base_addr_ && cur < max) {
-                ptr[i] = static_cast<uint1>(data_[cur - base_addr_]);
-            } else {
-                ptr[i] = 0;
+        
+        // Optimized bulk copy
+        if (offset >= base_addr_ && offset + size <= max) {
+            std::memcpy(ptr, data_.data() + (offset - base_addr_), size);
+        } else {
+            // Fallback for boundary crossing
+            for(int4 i = 0; i < size; ++i) {
+                uint64_t cur = offset + i;
+                if (cur >= base_addr_ && cur < max) {
+                    ptr[i] = static_cast<uint1>(data_[cur - base_addr_]);
+                } else {
+                    ptr[i] = 0;
+                }
             }
         }
     }
@@ -147,10 +176,21 @@ public:
 struct ServerState {
     bool initialized = false;
     std::string sla_dir;
-    std::unique_ptr<MemoryLoadImage> loader_64bit;
-    std::unique_ptr<MemoryLoadImage> loader_32bit;
-    std::unique_ptr<CliArchitecture> arch_64bit;
-    std::unique_ptr<CliArchitecture> arch_32bit;
+    // Cached architecture objects to avoid re-initialization overhead
+    MemoryLoadImage* loader_64bit = nullptr;
+    MemoryLoadImage* loader_32bit = nullptr;
+    CliArchitecture* arch_64bit = nullptr;
+    CliArchitecture* arch_32bit = nullptr;
+    // Track if architectures have been initialized
+    bool arch_64bit_ready = false;
+    bool arch_32bit_ready = false;
+    
+    ~ServerState() {
+        if (arch_64bit) delete arch_64bit;
+        if (arch_32bit) delete arch_32bit;
+        if (loader_64bit) delete loader_64bit;
+        if (loader_32bit) delete loader_32bit;
+    }
 };
 
 // Initialize Ghidra (called once in server mode)
@@ -172,8 +212,17 @@ bool init_ghidra(ServerState& state, const std::string& sla_dir) {
     }
 }
 
+// Helper to configure architecture safely
+void configure_arch(CliArchitecture* arch) {
+    arch->max_instructions = MAX_INSTRUCTIONS;
+    arch->flowoptions &= ~FlowInfo::error_toomanyinstructions;
+}
+
 // Process a single decompilation request
 std::string process_request(ServerState& state, const std::string& input) {
+    // Debug log: show request type
+    std::cerr << "[fission_decomp] Received request: " << input.substr(0, std::min(input.size(), (size_t)100)) << "..." << std::endl;
+    
     // Check for special commands
     std::string cmd = extract_json_string(input, "cmd");
     if (cmd == "quit") {
@@ -183,66 +232,165 @@ std::string process_request(ServerState& state, const std::string& input) {
         return "{\"status\":\"ok\",\"message\":\"pong\"}";
     }
     
-    // Parse JSON input
-    std::string bytes_b64 = extract_json_string(input, "bytes");
-    int64_t address = extract_json_int(input, "address");
-    bool is_64bit = extract_json_bool(input, "is_64bit");
-    std::string sla_dir = extract_json_string(input, "sla_dir");
-    
-    if (bytes_b64.empty() || sla_dir.empty()) {
-        return "{\"status\":\"error\",\"message\":\"Missing required fields: bytes, sla_dir\"}";
-    }
-    
-    // Initialize Ghidra if needed
-    if (!init_ghidra(state, sla_dir)) {
-        return "{\"status\":\"error\",\"message\":\"Failed to initialize Ghidra\"}";
-    }
-    
-    // Decode bytes
-    std::vector<uint8_t> bytes = base64_decode(bytes_b64);
-    if (bytes.empty()) {
-        return "{\"status\":\"error\",\"message\":\"Failed to decode bytes\"}";
-    }
-    
     try {
-        // Select architecture
-        const char* arch_id = is_64bit ? "x86:LE:64:default" : "x86:LE:32:default";
+        // Parse JSON input
+        std::string bytes_b64 = extract_json_string(input, "bytes");
+        int64_t address = extract_json_int(input, "address");
+        bool is_64bit = extract_json_bool(input, "is_64bit");
+        std::string sla_dir = extract_json_string(input, "sla_dir");
+        std::string load_bin_cmd = extract_json_string(input, "load_bin");
+
+        // Handle "load_bin" command
+        if (!load_bin_cmd.empty()) {
+            std::vector<uint8_t> bin_bytes = base64_decode(load_bin_cmd);
+            if (bin_bytes.empty()) {
+                return "{\"status\":\"error\",\"message\":\"Failed to decode load_bin bytes\"}";
+            }
+            
+            // Parse image_base (critical for correct address calculation!)
+            int64_t image_base = extract_json_int(input, "image_base");
+            std::cerr << "[fission_decomp] load_bin: size=" << bin_bytes.size() << " image_base=0x" << std::hex << image_base << std::dec << std::endl;
+            
+            // Initialize Ghidra if needed
+            if (sla_dir.empty()) {
+                return "{\"status\":\"error\",\"message\":\"Missing sla_dir for load_bin\"}";
+            }
+            if (!init_ghidra(state, sla_dir)) {
+                return "{\"status\":\"error\",\"message\":\"Failed to initialize Ghidra\"}";
+            }
+
+            // Initialize/Update loaders for both architectures with complete binary
+            // Use image_base as the base address for correct address translation!
+            
+            // 64-bit
+            if (!state.arch_64bit_ready) {
+                // Safety: delete if exists (defensive programming)
+                if (state.loader_64bit) delete state.loader_64bit;
+                if (state.arch_64bit) delete state.arch_64bit;
+                
+                state.loader_64bit = new MemoryLoadImage(bin_bytes, image_base);
+                state.arch_64bit = new CliArchitecture("x86:LE:64:default", state.loader_64bit, &null_stream);
+                DocumentStorage store;
+                state.arch_64bit->init(store);
+                configure_arch(state.arch_64bit);
+                state.arch_64bit_ready = true;
+                std::cerr << "[fission_decomp] Initialized 64-bit architecture (persistent)" << std::endl;
+            } else {
+                 state.loader_64bit->updateData(bin_bytes, image_base);
+                 state.arch_64bit->symboltab->getGlobalScope()->clear();
+            }
+
+            // 32-bit
+            if (!state.arch_32bit_ready) {
+                if (state.loader_32bit) delete state.loader_32bit;
+                if (state.arch_32bit) delete state.arch_32bit;
+
+                state.loader_32bit = new MemoryLoadImage(bin_bytes, image_base);
+                state.arch_32bit = new CliArchitecture("x86:LE:32:default", state.loader_32bit, &null_stream);
+                DocumentStorage store;
+                state.arch_32bit->init(store);
+                configure_arch(state.arch_32bit);
+                state.arch_32bit_ready = true;
+                 std::cerr << "[fission_decomp] Initialized 32-bit architecture (persistent)" << std::endl;
+            } else {
+                 state.loader_32bit->updateData(bin_bytes, image_base);
+                 state.arch_32bit->symboltab->getGlobalScope()->clear();
+            }
+            
+            return "{\"status\":\"ok\",\"message\":\"Binary loaded\"}";
+        }
         
-        // IMPORTANT: Allocate on heap and intentionally don't delete
-        // Ghidra's destructors have memory management issues that cause crashes
-        // This is a controlled memory leak but keeps the server stable
-        MemoryLoadImage* loader = new MemoryLoadImage(bytes, address);
-        CliArchitecture* arch = new CliArchitecture(arch_id, loader, &std::cerr);
+        // Normal Decompile Request
+        if (sla_dir.empty()) {
+            return "{\"status\":\"error\",\"message\":\"Missing sla_dir\"}";
+        }
+
+        if (!init_ghidra(state, sla_dir)) {
+            return "{\"status\":\"error\",\"message\":\"Failed to initialize Ghidra\"}";
+        }
+
+        // Determine loader/arch
+        MemoryLoadImage* loader = nullptr;
+        CliArchitecture* arch = nullptr;
+
+        if (is_64bit) {
+            if (!state.arch_64bit_ready) {
+                 // Fallback initialization
+                 std::vector<uint8_t> bytes;
+                 if (!bytes_b64.empty()) bytes = base64_decode(bytes_b64);
+                 
+                 if (state.loader_64bit) delete state.loader_64bit;
+                 if (state.arch_64bit) delete state.arch_64bit;
+
+                 state.loader_64bit = new MemoryLoadImage(bytes, address);
+                 state.arch_64bit = new CliArchitecture("x86:LE:64:default", state.loader_64bit, &null_stream);
+                 DocumentStorage store;
+                 state.arch_64bit->init(store);
+                 configure_arch(state.arch_64bit);
+                 state.arch_64bit_ready = true;
+            }
+            loader = state.loader_64bit;
+            arch = state.arch_64bit;
+        } else {
+            if (!state.arch_32bit_ready) {
+                 std::vector<uint8_t> bytes;
+                 if (!bytes_b64.empty()) bytes = base64_decode(bytes_b64);
+                 
+                 if (state.loader_32bit) delete state.loader_32bit;
+                 if (state.arch_32bit) delete state.arch_32bit;
+
+                 state.loader_32bit = new MemoryLoadImage(bytes, address);
+                 state.arch_32bit = new CliArchitecture("x86:LE:32:default", state.loader_32bit, &null_stream);
+                 DocumentStorage store;
+                 state.arch_32bit->init(store);
+                 configure_arch(state.arch_32bit);
+                 state.arch_32bit_ready = true;
+            }
+            loader = state.loader_32bit;
+            arch = state.arch_32bit;
+        }
+
+        if (!bytes_b64.empty()) {
+            std::vector<uint8_t> bytes = base64_decode(bytes_b64);
+            loader->updateData(bytes, address);
+        }
         
-        DocumentStorage store;
-        arch->init(store);
-        arch->max_instructions = 200000;
-        arch->flowoptions &= ~FlowInfo::error_toomanyinstructions;
+        std::cerr << "[fission_decomp] Step 1: Clearing global scope for 0x" << std::hex << address << std::dec << std::endl;
         
-        // Decompile
-        Address func_addr(arch->getDefaultCodeSpace(), address);
+        // Clear global scope to ensure no zombie Function objects remain
+        // Warning: This is NOT thread safe currently, but CLI process is single-threaded.
         Scope* global_scope = arch->symboltab->getGlobalScope();
+        global_scope->clear();
+
+        std::cerr << "[fission_decomp] Step 2: Adding function at 0x" << std::hex << address << std::dec << std::endl;
+        
+        // Decompile the new function
+        Address func_addr(arch->getDefaultCodeSpace(), address);
         Funcdata* fd = global_scope->findFunction(func_addr);
         if (fd == nullptr) {
             fd = global_scope->addFunction(func_addr, "func")->getFunction();
         }
-        
+
+        std::cerr << "[fission_decomp] Step 3: Resetting actions" << std::endl;
         arch->allacts.getCurrent()->reset(*fd);
-        arch->allacts.getCurrent()->perform(*fd);
         
+        std::cerr << "[fission_decomp] Step 4: Performing decompilation (this may take time)..." << std::endl;
+        arch->allacts.getCurrent()->perform(*fd);
+
+        std::cerr << "[fission_decomp] Step 5: Generating output" << std::endl;
         std::ostringstream c_stream;
         arch->print->setOutputStream(&c_stream);
         arch->print->docFunction(fd);
         
-        // Note: We intentionally don't delete arch and loader here
-        // to avoid Ghidra's destructor memory corruption issues
-        
+        std::cerr << "[fission_decomp] Step 6: Done!" << std::endl;
         return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_stream.str()) + "\"}";
         
     } catch (const LowlevelError& e) {
         return "{\"status\":\"error\",\"message\":\"" + json_escape(e.explain) + "\"}";
     } catch (const std::exception& e) {
         return "{\"status\":\"error\",\"message\":\"" + json_escape(e.what()) + "\"}";
+    } catch (...) {
+        return "{\"status\":\"error\",\"message\":\"Unknown Ghidra error\"}";
     }
 }
 
@@ -275,7 +423,6 @@ int run_server() {
 // Single-shot mode: process one request and exit
 int run_single() {
     std::cout.setf(std::ios::unitbuf);
-    std::cerr << "[fission_decomp] Starting..." << std::endl;
     
     // Read all of stdin
     std::stringstream buffer;
@@ -291,7 +438,6 @@ int run_single() {
     std::string response = process_request(state, input);
     std::cout << response << std::endl;
     std::cout.flush();
-    std::cerr.flush();
     _exit(0);  // Skip cleanup to avoid Ghidra memory corruption crash
 }
 

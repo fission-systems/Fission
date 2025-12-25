@@ -21,7 +21,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction
     }
 
     egui::SidePanel::left("side_bar")
-        .frame(egui::Frame::none().fill(catppuccin::BASE))
+        .frame(egui::Frame::none().fill(ctx.style().visuals.panel_fill))
         .default_width(240.0)
         .min_width(150.0)
         .resizable(true)
@@ -37,7 +37,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction
                     Activity::Plugins => "EXTENSIONS",
                     Activity::Settings => "SETTINGS",
                 };
-                ui.label(egui::RichText::new(title).size(11.0).strong().color(catppuccin::SUBTEXT0));
+                ui.label(egui::RichText::new(title).size(11.0).strong().color(ui.visuals().weak_text_color()));
             });
             ui.add_space(4.0);
             
@@ -53,11 +53,9 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction
                     }
                 }
                 Activity::Search => {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(20.0);
-                        ui.label(egui::RichText::new("Search functionality coming soon")
-                            .color(catppuccin::OVERLAY0).small());
-                    });
+                    if let Some(action) = super::search::render(ui, state) {
+                        result = Some(action);
+                    }
                 }
                 Activity::Debug => {
                     render_debug_sidebar(ui, state);
@@ -66,11 +64,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction
                     render_plugins_sidebar(ui, state);
                 }
                 Activity::Settings => {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(20.0);
-                        ui.label(egui::RichText::new("Settings coming soon")
-                            .color(catppuccin::OVERLAY0).small());
-                    });
+                    super::settings::render(ui, state);
                 }
             }
         });
@@ -85,7 +79,7 @@ fn render_debug_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.collapsing(egui::RichText::new("BREAKPOINTS").small().strong(), |ui| {
         // Breakpoint list (abbreviated)
         if state.debug.debug_state.breakpoints.is_empty() {
-            ui.label(egui::RichText::new("No breakpoints").color(catppuccin::OVERLAY0).small());
+            ui.label(egui::RichText::new("No breakpoints").color(ui.visuals().weak_text_color()).small());
         } else {
             for (addr, _bp) in &state.debug.debug_state.breakpoints {
                 ui.label(egui::RichText::new(format!("0x{:016x}", addr)).small().monospace());
@@ -114,29 +108,33 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("INSTALLED").size(10.0).strong().color(catppuccin::SUBTEXT0));
+        ui.label(egui::RichText::new("INSTALLED").size(10.0).strong().color(ui.visuals().weak_text_color()));
     });
     ui.add_space(4.0);
     
     // List plugins - clone to avoid borrow issues
-    let plugins: Vec<_> = state.plugin_manager.list_plugins().iter().cloned().collect();
+    let plugins: Vec<_> = if let Ok(mgr) = state.plugin_manager.read() {
+        mgr.list_plugins().into_iter().cloned().collect()
+    } else {
+        Vec::new()
+    };
     let mut toggle_action: Option<(String, bool, String)> = None; // (id, was_enabled, name)
     
     if plugins.is_empty() {
         ui.vertical_centered(|ui| {
             ui.add_space(20.0);
             ui.label(egui::RichText::new("No plugins installed")
-                .color(catppuccin::OVERLAY0).small().italics());
+                .color(ui.visuals().weak_text_color()).small().italics());
             ui.add_space(8.0);
             ui.label(egui::RichText::new("Load a plugin to extend\nFission's functionality")
-                .color(catppuccin::OVERLAY0).small());
+                .color(ui.visuals().weak_text_color()).small());
         });
     } else {
         egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
             for plugin in &plugins {
                 ui.push_id(&plugin.id, |ui| {
                     egui::Frame::none()
-                        .fill(catppuccin::SURFACE0)
+                        .fill(ui.visuals().faint_bg_color)
                         .inner_margin(egui::Margin::symmetric(8.0, 6.0))
                         .rounding(4.0)
                         .show(ui, |ui| {
@@ -147,14 +145,14 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
                                     PluginType::Lua => "Lu",
                                     PluginType::Native => "Na",
                                 };
-                                ui.label(egui::RichText::new(icon).size(14.0).strong().color(catppuccin::OVERLAY1));
+                                ui.label(egui::RichText::new(icon).size(14.0).strong().color(ui.visuals().text_color()));
                                 ui.add_space(4.0);
                                 
                                 ui.vertical(|ui| {
                                     ui.label(egui::RichText::new(&plugin.name)
-                                        .color(catppuccin::TEXT).strong());
+                                        .color(ui.visuals().strong_text_color()).strong());
                                     ui.label(egui::RichText::new(&plugin.version)
-                                        .color(catppuccin::SUBTEXT0).small());
+                                        .color(ui.visuals().weak_text_color()).small());
                                 });
                                 
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -182,12 +180,22 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     
     // Apply toggle action after rendering
     if let Some((plugin_id, was_enabled, name)) = toggle_action {
-        if was_enabled {
-            let _ = state.plugin_manager.disable_plugin(&plugin_id);
-            state.log(format!("[*] Disabled plugin: {}", name));
+        let result = if let Ok(mut mgr) = state.plugin_manager.write() {
+            if was_enabled {
+                let _ = mgr.disable_plugin(&plugin_id);
+                Some(format!("[*] Disabled plugin: {}", name))
+            } else {
+                let _ = mgr.enable_plugin(&plugin_id);
+                Some(format!("[*] Enabled plugin: {}", name))
+            }
         } else {
-            let _ = state.plugin_manager.enable_plugin(&plugin_id);
-            state.log(format!("[*] Enabled plugin: {}", name));
+            None
+        };
+        
+        if let Some(msg) = result {
+            state.log(msg);
+        } else if state.plugin_manager.write().is_err() {
+             state.log(format!("[!] Failed to acquire write lock for plugin manager to toggle {}", name));
         }
     }
     
@@ -203,10 +211,10 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     
     ui.vertical_centered(|ui| {
         ui.label(egui::RichText::new("• Yara Rules Scanner")
-            .color(catppuccin::SUBTEXT1).small());
+            .color(ui.visuals().weak_text_color()).small());
         ui.label(egui::RichText::new("• Crypto Detector")
-            .color(catppuccin::SUBTEXT1).small());
+            .color(ui.visuals().weak_text_color()).small());
         ui.label(egui::RichText::new("• IDA Script Importer")
-            .color(catppuccin::SUBTEXT1).small());
+            .color(ui.visuals().weak_text_color()).small());
     });
 }

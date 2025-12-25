@@ -92,7 +92,11 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                         timeline::render(ui, &mut state.debug.timeline);
                     }
                     BottomTab::Plugins => {
-                        plugins::render(ui, &mut state.plugin_manager, &mut state.plugin_panel_state);
+                        if let Ok(mut mgr) = state.plugin_manager.write() {
+                            plugins::render(ui, &mut mgr, &mut state.plugin_panel_state);
+                        } else {
+                            ui.label("Failed to access Plugin Manager");
+                        }
                     }
                 }
             });

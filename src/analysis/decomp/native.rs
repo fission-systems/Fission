@@ -4,11 +4,26 @@
 //! - `NativeDecompiler`: Spawns a new process per request (legacy)
 //! - `DecompilerServer`: Persistent server process for faster repeated requests
 
-use std::process::{Command, Stdio, Child, ChildStdin, ChildStdout};
+use std::process::{Command, Stdio, Child, ChildStdin};
 use std::io::{Write, BufRead, BufReader};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use anyhow::{anyhow, Result};
+use serde::Deserialize;
+
+use crate::config::CONFIG;
+
+/// Max empty lines before giving up (prevents infinite loop)
+const MAX_EMPTY_LINES: usize = 10;
+
+/// Decompiler JSON response structure
+#[derive(Deserialize, Debug)]
+struct DecompilerResponse {
+    status: String,
+    code: Option<String>,
+    message: Option<String>,
+}
 
 /// Legacy subprocess-based decompiler (spawns new process each time)
 pub struct NativeDecompiler {
@@ -56,6 +71,12 @@ impl NativeDecompiler {
         let output = child.wait_with_output()
             .map_err(|e| anyhow!("Failed to wait for decompiler: {}", e))?;
         
+        // Log stderr on failure for debugging
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("[NativeDecompiler] stderr: {}", stderr);
+        }
+        
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         parse_decompiler_response(&stdout)
     }
@@ -67,7 +88,16 @@ pub struct DecompilerServer {
     sla_dir: String,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
-    stdout_reader: Option<BufReader<ChildStdout>>,
+    /// Thread for reading stdout asynchronously
+    stdout_rx: Option<std::sync::mpsc::Receiver<String>>,
+    /// Handle for reader thread (for clean shutdown)
+    reader_handle: Option<JoinHandle<()>>,
+    /// Context cache for crash recovery
+    cached_binary: Option<Vec<u8>>,
+    cached_sla_dir: Option<String>,
+    cached_image_base: Option<u64>,
+    /// Request counter for periodic restart
+    request_count: u64,
 }
 
 impl DecompilerServer {
@@ -82,7 +112,12 @@ impl DecompilerServer {
             sla_dir: sla_dir.to_string(),
             child: None,
             stdin: None,
-            stdout_reader: None,
+            stdout_rx: None,
+            reader_handle: None,
+            cached_binary: None,
+            cached_sla_dir: None,
+            cached_image_base: None,
+            request_count: 0,
         })
     }
 
@@ -96,20 +131,22 @@ impl DecompilerServer {
                         // Process exited, need to restart
                         self.child = None;
                         self.stdin = None;
-                        self.stdout_reader = None;
+                        self.stdout_rx = None;
+                        self.reader_handle = None;
                     }
                     Ok(None) => return Ok(()), // Still running
                     Err(_) => {
                         self.child = None;
                         self.stdin = None;
-                        self.stdout_reader = None;
+                        self.stdout_rx = None;
+                        self.reader_handle = None;
                     }
                 }
             }
         }
 
         // Start new server process
-        // Note: stderr is inherited to avoid buffer blocking, logs go to console
+        // Note: stderr is inherited to avoid buffer blocking AND provide visibility
         let mut child = Command::new(&self.cli_path)
             .arg("--server")
             .stdin(Stdio::piped())
@@ -119,19 +156,104 @@ impl DecompilerServer {
             .map_err(|e| anyhow!("Failed to spawn decompiler server: {}", e))?;
 
         self.stdin = child.stdin.take();
+        
+        // Spawn background reader thread for stdout
         if let Some(stdout) = child.stdout.take() {
-            self.stdout_reader = Some(BufReader::new(stdout));
+            let (tx, rx) = std::sync::mpsc::channel();
+            let handle = std::thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => {
+                            if tx.send(line).is_err() {
+                                break; // Receiver dropped
+                            }
+                        }
+                        Err(_) => break, // EOF or error
+                    }
+                }
+            });
+            self.stdout_rx = Some(rx);
+            self.reader_handle = Some(handle);
         }
+        
         self.child = Some(child);
 
+        // Restore context if available (Crash Recovery)
+        // Clone data to avoid borrow checker issues with mutable self call
+        if let (Some(bytes), Some(sla_dir), Some(image_base)) = (
+            self.cached_binary.clone(), 
+            self.cached_sla_dir.clone(),
+            self.cached_image_base
+        ) {
+            eprintln!("[DecompilerServer] Recovering binary context after restart...");
+            // Dynamic timeout: base + ~1ms per KB
+            let timeout = CONFIG.decompiler.timeout_ms + (bytes.len() as u64 / 1024);
+            self.load_binary_internal_with_timeout(&bytes, &sla_dir, image_base, timeout)?;
+        }
+
+        Ok(())
+    }
+
+    /// Internal helper to send load_bin command with timeout
+    fn load_binary_internal_with_timeout(&mut self, bytes: &[u8], sla_dir: &str, image_base: u64, timeout_ms: u64) -> Result<()> {
+        let bytes_b64 = BASE64.encode(bytes);
+        
+        let request = format!(
+            r#"{{"load_bin":"{}","sla_dir":"{}","image_base":{}}}"#,
+            bytes_b64,
+            sla_dir,
+            image_base
+        );
+
+        if let Some(ref mut stdin) = self.stdin {
+            writeln!(stdin, "{}", request)?;
+            stdin.flush()?;
+        } else {
+             return Err(anyhow!("Server stdin not available"));
+        }
+        
+        // Read response with timeout
+        self.read_response_with_timeout(timeout_ms)
+            .map(|_| ())
+    }
+
+    /// Load complete binary into decompiler memory (Persistent Context)
+    pub fn load_binary(&mut self, bytes: &[u8], sla_dir: &str, image_base: u64) -> Result<()> {
+        // First ensure process is started (but don't trigger recovery yet)
+        self.ensure_started()?;
+        
+        // Dynamic timeout: base + ~1ms per KB
+        let timeout = CONFIG.decompiler.timeout_ms + (bytes.len() as u64 / 1024);
+        self.load_binary_internal_with_timeout(bytes, sla_dir, image_base, timeout)
+            .map_err(|e| anyhow!("Failed to load binary: {}", e))?;
+        
+        // Cache context for recovery AFTER successful load (not before!)
+        self.cached_binary = Some(bytes.to_vec());
+        self.cached_sla_dir = Some(sla_dir.to_string());
+        self.cached_image_base = Some(image_base);
+        
         Ok(())
     }
 
     /// Decompile bytes using the persistent server
     pub fn decompile(&mut self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
-        self.ensure_started()?;
+        // Check periodic restart
+        let restart_threshold = CONFIG.decompiler.requests_before_restart;
+        if restart_threshold > 0 && self.request_count >= restart_threshold {
+            eprintln!("[DecompilerServer] Restarting after {} requests to reclaim memory", self.request_count);
+            self.shutdown();
+            self.request_count = 0;
+        }
 
-        let bytes_b64 = BASE64.encode(bytes);
+        self.ensure_started()?;
+        self.request_count += 1;
+
+        let bytes_b64 = if bytes.is_empty() {
+             String::new()
+        } else {
+             BASE64.encode(bytes)
+        };
         
         let request = format!(
             r#"{{"bytes":"{}","address":{},"is_64bit":{},"sla_dir":"{}"}}"#,
@@ -141,40 +263,75 @@ impl DecompilerServer {
             self.sla_dir
         );
 
-        // Send request
         if let Some(ref mut stdin) = self.stdin {
-            writeln!(stdin, "{}", request)
-                .map_err(|e| anyhow!("Failed to write to server: {}", e))?;
-            stdin.flush()
-                .map_err(|e| anyhow!("Failed to flush to server: {}", e))?;
+            writeln!(stdin, "{}", request)?;
+            stdin.flush()?;
         } else {
             return Err(anyhow!("Server stdin not available"));
         }
 
-        // Read response
-        if let Some(ref mut reader) = self.stdout_reader {
-            let mut response = String::new();
-            reader.read_line(&mut response)
-                .map_err(|e| anyhow!("Failed to read from server: {}", e))?;
-            
-            parse_decompiler_response(&response)
+        // Read response with timeout
+        let response = match self.read_response_with_timeout(CONFIG.decompiler.timeout_ms) {
+            Ok(res) => res,
+            Err(e) => {
+                // Timeout or Error -> Kill process to stop memory leak
+                eprintln!("[DecompilerServer] Error/Timeout detected: {}. Restarting process...", e);
+                self.shutdown(); // Kill
+                return Err(e); // Propagate error, caller can retry
+            }
+        };
+        
+        parse_decompiler_response(&response)
+    }
+    
+    /// Helper to read response with timeout (with empty line limit)
+    fn read_response_with_timeout(&mut self, timeout_ms: u64) -> Result<String> {
+        if let Some(ref rx) = self.stdout_rx {
+             match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                 Ok(line) => {
+                     let mut response = line;
+                     let mut empty_retries = 0;
+                     
+                     // Allow empty lines with retry limit
+                     while response.trim().is_empty() {
+                          empty_retries += 1;
+                          if empty_retries > MAX_EMPTY_LINES {
+                              return Err(anyhow!("Too many empty lines from decompiler"));
+                          }
+                          match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                              Ok(l) => response = l,
+                              Err(_) => return Err(anyhow!("Timeout waiting for non-empty response")),
+                          }
+                     }
+                     Ok(response)
+                 },
+                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                     Err(anyhow!("Decompiler timed out after {}ms", timeout_ms))
+                 },
+                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                     Err(anyhow!("Decompiler process exited unexpectedly"))
+                 }
+             }
         } else {
-            Err(anyhow!("Server stdout not available"))
+             Err(anyhow!("Stdout receiver not available"))
         }
     }
-
+    
     /// Shutdown the server process
     pub fn shutdown(&mut self) {
-        if let Some(ref mut stdin) = self.stdin {
-            let _ = writeln!(stdin, r#"{{"cmd":"quit"}}"#);
-            let _ = stdin.flush();
-        }
         if let Some(ref mut child) = self.child {
+            let _ = child.kill(); // Force kill
             let _ = child.wait();
         }
         self.child = None;
         self.stdin = None;
-        self.stdout_reader = None;
+        self.stdout_rx = None;
+        // Join reader thread for clean shutdown (non-blocking wait)
+        if let Some(handle) = self.reader_handle.take() {
+            // We don't want to block, so just drop it.
+            // The thread will exit when stdout closes.
+            drop(handle);
+        }
     }
 
     /// Check if server is running
@@ -202,44 +359,16 @@ pub fn create_shared_server<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &st
     Ok(Arc::new(Mutex::new(server)))
 }
 
-/// Parse decompiler JSON response and extract code
+/// Parse decompiler JSON response using serde_json
 fn parse_decompiler_response(response: &str) -> Result<String> {
-    // Try to extract result
-    if response.contains("\"status\":\"ok\"") {
-        if let Some(start) = response.find("\"code\":\"") {
-            let start = start + 8;
-            let chars: Vec<char> = response.chars().collect();
-            let mut end = start;
-            while end < chars.len() {
-                if chars[end] == '"' && (end == start || chars[end - 1] != '\\') {
-                    break;
-                }
-                end += 1;
-            }
-            let code = &response[start..end];
-            let code = code
-                .replace("\\n", "\n")
-                .replace("\\r", "\r")
-                .replace("\\t", "\t")
-                .replace("\\\"", "\"")
-                .replace("\\\\", "\\");
-            return Ok(code);
-        }
-    }
+    let resp: DecompilerResponse = serde_json::from_str(response)
+        .map_err(|e| anyhow!("Invalid JSON response: {} (raw: {})", e, response))?;
     
-    // Check for error status
-    if response.contains("\"status\":\"error\"") {
-        if let Some(start) = response.find("\"message\":\"") {
-            let start = start + 11;
-            if let Some(end) = response[start..].find("\"") {
-                let msg = &response[start..start + end];
-                return Err(anyhow!("Decompiler error: {}", msg));
-            }
-        }
-        return Err(anyhow!("Decompiler error: {}", response));
+    match resp.status.as_str() {
+        "ok" => resp.code.ok_or_else(|| anyhow!("Missing 'code' field in response")),
+        "error" => Err(anyhow!("Decompiler error: {}", resp.message.unwrap_or_default())),
+        _ => Err(anyhow!("Unknown status: {}", resp.status)),
     }
-    
-    Err(anyhow!("Invalid response format: {}", response))
 }
 
 /// Helper to find the decompiler CLI in the project structure
@@ -319,15 +448,48 @@ impl DecompilerPool {
         Self::new(cli_path, sla_dir, num_workers)
     }
     
-    /// Decompile bytes using next available worker (round-robin)
-    pub fn decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
-        // Round-robin worker selection
-        let worker_idx = self.next_worker.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % self.workers.len();
+    /// Load binary into ALL workers in the pool
+    pub fn load_binary(&self, bytes: &[u8], sla_dir: &str, image_base: u64) -> Result<()> {
+        let workers_count = self.workers.len();
+        let mut success_count = 0;
         
-        // Lock the selected worker
+        for (i, worker) in self.workers.iter().enumerate() {
+            match worker.lock() {
+                Ok(mut guard) => {
+                    if let Err(e) = guard.load_binary(bytes, sla_dir, image_base) {
+                         eprintln!("[DecompilerPool] Worker {} failed to load binary: {}", i, e);
+                    } else {
+                         success_count += 1;
+                    }
+                },
+                Err(e) => eprintln!("[DecompilerPool] Failed to lock worker {}: {}", i, e),
+            }
+        }
+        
+        if success_count == 0 && workers_count > 0 {
+            Err(anyhow!("All workers failed to load binary"))
+        } else {
+            eprintln!("[DecompilerPool] Binary loaded into {}/{} workers", success_count, workers_count);
+            Ok(())
+        }
+    }
+    
+    /// Decompile bytes using next available worker
+    /// First tries to find any idle worker (non-blocking), then falls back to round-robin
+    pub fn decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
+        // Strategy 1: Try to find any available worker immediately (non-blocking)
+        // This improves load distribution when some workers are processing large functions
+        for worker in &self.workers {
+            if let Ok(mut guard) = worker.try_lock() {
+                return guard.decompile(bytes, base_addr, is_64bit);
+            }
+        }
+
+        // Strategy 2: All workers busy - use round-robin to queue fairly
+        let worker_idx = self.next_worker.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % self.workers.len();
         let mut worker = self.workers[worker_idx].lock()
             .map_err(|_| anyhow!("Worker mutex poisoned"))?;
-        
+
         worker.decompile(bytes, base_addr, is_64bit)
     }
     

@@ -1,68 +1,82 @@
-//! Status bar rendering at the bottom of the window.
+use eframe::egui::{self, Color32};
+use crate::ui::gui::state::{AppState, Activity};
+use crate::ui::gui::theme::catppuccin;
 
-use eframe::egui;
-use super::state::AppState;
-use super::theme::catppuccin;
-
-/// Render the status bar at the very bottom.
+/// Render the bottom status bar
 pub fn render(ctx: &egui::Context, state: &AppState) {
     egui::TopBottomPanel::bottom("status_bar")
-        .exact_height(24.0)
+        .default_height(24.0)
+        .max_height(24.0)
         .show(ctx, |ui| {
+            // Apply status bar background style
+            // Apply status bar background style
+            let bg_color = match state.ui.active_activity {
+                Activity::Debug => {
+                    if ctx.style().visuals.dark_mode {
+                        catppuccin::MAROON 
+                    } else {
+                        Color32::from_rgb(200, 50, 50) // Reddish for light mode debug
+                    }
+                },
+                _ => ctx.style().visuals.extreme_bg_color, // Use theme's bottom/extreme background
+            };
+            
+            ui.painter().rect_filled(ui.max_rect(), 0.0, bg_color);
+            
             ui.horizontal(|ui| {
-                // Debugger status indicator
-                let (debug_color, debug_icon, debug_text) = if state.debug.is_debugging {
-                    (catppuccin::GREEN, "▶", "Debugging")
-                } else {
-                    (catppuccin::OVERLAY0, "■", "Idle")
+                ui.add_space(8.0);
+                
+                // Left: Activity Indicator
+                let mode_icon = match state.ui.active_activity {
+                    Activity::Explorer => "📂",
+                    Activity::Search => "🔍",
+                    Activity::Debug => "🐞",
+                    Activity::Plugins => "🔌",
+                    Activity::Settings => "⚙️",
                 };
-                ui.label(egui::RichText::new(debug_icon).color(debug_color).small());
-                ui.label(egui::RichText::new(debug_text).color(debug_color).small());
+                ui.label(egui::RichText::new(mode_icon).size(12.0));
+                
+                ui.label(egui::RichText::new(match state.ui.active_activity {
+                    Activity::Explorer => "Explorer",
+                    Activity::Search => "Search",
+                    Activity::Debug => "Debugging",
+                    Activity::Plugins => "Extensions",
+                    Activity::Settings => "Settings",
+                }).color(ui.visuals().text_color()).size(12.0));
 
-                // Mode indicator
+                ui.add_space(10.0);
                 ui.separator();
-                if state.ui.dynamic_mode {
-                    ui.label(egui::RichText::new("● Dynamic").color(catppuccin::TEAL).small());
-                } else {
-                    ui.label(egui::RichText::new("○ Static").color(catppuccin::OVERLAY0).small());
-                }
-
-                ui.separator();
-
-                // Loaded binary info
-                if let Some(ref binary) = state.analysis.loaded_binary {
-                    let arch = if binary.is_64bit { "x64" } else { "x86" };
-                    ui.label(egui::RichText::new(format!("{} | {} | {} funcs", 
-                        truncate_path(&binary.path, 30), arch, binary.functions.len()))
-                        .color(catppuccin::SUBTEXT0).small());
-                } else {
-                    ui.label(egui::RichText::new("No binary").color(catppuccin::OVERLAY0).small());
+                
+                // Center: Log Message (Most recent)
+                if let Some(last_log) = state.log_buffer.last() {
+                     ui.label(egui::RichText::new(last_log)
+                        .color(ui.visuals().weak_text_color())
+                        .size(11.0)
+                        .italics()); // could truncate if too long
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new("Fission v0.1.0")
-                        .color(catppuccin::LAVENDER).small());
-                    ui.separator();
-                    ui.label(egui::RichText::new(format!("Cache: {}", state.analysis.decompile_cache.len()))
-                        .color(catppuccin::SUBTEXT0).small());
+                     ui.add_space(8.0);
+                     
+                     // Right: Branch
+                     ui.label(egui::RichText::new("main*").small().color(ui.visuals().strong_text_color()));
+                     ui.label(egui::RichText::new("").small().color(ui.visuals().strong_text_color()));
+                     ui.add_space(10.0);
+
+                     // Right: Cursor Position
+                     if let Some(addr) = state.ui.selected_xref_addr {
+                         ui.label(egui::RichText::new(format!("Ln {}, Col 1", 0)).small().color(ui.visuals().weak_text_color())); // Placeholder
+                         ui.label(egui::RichText::new(format!("0x{:X}", addr)).monospace().size(11.0).color(ui.visuals().text_color()));
+                     } else {
+                         ui.label(egui::RichText::new("--").small().color(ui.visuals().weak_text_color()));
+                     }
+
+                     ui.add_space(10.0);
+                     
+                     // Right: Memory (Mock)
+                     ui.label(egui::RichText::new("128 MB").small().color(ui.visuals().weak_text_color()));
+                     ui.label(egui::RichText::new("💾").small());
                 });
             });
         });
-}
-
-/// Truncate a path for display
-fn truncate_path(path: &str, max_len: usize) -> String {
-    if path.len() <= max_len {
-        path.to_string()
-    } else {
-        // Try to show the filename
-        if let Some(filename) = std::path::Path::new(path).file_name() {
-            if let Some(name) = filename.to_str() {
-                if name.len() <= max_len {
-                    return name.to_string();
-                }
-            }
-        }
-        format!("...{}", &path[path.len() - max_len + 3..])
-    }
 }

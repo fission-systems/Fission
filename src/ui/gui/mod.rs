@@ -13,7 +13,7 @@ mod widgets;
 pub mod theme;
 
 pub use app::FissionApp;
-pub use state::AppState;
+pub use state::{AppState, SettingsState, ThemeMode};
 pub use messages::AsyncMessage;
 pub use widgets::*;
 

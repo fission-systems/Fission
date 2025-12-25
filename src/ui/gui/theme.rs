@@ -61,6 +61,27 @@ pub mod code {
     pub const ASCII_PRINTABLE: super::Color32 = GREEN;
 }
 
+/// Apply theme based on mode
+pub fn set_theme(ctx: &egui::Context, mode: crate::ui::gui::state::ThemeMode) {
+    match mode {
+        crate::ui::gui::state::ThemeMode::Dark => apply_catppuccin_theme(ctx),
+        crate::ui::gui::state::ThemeMode::Light => {
+            let mut style = (*ctx.style()).clone();
+            style.visuals = egui::Visuals::light();
+            ctx.set_style(style);
+        },
+        crate::ui::gui::state::ThemeMode::System => {
+            let mut style = (*ctx.style()).clone();
+            style.visuals = if ctx.style().visuals.dark_mode {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            };
+            ctx.set_style(style); 
+        }
+    }
+}
+
 /// Apply Catppuccin theme to egui context
 pub fn apply_catppuccin_theme(ctx: &egui::Context) {
     use catppuccin::*;

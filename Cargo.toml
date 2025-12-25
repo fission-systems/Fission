@@ -51,6 +51,11 @@ hex = "0.4"
 base64 = "0.22"
 colored = "2.1"
 regex = "1.10"  # For efficient pattern matching
+lru = "0.12"    # LRU cache for decompilation results
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+dirs = "5.0"
 
 # System & Debugging
 [target.'cfg(target_os = "windows")'.dependencies]

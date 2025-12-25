@@ -48,4 +48,4 @@ memory_loadimage.hh
 memory_loadimage.cc
 
 # Submodule build directories
-ghidra_decompiler/build/
+ghidra_decompiler/build/ghidra_decompiler/build/

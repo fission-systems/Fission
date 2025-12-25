@@ -46,7 +46,8 @@ void fission_decompiler_destroy(FissionDecompiler* decomp);
  * @param is_64bit 1 for 64-bit binary, 0 for 32-bit
  * @param out_buffer Buffer to write decompiled C code
  * @param out_len Maximum size of output buffer
- * @return Number of bytes written to out_buffer, or -1 on error
+ * @return Bytes written (including null), or -1 on error. 
+ *         If buffer too small, returns required size (including null).
  */
 int fission_decompile(
     FissionDecompiler* decomp,
@@ -60,14 +61,7 @@ int fission_decompile(
 
 /**
  * Disassemble instructions at the given address.
- * 
- * @param decomp Decompiler instance
- * @param bytes Raw machine code bytes
- * @param bytes_len Length of bytes buffer
- * @param base_addr Virtual address of the first instruction
- * @param out_buffer Buffer to write disassembly text
- * @param out_len Maximum size of output buffer
- * @return Number of bytes written to out_buffer, or -1 on error
+ * (Not implemented yet - returns -1)
  */
 int fission_disassemble(
     FissionDecompiler* decomp,
@@ -79,11 +73,12 @@ int fission_disassemble(
 );
 
 /**
- * Get the last error message.
+ * Get the last error message for the given instance.
  * 
- * @return Pointer to static error string, or NULL if no error
+ * @param decomp Decompiler instance
+ * @return Pointer to error string, or NULL if no error
  */
-const char* fission_get_error(void);
+const char* fission_get_error(FissionDecompiler* decomp);
 
 /**
  * Check if native decompiler is available.
