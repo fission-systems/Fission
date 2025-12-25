@@ -3,26 +3,8 @@
 //! Entry point that handles CLI argument parsing and mode switching
 //! between headless CLI and full GUI modes.
 
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-
-mod app;
-mod analysis;
-mod core;
-mod debug;
-mod plugin;
-mod script;
-mod ui;
-
-// Re-export core utilities at crate level for convenience
-pub use crate::core::config;
-pub use crate::core::constants;
-pub use crate::core::errors;
-pub use crate::core::logging;
-pub use crate::core::prelude;
-
 use clap::Parser;
+use fission::ui;
 
 /// Fission: Hybrid Dynamic Analysis Platform
 #[derive(Parser, Debug)]
@@ -41,14 +23,13 @@ struct Args {
     verbose: u8,
 }
 
-fn main() -> crate::prelude::Result<()> {
+fn main() -> fission::prelude::Result<()> {
     // 1. Initialize logger with verbosity level
-    // ... (logger logic)
-    crate::core::logging::init(match std::env::args().filter(|a| a == "-v").count() {
-        0 => crate::core::logging::LogLevel::Warn,
-        1 => crate::core::logging::LogLevel::Info,
-        2 => crate::core::logging::LogLevel::Debug,
-        _ => crate::core::logging::LogLevel::Trace,
+    fission::logging::init(match std::env::args().filter(|a| a == "-v").count() {
+        0 => fission::logging::LogLevel::Warn,
+        1 => fission::logging::LogLevel::Info,
+        2 => fission::logging::LogLevel::Debug,
+        _ => fission::logging::LogLevel::Trace,
     });
     
     // Also init env_logger for dependencies if needed (optional)
@@ -57,15 +38,15 @@ fn main() -> crate::prelude::Result<()> {
     // 2. Parse command line arguments
     let args = Args::parse();
 
-    crate::core::logging::info("Fission Core Initialized");
-    crate::core::logging::debug(&format!("Target: {:?}", args.target));
-    crate::core::logging::debug(&format!("Headless: {}", args.headless));
+    fission::logging::info("Fission Core Initialized");
+    fission::logging::debug(&format!("Target: {:?}", args.target));
+    fission::logging::debug(&format!("Headless: {}", args.headless));
 
     // 3. Branch based on execution mode
     if args.headless {
         // CLI mode: Run REPL in main thread
         println!("[*] Fission v{} - Headless Mode", env!("CARGO_PKG_VERSION"));
-        ui::cli::run_cli().map_err(|e| crate::core::errors::FissionError::Other(e.to_string()))?;
+        ui::cli::run_cli().map_err(|e| fission::errors::FissionError::Other(e.to_string()))?;
     } else {
         // GUI mode: Run GUI in main thread
         println!("[*] Fission v{} - GUI Mode", env!("CARGO_PKG_VERSION"));
@@ -88,7 +69,7 @@ fn main() -> crate::prelude::Result<()> {
                 Ok(Box::new(ui::gui::FissionApp::default()))
             }),
         )
-        .map_err(|e| crate::core::errors::FissionError::Ui(e.to_string()))?;
+        .map_err(|e| fission::errors::FissionError::Ui(e.to_string()))?;
     }
 
     Ok(())

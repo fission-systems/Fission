@@ -2,6 +2,11 @@
 //!
 //! Contains all state that needs to be shared across UI panels.
 //! Organized into domain-specific sub-states for maintainability.
+//!
+//! ## Architecture
+//! 
+//! - `FissionContext`: Core application context (event bus, plugins) - shared with non-GUI code
+//! - `AppState`: GUI-specific state that wraps the context and adds UI-related fields
 
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -13,6 +18,7 @@ use lru::LruCache;
 use crate::analysis::loader::{LoadedBinary, FunctionInfo};
 use crate::analysis::disasm::DisassembledInstruction;
 use crate::config::CONFIG;
+use crate::core::context::FissionContext;
 
 // ============================================================================
 // Sub-state structures
@@ -160,7 +166,26 @@ pub struct CachedDecompile {
 /// 
 /// This struct holds all shared state that panels need to read/modify.
 /// Organized into domain-specific sub-states for better maintainability.
+/// 
+/// ## Design Notes
+/// 
+/// - `ctx`: Core application context (shared with non-GUI components)
+/// - Domain states (`analysis`, `debug`, `script`): Organized by feature area
+/// - `ui`: Pure GUI state (tabs, visibility, layout)
+/// - `settings`: User preferences (persisted to disk)
 pub struct AppState {
+    // =========================================================================
+    // Core Context (shared infrastructure)
+    // =========================================================================
+    
+    /// Core application context (event bus, plugins, etc.)
+    /// This is the bridge between GUI and core systems.
+    pub ctx: FissionContext,
+    
+    // =========================================================================
+    // Console / CLI State
+    // =========================================================================
+    
     /// Log buffer for the output console
     pub log_buffer: Vec<String>,
     /// Current command input in the integrated CLI
@@ -168,6 +193,10 @@ pub struct AppState {
     /// File dialog path (unused currently)
     pub file_dialog_path: String,
 
+    // =========================================================================
+    // Domain-Specific States
+    // =========================================================================
+    
     /// UI state (tabs, visibility, layout)
     pub ui: UIState,
     /// Analysis state (binary, functions, decompilation)
@@ -178,14 +207,30 @@ pub struct AppState {
     pub script: ScriptState,
     /// Settings state
     pub settings: SettingsState,
-    /// Plugin manager (shared with module system)
-    pub plugin_manager: Arc<RwLock<crate::plugin::PluginManager>>,
+    
+    // =========================================================================
+    // UI-Specific Components
+    // =========================================================================
+    
     /// Plugin panel state
     pub plugin_panel_state: crate::ui::gui::panels::bottom_tabs::plugins::PluginPanelState,
-    /// System-wide Event Bus
-    pub event_bus: std::sync::Arc<crate::core::events::EventBus>,
     /// Undo/Redo Command Manager
     pub command_manager: crate::ui::gui::commands::CommandManager,
+}
+
+// Convenience accessors for backwards compatibility
+impl AppState {
+    /// Get the event bus (convenience accessor)
+    #[inline]
+    pub fn event_bus(&self) -> &Arc<crate::core::events::EventBus> {
+        &self.ctx.event_bus
+    }
+    
+    /// Get the plugin manager (convenience accessor)
+    #[inline]
+    pub fn plugin_manager(&self) -> &Arc<RwLock<crate::plugin::PluginManager>> {
+        &self.ctx.plugin_manager
+    }
 }
 
 // ============================================================================
@@ -360,12 +405,11 @@ impl Default for UIState {
 
 impl Default for AppState {
     fn default() -> Self {
-        let mut plugin_manager_inner = crate::plugin::PluginManager::default();
-        let event_bus = std::sync::Arc::new(crate::core::events::EventBus::new());
-        plugin_manager_inner.set_event_bus(event_bus.clone());
-        let plugin_manager = Arc::new(RwLock::new(plugin_manager_inner));
+        // Create the core context first
+        let ctx = FissionContext::new();
         
         Self {
+            ctx,
             log_buffer: vec![
                 "==============================================================".into(),
                 "  Fission - Next-Gen Dynamic Instrumentation Platform".into(),
@@ -381,9 +425,7 @@ impl Default for AppState {
             debug: DebugStateUI::default(),
             script: ScriptState::default(),
             settings: crate::core::config_store::load(),
-            plugin_manager,
             plugin_panel_state: Default::default(),
-            event_bus,
             command_manager: crate::ui::gui::commands::CommandManager::default(),
         }
     }

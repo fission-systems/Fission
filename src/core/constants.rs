@@ -102,6 +102,10 @@ pub const TABLE_MEMBERREF: u8 = 0x0A;
 pub const TABLE_ASSEMBLY: u8 = 0x20;
 pub const TABLE_ASSEMBLYREF: u8 = 0x23;
 
+/// Total number of possible .NET metadata tables
+/// The .NET metadata spec defines 64 possible table types (0x00-0x3F)
+pub const DOTNET_TABLE_COUNT: usize = 64;
+
 // ============================================================================
 // Archive/Packer Signatures
 // ============================================================================

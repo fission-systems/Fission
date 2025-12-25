@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
+
+use crate::core::errors::Result;
 
 /// A single patch applied to the binary
 #[derive(Debug, Clone)]

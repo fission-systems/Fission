@@ -215,27 +215,27 @@ impl FissionAPI {
 
     /// Read memory from the target process
     fn read_memory(&self, address: u64, size: usize) -> PyResult<Vec<u8>> {
-        log::debug!(
+        crate::core::logging::debug(&format!(
             "Python requested memory read: {:#x} ({} bytes)",
             address,
             size
-        );
+        ));
         Ok(vec![0u8; size])
     }
 
     /// Write memory to the target process
     fn write_memory(&self, address: u64, data: Vec<u8>) -> PyResult<usize> {
-        log::debug!(
+        crate::core::logging::debug(&format!(
             "Python requested memory write: {:#x} ({} bytes)",
             address,
             data.len()
-        );
+        ));
         Ok(data.len())
     }
 
     /// Set a breakpoint at the given address
     fn set_breakpoint(&self, address: u64) -> PyResult<bool> {
-        log::debug!("Python set breakpoint: {:#x}", address);
+        crate::core::logging::debug(&format!("Python set breakpoint: {:#x}", address));
         Ok(true)
     }
 
@@ -298,7 +298,7 @@ impl PythonBridge {
         pyo3::prepare_freethreaded_python();
         self.initialized = true;
 
-        log::info!("Python interpreter initialized");
+        crate::core::logging::info("Python interpreter initialized");
         Ok(())
     }
 

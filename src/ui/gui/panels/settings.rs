@@ -1,3 +1,11 @@
+//! Settings Panel - Application configuration and preferences.
+//!
+//! Provides UI controls for:
+//! - Theme selection (Light/Dark/System)
+//! - UI scale adjustment
+//! - Decompiler configuration
+//! - Other application preferences
+
 use eframe::egui;
 use crate::ui::gui::state::{AppState, ThemeMode};
 use crate::ui::gui::theme::catppuccin;

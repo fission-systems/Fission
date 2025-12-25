@@ -1,5 +1,4 @@
 use crate::analysis::dotnet::{DotNetError, DotNetResult};
-use anyhow::Context;
 
 /// Information about a .NET method discovered in metadata tables.
 #[derive(Debug, Clone)]
@@ -45,7 +44,7 @@ pub struct DotNetMetadata {
     pub types: Vec<DotNetType>,
 }
 
-const TABLE_COUNT: usize = 64;
+use crate::core::constants::DOTNET_TABLE_COUNT;
 
 #[derive(Clone, Copy)]
 struct StreamHeader<'a> {
@@ -137,8 +136,8 @@ pub fn parse_metadata(
     let valid = reader.read_u64()?;
     let _sorted = reader.read_u64()?;
 
-    let mut row_counts = [0u32; TABLE_COUNT];
-    for table in 0..TABLE_COUNT {
+    let mut row_counts = [0u32; DOTNET_TABLE_COUNT];
+    for table in 0..DOTNET_TABLE_COUNT {
         if (valid >> table) & 1 == 1 {
             row_counts[table] = reader.read_u32()?;
         }
@@ -169,7 +168,7 @@ pub fn parse_metadata(
     let mut fields = Vec::new();
     let mut methods = Vec::new();
 
-    for table in 0..TABLE_COUNT {
+    for table in 0..DOTNET_TABLE_COUNT {
         let rows = row_counts[table] as usize;
         if rows == 0 {
             continue;
@@ -402,8 +401,7 @@ fn stream_slice<'a>(
         .ok_or_else(|| DotNetError::Malformed(format!("Invalid size for #{name}")))?;
     metadata
         .get(start..end)
-        .context("Stream range outside metadata")
-        .map_err(|e| DotNetError::Malformed(e.to_string()))
+        .ok_or_else(|| DotNetError::Malformed("Stream range outside metadata".into()))
 }
 
 fn heap_string(heap: &[u8], index: u32) -> DotNetResult<String> {

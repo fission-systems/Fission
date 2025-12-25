@@ -1,4 +1,14 @@
-//! Common types for debugging functionality.
+//! Common Types for Debugging Functionality
+//!
+//! This module defines the core data structures used throughout the debug system:
+//!
+//! - [`ProcessInfo`] - Basic information about a running process
+//! - [`DebugEvent`] - Events received from the debugger (breakpoints, exceptions, etc.)
+//! - [`DebugState`] - Current state of the debugging session
+//! - [`RegisterState`] - CPU register values (x86-64)
+//! - [`Breakpoint`] - Software breakpoint representation
+//!
+//! These types are platform-agnostic and used by all debugger implementations.
 
 use std::collections::HashMap;
 

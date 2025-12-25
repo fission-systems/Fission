@@ -113,7 +113,7 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     ui.add_space(4.0);
     
     // List plugins - clone to avoid borrow issues
-    let plugins: Vec<_> = if let Ok(mgr) = state.plugin_manager.read() {
+    let plugins: Vec<_> = if let Ok(mgr) = state.plugin_manager().read() {
         mgr.list_plugins().into_iter().cloned().collect()
     } else {
         Vec::new()
@@ -180,7 +180,7 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     
     // Apply toggle action after rendering
     if let Some((plugin_id, was_enabled, name)) = toggle_action {
-        let result = if let Ok(mut mgr) = state.plugin_manager.write() {
+        let result = if let Ok(mut mgr) = state.plugin_manager().write() {
             if was_enabled {
                 let _ = mgr.disable_plugin(&plugin_id);
                 Some(format!("[*] Disabled plugin: {}", name))
@@ -194,7 +194,7 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
         
         if let Some(msg) = result {
             state.log(msg);
-        } else if state.plugin_manager.write().is_err() {
+        } else if state.plugin_manager().write().is_err() {
              state.log(format!("[!] Failed to acquire write lock for plugin manager to toggle {}", name));
         }
     }

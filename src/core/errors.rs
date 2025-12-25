@@ -143,6 +143,13 @@ impl From<goblin::error::Error> for FissionError {
     }
 }
 
+// Allow implicit conversion from serde_json errors
+impl From<serde_json::Error> for FissionError {
+    fn from(err: serde_json::Error) -> Self {
+        FissionError::Other(err.to_string())
+    }
+}
+
 // Helper to convert to anyhow::Error (avoids orphan rule conflict)
 impl FissionError {
     pub fn to_anyhow(self) -> anyhow::Error {

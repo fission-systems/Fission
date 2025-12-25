@@ -9,7 +9,7 @@ use std::fs;
 use std::ffi::CString;
 use std::collections::HashMap;
 
-use super::hooks::{PluginEvent, PluginEventType};
+use crate::core::events::{FissionEvent, FissionEventType};
 use super::api::{PluginInfo, PluginType, BinaryInfo};
 
 /// Python plugin runtime
@@ -89,7 +89,7 @@ impl PythonRuntime {
     }
     
     /// Call a hook function in a plugin
-    pub fn call_hook(&self, plugin_id: &str, hook_name: &str, event: &PluginEvent) -> PyResult<()> {
+    pub fn call_hook(&self, plugin_id: &str, hook_name: &str, event: &FissionEvent) -> PyResult<()> {
         let module = self.modules.get(plugin_id)
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyKeyError, _>(
                 format!("Plugin '{}' not found", plugin_id)
@@ -112,25 +112,27 @@ impl PythonRuntime {
     }
     
     /// Dispatch an event to all plugins
-    pub fn dispatch_event(&self, event: &PluginEvent, event_bus: Option<&crate::core::events::EventBus>) {
+    pub fn dispatch_event(&self, event: &FissionEvent, event_bus: Option<&crate::core::events::EventBus>) {
         let hook_name = match event.event_type() {
-            PluginEventType::BinaryLoaded => "on_binary_loaded",
-            PluginEventType::FunctionDecompiled => "on_function_decompiled",
-            PluginEventType::BreakpointHit => "on_breakpoint_hit",
-            PluginEventType::DebugStep => "on_debug_step",
-            PluginEventType::AppStarted => "on_app_started",
-            PluginEventType::AppShutdown => "on_app_shutdown",
-            PluginEventType::CommandExecuted => "on_command_executed",
-            PluginEventType::All => return, // Can't dispatch to "All"
+            FissionEventType::BinaryLoaded => "on_binary_loaded",
+            FissionEventType::DecompilationSuccess => "on_function_decompiled",
+            FissionEventType::BreakpointHit => "on_breakpoint_hit",
+            FissionEventType::DebugStep => "on_debug_step",
+            FissionEventType::AppStarted => "on_app_started",
+            FissionEventType::AppShutdown => "on_app_shutdown",
+            FissionEventType::CommandExecuted => "on_command_executed",
+            FissionEventType::All => return, // Can't dispatch to "All"
+            // Other events don't have Python hooks yet
+            _ => return,
         };
         
         for plugin_id in self.modules.keys() {
             if let Err(e) = self.call_hook(plugin_id, hook_name, event) {
                 let error_msg = format!("Plugin '{}' hook '{}' error: {:?}", plugin_id, hook_name, e);
-                eprintln!("{}", error_msg);
+                crate::core::logging::error(&error_msg);
                 
                 if let Some(bus) = event_bus {
-                    bus.publish(crate::core::events::FissionEvent::LogMessage {
+                    bus.publish(FissionEvent::LogMessage {
                         level: "error".into(),
                         message: error_msg,
                         target: "plugin".into(),
@@ -140,12 +142,12 @@ impl PythonRuntime {
         }
     }
     
-    /// Convert a PluginEvent to a Python dict
-    fn event_to_pydict<'py>(&self, py: Python<'py>, event: &PluginEvent) -> PyResult<Bound<'py, PyDict>> {
+    /// Convert a FissionEvent to a Python dict
+    fn event_to_pydict<'py>(&self, py: Python<'py>, event: &FissionEvent) -> PyResult<Bound<'py, PyDict>> {
         let dict = PyDict::new(py);
         
         match event {
-            PluginEvent::BinaryLoaded { binary } => {
+            FissionEvent::BinaryLoaded(binary) => {
                 let info = BinaryInfo::from(binary.as_ref());
                 dict.set_item("type", "binary_loaded")?;
                 dict.set_item("path", &info.path)?;
@@ -154,33 +156,37 @@ impl PythonRuntime {
                 dict.set_item("entry_point", info.entry_point)?;
                 dict.set_item("function_count", info.function_count)?;
             }
-            PluginEvent::FunctionDecompiled { address, name, code } => {
+            FissionEvent::DecompilationSuccess { address, function_name, code } => {
                 dict.set_item("type", "function_decompiled")?;
                 dict.set_item("address", *address)?;
-                dict.set_item("name", name)?;
+                dict.set_item("name", function_name.as_deref().unwrap_or(""))?;
                 dict.set_item("code", code)?;
             }
-            PluginEvent::BreakpointHit { address, thread_id } => {
+            FissionEvent::BreakpointHit { address, thread_id } => {
                 dict.set_item("type", "breakpoint_hit")?;
                 dict.set_item("address", *address)?;
                 dict.set_item("thread_id", *thread_id)?;
             }
-            PluginEvent::DebugStep { registers, thread_id } => {
+            FissionEvent::DebugStep { registers, thread_id } => {
                 dict.set_item("type", "debug_step")?;
                 dict.set_item("thread_id", *thread_id)?;
                 dict.set_item("rip", registers.rip)?;
                 dict.set_item("rsp", registers.rsp)?;
                 dict.set_item("rax", registers.rax)?;
             }
-            PluginEvent::AppStarted => {
+            FissionEvent::AppStarted => {
                 dict.set_item("type", "app_started")?;
             }
-            PluginEvent::AppShutdown => {
+            FissionEvent::AppShutdown => {
                 dict.set_item("type", "app_shutdown")?;
             }
-            PluginEvent::CommandExecuted { command } => {
+            FissionEvent::CommandExecuted { command } => {
                 dict.set_item("type", "command_executed")?;
                 dict.set_item("command", command)?;
+            }
+            // Other events not exposed to Python yet
+            _ => {
+                dict.set_item("type", "unknown")?;
             }
         }
         

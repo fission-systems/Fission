@@ -9,12 +9,20 @@ use std::io::{Write, BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
 use crate::config::CONFIG;
+use crate::core::errors::{Result, FissionError};
 
-/// Max empty lines before giving up (prevents infinite loop)
+/// Maximum consecutive empty lines to tolerate when reading decompiler output.
+/// 
+/// When the decompiler subprocess sends output, empty lines can occur between
+/// chunks. This limit prevents infinite loops if the process becomes unresponsive.
+/// After receiving this many consecutive empty lines without valid content,
+/// the read operation times out.
+/// 
+/// This value is tuned for typical decompiler behavior - increase if handling
+/// very large functions that may produce sparse output.
 const MAX_EMPTY_LINES: usize = 10;
 
 /// Decompiler JSON response structure
@@ -48,7 +56,7 @@ impl DecompilerServer {
     pub fn new<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str) -> Result<Self> {
         let path = cli_path.as_ref().to_path_buf();
         if !path.exists() {
-            return Err(anyhow!("Decompiler CLI not found: {:?}", path));
+            return Err(FissionError::decompiler(format!("Decompiler CLI not found: {:?}", path)));
         }
         Ok(Self {
             cli_path: path,
@@ -96,7 +104,7 @@ impl DecompilerServer {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .map_err(|e| anyhow!("Failed to spawn decompiler server: {}", e))?;
+            .map_err(|e| FissionError::decompiler(format!("Failed to spawn decompiler server: {}", e)))?;
 
         self.stdin = child.stdin.take();
         
@@ -129,7 +137,7 @@ impl DecompilerServer {
             self.cached_sla_dir.clone(),
             self.cached_image_base
         ) {
-            eprintln!("[DecompilerServer] Recovering binary context after restart...");
+            crate::core::logging::info("[DecompilerServer] Recovering binary context after restart...");
             // Dynamic timeout: base + ~1ms per KB
             let timeout = CONFIG.decompiler.timeout_ms + (bytes.len() as u64 / 1024);
             self.load_binary_internal_with_timeout(&bytes, &sla_dir, image_base, timeout)?;
@@ -153,7 +161,7 @@ impl DecompilerServer {
             writeln!(stdin, "{}", request)?;
             stdin.flush()?;
         } else {
-             return Err(anyhow!("Server stdin not available"));
+             return Err(FissionError::decompiler("Server stdin not available"));
         }
         
         // Read response with timeout
@@ -169,7 +177,7 @@ impl DecompilerServer {
         // Dynamic timeout: base + ~1ms per KB
         let timeout = CONFIG.decompiler.timeout_ms + (bytes.len() as u64 / 1024);
         self.load_binary_internal_with_timeout(bytes, sla_dir, image_base, timeout)
-            .map_err(|e| anyhow!("Failed to load binary: {}", e))?;
+            .map_err(|e| FissionError::decompiler(format!("Failed to load binary: {}", e)))?;
         
         // Cache context for recovery AFTER successful load (not before!)
         self.cached_binary = Some(bytes.to_vec());
@@ -184,7 +192,7 @@ impl DecompilerServer {
         // Check periodic restart
         let restart_threshold = CONFIG.decompiler.requests_before_restart;
         if restart_threshold > 0 && self.request_count >= restart_threshold {
-            eprintln!("[DecompilerServer] Restarting after {} requests to reclaim memory", self.request_count);
+            crate::core::logging::info(&format!("[DecompilerServer] Restarting after {} requests to reclaim memory", self.request_count));
             self.shutdown();
             self.request_count = 0;
         }
@@ -210,7 +218,7 @@ impl DecompilerServer {
             writeln!(stdin, "{}", request)?;
             stdin.flush()?;
         } else {
-            return Err(anyhow!("Server stdin not available"));
+            return Err(FissionError::decompiler("Server stdin not available"));
         }
 
         // Read response with timeout
@@ -218,7 +226,7 @@ impl DecompilerServer {
             Ok(res) => res,
             Err(e) => {
                 // Timeout or Error -> Kill process to stop memory leak
-                eprintln!("[DecompilerServer] Error/Timeout detected: {}. Restarting process...", e);
+                crate::core::logging::warn(&format!("[DecompilerServer] Error/Timeout detected: {}. Restarting process...", e));
                 self.shutdown(); // Kill
                 return Err(e); // Propagate error, caller can retry
             }
@@ -239,24 +247,24 @@ impl DecompilerServer {
                      while response.trim().is_empty() {
                           empty_retries += 1;
                           if empty_retries > MAX_EMPTY_LINES {
-                              return Err(anyhow!("Too many empty lines from decompiler"));
+                              return Err(FissionError::decompiler("Too many empty lines from decompiler"));
                           }
                           match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
                               Ok(l) => response = l,
-                              Err(_) => return Err(anyhow!("Timeout waiting for non-empty response")),
+                              Err(_) => return Err(FissionError::decompiler("Timeout waiting for non-empty response")),
                           }
                      }
                      Ok(response)
                  },
                  Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                     Err(anyhow!("Decompiler timed out after {}ms", timeout_ms))
+                     Err(FissionError::decompiler(format!("Decompiler timed out after {}ms", timeout_ms)))
                  },
                  Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                     Err(anyhow!("Decompiler process exited unexpectedly"))
+                     Err(FissionError::decompiler("Decompiler process exited unexpectedly"))
                  }
              }
         } else {
-             Err(anyhow!("Stdout receiver not available"))
+             Err(FissionError::decompiler("Stdout receiver not available"))
         }
     }
     
@@ -305,12 +313,12 @@ pub fn create_shared_server<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &st
 /// Parse decompiler JSON response using serde_json
 fn parse_decompiler_response(response: &str) -> Result<String> {
     let resp: DecompilerResponse = serde_json::from_str(response)
-        .map_err(|e| anyhow!("Invalid JSON response: {} (raw: {})", e, response))?;
+        .map_err(|e| FissionError::decompiler(format!("Invalid JSON response: {} (raw: {})", e, response)))?;
     
     match resp.status.as_str() {
-        "ok" => resp.code.ok_or_else(|| anyhow!("Missing 'code' field in response")),
-        "error" => Err(anyhow!("Decompiler error: {}", resp.message.unwrap_or_default())),
-        _ => Err(anyhow!("Unknown status: {}", resp.status)),
+        "ok" => resp.code.ok_or_else(|| FissionError::decompiler("Missing 'code' field in response")),
+        "error" => Err(FissionError::decompiler(format!("Decompiler error: {}", resp.message.unwrap_or_default()))),
+        _ => Err(FissionError::decompiler(format!("Unknown status: {}", resp.status))),
     }
 }
 
@@ -360,7 +368,7 @@ impl DecompilerPool {
         for i in 0..num_workers {
             match DecompilerServer::new(&cli_path, sla_dir) {
                 Ok(server) => {
-                    eprintln!("[DecompilerPool] Created worker {}/{}", i + 1, num_workers);
+                    crate::core::logging::info(&format!("[DecompilerPool] Created worker {}/{}", i + 1, num_workers));
                     workers.push(Mutex::new(server));
                 }
                 Err(e) => {
@@ -368,13 +376,13 @@ impl DecompilerPool {
                     if workers.is_empty() {
                         return Err(e);
                     }
-                    eprintln!("[DecompilerPool] Warning: Could not create worker {}: {}", i + 1, e);
+                    crate::core::logging::warn(&format!("[DecompilerPool] Warning: Could not create worker {}: {}", i + 1, e));
                     break;
                 }
             }
         }
         
-        eprintln!("[DecompilerPool] Initialized with {} workers", workers.len());
+        crate::core::logging::info(&format!("[DecompilerPool] Initialized with {} workers", workers.len()));
         
         Ok(Self {
             workers,
@@ -400,19 +408,19 @@ impl DecompilerPool {
             match worker.lock() {
                 Ok(mut guard) => {
                     if let Err(e) = guard.load_binary(bytes, sla_dir, image_base) {
-                         eprintln!("[DecompilerPool] Worker {} failed to load binary: {}", i, e);
+                         crate::core::logging::warn(&format!("[DecompilerPool] Worker {} failed to load binary: {}", i, e));
                     } else {
                          success_count += 1;
                     }
                 },
-                Err(e) => eprintln!("[DecompilerPool] Failed to lock worker {}: {}", i, e),
+                Err(e) => crate::core::logging::warn(&format!("[DecompilerPool] Failed to lock worker {}: {}", i, e)),
             }
         }
         
         if success_count == 0 && workers_count > 0 {
-            Err(anyhow!("All workers failed to load binary"))
+            Err(FissionError::decompiler("All workers failed to load binary"))
         } else {
-            eprintln!("[DecompilerPool] Binary loaded into {}/{} workers", success_count, workers_count);
+            crate::core::logging::info(&format!("[DecompilerPool] Binary loaded into {}/{} workers", success_count, workers_count));
             Ok(())
         }
     }
@@ -431,7 +439,7 @@ impl DecompilerPool {
         // Strategy 2: All workers busy - use round-robin to queue fairly
         let worker_idx = self.next_worker.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % self.workers.len();
         let mut worker = self.workers[worker_idx].lock()
-            .map_err(|_| anyhow!("Worker mutex poisoned"))?;
+            .map_err(|_| FissionError::decompiler("Worker mutex poisoned"))?;
 
         worker.decompile(bytes, base_addr, is_64bit)
     }

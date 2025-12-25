@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use crate::core::events::EventBus;
-use super::hooks::{PluginEvent, PluginEventType, PluginHook, HookPriority};
+use crate::core::events::{EventBus, FissionEvent, FissionEventType};
+use super::hooks::{PluginHook, HookPriority};
 use super::api::{PluginInfo, PluginType, PluginAPI, BinaryInfo};
 use super::traits::{FissionPlugin, PluginContext};
 
 /// Callback function type for plugin hooks
-pub type HookCallback = Box<dyn Fn(&PluginEvent) + Send + Sync>;
+pub type HookCallback = Box<dyn Fn(&FissionEvent) + Send + Sync>;
 
 /// A loaded plugin
 struct LoadedPlugin {
@@ -201,12 +201,12 @@ impl PluginManager {
     pub fn register_hook<F>(
         &mut self,
         plugin_id: &str,
-        event_type: PluginEventType,
+        event_type: FissionEventType,
         priority: HookPriority,
         callback: F,
     ) -> Result<u64, String>
     where
-        F: Fn(&PluginEvent) + Send + Sync + 'static,
+        F: Fn(&FissionEvent) + Send + Sync + 'static,
     {
         let plugin = self.plugins.get_mut(plugin_id)
             .ok_or_else(|| format!("Plugin '{}' not found", plugin_id))?;
@@ -241,7 +241,7 @@ impl PluginManager {
     }
     
     /// Emit an event to all registered hooks and plugins
-    pub fn emit_event(&self, event: &PluginEvent) {
+    pub fn emit_event(&self, event: &FissionEvent) {
         // 1. Dispatch to trait-based plugins
         if let Some(api) = &self.api {
             let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
@@ -251,11 +251,11 @@ impl PluginManager {
                 
                 if let Some(instance) = &plugin.instance {
                     match event {
-                        PluginEvent::BinaryLoaded { binary } => {
+                        FissionEvent::BinaryLoaded(binary) => {
                             let info = BinaryInfo::from(binary.as_ref());
                             instance.on_binary_loaded(&ctx, &info)
                         },
-                        PluginEvent::FunctionDecompiled { address, code, name: _ } => {
+                        FissionEvent::DecompilationSuccess { address, code, .. } => {
                             instance.on_function_decompiled(&ctx, *address, code)
                         },
                         _ => {} // Other events not mapped to trait methods yet
@@ -282,7 +282,7 @@ impl PluginManager {
                     if !plugin.info.enabled { return false; }
                 }
                 
-                hook.event_type == event_type || hook.event_type == PluginEventType::All
+                hook.event_type == event_type || hook.event_type == FissionEventType::All
             })
             .collect();
         
@@ -398,7 +398,7 @@ mod tests {
         
         let hook_id = pm.register_hook(
             &plugin_id,
-            PluginEventType::AppStarted,
+            FissionEventType::AppStarted,
             HookPriority::Normal,
             move |_| {
                 counter_clone.fetch_add(1, Ordering::SeqCst);
@@ -408,7 +408,7 @@ mod tests {
         assert_eq!(pm.hook_count(), 1);
         
         // Emit event
-        pm.emit_event(&PluginEvent::AppStarted);
+        pm.emit_event(&FissionEvent::AppStarted);
         assert_eq!(counter.load(Ordering::SeqCst), 1);
         
         // Unregister hook
@@ -425,7 +425,7 @@ mod tests {
         fn name(&self) -> &str { "EventBus Plugin" }
         fn on_load(&mut self, ctx: &PluginContext) -> crate::core::prelude::Result<()> {
             if let Some(bus) = &ctx.event_bus {
-                bus.publish(crate::core::events::FissionEvent::LogMessage { 
+                bus.publish(FissionEvent::LogMessage { 
                     level: "info".into(),
                     message: "Plugin loaded".into(),
                     target: "plugin".into(),
@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn test_plugin_event_bus() {
         let mut pm = PluginManager::new();
-        let event_bus = Arc::new(crate::core::events::EventBus::new());
+        let event_bus = Arc::new(EventBus::new());
         pm.set_event_bus(event_bus.clone());
         
         // Mock API is needed for on_load to be called
@@ -459,7 +459,7 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
         event_bus.subscribe(move |event| {
-            if let crate::core::events::FissionEvent::LogMessage { message, .. } = event {
+            if let FissionEvent::LogMessage { message, .. } = event {
                 if message == "Plugin loaded" {
                     counter_clone.fetch_add(1, Ordering::SeqCst);
                 }

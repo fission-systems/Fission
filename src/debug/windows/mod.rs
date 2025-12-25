@@ -4,8 +4,8 @@ mod process;
 
 pub use process::enumerate_processes;
 
-use super::types::{DebugState, DebugStatus, ProcessInfo};
-use super::Debugger;
+use super::types::{DebugState, DebugStatus, ProcessInfo, RegisterState, Breakpoint};
+use super::traits::Debugger;
 use super::ttd::Timeline;
 
 use std::sync::mpsc::{Receiver, Sender};
