@@ -809,6 +809,357 @@ impl WindowsStructures {
                 FieldDef { name: "NameLength", type_name: "ULONG", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
             ],
         });
+
+        // ====================================================================
+        // PE Export/Import (Binary Analysis)
+        // ====================================================================
+
+        // IMAGE_EXPORT_DIRECTORY
+        self.add(StructDef {
+            name: "IMAGE_EXPORT_DIRECTORY",
+            size_32: 40,
+            size_64: 40,
+            fields: vec![
+                FieldDef { name: "Characteristics", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "TimeDateStamp", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "MajorVersion", type_name: "WORD", offset_32: 8, offset_64: 8, size_32: 2, size_64: 2 },
+                FieldDef { name: "MinorVersion", type_name: "WORD", offset_32: 10, offset_64: 10, size_32: 2, size_64: 2 },
+                FieldDef { name: "Name", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "Base", type_name: "DWORD", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
+                FieldDef { name: "NumberOfFunctions", type_name: "DWORD", offset_32: 20, offset_64: 20, size_32: 4, size_64: 4 },
+                FieldDef { name: "NumberOfNames", type_name: "DWORD", offset_32: 24, offset_64: 24, size_32: 4, size_64: 4 },
+                FieldDef { name: "AddressOfFunctions", type_name: "DWORD", offset_32: 28, offset_64: 28, size_32: 4, size_64: 4 },
+                FieldDef { name: "AddressOfNames", type_name: "DWORD", offset_32: 32, offset_64: 32, size_32: 4, size_64: 4 },
+                FieldDef { name: "AddressOfNameOrdinals", type_name: "DWORD", offset_32: 36, offset_64: 36, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // IMAGE_THUNK_DATA32
+        self.add(StructDef {
+            name: "IMAGE_THUNK_DATA32",
+            size_32: 4,
+            size_64: 0,
+            fields: vec![
+                FieldDef { name: "u1", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 0 },
+            ],
+        });
+
+        // IMAGE_THUNK_DATA64
+        self.add(StructDef {
+            name: "IMAGE_THUNK_DATA64",
+            size_32: 0,
+            size_64: 8,
+            fields: vec![
+                FieldDef { name: "u1", type_name: "ULONGLONG", offset_32: 0, offset_64: 0, size_32: 0, size_64: 8 },
+            ],
+        });
+
+        // IMAGE_IMPORT_BY_NAME
+        self.add(StructDef {
+            name: "IMAGE_IMPORT_BY_NAME",
+            size_32: 4,
+            size_64: 4,
+            fields: vec![
+                FieldDef { name: "Hint", type_name: "WORD", offset_32: 0, offset_64: 0, size_32: 2, size_64: 2 },
+                FieldDef { name: "Name", type_name: "CHAR[1]", offset_32: 2, offset_64: 2, size_32: 1, size_64: 1 },
+            ],
+        });
+
+        // IMAGE_BASE_RELOCATION
+        self.add(StructDef {
+            name: "IMAGE_BASE_RELOCATION",
+            size_32: 8,
+            size_64: 8,
+            fields: vec![
+                FieldDef { name: "VirtualAddress", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "SizeOfBlock", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // IMAGE_RESOURCE_DIRECTORY
+        self.add(StructDef {
+            name: "IMAGE_RESOURCE_DIRECTORY",
+            size_32: 16,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "Characteristics", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "TimeDateStamp", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "MajorVersion", type_name: "WORD", offset_32: 8, offset_64: 8, size_32: 2, size_64: 2 },
+                FieldDef { name: "MinorVersion", type_name: "WORD", offset_32: 10, offset_64: 10, size_32: 2, size_64: 2 },
+                FieldDef { name: "NumberOfNamedEntries", type_name: "WORD", offset_32: 12, offset_64: 12, size_32: 2, size_64: 2 },
+                FieldDef { name: "NumberOfIdEntries", type_name: "WORD", offset_32: 14, offset_64: 14, size_32: 2, size_64: 2 },
+            ],
+        });
+
+        // ====================================================================
+        // NT Internals (Anti-debug/Injection Analysis)
+        // ====================================================================
+
+        // CLIENT_ID
+        self.add(StructDef {
+            name: "CLIENT_ID",
+            size_32: 8,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "UniqueProcess", type_name: "HANDLE", offset_32: 0, offset_64: 0, size_32: 4, size_64: 8 },
+                FieldDef { name: "UniqueThread", type_name: "HANDLE", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // OBJECT_ATTRIBUTES
+        self.add(StructDef {
+            name: "OBJECT_ATTRIBUTES",
+            size_32: 24,
+            size_64: 48,
+            fields: vec![
+                FieldDef { name: "Length", type_name: "ULONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "RootDirectory", type_name: "HANDLE", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "ObjectName", type_name: "PUNICODE_STRING", offset_32: 8, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "Attributes", type_name: "ULONG", offset_32: 12, offset_64: 24, size_32: 4, size_64: 4 },
+                FieldDef { name: "SecurityDescriptor", type_name: "PVOID", offset_32: 16, offset_64: 32, size_32: 4, size_64: 8 },
+                FieldDef { name: "SecurityQualityOfService", type_name: "PVOID", offset_32: 20, offset_64: 40, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // IO_STATUS_BLOCK
+        self.add(StructDef {
+            name: "IO_STATUS_BLOCK",
+            size_32: 8,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "Status", type_name: "NTSTATUS", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "Information", type_name: "ULONG_PTR", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // RTL_USER_PROCESS_PARAMETERS
+        self.add(StructDef {
+            name: "RTL_USER_PROCESS_PARAMETERS",
+            size_32: 0x290,
+            size_64: 0x410,
+            fields: vec![
+                FieldDef { name: "MaximumLength", type_name: "ULONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "Length", type_name: "ULONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "Flags", type_name: "ULONG", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "DebugFlags", type_name: "ULONG", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "ConsoleHandle", type_name: "HANDLE", offset_32: 16, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "ImagePathName", type_name: "UNICODE_STRING", offset_32: 56, offset_64: 96, size_32: 8, size_64: 16 },
+                FieldDef { name: "CommandLine", type_name: "UNICODE_STRING", offset_32: 64, offset_64: 112, size_32: 8, size_64: 16 },
+                FieldDef { name: "Environment", type_name: "PVOID", offset_32: 72, offset_64: 128, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // ====================================================================
+        // Debug/Injection
+        // ====================================================================
+
+        // DEBUG_EVENT
+        self.add(StructDef {
+            name: "DEBUG_EVENT",
+            size_32: 96,
+            size_64: 176,
+            fields: vec![
+                FieldDef { name: "dwDebugEventCode", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwProcessId", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwThreadId", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "u", type_name: "UNION", offset_32: 12, offset_64: 16, size_32: 84, size_64: 160 },
+            ],
+        });
+
+        // EXCEPTION_POINTERS
+        self.add(StructDef {
+            name: "EXCEPTION_POINTERS",
+            size_32: 8,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "ExceptionRecord", type_name: "PEXCEPTION_RECORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 8 },
+                FieldDef { name: "ContextRecord", type_name: "PCONTEXT", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // ====================================================================
+        // Security (Privilege Escalation Analysis)
+        // ====================================================================
+
+        // ACL
+        self.add(StructDef {
+            name: "ACL",
+            size_32: 8,
+            size_64: 8,
+            fields: vec![
+                FieldDef { name: "AclRevision", type_name: "BYTE", offset_32: 0, offset_64: 0, size_32: 1, size_64: 1 },
+                FieldDef { name: "Sbz1", type_name: "BYTE", offset_32: 1, offset_64: 1, size_32: 1, size_64: 1 },
+                FieldDef { name: "AclSize", type_name: "WORD", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
+                FieldDef { name: "AceCount", type_name: "WORD", offset_32: 4, offset_64: 4, size_32: 2, size_64: 2 },
+                FieldDef { name: "Sbz2", type_name: "WORD", offset_32: 6, offset_64: 6, size_32: 2, size_64: 2 },
+            ],
+        });
+
+        // ACE_HEADER
+        self.add(StructDef {
+            name: "ACE_HEADER",
+            size_32: 4,
+            size_64: 4,
+            fields: vec![
+                FieldDef { name: "AceType", type_name: "BYTE", offset_32: 0, offset_64: 0, size_32: 1, size_64: 1 },
+                FieldDef { name: "AceFlags", type_name: "BYTE", offset_32: 1, offset_64: 1, size_32: 1, size_64: 1 },
+                FieldDef { name: "AceSize", type_name: "WORD", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
+            ],
+        });
+
+        // SECURITY_DESCRIPTOR
+        self.add(StructDef {
+            name: "SECURITY_DESCRIPTOR",
+            size_32: 20,
+            size_64: 40,
+            fields: vec![
+                FieldDef { name: "Revision", type_name: "BYTE", offset_32: 0, offset_64: 0, size_32: 1, size_64: 1 },
+                FieldDef { name: "Sbz1", type_name: "BYTE", offset_32: 1, offset_64: 1, size_32: 1, size_64: 1 },
+                FieldDef { name: "Control", type_name: "WORD", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
+                FieldDef { name: "Owner", type_name: "PSID", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "Group", type_name: "PSID", offset_32: 8, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "Sacl", type_name: "PACL", offset_32: 12, offset_64: 24, size_32: 4, size_64: 8 },
+                FieldDef { name: "Dacl", type_name: "PACL", offset_32: 16, offset_64: 32, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // SID
+        self.add(StructDef {
+            name: "SID",
+            size_32: 12,
+            size_64: 12,
+            fields: vec![
+                FieldDef { name: "Revision", type_name: "BYTE", offset_32: 0, offset_64: 0, size_32: 1, size_64: 1 },
+                FieldDef { name: "SubAuthorityCount", type_name: "BYTE", offset_32: 1, offset_64: 1, size_32: 1, size_64: 1 },
+                FieldDef { name: "IdentifierAuthority", type_name: "SID_IDENTIFIER_AUTHORITY", offset_32: 2, offset_64: 2, size_32: 6, size_64: 6 },
+                FieldDef { name: "SubAuthority", type_name: "DWORD[1]", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // TOKEN_USER
+        self.add(StructDef {
+            name: "TOKEN_USER",
+            size_32: 8,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "User", type_name: "SID_AND_ATTRIBUTES", offset_32: 0, offset_64: 0, size_32: 8, size_64: 16 },
+            ],
+        });
+
+        // SID_AND_ATTRIBUTES
+        self.add(StructDef {
+            name: "SID_AND_ATTRIBUTES",
+            size_32: 8,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "Sid", type_name: "PSID", offset_32: 0, offset_64: 0, size_32: 4, size_64: 8 },
+                FieldDef { name: "Attributes", type_name: "DWORD", offset_32: 4, offset_64: 8, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // ====================================================================
+        // Networking (C2 Analysis)
+        // ====================================================================
+
+        // SOCKADDR_IN6
+        self.add(StructDef {
+            name: "SOCKADDR_IN6",
+            size_32: 28,
+            size_64: 28,
+            fields: vec![
+                FieldDef { name: "sin6_family", type_name: "SHORT", offset_32: 0, offset_64: 0, size_32: 2, size_64: 2 },
+                FieldDef { name: "sin6_port", type_name: "USHORT", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
+                FieldDef { name: "sin6_flowinfo", type_name: "ULONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "sin6_addr", type_name: "IN6_ADDR", offset_32: 8, offset_64: 8, size_32: 16, size_64: 16 },
+                FieldDef { name: "sin6_scope_id", type_name: "ULONG", offset_32: 24, offset_64: 24, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // IN_ADDR
+        self.add(StructDef {
+            name: "IN_ADDR",
+            size_32: 4,
+            size_64: 4,
+            fields: vec![
+                FieldDef { name: "S_addr", type_name: "ULONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // IN6_ADDR
+        self.add(StructDef {
+            name: "IN6_ADDR",
+            size_32: 16,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "Byte", type_name: "UCHAR[16]", offset_32: 0, offset_64: 0, size_32: 16, size_64: 16 },
+            ],
+        });
+
+        // ADDRINFO
+        self.add(StructDef {
+            name: "ADDRINFO",
+            size_32: 32,
+            size_64: 48,
+            fields: vec![
+                FieldDef { name: "ai_flags", type_name: "INT", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "ai_family", type_name: "INT", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "ai_socktype", type_name: "INT", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "ai_protocol", type_name: "INT", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "ai_addrlen", type_name: "SIZE_T", offset_32: 16, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "ai_canonname", type_name: "PCHAR", offset_32: 20, offset_64: 24, size_32: 4, size_64: 8 },
+                FieldDef { name: "ai_addr", type_name: "PSOCKADDR", offset_32: 24, offset_64: 32, size_32: 4, size_64: 8 },
+                FieldDef { name: "ai_next", type_name: "PADDRINFO", offset_32: 28, offset_64: 40, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // ====================================================================
+        // Service (Persistence Analysis)
+        // ====================================================================
+
+        // SERVICE_STATUS
+        self.add(StructDef {
+            name: "SERVICE_STATUS",
+            size_32: 28,
+            size_64: 28,
+            fields: vec![
+                FieldDef { name: "dwServiceType", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwCurrentState", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwControlsAccepted", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwWin32ExitCode", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwServiceSpecificExitCode", type_name: "DWORD", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwCheckPoint", type_name: "DWORD", offset_32: 20, offset_64: 20, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwWaitHint", type_name: "DWORD", offset_32: 24, offset_64: 24, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // SERVICE_TABLE_ENTRYW
+        self.add(StructDef {
+            name: "SERVICE_TABLE_ENTRYW",
+            size_32: 8,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "lpServiceName", type_name: "LPWSTR", offset_32: 0, offset_64: 0, size_32: 4, size_64: 8 },
+                FieldDef { name: "lpServiceProc", type_name: "LPSERVICE_MAIN_FUNCTION", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // SERVICE_STATUS_PROCESS
+        self.add(StructDef {
+            name: "SERVICE_STATUS_PROCESS",
+            size_32: 36,
+            size_64: 36,
+            fields: vec![
+                FieldDef { name: "dwServiceType", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwCurrentState", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwControlsAccepted", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwWin32ExitCode", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwServiceSpecificExitCode", type_name: "DWORD", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwCheckPoint", type_name: "DWORD", offset_32: 20, offset_64: 20, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwWaitHint", type_name: "DWORD", offset_32: 24, offset_64: 24, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwProcessId", type_name: "DWORD", offset_32: 28, offset_64: 28, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwServiceFlags", type_name: "DWORD", offset_32: 32, offset_64: 32, size_32: 4, size_64: 4 },
+            ],
+        });
     }
     
     /// Get structure by name
