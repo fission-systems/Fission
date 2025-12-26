@@ -664,20 +664,149 @@ impl WindowsStructures {
             ],
         });
 
-        // CONTEXT (x64 simplified - key registers only)
+        // CONTEXT_X86 (32-bit Architecture)
         self.add(StructDef {
-            name: "CONTEXT",
+            name: "CONTEXT_X86",
             size_32: 716,
+            size_64: 0,
+            fields: vec![
+                FieldDef { name: "ContextFlags", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Dr0", type_name: "DWORD", offset_32: 4, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Dr1", type_name: "DWORD", offset_32: 8, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Dr2", type_name: "DWORD", offset_32: 12, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Dr3", type_name: "DWORD", offset_32: 16, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SegGs", type_name: "DWORD", offset_32: 140, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SegFs", type_name: "DWORD", offset_32: 144, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SegEs", type_name: "DWORD", offset_32: 148, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SegDs", type_name: "DWORD", offset_32: 152, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Edi", type_name: "DWORD", offset_32: 156, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Esi", type_name: "DWORD", offset_32: 160, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Ebx", type_name: "DWORD", offset_32: 164, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Edx", type_name: "DWORD", offset_32: 168, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Ecx", type_name: "DWORD", offset_32: 172, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Eax", type_name: "DWORD", offset_32: 176, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Ebp", type_name: "DWORD", offset_32: 180, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Eip", type_name: "DWORD", offset_32: 184, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SegCs", type_name: "DWORD", offset_32: 188, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "EFlags", type_name: "DWORD", offset_32: 192, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Esp", type_name: "DWORD", offset_32: 196, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SegSs", type_name: "DWORD", offset_32: 200, offset_64: 0, size_32: 4, size_64: 0 },
+            ],
+        });
+
+        // CONTEXT_X64 (64-bit Architecture)
+        self.add(StructDef {
+            name: "CONTEXT_X64",
+            size_32: 0,
             size_64: 1232,
             fields: vec![
-                FieldDef { name: "ContextFlags", type_name: "DWORD", offset_32: 0, offset_64: 48, size_32: 4, size_64: 4 },
+                FieldDef { name: "P1Home", type_name: "DWORD64", offset_32: 0, offset_64: 0, size_32: 0, size_64: 8 },
+                FieldDef { name: "P2Home", type_name: "DWORD64", offset_32: 0, offset_64: 8, size_32: 0, size_64: 8 },
+                FieldDef { name: "P3Home", type_name: "DWORD64", offset_32: 0, offset_64: 16, size_32: 0, size_64: 8 },
+                FieldDef { name: "P4Home", type_name: "DWORD64", offset_32: 0, offset_64: 24, size_32: 0, size_64: 8 },
+                FieldDef { name: "P5Home", type_name: "DWORD64", offset_32: 0, offset_64: 32, size_32: 0, size_64: 8 },
+                FieldDef { name: "P6Home", type_name: "DWORD64", offset_32: 0, offset_64: 40, size_32: 0, size_64: 8 },
+                FieldDef { name: "ContextFlags", type_name: "DWORD", offset_32: 0, offset_64: 48, size_32: 0, size_64: 4 },
+                FieldDef { name: "MxCsr", type_name: "DWORD", offset_32: 0, offset_64: 52, size_32: 0, size_64: 4 },
                 FieldDef { name: "Rax", type_name: "DWORD64", offset_32: 0, offset_64: 120, size_32: 0, size_64: 8 },
                 FieldDef { name: "Rcx", type_name: "DWORD64", offset_32: 0, offset_64: 128, size_32: 0, size_64: 8 },
                 FieldDef { name: "Rdx", type_name: "DWORD64", offset_32: 0, offset_64: 136, size_32: 0, size_64: 8 },
                 FieldDef { name: "Rbx", type_name: "DWORD64", offset_32: 0, offset_64: 144, size_32: 0, size_64: 8 },
                 FieldDef { name: "Rsp", type_name: "DWORD64", offset_32: 0, offset_64: 152, size_32: 0, size_64: 8 },
                 FieldDef { name: "Rbp", type_name: "DWORD64", offset_32: 0, offset_64: 160, size_32: 0, size_64: 8 },
+                FieldDef { name: "Rsi", type_name: "DWORD64", offset_32: 0, offset_64: 168, size_32: 0, size_64: 8 },
+                FieldDef { name: "Rdi", type_name: "DWORD64", offset_32: 0, offset_64: 176, size_32: 0, size_64: 8 },
+                FieldDef { name: "R8", type_name: "DWORD64", offset_32: 0, offset_64: 184, size_32: 0, size_64: 8 },
+                FieldDef { name: "R9", type_name: "DWORD64", offset_32: 0, offset_64: 192, size_32: 0, size_64: 8 },
+                FieldDef { name: "R10", type_name: "DWORD64", offset_32: 0, offset_64: 200, size_32: 0, size_64: 8 },
+                FieldDef { name: "R11", type_name: "DWORD64", offset_32: 0, offset_64: 208, size_32: 0, size_64: 8 },
+                FieldDef { name: "R12", type_name: "DWORD64", offset_32: 0, offset_64: 216, size_32: 0, size_64: 8 },
+                FieldDef { name: "R13", type_name: "DWORD64", offset_32: 0, offset_64: 224, size_32: 0, size_64: 8 },
+                FieldDef { name: "R14", type_name: "DWORD64", offset_32: 0, offset_64: 232, size_32: 0, size_64: 8 },
+                FieldDef { name: "R15", type_name: "DWORD64", offset_32: 0, offset_64: 240, size_32: 0, size_64: 8 },
                 FieldDef { name: "Rip", type_name: "DWORD64", offset_32: 0, offset_64: 248, size_32: 0, size_64: 8 },
+            ],
+        });
+
+        // ====================================================================
+        // PE Optional Headers (32/64 split)
+        // ====================================================================
+
+        // IMAGE_OPTIONAL_HEADER32
+        self.add(StructDef {
+            name: "IMAGE_OPTIONAL_HEADER32",
+            size_32: 224,
+            size_64: 0,
+            fields: vec![
+                FieldDef { name: "Magic", type_name: "WORD", offset_32: 0, offset_64: 0, size_32: 2, size_64: 0 },
+                FieldDef { name: "MajorLinkerVersion", type_name: "BYTE", offset_32: 2, offset_64: 0, size_32: 1, size_64: 0 },
+                FieldDef { name: "MinorLinkerVersion", type_name: "BYTE", offset_32: 3, offset_64: 0, size_32: 1, size_64: 0 },
+                FieldDef { name: "SizeOfCode", type_name: "DWORD", offset_32: 4, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "AddressOfEntryPoint", type_name: "DWORD", offset_32: 16, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "BaseOfCode", type_name: "DWORD", offset_32: 20, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "BaseOfData", type_name: "DWORD", offset_32: 24, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "ImageBase", type_name: "DWORD", offset_32: 28, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SectionAlignment", type_name: "DWORD", offset_32: 32, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "FileAlignment", type_name: "DWORD", offset_32: 36, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SizeOfImage", type_name: "DWORD", offset_32: 56, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SizeOfHeaders", type_name: "DWORD", offset_32: 60, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Subsystem", type_name: "WORD", offset_32: 68, offset_64: 0, size_32: 2, size_64: 0 },
+                FieldDef { name: "NumberOfRvaAndSizes", type_name: "DWORD", offset_32: 92, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "DataDirectory", type_name: "IMAGE_DATA_DIRECTORY[16]", offset_32: 96, offset_64: 0, size_32: 128, size_64: 0 },
+            ],
+        });
+
+        // IMAGE_OPTIONAL_HEADER64
+        self.add(StructDef {
+            name: "IMAGE_OPTIONAL_HEADER64",
+            size_32: 0,
+            size_64: 240,
+            fields: vec![
+                FieldDef { name: "Magic", type_name: "WORD", offset_32: 0, offset_64: 0, size_32: 0, size_64: 2 },
+                FieldDef { name: "MajorLinkerVersion", type_name: "BYTE", offset_32: 0, offset_64: 2, size_32: 0, size_64: 1 },
+                FieldDef { name: "MinorLinkerVersion", type_name: "BYTE", offset_32: 0, offset_64: 3, size_32: 0, size_64: 1 },
+                FieldDef { name: "SizeOfCode", type_name: "DWORD", offset_32: 0, offset_64: 4, size_32: 0, size_64: 4 },
+                FieldDef { name: "AddressOfEntryPoint", type_name: "DWORD", offset_32: 0, offset_64: 16, size_32: 0, size_64: 4 },
+                FieldDef { name: "BaseOfCode", type_name: "DWORD", offset_32: 0, offset_64: 20, size_32: 0, size_64: 4 },
+                FieldDef { name: "ImageBase", type_name: "ULONGLONG", offset_32: 0, offset_64: 24, size_32: 0, size_64: 8 },
+                FieldDef { name: "SectionAlignment", type_name: "DWORD", offset_32: 0, offset_64: 32, size_32: 0, size_64: 4 },
+                FieldDef { name: "FileAlignment", type_name: "DWORD", offset_32: 0, offset_64: 36, size_32: 0, size_64: 4 },
+                FieldDef { name: "SizeOfImage", type_name: "DWORD", offset_32: 0, offset_64: 56, size_32: 0, size_64: 4 },
+                FieldDef { name: "SizeOfHeaders", type_name: "DWORD", offset_32: 0, offset_64: 60, size_32: 0, size_64: 4 },
+                FieldDef { name: "Subsystem", type_name: "WORD", offset_32: 0, offset_64: 68, size_32: 0, size_64: 2 },
+                FieldDef { name: "NumberOfRvaAndSizes", type_name: "DWORD", offset_32: 0, offset_64: 108, size_32: 0, size_64: 4 },
+                FieldDef { name: "DataDirectory", type_name: "IMAGE_DATA_DIRECTORY[16]", offset_32: 0, offset_64: 112, size_32: 0, size_64: 128 },
+            ],
+        });
+
+        // ====================================================================
+        // Windows Registry
+        // ====================================================================
+
+        // KEY_VALUE_PARTIAL_INFORMATION
+        self.add(StructDef {
+            name: "KEY_VALUE_PARTIAL_INFORMATION",
+            size_32: 16,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "TitleIndex", type_name: "ULONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "Type", type_name: "ULONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "DataLength", type_name: "ULONG", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "Data", type_name: "UCHAR[1]", offset_32: 12, offset_64: 12, size_32: 1, size_64: 1 },
+            ],
+        });
+
+        // KEY_VALUE_FULL_INFORMATION
+        self.add(StructDef {
+            name: "KEY_VALUE_FULL_INFORMATION",
+            size_32: 20,
+            size_64: 20,
+            fields: vec![
+                FieldDef { name: "TitleIndex", type_name: "ULONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "Type", type_name: "ULONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "DataOffset", type_name: "ULONG", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "DataLength", type_name: "ULONG", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "NameLength", type_name: "ULONG", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
             ],
         });
     }
