@@ -3,6 +3,8 @@
 //! FLIRT-style pattern matching for recognizing CRT and standard library functions.
 //! This helps the decompiler identify known functions without debug symbols.
 
+pub mod win_api;
+
 use std::collections::HashMap;
 
 /// A function signature pattern for matching
@@ -160,6 +162,43 @@ impl SignatureDatabase {
     /// Add a custom signature
     pub fn add_signature(&mut self, sig: FunctionSignature) {
         self.signatures.push(sig);
+    }
+    
+    /// Scan binary bytes and identify known functions at given addresses
+    /// Returns a map of address -> function name for matched signatures
+    pub fn identify_functions_in_binary(
+        &self,
+        binary_data: &[u8],
+        function_addresses: &[(u64, String)], // (address, current_name)
+        image_base: u64,
+    ) -> HashMap<u64, String> {
+        let mut identified = HashMap::new();
+        
+        for (addr, _current_name) in function_addresses {
+            // Calculate file offset from virtual address
+            // For memory-mapped data, the address should be usable directly
+            let offset = if *addr >= image_base {
+                (*addr - image_base) as usize
+            } else {
+                continue;
+            };
+            
+            // Skip if offset is out of bounds
+            if offset >= binary_data.len() {
+                continue;
+            }
+            
+            // Get function bytes (first 32 bytes should be enough for matching)
+            let end_offset = (offset + 32).min(binary_data.len());
+            let func_bytes = &binary_data[offset..end_offset];
+            
+            // Try to identify
+            if let Some(sig) = self.identify(func_bytes) {
+                identified.insert(*addr, sig.name.clone());
+            }
+        }
+        
+        identified
     }
 }
 

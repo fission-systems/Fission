@@ -11,6 +11,8 @@ pub enum SideBarAction {
     SelectFunction(crate::analysis::loader::FunctionInfo),
     /// User requested function analysis
     AnalyzeFunctions,
+    /// User wants to rename a function
+    RenameFunction(u64),
 }
 
 /// Render the side bar panel.
@@ -49,6 +51,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction
                         result = Some(match action {
                             FunctionAction::Select(func) => SideBarAction::SelectFunction(func),
                             FunctionAction::Analyze => SideBarAction::AnalyzeFunctions,
+                            FunctionAction::Rename(addr) => SideBarAction::RenameFunction(addr),
                         });
                     }
                 }

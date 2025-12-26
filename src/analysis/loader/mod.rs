@@ -577,6 +577,36 @@ impl LoadedBinary {
                 is_import: false,
             });
         }
+        
+        // Extract PLT/GOT symbols for imported function resolution
+        let mut iat_symbols_map = std::collections::HashMap::new();
+        
+        // Get PLT relocations - these contain the mapping from PLT address to function name
+        for reloc in &elf.pltrelocs {
+            if let Some(sym) = elf.dynsyms.get(reloc.r_sym) {
+                if sym.st_type() == goblin::elf::sym::STT_FUNC {
+                    let name = elf.dynstrtab.get_at(sym.st_name).unwrap_or("").to_string();
+                    if !name.is_empty() {
+                        // The r_offset is the GOT entry address, but we want the PLT address
+                        // For now, use the symbol value if non-zero, or the GOT offset
+                        let addr = if sym.st_value != 0 { sym.st_value } else { reloc.r_offset };
+                        iat_symbols_map.insert(addr, name);
+                    }
+                }
+            }
+        }
+        
+        // Also add dynamic symbols with undefined section (imports)
+        for sym in &elf.dynsyms {
+            if sym.st_type() == goblin::elf::sym::STT_FUNC 
+                && sym.st_shndx == goblin::elf::section_header::SHN_UNDEF as usize
+                && sym.st_value != 0 {
+                let name = elf.dynstrtab.get_at(sym.st_name).unwrap_or("").to_string();
+                if !name.is_empty() {
+                    iat_symbols_map.insert(sym.st_value, name);
+                }
+            }
+        }
 
         LoadedBinaryBuilder::new(path, data)
             .format("ELF")
@@ -586,6 +616,7 @@ impl LoadedBinary {
             .is_64bit(is_64bit)
             .add_sections(sections_info)
             .add_functions(functions_info)
+            .add_iat_symbols(iat_symbols_map)
             .build()
     }
 
@@ -641,6 +672,14 @@ impl LoadedBinary {
                         is_import: false,
                     });
                 }
+                
+                // Extract import symbols from imports
+                let mut iat_symbols_map = std::collections::HashMap::new();
+                for import in macho.imports().unwrap_or_default() {
+                    if import.address != 0 {
+                        iat_symbols_map.insert(import.address, import.name.to_string());
+                    }
+                }
 
                 LoadedBinaryBuilder::new(path, data)
                     .format("Mach-O")
@@ -649,6 +688,7 @@ impl LoadedBinary {
                     .is_64bit(is_64bit)
                     .add_sections(sections_info)
                     .add_functions(functions_info)
+                    .add_iat_symbols(iat_symbols_map)
                     .build()
             }
             goblin::mach::Mach::Fat(_) => Err(err!(loader, "Fat Mach-O binaries not yet supported")),

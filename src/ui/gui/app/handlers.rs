@@ -63,10 +63,28 @@ pub fn process_messages(
                 
                 state.analysis.loaded_binary = Some(binary.clone()); // Use clone for local reference if needed, but Arc is cheap
                 
+                // Run CRT signature matching on known functions
+                let sig_db = crate::analysis::signatures::SignatureDatabase::new();
+                let func_addrs: Vec<(u64, String)> = binary.functions.iter()
+                    .map(|f| (f.address, f.name.clone()))
+                    .collect();
+                let matched_sigs = sig_db.identify_functions_in_binary(
+                    &binary.data,
+                    &func_addrs,
+                    binary.image_base,
+                );
+                if !matched_sigs.is_empty() {
+                    state.log(format!("[*] CRT signatures matched: {} functions", matched_sigs.len()));
+                }
+                
+                // Merge IAT symbols with CRT signature matches
+                let mut combined_symbols = binary.iat_symbols.clone();
+                combined_symbols.extend(matched_sigs);
+                
                 // Trigger background binary load for decompiler context
                 // Use memory-mapped data so sections are at their virtual addresses
                 state.log(format!("[*] IAT symbols extracted: {} entries", binary.iat_symbols.len()));
-                let request = super::decomp_worker::DecompileRequest::load_binary(binary.get_memory_mapped_data(), binary.image_base, binary.iat_symbols.clone());
+                let request = super::decomp_worker::DecompileRequest::load_binary(binary.get_memory_mapped_data(), binary.image_base, combined_symbols);
                 if let Err(e) = decomp_tx.send(request) {
                     state.log(format!("[!] Failed to trigger decompiler binary load: {}", e));
                     state.analysis.decompiler_context_loaded = false;
