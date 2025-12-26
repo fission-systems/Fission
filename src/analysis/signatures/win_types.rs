@@ -92,6 +92,7 @@ impl WindowsStructures {
             structures: HashMap::new(),
         };
         db.load_common_structures();
+        db.load_extended_structures();
         db
     }
     
@@ -237,7 +238,6 @@ impl WindowsStructures {
                 FieldDef { name: "e_magic", type_name: "WORD", offset_32: 0, offset_64: 0, size_32: 2, size_64: 2 },
                 FieldDef { name: "e_cblp", type_name: "WORD", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
                 FieldDef { name: "e_cp", type_name: "WORD", offset_32: 4, offset_64: 4, size_32: 2, size_64: 2 },
-                // ... more fields (abbreviated for space)
                 FieldDef { name: "e_lfanew", type_name: "LONG", offset_32: 60, offset_64: 60, size_32: 4, size_64: 4 },
             ],
         });
@@ -270,6 +270,155 @@ impl WindowsStructures {
         });
     }
     
+    /// Load extended structures (GUI, Memory, Loader, Network)
+    fn load_extended_structures(&mut self) {
+        
+        // ====================================================================
+        // GUI & Windowing Structures
+        // ====================================================================
+
+        // POINT
+        self.add(StructDef {
+            name: "POINT",
+            size_32: 8,
+            size_64: 8,
+            fields: vec![
+                FieldDef { name: "x", type_name: "LONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "y", type_name: "LONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // RECT
+        self.add(StructDef {
+            name: "RECT",
+            size_32: 16,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "left", type_name: "LONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "top", type_name: "LONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "right", type_name: "LONG", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "bottom", type_name: "LONG", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // MSG (Window Message)
+        self.add(StructDef {
+            name: "MSG",
+            size_32: 28,
+            size_64: 48,
+            fields: vec![
+                FieldDef { name: "hwnd", type_name: "HWND", offset_32: 0, offset_64: 0, size_32: 4, size_64: 8 },
+                FieldDef { name: "message", type_name: "UINT", offset_32: 4, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "wParam", type_name: "WPARAM", offset_32: 8, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "lParam", type_name: "LPARAM", offset_32: 12, offset_64: 24, size_32: 4, size_64: 8 },
+                FieldDef { name: "time", type_name: "DWORD", offset_32: 16, offset_64: 32, size_32: 4, size_64: 4 },
+                FieldDef { name: "pt", type_name: "POINT", offset_32: 20, offset_64: 36, size_32: 8, size_64: 8 },
+            ],
+        });
+
+        // ====================================================================
+        // System Information & Memory
+        // ====================================================================
+
+        // MEMORY_BASIC_INFORMATION
+        self.add(StructDef {
+            name: "MEMORY_BASIC_INFORMATION",
+            size_32: 28,
+            size_64: 48,
+            fields: vec![
+                FieldDef { name: "BaseAddress", type_name: "PVOID", offset_32: 0, offset_64: 0, size_32: 4, size_64: 8 },
+                FieldDef { name: "AllocationBase", type_name: "PVOID", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "AllocationProtect", type_name: "DWORD", offset_32: 8, offset_64: 16, size_32: 4, size_64: 4 },
+                FieldDef { name: "RegionSize", type_name: "SIZE_T", offset_32: 12, offset_64: 24, size_32: 4, size_64: 8 },
+                FieldDef { name: "State", type_name: "DWORD", offset_32: 16, offset_64: 32, size_32: 4, size_64: 4 },
+                FieldDef { name: "Protect", type_name: "DWORD", offset_32: 20, offset_64: 36, size_32: 4, size_64: 4 },
+                FieldDef { name: "Type", type_name: "DWORD", offset_32: 24, offset_64: 40, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // SYSTEM_INFO
+        self.add(StructDef {
+            name: "SYSTEM_INFO",
+            size_32: 36,
+            size_64: 48,
+            fields: vec![
+                FieldDef { name: "wProcessorArchitecture", type_name: "WORD", offset_32: 0, offset_64: 0, size_32: 2, size_64: 2 },
+                FieldDef { name: "wReserved", type_name: "WORD", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
+                FieldDef { name: "dwPageSize", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "lpMinimumApplicationAddress", type_name: "LPVOID", offset_32: 8, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "lpMaximumApplicationAddress", type_name: "LPVOID", offset_32: 12, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "dwActiveProcessorMask", type_name: "DWORD_PTR", offset_32: 16, offset_64: 24, size_32: 4, size_64: 8 },
+                FieldDef { name: "dwNumberOfProcessors", type_name: "DWORD", offset_32: 20, offset_64: 32, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwProcessorType", type_name: "DWORD", offset_32: 24, offset_64: 36, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwAllocationGranularity", type_name: "DWORD", offset_32: 28, offset_64: 40, size_32: 4, size_64: 4 },
+                FieldDef { name: "wProcessorLevel", type_name: "WORD", offset_32: 32, offset_64: 44, size_32: 2, size_64: 2 },
+                FieldDef { name: "wProcessorRevision", type_name: "WORD", offset_32: 34, offset_64: 46, size_32: 2, size_64: 2 },
+            ],
+        });
+
+        // ====================================================================
+        // File System
+        // ====================================================================
+
+        // WIN32_FIND_DATAW
+        self.add(StructDef {
+            name: "WIN32_FIND_DATAW",
+            size_32: 592,
+            size_64: 592,
+            fields: vec![
+                FieldDef { name: "dwFileAttributes", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "ftCreationTime", type_name: "FILETIME", offset_32: 4, offset_64: 4, size_32: 8, size_64: 8 },
+                FieldDef { name: "ftLastAccessTime", type_name: "FILETIME", offset_32: 12, offset_64: 12, size_32: 8, size_64: 8 },
+                FieldDef { name: "ftLastWriteTime", type_name: "FILETIME", offset_32: 20, offset_64: 20, size_32: 8, size_64: 8 },
+                FieldDef { name: "nFileSizeHigh", type_name: "DWORD", offset_32: 28, offset_64: 28, size_32: 4, size_64: 4 },
+                FieldDef { name: "nFileSizeLow", type_name: "DWORD", offset_32: 32, offset_64: 32, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwReserved0", type_name: "DWORD", offset_32: 36, offset_64: 36, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwReserved1", type_name: "DWORD", offset_32: 40, offset_64: 40, size_32: 4, size_64: 4 },
+                FieldDef { name: "cFileName", type_name: "WCHAR[260]", offset_32: 44, offset_64: 44, size_32: 520, size_64: 520 },
+                FieldDef { name: "cAlternateFileName", type_name: "WCHAR[14]", offset_32: 564, offset_64: 564, size_32: 28, size_64: 28 },
+            ],
+        });
+
+        // ====================================================================
+        // NT Loader Internals (Important for Malware Analysis)
+        // ====================================================================
+
+        // PEB_LDR_DATA
+        self.add(StructDef {
+            name: "PEB_LDR_DATA",
+            size_32: 48,
+            size_64: 88,
+            fields: vec![
+                FieldDef { name: "Length", type_name: "ULONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "Initialized", type_name: "BOOLEAN", offset_32: 4, offset_64: 4, size_32: 1, size_64: 1 },
+                FieldDef { name: "SsHandle", type_name: "HANDLE", offset_32: 8, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "InLoadOrderModuleList", type_name: "LIST_ENTRY", offset_32: 12, offset_64: 16, size_32: 8, size_64: 16 },
+                FieldDef { name: "InMemoryOrderModuleList", type_name: "LIST_ENTRY", offset_32: 20, offset_64: 32, size_32: 8, size_64: 16 },
+                FieldDef { name: "InInitializationOrderModuleList", type_name: "LIST_ENTRY", offset_32: 28, offset_64: 48, size_32: 8, size_64: 16 },
+                FieldDef { name: "EntryInProgress", type_name: "PVOID", offset_32: 36, offset_64: 64, size_32: 4, size_64: 8 },
+                FieldDef { name: "ShutdownInProgress", type_name: "BOOLEAN", offset_32: 40, offset_64: 72, size_32: 1, size_64: 1 },
+                FieldDef { name: "ShutdownThreadId", type_name: "HANDLE", offset_32: 44, offset_64: 80, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // LDR_DATA_TABLE_ENTRY
+        self.add(StructDef {
+            name: "LDR_DATA_TABLE_ENTRY",
+            size_32: 80,
+            size_64: 144,
+            fields: vec![
+                FieldDef { name: "InLoadOrderLinks", type_name: "LIST_ENTRY", offset_32: 0, offset_64: 0, size_32: 8, size_64: 16 },
+                FieldDef { name: "InMemoryOrderLinks", type_name: "LIST_ENTRY", offset_32: 8, offset_64: 16, size_32: 8, size_64: 16 },
+                FieldDef { name: "InInitializationOrderLinks", type_name: "LIST_ENTRY", offset_32: 16, offset_64: 32, size_32: 8, size_64: 16 },
+                FieldDef { name: "DllBase", type_name: "PVOID", offset_32: 24, offset_64: 48, size_32: 4, size_64: 8 },
+                FieldDef { name: "EntryPoint", type_name: "PVOID", offset_32: 28, offset_64: 56, size_32: 4, size_64: 8 },
+                FieldDef { name: "SizeOfImage", type_name: "ULONG", offset_32: 32, offset_64: 64, size_32: 4, size_64: 4 },
+                FieldDef { name: "FullDllName", type_name: "UNICODE_STRING", offset_32: 36, offset_64: 72, size_32: 8, size_64: 16 },
+                FieldDef { name: "BaseDllName", type_name: "UNICODE_STRING", offset_32: 44, offset_64: 88, size_32: 8, size_64: 16 },
+            ],
+        });
+    }
+    
     /// Get structure by name
     pub fn get(&self, name: &str) -> Option<&StructDef> {
         self.structures.get(name)
@@ -286,3 +435,4 @@ impl Default for WindowsStructures {
         Self::new()
     }
 }
+
