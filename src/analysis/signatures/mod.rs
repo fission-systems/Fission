@@ -446,6 +446,210 @@ impl SignatureDatabase {
             "_wcsicmp",
             "48 89 5C 24 08 57 48 83 EC 20 48 8B DA 48 8B F9 0F B7 01"
         ));
+        
+        // ==================== C++ Runtime (x64) ====================
+        
+        // operator new (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "operator_new",
+            "48 83 EC 28 48 85 C9 75 ?? B9 01 00 00 00"
+        ));
+        
+        // operator delete (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "operator_delete",
+            "48 85 C9 74 ?? 48 83 EC 28 E8"
+        ));
+        
+        // __CxxFrameHandler3 (x64 SEH)
+        self.signatures.push(FunctionSignature::from_hex(
+            "__CxxFrameHandler3",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57"
+        ));
+        
+        // __CxxFrameHandler4 (x64 newer)
+        self.signatures.push(FunctionSignature::from_hex(
+            "__CxxFrameHandler4",
+            "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 54 41 55"
+        ));
+        
+        // _RTDynamicCast (RTTI)
+        self.signatures.push(FunctionSignature::from_hex(
+            "__RTDynamicCast",
+            "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55"
+        ));
+        
+        // __std_exception_copy (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "__std_exception_copy",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B 02"
+        ));
+        
+        // __std_exception_destroy (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "__std_exception_destroy",
+            "48 85 D2 74 ?? 48 89 5C 24 08 57 48 83 EC 20"
+        ));
+        
+        // ==================== Anti-Debug Patterns ====================
+        
+        // IsDebuggerPresent via PEB
+        self.signatures.push(FunctionSignature::from_hex(
+            "antidebug_peb_BeingDebugged",
+            "65 48 8B 04 25 60 00 00 00 0F B6 40 02"
+        ));
+        
+        // NtGlobalFlag check
+        self.signatures.push(FunctionSignature::from_hex(
+            "antidebug_peb_NtGlobalFlag",
+            "65 48 8B 04 25 60 00 00 00 8B 80 BC 00 00 00"
+        ));
+        
+        // RDTSC timing check
+        self.signatures.push(FunctionSignature::from_hex(
+            "timing_rdtsc",
+            "0F 31 48 C1 E2 20 48 0B C2"
+        ));
+        
+        // GetTickCount timing
+        self.signatures.push(FunctionSignature::from_hex(
+            "timing_GetTickCount",
+            "FF 15 ?? ?? ?? ?? 8B D8 FF 15 ?? ?? ?? ?? 2B C3"
+        ));
+        
+        // QueryPerformanceCounter timing
+        self.signatures.push(FunctionSignature::from_hex(
+            "timing_QueryPerformanceCounter",
+            "48 8D 4C 24 ?? FF 15 ?? ?? ?? ?? 48 8B 44 24"
+        ));
+        
+        // ==================== Crypto Patterns ====================
+        
+        // AES S-box lookup
+        self.signatures.push(FunctionSignature::from_hex(
+            "aes_sbox_lookup",
+            "0F B6 C0 48 8D 0D ?? ?? ?? ?? 0F B6 04 01"
+        ));
+        
+        // MD5 init constants
+        self.signatures.push(FunctionSignature::from_hex(
+            "md5_init",
+            "C7 01 01 23 45 67 C7 41 04 89 AB CD EF"
+        ));
+        
+        // SHA256 init
+        self.signatures.push(FunctionSignature::from_hex(
+            "sha256_init",
+            "C7 01 67 E6 09 6A C7 41 04 85 AE 67 BB"
+        ));
+        
+        // SHA1 init
+        self.signatures.push(FunctionSignature::from_hex(
+            "sha1_init",
+            "C7 01 01 23 45 67 C7 41 04 89 AB CD EF C7 41 08 FE DC BA 98"
+        ));
+        
+        // RC4 key schedule
+        self.signatures.push(FunctionSignature::from_hex(
+            "rc4_init",
+            "33 C0 89 01 89 41 04 48 8D 49 04 3D 00 01 00 00 72"
+        ));
+        
+        // Base64 encode pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "base64_encode",
+            "48 8D 05 ?? ?? ?? ?? 0F B6 14 08 C1 E9 02"
+        ));
+        
+        // XOR loop pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "xor_decrypt_loop",
+            "30 04 0A 48 FF C2 48 3B D1 72"
+        ));
+        
+        // ==================== Compression ====================
+        
+        // zlib inflate
+        self.signatures.push(FunctionSignature::from_hex(
+            "zlib_inflate",
+            "55 48 8B EC 48 83 EC 50 48 89 5D F0 48 89 75 F8"
+        ));
+        
+        // zlib deflate
+        self.signatures.push(FunctionSignature::from_hex(
+            "zlib_deflate",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54"
+        ));
+        
+        // LZ4 decompress
+        self.signatures.push(FunctionSignature::from_hex(
+            "lz4_decompress_safe",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 54"
+        ));
+        
+        // LZMA decode
+        self.signatures.push(FunctionSignature::from_hex(
+            "lzma_decode",
+            "41 57 41 56 41 55 41 54 55 57 56 53 48 81 EC"
+        ));
+        
+        // ==================== Framework Patterns ====================
+        
+        // Python Py_Initialize
+        self.signatures.push(FunctionSignature::from_hex(
+            "Py_Initialize",
+            "40 53 48 83 EC 20 48 8B D9 33 C9 E8"
+        ));
+        
+        // Python PyRun_SimpleString
+        self.signatures.push(FunctionSignature::from_hex(
+            "PyRun_SimpleString",
+            "48 89 5C 24 08 57 48 83 EC 20 48 8B F9 BA"
+        ));
+        
+        // .NET CorExeMain
+        self.signatures.push(FunctionSignature::from_hex(
+            "_CorExeMain",
+            "48 83 EC 28 48 8B 05 ?? ?? ?? ?? 48 85 C0 75"
+        ));
+        
+        // Golang runtime.main
+        self.signatures.push(FunctionSignature::from_hex(
+            "runtime_main",
+            "65 48 8B 0C 25 28 00 00 00 48 8D 44 24"
+        ));
+        
+        // Rust std::rt::lang_start
+        self.signatures.push(FunctionSignature::from_hex(
+            "rust_lang_start",
+            "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 30 49 8B F8"
+        ));
+        
+        // ==================== Windows Internals ====================
+        
+        // RtlAllocateHeap pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "RtlAllocateHeap",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 41 8B F0 48 8B DA"
+        ));
+        
+        // RtlFreeHeap pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "RtlFreeHeap",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 49 8B F0 8B FA"
+        ));
+        
+        // NtAllocateVirtualMemory pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "NtAllocateVirtualMemory",
+            "4C 8B DC 49 89 5B 10 49 89 73 18 57 48 83 EC 50"
+        ));
+        
+        // LdrLoadDll pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "LdrLoadDll",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 49 8B F9"
+        ));
     }
     
     /// Try to match a function's bytes against known signatures
