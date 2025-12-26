@@ -8,6 +8,7 @@ use std::process::{Command, Stdio, Child, ChildStdin};
 use std::io::{Write, BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::collections::HashMap;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::Deserialize;
 
@@ -47,6 +48,7 @@ pub struct DecompilerServer {
     cached_binary: Option<Vec<u8>>,
     cached_sla_dir: Option<String>,
     cached_image_base: Option<u64>,
+    cached_iat_symbols: Option<HashMap<u64, String>>,
     /// Request counter for periodic restart
     request_count: u64,
 }
@@ -68,6 +70,7 @@ impl DecompilerServer {
             cached_binary: None,
             cached_sla_dir: None,
             cached_image_base: None,
+            cached_iat_symbols: None,
             request_count: 0,
         })
     }
@@ -140,21 +143,34 @@ impl DecompilerServer {
             crate::core::logging::info("[DecompilerServer] Recovering binary context after restart...");
             // Dynamic timeout: base + ~1ms per KB
             let timeout = CONFIG.decompiler.timeout_ms + (bytes.len() as u64 / 1024);
-            self.load_binary_internal_with_timeout(&bytes, &sla_dir, image_base, timeout)?;
+            let iat_symbols = self.cached_iat_symbols.clone().unwrap_or_default();
+            self.load_binary_internal_with_timeout(&bytes, &sla_dir, image_base, &iat_symbols, timeout)?;
         }
 
         Ok(())
     }
 
     /// Internal helper to send load_bin command with timeout
-    fn load_binary_internal_with_timeout(&mut self, bytes: &[u8], sla_dir: &str, image_base: u64, timeout_ms: u64) -> Result<()> {
+    fn load_binary_internal_with_timeout(&mut self, bytes: &[u8], sla_dir: &str, image_base: u64, iat_symbols: &HashMap<u64, String>, timeout_ms: u64) -> Result<()> {
         let bytes_b64 = BASE64.encode(bytes);
         
+        // Serialize IAT symbols to JSON object: {"0x401000":"GetProcAddress",...}
+        let iat_json = if iat_symbols.is_empty() {
+            "{}".to_string()
+        } else {
+            let entries: Vec<String> = iat_symbols
+                .iter()
+                .map(|(addr, name)| format!(r#""0x{:x}":"{}""#, addr, name.replace('"', "\\\"")))
+                .collect();
+            format!("{{{}}}", entries.join(","))
+        };
+        
         let request = format!(
-            r#"{{"load_bin":"{}","sla_dir":"{}","image_base":{}}}"#,
+            r#"{{"load_bin":"{}","sla_dir":"{}","image_base":{},"iat_symbols":{}}}"#,
             bytes_b64,
             sla_dir,
-            image_base
+            image_base,
+            iat_json
         );
 
         if let Some(ref mut stdin) = self.stdin {
@@ -170,19 +186,20 @@ impl DecompilerServer {
     }
 
     /// Load complete binary into decompiler memory (Persistent Context)
-    pub fn load_binary(&mut self, bytes: &[u8], sla_dir: &str, image_base: u64) -> Result<()> {
+    pub fn load_binary(&mut self, bytes: &[u8], sla_dir: &str, image_base: u64, iat_symbols: &HashMap<u64, String>) -> Result<()> {
         // First ensure process is started (but don't trigger recovery yet)
         self.ensure_started()?;
         
         // Dynamic timeout: base + ~1ms per KB
         let timeout = CONFIG.decompiler.timeout_ms + (bytes.len() as u64 / 1024);
-        self.load_binary_internal_with_timeout(bytes, sla_dir, image_base, timeout)
+        self.load_binary_internal_with_timeout(bytes, sla_dir, image_base, iat_symbols, timeout)
             .map_err(|e| FissionError::decompiler(format!("Failed to load binary: {}", e)))?;
         
         // Cache context for recovery AFTER successful load (not before!)
         self.cached_binary = Some(bytes.to_vec());
         self.cached_sla_dir = Some(sla_dir.to_string());
         self.cached_image_base = Some(image_base);
+        self.cached_iat_symbols = Some(iat_symbols.clone());
         
         Ok(())
     }
@@ -357,6 +374,8 @@ pub fn find_library() -> Option<std::path::PathBuf> {
 pub struct DecompilerPool {
     workers: Vec<Mutex<DecompilerServer>>,
     next_worker: std::sync::atomic::AtomicUsize,
+    /// Flag to indicate if binary has been loaded into workers
+    binary_loaded: std::sync::atomic::AtomicBool,
 }
 
 impl DecompilerPool {
@@ -387,6 +406,7 @@ impl DecompilerPool {
         Ok(Self {
             workers,
             next_worker: std::sync::atomic::AtomicUsize::new(0),
+            binary_loaded: std::sync::atomic::AtomicBool::new(false),
         })
     }
     
@@ -400,14 +420,14 @@ impl DecompilerPool {
     }
     
     /// Load binary into ALL workers in the pool
-    pub fn load_binary(&self, bytes: &[u8], sla_dir: &str, image_base: u64) -> Result<()> {
+    pub fn load_binary(&self, bytes: &[u8], sla_dir: &str, image_base: u64, iat_symbols: &HashMap<u64, String>) -> Result<()> {
         let workers_count = self.workers.len();
         let mut success_count = 0;
         
         for (i, worker) in self.workers.iter().enumerate() {
             match worker.lock() {
                 Ok(mut guard) => {
-                    if let Err(e) = guard.load_binary(bytes, sla_dir, image_base) {
+                    if let Err(e) = guard.load_binary(bytes, sla_dir, image_base, iat_symbols) {
                          crate::core::logging::warn(&format!("[DecompilerPool] Worker {} failed to load binary: {}", i, e));
                     } else {
                          success_count += 1;
@@ -420,6 +440,8 @@ impl DecompilerPool {
         if success_count == 0 && workers_count > 0 {
             Err(FissionError::decompiler("All workers failed to load binary"))
         } else {
+            // Mark binary as loaded
+            self.binary_loaded.store(true, std::sync::atomic::Ordering::SeqCst);
             crate::core::logging::info(&format!("[DecompilerPool] Binary loaded into {}/{} workers", success_count, workers_count));
             Ok(())
         }
@@ -428,6 +450,16 @@ impl DecompilerPool {
     /// Decompile bytes using next available worker
     /// First tries to find any idle worker (non-blocking), then falls back to round-robin
     pub fn decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
+        // Wait for binary to be loaded (with timeout)
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(10);
+        while !self.binary_loaded.load(std::sync::atomic::Ordering::SeqCst) {
+            if start.elapsed() > timeout {
+                return Err(FissionError::decompiler("Timeout waiting for binary to be loaded"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        
         // Strategy 1: Try to find any available worker immediately (non-blocking)
         // This improves load distribution when some workers are processing large functions
         for worker in &self.workers {
@@ -446,6 +478,11 @@ impl DecompilerPool {
     
     /// Try to decompile without blocking (returns None if all workers busy)
     pub fn try_decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Option<Result<String>> {
+        // Don't attempt decompilation if binary isn't loaded yet
+        if !self.binary_loaded.load(std::sync::atomic::Ordering::SeqCst) {
+            return None;
+        }
+        
         // Try each worker, return first one that's available
         for worker in &self.workers {
             if let Ok(mut guard) = worker.try_lock() {

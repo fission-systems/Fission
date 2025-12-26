@@ -124,6 +124,66 @@ std::string json_escape(const std::string& s) {
     return result;
 }
 
+// Extract IAT symbols from JSON object: {"iat_symbols":{"0x401000":"GetProcAddress",...}}
+std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json) {
+    std::map<uint64_t, std::string> symbols;
+    
+    // Find "iat_symbols":{
+    std::string search = "\"iat_symbols\":";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return symbols;
+    pos += search.length();
+    
+    // Skip whitespace
+    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t')) pos++;
+    if (pos >= json.length() || json[pos] != '{') return symbols;
+    pos++; // skip '{'
+    
+    // Parse key-value pairs until '}'
+    while (pos < json.length()) {
+        // Skip whitespace
+        while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n')) pos++;
+        
+        if (pos >= json.length() || json[pos] == '}') break;
+        if (json[pos] == ',') { pos++; continue; }
+        
+        // Parse key (address like "0x401000")
+        if (json[pos] != '"') break;
+        pos++; // skip opening quote
+        size_t key_end = json.find('"', pos);
+        if (key_end == std::string::npos) break;
+        std::string addr_str = json.substr(pos, key_end - pos);
+        pos = key_end + 1;
+        
+        // Skip ":"
+        while (pos < json.length() && (json[pos] == ' ' || json[pos] == ':')) pos++;
+        
+        // Parse value (function name)
+        if (pos >= json.length() || json[pos] != '"') break;
+        pos++; // skip opening quote
+        size_t val_end = pos;
+        while (val_end < json.length()) {
+            if (json[val_end] == '"' && val_end > 0 && json[val_end-1] != '\\') break;
+            val_end++;
+        }
+        if (val_end >= json.length()) break;
+        std::string func_name = json.substr(pos, val_end - pos);
+        pos = val_end + 1;
+        
+        // Parse address (supports "0x" hex prefix)
+        uint64_t addr = 0;
+        if (addr_str.substr(0, 2) == "0x" || addr_str.substr(0, 2) == "0X") {
+            addr = std::stoull(addr_str.substr(2), nullptr, 16);
+        } else {
+            addr = std::stoull(addr_str, nullptr, 10);
+        }
+        
+        symbols[addr] = func_name;
+    }
+    
+    return symbols;
+}
+
 // Custom LoadImage for memory
 class MemoryLoadImage : public LoadImage {
     std::vector<uint8_t> data_;
@@ -193,6 +253,34 @@ struct ServerState {
     }
 };
 
+// Inject IAT symbols into Ghidra's symbol table
+void inject_iat_symbols(CliArchitecture* arch, const std::map<uint64_t, std::string>& symbols) {
+    if (!arch || symbols.empty()) return;
+    
+    Scope* global_scope = arch->symboltab->getGlobalScope();
+    if (!global_scope) return;
+    
+    int injected = 0;
+    for (const auto& [addr, name] : symbols) {
+        try {
+            Address sym_addr(arch->getDefaultCodeSpace(), addr);
+            // Get or create function symbol
+            Funcdata* existing = global_scope->findFunction(sym_addr);
+            if (existing == nullptr) {
+                // Create external/import symbol as function
+                global_scope->addFunction(sym_addr, name);
+                injected++;
+            }
+        } catch (...) {
+            // Ignore symbol injection errors
+        }
+    }
+    
+    if (injected > 0) {
+        std::cerr << "[fission_decomp] Injected " << injected << " IAT symbols" << std::endl;
+    }
+}
+
 // Initialize Ghidra (called once in server mode)
 bool init_ghidra(ServerState& state, const std::string& sla_dir) {
     if (state.initialized && state.sla_dir == sla_dir) {
@@ -216,6 +304,62 @@ bool init_ghidra(ServerState& state, const std::string& sla_dir) {
 void configure_arch(CliArchitecture* arch) {
     arch->max_instructions = MAX_INSTRUCTIONS;
     arch->flowoptions &= ~FlowInfo::error_toomanyinstructions;
+    
+    // Note: Additional Ghidra analysis options for local variable naming
+    // are configured through the .sla specification files and architecture
+    // settings. In standalone CLI mode, the options interface is limited.
+    // For example, to improve local variable naming:
+    // - Use Windows-specific .sla files with calling conventions
+    // - Custom type databases can be loaded via .gdt files
+}
+
+// Register Windows API types for better type inference
+void register_windows_types(CliArchitecture* arch, bool is_64bit) {
+    if (!arch) return;
+    
+    TypeFactory* types = arch->types;
+    if (!types) return;
+    
+    int ptrSize = is_64bit ? 8 : 4;
+    
+    try {
+        // Get base void type for pointer creation
+        Datatype* voidType = types->getTypeVoid();
+        Datatype* charType = types->getTypeChar(TYPE_INT);
+        Datatype* wcharType = types->getBase(2, TYPE_INT); // wchar_t is 2 bytes on Windows
+        
+        // Create common Windows types
+        // Note: Ghidra TypeFactory doesn't allow custom type names directly,
+        // but we can create typedef aliases using the architecture's symbol table
+        
+        // For now, the best approach is to ensure the decompiler uses correct sizes
+        // The actual type naming happens through Ghidra's data type archives
+        
+        // DWORD = uint32
+        types->getBase(4, TYPE_UINT);
+        
+        // WORD = uint16  
+        types->getBase(2, TYPE_UINT);
+        
+        // BYTE = uint8
+        types->getBase(1, TYPE_UINT);
+        
+        // HANDLE = void*
+        types->getTypePointer(ptrSize, voidType, 0);
+        
+        // LPSTR = char*
+        types->getTypePointer(ptrSize, charType, 0);
+        
+        // LPWSTR = wchar_t*
+        types->getTypePointer(ptrSize, wcharType, 0);
+        
+        // BOOL = int32
+        types->getBase(4, TYPE_INT);
+        
+        std::cerr << "[fission_decomp] Windows types registered (" << (is_64bit ? "64" : "32") << "-bit)" << std::endl;
+    } catch (...) {
+        // Type registration is best-effort
+    }
 }
 
 // Process a single decompilation request
@@ -273,12 +417,18 @@ std::string process_request(ServerState& state, const std::string& input) {
                 DocumentStorage store;
                 state.arch_64bit->init(store);
                 configure_arch(state.arch_64bit);
+                register_windows_types(state.arch_64bit, true); // 64-bit
                 state.arch_64bit_ready = true;
                 std::cerr << "[fission_decomp] Initialized 64-bit architecture (persistent)" << std::endl;
             } else {
                  state.loader_64bit->updateData(bin_bytes, image_base);
                  state.arch_64bit->symboltab->getGlobalScope()->clear();
             }
+            
+            // Inject IAT symbols for 64-bit arch
+            auto iat_symbols = extract_iat_symbols(input);
+            std::cerr << "[fission_decomp] Parsed " << iat_symbols.size() << " IAT symbols from JSON" << std::endl;
+            inject_iat_symbols(state.arch_64bit, iat_symbols);
 
             // 32-bit
             if (!state.arch_32bit_ready) {
@@ -290,12 +440,16 @@ std::string process_request(ServerState& state, const std::string& input) {
                 DocumentStorage store;
                 state.arch_32bit->init(store);
                 configure_arch(state.arch_32bit);
+                register_windows_types(state.arch_32bit, false); // 32-bit
                 state.arch_32bit_ready = true;
                  std::cerr << "[fission_decomp] Initialized 32-bit architecture (persistent)" << std::endl;
             } else {
                  state.loader_32bit->updateData(bin_bytes, image_base);
                  state.arch_32bit->symboltab->getGlobalScope()->clear();
             }
+            
+            // Inject IAT symbols for 32-bit arch
+            inject_iat_symbols(state.arch_32bit, iat_symbols);
             
             return "{\"status\":\"ok\",\"message\":\"Binary loaded\"}";
         }

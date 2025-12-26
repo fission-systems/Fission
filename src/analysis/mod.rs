@@ -8,6 +8,7 @@ pub mod disasm;
 pub mod dotnet;
 pub mod loader;
 pub mod patch;
+pub mod signatures;
 pub mod xrefs;
 
 pub use loader::{LoadedBinary, FunctionInfo, SectionInfo};
