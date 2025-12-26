@@ -419,7 +419,7 @@ impl WindowsStructures {
         });
 
         // ====================================================================
-        // PE Headers (Executable File Structure) - 파일 파싱 필수
+        // PE Headers (Executable File Structure)
         // ====================================================================
 
         // IMAGE_FILE_HEADER
@@ -438,7 +438,7 @@ impl WindowsStructures {
             ],
         });
 
-        // IMAGE_DATA_DIRECTORY (Import/Export Table 위치 정보)
+        // IMAGE_DATA_DIRECTORY
         self.add(StructDef {
             name: "IMAGE_DATA_DIRECTORY",
             size_32: 8,
@@ -468,7 +468,7 @@ impl WindowsStructures {
             ],
         });
 
-        // IMAGE_NT_HEADERS (주요 필드)
+        // IMAGE_NT_HEADERS
         self.add(StructDef {
             name: "IMAGE_NT_HEADERS",
             size_32: 248,
@@ -482,7 +482,7 @@ impl WindowsStructures {
             ],
         });
 
-        // IMAGE_IMPORT_DESCRIPTOR (IAT 분석용)
+        // IMAGE_IMPORT_DESCRIPTOR
         self.add(StructDef {
             name: "IMAGE_IMPORT_DESCRIPTOR",
             size_32: 20,
@@ -497,7 +497,7 @@ impl WindowsStructures {
         });
 
         // ====================================================================
-        // Networking (Winsock) - 통신 분석용
+        // Networking (Winsock)
         // ====================================================================
 
         // SOCKADDR_IN (IPv4)
