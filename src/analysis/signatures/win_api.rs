@@ -49,6 +49,8 @@ impl WinApiDatabase {
         db.load_kernel32();
         db.load_user32();
         db.load_ntdll();
+        db.load_advapi32();
+        db.load_ws2_32();
         db
     }
 
@@ -167,6 +169,127 @@ impl WinApiDatabase {
             ("lpMem", "LPVOID"),
         ]));
         self.add(ApiSignature::new("GetProcessHeap", "HANDLE", &[]));
+        
+        // Process Injection
+        self.add(ApiSignature::new("OpenProcess", "HANDLE", &[
+            ("dwDesiredAccess", "DWORD"),
+            ("bInheritHandle", "BOOL"),
+            ("dwProcessId", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("VirtualAllocEx", "LPVOID", &[
+            ("hProcess", "HANDLE"),
+            ("lpAddress", "LPVOID"),
+            ("dwSize", "SIZE_T"),
+            ("flAllocationType", "DWORD"),
+            ("flProtect", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("VirtualFreeEx", "BOOL", &[
+            ("hProcess", "HANDLE"),
+            ("lpAddress", "LPVOID"),
+            ("dwSize", "SIZE_T"),
+            ("dwFreeType", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("WriteProcessMemory", "BOOL", &[
+            ("hProcess", "HANDLE"),
+            ("lpBaseAddress", "LPVOID"),
+            ("lpBuffer", "LPCVOID"),
+            ("nSize", "SIZE_T"),
+            ("lpNumberOfBytesWritten", "SIZE_T*"),
+        ]));
+        self.add(ApiSignature::new("ReadProcessMemory", "BOOL", &[
+            ("hProcess", "HANDLE"),
+            ("lpBaseAddress", "LPCVOID"),
+            ("lpBuffer", "LPVOID"),
+            ("nSize", "SIZE_T"),
+            ("lpNumberOfBytesRead", "SIZE_T*"),
+        ]));
+        self.add(ApiSignature::new("CreateRemoteThread", "HANDLE", &[
+            ("hProcess", "HANDLE"),
+            ("lpThreadAttributes", "LPSECURITY_ATTRIBUTES"),
+            ("dwStackSize", "SIZE_T"),
+            ("lpStartAddress", "LPTHREAD_START_ROUTINE"),
+            ("lpParameter", "LPVOID"),
+            ("dwCreationFlags", "DWORD"),
+            ("lpThreadId", "LPDWORD"),
+        ]));
+        self.add(ApiSignature::new("CreateRemoteThreadEx", "HANDLE", &[
+            ("hProcess", "HANDLE"),
+            ("lpThreadAttributes", "LPSECURITY_ATTRIBUTES"),
+            ("dwStackSize", "SIZE_T"),
+            ("lpStartAddress", "LPTHREAD_START_ROUTINE"),
+            ("lpParameter", "LPVOID"),
+            ("dwCreationFlags", "DWORD"),
+            ("lpAttributeList", "LPPROC_THREAD_ATTRIBUTE_LIST"),
+            ("lpThreadId", "LPDWORD"),
+        ]));
+        
+        // Anti-Debug
+        self.add(ApiSignature::new("IsDebuggerPresent", "BOOL", &[]));
+        self.add(ApiSignature::new("CheckRemoteDebuggerPresent", "BOOL", &[
+            ("hProcess", "HANDLE"),
+            ("pbDebuggerPresent", "PBOOL"),
+        ]));
+        self.add(ApiSignature::new("OutputDebugStringA", "void", &[
+            ("lpOutputString", "LPCSTR"),
+        ]));
+        self.add(ApiSignature::new("OutputDebugStringW", "void", &[
+            ("lpOutputString", "LPCWSTR"),
+        ]));
+        
+        // Process enumeration
+        self.add(ApiSignature::new("CreateToolhelp32Snapshot", "HANDLE", &[
+            ("dwFlags", "DWORD"),
+            ("th32ProcessID", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("Process32FirstW", "BOOL", &[
+            ("hSnapshot", "HANDLE"),
+            ("lppe", "LPPROCESSENTRY32W"),
+        ]));
+        self.add(ApiSignature::new("Process32NextW", "BOOL", &[
+            ("hSnapshot", "HANDLE"),
+            ("lppe", "LPPROCESSENTRY32W"),
+        ]));
+        
+        // CreateProcess
+        self.add(ApiSignature::new("CreateProcessA", "BOOL", &[
+            ("lpApplicationName", "LPCSTR"),
+            ("lpCommandLine", "LPSTR"),
+            ("lpProcessAttributes", "LPSECURITY_ATTRIBUTES"),
+            ("lpThreadAttributes", "LPSECURITY_ATTRIBUTES"),
+            ("bInheritHandles", "BOOL"),
+            ("dwCreationFlags", "DWORD"),
+            ("lpEnvironment", "LPVOID"),
+            ("lpCurrentDirectory", "LPCSTR"),
+            ("lpStartupInfo", "LPSTARTUPINFOA"),
+            ("lpProcessInformation", "LPPROCESS_INFORMATION"),
+        ]));
+        self.add(ApiSignature::new("CreateProcessW", "BOOL", &[
+            ("lpApplicationName", "LPCWSTR"),
+            ("lpCommandLine", "LPWSTR"),
+            ("lpProcessAttributes", "LPSECURITY_ATTRIBUTES"),
+            ("lpThreadAttributes", "LPSECURITY_ATTRIBUTES"),
+            ("bInheritHandles", "BOOL"),
+            ("dwCreationFlags", "DWORD"),
+            ("lpEnvironment", "LPVOID"),
+            ("lpCurrentDirectory", "LPCWSTR"),
+            ("lpStartupInfo", "LPSTARTUPINFOW"),
+            ("lpProcessInformation", "LPPROCESS_INFORMATION"),
+        ]));
+        
+        // Wait/Sync
+        self.add(ApiSignature::new("WaitForSingleObject", "DWORD", &[
+            ("hHandle", "HANDLE"),
+            ("dwMilliseconds", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("WaitForMultipleObjects", "DWORD", &[
+            ("nCount", "DWORD"),
+            ("lpHandles", "const HANDLE*"),
+            ("bWaitAll", "BOOL"),
+            ("dwMilliseconds", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("Sleep", "void", &[
+            ("dwMilliseconds", "DWORD"),
+        ]));
     }
 
     fn load_user32(&mut self) {
@@ -208,6 +331,208 @@ impl WinApiDatabase {
             ("RegionSize", "PSIZE_T"),
             ("NewProtect", "ULONG"),
             ("OldProtect", "PULONG"),
+        ]));
+        self.add(ApiSignature::new("NtWriteVirtualMemory", "NTSTATUS", &[
+            ("ProcessHandle", "HANDLE"),
+            ("BaseAddress", "PVOID"),
+            ("Buffer", "PVOID"),
+            ("NumberOfBytesToWrite", "SIZE_T"),
+            ("NumberOfBytesWritten", "PSIZE_T"),
+        ]));
+        self.add(ApiSignature::new("NtReadVirtualMemory", "NTSTATUS", &[
+            ("ProcessHandle", "HANDLE"),
+            ("BaseAddress", "PVOID"),
+            ("Buffer", "PVOID"),
+            ("NumberOfBytesToRead", "SIZE_T"),
+            ("NumberOfBytesRead", "PSIZE_T"),
+        ]));
+        self.add(ApiSignature::new("NtCreateThreadEx", "NTSTATUS", &[
+            ("ThreadHandle", "PHANDLE"),
+            ("DesiredAccess", "ACCESS_MASK"),
+            ("ObjectAttributes", "POBJECT_ATTRIBUTES"),
+            ("ProcessHandle", "HANDLE"),
+            ("StartRoutine", "PVOID"),
+            ("Argument", "PVOID"),
+            ("CreateFlags", "ULONG"),
+            ("ZeroBits", "SIZE_T"),
+            ("StackSize", "SIZE_T"),
+            ("MaximumStackSize", "SIZE_T"),
+            ("AttributeList", "PVOID"),
+        ]));
+        self.add(ApiSignature::new("NtQueryInformationProcess", "NTSTATUS", &[
+            ("ProcessHandle", "HANDLE"),
+            ("ProcessInformationClass", "PROCESSINFOCLASS"),
+            ("ProcessInformation", "PVOID"),
+            ("ProcessInformationLength", "ULONG"),
+            ("ReturnLength", "PULONG"),
+        ]));
+        self.add(ApiSignature::new("NtQuerySystemInformation", "NTSTATUS", &[
+            ("SystemInformationClass", "SYSTEM_INFORMATION_CLASS"),
+            ("SystemInformation", "PVOID"),
+            ("SystemInformationLength", "ULONG"),
+            ("ReturnLength", "PULONG"),
+        ]));
+        self.add(ApiSignature::new("LdrLoadDll", "NTSTATUS", &[
+            ("PathToFile", "PWSTR"),
+            ("Flags", "PULONG"),
+            ("ModuleFileName", "PUNICODE_STRING"),
+            ("ModuleHandle", "PHANDLE"),
+        ]));
+        self.add(ApiSignature::new("NtOpenProcess", "NTSTATUS", &[
+            ("ProcessHandle", "PHANDLE"),
+            ("DesiredAccess", "ACCESS_MASK"),
+            ("ObjectAttributes", "POBJECT_ATTRIBUTES"),
+            ("ClientId", "PCLIENT_ID"),
+        ]));
+    }
+
+    fn load_advapi32(&mut self) {
+        // Registry
+        self.add(ApiSignature::new("RegOpenKeyExA", "LSTATUS", &[
+            ("hKey", "HKEY"),
+            ("lpSubKey", "LPCSTR"),
+            ("ulOptions", "DWORD"),
+            ("samDesired", "REGSAM"),
+            ("phkResult", "PHKEY"),
+        ]));
+        self.add(ApiSignature::new("RegOpenKeyExW", "LSTATUS", &[
+            ("hKey", "HKEY"),
+            ("lpSubKey", "LPCWSTR"),
+            ("ulOptions", "DWORD"),
+            ("samDesired", "REGSAM"),
+            ("phkResult", "PHKEY"),
+        ]));
+        self.add(ApiSignature::new("RegSetValueExA", "LSTATUS", &[
+            ("hKey", "HKEY"),
+            ("lpValueName", "LPCSTR"),
+            ("Reserved", "DWORD"),
+            ("dwType", "DWORD"),
+            ("lpData", "const BYTE*"),
+            ("cbData", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("RegSetValueExW", "LSTATUS", &[
+            ("hKey", "HKEY"),
+            ("lpValueName", "LPCWSTR"),
+            ("Reserved", "DWORD"),
+            ("dwType", "DWORD"),
+            ("lpData", "const BYTE*"),
+            ("cbData", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("RegQueryValueExA", "LSTATUS", &[
+            ("hKey", "HKEY"),
+            ("lpValueName", "LPCSTR"),
+            ("lpReserved", "LPDWORD"),
+            ("lpType", "LPDWORD"),
+            ("lpData", "LPBYTE"),
+            ("lpcbData", "LPDWORD"),
+        ]));
+        self.add(ApiSignature::new("RegCloseKey", "LSTATUS", &[
+            ("hKey", "HKEY"),
+        ]));
+        
+        // Privileges
+        self.add(ApiSignature::new("OpenProcessToken", "BOOL", &[
+            ("ProcessHandle", "HANDLE"),
+            ("DesiredAccess", "DWORD"),
+            ("TokenHandle", "PHANDLE"),
+        ]));
+        self.add(ApiSignature::new("AdjustTokenPrivileges", "BOOL", &[
+            ("TokenHandle", "HANDLE"),
+            ("DisableAllPrivileges", "BOOL"),
+            ("NewState", "PTOKEN_PRIVILEGES"),
+            ("BufferLength", "DWORD"),
+            ("PreviousState", "PTOKEN_PRIVILEGES"),
+            ("ReturnLength", "PDWORD"),
+        ]));
+        self.add(ApiSignature::new("LookupPrivilegeValueA", "BOOL", &[
+            ("lpSystemName", "LPCSTR"),
+            ("lpName", "LPCSTR"),
+            ("lpLuid", "PLUID"),
+        ]));
+        
+        // Crypto
+        self.add(ApiSignature::new("CryptAcquireContextA", "BOOL", &[
+            ("phProv", "HCRYPTPROV*"),
+            ("szContainer", "LPCSTR"),
+            ("szProvider", "LPCSTR"),
+            ("dwProvType", "DWORD"),
+            ("dwFlags", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("CryptEncrypt", "BOOL", &[
+            ("hKey", "HCRYPTKEY"),
+            ("hHash", "HCRYPTHASH"),
+            ("Final", "BOOL"),
+            ("dwFlags", "DWORD"),
+            ("pbData", "BYTE*"),
+            ("pdwDataLen", "DWORD*"),
+            ("dwBufLen", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("CryptDecrypt", "BOOL", &[
+            ("hKey", "HCRYPTKEY"),
+            ("hHash", "HCRYPTHASH"),
+            ("Final", "BOOL"),
+            ("dwFlags", "DWORD"),
+            ("pbData", "BYTE*"),
+            ("pdwDataLen", "DWORD*"),
+        ]));
+    }
+
+    fn load_ws2_32(&mut self) {
+        self.add(ApiSignature::new("WSAStartup", "int", &[
+            ("wVersionRequested", "WORD"),
+            ("lpWSAData", "LPWSADATA"),
+        ]));
+        self.add(ApiSignature::new("WSACleanup", "int", &[]));
+        self.add(ApiSignature::new("socket", "SOCKET", &[
+            ("af", "int"),
+            ("type", "int"),
+            ("protocol", "int"),
+        ]));
+        self.add(ApiSignature::new("connect", "int", &[
+            ("s", "SOCKET"),
+            ("name", "const sockaddr*"),
+            ("namelen", "int"),
+        ]));
+        self.add(ApiSignature::new("send", "int", &[
+            ("s", "SOCKET"),
+            ("buf", "const char*"),
+            ("len", "int"),
+            ("flags", "int"),
+        ]));
+        self.add(ApiSignature::new("recv", "int", &[
+            ("s", "SOCKET"),
+            ("buf", "char*"),
+            ("len", "int"),
+            ("flags", "int"),
+        ]));
+        self.add(ApiSignature::new("closesocket", "int", &[
+            ("s", "SOCKET"),
+        ]));
+        self.add(ApiSignature::new("bind", "int", &[
+            ("s", "SOCKET"),
+            ("name", "const sockaddr*"),
+            ("namelen", "int"),
+        ]));
+        self.add(ApiSignature::new("listen", "int", &[
+            ("s", "SOCKET"),
+            ("backlog", "int"),
+        ]));
+        self.add(ApiSignature::new("accept", "SOCKET", &[
+            ("s", "SOCKET"),
+            ("addr", "sockaddr*"),
+            ("addrlen", "int*"),
+        ]));
+        self.add(ApiSignature::new("getaddrinfo", "INT", &[
+            ("pNodeName", "PCSTR"),
+            ("pServiceName", "PCSTR"),
+            ("pHints", "const ADDRINFOA*"),
+            ("ppResult", "PADDRINFOA*"),
+        ]));
+        self.add(ApiSignature::new("inet_addr", "unsigned long", &[
+            ("cp", "const char*"),
+        ]));
+        self.add(ApiSignature::new("htons", "u_short", &[
+            ("hostshort", "u_short"),
         ]));
     }
 
