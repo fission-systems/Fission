@@ -8,6 +8,7 @@
 
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
+use std::collections::HashMap;
 use crate::analysis::decomp::{DecompilerPool, DecompilerServer};
 use crate::config::{CONFIG, DecompilerMode};
 use crate::core::errors::FissionError;
@@ -29,6 +30,8 @@ pub struct DecompileRequest {
     pub is_binary_load: bool,
     /// Image base address for binary load (critical for address translation)
     pub image_base: u64,
+    /// IAT symbols to inject into decompiler (address -> name)
+    pub iat_symbols: HashMap<u64, String>,
 }
 
 impl DecompileRequest {
@@ -41,10 +44,11 @@ impl DecompileRequest {
             is_prefetch: false,
             is_binary_load: false,
             image_base: 0,
+            iat_symbols: HashMap::new(),
         }
     }
 
-    pub fn load_binary(bytes: Vec<u8>, image_base: u64) -> Self {
+    pub fn load_binary(bytes: Vec<u8>, image_base: u64, iat_symbols: HashMap<u64, String>) -> Self {
         Self {
             request_id: 0, // Load request doesn't use ID
             bytes,
@@ -53,6 +57,7 @@ impl DecompileRequest {
             is_prefetch: false,
             is_binary_load: true,
             image_base,
+            iat_symbols,
         }
     }
 
@@ -65,6 +70,7 @@ impl DecompileRequest {
             is_prefetch: true,
             is_binary_load: false,
             image_base: 0,
+            iat_symbols: HashMap::new(),
         }
     }
 }
@@ -191,7 +197,7 @@ fn worker_loop(
                 // If other workers are busy, we might block or fail.
                 // Ideally, `load_binary` should be called when no other work is happening (e.g. file load).
                 
-                if let Err(e) = p.load_binary(&request.bytes, &sla_dir, request.image_base) {
+                if let Err(e) = p.load_binary(&request.bytes, &sla_dir, request.image_base, &request.iat_symbols) {
                      crate::core::logging::error(&format!("[decomp-worker] Failed to load binary: {}", e));
                 } else {
                      crate::core::logging::info("[decomp-worker] Binary loaded successfully");

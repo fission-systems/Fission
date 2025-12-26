@@ -317,7 +317,7 @@ fn cmd_decompile(state: &CliState, addr: u64) {
                         Ok(mut server) => {
                             // Load binary into decompiler
                             let mapped_data = binary.get_memory_mapped_data();
-                            if let Err(e) = server.load_binary(&mapped_data, binary.arch_spec.as_str(), binary.image_base) {
+                            if let Err(e) = server.load_binary(&mapped_data, binary.arch_spec.as_str(), binary.image_base, &binary.iat_symbols) {
                                 println!("{} Failed to load binary into decompiler: {}", "[!]".red(), e);
                                 return;
                             }

@@ -65,7 +65,8 @@ pub fn process_messages(
                 
                 // Trigger background binary load for decompiler context
                 // Use memory-mapped data so sections are at their virtual addresses
-                let request = super::decomp_worker::DecompileRequest::load_binary(binary.get_memory_mapped_data(), binary.image_base);
+                state.log(format!("[*] IAT symbols extracted: {} entries", binary.iat_symbols.len()));
+                let request = super::decomp_worker::DecompileRequest::load_binary(binary.get_memory_mapped_data(), binary.image_base, binary.iat_symbols.clone());
                 if let Err(e) = decomp_tx.send(request) {
                     state.log(format!("[!] Failed to trigger decompiler binary load: {}", e));
                     state.analysis.decompiler_context_loaded = false;

@@ -458,6 +458,29 @@ impl LoadedBinary {
                     });
                 }
                 
+                // Try to extract IAT symbols from raw PE headers
+                // This is needed because object crate's imports() doesn't provide addresses
+                let mut iat_symbols_map = std::collections::HashMap::new();
+                
+                // Parse PE manually for IAT with lenient options (skip certificate validation)
+                let opts = goblin::pe::options::ParseOptions {
+                    resolve_rva: true,
+                    parse_attribute_certificates: false,  // Skip malformed certificates
+                };
+                
+                match goblin::pe::PE::parse_with_opts(&data, &opts) {
+                    Ok(pe) => {
+                        eprintln!("[loader] goblin PE parsed (lenient): {} imports", pe.imports.len());
+                        for import in &pe.imports {
+                            let iat_va = image_base + import.offset as u64;
+                            iat_symbols_map.insert(iat_va, import.name.to_string());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[loader] goblin PE parse failed in fallback (lenient): {}", e);
+                    }
+                }
+
                 LoadedBinaryBuilder::new(path, data)
                     .format("PE (Fallback)")
                     .arch_spec(arch_spec)
@@ -466,6 +489,7 @@ impl LoadedBinary {
                     .is_64bit(is_64bit)
                     .add_sections(sections_info)
                     .add_functions(functions_info)
+                    .add_iat_symbols(iat_symbols_map)
                     .build()
             }
         }

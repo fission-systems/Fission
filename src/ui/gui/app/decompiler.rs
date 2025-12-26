@@ -125,6 +125,7 @@ pub fn decompile_function(
         is_prefetch: false,
         is_binary_load: false,
         image_base: 0,
+        iat_symbols: std::collections::HashMap::new(),
     };
     
     if let Err(e) = decomp_tx.send(request) {
