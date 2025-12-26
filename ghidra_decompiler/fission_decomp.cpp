@@ -20,6 +20,8 @@
 #include <cstdlib>
 #include <memory>
 #include <algorithm>
+#include <iomanip>
+#include <map>
 
 #include "libdecomp.hh"
 #include "sleigh_arch.hh"
@@ -184,6 +186,63 @@ std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json) {
     return symbols;
 }
 
+// Post-process decompiled output to replace indirect calls with IAT function names
+// Replaces patterns like "(*pcRam00cf4208)(...)" with "GetProcAddress(...)"
+std::string post_process_iat_calls(const std::string& code, const std::map<uint64_t, std::string>& iat_symbols) {
+    if (iat_symbols.empty()) return code;
+    
+    std::string result = code;
+    
+    // Pattern: (*pcRamXXXXXXXX) or (*pcRam00XXXXXXXX)
+    // We look for pcRam followed by hex digits
+    for (const auto& [addr, name] : iat_symbols) {
+        // Generate patterns for this address (both 32-bit and 64-bit formats)
+        char pattern32[32], pattern64[32];
+        snprintf(pattern32, sizeof(pattern32), "pcRam%08x", (uint32_t)addr);
+        snprintf(pattern64, sizeof(pattern64), "pcRam%016llx", (unsigned long long)addr);
+        
+        // Also try without leading zeros
+        std::ostringstream pattern_stream;
+        pattern_stream << "pcRam" << std::hex << std::setfill('0') << std::setw(8) << (addr & 0xFFFFFFFF);
+        std::string pattern_lower = pattern_stream.str();
+        
+        // Replace all occurrences
+        size_t pos = 0;
+        while ((pos = result.find(pattern32, pos)) != std::string::npos) {
+            // Find the start of the dereference pattern (*pcRam...)
+            size_t start = pos;
+            if (start > 0 && result[start-1] == '*' && start > 1 && result[start-2] == '(') {
+                // Find matching closing paren and call args
+                size_t end_ptr = result.find(')', start);
+                if (end_ptr != std::string::npos) {
+                    // Replace "(*pcRam...)" with function name
+                    result.replace(start - 2, end_ptr - start + 3, name);
+                    pos = start - 2 + name.length();
+                    continue;
+                }
+            }
+            pos += strlen(pattern32);
+        }
+        
+        // Also try pattern64 for 64-bit binaries
+        pos = 0;
+        while ((pos = result.find(pattern64, pos)) != std::string::npos) {
+            size_t start = pos;
+            if (start > 0 && result[start-1] == '*' && start > 1 && result[start-2] == '(') {
+                size_t end_ptr = result.find(')', start);
+                if (end_ptr != std::string::npos) {
+                    result.replace(start - 2, end_ptr - start + 3, name);
+                    pos = start - 2 + name.length();
+                    continue;
+                }
+            }
+            pos += strlen(pattern64);
+        }
+    }
+    
+    return result;
+}
+
 // Custom LoadImage for memory
 class MemoryLoadImage : public LoadImage {
     std::vector<uint8_t> data_;
@@ -244,6 +303,8 @@ struct ServerState {
     // Track if architectures have been initialized
     bool arch_64bit_ready = false;
     bool arch_32bit_ready = false;
+    // Store IAT symbols for post-processing
+    std::map<uint64_t, std::string> iat_symbols;
     
     ~ServerState() {
         if (arch_64bit) delete arch_64bit;
@@ -300,17 +361,40 @@ bool init_ghidra(ServerState& state, const std::string& sla_dir) {
     }
 }
 
-// Helper to configure architecture safely
+// Helper to configure architecture safely with advanced options
 void configure_arch(CliArchitecture* arch) {
     arch->max_instructions = MAX_INSTRUCTIONS;
     arch->flowoptions &= ~FlowInfo::error_toomanyinstructions;
     
-    // Note: Additional Ghidra analysis options for local variable naming
-    // are configured through the .sla specification files and architecture
-    // settings. In standalone CLI mode, the options interface is limited.
-    // For example, to improve local variable naming:
-    // - Use Windows-specific .sla files with calling conventions
-    // - Custom type databases can be loaded via .gdt files
+    // === Advanced Ghidra Decompiler Options ===
+    // Based on DecompileOptions class from Ghidra API
+    
+    // 1. Prototype Evaluation Model (calling convention)
+    // For Windows x64, the default should be __fastcall-like
+    // This affects how parameters and return values are inferred
+    
+    // 2. Simplification options
+    // These are applied during the decompilation action group
+    
+    // 3. Jump table limits - prevent excessive memory for switch statements
+    // Default is usually sufficient
+    
+    // 4. Read-only memory treatment
+    // IAT sections should ideally be marked read-only for proper resolution
+    // This is handled by the LoadImage but we can influence through options
+    
+    // 5. Output formatting options via PrintLanguage base class
+    if (arch->print) {
+        // Configure output options through base PrintLanguage class
+        arch->print->setFlat(false);          // Use indentation
+        arch->print->setIndentIncrement(2);   // 2 spaces per indent level
+    }
+    
+    // 6. Alias blocking - helps with type propagation
+    // Already enabled by default in standalone mode
+    
+    // Note: Full DecompileOptions require the Ghidra Java layer
+    // In standalone C++ mode, options are more limited but we optimize what we can
 }
 
 // Register Windows API types for better type inference
@@ -429,6 +513,8 @@ std::string process_request(ServerState& state, const std::string& input) {
             auto iat_symbols = extract_iat_symbols(input);
             std::cerr << "[fission_decomp] Parsed " << iat_symbols.size() << " IAT symbols from JSON" << std::endl;
             inject_iat_symbols(state.arch_64bit, iat_symbols);
+            // Store for post-processing
+            state.iat_symbols = iat_symbols;
 
             // 32-bit
             if (!state.arch_32bit_ready) {
@@ -536,8 +622,12 @@ std::string process_request(ServerState& state, const std::string& input) {
         arch->print->setOutputStream(&c_stream);
         arch->print->docFunction(fd);
         
-        std::cerr << "[fission_decomp] Step 6: Done!" << std::endl;
-        return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_stream.str()) + "\"}";
+        std::cerr << "[fission_decomp] Step 6: Post-processing IAT calls" << std::endl;
+        std::string c_code = c_stream.str();
+        c_code = post_process_iat_calls(c_code, state.iat_symbols);
+        
+        std::cerr << "[fission_decomp] Step 7: Done!" << std::endl;
+        return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_code) + "\"}";
         
     } catch (const LowlevelError& e) {
         return "{\"status\":\"error\",\"message\":\"" + json_escape(e.explain) + "\"}";
