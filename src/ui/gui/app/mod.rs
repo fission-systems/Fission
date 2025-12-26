@@ -206,6 +206,14 @@ impl eframe::App for FissionApp {
                 side_bar::SideBarAction::AnalyzeFunctions => {
                     self.analyze_functions();
                 }
+                side_bar::SideBarAction::RenameFunction(addr) => {
+                    // Get current name for the function
+                    let current_name = self.state.analysis.user_function_names
+                        .get(&addr)
+                        .cloned()
+                        .unwrap_or_else(|| format!("sub_{:x}", addr));
+                    self.state.analysis.rename_dialog = Some((addr, current_name));
+                }
             }
         }
         

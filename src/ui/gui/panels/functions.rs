@@ -12,6 +12,8 @@ pub enum FunctionAction {
     Select(FunctionInfo),
     /// User clicked Analyze button
     Analyze,
+    /// User wants to rename a function
+    Rename(u64), // function address
 }
 
 /// Render the functions list panel on the left side.
@@ -96,9 +98,23 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
                                 egui::RichText::new(&label).color(name_color)
                             };
                             
-                            if ui.selectable_label(is_selected, text).clicked() {
+                            let response = ui.selectable_label(is_selected, text);
+                            
+                            if response.clicked() {
                                 action = Some(FunctionAction::Select(func.clone()));
                             }
+                            
+                            // Right-click context menu
+                            response.context_menu(|ui| {
+                                if ui.button("✏️ Rename").clicked() {
+                                    action = Some(FunctionAction::Rename(func.address));
+                                    ui.close_menu();
+                                }
+                                if ui.button("📋 Copy Address").clicked() {
+                                    ui.output_mut(|o| o.copied_text = format!("0x{:x}", func.address));
+                                    ui.close_menu();
+                                }
+                            });
                         });
                     });
                 });

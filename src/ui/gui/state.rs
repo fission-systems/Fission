@@ -81,6 +81,10 @@ pub struct AnalysisState {
     pub detection_result: Option<crate::analysis::detector::DetectionResult>,
     /// Cross-references database
     pub xref_db: Option<crate::analysis::xrefs::XrefDatabase>,
+    /// User-defined function names (address -> custom name)
+    pub user_function_names: std::collections::HashMap<u64, String>,
+    /// Rename dialog state: (address, current_input)
+    pub rename_dialog: Option<(u64, String)>,
 }
 
 /// Debug-related state (debugger, breakpoints, memory)
@@ -341,6 +345,8 @@ impl Default for AnalysisState {
             patch_bytes_input: String::new(),
             detection_result: None,
             xref_db: None,
+            user_function_names: std::collections::HashMap::new(),
+            rename_dialog: None,
         }
     }
 }
