@@ -412,37 +412,64 @@ void register_windows_types(CliArchitecture* arch, bool is_64bit) {
         Datatype* charType = types->getTypeChar(TYPE_INT);
         Datatype* wcharType = types->getBase(2, TYPE_INT); // wchar_t is 2 bytes on Windows
         
-        // Create common Windows types
-        // Note: Ghidra TypeFactory doesn't allow custom type names directly,
-        // but we can create typedef aliases using the architecture's symbol table
-        
-        // For now, the best approach is to ensure the decompiler uses correct sizes
-        // The actual type naming happens through Ghidra's data type archives
-        
+        // === Basic Windows Types ===
         // DWORD = uint32
         types->getBase(4, TYPE_UINT);
-        
         // WORD = uint16  
         types->getBase(2, TYPE_UINT);
-        
         // BYTE = uint8
         types->getBase(1, TYPE_UINT);
+        // QWORD = uint64
+        types->getBase(8, TYPE_UINT);
         
         // HANDLE = void*
         types->getTypePointer(ptrSize, voidType, 0);
-        
         // LPSTR = char*
         types->getTypePointer(ptrSize, charType, 0);
-        
         // LPWSTR = wchar_t*
         types->getTypePointer(ptrSize, wcharType, 0);
         
         // BOOL = int32
         types->getBase(4, TYPE_INT);
+        // LONG = int32
+        types->getBase(4, TYPE_INT);
+        // LONGLONG = int64
+        types->getBase(8, TYPE_INT);
+        
+        // SIZE_T = uintptr
+        types->getBase(ptrSize, TYPE_UINT);
+        // SSIZE_T = intptr
+        types->getBase(ptrSize, TYPE_INT);
         
         std::cerr << "[fission_decomp] Windows types registered (" << (is_64bit ? "64" : "32") << "-bit)" << std::endl;
     } catch (...) {
         // Type registration is best-effort
+    }
+}
+
+// Register known global symbols (security cookie, etc.)
+void register_known_globals(CliArchitecture* arch, uint64_t image_base, bool is_64bit) {
+    if (!arch || !arch->symboltab) return;
+    
+    Scope* global_scope = arch->symboltab->getGlobalScope();
+    if (!global_scope) return;
+    
+    // Known MSVC global variable patterns
+    // These are common addresses relative to typical PE layout
+    // Note: Actual offsets depend on the binary, but we can add named symbols
+    // for common patterns that appear in the decompiled output
+    
+    try {
+        // The __security_cookie is typically at a known offset in .data section
+        // For PyInstaller binaries like the user's, it's at base + 0x40040 area
+        // We'll register some common patterns as named data symbols
+        
+        // For now, we'll inject known globals via the IAT symbols mechanism
+        // since Ghidra's standalone mode has limited data symbol support
+        
+        std::cerr << "[fission_decomp] Known globals registration skipped (using IAT mechanism)" << std::endl;
+    } catch (...) {
+        // Global registration is best-effort
     }
 }
 

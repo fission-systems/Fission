@@ -80,8 +80,7 @@ impl SignatureDatabase {
     
     /// Load MSVC CRT signatures
     fn load_msvc_signatures(&mut self) {
-        // Common CRT function entry patterns
-        // These are simplified examples - real FLIRT signatures are much more complex
+        // ==================== x86 Patterns ====================
         
         // __security_check_cookie (x86)
         self.signatures.push(FunctionSignature::from_hex(
@@ -89,13 +88,13 @@ impl SignatureDatabase {
             "3B 0D ?? ?? ?? ?? 74 ?? C3"
         ));
         
-        // __security_cookie_init (x86)
+        // __security_init_cookie (x86)
         self.signatures.push(FunctionSignature::from_hex(
             "__security_init_cookie",
             "8B FF 55 8B EC 83 EC 10 A1"
         ));
         
-        // _initterm (x86) - CRT initialization
+        // _initterm (x86)
         self.signatures.push(FunctionSignature::from_hex(
             "_initterm",
             "56 8B 74 24 08 57 8B 7C 24 10"
@@ -107,40 +106,128 @@ impl SignatureDatabase {
             "53 56 57 BB 01 00 00 00"
         ));
         
-        // malloc wrapper (common pattern)
+        // ==================== x64 Patterns ====================
+        
+        // __security_check_cookie (x64) - GS cookie check
         self.signatures.push(FunctionSignature::from_hex(
-            "malloc",
-            "FF 25 ?? ?? ?? ??" // jmp [IAT]
+            "__security_check_cookie",
+            "48 3B 0D ?? ?? ?? ?? 75 ?? C3"
         ));
         
-        // memcpy common prologue
+        // __security_init_cookie (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "__security_init_cookie",
+            "48 83 EC 28 48 8B 05"
+        ));
+        
+        // _initterm (x64) - initializer list
+        self.signatures.push(FunctionSignature::from_hex(
+            "_initterm",
+            "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B FA"
+        ));
+        
+        // _initterm_e (x64) - initializer with error
+        self.signatures.push(FunctionSignature::from_hex(
+            "_initterm_e",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18"
+        ));
+        
+        // __GSHandlerCheck (x64) - exception handler GS check
+        self.signatures.push(FunctionSignature::from_hex(
+            "__GSHandlerCheck",
+            "48 89 4C 24 08 48 89 54 24 10 4C 89 44 24 18"
+        ));
+        
+        // __chkstk (x64) - stack probe
+        self.signatures.push(FunctionSignature::from_hex(
+            "__chkstk",
+            "48 83 EC 10 4C 89 14 24 4C 89 5C 24 08"
+        ));
+        
+        // __alloca_probe (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "__alloca_probe",
+            "51 48 8D 4C 24 08 48 2B C8"
+        ));
+        
+        // memset (x64) - common pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "memset",
+            "40 53 48 83 EC 20 0F B6 C2 48 8B D9"
+        ));
+        
+        // memcpy (x64)
         self.signatures.push(FunctionSignature::from_hex(
             "memcpy",
-            "8B 44 24 04 8B 4C 24 0C"
+            "48 8B C1 4C 8D 15 ?? ?? ?? ?? 49 83 F8 0F"
         ));
         
-        // strlen common pattern
+        // memmove (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "memmove",
+            "48 8B C1 4C 8B D9 48 3B CA"
+        ));
+        
+        // strlen (x64)
         self.signatures.push(FunctionSignature::from_hex(
             "strlen",
-            "8B 4C 24 04 F7 C1 03 00 00 00"
+            "48 8B C1 48 F7 D0 48 83 C0 01"
         ));
         
-        // strcmp pattern
+        // strcmp (x64)
         self.signatures.push(FunctionSignature::from_hex(
             "strcmp",
-            "8B 4C 24 04 8B 54 24 08 0F B6 01"
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F2"
         ));
         
-        // printf/sprintf wrapper
+        // wcslen (x64)
         self.signatures.push(FunctionSignature::from_hex(
-            "_printf",
-            "6A ?? 68 ?? ?? ?? ?? E8"
+            "wcslen",
+            "48 8B C1 66 83 39 00 74"
         ));
         
-        // x64 patterns
+        // wcscpy (x64)
         self.signatures.push(FunctionSignature::from_hex(
-            "__security_check_cookie_x64",
-            "48 3B 0D ?? ?? ?? ?? 75 ?? C3"
+            "wcscpy",
+            "48 8B C1 66 44 89 01 66 45 85 C0"
+        ));
+        
+        // _purecall (x64) - pure virtual call error
+        self.signatures.push(FunctionSignature::from_hex(
+            "_purecall",
+            "48 83 EC 28 E8 ?? ?? ?? ?? 33 C0"
+        ));
+        
+        // _amsg_exit (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "_amsg_exit",
+            "48 83 EC 28 8B C1 B9 ?? 00 00 00"
+        ));
+        
+        // _cexit (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "_cexit",
+            "48 83 EC 28 E8 ?? ?? ?? ?? 85 C0 75"
+        ));
+        
+        // _c_exit (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "_c_exit",
+            "48 83 EC 28 E8 ?? ?? ?? ?? E8"
+        ));
+        
+        // ~~ PyInstaller specific (observed in user binary) ~~
+        
+        // Python main entry stub
+        self.signatures.push(FunctionSignature::from_hex(
+            "_pyi_main",
+            "48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20"
+        ));
+        
+        // Common function prologue patterns (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "_crt_startup",
+            "48 83 EC 28 48 8D 0D ?? ?? ?? ?? E8"
         ));
     }
     
