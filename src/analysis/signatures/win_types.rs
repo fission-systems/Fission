@@ -417,6 +417,128 @@ impl WindowsStructures {
                 FieldDef { name: "BaseDllName", type_name: "UNICODE_STRING", offset_32: 44, offset_64: 88, size_32: 8, size_64: 16 },
             ],
         });
+
+        // ====================================================================
+        // PE Headers (Executable File Structure) - 파일 파싱 필수
+        // ====================================================================
+
+        // IMAGE_FILE_HEADER
+        self.add(StructDef {
+            name: "IMAGE_FILE_HEADER",
+            size_32: 20,
+            size_64: 20,
+            fields: vec![
+                FieldDef { name: "Machine", type_name: "WORD", offset_32: 0, offset_64: 0, size_32: 2, size_64: 2 },
+                FieldDef { name: "NumberOfSections", type_name: "WORD", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
+                FieldDef { name: "TimeDateStamp", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "PointerToSymbolTable", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "NumberOfSymbols", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "SizeOfOptionalHeader", type_name: "WORD", offset_32: 16, offset_64: 16, size_32: 2, size_64: 2 },
+                FieldDef { name: "Characteristics", type_name: "WORD", offset_32: 18, offset_64: 18, size_32: 2, size_64: 2 },
+            ],
+        });
+
+        // IMAGE_DATA_DIRECTORY (Import/Export Table 위치 정보)
+        self.add(StructDef {
+            name: "IMAGE_DATA_DIRECTORY",
+            size_32: 8,
+            size_64: 8,
+            fields: vec![
+                FieldDef { name: "VirtualAddress", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "Size", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // IMAGE_SECTION_HEADER
+        self.add(StructDef {
+            name: "IMAGE_SECTION_HEADER",
+            size_32: 40,
+            size_64: 40,
+            fields: vec![
+                FieldDef { name: "Name", type_name: "BYTE[8]", offset_32: 0, offset_64: 0, size_32: 8, size_64: 8 },
+                FieldDef { name: "VirtualSize", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "VirtualAddress", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "SizeOfRawData", type_name: "DWORD", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
+                FieldDef { name: "PointerToRawData", type_name: "DWORD", offset_32: 20, offset_64: 20, size_32: 4, size_64: 4 },
+                FieldDef { name: "PointerToRelocations", type_name: "DWORD", offset_32: 24, offset_64: 24, size_32: 4, size_64: 4 },
+                FieldDef { name: "PointerToLinenumbers", type_name: "DWORD", offset_32: 28, offset_64: 28, size_32: 4, size_64: 4 },
+                FieldDef { name: "NumberOfRelocations", type_name: "WORD", offset_32: 32, offset_64: 32, size_32: 2, size_64: 2 },
+                FieldDef { name: "NumberOfLinenumbers", type_name: "WORD", offset_32: 34, offset_64: 34, size_32: 2, size_64: 2 },
+                FieldDef { name: "Characteristics", type_name: "DWORD", offset_32: 36, offset_64: 36, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // IMAGE_NT_HEADERS (주요 필드)
+        self.add(StructDef {
+            name: "IMAGE_NT_HEADERS",
+            size_32: 248,
+            size_64: 264,
+            fields: vec![
+                FieldDef { name: "Signature", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "FileHeader", type_name: "IMAGE_FILE_HEADER", offset_32: 4, offset_64: 4, size_32: 20, size_64: 20 },
+                FieldDef { name: "OptionalHeader_Magic", type_name: "WORD", offset_32: 24, offset_64: 24, size_32: 2, size_64: 2 },
+                FieldDef { name: "AddressOfEntryPoint", type_name: "DWORD", offset_32: 40, offset_64: 40, size_32: 4, size_64: 4 },
+                FieldDef { name: "ImageBase", type_name: "ULONGLONG", offset_32: 52, offset_64: 48, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // IMAGE_IMPORT_DESCRIPTOR (IAT 분석용)
+        self.add(StructDef {
+            name: "IMAGE_IMPORT_DESCRIPTOR",
+            size_32: 20,
+            size_64: 20,
+            fields: vec![
+                FieldDef { name: "OriginalFirstThunk", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "TimeDateStamp", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "ForwarderChain", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "Name", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "FirstThunk", type_name: "DWORD", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // ====================================================================
+        // Networking (Winsock) - 통신 분석용
+        // ====================================================================
+
+        // SOCKADDR_IN (IPv4)
+        self.add(StructDef {
+            name: "SOCKADDR_IN",
+            size_32: 16,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "sin_family", type_name: "SHORT", offset_32: 0, offset_64: 0, size_32: 2, size_64: 2 },
+                FieldDef { name: "sin_port", type_name: "USHORT", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
+                FieldDef { name: "sin_addr", type_name: "ULONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "sin_zero", type_name: "CHAR[8]", offset_32: 8, offset_64: 8, size_32: 8, size_64: 8 },
+            ],
+        });
+
+        // WSADATA (Winsock Init)
+        self.add(StructDef {
+            name: "WSADATA",
+            size_32: 400,
+            size_64: 408,
+            fields: vec![
+                FieldDef { name: "wVersion", type_name: "WORD", offset_32: 0, offset_64: 0, size_32: 2, size_64: 2 },
+                FieldDef { name: "wHighVersion", type_name: "WORD", offset_32: 2, offset_64: 2, size_32: 2, size_64: 2 },
+                FieldDef { name: "szDescription", type_name: "CHAR[257]", offset_32: 4, offset_64: 4, size_32: 257, size_64: 257 },
+                FieldDef { name: "szSystemStatus", type_name: "CHAR[129]", offset_32: 261, offset_64: 261, size_32: 129, size_64: 129 },
+            ],
+        });
+
+        // HOSTENT (DNS resolution)
+        self.add(StructDef {
+            name: "HOSTENT",
+            size_32: 16,
+            size_64: 32,
+            fields: vec![
+                FieldDef { name: "h_name", type_name: "PCHAR", offset_32: 0, offset_64: 0, size_32: 4, size_64: 8 },
+                FieldDef { name: "h_aliases", type_name: "PCHAR*", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "h_addrtype", type_name: "SHORT", offset_32: 8, offset_64: 16, size_32: 2, size_64: 2 },
+                FieldDef { name: "h_length", type_name: "SHORT", offset_32: 10, offset_64: 18, size_32: 2, size_64: 2 },
+                FieldDef { name: "h_addr_list", type_name: "PCHAR*", offset_32: 12, offset_64: 24, size_32: 4, size_64: 8 },
+            ],
+        });
     }
     
     /// Get structure by name
