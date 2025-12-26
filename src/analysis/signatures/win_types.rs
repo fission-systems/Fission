@@ -539,6 +539,147 @@ impl WindowsStructures {
                 FieldDef { name: "h_addr_list", type_name: "PCHAR*", offset_32: 12, offset_64: 24, size_32: 4, size_64: 8 },
             ],
         });
+
+        // ====================================================================
+        // Security & Privileges (Token Manipulation)
+        // ====================================================================
+
+        // LUID (Locally Unique Identifier)
+        self.add(StructDef {
+            name: "LUID",
+            size_32: 8,
+            size_64: 8,
+            fields: vec![
+                FieldDef { name: "LowPart", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "HighPart", type_name: "LONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // LUID_AND_ATTRIBUTES
+        self.add(StructDef {
+            name: "LUID_AND_ATTRIBUTES",
+            size_32: 12,
+            size_64: 12,
+            fields: vec![
+                FieldDef { name: "Luid", type_name: "LUID", offset_32: 0, offset_64: 0, size_32: 8, size_64: 8 },
+                FieldDef { name: "Attributes", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // TOKEN_PRIVILEGES
+        self.add(StructDef {
+            name: "TOKEN_PRIVILEGES",
+            size_32: 16,
+            size_64: 16,
+            fields: vec![
+                FieldDef { name: "PrivilegeCount", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "Privileges", type_name: "LUID_AND_ATTRIBUTES[1]", offset_32: 4, offset_64: 4, size_32: 12, size_64: 12 },
+            ],
+        });
+
+        // SID_IDENTIFIER_AUTHORITY
+        self.add(StructDef {
+            name: "SID_IDENTIFIER_AUTHORITY",
+            size_32: 6,
+            size_64: 6,
+            fields: vec![
+                FieldDef { name: "Value", type_name: "BYTE[6]", offset_32: 0, offset_64: 0, size_32: 6, size_64: 6 },
+            ],
+        });
+
+        // ====================================================================
+        // ToolHelp32 (Process Enumeration)
+        // ====================================================================
+
+        // PROCESSENTRY32W
+        self.add(StructDef {
+            name: "PROCESSENTRY32W",
+            size_32: 556,
+            size_64: 568,
+            fields: vec![
+                FieldDef { name: "dwSize", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "cntUsage", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "th32ProcessID", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "th32DefaultHeapID", type_name: "ULONG_PTR", offset_32: 12, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "th32ModuleID", type_name: "DWORD", offset_32: 16, offset_64: 24, size_32: 4, size_64: 4 },
+                FieldDef { name: "cntThreads", type_name: "DWORD", offset_32: 20, offset_64: 28, size_32: 4, size_64: 4 },
+                FieldDef { name: "th32ParentProcessID", type_name: "DWORD", offset_32: 24, offset_64: 32, size_32: 4, size_64: 4 },
+                FieldDef { name: "pcPriClassBase", type_name: "LONG", offset_32: 28, offset_64: 36, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwFlags", type_name: "DWORD", offset_32: 32, offset_64: 40, size_32: 4, size_64: 4 },
+                FieldDef { name: "szExeFile", type_name: "WCHAR[260]", offset_32: 36, offset_64: 44, size_32: 520, size_64: 520 },
+            ],
+        });
+
+        // MODULEENTRY32W
+        self.add(StructDef {
+            name: "MODULEENTRY32W",
+            size_32: 1064,
+            size_64: 1080,
+            fields: vec![
+                FieldDef { name: "dwSize", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "th32ModuleID", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "th32ProcessID", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "GlblcntUsage", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "ProccntUsage", type_name: "DWORD", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
+                FieldDef { name: "modBaseAddr", type_name: "BYTE*", offset_32: 20, offset_64: 24, size_32: 4, size_64: 8 },
+                FieldDef { name: "modBaseSize", type_name: "DWORD", offset_32: 24, offset_64: 32, size_32: 4, size_64: 4 },
+                FieldDef { name: "hModule", type_name: "HMODULE", offset_32: 28, offset_64: 40, size_32: 4, size_64: 8 },
+                FieldDef { name: "szModule", type_name: "WCHAR[256]", offset_32: 32, offset_64: 48, size_32: 512, size_64: 512 },
+                FieldDef { name: "szExePath", type_name: "WCHAR[260]", offset_32: 544, offset_64: 560, size_32: 520, size_64: 520 },
+            ],
+        });
+
+        // THREADENTRY32
+        self.add(StructDef {
+            name: "THREADENTRY32",
+            size_32: 28,
+            size_64: 28,
+            fields: vec![
+                FieldDef { name: "dwSize", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "cntUsage", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "th32ThreadID", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "th32OwnerProcessID", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "tpBasePri", type_name: "LONG", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
+                FieldDef { name: "tpDeltaPri", type_name: "LONG", offset_32: 20, offset_64: 20, size_32: 4, size_64: 4 },
+                FieldDef { name: "dwFlags", type_name: "DWORD", offset_32: 24, offset_64: 24, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // ====================================================================
+        // Exception Handling
+        // ====================================================================
+
+        // EXCEPTION_RECORD
+        self.add(StructDef {
+            name: "EXCEPTION_RECORD",
+            size_32: 80,
+            size_64: 152,
+            fields: vec![
+                FieldDef { name: "ExceptionCode", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "ExceptionFlags", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "ExceptionRecord", type_name: "PEXCEPTION_RECORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "ExceptionAddress", type_name: "PVOID", offset_32: 12, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "NumberParameters", type_name: "DWORD", offset_32: 16, offset_64: 24, size_32: 4, size_64: 4 },
+                FieldDef { name: "ExceptionInformation", type_name: "ULONG_PTR[15]", offset_32: 20, offset_64: 32, size_32: 60, size_64: 120 },
+            ],
+        });
+
+        // CONTEXT (x64 simplified - key registers only)
+        self.add(StructDef {
+            name: "CONTEXT",
+            size_32: 716,
+            size_64: 1232,
+            fields: vec![
+                FieldDef { name: "ContextFlags", type_name: "DWORD", offset_32: 0, offset_64: 48, size_32: 4, size_64: 4 },
+                FieldDef { name: "Rax", type_name: "DWORD64", offset_32: 0, offset_64: 120, size_32: 0, size_64: 8 },
+                FieldDef { name: "Rcx", type_name: "DWORD64", offset_32: 0, offset_64: 128, size_32: 0, size_64: 8 },
+                FieldDef { name: "Rdx", type_name: "DWORD64", offset_32: 0, offset_64: 136, size_32: 0, size_64: 8 },
+                FieldDef { name: "Rbx", type_name: "DWORD64", offset_32: 0, offset_64: 144, size_32: 0, size_64: 8 },
+                FieldDef { name: "Rsp", type_name: "DWORD64", offset_32: 0, offset_64: 152, size_32: 0, size_64: 8 },
+                FieldDef { name: "Rbp", type_name: "DWORD64", offset_32: 0, offset_64: 160, size_32: 0, size_64: 8 },
+                FieldDef { name: "Rip", type_name: "DWORD64", offset_32: 0, offset_64: 248, size_32: 0, size_64: 8 },
+            ],
+        });
     }
     
     /// Get structure by name
