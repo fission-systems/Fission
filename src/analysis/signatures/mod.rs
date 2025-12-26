@@ -4,6 +4,7 @@
 //! This helps the decompiler identify known functions without debug symbols.
 
 pub mod win_api;
+pub mod win_types;
 
 use std::collections::HashMap;
 
