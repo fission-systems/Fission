@@ -230,6 +230,222 @@ impl SignatureDatabase {
             "_crt_startup",
             "48 83 EC 28 48 8D 0D ?? ?? ?? ?? E8"
         ));
+        
+        // ==================== String Functions (x64) ====================
+        
+        // memcmp (x64) - memory comparison
+        self.signatures.push(FunctionSignature::from_hex(
+            "memcmp",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 4D 8B C8"
+        ));
+        
+        // memcmp variant (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "memcmp",
+            "4C 8B DC 49 89 5B 08 49 89 6B 10 49 89 73 18"
+        ));
+        
+        // strncmp (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strncmp",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 4C 8B CA"
+        ));
+        
+        // strncpy (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strncpy",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 49 8B F0"
+        ));
+        
+        // strcpy (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strcpy",
+            "48 8B C1 0F B6 12 88 11 48 FF C1"
+        ));
+        
+        // strcat (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strcat",
+            "48 8B C1 80 39 00 74 ?? 48 FF C1 EB"
+        ));
+        
+        // strncat (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strncat",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 49 8B D8"
+        ));
+        
+        // strchr (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strchr",
+            "40 53 48 83 EC 20 0F B6 DA 48 8B C1"
+        ));
+        
+        // strrchr (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strrchr",
+            "48 89 5C 24 08 57 48 83 EC 20 0F B6 FA 48 8B D9 E8"
+        ));
+        
+        // strstr (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strstr",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F9 48 8B F2"
+        ));
+        
+        // ==================== Formatting Functions (x64) ====================
+        
+        // sprintf (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "sprintf",
+            "48 89 4C 24 08 48 89 54 24 10 4C 89 44 24 18 4C 89 4C 24 20 48 83 EC 38"
+        ));
+        
+        // snprintf / _snprintf (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "snprintf",
+            "4C 89 4C 24 20 4C 89 44 24 18 48 89 54 24 10 48 89 4C 24 08 48 83 EC 38"
+        ));
+        
+        // sscanf (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "sscanf",
+            "48 89 54 24 10 4C 89 44 24 18 4C 89 4C 24 20 48 83 EC 28"
+        ));
+        
+        // printf (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "printf",
+            "48 89 4C 24 08 48 89 54 24 10 4C 89 44 24 18 4C 89 4C 24 20 48 83 EC 28"
+        ));
+        
+        // ==================== Conversion Functions (x64) ====================
+        
+        // atoi (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "atoi",
+            "48 83 EC 28 45 33 C0 45 33 C9 33 D2"
+        ));
+        
+        // atol (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "atol",
+            "48 83 EC 28 45 33 C0 45 33 C9"
+        ));
+        
+        // strtol (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strtol",
+            "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 20 41 8B E8"
+        ));
+        
+        // strtoul (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strtoul",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 83 FA 24"
+        ));
+        
+        // ==================== Memory Allocation (x64) ====================
+        
+        // malloc (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "malloc",
+            "48 83 EC 28 48 85 C9 75 ?? B9 01 00 00 00"
+        ));
+        
+        // calloc (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "calloc",
+            "48 89 5C 24 08 57 48 83 EC 20 48 8B FA 48 8B D9 48 0F AF FB"
+        ));
+        
+        // realloc (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "realloc",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F2 48 8B F9 48 85 C9"
+        ));
+        
+        // free (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "free",
+            "48 85 C9 74 ?? 48 83 EC 28 4C 8B C1"
+        ));
+        
+        // free variant (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "free",
+            "48 83 EC 28 48 85 C9 74 ?? E8"
+        ));
+        
+        // ==================== File I/O (x64) ====================
+        
+        // fopen (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "fopen",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 50 48 8B FA 48 8B F1"
+        ));
+        
+        // fclose (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "fclose",
+            "48 89 5C 24 08 57 48 83 EC 20 48 8B F9 33 D2"
+        ));
+        
+        // fread (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "fread",
+            "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 30 49 8B E8"
+        ));
+        
+        // fwrite (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "fwrite",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 49 8B D9"
+        ));
+        
+        // fseek (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "fseek",
+            "48 89 5C 24 08 57 48 83 EC 20 41 8B F8 48 8B D9 48 63 C2"
+        ));
+        
+        // ftell (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "ftell",
+            "48 83 EC 28 48 8B 49 18 48 83 C1 08"
+        ));
+        
+        // ==================== Wide String Functions (x64) ====================
+        
+        // wcscmp (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "wcscmp",
+            "48 89 5C 24 08 57 48 83 EC 20 48 8B DA 48 8B F9 66 39 11"
+        ));
+        
+        // wcsncmp (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "wcsncmp",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 4C 8B C2"
+        ));
+        
+        // wcscat (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "wcscat",
+            "48 8B C1 66 83 39 00 74 ?? 48 83 C1 02 EB"
+        ));
+        
+        // wcsstr (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "wcsstr",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B FA 48 8B F1 66 83 3A 00"
+        ));
+        
+        // _wcsicmp (x64) - case insensitive wide compare
+        self.signatures.push(FunctionSignature::from_hex(
+            "_wcsicmp",
+            "48 89 5C 24 08 57 48 83 EC 20 48 8B DA 48 8B F9 0F B7 01"
+        ));
     }
     
     /// Try to match a function's bytes against known signatures
