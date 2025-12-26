@@ -650,6 +650,194 @@ impl SignatureDatabase {
             "LdrLoadDll",
             "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 49 8B F9"
         ));
+        
+        // ==================== Syscall Stubs (EDR Evasion) ====================
+        
+        // Direct syscall (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "syscall_stub",
+            "4C 8B D1 B8 ?? ?? 00 00 0F 05 C3"
+        ));
+        
+        // Wow64 syscall (32-bit on 64-bit)
+        self.signatures.push(FunctionSignature::from_hex(
+            "wow64_syscall",
+            "B8 ?? ?? 00 00 BA ?? ?? ?? ?? FF D2"
+        ));
+        
+        // Syscall with jmp to ntdll
+        self.signatures.push(FunctionSignature::from_hex(
+            "syscall_jmp_ntdll",
+            "4C 8B D1 B8 ?? ?? 00 00 49 BB ?? ?? ?? ?? ?? ?? 00 00 41 FF E3"
+        ));
+        
+        // ==================== Process Injection Patterns ====================
+        
+        // NtCreateThreadEx stub
+        self.signatures.push(FunctionSignature::from_hex(
+            "NtCreateThreadEx",
+            "4C 8B D1 B8 C7 00 00 00"
+        ));
+        
+        // NtWriteVirtualMemory
+        self.signatures.push(FunctionSignature::from_hex(
+            "NtWriteVirtualMemory",
+            "4C 8B D1 B8 3A 00 00 00"
+        ));
+        
+        // NtProtectVirtualMemory
+        self.signatures.push(FunctionSignature::from_hex(
+            "NtProtectVirtualMemory",
+            "4C 8B D1 B8 50 00 00 00"
+        ));
+        
+        // APC injection pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "apc_injection",
+            "48 8B D1 48 8B CA 48 8B C2 4C 8D 4C 24"
+        ));
+        
+        // ==================== VM/Sandbox Detection ====================
+        
+        // CPUID VM detection
+        self.signatures.push(FunctionSignature::from_hex(
+            "vm_detect_cpuid",
+            "B8 01 00 00 00 0F A2 81 E1 00 00 00 80"
+        ));
+        
+        // CPUID hypervisor brand check
+        self.signatures.push(FunctionSignature::from_hex(
+            "vm_detect_cpuid_hypervisor",
+            "B8 40 00 00 00 0F A2"
+        ));
+        
+        // In instruction (VMware backdoor)
+        self.signatures.push(FunctionSignature::from_hex(
+            "vm_detect_vmware",
+            "B8 58 4D 56 56 BB 00 00 00 00 B9 0A 00 00 00 BA 58 56 00 00 ED"
+        ));
+        
+        // ==================== Network Patterns (C2) ====================
+        
+        // WSAStartup pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "wsa_startup",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 8B F9 48 8D 54 24 20"
+        ));
+        
+        // socket() pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "socket_create",
+            "44 8B C2 8B D1 B9 02 00 00 00 FF 15"
+        ));
+        
+        // connect() pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "socket_connect",
+            "44 8B 4C 24 ?? 44 8B 44 24 ?? 8B 54 24 ?? 8B 4C 24 ?? FF 15"
+        ));
+        
+        // send() pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "socket_send",
+            "45 33 C9 44 8B 44 24 ?? 48 8B 54 24 ?? 8B 4C 24 ?? FF 15"
+        ));
+        
+        // recv() pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "socket_recv",
+            "45 33 C9 45 8B C0 48 8B D1 8B C9 FF 15"
+        ));
+        
+        // ==================== Packer Stubs ====================
+        
+        // UPX stub (x86)
+        self.signatures.push(FunctionSignature::from_hex(
+            "upx_stub",
+            "60 BE ?? ?? ?? ?? 8D BE ?? ?? ?? ?? 57 83 CD FF"
+        ));
+        
+        // UPX stub (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "upx_stub_x64",
+            "53 51 52 48 8D 05 ?? ?? ?? ?? 48 8D 0D"
+        ));
+        
+        // Themida/WinLicense entry
+        self.signatures.push(FunctionSignature::from_hex(
+            "themida_entry",
+            "55 8B EC 83 C4 ?? B8 ?? ?? ?? ?? E8"
+        ));
+        
+        // VMProtect stub
+        self.signatures.push(FunctionSignature::from_hex(
+            "vmp_stub",
+            "68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 00 00 00 00 00"
+        ));
+        
+        // ASPack stub
+        self.signatures.push(FunctionSignature::from_hex(
+            "aspack_stub",
+            "60 E8 00 00 00 00 5D 81 ED ?? ?? ?? ?? B8 ?? ?? ?? ??"
+        ));
+        
+        // ==================== TLS Callback ====================
+        
+        // TLS callback prologue (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "tls_callback",
+            "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 83 FA 01"
+        ));
+        
+        // TLS callback DLL_PROCESS_ATTACH check
+        self.signatures.push(FunctionSignature::from_hex(
+            "tls_callback_attach",
+            "83 FA 01 75 ?? 48 89 5C 24"
+        ));
+        
+        // ==================== Math Functions (SSE) ====================
+        
+        // sqrtf (x64 SSE)
+        self.signatures.push(FunctionSignature::from_hex(
+            "sqrtf",
+            "0F 51 C0 C3"
+        ));
+        
+        // sqrtsd (x64 double)
+        self.signatures.push(FunctionSignature::from_hex(
+            "sqrt",
+            "F2 0F 51 C0 C3"
+        ));
+        
+        // sinf (x64 UCRT)
+        self.signatures.push(FunctionSignature::from_hex(
+            "sinf",
+            "48 83 EC 28 0F 28 D0 F3 0F 5A C0"
+        ));
+        
+        // cosf (x64 UCRT)
+        self.signatures.push(FunctionSignature::from_hex(
+            "cosf",
+            "48 83 EC 28 0F 28 D0 F3 0F 5A C8"
+        ));
+        
+        // fabsf (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "fabsf",
+            "0F 54 05 ?? ?? ?? ?? C3"
+        ));
+        
+        // floorf (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "floorf",
+            "66 0F 3A 0A C0 01 C3"
+        ));
+        
+        // ceilf (x64)
+        self.signatures.push(FunctionSignature::from_hex(
+            "ceilf",
+            "66 0F 3A 0A C0 02 C3"
+        ));
     }
     
     /// Try to match a function's bytes against known signatures
