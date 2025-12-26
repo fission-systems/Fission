@@ -838,6 +838,130 @@ impl SignatureDatabase {
             "ceilf",
             "66 0F 3A 0A C0 02 C3"
         ));
+        
+        // ==================== x86 Patterns (32-bit) ====================
+        
+        // malloc (x86)
+        self.signatures.push(FunctionSignature::from_hex(
+            "malloc",
+            "55 8B EC 83 7D 08 00 75 ?? 6A 01"
+        ));
+        
+        // free (x86)
+        self.signatures.push(FunctionSignature::from_hex(
+            "free",
+            "55 8B EC 83 7D 08 00 74 ?? 8B 45 08"
+        ));
+        
+        // memcpy (x86)
+        self.signatures.push(FunctionSignature::from_hex(
+            "memcpy",
+            "55 8B EC 57 56 8B 75 0C 8B 4D 10 8B 7D 08"
+        ));
+        
+        // memset (x86)
+        self.signatures.push(FunctionSignature::from_hex(
+            "memset",
+            "55 8B EC 57 8B 7D 08 0F B6 45 0C"
+        ));
+        
+        // strlen (x86)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strlen",
+            "8B 4C 24 04 F7 C1 03 00 00 00 74"
+        ));
+        
+        // strcmp (x86)
+        self.signatures.push(FunctionSignature::from_hex(
+            "strcmp",
+            "55 8B EC 56 8B 75 08 57 8B 7D 0C 8A 06"
+        ));
+        
+        // ==================== MinGW/GCC ====================
+        
+        // __main (GCC CRT)
+        self.signatures.push(FunctionSignature::from_hex(
+            "__main",
+            "55 48 89 E5 48 83 EC 20 E8 ?? ?? ?? ?? 48 83 C4 20 5D C3"
+        ));
+        
+        // __mingw_CRTStartup
+        self.signatures.push(FunctionSignature::from_hex(
+            "__mingw_CRTStartup",
+            "48 83 EC 28 48 8B 05 ?? ?? ?? ?? 48 85 C0"
+        ));
+        
+        // __gcc_personality_v0
+        self.signatures.push(FunctionSignature::from_hex(
+            "__gcc_personality_v0",
+            "55 48 89 E5 41 57 41 56 41 55 41 54 53"
+        ));
+        
+        // ==================== WinHTTP/WinInet (C2) ====================
+        
+        // WinHttpOpen pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "winhttp_open",
+            "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 56 41 57 48 83 EC 40"
+        ));
+        
+        // WinHttpConnect
+        self.signatures.push(FunctionSignature::from_hex(
+            "winhttp_connect",
+            "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 30"
+        ));
+        
+        // InternetOpenA
+        self.signatures.push(FunctionSignature::from_hex(
+            "internet_open",
+            "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 56 41 57"
+        ));
+        
+        // ==================== Registry (Persistence) ====================
+        
+        // RegOpenKeyExW pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "reg_open_key",
+            "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC 30 49 8B F9"
+        ));
+        
+        // RegSetValueExW pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "reg_set_value",
+            "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 41 56"
+        ));
+        
+        // RegQueryValueExW pattern
+        self.signatures.push(FunctionSignature::from_hex(
+            "reg_query_value",
+            "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55"
+        ));
+        
+        // ==================== Additional Crypto ====================
+        
+        // ChaCha20 quarter round
+        self.signatures.push(FunctionSignature::from_hex(
+            "chacha20_quarter",
+            "01 C1 31 C8 C1 C0 10 01 C3"
+        ));
+        
+        // CRC32 table lookup
+        self.signatures.push(FunctionSignature::from_hex(
+            "crc32_update",
+            "33 C0 8A 44 24 ?? 32 01 48 FF C1 48 8D 15"
+        ));
+        
+        // Blowfish F function
+        self.signatures.push(FunctionSignature::from_hex(
+            "blowfish_f",
+            "8B C1 C1 E8 18 8B 44 82 ?? 03 44 8A"
+        ));
+        
+        // TEA encrypt
+        self.signatures.push(FunctionSignature::from_hex(
+            "tea_encrypt",
+            "8B 01 8B 49 04 8D 14 30 C1 E0 04 C1 E9 05"
+        ));
     }
     
     /// Try to match a function's bytes against known signatures
