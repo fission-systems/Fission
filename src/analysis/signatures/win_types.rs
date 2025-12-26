@@ -1160,6 +1160,124 @@ impl WindowsStructures {
                 FieldDef { name: "dwServiceFlags", type_name: "DWORD", offset_32: 32, offset_64: 32, size_32: 4, size_64: 4 },
             ],
         });
+
+        // ====================================================================
+        // TLS Callback (Anti-debug Analysis)
+        // ====================================================================
+
+        // IMAGE_TLS_DIRECTORY32
+        self.add(StructDef {
+            name: "IMAGE_TLS_DIRECTORY32",
+            size_32: 24,
+            size_64: 0,
+            fields: vec![
+                FieldDef { name: "StartAddressOfRawData", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "EndAddressOfRawData", type_name: "DWORD", offset_32: 4, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "AddressOfIndex", type_name: "DWORD", offset_32: 8, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "AddressOfCallBacks", type_name: "DWORD", offset_32: 12, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "SizeOfZeroFill", type_name: "DWORD", offset_32: 16, offset_64: 0, size_32: 4, size_64: 0 },
+                FieldDef { name: "Characteristics", type_name: "DWORD", offset_32: 20, offset_64: 0, size_32: 4, size_64: 0 },
+            ],
+        });
+
+        // IMAGE_TLS_DIRECTORY64
+        self.add(StructDef {
+            name: "IMAGE_TLS_DIRECTORY64",
+            size_32: 0,
+            size_64: 40,
+            fields: vec![
+                FieldDef { name: "StartAddressOfRawData", type_name: "ULONGLONG", offset_32: 0, offset_64: 0, size_32: 0, size_64: 8 },
+                FieldDef { name: "EndAddressOfRawData", type_name: "ULONGLONG", offset_32: 0, offset_64: 8, size_32: 0, size_64: 8 },
+                FieldDef { name: "AddressOfIndex", type_name: "ULONGLONG", offset_32: 0, offset_64: 16, size_32: 0, size_64: 8 },
+                FieldDef { name: "AddressOfCallBacks", type_name: "ULONGLONG", offset_32: 0, offset_64: 24, size_32: 0, size_64: 8 },
+                FieldDef { name: "SizeOfZeroFill", type_name: "DWORD", offset_32: 0, offset_64: 32, size_32: 0, size_64: 4 },
+                FieldDef { name: "Characteristics", type_name: "DWORD", offset_32: 0, offset_64: 36, size_32: 0, size_64: 4 },
+            ],
+        });
+
+        // ====================================================================
+        // NT Internal Structures
+        // ====================================================================
+
+        // NT_TIB (Thread Information Block - fs:[0] / gs:[0])
+        self.add(StructDef {
+            name: "NT_TIB",
+            size_32: 28,
+            size_64: 56,
+            fields: vec![
+                FieldDef { name: "ExceptionList", type_name: "PEXCEPTION_REGISTRATION_RECORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 8 },
+                FieldDef { name: "StackBase", type_name: "PVOID", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "StackLimit", type_name: "PVOID", offset_32: 8, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "SubSystemTib", type_name: "PVOID", offset_32: 12, offset_64: 24, size_32: 4, size_64: 8 },
+                FieldDef { name: "FiberData", type_name: "PVOID", offset_32: 16, offset_64: 32, size_32: 4, size_64: 8 },
+                FieldDef { name: "ArbitraryUserPointer", type_name: "PVOID", offset_32: 20, offset_64: 40, size_32: 4, size_64: 8 },
+                FieldDef { name: "Self", type_name: "PNT_TIB", offset_32: 24, offset_64: 48, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // PROCESS_BASIC_INFORMATION (NtQueryInformationProcess)
+        self.add(StructDef {
+            name: "PROCESS_BASIC_INFORMATION",
+            size_32: 24,
+            size_64: 48,
+            fields: vec![
+                FieldDef { name: "ExitStatus", type_name: "NTSTATUS", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "PebBaseAddress", type_name: "PPEB", offset_32: 4, offset_64: 8, size_32: 4, size_64: 8 },
+                FieldDef { name: "AffinityMask", type_name: "ULONG_PTR", offset_32: 8, offset_64: 16, size_32: 4, size_64: 8 },
+                FieldDef { name: "BasePriority", type_name: "LONG", offset_32: 12, offset_64: 24, size_32: 4, size_64: 4 },
+                FieldDef { name: "UniqueProcessId", type_name: "ULONG_PTR", offset_32: 16, offset_64: 32, size_32: 4, size_64: 8 },
+                FieldDef { name: "InheritedFromUniqueProcessId", type_name: "ULONG_PTR", offset_32: 20, offset_64: 40, size_32: 4, size_64: 8 },
+            ],
+        });
+
+        // SYSTEM_PROCESS_INFORMATION (NtQuerySystemInformation)
+        self.add(StructDef {
+            name: "SYSTEM_PROCESS_INFORMATION",
+            size_32: 184,
+            size_64: 256,
+            fields: vec![
+                FieldDef { name: "NextEntryOffset", type_name: "ULONG", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "NumberOfThreads", type_name: "ULONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "WorkingSetPrivateSize", type_name: "LARGE_INTEGER", offset_32: 8, offset_64: 8, size_32: 8, size_64: 8 },
+                FieldDef { name: "UniqueProcessId", type_name: "HANDLE", offset_32: 56, offset_64: 80, size_32: 4, size_64: 8 },
+                FieldDef { name: "InheritedFromUniqueProcessId", type_name: "HANDLE", offset_32: 60, offset_64: 88, size_32: 4, size_64: 8 },
+                FieldDef { name: "HandleCount", type_name: "ULONG", offset_32: 64, offset_64: 96, size_32: 4, size_64: 4 },
+                FieldDef { name: "SessionId", type_name: "ULONG", offset_32: 68, offset_64: 100, size_32: 4, size_64: 4 },
+                FieldDef { name: "ImageName", type_name: "UNICODE_STRING", offset_32: 92, offset_64: 112, size_32: 8, size_64: 16 },
+            ],
+        });
+
+        // ====================================================================
+        // Delay Import (Runtime Loading)
+        // ====================================================================
+
+        // IMAGE_DELAYLOAD_DESCRIPTOR
+        self.add(StructDef {
+            name: "IMAGE_DELAYLOAD_DESCRIPTOR",
+            size_32: 32,
+            size_64: 32,
+            fields: vec![
+                FieldDef { name: "Attributes", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "DllNameRVA", type_name: "DWORD", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+                FieldDef { name: "ModuleHandleRVA", type_name: "DWORD", offset_32: 8, offset_64: 8, size_32: 4, size_64: 4 },
+                FieldDef { name: "ImportAddressTableRVA", type_name: "DWORD", offset_32: 12, offset_64: 12, size_32: 4, size_64: 4 },
+                FieldDef { name: "ImportNameTableRVA", type_name: "DWORD", offset_32: 16, offset_64: 16, size_32: 4, size_64: 4 },
+                FieldDef { name: "BoundImportAddressTableRVA", type_name: "DWORD", offset_32: 20, offset_64: 20, size_32: 4, size_64: 4 },
+                FieldDef { name: "UnloadInformationTableRVA", type_name: "DWORD", offset_32: 24, offset_64: 24, size_32: 4, size_64: 4 },
+                FieldDef { name: "TimeDateStamp", type_name: "DWORD", offset_32: 28, offset_64: 28, size_32: 4, size_64: 4 },
+            ],
+        });
+
+        // LARGE_INTEGER
+        self.add(StructDef {
+            name: "LARGE_INTEGER",
+            size_32: 8,
+            size_64: 8,
+            fields: vec![
+                FieldDef { name: "LowPart", type_name: "DWORD", offset_32: 0, offset_64: 0, size_32: 4, size_64: 4 },
+                FieldDef { name: "HighPart", type_name: "LONG", offset_32: 4, offset_64: 4, size_32: 4, size_64: 4 },
+            ],
+        });
     }
     
     /// Get structure by name
