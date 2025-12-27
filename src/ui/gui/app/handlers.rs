@@ -3,12 +3,12 @@
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use crate::ui::gui::state::AppState;
 use crate::ui::gui::messages::AsyncMessage;
+use crate::ui::gui::state::AppState;
 
 use super::debug_ops;
-use super::file_ops;
 use super::decompiler;
+use super::file_ops;
 
 /// Process pending async messages from background threads
 pub fn process_messages(
@@ -16,28 +16,32 @@ pub fn process_messages(
     rx: &Receiver<AsyncMessage>,
     tx: &Sender<AsyncMessage>,
     decomp_tx: &Sender<super::decomp_worker::DecompileRequest>,
-    #[cfg(target_os = "windows")]
-    dbg_event_rx: &Option<std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>>,
+    #[cfg(target_os = "windows")] dbg_event_rx: &Option<
+        std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>,
+    >,
 ) {
     while let Ok(msg) = rx.try_recv() {
         match msg {
             AsyncMessage::BinaryLoaded(Ok(binary)) => {
                 // Note: Internal function discovery now disabled for fast loading
                 // Can be triggered separately via "Analyze" button
-                
+
                 state.log(format!("[✓] Loaded: {}", binary.path));
-                state.log(format!("    {} {} | Entry: 0x{:x}", 
+                state.log(format!(
+                    "    {} {} | Entry: 0x{:x}",
                     if binary.is_64bit { "64-bit" } else { "32-bit" },
                     binary.format,
-                    binary.entry_point));
+                    binary.entry_point
+                ));
                 state.log(format!("    {} functions found", binary.functions.len()));
-                
+
                 // Run detection (DiE-style)
                 let detection = crate::analysis::detector::detect(&binary);
                 if !detection.detections.is_empty() {
                     state.log("[*] Detection results:".to_string());
                     for d in &detection.detections {
-                        state.log(format!("    {} {} {}", 
+                        state.log(format!(
+                            "    {} {} {}",
                             match d.detection_type {
                                 crate::analysis::DetectionType::Packer => "📦",
                                 crate::analysis::DetectionType::Protector => "🛡️",
@@ -49,23 +53,29 @@ pub fn process_messages(
                                 crate::analysis::DetectionType::Sfx => "📁",
                             },
                             d.display(),
-                            if d.confidence == crate::analysis::Confidence::High { "✓" } else { "" }
+                            if d.confidence == crate::analysis::Confidence::High {
+                                "✓"
+                            } else {
+                                ""
+                            }
                         ));
                     }
                     state.analysis.detection_result = Some(detection);
                 }
-                
+
                 // Build cross-references database
                 let xref_db = crate::analysis::xrefs::XrefDatabase::build_from_binary(&binary);
                 let xref_count = xref_db.total_refs();
                 state.log(format!("[*] 🔗 Built {} cross-references", xref_count));
                 state.analysis.xref_db = Some(xref_db);
-                
+
                 state.analysis.loaded_binary = Some(binary.clone()); // Use clone for local reference if needed, but Arc is cheap
-                
+
                 // Run CRT signature matching on known functions
                 let sig_db = crate::analysis::signatures::SignatureDatabase::new();
-                let func_addrs: Vec<(u64, String)> = binary.functions.iter()
+                let func_addrs: Vec<(u64, String)> = binary
+                    .functions
+                    .iter()
                     .map(|f| (f.address, f.name.clone()))
                     .collect();
                 let matched_sigs = sig_db.identify_functions_in_binary(
@@ -74,19 +84,96 @@ pub fn process_messages(
                     binary.image_base,
                 );
                 if !matched_sigs.is_empty() {
-                    state.log(format!("[*] CRT signatures matched: {} functions", matched_sigs.len()));
+                    state.log(format!(
+                        "[*] CRT signatures matched: {} functions",
+                        matched_sigs.len()
+                    ));
                 }
-                
+
                 // Merge IAT symbols with CRT signature matches
                 let mut combined_symbols = binary.iat_symbols.clone();
                 combined_symbols.extend(matched_sigs);
-                
+
+                // Determine GDT paths based on architecture
+                let (gdt_path, gdt_json_path) = if binary.is_64bit {
+                    (
+                        "typeinfo/win32/windows_vs12_64.gdt",
+                        "typeinfo/win32/windows_vs12_64.gdt.types.json",
+                    )
+                } else {
+                    (
+                        "typeinfo/win32/windows_vs12_32.gdt",
+                        "typeinfo/win32/windows_vs12_32.gdt.types.json",
+                    )
+                };
+
+                // Auto-generate GDT types.json if it doesn't exist
+                let gdt_json_path_opt = if std::path::Path::new(gdt_json_path).exists() {
+                    Some(gdt_json_path.to_string())
+                } else if std::path::Path::new(gdt_path).exists() {
+                    // GDT file exists but JSON not generated yet - parse it now
+                    state.log(format!("[*] Generating GDT types from {}...", gdt_path));
+
+                    let result: Option<String> = (|| {
+                        let parser = crate::analysis::gdt_parser::GdtParser::load(gdt_path).ok()?;
+                        let db = parser.extract_db().ok()?;
+                        let complete_structures =
+                            crate::analysis::gdt_parser::GdtParser::extract_complete_structures(
+                                &db,
+                            );
+
+                        // Generate JSON and save
+                        let json = serde_json::json!({
+                            "source": gdt_path,
+                            "complete_structure_count": complete_structures.len(),
+                            "complete_structures": complete_structures.iter().map(|s| {
+                                serde_json::json!({
+                                    "name": s.name,
+                                    "size": s.size,
+                                    "alignment": s.alignment,
+                                    "field_count": s.field_count,
+                                    "fields": s.fields.iter().map(|f| {
+                                        serde_json::json!({"name": f.name, "offset": f.offset, "size": f.size})
+                                    }).collect::<Vec<_>>(),
+                                })
+                            }).collect::<Vec<_>>(),
+                        });
+
+                        let mut file = std::fs::File::create(gdt_json_path).ok()?;
+                        serde_json::to_writer_pretty(&mut file, &json).ok()?;
+                        state.log(format!(
+                            "[*] Generated {} structures to {}",
+                            complete_structures.len(),
+                            gdt_json_path
+                        ));
+                        Some(gdt_json_path.to_string())
+                    })();
+
+                    if result.is_none() {
+                        state.log("[!] Failed to generate GDT types".to_string());
+                    }
+                    result
+                } else {
+                    None
+                };
+
                 // Trigger background binary load for decompiler context
                 // Use memory-mapped data so sections are at their virtual addresses
-                state.log(format!("[*] IAT symbols extracted: {} entries", binary.iat_symbols.len()));
-                let request = super::decomp_worker::DecompileRequest::load_binary(binary.get_memory_mapped_data(), binary.image_base, combined_symbols);
+                state.log(format!(
+                    "[*] IAT symbols extracted: {} entries",
+                    binary.iat_symbols.len()
+                ));
+                let request = super::decomp_worker::DecompileRequest::load_binary(
+                    binary.get_memory_mapped_data(),
+                    binary.image_base,
+                    combined_symbols,
+                    gdt_json_path_opt,
+                );
                 if let Err(e) = decomp_tx.send(request) {
-                    state.log(format!("[!] Failed to trigger decompiler binary load: {}", e));
+                    state.log(format!(
+                        "[!] Failed to trigger decompiler binary load: {}",
+                        e
+                    ));
                     state.analysis.decompiler_context_loaded = false;
                 } else {
                     state.log("[*] Initializing decompiler persistent context...");
@@ -105,7 +192,9 @@ pub fn process_messages(
                 state.analysis.decompiled_code = format!("// Decompilation failed\n// Error: {}\n\n// Possible causes:\n// - Function may not exist at this address\n// - fission_decomp CLI may not be built\n// - Try running: cd ghidra_decompiler/build && cmake .. && make", error);
                 state.analysis.decompiling = false;
                 state.log(format!("[✗] Decompile error: {}", error));
-                state.log("    → Check if ghidra_decompiler/build/fission_decomp exists".to_string());
+                state.log(
+                    "    → Check if ghidra_decompiler/build/fission_decomp exists".to_string(),
+                );
             }
             AsyncMessage::FileSelected(Some(path)) => {
                 file_ops::load_binary(state, tx.clone(), &path);
@@ -118,12 +207,30 @@ pub fn process_messages(
             }
             AsyncMessage::Event(evt) => {
                 match evt {
-                    crate::core::events::FissionEvent::LogMessage { level, message, target } => {
-                        state.log(format!("[{}] {} - {}", level.to_uppercase(), target, message));
+                    crate::core::events::FissionEvent::LogMessage {
+                        level,
+                        message,
+                        target,
+                    } => {
+                        state.log(format!(
+                            "[{}] {} - {}",
+                            level.to_uppercase(),
+                            target,
+                            message
+                        ));
                     }
-                    crate::core::events::FissionEvent::Progress { task_id: _, current, total, message } => {
+                    crate::core::events::FissionEvent::Progress {
+                        task_id: _,
+                        current,
+                        total,
+                        message,
+                    } => {
                         // TODO: Update status bar progress
-                        state.log(format!("[Progress] {:.1}% - {}", (current as f64 / total as f64) * 100.0, message));
+                        state.log(format!(
+                            "[Progress] {:.1}% - {}",
+                            (current as f64 / total as f64) * 100.0,
+                            message
+                        ));
                     }
                     crate::core::events::FissionEvent::SelectionChanged { address } => {
                         if let Some(addr) = address {
@@ -152,11 +259,7 @@ pub fn process_messages(
 }
 
 /// Process a CLI command
-pub fn process_command(
-    state: &mut AppState,
-    tx: Sender<AsyncMessage>,
-    cmd: &str,
-) {
+pub fn process_command(state: &mut AppState, tx: Sender<AsyncMessage>, cmd: &str) {
     match cmd {
         "help" | "?" => {
             state.log("Available commands:");
@@ -167,7 +270,9 @@ pub fn process_command(
         }
         "funcs" | "functions" => {
             if let Some(ref binary) = state.analysis.loaded_binary {
-                let funcs: Vec<_> = binary.functions.iter()
+                let funcs: Vec<_> = binary
+                    .functions
+                    .iter()
                     .map(|f| (f.address, f.name.clone()))
                     .collect();
                 state.log(format!("[*] {} functions:", funcs.len()));
@@ -226,18 +331,23 @@ pub fn process_command(
             } else {
                 Vec::new()
             };
-            
+
             state.log("[*] Loaded Plugins:");
-            
+
             if plugins.is_empty() {
                 state.log("    (none)");
             } else {
                 for plugin in plugins {
-                    state.log(format!("    - {} ({}) v{} [{}]", 
-                        plugin.name, 
+                    state.log(format!(
+                        "    - {} ({}) v{} [{}]",
+                        plugin.name,
                         plugin.id,
                         plugin.version,
-                        if plugin.enabled { "Enabled" } else { "Disabled" }
+                        if plugin.enabled {
+                            "Enabled"
+                        } else {
+                            "Disabled"
+                        }
                     ));
                 }
             }
@@ -246,14 +356,14 @@ pub fn process_command(
             // patch <addr> <byte1> <byte2> ...
             let parts: Vec<&str> = cmd.split_whitespace().collect();
             if parts.len() < 3 {
-                 state.log("[!] Usage: patch <address> <hex_byte1> [hex_byte2 ...]");
+                state.log("[!] Usage: patch <address> <hex_byte1> [hex_byte2 ...]");
             } else {
                 let addr_str = parts[1].trim_start_matches("0x");
                 match u64::from_str_radix(addr_str, 16) {
                     Ok(addr) => {
                         let mut bytes = Vec::new();
                         let mut valid = true;
-                        
+
                         for s in &parts[2..] {
                             match u8::from_str_radix(s, 16) {
                                 Ok(b) => bytes.push(b),
@@ -264,14 +374,14 @@ pub fn process_command(
                                 }
                             }
                         }
-                        
+
                         if valid {
                             let command = Box::new(crate::ui::gui::commands::PatchBytesCommand {
                                 address: addr,
                                 old_bytes: Vec::new(),
                                 new_bytes: bytes,
                             });
-                            
+
                             let mut mgr = std::mem::take(&mut state.command_manager);
                             if let Err(e) = mgr.execute(command, state) {
                                 state.log(format!("[!] Patch failed: {}", e));
@@ -298,7 +408,7 @@ pub fn process_command(
                             old_name: String::new(), // Will be filled by execute
                             new_name,
                         });
-                        
+
                         let mut mgr = std::mem::take(&mut state.command_manager);
                         if let Err(e) = mgr.execute(command, state) {
                             state.log(format!("[!] Rename failed: {}", e));
@@ -318,4 +428,3 @@ pub fn process_command(
         }
     }
 }
-
