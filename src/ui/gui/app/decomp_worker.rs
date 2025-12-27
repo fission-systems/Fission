@@ -6,13 +6,16 @@
 //! - Request debouncing (only process latest user request)
 //! - Background prefetching support
 
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
-use std::collections::HashMap;
 use crate::analysis::decomp::{DecompilerPool, DecompilerServer};
-use crate::config::{CONFIG, DecompilerMode};
+use crate::config::{DecompilerMode, CONFIG};
 use crate::core::errors::FissionError;
 use crate::ui::gui::messages::AsyncMessage;
+use std::collections::HashMap;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 
 /// Request to decompile a function
 pub struct DecompileRequest {
@@ -32,6 +35,8 @@ pub struct DecompileRequest {
     pub image_base: u64,
     /// IAT symbols to inject into decompiler (address -> name)
     pub iat_symbols: HashMap<u64, String>,
+    /// GDT types JSON path for Windows structure definitions
+    pub gdt_json_path: Option<String>,
 }
 
 impl DecompileRequest {
@@ -45,10 +50,16 @@ impl DecompileRequest {
             is_binary_load: false,
             image_base: 0,
             iat_symbols: HashMap::new(),
+            gdt_json_path: None,
         }
     }
 
-    pub fn load_binary(bytes: Vec<u8>, image_base: u64, iat_symbols: HashMap<u64, String>) -> Self {
+    pub fn load_binary(
+        bytes: Vec<u8>,
+        image_base: u64,
+        iat_symbols: HashMap<u64, String>,
+        gdt_json_path: Option<String>,
+    ) -> Self {
         Self {
             request_id: 0, // Load request doesn't use ID
             bytes,
@@ -58,6 +69,7 @@ impl DecompileRequest {
             is_binary_load: true,
             image_base,
             iat_symbols,
+            gdt_json_path,
         }
     }
 
@@ -71,6 +83,7 @@ impl DecompileRequest {
             is_binary_load: false,
             image_base: 0,
             iat_symbols: HashMap::new(),
+            gdt_json_path: None,
         }
     }
 }
@@ -82,11 +95,20 @@ enum DecompilerBackend {
 }
 
 impl DecompilerBackend {
-    fn decompile(&mut self, bytes: &[u8], address: u64, is_64bit: bool) -> crate::core::prelude::Result<String> {
+    fn decompile(
+        &mut self,
+        bytes: &[u8],
+        address: u64,
+        is_64bit: bool,
+    ) -> crate::core::prelude::Result<String> {
         match self {
-            DecompilerBackend::Pool(pool) => pool.decompile(bytes, address, is_64bit).map_err(Into::into),
+            DecompilerBackend::Pool(pool) => {
+                pool.decompile(bytes, address, is_64bit).map_err(Into::into)
+            }
             DecompilerBackend::Server(server) => {
-                let mut guard = server.lock().map_err(|e| FissionError::decompiler(format!("Lock error: {}", e)))?;
+                let mut guard = server
+                    .lock()
+                    .map_err(|e| FissionError::decompiler(format!("Lock error: {}", e)))?;
                 guard.decompile(bytes, address, is_64bit)
             }
         }
@@ -101,13 +123,13 @@ pub fn spawn_worker(
 ) {
     // Wrap receiver in Arc<Mutex> for sharing across threads
     let request_rx = Arc::new(Mutex::new(request_rx));
-    
+
     // Create shared pool (will be initialized on first request)
     let pool: Arc<Mutex<Option<Arc<DecompilerPool>>>> = Arc::new(Mutex::new(None));
-    
+
     // Get worker count from config
     let num_workers = CONFIG.decompiler.effective_num_workers();
-    
+
     // Spawn multiple worker threads
     for i in 0..num_workers {
         let request_rx = Arc::clone(&request_rx);
@@ -115,16 +137,26 @@ pub fn spawn_worker(
         let latest_request_id = Arc::clone(&latest_request_id);
         let pool = Arc::clone(&pool);
         let num_workers = num_workers; // Copy for closure
-        
+
         std::thread::Builder::new()
             .name(format!("decomp-worker-{}", i))
             .spawn(move || {
-                worker_loop(i, num_workers, request_rx, result_tx, pool, latest_request_id);
+                worker_loop(
+                    i,
+                    num_workers,
+                    request_rx,
+                    result_tx,
+                    pool,
+                    latest_request_id,
+                );
             })
             .expect("Failed to spawn decompiler worker thread");
     }
-    
-    crate::core::logging::info(&format!("[decomp-worker] Spawned {} worker threads (auto-detected)", num_workers));
+
+    crate::core::logging::info(&format!(
+        "[decomp-worker] Spawned {} worker threads (auto-detected)",
+        num_workers
+    ));
 }
 
 fn worker_loop(
@@ -144,7 +176,10 @@ fn worker_loop(
             let rx = match request_rx.lock() {
                 Ok(guard) => guard,
                 Err(poisoned) => {
-                    crate::core::logging::warn(&format!("[decomp-worker-{}] Request queue mutex poisoned, recovering...", worker_id));
+                    crate::core::logging::warn(&format!(
+                        "[decomp-worker-{}] Request queue mutex poisoned, recovering...",
+                        worker_id
+                    ));
                     poisoned.into_inner()
                 }
             };
@@ -153,15 +188,18 @@ fn worker_loop(
                 Err(_) => break, // Channel closed
             }
         };
-        
+
         // Handle Binary Load Request (Broadcast to pool)
         if request.is_binary_load {
-             // Initialize pool if needed
-             let decompiler_pool = {
+            // Initialize pool if needed
+            let decompiler_pool = {
                 let mut pool_guard = match pool.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => {
-                        crate::core::logging::warn(&format!("[decomp-worker-{}] Pool mutex poisoned, recovering...", worker_id));
+                        crate::core::logging::warn(&format!(
+                            "[decomp-worker-{}] Pool mutex poisoned, recovering...",
+                            worker_id
+                        ));
                         poisoned.into_inner()
                     }
                 };
@@ -173,7 +211,8 @@ fn worker_loop(
                             .to_string_lossy()
                             .into_owned();
 
-                        if let Ok(new_pool) = DecompilerPool::new(&cli_path, &sla_dir, num_workers) {
+                        if let Ok(new_pool) = DecompilerPool::new(&cli_path, &sla_dir, num_workers)
+                        {
                             *pool_guard = Some(Arc::new(new_pool));
                         }
                     }
@@ -187,7 +226,7 @@ fn worker_loop(
                     .join("ghidra_decompiler")
                     .to_string_lossy()
                     .into_owned();
-                
+
                 // Load binary into ALL workers
                 // Note: Since each worker thread picks up requests from the SAME channel,
                 // we have a problem: only ONE worker will pick up this request!
@@ -196,11 +235,19 @@ fn worker_loop(
                 // However, `pool.load_binary` requires locking the workers.
                 // If other workers are busy, we might block or fail.
                 // Ideally, `load_binary` should be called when no other work is happening (e.g. file load).
-                
-                if let Err(e) = p.load_binary(&request.bytes, &sla_dir, request.image_base, &request.iat_symbols) {
-                     crate::core::logging::error(&format!("[decomp-worker] Failed to load binary: {}", e));
+
+                if let Err(e) = p.load_binary(
+                    &request.bytes,
+                    &sla_dir,
+                    request.image_base,
+                    &request.iat_symbols,
+                ) {
+                    crate::core::logging::error(&format!(
+                        "[decomp-worker] Failed to load binary: {}",
+                        e
+                    ));
                 } else {
-                     crate::core::logging::info("[decomp-worker] Binary loaded successfully");
+                    crate::core::logging::info("[decomp-worker] Binary loaded successfully");
                 }
             }
             continue;
@@ -225,7 +272,8 @@ fn worker_loop(
                             .map(|p| p.join("ghidra_decompiler").to_string_lossy().into_owned())
                             .unwrap_or_else(|_| ".".to_string());
 
-                        if let Ok(new_pool) = DecompilerPool::new(&cli_path, &sla_dir, num_workers) {
+                        if let Ok(new_pool) = DecompilerPool::new(&cli_path, &sla_dir, num_workers)
+                        {
                             *pool_guard = Some(Arc::new(new_pool));
                         }
                     }
@@ -235,7 +283,9 @@ fn worker_loop(
 
             // Use non-blocking try_decompile for prefetch (don't block other requests)
             if let Some(ref p) = decompiler_pool {
-                if let Some(result) = p.try_decompile(&request.bytes, request.address, request.is_64bit) {
+                if let Some(result) =
+                    p.try_decompile(&request.bytes, request.address, request.is_64bit)
+                {
                     if let Ok(c_code) = result {
                         // Send prefetch result (will be cached but won't update UI)
                         let _ = result_tx.send(AsyncMessage::DecompileResult {
@@ -248,29 +298,32 @@ fn worker_loop(
             }
             continue;
         }
-        
+
         // Check if this request is still the latest
         let current_latest = latest_request_id.load(Ordering::SeqCst);
         if request.request_id != current_latest {
             continue;
         }
-        
+
         // Initialize pool if needed (Lazy Local Cache)
         if local_pool.is_none() {
             let mut pool_guard = match pool.lock() {
                 Ok(guard) => guard,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            
+
             if pool_guard.is_none() {
-                 if let Some(cli_path) = crate::analysis::decomp::native::find_cli() {
+                if let Some(cli_path) = crate::analysis::decomp::native::find_cli() {
                     let sla_dir = std::env::current_dir()
                         .map(|p| p.join("ghidra_decompiler").to_string_lossy().into_owned())
                         .unwrap_or_else(|_| ".".to_string());
-                    
+
                     match DecompilerPool::new(&cli_path, &sla_dir, num_workers) {
                         Ok(new_pool) => {
-                            crate::core::logging::info(&format!("[decomp-worker-{}] Pool initialized with {} workers", worker_id, num_workers));
+                            crate::core::logging::info(&format!(
+                                "[decomp-worker-{}] Pool initialized with {} workers",
+                                worker_id, num_workers
+                            ));
                             *pool_guard = Some(Arc::new(new_pool));
                         }
                         Err(e) => {
@@ -295,14 +348,14 @@ fn worker_loop(
         if request.request_id != current_latest {
             continue;
         }
-        
+
         // Perform decompilation using local pool ref (No Mutex Lock!)
         let result = if let Some(ref p) = local_pool {
             p.decompile(&request.bytes, request.address, request.is_64bit)
         } else {
             Err(FissionError::decompiler("Decompiler pool not available"))
         };
-        
+
         // Send result only if still latest
         let current_latest = latest_request_id.load(Ordering::SeqCst);
         if request.request_id == current_latest {

@@ -1,15 +1,15 @@
 //! Decompiler operations - Function decompilation using native FFI.
 
-use std::sync::mpsc::Sender;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::decomp_worker::DecompileRequest;
 use crate::analysis::disasm::DisasmEngine;
 use crate::analysis::loader::FunctionInfo;
 use crate::config::CONFIG;
 use crate::ui::gui::state::{AppState, CachedDecompile};
-use super::decomp_worker::DecompileRequest;
 
 /// Decompile a function (sends request to worker thread)
 pub fn decompile_function(
@@ -20,14 +20,17 @@ pub fn decompile_function(
 ) {
     // Skip import functions
     if func.is_import {
-        state.log(format!("[!] {} is an import function (no code to decompile)", func.name));
+        state.log(format!(
+            "[!] {} is an import function (no code to decompile)",
+            func.name
+        ));
         state.analysis.decompiled_code = format!(
             "// {} is an imported function\n// Address: 0x{:x}\n// No code available - this is a stub pointing to external library",
             func.name, func.address
         );
         return;
     }
-    
+
     // Check cache first (LruCache.get() updates access order)
     let address = func.address;
     if let Some(cached) = state.analysis.decompile_cache.get(&address) {
@@ -38,39 +41,40 @@ pub fn decompile_function(
         state.analysis.asm_instructions = asm;
         return;
     }
-    
+
     if state.analysis.loaded_binary.is_none() {
         state.log("[!] No binary loaded");
         return;
     }
-    
+
     let (bytes, is_64bit) = {
         let binary = state.analysis.loaded_binary.as_ref().unwrap();
-        
+
         // Get function bytes (use config default if size is unknown)
-        let mut func_size = if func.size > 0 { 
-            func.size as usize 
-        } else { 
-            CONFIG.decompiler.default_function_size 
+        let mut func_size = if func.size > 0 {
+            func.size as usize
+        } else {
+            CONFIG.decompiler.default_function_size
         };
-        
+
         // Limit function size to not exceed section bounds
         for section in &binary.sections {
-            if section.is_executable 
-                && address >= section.virtual_address 
-                && address < section.virtual_address + section.virtual_size as u64 
+            if section.is_executable
+                && address >= section.virtual_address
+                && address < section.virtual_address + section.virtual_size as u64
             {
-                let max_size = (section.virtual_address + section.virtual_size as u64 - address) as usize;
+                let max_size =
+                    (section.virtual_address + section.virtual_size as u64 - address) as usize;
                 func_size = func_size.min(max_size);
                 break;
             }
         }
-        
+
         // Clamp to configured min/max sizes
         func_size = func_size
             .max(CONFIG.decompiler.min_function_size)
             .min(CONFIG.decompiler.max_function_size);
-        
+
         let bytes = match binary.get_bytes(address, func_size) {
             Some(b) => b,
             None => {
@@ -80,20 +84,18 @@ pub fn decompile_function(
         };
         (bytes, binary.is_64bit)
     };
-    
+
     // Disassemble bytes (synchronous, fast)
     match DisasmEngine::new(is_64bit) {
-        Ok(engine) => {
-            match engine.disassemble(&bytes, address) {
-                Ok(insns) => {
-                    state.analysis.asm_instructions = insns;
-                }
-                Err(e) => {
-                    state.log(format!("[!] Disassembly error: {}", e));
-                    state.analysis.asm_instructions.clear();
-                }
+        Ok(engine) => match engine.disassemble(&bytes, address) {
+            Ok(insns) => {
+                state.analysis.asm_instructions = insns;
             }
-        }
+            Err(e) => {
+                state.log(format!("[!] Disassembly error: {}", e));
+                state.analysis.asm_instructions.clear();
+            }
+        },
         Err(e) => {
             state.log(format!("[!] Failed to initialize disassembler: {}", e));
             state.analysis.asm_instructions.clear();
@@ -102,12 +104,16 @@ pub fn decompile_function(
 
     state.analysis.decompiling = true;
     state.analysis.decompiled_code = format!("// Decompiling 0x{:x}...", address);
-    state.log(format!("[*] Decompiling 0x{:x} ({} bytes)", address, bytes.len()));
-    
+    state.log(format!(
+        "[*] Decompiling 0x{:x} ({} bytes)",
+        address,
+        bytes.len()
+    ));
+
     // Generate new request ID (for debouncing)
     let request_id = latest_request_id.fetch_add(1, Ordering::SeqCst) + 1;
     latest_request_id.store(request_id, Ordering::SeqCst);
-    
+
     // Send request to worker thread (non-blocking)
     // Send request to worker thread (non-blocking)
     // Optimization: If decompiler context is loaded, send empty bytes to use persistent memory
@@ -126,8 +132,9 @@ pub fn decompile_function(
         is_binary_load: false,
         image_base: 0,
         iat_symbols: std::collections::HashMap::new(),
+        gdt_json_path: None,
     };
-    
+
     if let Err(e) = decomp_tx.send(request) {
         state.log(format!("[!] Failed to send decompile request: {}", e));
         state.analysis.decompiling = false;
@@ -142,15 +149,18 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
     } else {
         c_code.clone()
     };
-    
+
     if let Some(func) = &state.analysis.selected_function {
         if func.address == address {
             // LruCache.put() automatically evicts oldest entry when at capacity
-            state.analysis.decompile_cache.put(address, CachedDecompile {
-                c_code: processed_code.clone(),
-                asm_instructions: state.analysis.asm_instructions.clone(),
-                timestamp: Instant::now(),
-            });
+            state.analysis.decompile_cache.put(
+                address,
+                CachedDecompile {
+                    c_code: processed_code.clone(),
+                    asm_instructions: state.analysis.asm_instructions.clone(),
+                    timestamp: Instant::now(),
+                },
+            );
         }
     }
     state.analysis.decompiled_code = processed_code;
@@ -160,8 +170,8 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
 /// Replace pcRamXXXXXXXX and func_0xXXXXXXXX patterns with actual IAT symbol names
 /// Uses combined regex for single-pass O(N) complexity
 fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, String>) -> String {
-    use regex::Regex;
     use once_cell::sync::Lazy;
+    use regex::Regex;
 
     if iat_symbols.is_empty() {
         return code.to_string();
@@ -169,9 +179,8 @@ fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, St
 
     // Combined regex pattern for both pcRam and func_0x patterns
     // Matches: pcRam00403050 or func_0x00403050
-    static COMBINED_RE: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?:pcRam|func_0x)([0-9a-fA-F]{8})").unwrap()
-    });
+    static COMBINED_RE: Lazy<Regex> =
+        Lazy::new(|| Regex::new(r"(?:pcRam|func_0x)([0-9a-fA-F]{8})").unwrap());
 
     // Single pass replacement for both patterns
     let result = COMBINED_RE.replace_all(code, |caps: &regex::Captures| {
