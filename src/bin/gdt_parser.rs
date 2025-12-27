@@ -71,6 +71,14 @@ fn main() {
     let id_map = GdtParser::extract_datatype_id_map(&db);
     println!("✓ Mapped {} Data Type IDs to names", id_map.len());
 
+    // Extract typedef aliases
+    let typedef_map = GdtParser::extract_typedef_map(&db);
+    println!("✓ Found {} typedef pointer aliases", typedef_map.len());
+
+    // Build alias resolution map
+    let alias_map = GdtParser::build_alias_map(&db);
+    println!("✓ Built {} alias → base type mappings", alias_map.len());
+
     // Extract complete structures with fields
     let complete_structures = GdtParser::extract_complete_structures(&db);
     println!(
@@ -188,9 +196,13 @@ fn main() {
         "complete_structure_count": complete_structures.len(),
         "id_mapping_count": id_map.len(),
         "field_count": fields.len(),
+        "typedef_alias_count": alias_map.len(),
         "structure_names": struct_types,
         "complete_structures": struct_json,
         "id_mappings": id_map_json,
+        "typedef_aliases": alias_map.iter().take(200).map(|(k, v)| {
+            serde_json::json!({"alias": k, "base": v})
+        }).collect::<Vec<_>>(),
     });
 
     let mut json_file = File::create(&json_path).expect("Failed to create JSON file");
