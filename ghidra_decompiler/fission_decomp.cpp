@@ -667,6 +667,7 @@ std::string process_request(ServerState& state, const std::string& input) {
         bool is_64bit = extract_json_bool(input, "is_64bit");
         std::string sla_dir = extract_json_string(input, "sla_dir");
         std::string load_bin_cmd = extract_json_string(input, "load_bin");
+        std::string gdt_json = extract_json_string(input, "gdt_json"); // GDT types JSON path
 
         // Handle "load_bin" command
         if (!load_bin_cmd.empty()) {
@@ -702,6 +703,10 @@ std::string process_request(ServerState& state, const std::string& input) {
                 state.arch_64bit->init(store);
                 configure_arch(state.arch_64bit);
                 register_windows_types(state.arch_64bit, true); // 64-bit
+                // Load GDT types if provided
+                if (!gdt_json.empty()) {
+                    load_gdt_types(state.arch_64bit, gdt_json);
+                }
                 state.arch_64bit_ready = true;
                 std::cerr << "[fission_decomp] Initialized 64-bit architecture (persistent)" << std::endl;
             } else {
@@ -727,6 +732,16 @@ std::string process_request(ServerState& state, const std::string& input) {
                 state.arch_32bit->init(store);
                 configure_arch(state.arch_32bit);
                 register_windows_types(state.arch_32bit, false); // 32-bit
+                // Load GDT types if provided (use 32-bit GDT for 32-bit arch if available)
+                if (!gdt_json.empty()) {
+                    // Try to find 32-bit version by replacing "64" with "32" in path
+                    std::string gdt_json_32 = gdt_json;
+                    size_t pos = gdt_json_32.find("64");
+                    if (pos != std::string::npos) {
+                        gdt_json_32.replace(pos, 2, "32");
+                    }
+                    load_gdt_types(state.arch_32bit, gdt_json_32);
+                }
                 state.arch_32bit_ready = true;
                  std::cerr << "[fission_decomp] Initialized 32-bit architecture (persistent)" << std::endl;
             } else {
