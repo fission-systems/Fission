@@ -294,6 +294,75 @@ impl WinApiDatabase {
         self.add(ApiSignature::new("Sleep", "void", &[
             ("dwMilliseconds", "DWORD"),
         ]));
+        
+        // File/System
+        self.add(ApiSignature::new("GetEnvironmentVariableA", "DWORD", &[
+            ("lpName", "LPCSTR"),
+            ("lpBuffer", "LPSTR"),
+            ("nSize", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("GetTempPathA", "DWORD", &[
+            ("nBufferLength", "DWORD"),
+            ("lpBuffer", "LPSTR"),
+        ]));
+        self.add(ApiSignature::new("GetSystemDirectoryA", "UINT", &[
+            ("lpBuffer", "LPSTR"),
+            ("uSize", "UINT"),
+        ]));
+        self.add(ApiSignature::new("GetWindowsDirectoryA", "UINT", &[
+            ("lpBuffer", "LPSTR"),
+            ("uSize", "UINT"),
+        ]));
+        self.add(ApiSignature::new("CopyFileA", "BOOL", &[
+            ("lpExistingFileName", "LPCSTR"),
+            ("lpNewFileName", "LPCSTR"),
+            ("bFailIfExists", "BOOL"),
+        ]));
+        self.add(ApiSignature::new("DeleteFileA", "BOOL", &[
+            ("lpFileName", "LPCSTR"),
+        ]));
+        self.add(ApiSignature::new("MoveFileA", "BOOL", &[
+            ("lpExistingFileName", "LPCSTR"),
+            ("lpNewFileName", "LPCSTR"),
+        ]));
+        self.add(ApiSignature::new("GetModuleFileNameA", "DWORD", &[
+            ("hModule", "HMODULE"),
+            ("lpFilename", "LPSTR"),
+            ("nSize", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("GetCommandLineA", "LPSTR", &[]));
+        
+        // Timing
+        self.add(ApiSignature::new("GetTickCount", "DWORD", &[]));
+        self.add(ApiSignature::new("GetTickCount64", "ULONGLONG", &[]));
+        self.add(ApiSignature::new("QueryPerformanceCounter", "BOOL", &[
+            ("lpPerformanceCount", "LARGE_INTEGER*"),
+        ]));
+        
+        // Error
+        self.add(ApiSignature::new("GetLastError", "DWORD", &[]));
+        self.add(ApiSignature::new("SetLastError", "void", &[
+            ("dwErrCode", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("ExitProcess", "void", &[
+            ("uExitCode", "UINT"),
+        ]));
+        
+        // Thread context (Process Hollowing)
+        self.add(ApiSignature::new("GetThreadContext", "BOOL", &[
+            ("hThread", "HANDLE"),
+            ("lpContext", "LPCONTEXT"),
+        ]));
+        self.add(ApiSignature::new("SetThreadContext", "BOOL", &[
+            ("hThread", "HANDLE"),
+            ("lpContext", "const CONTEXT*"),
+        ]));
+        self.add(ApiSignature::new("ResumeThread", "DWORD", &[
+            ("hThread", "HANDLE"),
+        ]));
+        self.add(ApiSignature::new("SuspendThread", "DWORD", &[
+            ("hThread", "HANDLE"),
+        ]));
     }
 
     fn load_user32(&mut self) {
@@ -449,6 +518,65 @@ impl WinApiDatabase {
             ("ObjectAttributes", "POBJECT_ATTRIBUTES"),
             ("ClientId", "PCLIENT_ID"),
         ]));
+        
+        // Section (Process Hollowing)
+        self.add(ApiSignature::new("NtCreateSection", "NTSTATUS", &[
+            ("SectionHandle", "PHANDLE"),
+            ("DesiredAccess", "ACCESS_MASK"),
+            ("ObjectAttributes", "POBJECT_ATTRIBUTES"),
+            ("MaximumSize", "PLARGE_INTEGER"),
+            ("SectionPageProtection", "ULONG"),
+            ("AllocationAttributes", "ULONG"),
+            ("FileHandle", "HANDLE"),
+        ]));
+        self.add(ApiSignature::new("NtMapViewOfSection", "NTSTATUS", &[
+            ("SectionHandle", "HANDLE"),
+            ("ProcessHandle", "HANDLE"),
+            ("BaseAddress", "PVOID*"),
+            ("ZeroBits", "ULONG_PTR"),
+            ("CommitSize", "SIZE_T"),
+            ("SectionOffset", "PLARGE_INTEGER"),
+            ("ViewSize", "PSIZE_T"),
+            ("InheritDisposition", "SECTION_INHERIT"),
+            ("AllocationType", "ULONG"),
+            ("Win32Protect", "ULONG"),
+        ]));
+        self.add(ApiSignature::new("NtUnmapViewOfSection", "NTSTATUS", &[
+            ("ProcessHandle", "HANDLE"),
+            ("BaseAddress", "PVOID"),
+        ]));
+        
+        // APC Injection
+        self.add(ApiSignature::new("NtQueueApcThread", "NTSTATUS", &[
+            ("ThreadHandle", "HANDLE"),
+            ("ApcRoutine", "PPS_APC_ROUTINE"),
+            ("ApcArgument1", "PVOID"),
+            ("ApcArgument2", "PVOID"),
+            ("ApcArgument3", "PVOID"),
+        ]));
+        
+        // Common
+        self.add(ApiSignature::new("NtClose", "NTSTATUS", &[
+            ("Handle", "HANDLE"),
+        ]));
+        self.add(ApiSignature::new("NtFreeVirtualMemory", "NTSTATUS", &[
+            ("ProcessHandle", "HANDLE"),
+            ("BaseAddress", "PVOID*"),
+            ("RegionSize", "PSIZE_T"),
+            ("FreeType", "ULONG"),
+        ]));
+        self.add(ApiSignature::new("RtlInitUnicodeString", "void", &[
+            ("DestinationString", "PUNICODE_STRING"),
+            ("SourceString", "PCWSTR"),
+        ]));
+        
+        // Anti-debug
+        self.add(ApiSignature::new("NtSetInformationThread", "NTSTATUS", &[
+            ("ThreadHandle", "HANDLE"),
+            ("ThreadInformationClass", "THREADINFOCLASS"),
+            ("ThreadInformation", "PVOID"),
+            ("ThreadInformationLength", "ULONG"),
+        ]));
     }
 
     fn load_advapi32(&mut self) {
@@ -539,6 +667,49 @@ impl WinApiDatabase {
             ("dwFlags", "DWORD"),
             ("pbData", "BYTE*"),
             ("pdwDataLen", "DWORD*"),
+        ]));
+        
+        // Services (Persistence)
+        self.add(ApiSignature::new("OpenSCManagerA", "SC_HANDLE", &[
+            ("lpMachineName", "LPCSTR"),
+            ("lpDatabaseName", "LPCSTR"),
+            ("dwDesiredAccess", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("CreateServiceA", "SC_HANDLE", &[
+            ("hSCManager", "SC_HANDLE"),
+            ("lpServiceName", "LPCSTR"),
+            ("lpDisplayName", "LPCSTR"),
+            ("dwDesiredAccess", "DWORD"),
+            ("dwServiceType", "DWORD"),
+            ("dwStartType", "DWORD"),
+            ("dwErrorControl", "DWORD"),
+            ("lpBinaryPathName", "LPCSTR"),
+            ("lpLoadOrderGroup", "LPCSTR"),
+            ("lpdwTagId", "LPDWORD"),
+            ("lpDependencies", "LPCSTR"),
+            ("lpServiceStartName", "LPCSTR"),
+            ("lpPassword", "LPCSTR"),
+        ]));
+        self.add(ApiSignature::new("OpenServiceA", "SC_HANDLE", &[
+            ("hSCManager", "SC_HANDLE"),
+            ("lpServiceName", "LPCSTR"),
+            ("dwDesiredAccess", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("StartServiceA", "BOOL", &[
+            ("hService", "SC_HANDLE"),
+            ("dwNumServiceArgs", "DWORD"),
+            ("lpServiceArgVectors", "LPCSTR*"),
+        ]));
+        self.add(ApiSignature::new("ControlService", "BOOL", &[
+            ("hService", "SC_HANDLE"),
+            ("dwControl", "DWORD"),
+            ("lpServiceStatus", "LPSERVICE_STATUS"),
+        ]));
+        self.add(ApiSignature::new("DeleteService", "BOOL", &[
+            ("hService", "SC_HANDLE"),
+        ]));
+        self.add(ApiSignature::new("CloseServiceHandle", "BOOL", &[
+            ("hSCObject", "SC_HANDLE"),
         ]));
     }
 
