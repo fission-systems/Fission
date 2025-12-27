@@ -6,6 +6,7 @@ pub mod decomp;
 pub mod detector;
 pub mod disasm;
 pub mod dotnet;
+pub mod gdt_parser;
 pub mod loader;
 pub mod patch;
 pub mod signatures;
