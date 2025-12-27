@@ -51,6 +51,10 @@ impl WinApiDatabase {
         db.load_ntdll();
         db.load_advapi32();
         db.load_ws2_32();
+        db.load_winhttp();
+        db.load_wininet();
+        db.load_shell32();
+        db.load_bcrypt();
         db
     }
 
@@ -314,6 +318,67 @@ impl WinApiDatabase {
             ("hWnd", "HWND"),
             ("lpString", "LPCSTR"),
         ]));
+        
+        // Input/Keylogger detection
+        self.add(ApiSignature::new("GetAsyncKeyState", "SHORT", &[
+            ("vKey", "int"),
+        ]));
+        self.add(ApiSignature::new("GetKeyState", "SHORT", &[
+            ("nVirtKey", "int"),
+        ]));
+        self.add(ApiSignature::new("SetWindowsHookExA", "HHOOK", &[
+            ("idHook", "int"),
+            ("lpfn", "HOOKPROC"),
+            ("hmod", "HINSTANCE"),
+            ("dwThreadId", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("SetWindowsHookExW", "HHOOK", &[
+            ("idHook", "int"),
+            ("lpfn", "HOOKPROC"),
+            ("hmod", "HINSTANCE"),
+            ("dwThreadId", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("CallNextHookEx", "LRESULT", &[
+            ("hhk", "HHOOK"),
+            ("nCode", "int"),
+            ("wParam", "WPARAM"),
+            ("lParam", "LPARAM"),
+        ]));
+        self.add(ApiSignature::new("UnhookWindowsHookEx", "BOOL", &[
+            ("hhk", "HHOOK"),
+        ]));
+        
+        // Window enumeration
+        self.add(ApiSignature::new("GetForegroundWindow", "HWND", &[]));
+        self.add(ApiSignature::new("GetWindowThreadProcessId", "DWORD", &[
+            ("hWnd", "HWND"),
+            ("lpdwProcessId", "LPDWORD"),
+        ]));
+        self.add(ApiSignature::new("FindWindowA", "HWND", &[
+            ("lpClassName", "LPCSTR"),
+            ("lpWindowName", "LPCSTR"),
+        ]));
+        self.add(ApiSignature::new("FindWindowW", "HWND", &[
+            ("lpClassName", "LPCWSTR"),
+            ("lpWindowName", "LPCWSTR"),
+        ]));
+        self.add(ApiSignature::new("EnumWindows", "BOOL", &[
+            ("lpEnumFunc", "WNDENUMPROC"),
+            ("lParam", "LPARAM"),
+        ]));
+        self.add(ApiSignature::new("GetDesktopWindow", "HWND", &[]));
+        self.add(ApiSignature::new("PostMessageA", "BOOL", &[
+            ("hWnd", "HWND"),
+            ("Msg", "UINT"),
+            ("wParam", "WPARAM"),
+            ("lParam", "LPARAM"),
+        ]));
+        self.add(ApiSignature::new("SendMessageA", "LRESULT", &[
+            ("hWnd", "HWND"),
+            ("Msg", "UINT"),
+            ("wParam", "WPARAM"),
+            ("lParam", "LPARAM"),
+        ]));
     }
 
     fn load_ntdll(&mut self) {
@@ -533,6 +598,174 @@ impl WinApiDatabase {
         ]));
         self.add(ApiSignature::new("htons", "u_short", &[
             ("hostshort", "u_short"),
+        ]));
+    }
+
+    fn load_winhttp(&mut self) {
+        self.add(ApiSignature::new("WinHttpOpen", "HINTERNET", &[
+            ("pszAgentW", "LPCWSTR"),
+            ("dwAccessType", "DWORD"),
+            ("pszProxyW", "LPCWSTR"),
+            ("pszProxyBypassW", "LPCWSTR"),
+            ("dwFlags", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("WinHttpConnect", "HINTERNET", &[
+            ("hSession", "HINTERNET"),
+            ("pswzServerName", "LPCWSTR"),
+            ("nServerPort", "INTERNET_PORT"),
+            ("dwReserved", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("WinHttpOpenRequest", "HINTERNET", &[
+            ("hConnect", "HINTERNET"),
+            ("pwszVerb", "LPCWSTR"),
+            ("pwszObjectName", "LPCWSTR"),
+            ("pwszVersion", "LPCWSTR"),
+            ("pwszReferrer", "LPCWSTR"),
+            ("ppwszAcceptTypes", "LPCWSTR*"),
+            ("dwFlags", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("WinHttpSendRequest", "BOOL", &[
+            ("hRequest", "HINTERNET"),
+            ("lpszHeaders", "LPCWSTR"),
+            ("dwHeadersLength", "DWORD"),
+            ("lpOptional", "LPVOID"),
+            ("dwOptionalLength", "DWORD"),
+            ("dwTotalLength", "DWORD"),
+            ("dwContext", "DWORD_PTR"),
+        ]));
+        self.add(ApiSignature::new("WinHttpReceiveResponse", "BOOL", &[
+            ("hRequest", "HINTERNET"),
+            ("lpReserved", "LPVOID"),
+        ]));
+        self.add(ApiSignature::new("WinHttpReadData", "BOOL", &[
+            ("hRequest", "HINTERNET"),
+            ("lpBuffer", "LPVOID"),
+            ("dwNumberOfBytesToRead", "DWORD"),
+            ("lpdwNumberOfBytesRead", "LPDWORD"),
+        ]));
+        self.add(ApiSignature::new("WinHttpCloseHandle", "BOOL", &[
+            ("hInternet", "HINTERNET"),
+        ]));
+    }
+
+    fn load_wininet(&mut self) {
+        self.add(ApiSignature::new("InternetOpenA", "HINTERNET", &[
+            ("lpszAgent", "LPCSTR"),
+            ("dwAccessType", "DWORD"),
+            ("lpszProxy", "LPCSTR"),
+            ("lpszProxyBypass", "LPCSTR"),
+            ("dwFlags", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("InternetConnectA", "HINTERNET", &[
+            ("hInternet", "HINTERNET"),
+            ("lpszServerName", "LPCSTR"),
+            ("nServerPort", "INTERNET_PORT"),
+            ("lpszUserName", "LPCSTR"),
+            ("lpszPassword", "LPCSTR"),
+            ("dwService", "DWORD"),
+            ("dwFlags", "DWORD"),
+            ("dwContext", "DWORD_PTR"),
+        ]));
+        self.add(ApiSignature::new("HttpOpenRequestA", "HINTERNET", &[
+            ("hConnect", "HINTERNET"),
+            ("lpszVerb", "LPCSTR"),
+            ("lpszObjectName", "LPCSTR"),
+            ("lpszVersion", "LPCSTR"),
+            ("lpszReferrer", "LPCSTR"),
+            ("lplpszAcceptTypes", "LPCSTR*"),
+            ("dwFlags", "DWORD"),
+            ("dwContext", "DWORD_PTR"),
+        ]));
+        self.add(ApiSignature::new("HttpSendRequestA", "BOOL", &[
+            ("hRequest", "HINTERNET"),
+            ("lpszHeaders", "LPCSTR"),
+            ("dwHeadersLength", "DWORD"),
+            ("lpOptional", "LPVOID"),
+            ("dwOptionalLength", "DWORD"),
+        ]));
+        self.add(ApiSignature::new("InternetReadFile", "BOOL", &[
+            ("hFile", "HINTERNET"),
+            ("lpBuffer", "LPVOID"),
+            ("dwNumberOfBytesToRead", "DWORD"),
+            ("lpdwNumberOfBytesRead", "LPDWORD"),
+        ]));
+        self.add(ApiSignature::new("InternetCloseHandle", "BOOL", &[
+            ("hInternet", "HINTERNET"),
+        ]));
+    }
+
+    fn load_shell32(&mut self) {
+        self.add(ApiSignature::new("ShellExecuteA", "HINSTANCE", &[
+            ("hwnd", "HWND"),
+            ("lpOperation", "LPCSTR"),
+            ("lpFile", "LPCSTR"),
+            ("lpParameters", "LPCSTR"),
+            ("lpDirectory", "LPCSTR"),
+            ("nShowCmd", "INT"),
+        ]));
+        self.add(ApiSignature::new("ShellExecuteW", "HINSTANCE", &[
+            ("hwnd", "HWND"),
+            ("lpOperation", "LPCWSTR"),
+            ("lpFile", "LPCWSTR"),
+            ("lpParameters", "LPCWSTR"),
+            ("lpDirectory", "LPCWSTR"),
+            ("nShowCmd", "INT"),
+        ]));
+        self.add(ApiSignature::new("ShellExecuteExA", "BOOL", &[
+            ("pExecInfo", "SHELLEXECUTEINFOA*"),
+        ]));
+        self.add(ApiSignature::new("SHGetFolderPathA", "HRESULT", &[
+            ("hwnd", "HWND"),
+            ("csidl", "int"),
+            ("hToken", "HANDLE"),
+            ("dwFlags", "DWORD"),
+            ("pszPath", "LPSTR"),
+        ]));
+    }
+
+    fn load_bcrypt(&mut self) {
+        self.add(ApiSignature::new("BCryptOpenAlgorithmProvider", "NTSTATUS", &[
+            ("phAlgorithm", "BCRYPT_ALG_HANDLE*"),
+            ("pszAlgId", "LPCWSTR"),
+            ("pszImplementation", "LPCWSTR"),
+            ("dwFlags", "ULONG"),
+        ]));
+        self.add(ApiSignature::new("BCryptGenerateSymmetricKey", "NTSTATUS", &[
+            ("hAlgorithm", "BCRYPT_ALG_HANDLE"),
+            ("phKey", "BCRYPT_KEY_HANDLE*"),
+            ("pbKeyObject", "PUCHAR"),
+            ("cbKeyObject", "ULONG"),
+            ("pbSecret", "PUCHAR"),
+            ("cbSecret", "ULONG"),
+            ("dwFlags", "ULONG"),
+        ]));
+        self.add(ApiSignature::new("BCryptEncrypt", "NTSTATUS", &[
+            ("hKey", "BCRYPT_KEY_HANDLE"),
+            ("pbInput", "PUCHAR"),
+            ("cbInput", "ULONG"),
+            ("pPaddingInfo", "VOID*"),
+            ("pbIV", "PUCHAR"),
+            ("cbIV", "ULONG"),
+            ("pbOutput", "PUCHAR"),
+            ("cbOutput", "ULONG"),
+            ("pcbResult", "ULONG*"),
+            ("dwFlags", "ULONG"),
+        ]));
+        self.add(ApiSignature::new("BCryptDecrypt", "NTSTATUS", &[
+            ("hKey", "BCRYPT_KEY_HANDLE"),
+            ("pbInput", "PUCHAR"),
+            ("cbInput", "ULONG"),
+            ("pPaddingInfo", "VOID*"),
+            ("pbIV", "PUCHAR"),
+            ("cbIV", "ULONG"),
+            ("pbOutput", "PUCHAR"),
+            ("cbOutput", "ULONG"),
+            ("pcbResult", "ULONG*"),
+            ("dwFlags", "ULONG"),
+        ]));
+        self.add(ApiSignature::new("BCryptCloseAlgorithmProvider", "NTSTATUS", &[
+            ("hAlgorithm", "BCRYPT_ALG_HANDLE"),
+            ("dwFlags", "ULONG"),
         ]));
     }
 
