@@ -541,6 +541,128 @@ impl GdtParser {
         id_map
     }
 
+    /// Typedef record structure (from RE):
+    /// [Typedef ID (8B)][Data Type ID (8B)][Flags (1B)][Name_len (varies)][Name][Cat ID (8B)]...
+    ///
+    /// Extract Typedef alias → Base Type ID mapping
+    /// This allows resolving LP*, P*, LPC* aliases to their base structure
+    pub fn extract_typedef_map(db: &[u8]) -> std::collections::HashMap<String, u32> {
+        let mut typedef_map: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+
+        // Look for Typedef record pattern:
+        // After Typedef ID (8B) and Data Type ID (8B) is Flags (1B)
+        // Pattern: [xx xx xx xx xx xx xx xx] [yy yy yy yy yy yy yy yy] [ff] [len] [name]
+
+        let mut i = 0;
+        while i + 32 < db.len() {
+            // Look for pointer typedef names starting with LP, P, or LPC
+            // Name length byte followed by L or P
+            let name_len = db[i] as usize;
+            if name_len >= 2 && name_len <= 64 && i + 1 + name_len < db.len() {
+                // Check for LP* or P* prefix
+                if (db[i + 1] == b'L' && db[i + 2] == b'P')
+                    || (db[i + 1] == b'P' && db[i + 2].is_ascii_uppercase())
+                {
+                    let name_bytes = &db[i + 1..i + 1 + name_len];
+                    if name_bytes
+                        .iter()
+                        .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+                    {
+                        if let Ok(name) = std::str::from_utf8(name_bytes) {
+                            // Look backwards for Base Type ID (should be within 20 bytes before)
+                            // Pattern: [... base_type_id ...] [flags] [name_len] [name]
+                            // The base type ID is typically 8-12 bytes before name_len
+
+                            if i >= 10 {
+                                // Try to find a 2-byte ID that makes sense
+                                // Look at position i-8 to i-6 for potential ID
+                                let potential_id =
+                                    u16::from_be_bytes([db[i - 6], db[i - 5]]) as u32;
+
+                                if potential_id > 0 && potential_id < 0x10000 {
+                                    // Store the typedef alias mapping
+                                    typedef_map.insert(name.to_string(), potential_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        typedef_map
+    }
+
+    /// Get the base type name for a typedef alias
+    /// Returns the canonical structure name (without LP*, P*, LPC* prefix)
+    pub fn resolve_typedef(
+        typedef_name: &str,
+        typedef_map: &std::collections::HashMap<String, u32>,
+        id_map: &std::collections::HashMap<u32, String>,
+    ) -> Option<String> {
+        if let Some(&base_id) = typedef_map.get(typedef_name) {
+            return id_map.get(&base_id).cloned();
+        }
+        None
+    }
+
+    /// Normalize a type name by removing pointer prefixes
+    /// LP*, P*, LPC*, NP*, LPCW*, LPCSTR → base type
+    pub fn normalize_type_name(name: &str) -> String {
+        // Common pointer prefixes in Windows API
+        let prefixes = [
+            "LPCW", "LPCU", "LPCB", "LPC", "LPW", "LP", "NP", "PW", "PC", "P",
+        ];
+
+        for prefix in prefixes {
+            if name.starts_with(prefix) && name.len() > prefix.len() {
+                let suffix = &name[prefix.len()..];
+                // Make sure the suffix starts with uppercase (actual type name)
+                if suffix
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_uppercase())
+                    .unwrap_or(false)
+                {
+                    // Return the base type name
+                    return suffix.to_string();
+                }
+            }
+        }
+
+        name.to_string()
+    }
+
+    /// Build a complete type alias map: alias_name → canonical_name
+    pub fn build_alias_map(db: &[u8]) -> std::collections::HashMap<String, String> {
+        let id_map = Self::extract_datatype_id_map(db);
+        let typedef_map = Self::extract_typedef_map(db);
+
+        let mut alias_map: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
+        // For each typedef, try to resolve to base type name
+        for (alias_name, base_id) in &typedef_map {
+            if let Some(base_name) = id_map.get(base_id) {
+                alias_map.insert(alias_name.clone(), base_name.clone());
+            }
+        }
+
+        // Also add normalized names for any unresolved aliases
+        for alias_name in typedef_map.keys() {
+            if !alias_map.contains_key(alias_name) {
+                let normalized = Self::normalize_type_name(alias_name);
+                if normalized != *alias_name {
+                    alias_map.insert(alias_name.clone(), normalized);
+                }
+            }
+        }
+
+        alias_map
+    }
+
     /// Extract complete structures with their fields resolved
     pub fn extract_complete_structures(db: &[u8]) -> Vec<StructDef> {
         let id_map = Self::extract_datatype_id_map(db);
