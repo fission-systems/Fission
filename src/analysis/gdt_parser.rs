@@ -198,53 +198,85 @@ impl GdtParser {
     pub fn extract_structures(db: &[u8]) -> Vec<StructDef> {
         let mut structures = Vec::new();
         
-        // Pattern: structure record with fields
-        // Structure record format:
-        // [len][name][padding][category_id][size_be32][align_be32][field_count_be32]
+        // Structure record format (based on observation and Ghidra DB schema):
+        // [Name String]
+        // [Comment String]
+        // [Is Union (1 byte)]
+        // [Category ID (8 bytes)]
+        // [Length (4 bytes)]
+        // [Alignment (4 bytes)]
+        // [Num Components (4 bytes)]
         
         let mut i = 0;
-        while i + 20 < db.len() {
-            // Look for structure name pattern (starts with _ and uppercase)
-            if db[i] > 0 && db[i] < 64 {  // reasonable name length
-                let name_len = db[i] as usize;
-                if i + 1 + name_len + 16 < db.len() {
-                    // Check if name starts with _ or uppercase
-                    if db[i + 1] == b'_' || (db[i + 1] >= b'A' && db[i + 1] <= b'Z') {
-                        if let Ok(name) = std::str::from_utf8(&db[i + 1..i + 1 + name_len]) {
-                            // Check if it looks like a Windows structure name
-                            if Self::is_windows_struct_name(name) {
-                                // Try to parse structure info after the name
-                                let after_name = i + 1 + name_len;
-                                
-                                // Skip to find size/alignment info (look for pattern)
-                                // Format: [padding to align][category?][size_be32][align_be32][field_count_be32]
-                                if after_name + 16 < db.len() {
-                                    // Skip padding zeros
-                                    let mut j = after_name;
-                                    while j < after_name + 10 && j < db.len() && db[j] == 0 {
-                                        j += 1;
-                                    }
-                                    
-                                    // Try to read size (should be reasonable value < 10000)
-                                    if j + 12 < db.len() {
-                                        let size = u32::from_be_bytes([db[j], db[j+1], db[j+2], db[j+3]]);
-                                        let align = u32::from_be_bytes([db[j+4], db[j+5], db[j+6], db[j+7]]);
-                                        let field_count = u32::from_be_bytes([db[j+8], db[j+9], db[j+10], db[j+11]]);
-                                        
-                                        // Sanity check
-                                        if size > 0 && size < 100000 && align <= 16 && field_count < 500 {
-                                            structures.push(StructDef {
-                                                name: name.to_string(),
-                                                size,
-                                                alignment: align,
-                                                field_count,
-                                                fields: Vec::new(), // Fields parsed separately
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
+        while i + 30 < db.len() {
+            // 1. Try to read Name
+            // Check for valid string length (1-127 for now)
+            let name_len = db[i];
+            if name_len > 0 && name_len < 0x80 {
+                let name_len = name_len as usize;
+                
+                // Check bounds for Name + Min Record Size (Comment=0, Union=1, Cat=8, Len=4, Align=4, Count=4 = 21 bytes)
+                if i + 1 + name_len + 21 <= db.len() {
+                     // Check Name Charset
+                    let name_bytes = &db[i + 1..i + 1 + name_len];
+                    if name_bytes.iter().all(|&b| b.is_ascii_graphic()) {
+                         if let Ok(name) = std::str::from_utf8(name_bytes) {
+                             if Self::is_windows_struct_name(name) {
+                                 let mut curr = i + 1 + name_len;
+                                 
+                                 // 2. Skip Comment String
+                                 let comment_len = db[curr];
+                                 if comment_len < 0x80 { // Handle simple strings only for now
+                                     curr += 1 + comment_len as usize;
+                                     
+                                     // 3. Skip Is Union (1 byte)
+                                     /* let is_union = db[curr] != 0; */
+                                     curr += 1;
+                                     
+                                     // 4. Skip Category ID (8 bytes)
+                                     /* let cat_id = u64::from_be_bytes(...) */
+                                     curr += 8;
+                                     
+                                     // 5. Read Length, Alignment, Count
+                                     if curr + 12 <= db.len() {
+                                         let size = u32::from_be_bytes([db[curr], db[curr+1], db[curr+2], db[curr+3]]);
+                                         let align = u32::from_be_bytes([db[curr+4], db[curr+5], db[curr+6], db[curr+7]]);
+                                         let field_count = u32::from_be_bytes([db[curr+8], db[curr+9], db[curr+10], db[curr+11]]);
+                                         
+                                         // Filter out suspicious values and potential Typedefs
+                                         // Typedefs have ID (8 bytes) where Structure has Size(4) + Align(4)
+                                         // If we read a Typedef as Structure:
+                                         //   Size = ID_High
+                                         //   Align = ID_Low
+                                         // IDs are often large or odd, while Align MUST be power of 2.
+                                         
+                                         let is_power_of_2 = align > 0 && (align & (align - 1)) == 0;
+                                         
+                                         // Heuristic: Small values are likely real sizes. Large values are likely IDs.
+                                         let is_valid_layout = size > 0 && size < 65536 && align > 0 && align <= 64;
+                                         
+                                         if is_valid_layout {
+                                             structures.push(StructDef {
+                                                 name: name.to_string(),
+                                                 size,
+                                                 alignment: align,
+                                                 field_count,
+                                                 fields: Vec::new(),
+                                             });
+                                         } else {
+                                             // Still capture the name, but mark size as 0 (opaque)
+                                             structures.push(StructDef {
+                                                 name: name.to_string(),
+                                                 size: 0,
+                                                 alignment: 0,
+                                                 field_count: 0,
+                                                 fields: Vec::new(),
+                                             });
+                                         }
+                                     }
+                                 }
+                             }
+                         }
                     }
                 }
             }
@@ -296,49 +328,72 @@ impl GdtParser {
         name == "TEB"
     }
     
-    /// Extract field definitions from DB
+    
+    /// Extract field definitions from Component Data Types table
+    /// Based on RE findings:
+    /// RecordID(4) + ParentID(4) + Offset(4) + Unknown(4) + TypeID(4) + NameLen(4) + Name + Comment(4) + Size(4) + Ordinal(4)
     pub fn extract_fields(db: &[u8]) -> Vec<FieldDef> {
         let mut fields = Vec::new();
         
-        // Field record format:
-        // [name_len][field_name][ff ff ff][offset_be32][size_be32][...]
+        // Component record structure (all BE u32):
+        // +0:  Record ID (4 bytes)
+        // +4:  Parent Structure ID (4 bytes)
+        // +8:  Field Offset within struct (4 bytes)
+        // +12: Unknown (4 bytes)
+        // +16: Type ID (4 bytes)
+        // +20: Name Length (4 bytes)
+        // +24: Name (variable, name_len bytes)
+        // +24+name_len: Comment marker (0xFFFFFFFF if null)
+        // +24+name_len+4: Component Size (4 bytes)
+        // +24+name_len+8: Ordinal (4 bytes)
         
         let mut i = 0;
-        while i + 20 < db.len() {
-            // Look for field name followed by ffff marker
-            if db[i] > 2 && db[i] < 64 {  // reasonable name length
-                let name_len = db[i] as usize;
-                if i + 1 + name_len + 10 < db.len() {
-                    // Check for ffff marker after name
-                    let marker_start = i + 1 + name_len;
-                    if marker_start + 3 < db.len() && 
-                       db[marker_start] == 0xff && 
-                       db[marker_start + 1] == 0xff &&
-                       db[marker_start + 2] == 0xff {
-                        if let Ok(name) = std::str::from_utf8(&db[i + 1..i + 1 + name_len]) {
-                            // Check if it looks like a field name (camelCase or has common prefixes)
-                            if Self::is_field_name(name) {
-                                let after_marker = marker_start + 4;
-                                if after_marker + 8 < db.len() {
-                                    let offset = u32::from_be_bytes([
-                                        db[after_marker], db[after_marker+1], 
-                                        db[after_marker+2], db[after_marker+3]
-                                    ]);
-                                    let size = u32::from_be_bytes([
-                                        db[after_marker+4], db[after_marker+5],
-                                        db[after_marker+6], db[after_marker+7]
-                                    ]);
-                                    
-                                    // Sanity check
-                                    if offset < 100000 && size <= 8 && size > 0 {
-                                        fields.push(FieldDef {
-                                            name: name.to_string(),
-                                            offset,
-                                            size,
-                                            type_name: String::new(), // Would need more parsing
-                                        });
-                                    }
-                                }
+        while i + 36 < db.len() {
+            // Look for potential Component record pattern:
+            // 1. Reasonable Parent ID (< 0x10000)
+            // 2. Reasonable Offset (< 0x10000)
+            // 3. Reasonable Name Length (1-64)
+            
+            let parent_id = u32::from_be_bytes([db[i+4], db[i+5], db[i+6], db[i+7]]);
+            let field_offset = u32::from_be_bytes([db[i+8], db[i+9], db[i+10], db[i+11]]);
+            let name_len = u32::from_be_bytes([db[i+20], db[i+21], db[i+22], db[i+23]]) as usize;
+            
+            // Sanity checks
+            if parent_id > 0 && parent_id < 0x100000 &&
+               field_offset < 0x100000 &&
+               name_len > 0 && name_len < 64 &&
+               i + 24 + name_len + 12 < db.len() {
+                
+                // Check if name is valid ASCII
+                let name_start = i + 24;
+                let name_bytes = &db[name_start..name_start + name_len];
+                
+                if name_bytes.iter().all(|&b| b.is_ascii_graphic() || b == b'_') {
+                    if let Ok(name) = std::str::from_utf8(name_bytes) {
+                        // Check for comment marker (0xFFFFFFFF)
+                        let comment_pos = name_start + name_len;
+                        if db[comment_pos] == 0xFF && db[comment_pos+1] == 0xFF &&
+                           db[comment_pos+2] == 0xFF && db[comment_pos+3] == 0xFF {
+                            
+                            let comp_size = u32::from_be_bytes([
+                                db[comment_pos+4], db[comment_pos+5],
+                                db[comment_pos+6], db[comment_pos+7]
+                            ]);
+                            let ordinal = u32::from_be_bytes([
+                                db[comment_pos+8], db[comment_pos+9],
+                                db[comment_pos+10], db[comment_pos+11]
+                            ]);
+                            
+                            // Additional sanity: size should be reasonable (1-8192 bytes)
+                            if comp_size > 0 && comp_size <= 8192 && ordinal < 10000 {
+                                fields.push(FieldDef {
+                                    name: name.to_string(),
+                                    offset: field_offset,
+                                    size: comp_size,
+                                    type_name: String::new(),
+                                    parent_id,
+                                    ordinal,
+                                });
                             }
                         }
                     }
@@ -347,7 +402,25 @@ impl GdtParser {
             i += 1;
         }
         
+        // Sort by parent_id then ordinal for proper grouping
+        fields.sort_by(|a, b| {
+            a.parent_id.cmp(&b.parent_id)
+                .then(a.ordinal.cmp(&b.ordinal))
+        });
+        
         fields
+    }
+    
+    /// Extract fields grouped by parent structure ID
+    pub fn extract_fields_grouped(db: &[u8]) -> std::collections::HashMap<u32, Vec<FieldDef>> {
+        let fields = Self::extract_fields(db);
+        let mut grouped: std::collections::HashMap<u32, Vec<FieldDef>> = std::collections::HashMap::new();
+        
+        for field in fields {
+            grouped.entry(field.parent_id).or_default().push(field);
+        }
+        
+        grouped
     }
     
     /// Check if name looks like a structure field
@@ -391,6 +464,8 @@ pub struct FieldDef {
     pub offset: u32,
     pub size: u32,
     pub type_name: String,
+    pub parent_id: u32,
+    pub ordinal: u32,
 }
 
 /// DB header information
