@@ -27,6 +27,8 @@
 #include "sleigh_arch.hh"
 #include "loadimage.hh"
 #include "flow.hh"
+#include "type.hh"
+#include <fstream>
 
 using namespace ghidra;
 
@@ -313,6 +315,177 @@ struct ServerState {
         if (loader_32bit) delete loader_32bit;
     }
 };
+
+// Structure to hold GDT type information  
+struct GdtField {
+    std::string name;
+    int offset;
+    int size;
+};
+
+struct GdtStruct {
+    std::string name;
+    int size;
+    int alignment;
+    std::vector<GdtField> fields;
+};
+
+// Simple JSON parser for GDT types.json format
+// Extracts complete_structures array from the JSON file
+std::vector<GdtStruct> parse_gdt_json(const std::string& json_path) {
+    std::vector<GdtStruct> result;
+    
+    std::ifstream file(json_path);
+    if (!file.is_open()) {
+        return result;
+    }
+    
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    std::string json = buffer.str();
+    
+    // Find "complete_structures" array
+    size_t pos = json.find("\"complete_structures\"");
+    if (pos == std::string::npos) return result;
+    
+    // Find the array start
+    pos = json.find('[', pos);
+    if (pos == std::string::npos) return result;
+    
+    // Parse structures (simplified nested object parsing)
+    size_t depth = 1;
+    size_t start = pos + 1;
+    
+    while (pos < json.size() && depth > 0) {
+        pos++;
+        if (json[pos] == '[') depth++;
+        else if (json[pos] == ']') depth--;
+        else if (json[pos] == '{' && depth == 1) {
+            // Start of a structure object
+            size_t struct_start = pos;
+            int struct_depth = 1;
+            while (pos < json.size() && struct_depth > 0) {
+                pos++;
+                if (json[pos] == '{') struct_depth++;
+                else if (json[pos] == '}') struct_depth--;
+            }
+            
+            // Extract this structure's JSON
+            std::string struct_json = json.substr(struct_start, pos - struct_start + 1);
+            
+            GdtStruct s;
+            s.name = extract_json_string(struct_json, "name");
+            s.size = (int)extract_json_int(struct_json, "size");
+            s.alignment = (int)extract_json_int(struct_json, "alignment");
+            
+            // Parse fields array within this struct
+            size_t fields_pos = struct_json.find("\"fields\"");
+            if (fields_pos != std::string::npos) {
+                size_t arr_start = struct_json.find('[', fields_pos);
+                if (arr_start != std::string::npos) {
+                    int arr_depth = 1;
+                    size_t fp = arr_start + 1;
+                    while (fp < struct_json.size() && arr_depth > 0) {
+                        if (struct_json[fp] == '{') {
+                            size_t field_start = fp;
+                            int fd = 1;
+                            fp++;
+                            while (fp < struct_json.size() && fd > 0) {
+                                if (struct_json[fp] == '{') fd++;
+                                else if (struct_json[fp] == '}') fd--;
+                                fp++;
+                            }
+                            std::string field_json = struct_json.substr(field_start, fp - field_start);
+                            
+                            GdtField f;
+                            f.name = extract_json_string(field_json, "name");
+                            f.offset = (int)extract_json_int(field_json, "offset");
+                            f.size = (int)extract_json_int(field_json, "size");
+                            if (!f.name.empty() && f.size > 0) {
+                                s.fields.push_back(f);
+                            }
+                        }
+                        if (struct_json[fp] == '[') arr_depth++;
+                        else if (struct_json[fp] == ']') arr_depth--;
+                        fp++;
+                    }
+                }
+            }
+            
+            if (!s.name.empty() && s.size > 0) {
+                result.push_back(s);
+            }
+        }
+    }
+    
+    return result;
+}
+
+// Load GDT types into TypeFactory
+void load_gdt_types(CliArchitecture* arch, const std::string& gdt_json_path) {
+    if (!arch || gdt_json_path.empty()) return;
+    
+    TypeFactory* types = arch->types;
+    if (!types) return;
+    
+    std::vector<GdtStruct> gdt_structs = parse_gdt_json(gdt_json_path);
+    if (gdt_structs.empty()) {
+        std::cerr << "[fission_decomp] No GDT types loaded from: " << gdt_json_path << std::endl;
+        return;
+    }
+    
+    int loaded = 0;
+    for (const auto& gdt : gdt_structs) {
+        try {
+            // Check if type already exists
+            Datatype* existing = types->findByName(gdt.name);
+            if (existing != nullptr) continue;
+            
+            // Create empty structure
+            TypeStruct* ts = types->getTypeStruct(gdt.name);
+            if (!ts) continue;
+            
+            // Build field list
+            std::vector<TypeField> fields;
+            int field_id = 0;
+            for (const auto& f : gdt.fields) {
+                // Get appropriate base type for field size
+                Datatype* field_type = nullptr;
+                if (f.size == 1) {
+                    field_type = types->getBase(1, TYPE_UINT);
+                } else if (f.size == 2) {
+                    field_type = types->getBase(2, TYPE_UINT);
+                } else if (f.size == 4) {
+                    field_type = types->getBase(4, TYPE_UINT);
+                } else if (f.size == 8) {
+                    field_type = types->getBase(8, TYPE_UINT);
+                } else {
+                    // For other sizes, create array of bytes
+                    Datatype* byte_type = types->getBase(1, TYPE_UINT);
+                    field_type = types->getTypeArray(f.size, byte_type);
+                }
+                
+                if (field_type) {
+                    TypeField tf(field_id, f.offset, f.name, field_type);
+                    fields.push_back(tf);
+                    field_id++;
+                }
+            }
+            
+            // Set fields on the structure
+            if (!fields.empty()) {
+                types->setFields(fields, ts, gdt.size, gdt.alignment, 0);
+                loaded++;
+            }
+        } catch (...) {
+            // Ignore type creation errors
+        }
+    }
+    
+    if (loaded > 0) {
+        std::cerr << "[fission_decomp] Loaded " << loaded << " GDT structures from " << gdt_json_path << std::endl;
+    }
+}
 
 // Inject IAT symbols into Ghidra's symbol table
 void inject_iat_symbols(CliArchitecture* arch, const std::map<uint64_t, std::string>& symbols) {
