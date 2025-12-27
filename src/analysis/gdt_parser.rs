@@ -271,34 +271,26 @@ impl GdtParser {
                                             db[curr + 11],
                                         ]);
 
-                                        // Filter out suspicious values and potential Typedefs
-                                        // Typedefs have ID (8 bytes) where Structure has Size(4) + Align(4)
-                                        // If we read a Typedef as Structure:
-                                        //   Size = ID_High
-                                        //   Align = ID_Low
-                                        // IDs are often large or odd, while Align MUST be power of 2.
+                                        // Validation based on confirmed RE:
+                                        // - Size should be 1-1048576 (1MB max)
+                                        // - Alignment should be power of 2 (1, 2, 4, 8, 16, 32...)
+                                        // - NumComponents should be 1-10000
 
                                         let is_power_of_2 = align > 0 && (align & (align - 1)) == 0;
+                                        let is_valid = size > 0
+                                            && size <= 1048576
+                                            && align > 0
+                                            && align <= 8192
+                                            && is_power_of_2
+                                            && field_count > 0
+                                            && field_count < 10000;
 
-                                        // Heuristic: Small values are likely real sizes. Large values are likely IDs.
-                                        let is_valid_layout =
-                                            size > 0 && size < 65536 && align > 0 && align <= 64;
-
-                                        if is_valid_layout {
+                                        if is_valid {
                                             structures.push(StructDef {
                                                 name: name.to_string(),
                                                 size,
                                                 alignment: align,
                                                 field_count,
-                                                fields: Vec::new(),
-                                            });
-                                        } else {
-                                            // Still capture the name, but mark size as 0 (opaque)
-                                            structures.push(StructDef {
-                                                name: name.to_string(),
-                                                size: 0,
-                                                alignment: 0,
-                                                field_count: 0,
                                                 fields: Vec::new(),
                                             });
                                         }
@@ -579,6 +571,39 @@ impl GdtParser {
         structures.sort_by(|a, b| a.name.cmp(&b.name));
 
         structures
+    }
+
+    /// Extract all structures by merging Composite table (size/align) with Component table (fields)
+    /// This provides the most complete structure definitions possible
+    pub fn extract_all_structures(db: &[u8]) -> Vec<StructDef> {
+        use std::collections::HashMap;
+
+        // Get component-based structures (have fields)
+        let component_structs = Self::extract_complete_structures(db);
+
+        // Get composite-based structures (have accurate size/align from DB)
+        let composite_structs = Self::extract_structures(db);
+
+        // Create lookup by name
+        let mut struct_map: HashMap<String, StructDef> = HashMap::new();
+
+        // First add component-based (these have fields)
+        for s in component_structs {
+            struct_map.insert(s.name.clone(), s);
+        }
+
+        // Then add/update with composite-based (these have accurate size from DB)
+        // Only add if not already present (priority to structs with fields)
+        for s in composite_structs {
+            if !struct_map.contains_key(&s.name) {
+                struct_map.insert(s.name.clone(), s);
+            }
+        }
+
+        let mut result: Vec<StructDef> = struct_map.into_values().collect();
+        result.sort_by(|a, b| a.name.cmp(&b.name));
+
+        result
     }
 }
 
