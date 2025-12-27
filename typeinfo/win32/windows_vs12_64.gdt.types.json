@@ -1,7 +1,5011 @@
 {
+  "field_count": 77155,
+  "fields_sample": [
+    {
+      "name": "Shift",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Value",
+      "offset": 0,
+      "size": 2
+    },
+    {
+      "name": "Shift",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Value",
+      "offset": 0,
+      "size": 1
+    },
+    {
+      "name": "Shift",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Value",
+      "offset": 0,
+      "size": 2
+    },
+    {
+      "name": "Shift",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Value",
+      "offset": 0,
+      "size": 1
+    },
+    {
+      "name": "ExceptionFlags",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Descriptor",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "HighWord",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Bits",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Granularity",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Default_Big",
+      "offset": 1,
+      "size": 7
+    },
+    {
+      "name": "Reserved_0",
+      "offset": 1,
+      "size": 6
+    },
+    {
+      "name": "Sys",
+      "offset": 1,
+      "size": 5
+    },
+    {
+      "name": "LimitHi",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Pres",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "Dpl",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Type",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "BaseHi",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "Flags2",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Flags1",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "BaseLow",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "SegGs",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "FloatSave",
+      "offset": 112,
+      "size": 7
+    },
+    {
+      "name": "Dr7",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "Dr6",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "Dr3",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "Dr2",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "Dr1",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Dr0",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Cr0NpxState",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "RegisterArea",
+      "offset": 80,
+      "size": 7
+    },
+    {
+      "name": "DataSelector",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "DataOffset",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "ErrorSelector",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "ErrorOffset",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "TagWord",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "StatusWord",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "HighWord",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Bits",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Granularity",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Default_Big",
+      "offset": 1,
+      "size": 7
+    },
+    {
+      "name": "Reserved_0",
+      "offset": 1,
+      "size": 6
+    },
+    {
+      "name": "Sys",
+      "offset": 1,
+      "size": 5
+    },
+    {
+      "name": "LimitHi",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Pres",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "Dpl",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Type",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "BaseHi",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "Flags2",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Flags1",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "BaseLow",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Rdi",
+      "offset": 8,
+      "size": 7
+    },
+    {
+      "name": "Rsi",
+      "offset": 8,
+      "size": 6
+    },
+    {
+      "name": "Rbp",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "Rsp",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "Rbx",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Rdx",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "Rcx",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Xmm8",
+      "offset": 8,
+      "size": 8
+    },
+    {
+      "name": "Xmm7",
+      "offset": 8,
+      "size": 7
+    },
+    {
+      "name": "Xmm6",
+      "offset": 8,
+      "size": 6
+    },
+    {
+      "name": "Xmm5",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "Xmm4",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "Xmm3",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Xmm2",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "Xmm1",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Entry",
+      "offset": 192,
+      "size": 7
+    },
+    {
+      "name": "HighAddress",
+      "offset": 8,
+      "size": 6
+    },
+    {
+      "name": "LowAddress",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "Once",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Search",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "GlobalHint",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "LocalHint",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "FunctionEntry",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "UnwindData",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "EndAddress",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Xmm6",
+      "offset": 16,
+      "size": 8
+    },
+    {
+      "name": "Xmm5",
+      "offset": 16,
+      "size": 7
+    },
+    {
+      "name": "Xmm4",
+      "offset": 16,
+      "size": 6
+    },
+    {
+      "name": "Xmm3",
+      "offset": 16,
+      "size": 5
+    },
+    {
+      "name": "Xmm2",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "Xmm1",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Xmm0",
+      "offset": 16,
+      "size": 2
+    },
+    {
+      "name": "Legacy",
+      "offset": 128,
+      "size": 1
+    },
+    {
+      "name": "SegCs",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "MxCsr",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "ContextFlags",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "P6Home",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "P5Home",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "P4Home",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "P3Home",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "P2Home",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "XState",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "Legacy",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Length",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Buffer",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "Area",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Reserved1",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Length",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Header",
+      "offset": 64,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 56,
+      "size": 1
+    },
+    {
+      "name": "DataOffset",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "Reserved2",
+      "offset": 2,
+      "size": 7
+    },
+    {
+      "name": "ErrorSelector",
+      "offset": 2,
+      "size": 6
+    },
+    {
+      "name": "ErrorOffset",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "ErrorOpcode",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "Reserved1",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "TagWord",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "StatusWord",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "High",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "XcptAction",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "SigNum",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Uniquifier",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Data4",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Data3",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "Data2",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Blink",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Blink",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Blink",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "HighPart",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "QuadPart",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "HighPart",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "HighPart",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "QuadPart",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "HighPart",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "HighPart",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "HighPart",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 6,
+      "size": 2
+    },
+    {
+      "name": "Group",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Number",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "lTotalCount",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "lHighWaterCount",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "lSizes",
+      "offset": 40,
+      "size": 2
+    },
+    {
+      "name": "lCounts",
+      "offset": 40,
+      "size": 1
+    },
+    {
+      "name": "lconv_num_refcount",
+      "offset": 8,
+      "size": 8
+    },
+    {
+      "name": "lconv_intl_refcount",
+      "offset": 8,
+      "size": 7
+    },
+    {
+      "name": "mb_cur_max",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "lc_clike",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "lc_category",
+      "offset": 192,
+      "size": 4
+    },
+    {
+      "name": "lc_time_cp",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "lc_collate_cp",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "lc_codepage",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "wrefcount",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "refcount",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "wlocale",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "mbcinfo",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Mask",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Index",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Mask",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Index",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Mask",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Index",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Mask",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Index",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Base",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "DispatcherContext",
+      "offset": 3,
+      "size": 8
+    },
+    {
+      "name": "ContextRecord",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "EstablisherFrame",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "ExceptionRecord",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "DispatcherContext",
+      "offset": 3,
+      "size": 8
+    },
+    {
+      "name": "ContextRecord",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "EstablisherFrame",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "ExceptionRecord",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "szDll",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "szDll",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "pdli",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "dliNotify",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "WaitResult",
+      "offset": 3,
+      "size": 4
+    },
+    {
+      "name": "Wait",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Context",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Instance",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Timer",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Context",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Instance",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Work",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Context",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Instance",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Priority",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "FinalizationCallback",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "DllHandle",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ActivationContext",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "CleanupGroupCancelCallback",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "CleanupGroup",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Pool",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "CallbackEnviron",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "CleanupContext",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "ObjectContext",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Context",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Instance",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Range",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Addr",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "lpFlsData",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ExceptionInfo",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Parameter",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "SchedulerParam",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "ActivationPayload",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Reason",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "BaseOfImage",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "PcValue",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "cnt",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "ptr",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Tag",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "TagBase",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Context",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Parameter",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "RunOnce",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ListHead",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ListHead",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ListEntry",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "ListHead",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ListHead",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ListHead",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ListHead",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Reserved",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Reason",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "DllHandle",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "HistoryTable",
+      "offset": 5,
+      "size": 8
+    },
+    {
+      "name": "ContextRecord",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "ReturnValue",
+      "offset": 3,
+      "size": 8
+    },
+    {
+      "name": "ExceptionRecord",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "TargetIp",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "TargetFrame",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ReturnValue",
+      "offset": 3,
+      "size": 8
+    },
+    {
+      "name": "ExceptionRecord",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "TargetIp",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "TargetFrame",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "FunctionTable",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "OutOfProcessCallbackDll",
+      "offset": 5,
+      "size": 8
+    },
+    {
+      "name": "Context",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "Callback",
+      "offset": 3,
+      "size": 8
+    },
+    {
+      "name": "Length",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "BaseAddress",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "TableIdentifier",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ContextPointers",
+      "offset": 7,
+      "size": 8
+    },
+    {
+      "name": "EstablisherFrame",
+      "offset": 6,
+      "size": 8
+    },
+    {
+      "name": "HandlerData",
+      "offset": 5,
+      "size": 8
+    },
+    {
+      "name": "ContextRecord",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "FunctionEntry",
+      "offset": 3,
+      "size": 8
+    },
+    {
+      "name": "ControlPc",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "ImageBase",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "HandlerType",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "HistoryTable",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "ImageBase",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "ControlPc",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "BaseAddress",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "EntryCount",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "FunctionTable",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ExceptionRecord",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "ContextRecord",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Functions",
+      "offset": 3,
+      "size": 8
+    },
+    {
+      "name": "Entries",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "TableAddress",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Process",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Context",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "ControlPc",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Data",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Data",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Data",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Data",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Offset",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Shift",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Multiplicand",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Multiplier",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Shift",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Multiplicand",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Multiplier",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "HighProduct",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Multiplicand",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Multiplier",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "HighProduct",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Multiplicand",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Multiplier",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Shift",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "HighPart",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "LowPart",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Shift",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "HighPart",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "LowPart",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Multiplicand",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Multiplier",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Multiplicand",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Multiplier",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Count",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Count",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Count",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Count",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Count",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Source",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Count",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Source",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Count",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Source",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Count",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Source",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Counter",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Selector",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "MxCsr",
+      "offset": 0,
+      "size": 4
+    },
+    {
+      "name": "Source",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "sel",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Address",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Target",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Comperand",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "Exchange",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Comperand",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "ExChange",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Target",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Comperand",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "ExChange",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Target",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Value",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Comperand",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "ExChange",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Destination",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "Addend",
+      "offset": 0,
+      "size": 8
+    },
+    {
+      "name": "ThisPeriodTotalKernelTime",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "ThisPeriodTotalUserTime",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "TotalKernelTime",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "OtherTransferCount",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "WriteTransferCount",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "ReadTransferCount",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "OtherOperationCount",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "WriteOperationCount",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Reserved3",
+      "offset": 8,
+      "size": 8
+    },
+    {
+      "name": "Reserved2",
+      "offset": 8,
+      "size": 7
+    },
+    {
+      "name": "WorkingSetLimit",
+      "offset": 8,
+      "size": 6
+    },
+    {
+      "name": "TimeLimit",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "PagefileLimit",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "MaximumWorkingSetSize",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "MinimumWorkingSetSize",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "NonPagedPoolLimit",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Reserved0",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "TimeLimit",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "PagefileLimit",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "MaximumWorkingSetSize",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "MinimumWorkingSetSize",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "NonPagedPoolLimit",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "UmsCompletionList",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "UmsContext",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Self",
+      "offset": 8,
+      "size": 6
+    },
+    {
+      "name": "ArbitraryUserPointer",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "FiberData",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "SubSystemTib",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "StackLimit",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "StackBase",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Self",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "ArbitraryUserPointer",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "FiberData",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "SubSystemTib",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "StackLimit",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "StackBase",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Self",
+      "offset": 8,
+      "size": 6
+    },
+    {
+      "name": "ArbitraryUserPointer",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "FiberData",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "SubSystemTib",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "StackLimit",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "StackBase",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "MemberLevel",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Level",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "EffectiveOnly",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "CopyOnOpen",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "EffectiveOnly",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "ContextTrackingMode",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "ImpersonationLevel",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "TokenSource",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "ModifiedId",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "AuthenticationId",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "PrivilegeCount",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "GroupCount",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "DynamicAvailable",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "DynamicCharged",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "ImpersonationLevel",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "TokenType",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "ExpirationTime",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "AuthenticationId",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "SourceIdentifier",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "MandatoryPolicy",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "ImpersonationLevel",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "TokenType",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "AuthenticationId",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Privileges",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "RestrictedSidHash",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Privileges",
+      "offset": 8,
+      "size": 8
+    },
+    {
+      "name": "PrivilegeLength",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "PrivilegeCount",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "RestrictedSids",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "RestrictedSidLength",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "RestrictedSidCount",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "Sids",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "SidLength",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Privileges",
+      "offset": 12,
+      "size": 1
+    },
+    {
+      "name": "Groups",
+      "offset": 16,
+      "size": 1
+    },
+    {
+      "name": "Privileges",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "AccessReason",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "AccessStatus",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "GrantedAccess",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "ResultListCount",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "ObjectTypeList",
+      "offset": 8,
+      "size": 7
+    },
+    {
+      "name": "ObjectTypeListCount",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "GenericMapping",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "PrincipalSelfSid",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "PreviouslyGrantedAccess",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "DesiredAccess",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "SeSecurityDescriptor",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "SecurityDescriptor",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Privilege",
+      "offset": 12,
+      "size": 2
+    },
+    {
+      "name": "Control",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "ObjectType",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "Sbz",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Dacl",
+      "offset": 8,
+      "size": 6
+    },
+    {
+      "name": "Sacl",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "Group",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "Owner",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Control",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "Sbz1",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Dacl",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "Sacl",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "Group",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "Owner",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "Control",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "Sbz1",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "AclBytesFree",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "AclBytesInUse",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "InheritedObjectType",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "ObjectType",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "InheritedObjectType",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "ObjectType",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "InheritedObjectType",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "ObjectType",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "InheritedObjectType",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "ObjectType",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "InheritedObjectType",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "ObjectType",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "InheritedObjectType",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "ObjectType",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "InheritedObjectType",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "ObjectType",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "InheritedObjectType",
+      "offset": 16,
+      "size": 4
+    },
+    {
+      "name": "ObjectType",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SidStart",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Mask",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "AceSize",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "AceFlags",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Sbz2",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "AceCount",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "AclSize",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "Sbz1",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Hash",
+      "offset": 256,
+      "size": 2
+    },
+    {
+      "name": "SidAttr",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Attributes",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "SubAuthority",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "IdentifierAuthority",
+      "offset": 6,
+      "size": 2
+    },
+    {
+      "name": "SubAuthorityCount",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Attributes",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "GenericAll",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "GenericExecute",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "GenericWrite",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "ContextRecord",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "ExceptionInformation",
+      "offset": 120,
+      "size": 6
+    },
+    {
+      "name": "NumberParameters",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "ExceptionAddress",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "ExceptionRecord",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "ExceptionFlags",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "ExceptionInformation",
+      "offset": 60,
+      "size": 5
+    },
+    {
+      "name": "NumberParameters",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "ExceptionAddress",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "ExceptionRecord",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "ExceptionFlags",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "ExceptionInformation",
+      "offset": 120,
+      "size": 5
+    },
+    {
+      "name": "NumberParameters",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "ExceptionAddress",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "ExceptionRecord",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "IdleSensitivity",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "IdleTimeout",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "Idle",
+      "offset": 12,
+      "size": 6
+    },
+    {
+      "name": "Reserved",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "LidOpenWake",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "LidClose",
+      "offset": 12,
+      "size": 3
+    },
+    {
+      "name": "SleepButton",
+      "offset": 12,
+      "size": 2
+    },
+    {
+      "name": "PowerButton",
+      "offset": 12,
+      "size": 1
+    },
+    {
+      "name": "MinSystemState",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "PowerPolicy",
+      "offset": 12,
+      "size": 3
+    },
+    {
+      "name": "BatteryLevel",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Spare",
+      "offset": 3,
+      "size": 1
+    },
+    {
+      "name": "EventCode",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Processors",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Processors",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Processors",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "OldState",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Processors",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Speed",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Latency",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Processor",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "Speed",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "Latency",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Status",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "State",
+      "offset": 416,
+      "size": 4
+    },
+    {
+      "name": "StartTime",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "ResetCount",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "TotalTransitions",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "IdleTimeBuckets",
+      "offset": 384,
+      "size": 6
+    },
+    {
+      "name": "MaxTimeUs",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "MinTimeUs",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "InvalidBucketIndex",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "FailedTransitions",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "IdleTransitions",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Count",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "MaxTimeUs",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "MinTimeUs",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "State",
+      "offset": 48,
+      "size": 4
+    },
+    {
+      "name": "StartTime",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "ResetCount",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "TotalTransitions",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "IdleTimeBuckets",
+      "offset": 24,
+      "size": 4
+    },
+    {
+      "name": "TotalTime",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "InvalidBucketIndex",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "FailedTransitions",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "PolicyType",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "BusyAdjThreshold",
+      "offset": 1,
+      "size": 7
+    },
+    {
+      "name": "ThermalConstraint",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "LowestPerfState",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "MinPerfState",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "MaxPerfState",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "CurrentState",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "MaxFrequency",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "PolicyType",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "BusyAdjThreshold",
+      "offset": 1,
+      "size": 7
+    },
+    {
+      "name": "ThermalConstraint",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "LowestPerfState",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "MinPerfState",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "MaxPerfState",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "CurrentState",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "MaxFrequency",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Control",
+      "offset": 8,
+      "size": 8
+    },
+    {
+      "name": "DecreaseTime",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "IncreaseTime",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "Type",
+      "offset": 1,
+      "size": 5
+    },
+    {
+      "name": "DecreaseLevel",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "IncreaseLevel",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "PercentFrequency",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Power",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "State",
+      "offset": 32,
+      "size": 5
+    },
+    {
+      "name": "TargetProcessors",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "OldState",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "TargetState",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Count",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "State",
+      "offset": 32,
+      "size": 5
+    },
+    {
+      "name": "TargetProcessors",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "OldState",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "TargetState",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Count",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Context",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "StateFlags",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "Reserved",
+      "offset": 1,
+      "size": 6
+    },
+    {
+      "name": "StateType",
+      "offset": 1,
+      "size": 5
+    },
+    {
+      "name": "DemotePercent",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "PromotePercent",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "TimeCheck",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Power",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "PercentFrequency",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Capacity",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "ButtonInstanceID",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Flags",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Data",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "DataLength",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "PowerCondition",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Guid",
+      "offset": 16,
+      "size": 1
+    },
+    {
+      "name": "GenericReparseBuffer",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "ReparseGuid",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Reserved",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "ReparseDataLength",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Alignment",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "FileName",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "FileNameLength",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Action",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Type",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "Protect",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "State",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "RegionSize",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "AllocationProtect",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "AllocationBase",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Type",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "Protect",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "State",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "RegionSize",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "AllocationProtect",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "AllocationBase",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Type",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "Protect",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "State",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "RegionSize",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "AllocationProtect",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "AllocationBase",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Features",
+      "offset": 512,
+      "size": 3
+    },
+    {
+      "name": "OptimizedSave",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "Size",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Size",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Group",
+      "offset": 72,
+      "size": 3
+    },
+    {
+      "name": "Cache",
+      "offset": 48,
+      "size": 2
+    },
+    {
+      "name": "NumaNode",
+      "offset": 40,
+      "size": 1
+    },
+    {
+      "name": "Size",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "GroupInfo",
+      "offset": 48,
+      "size": 3
+    },
+    {
+      "name": "Reserved",
+      "offset": 20,
+      "size": 2
+    },
+    {
+      "name": "ActiveGroupCount",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "ActiveProcessorMask",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Reserved",
+      "offset": 38,
+      "size": 2
+    },
+    {
+      "name": "ActiveProcessorCount",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "GroupMask",
+      "offset": 16,
+      "size": 6
+    },
+    {
+      "name": "Reserved",
+      "offset": 20,
+      "size": 5
+    },
+    {
+      "name": "Type",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "CacheSize",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "LineSize",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "Associativity",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "GroupMask",
+      "offset": 16,
+      "size": 2
+    },
+    {
+      "name": "Reserved",
+      "offset": 20,
+      "size": 1
+    },
+    {
+      "name": "GroupMask",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "GroupCount",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "Reserved",
+      "offset": 21,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 16,
+      "size": 3
+    },
+    {
+      "name": "Cache",
+      "offset": 12,
+      "size": 2
+    },
+    {
+      "name": "NumaNode",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Relationship",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Type",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "Size",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "LineSize",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "Associativity",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "IoInfo",
+      "offset": 48,
+      "size": 1
+    },
+    {
+      "name": "CompletionPort",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "RestrictedSids",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "PrivilegesToDelete",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "SidsToDisable",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "JobToken",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "ProcessIdList",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "NumberOfProcessIdsInList",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "PeakJobMemoryUsed",
+      "offset": 8,
+      "size": 5
+    },
+    {
+      "name": "PeakProcessMemoryUsed",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "JobMemoryLimit",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "ProcessMemoryLimit",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "IoInfo",
+      "offset": 48,
+      "size": 1
+    },
+    {
+      "name": "SchedulingClass",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "PriorityClass",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "Affinity",
+      "offset": 8,
+      "size": 6
+    },
+    {
+      "name": "ActiveProcessLimit",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "MaximumWorkingSetSize",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "MinimumWorkingSetSize",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "LimitFlags",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "PerJobUserTimeLimit",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "TotalTerminatedProcesses",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "ActiveProcesses",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "TotalProcesses",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "TotalPageFaultCount",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "ImageBase",
+      "offset": 8,
+      "size": 8
+    },
+    {
+      "name": "BaseOfCode",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "AddressOfEntryPoint",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "SizeOfUninitializedData",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "SizeOfInitializedData",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "SizeOfCode",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "MinorLinkerVersion",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "MajorLinkerVersion",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "BaseOfData",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "BaseOfCode",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "AddressOfEntryPoint",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "SizeOfUninitializedData",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "SizeOfInitializedData",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "SizeOfCode",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "MinorLinkerVersion",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "MajorLinkerVersion",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "BaseOfData",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "BaseOfCode",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "AddressOfEntryPoint",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "SizeOfUninitializedData",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "SizeOfInitializedData",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "SizeOfCode",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "MinorLinkerVersion",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "MajorLinkerVersion",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Size",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Characteristics",
+      "offset": 2,
+      "size": 6
+    },
+    {
+      "name": "SizeOfOptionalHeader",
+      "offset": 2,
+      "size": 5
+    },
+    {
+      "name": "NumberOfSymbols",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "PointerToSymbolTable",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "TimeDateStamp",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "NumberOfSections",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "e32_mpages",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "e32_mflags",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "e32_ver",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "e32_os",
+      "offset": 2,
+      "size": 5
+    },
+    {
+      "name": "e32_cpu",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "e32_level",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "e32_worder",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "e32_border",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "ne_heap",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "ne_autodata",
+      "offset": 2,
+      "size": 7
+    },
+    {
+      "name": "ne_flags",
+      "offset": 2,
+      "size": 6
+    },
+    {
+      "name": "ne_crc",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "ne_cbenttab",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "ne_enttab",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "ne_rev",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "ne_ver",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "e_sp",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "e_ss",
+      "offset": 2,
+      "size": 7
+    },
+    {
+      "name": "e_maxalloc",
+      "offset": 2,
+      "size": 6
+    },
+    {
+      "name": "e_minalloc",
+      "offset": 2,
+      "size": 5
+    },
+    {
+      "name": "e_cparhdr",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "e_crlc",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "e_cp",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "e_cblp",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "EstimatedTime",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "Rate",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "RemainingCapacity",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "MaxCapacity",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "Spare1",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "Discharging",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "Charging",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "BatteryPresent",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "HiberFilePresent",
+      "offset": 1,
+      "size": 8
+    },
+    {
+      "name": "SystemS5",
+      "offset": 1,
+      "size": 7
+    },
+    {
+      "name": "SystemS4",
+      "offset": 1,
+      "size": 6
+    },
+    {
+      "name": "SystemS3",
+      "offset": 1,
+      "size": 5
+    },
+    {
+      "name": "SystemS2",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "SystemS1",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "LidPresent",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "SleepButtonPresent",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "MaxSpindownTimeout",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "MinSpindownTimeout",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "MaxVideoTimeout",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "MinVideoTimeout",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "MaxSleep",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "IncreasePercent",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "DecreaseTime",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "IncreaseTime",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "TimeCheck",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "BusyAdjThreshold",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "MinThrottle",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "MaxThrottle",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Flags",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "DecreasePolicy",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "IncreasePolicy",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Policy",
+      "offset": 60,
+      "size": 6
+    },
+    {
+      "name": "PolicyCount",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "Reserved",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "DisableCStates",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "Spare",
+      "offset": 3,
+      "size": 2
+    },
+    {
+      "name": "DynamicThrottle",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "AllowPromotion",
+      "offset": 1,
+      "size": 7
+    },
+    {
+      "name": "AllowDemotion",
+      "offset": 1,
+      "size": 6
+    },
+    {
+      "name": "Spare",
+      "offset": 2,
+      "size": 5
+    },
+    {
+      "name": "PromotePercent",
+      "offset": 1,
+      "size": 4
+    },
+    {
+      "name": "DemotePercent",
+      "offset": 1,
+      "size": 3
+    },
+    {
+      "name": "PromoteLimit",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "DemoteLimit",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Policy",
+      "offset": 24,
+      "size": 3
+    },
+    {
+      "name": "PolicyCount",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Flags",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "Disabled",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Spare",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "PromotePercent",
+      "offset": 1,
+      "size": 2
+    },
+    {
+      "name": "DemotePercent",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "DeCommitTotalFreeThreshold",
+      "offset": 8,
+      "size": 8
+    },
+    {
+      "name": "DeCommitFreeBlockThreshold",
+      "offset": 8,
+      "size": 7
+    },
+    {
+      "name": "CriticalSectionDefaultTimeout",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "GlobalFlagsSet",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "GlobalFlagsClear",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "MinorVersion",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "MajorVersion",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "TimeDateStamp",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "DeCommitTotalFreeThreshold",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "DeCommitFreeBlockThreshold",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "CriticalSectionDefaultTimeout",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "GlobalFlagsSet",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "GlobalFlagsClear",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "MinorVersion",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "MajorVersion",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "TimeDateStamp",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "CodePage",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Size",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "NameString",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "NameString",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "DataIsDirectory",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "Name",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "NameIsString",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "NumberOfIdEntries",
+      "offset": 2,
+      "size": 5
+    },
+    {
+      "name": "NumberOfNamedEntries",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "MinorVersion",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "MajorVersion",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "TimeDateStamp",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Reserved",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "OffsetModuleName",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "NumberOfModuleForwarderRefs",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "OffsetModuleName",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "FirstThunk",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "Name",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "ForwarderChain",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "TimeDateStamp",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "OriginalFirstThunk",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Characteristics",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "SizeOfZeroFill",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "AddressOfCallBacks",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "AddressOfIndex",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "EndAddressOfRawData",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Characteristics",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "SizeOfZeroFill",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "AddressOfCallBacks",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "AddressOfIndex",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "EndAddressOfRawData",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "AddressOfData",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "Ordinal",
+      "offset": 4,
+      "size": 2
+    },
+    {
+      "name": "Function",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "AddressOfData",
+      "offset": 8,
+      "size": 3
+    },
+    {
+      "name": "Ordinal",
+      "offset": 8,
+      "size": 2
+    },
+    {
+      "name": "Function",
+      "offset": 8,
+      "size": 1
+    },
+    {
+      "name": "Name",
+      "offset": 1,
+      "size": 1
+    },
+    {
+      "name": "AddressOfFunctions",
+      "offset": 4,
+      "size": 8
+    },
+    {
+      "name": "NumberOfNames",
+      "offset": 4,
+      "size": 7
+    },
+    {
+      "name": "NumberOfFunctions",
+      "offset": 4,
+      "size": 6
+    },
+    {
+      "name": "Base",
+      "offset": 4,
+      "size": 5
+    },
+    {
+      "name": "Name",
+      "offset": 4,
+      "size": 4
+    },
+    {
+      "name": "MinorVersion",
+      "offset": 2,
+      "size": 3
+    },
+    {
+      "name": "MajorVersion",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "TimeDateStamp",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "EndHeader",
+      "offset": 2,
+      "size": 6
+    },
+    {
+      "name": "Size",
+      "offset": 10,
+      "size": 5
+    },
+    {
+      "name": "Mode",
+      "offset": 8,
+      "size": 4
+    },
+    {
+      "name": "GroupID",
+      "offset": 6,
+      "size": 3
+    },
+    {
+      "name": "UserID",
+      "offset": 6,
+      "size": 2
+    },
+    {
+      "name": "Date",
+      "offset": 12,
+      "size": 1
+    },
+    {
+      "name": "SizeOfBlock",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Linenumber",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "VirtualAddress",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "Type",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "SymbolTableIndex",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "RelocCount",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "CRC",
+      "offset": 20,
+      "size": 4
+    },
+    {
+      "name": "rgbReserved",
+      "offset": 16,
+      "size": 1
+    },
+    {
+      "name": "rgbReserved",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "Section",
+      "offset": 20,
+      "size": 2
+    },
+    {
+      "name": "rgbReserved",
+      "offset": 2,
+      "size": 8
+    },
+    {
+      "name": "HighNumber",
+      "offset": 2,
+      "size": 7
+    },
+    {
+      "name": "bReserved",
+      "offset": 1,
+      "size": 6
+    },
+    {
+      "name": "Selection",
+      "offset": 1,
+      "size": 5
+    },
+    {
+      "name": "Number",
+      "offset": 2,
+      "size": 4
+    },
+    {
+      "name": "CheckSum",
+      "offset": 4,
+      "size": 3
+    },
+    {
+      "name": "NumberOfLinenumbers",
+      "offset": 2,
+      "size": 2
+    },
+    {
+      "name": "NumberOfRelocations",
+      "offset": 2,
+      "size": 1
+    },
+    {
+      "name": "File",
+      "offset": 20,
+      "size": 1
+    },
+    {
+      "name": "rgbReserved",
+      "offset": 12,
+      "size": 2
+    },
+    {
+      "name": "WeakSearchType",
+      "offset": 4,
+      "size": 1
+    },
+    {
+      "name": "CRC",
+      "offset": 18,
+      "size": 4
+    },
+    {
+      "name": "rgbReserved",
+      "offset": 14,
+      "size": 1
+    },
+    {
+      "name": "TokenDef",
+      "offset": 18,
+      "size": 3
+    },
+    {
+      "name": "Section",
+      "offset": 18,
+      "size": 2
+    },
+    {
+      "name": "HighNumber",
+      "offset": 2,
+      "size": 7
+    },
+    {
+      "name": "bReserved",
+      "offset": 1,
+      "size": 6
+    },
+    {
+      "name": "Selection",
+      "offset": 1,
+      "size": 5
+    },
+    {
+      "name": "Number",
+      "offset": 2,
+      "size": 4
+    }
+  ],
   "source": "typeinfo/win32/windows_vs12_64.gdt",
-  "struct_count": 849,
-  "structures": [
+  "struct_name_count": 849,
+  "structure_count": 39,
+  "structure_names": [
     "CONTEXT",
     "CONTEXT_ALL",
     "CONTEXT_AMD64",
@@ -851,6 +5855,242 @@
     "WIN32_FIND_DATAW",
     "WIN32_FIND_STREAM_DATA",
     "WSADATA"
+  ],
+  "structures": [
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_ACTIVATION_CONTEXT",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_AMMediaType",
+      "size": 56576
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_CrtMemBlockHeader",
+      "size": 60672
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_DPA",
+      "size": 5888
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_DSA",
+      "size": 5888
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_EVENTSFORLOGFILE",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_EXCEPTION_REGISTRATION_RECORD",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HCHANGE",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HCLUSENUM",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HCLUSTER",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HGROUP",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HGROUPENUM",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HNETINTERFACE",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HNETWORK",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HNETWORKENUM",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HNODE",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HNODEENUM",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HREGBATCH",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HREGBATCHNOTIFICATION",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HREGBATCHPORT",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HRESENUM",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HRESOURCE",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_HRESTYPEENUM",
+      "size": 46336
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_IMAGELIST",
+      "size": 5888
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_NDR_ASYNC_MESSAGE",
+      "size": 67840
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_NDR_CORRELATION_INFO",
+      "size": 67840
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_NDR_PROC_CONTEXT",
+      "size": 67840
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_PACKEDEVENTINFO",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_PROC_THREAD_ATTRIBUTE_LIST",
+      "size": 4864
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_PSP",
+      "size": 31488
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TEB",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TP_CALLBACK_INSTANCE",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TP_CLEANUP_GROUP",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TP_IO",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TP_POOL",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TP_TIMER",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TP_WAIT",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TP_WORK",
+      "size": 2304
+    },
+    {
+      "alignment": 0,
+      "field_count": 256,
+      "name": "_TREEITEM",
+      "size": 5888
+    }
   ],
   "total_types": 43924
 }

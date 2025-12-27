@@ -193,6 +193,204 @@ impl GdtParser {
             })
             .collect()
     }
+    
+    /// Extract structure definitions with field information
+    pub fn extract_structures(db: &[u8]) -> Vec<StructDef> {
+        let mut structures = Vec::new();
+        
+        // Pattern: structure record with fields
+        // Structure record format:
+        // [len][name][padding][category_id][size_be32][align_be32][field_count_be32]
+        
+        let mut i = 0;
+        while i + 20 < db.len() {
+            // Look for structure name pattern (starts with _ and uppercase)
+            if db[i] > 0 && db[i] < 64 {  // reasonable name length
+                let name_len = db[i] as usize;
+                if i + 1 + name_len + 16 < db.len() {
+                    // Check if name starts with _ or uppercase
+                    if db[i + 1] == b'_' || (db[i + 1] >= b'A' && db[i + 1] <= b'Z') {
+                        if let Ok(name) = std::str::from_utf8(&db[i + 1..i + 1 + name_len]) {
+                            // Check if it looks like a Windows structure name
+                            if Self::is_windows_struct_name(name) {
+                                // Try to parse structure info after the name
+                                let after_name = i + 1 + name_len;
+                                
+                                // Skip to find size/alignment info (look for pattern)
+                                // Format: [padding to align][category?][size_be32][align_be32][field_count_be32]
+                                if after_name + 16 < db.len() {
+                                    // Skip padding zeros
+                                    let mut j = after_name;
+                                    while j < after_name + 10 && j < db.len() && db[j] == 0 {
+                                        j += 1;
+                                    }
+                                    
+                                    // Try to read size (should be reasonable value < 10000)
+                                    if j + 12 < db.len() {
+                                        let size = u32::from_be_bytes([db[j], db[j+1], db[j+2], db[j+3]]);
+                                        let align = u32::from_be_bytes([db[j+4], db[j+5], db[j+6], db[j+7]]);
+                                        let field_count = u32::from_be_bytes([db[j+8], db[j+9], db[j+10], db[j+11]]);
+                                        
+                                        // Sanity check
+                                        if size > 0 && size < 100000 && align <= 16 && field_count < 500 {
+                                            structures.push(StructDef {
+                                                name: name.to_string(),
+                                                size,
+                                                alignment: align,
+                                                field_count,
+                                                fields: Vec::new(), // Fields parsed separately
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        
+        // Deduplicate by name
+        structures.sort_by(|a, b| a.name.cmp(&b.name));
+        structures.dedup_by(|a, b| a.name == b.name);
+        
+        structures
+    }
+    
+    /// Check if name looks like a Windows structure
+    fn is_windows_struct_name(name: &str) -> bool {
+        // Must be at least 4 chars
+        if name.len() < 4 {
+            return false;
+        }
+        
+        // Check for common patterns
+        name.starts_with('_') ||
+        name.starts_with("IMAGE_") ||
+        name.starts_with("PROCESS_") ||
+        name.starts_with("THREAD_") ||
+        name.starts_with("MEMORY_") ||
+        name.starts_with("SECURITY_") ||
+        name.starts_with("TOKEN_") ||
+        name.starts_with("RTL_") ||
+        name.starts_with("LDR_") ||
+        name.starts_with("LIST_") ||
+        name.starts_with("UNICODE_") ||
+        name.starts_with("EXCEPTION_") ||
+        name.starts_with("CONTEXT") ||
+        name.starts_with("CRITICAL_") ||
+        name.starts_with("OVERLAPPED") ||
+        name.starts_with("SOCKADDR") ||
+        name.starts_with("STARTUPINFO") ||
+        name.starts_with("WIN32_") ||
+        name == "FILETIME" ||
+        name == "GUID" ||
+        name == "LARGE_INTEGER" ||
+        name == "POINT" ||
+        name == "RECT" ||
+        name == "SIZE" ||
+        name == "MSG" ||
+        name == "WSADATA" ||
+        name == "PEB" ||
+        name == "TEB"
+    }
+    
+    /// Extract field definitions from DB
+    pub fn extract_fields(db: &[u8]) -> Vec<FieldDef> {
+        let mut fields = Vec::new();
+        
+        // Field record format:
+        // [name_len][field_name][ff ff ff][offset_be32][size_be32][...]
+        
+        let mut i = 0;
+        while i + 20 < db.len() {
+            // Look for field name followed by ffff marker
+            if db[i] > 2 && db[i] < 64 {  // reasonable name length
+                let name_len = db[i] as usize;
+                if i + 1 + name_len + 10 < db.len() {
+                    // Check for ffff marker after name
+                    let marker_start = i + 1 + name_len;
+                    if marker_start + 3 < db.len() && 
+                       db[marker_start] == 0xff && 
+                       db[marker_start + 1] == 0xff &&
+                       db[marker_start + 2] == 0xff {
+                        if let Ok(name) = std::str::from_utf8(&db[i + 1..i + 1 + name_len]) {
+                            // Check if it looks like a field name (camelCase or has common prefixes)
+                            if Self::is_field_name(name) {
+                                let after_marker = marker_start + 4;
+                                if after_marker + 8 < db.len() {
+                                    let offset = u32::from_be_bytes([
+                                        db[after_marker], db[after_marker+1], 
+                                        db[after_marker+2], db[after_marker+3]
+                                    ]);
+                                    let size = u32::from_be_bytes([
+                                        db[after_marker+4], db[after_marker+5],
+                                        db[after_marker+6], db[after_marker+7]
+                                    ]);
+                                    
+                                    // Sanity check
+                                    if offset < 100000 && size <= 8 && size > 0 {
+                                        fields.push(FieldDef {
+                                            name: name.to_string(),
+                                            offset,
+                                            size,
+                                            type_name: String::new(), // Would need more parsing
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        
+        fields
+    }
+    
+    /// Check if name looks like a structure field
+    fn is_field_name(name: &str) -> bool {
+        if name.len() < 2 || name.len() > 50 {
+            return false;
+        }
+        // Field names are typically camelCase or have prefixes like dw, lp, h, p, etc.
+        let first = name.chars().next().unwrap();
+        first.is_ascii_lowercase() ||
+        name.starts_with("dw") ||
+        name.starts_with("lp") ||
+        name.starts_with("cb") ||
+        name.starts_with("sz") ||
+        name.starts_with("n") ||
+        name.starts_with("h") ||
+        name.starts_with("p") ||
+        name.starts_with("b") ||
+        name.starts_with("f") ||
+        name.starts_with("c") ||
+        name.starts_with("u") ||
+        name.starts_with("w") ||
+        (first.is_ascii_uppercase() && name.len() > 2)
+    }
+}
+
+/// Structure definition extracted from GDT
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: String,
+    pub size: u32,
+    pub alignment: u32,
+    pub field_count: u32,
+    pub fields: Vec<FieldDef>,
+}
+
+/// Field definition within a structure
+#[derive(Debug, Clone)]
+pub struct FieldDef {
+    pub name: String,
+    pub offset: u32,
+    pub size: u32,
+    pub type_name: String,
 }
 
 /// DB header information
