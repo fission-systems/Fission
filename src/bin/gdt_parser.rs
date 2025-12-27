@@ -94,12 +94,26 @@ fn main() {
     
     if dump_fields {
         println!("\n=== Field Definitions (sample) ===");
-        for f in fields.iter().take(50) {
-            println!("  {} (offset={}, size={})", f.name, f.offset, f.size);
+        
+        // Group fields by parent_id
+        let grouped = GdtParser::extract_fields_grouped(&db);
+        let mut parent_ids: Vec<_> = grouped.keys().collect();
+        parent_ids.sort();
+        
+        let mut shown = 0;
+        for &parent_id in parent_ids.iter().take(10) {
+            if let Some(parent_fields) = grouped.get(&parent_id) {
+                println!("\n  [Parent ID 0x{:X}] {} fields:", parent_id, parent_fields.len());
+                for f in parent_fields.iter().take(8) {
+                    println!("    +{:4}: {} ({} bytes)", f.offset, f.name, f.size);
+                }
+                if parent_fields.len() > 8 {
+                    println!("    ... and {} more fields", parent_fields.len() - 8);
+                }
+                shown += 1;
+            }
         }
-        if fields.len() > 50 {
-            println!("  ... and {} more", fields.len() - 50);
-        }
+        println!("\n  Total: {} parent structures with fields", grouped.len());
     }
     
     // Write DB to file if requested
