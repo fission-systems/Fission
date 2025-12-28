@@ -35,7 +35,7 @@ A next-generation hybrid dynamic analysis platform that unifies the best feature
 ### Smart Decompilation
 - **Context-Aware Constant Substitution** - Replaces magic numbers with symbolic names based on API parameter context
 - **16 Enum Groups** - PAGE_PROTECT, MEM_ALLOC, GENERIC_ACCESS, HKEY_ROOT, AF_FAMILY, etc.
-- **43 API Mappings** - VirtualAlloc, CreateFile, OpenProcess, socket, RegOpenKeyEx, etc.
+- **100+ API Mappings** - 9 DLLs supported (kernel32, user32, ntdll, advapi32, ws2_32, winhttp, wininet, shell32, bcrypt)
 - **Dynamic Flag Resolution** - Automatically detects OR combinations (e.g., `0x3000` → `MEM_COMMIT | MEM_RESERVE`)
 - **GDT Type Loading** - 5,700+ structures and 6,500+ typedefs from Ghidra data
 
@@ -62,16 +62,18 @@ A next-generation hybrid dynamic analysis platform that unifies the best feature
 
 | Component | Technology |
 |-----------|------------|
-| Language | Rust 2021 |
-| GUI | egui + eframe |
+| Language | Rust 2021 Edition |
+| GUI | egui 0.29 + eframe 0.29 |
 | Theme | Catppuccin |
-| Disassembler | iced-x86 |
+| Disassembler | iced-x86 1.21 |
 | Decompiler | Ghidra C++ (subprocess) |
-| Binary Parsing | goblin + object |
+| Binary Parsing | goblin 0.8 + object 0.32 |
 | .NET Parsing | Custom Rust |
-| Debugging | Windows API / ptrace |
-| Scripting | PyO3 |
-| Caching | lru crate |
+| Debugging | Windows 0.54 / nix 0.28 (ptrace) |
+| Scripting | PyO3 0.24 (optional) |
+| Async | Tokio 1.36 |
+| Caching | lru 0.12 |
+| CLI | reedline 0.30 + clap 4.5 |
 
 ## Architecture
 
@@ -137,20 +139,66 @@ cargo run --release
 4. Double-click a function for Assembly/Decompiled tabs
 5. Use **Debug** tab (bottom) to attach and control execution
 
+## CLI Commands
+
+Run with `--headless` for CLI mode. Available commands:
+
+| Command | Aliases | Syntax | Description |
+|---------|---------|--------|-------------|
+| `load` | `open`, `o` | `load <path>` | Load a binary file |
+| `info` | `i` | `info` | Display binary information |
+| `funcs` | `functions`, `f` | `funcs` | List discovered functions |
+| `sections` | `sec` | `sections` | Show section table |
+| `strings` | `str` | `strings` | Extract ASCII strings (min 4 bytes) |
+| `analyze` | `anal`, `a` | `analyze` | Discover internal functions |
+| `disasm` | `dis`, `d` | `disasm <addr> [count]` | Disassemble at address |
+| `decompile` | `dec`, `decomp` | `decompile <addr>` | Decompile function at address |
+| `clear` | `cls` | `clear` | Clear screen |
+| `help` | `?`, `h` | `help` | Show help message |
+| `quit` | `exit`, `q` | `quit` | Exit program |
+
+**Address formats:** `0x1000`, `140001000`, `1000` (decimal)
+
 ## Configuration
 
-Key settings in `src/core/config.rs`:
+All settings defined in `src/core/config.rs`:
 
 ```rust
+// Decompiler settings
 DecompilerConfig {
-    num_workers: 0,              // 0 = auto (CPU cores, max 8)
-    timeout_ms: 30000,           // 30 second timeout
-    enable_prefetch: true,       // Pre-decompile adjacent functions
-    requests_before_restart: 500 // Restart subprocess to reclaim memory
+    mode: DecompilerMode::Single, // Single (memory efficient) or Pool (parallel)
+    num_workers: 0,               // 0 = auto (CPU cores, max 8)
+    max_workers: 8,               // Cap on auto-detected workers
+    default_function_size: 4096,  // 4KB default function size
+    max_function_size: 65536,     // 64KB max function size
+    min_function_size: 16,        // 16 bytes minimum
+    timeout_ms: 30000,            // 30 second timeout
+    enable_prefetch: true,        // Pre-decompile adjacent functions
+    prefetch_count: 3,            // Number of functions to prefetch
+    requests_before_restart: 500, // Restart subprocess to reclaim memory
 }
 
+// Analysis settings
 AnalysisConfig {
-    decompile_cache_size: 100    // LRU cache entries
+    max_string_search_size: 262144, // 256KB for string extraction
+    min_string_length: 4,           // Minimum 4 bytes for strings
+    auto_xref_analysis: true,       // Auto cross-reference on load
+    decompile_cache_size: 100,      // LRU cache entries
+    function_address_range: 4096,   // 4KB range for function matching
+}
+
+// Debug/TTD settings
+DebugConfig {
+    max_snapshots: 10000,   // Time travel debugging snapshots
+    max_process_ids: 4096,  // Max processes to enumerate
+}
+
+// UI settings
+UiConfig {
+    show_performance: false,   // Performance metrics display
+    auto_scroll_entry: true,   // Auto-scroll to entry point on load
+    max_log_entries: 1000,     // Console history limit
+    hex_rows_per_page: 64,     // Hex viewer pagination
 }
 ```
 
@@ -159,33 +207,60 @@ AnalysisConfig {
 ```
 Fission/
 ├── Cargo.toml
+├── build.rs                    # Native library linking
 ├── ghidra_decompiler/
 │   ├── CMakeLists.txt
-│   ├── fission_decomp.cpp   # Subprocess decompiler
-│   ├── wrapper.cpp          # FFI wrapper (legacy)
-│   └── languages/           # Sleigh (.sla) files
+│   ├── fission_decomp.cpp      # Subprocess decompiler
+│   └── languages/              # Sleigh (.sla) files
 ├── src/
 │   ├── main.rs
+│   ├── lib.rs
 │   ├── core/
-│   │   ├── config.rs        # Global configuration
-│   │   ├── events.rs        # Event bus system
-│   │   └── modules.rs       # Module lifecycle
+│   │   ├── config.rs           # All configuration options
+│   │   ├── context.rs          # FissionContext
+│   │   ├── events.rs           # Event bus system
+│   │   ├── errors.rs           # Unified error types
+│   │   ├── logging.rs          # Log levels
+│   │   ├── constants.rs        # Magic bytes
+│   │   └── modules.rs          # Module lifecycle
 │   ├── analysis/
-│   │   ├── loader/          # PE/ELF parsing
-│   │   ├── disasm/          # iced-x86 wrapper
-│   │   ├── decomp/          # Decompiler pool
-│   │   └── dotnet/          # .NET/CLR analysis
-│   ├── debug/               # Debugger core
-│   ├── plugin/              # Plugin system
-│   │   ├── traits.rs        # FissionPlugin trait
-│   │   ├── manager.rs       # Plugin registry
-│   │   └── python.rs        # PyO3 integration
-│   └── ui/gui/
-│       ├── app/             # App logic
-│       │   ├── decomp_worker.rs  # Worker threads
-│       │   └── decompiler.rs     # Decompile API
-│       ├── panels/          # UI components
-│       └── theme.rs         # Catppuccin styling
+│   │   ├── loader/             # PE/ELF/Mach-O parsing
+│   │   ├── disasm/             # iced-x86 wrapper
+│   │   ├── decomp/             # Decompiler pool
+│   │   ├── dotnet/             # .NET/CLR analysis
+│   │   ├── gdt_parser.rs       # GDT type extraction
+│   │   ├── signatures/         # Windows API mappings (100+ APIs)
+│   │   ├── detector/           # Binary signature detection
+│   │   ├── xrefs/              # Cross-reference database
+│   │   └── patch/              # Memory patching
+│   ├── debug/
+│   │   ├── windows/            # Win32 debugger
+│   │   ├── linux.rs            # ptrace debugger
+│   │   ├── ttd/                # Time travel debugging
+│   │   ├── traits.rs           # Platform trait
+│   │   └── memory.rs           # Cross-platform memory ops
+│   ├── plugin/
+│   │   ├── traits.rs           # FissionPlugin trait
+│   │   ├── manager.rs          # Plugin registry
+│   │   ├── python.rs           # PyO3 integration
+│   │   ├── hooks.rs            # Event bus
+│   │   └── api.rs              # Python API
+│   ├── script/
+│   │   ├── bridge.rs           # Python interop
+│   │   └── types.rs            # Exported types
+│   └── ui/
+│       ├── gui/
+│       │   ├── app/            # FissionApp orchestrator
+│       │   ├── panels/         # UI components
+│       │   ├── theme.rs        # Catppuccin styling
+│       │   └── state.rs        # AppState management
+│       └── cli/
+│           ├── mod.rs          # REPL loop
+│           └── commands.rs     # Command parsing
+└── tests/
+    ├── cli_tests.rs
+    ├── decompiler_tests.rs
+    └── loader_tests.rs
 ```
 
 ## Development Status
@@ -199,6 +274,21 @@ Fission/
 - [x] Performance Optimization - Pool, caching, prefetch
 - [ ] Advanced TTD - Full time travel debugging
 - [ ] Remote Debugging - Network-based debug sessions
+
+## Testing
+
+```bash
+# Run all tests
+cargo test
+
+# Run specific test file
+cargo test --test loader_tests
+cargo test --test decompiler_tests
+cargo test --test cli_tests
+
+# Run with verbose output
+cargo test -- --nocapture
+```
 
 ## 🚀 Ultimate Roadmap: Project Restoration
 
