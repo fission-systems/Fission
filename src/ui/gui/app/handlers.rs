@@ -97,13 +97,13 @@ pub fn process_messages(
                 // Determine GDT paths based on architecture
                 let (gdt_path, gdt_json_path) = if binary.is_64bit {
                     (
-                        "typeinfo/win32/windows_vs12_64.gdt",
-                        "typeinfo/win32/windows_vs12_64.gdt.types.json",
+                        "ghidra/typeinfo/win32/windows_vs12_64.gdt",
+                        "ghidra/typeinfo/win32/windows_vs12_64.gdt.types.json",
                     )
                 } else {
                     (
-                        "typeinfo/win32/windows_vs12_32.gdt",
-                        "typeinfo/win32/windows_vs12_32.gdt.types.json",
+                        "ghidra/typeinfo/win32/windows_vs12_32.gdt",
+                        "ghidra/typeinfo/win32/windows_vs12_32.gdt.types.json",
                     )
                 };
 

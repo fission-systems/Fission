@@ -550,39 +550,48 @@ impl GdtParser {
         let mut typedef_map: std::collections::HashMap<String, u32> =
             std::collections::HashMap::new();
 
-        // Look for Typedef record pattern:
-        // After Typedef ID (8B) and Data Type ID (8B) is Flags (1B)
-        // Pattern: [xx xx xx xx xx xx xx xx] [yy yy yy yy yy yy yy yy] [ff] [len] [name]
+        // Typedef record structure (based on RE analysis):
+        // [name_len: 1B] [name: N bytes] [base_type_id: 8B big-endian] ...
+        //
+        // - i points to name_len byte
+        // - name starts at i+1, ends at i+1+name_len
+        // - base_type_id is 8 bytes after name (big-endian u64)
 
         let mut i = 0;
         while i + 32 < db.len() {
             // Look for pointer typedef names starting with LP, P, or LPC
-            // Name length byte followed by L or P
             let name_len = db[i] as usize;
-            if name_len >= 2 && name_len <= 64 && i + 1 + name_len < db.len() {
-                // Check for LP* or P* prefix
-                if (db[i + 1] == b'L' && db[i + 2] == b'P')
-                    || (db[i + 1] == b'P' && db[i + 2].is_ascii_uppercase())
-                {
-                    let name_bytes = &db[i + 1..i + 1 + name_len];
-                    if name_bytes
-                        .iter()
-                        .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+            if name_len >= 2 && name_len <= 64 {
+                let name_end = i + 1 + name_len;
+
+                // Ensure we have enough bytes for name + 8-byte ID after it
+                if name_end + 8 <= db.len() {
+                    // Check for LP* or P* prefix
+                    if (db[i + 1] == b'L' && db[i + 2] == b'P')
+                        || (db[i + 1] == b'P' && db[i + 2].is_ascii_uppercase())
                     {
-                        if let Ok(name) = std::str::from_utf8(name_bytes) {
-                            // Look backwards for Base Type ID (should be within 20 bytes before)
-                            // Pattern: [... base_type_id ...] [flags] [name_len] [name]
-                            // The base type ID is typically 8-12 bytes before name_len
+                        let name_bytes = &db[i + 1..name_end];
+                        if name_bytes
+                            .iter()
+                            .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+                        {
+                            if let Ok(name) = std::str::from_utf8(name_bytes) {
+                                // Read 8-byte big-endian ID after the name
+                                let base_type_id = u64::from_be_bytes([
+                                    db[name_end],
+                                    db[name_end + 1],
+                                    db[name_end + 2],
+                                    db[name_end + 3],
+                                    db[name_end + 4],
+                                    db[name_end + 5],
+                                    db[name_end + 6],
+                                    db[name_end + 7],
+                                ]);
 
-                            if i >= 10 {
-                                // Try to find a 2-byte ID that makes sense
-                                // Look at position i-8 to i-6 for potential ID
-                                let potential_id =
-                                    u16::from_be_bytes([db[i - 6], db[i - 5]]) as u32;
-
-                                if potential_id > 0 && potential_id < 0x10000 {
-                                    // Store the typedef alias mapping
-                                    typedef_map.insert(name.to_string(), potential_id);
+                                // Use lower 32 bits as ID (matches id_map key type)
+                                let id32 = base_type_id as u32;
+                                if id32 > 0 {
+                                    typedef_map.insert(name.to_string(), id32);
                                 }
                             }
                         }
@@ -606,6 +615,142 @@ impl GdtParser {
             return id_map.get(&base_id).cloned();
         }
         None
+    }
+
+    /// Extract enum/constant values from GDT database
+    /// Returns a map of constant name -> value
+    ///
+    /// Pattern observed in GDT:
+    /// - Known prefixes: WM_, MEM_, PAGE_, GENERIC_, FILE_, CREATE_, etc.
+    /// - Format: [len:1B] [name:N bytes, null-padded] [padding] [value:2-4B]
+    pub fn extract_enum_values(db: &[u8]) -> std::collections::HashMap<String, u64> {
+        let mut enum_map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+
+        // Known Windows constant prefixes
+        let prefixes: &[&[u8]] = &[
+            b"WM_",        // Window Messages
+            b"MEM_",       // Memory allocation
+            b"PAGE_",      // Page protection
+            b"GENERIC_",   // Generic access rights
+            b"FILE_",      // File attributes/flags
+            b"CREATE_",    // Creation flags
+            b"PROCESS_",   // Process access rights
+            b"THREAD_",    // Thread access rights
+            b"KEY_",       // Registry key access
+            b"HKEY_",      // Registry root keys
+            b"SW_",        // ShowWindow commands
+            b"MB_",        // MessageBox flags
+            b"VK_",        // Virtual keys
+            b"CF_",        // Clipboard formats
+            b"CS_",        // Class styles
+            b"WS_",        // Window styles
+            b"ES_",        // Edit control styles
+            b"BS_",        // Button styles
+            b"LB_",        // Listbox messages
+            b"CB_",        // Combobox messages
+            b"EM_",        // Edit messages
+            b"BM_",        // Button messages
+            b"STM_",       // Static messages
+            b"DT_",        // DrawText flags
+            b"IDC_",       // Cursor IDs
+            b"IDI_",       // Icon IDs
+            b"COLOR_",     // System colors
+            b"SC_",        // System commands
+            b"SB_",        // Scrollbar
+            b"SM_",        // System metrics
+            b"GWL_",       // GetWindowLong
+            b"HWND_",      // Special window handles
+            b"SWP_",       // SetWindowPos flags
+            b"RDW_",       // RedrawWindow flags
+            b"PM_",        // PeekMessage flags
+            b"QS_",        // Queue status flags
+            b"WAIT_",      // Wait return values
+            b"INFINITE",   // Wait infinite
+            b"TRUE",       // Boolean true
+            b"FALSE",      // Boolean false
+            b"NULL",       // Null pointer
+            b"INVALID_",   // Invalid handles
+            b"STATUS_",    // NTSTATUS codes
+            b"ERROR_",     // Error codes
+            b"STILL_",     // Still active
+            b"EXCEPTION_", // Exception codes
+            b"DBG_",       // Debug events
+            b"CTRL_",      // Console control
+            b"STD_",       // Standard handles
+            b"SECTION_",   // Section access
+            b"TOKEN_",     // Token access
+            b"SE_",        // Security privileges
+            b"DACL_",      // DACL flags
+            b"OWNER_",     // Owner flags
+            b"GROUP_",     // Group flags
+        ];
+
+        let mut i = 0;
+        while i + 32 < db.len() {
+            let name_len = db[i] as usize;
+
+            // Valid name length range
+            if name_len >= 3 && name_len <= 48 && i + 1 + name_len < db.len() {
+                let name_bytes = &db[i + 1..i + 1 + name_len];
+
+                // Check if this looks like a constant name (starts with known prefix)
+                let has_known_prefix = prefixes.iter().any(|prefix| {
+                    name_bytes.len() >= prefix.len() && &name_bytes[..prefix.len()] == *prefix
+                });
+
+                if has_known_prefix {
+                    // Validate that name is alphanumeric/underscore
+                    if name_bytes
+                        .iter()
+                        .all(|&b| b.is_ascii_alphanumeric() || b == b'_')
+                    {
+                        if let Ok(name) = std::str::from_utf8(name_bytes) {
+                            // Look for value after name + variable null padding
+                            let name_end = i + 1 + name_len;
+
+                            // Skip null padding (variable length, up to 10 bytes)
+                            let mut val_offset = name_end;
+                            while val_offset < db.len()
+                                && val_offset < name_end + 10
+                                && db[val_offset] == 0
+                            {
+                                val_offset += 1;
+                            }
+
+                            if val_offset + 4 <= db.len() {
+                                // Read as big-endian (GDT internal format)
+                                let first_byte = db[val_offset];
+
+                                // Determine value size based on first byte pattern
+                                // High bytes (0x80+) indicate 4-byte value
+                                // Low bytes (< 0x80) with next byte 0x00 indicate 2-byte value
+                                let value = if first_byte >= 0x80 {
+                                    // 4-byte value (e.g., GENERIC_READ = 0x80000000)
+                                    u32::from_be_bytes([
+                                        db[val_offset],
+                                        db[val_offset + 1],
+                                        db[val_offset + 2],
+                                        db[val_offset + 3],
+                                    ]) as u64
+                                } else if first_byte > 0 && db[val_offset + 1] == 0 {
+                                    // 2-byte value where high byte is non-zero (e.g., 0x2000)
+                                    u16::from_be_bytes([db[val_offset], db[val_offset + 1]]) as u64
+                                } else {
+                                    // 2-byte value (e.g., WM_KEYDOWN = 0x0100)
+                                    u16::from_be_bytes([db[val_offset], db[val_offset + 1]]) as u64
+                                };
+
+                                // Allow value 0 for FALSE, NULL, etc.
+                                enum_map.insert(name.to_string(), value);
+                            }
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        enum_map
     }
 
     /// Normalize a type name by removing pointer prefixes

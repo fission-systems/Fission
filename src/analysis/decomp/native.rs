@@ -4,24 +4,24 @@
 //! - `DecompilerServer`: Persistent server process for faster repeated requests
 //! - `DecompilerPool`: Pool of server processes for parallel decompilation
 
-use std::process::{Command, Stdio, Child, ChildStdin};
-use std::io::{Write, BufRead, BufReader};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::collections::HashMap;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use serde::Deserialize;
 
 use crate::config::CONFIG;
-use crate::core::errors::{Result, FissionError};
+use crate::core::errors::{FissionError, Result};
 
 /// Maximum consecutive empty lines to tolerate when reading decompiler output.
-/// 
+///
 /// When the decompiler subprocess sends output, empty lines can occur between
 /// chunks. This limit prevents infinite loops if the process becomes unresponsive.
 /// After receiving this many consecutive empty lines without valid content,
 /// the read operation times out.
-/// 
+///
 /// This value is tuned for typical decompiler behavior - increase if handling
 /// very large functions that may produce sparse output.
 const MAX_EMPTY_LINES: usize = 10;
@@ -49,6 +49,7 @@ pub struct DecompilerServer {
     cached_sla_dir: Option<String>,
     cached_image_base: Option<u64>,
     cached_iat_symbols: Option<HashMap<u64, String>>,
+    cached_gdt_json_path: Option<String>,
     /// Request counter for periodic restart
     request_count: u64,
 }
@@ -58,7 +59,10 @@ impl DecompilerServer {
     pub fn new<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str) -> Result<Self> {
         let path = cli_path.as_ref().to_path_buf();
         if !path.exists() {
-            return Err(FissionError::decompiler(format!("Decompiler CLI not found: {:?}", path)));
+            return Err(FissionError::decompiler(format!(
+                "Decompiler CLI not found: {:?}",
+                path
+            )));
         }
         Ok(Self {
             cli_path: path,
@@ -71,6 +75,7 @@ impl DecompilerServer {
             cached_sla_dir: None,
             cached_image_base: None,
             cached_iat_symbols: None,
+            cached_gdt_json_path: None,
             request_count: 0,
         })
     }
@@ -107,10 +112,12 @@ impl DecompilerServer {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .map_err(|e| FissionError::decompiler(format!("Failed to spawn decompiler server: {}", e)))?;
+            .map_err(|e| {
+                FissionError::decompiler(format!("Failed to spawn decompiler server: {}", e))
+            })?;
 
         self.stdin = child.stdin.take();
-        
+
         // Spawn background reader thread for stdout
         if let Some(stdout) = child.stdout.take() {
             let (tx, rx) = std::sync::mpsc::channel();
@@ -130,30 +137,50 @@ impl DecompilerServer {
             self.stdout_rx = Some(rx);
             self.reader_handle = Some(handle);
         }
-        
+
         self.child = Some(child);
 
         // Restore context if available (Crash Recovery)
         // Clone data to avoid borrow checker issues with mutable self call
         if let (Some(bytes), Some(sla_dir), Some(image_base)) = (
-            self.cached_binary.clone(), 
+            self.cached_binary.clone(),
             self.cached_sla_dir.clone(),
-            self.cached_image_base
+            self.cached_image_base,
         ) {
-            crate::core::logging::info("[DecompilerServer] Recovering binary context after restart...");
+            crate::core::logging::info(
+                "[DecompilerServer] Recovering binary context after restart...",
+            );
             // Dynamic timeout: base + ~1ms per KB
             let timeout = CONFIG.decompiler.timeout_ms + (bytes.len() as u64 / 1024);
             let iat_symbols = self.cached_iat_symbols.clone().unwrap_or_default();
-            self.load_binary_internal_with_timeout(&bytes, &sla_dir, image_base, &iat_symbols, timeout)?;
+            // Clone path to avoid borrowing self while calling mutable method
+            let gdt_json_path_owned = self.cached_gdt_json_path.clone();
+
+            self.load_binary_internal_with_timeout(
+                &bytes,
+                &sla_dir,
+                image_base,
+                &iat_symbols,
+                gdt_json_path_owned.as_deref(),
+                timeout,
+            )?;
         }
 
         Ok(())
     }
 
     /// Internal helper to send load_bin command with timeout
-    fn load_binary_internal_with_timeout(&mut self, bytes: &[u8], sla_dir: &str, image_base: u64, iat_symbols: &HashMap<u64, String>, timeout_ms: u64) -> Result<()> {
+    fn load_binary_internal_with_timeout(
+        &mut self,
+        bytes: &[u8],
+        sla_dir: &str,
+        image_base: u64,
+        iat_symbols: &HashMap<u64, String>,
+        gdt_json_path: Option<&str>,
+        timeout_ms: u64,
+    ) -> Result<()> {
         let bytes_b64 = BASE64.encode(bytes);
-        
+
         // Serialize IAT symbols to JSON object: {"0x401000":"GetProcAddress",...}
         let iat_json = if iat_symbols.is_empty() {
             "{}".to_string()
@@ -164,43 +191,60 @@ impl DecompilerServer {
                 .collect();
             format!("{{{}}}", entries.join(","))
         };
-        
+
+        // Include gdt_json if provided
+        let gdt_json_field = match gdt_json_path {
+            Some(path) => format!(r#","gdt_json":"{}""#, path),
+            None => String::new(),
+        };
+
         let request = format!(
-            r#"{{"load_bin":"{}","sla_dir":"{}","image_base":{},"iat_symbols":{}}}"#,
-            bytes_b64,
-            sla_dir,
-            image_base,
-            iat_json
+            r#"{{"load_bin":"{}","sla_dir":"{}","image_base":{},"iat_symbols":{}{}}}}}"#,
+            bytes_b64, sla_dir, image_base, iat_json, gdt_json_field
         );
 
         if let Some(ref mut stdin) = self.stdin {
             writeln!(stdin, "{}", request)?;
             stdin.flush()?;
         } else {
-             return Err(FissionError::decompiler("Server stdin not available"));
+            return Err(FissionError::decompiler("Server stdin not available"));
         }
-        
+
         // Read response with timeout
-        self.read_response_with_timeout(timeout_ms)
-            .map(|_| ())
+        self.read_response_with_timeout(timeout_ms).map(|_| ())
     }
 
     /// Load complete binary into decompiler memory (Persistent Context)
-    pub fn load_binary(&mut self, bytes: &[u8], sla_dir: &str, image_base: u64, iat_symbols: &HashMap<u64, String>) -> Result<()> {
+    pub fn load_binary(
+        &mut self,
+        bytes: &[u8],
+        sla_dir: &str,
+        image_base: u64,
+        iat_symbols: &HashMap<u64, String>,
+        gdt_json_path: Option<&str>,
+    ) -> Result<()> {
         // First ensure process is started (but don't trigger recovery yet)
         self.ensure_started()?;
-        
+
         // Dynamic timeout: base + ~1ms per KB
         let timeout = CONFIG.decompiler.timeout_ms + (bytes.len() as u64 / 1024);
-        self.load_binary_internal_with_timeout(bytes, sla_dir, image_base, iat_symbols, timeout)
-            .map_err(|e| FissionError::decompiler(format!("Failed to load binary: {}", e)))?;
-        
+        self.load_binary_internal_with_timeout(
+            bytes,
+            sla_dir,
+            image_base,
+            iat_symbols,
+            gdt_json_path,
+            timeout,
+        )
+        .map_err(|e| FissionError::decompiler(format!("Failed to load binary: {}", e)))?;
+
         // Cache context for recovery AFTER successful load (not before!)
         self.cached_binary = Some(bytes.to_vec());
         self.cached_sla_dir = Some(sla_dir.to_string());
         self.cached_image_base = Some(image_base);
         self.cached_iat_symbols = Some(iat_symbols.clone());
-        
+        self.cached_gdt_json_path = gdt_json_path.map(|s| s.to_string());
+
         Ok(())
     }
 
@@ -209,7 +253,10 @@ impl DecompilerServer {
         // Check periodic restart
         let restart_threshold = CONFIG.decompiler.requests_before_restart;
         if restart_threshold > 0 && self.request_count >= restart_threshold {
-            crate::core::logging::info(&format!("[DecompilerServer] Restarting after {} requests to reclaim memory", self.request_count));
+            crate::core::logging::info(&format!(
+                "[DecompilerServer] Restarting after {} requests to reclaim memory",
+                self.request_count
+            ));
             self.shutdown();
             self.request_count = 0;
         }
@@ -218,11 +265,11 @@ impl DecompilerServer {
         self.request_count += 1;
 
         let bytes_b64 = if bytes.is_empty() {
-             String::new()
+            String::new()
         } else {
-             BASE64.encode(bytes)
+            BASE64.encode(bytes)
         };
-        
+
         let request = format!(
             r#"{{"bytes":"{}","address":{},"is_64bit":{},"sla_dir":"{}"}}"#,
             bytes_b64,
@@ -243,48 +290,57 @@ impl DecompilerServer {
             Ok(res) => res,
             Err(e) => {
                 // Timeout or Error -> Kill process to stop memory leak
-                crate::core::logging::warn(&format!("[DecompilerServer] Error/Timeout detected: {}. Restarting process...", e));
+                crate::core::logging::warn(&format!(
+                    "[DecompilerServer] Error/Timeout detected: {}. Restarting process...",
+                    e
+                ));
                 self.shutdown(); // Kill
                 return Err(e); // Propagate error, caller can retry
             }
         };
-        
+
         parse_decompiler_response(&response)
     }
-    
+
     /// Helper to read response with timeout (with empty line limit)
     fn read_response_with_timeout(&mut self, timeout_ms: u64) -> Result<String> {
         if let Some(ref rx) = self.stdout_rx {
-             match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-                 Ok(line) => {
-                     let mut response = line;
-                     let mut empty_retries = 0;
-                     
-                     // Allow empty lines with retry limit
-                     while response.trim().is_empty() {
-                          empty_retries += 1;
-                          if empty_retries > MAX_EMPTY_LINES {
-                              return Err(FissionError::decompiler("Too many empty lines from decompiler"));
-                          }
-                          match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-                              Ok(l) => response = l,
-                              Err(_) => return Err(FissionError::decompiler("Timeout waiting for non-empty response")),
-                          }
-                     }
-                     Ok(response)
-                 },
-                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                     Err(FissionError::decompiler(format!("Decompiler timed out after {}ms", timeout_ms)))
-                 },
-                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                     Err(FissionError::decompiler("Decompiler process exited unexpectedly"))
-                 }
-             }
+            match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                Ok(line) => {
+                    let mut response = line;
+                    let mut empty_retries = 0;
+
+                    // Allow empty lines with retry limit
+                    while response.trim().is_empty() {
+                        empty_retries += 1;
+                        if empty_retries > MAX_EMPTY_LINES {
+                            return Err(FissionError::decompiler(
+                                "Too many empty lines from decompiler",
+                            ));
+                        }
+                        match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                            Ok(l) => response = l,
+                            Err(_) => {
+                                return Err(FissionError::decompiler(
+                                    "Timeout waiting for non-empty response",
+                                ))
+                            }
+                        }
+                    }
+                    Ok(response)
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(FissionError::decompiler(
+                    format!("Decompiler timed out after {}ms", timeout_ms),
+                )),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(
+                    FissionError::decompiler("Decompiler process exited unexpectedly"),
+                ),
+            }
         } else {
-             Err(FissionError::decompiler("Stdout receiver not available"))
+            Err(FissionError::decompiler("Stdout receiver not available"))
         }
     }
-    
+
     /// Shutdown the server process
     pub fn shutdown(&mut self) {
         if let Some(ref mut child) = self.child {
@@ -322,30 +378,42 @@ impl Drop for DecompilerServer {
 pub type SharedDecompilerServer = Arc<Mutex<DecompilerServer>>;
 
 /// Create a shared decompiler server
-pub fn create_shared_server<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str) -> Result<SharedDecompilerServer> {
+pub fn create_shared_server<P: AsRef<std::path::Path>>(
+    cli_path: P,
+    sla_dir: &str,
+) -> Result<SharedDecompilerServer> {
     let server = DecompilerServer::new(cli_path, sla_dir)?;
     Ok(Arc::new(Mutex::new(server)))
 }
 
 /// Parse decompiler JSON response using serde_json
 fn parse_decompiler_response(response: &str) -> Result<String> {
-    let resp: DecompilerResponse = serde_json::from_str(response)
-        .map_err(|e| FissionError::decompiler(format!("Invalid JSON response: {} (raw: {})", e, response)))?;
-    
+    let resp: DecompilerResponse = serde_json::from_str(response).map_err(|e| {
+        FissionError::decompiler(format!("Invalid JSON response: {} (raw: {})", e, response))
+    })?;
+
     match resp.status.as_str() {
-        "ok" => resp.code.ok_or_else(|| FissionError::decompiler("Missing 'code' field in response")),
-        "error" => Err(FissionError::decompiler(format!("Decompiler error: {}", resp.message.unwrap_or_default()))),
-        _ => Err(FissionError::decompiler(format!("Unknown status: {}", resp.status))),
+        "ok" => resp
+            .code
+            .ok_or_else(|| FissionError::decompiler("Missing 'code' field in response")),
+        "error" => Err(FissionError::decompiler(format!(
+            "Decompiler error: {}",
+            resp.message.unwrap_or_default()
+        ))),
+        _ => Err(FissionError::decompiler(format!(
+            "Unknown status: {}",
+            resp.status
+        ))),
     }
 }
 
 /// Helper to find the decompiler CLI in the project structure
 pub fn find_cli() -> Option<std::path::PathBuf> {
     let base = std::env::current_dir().ok()?;
-    
+
     #[cfg(target_os = "windows")]
     let cli_name = "fission_decomp.exe";
-    
+
     #[cfg(not(target_os = "windows"))]
     let cli_name = "fission_decomp";
 
@@ -380,14 +448,22 @@ pub struct DecompilerPool {
 
 impl DecompilerPool {
     /// Create a new pool with N worker processes
-    pub fn new<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str, num_workers: usize) -> Result<Self> {
+    pub fn new<P: AsRef<std::path::Path>>(
+        cli_path: P,
+        sla_dir: &str,
+        num_workers: usize,
+    ) -> Result<Self> {
         let num_workers = num_workers.max(1); // At least 1 worker
         let mut workers = Vec::with_capacity(num_workers);
-        
+
         for i in 0..num_workers {
             match DecompilerServer::new(&cli_path, sla_dir) {
                 Ok(server) => {
-                    crate::core::logging::info(&format!("[DecompilerPool] Created worker {}/{}", i + 1, num_workers));
+                    crate::core::logging::info(&format!(
+                        "[DecompilerPool] Created worker {}/{}",
+                        i + 1,
+                        num_workers
+                    ));
                     workers.push(Mutex::new(server));
                 }
                 Err(e) => {
@@ -395,21 +471,28 @@ impl DecompilerPool {
                     if workers.is_empty() {
                         return Err(e);
                     }
-                    crate::core::logging::warn(&format!("[DecompilerPool] Warning: Could not create worker {}: {}", i + 1, e));
+                    crate::core::logging::warn(&format!(
+                        "[DecompilerPool] Warning: Could not create worker {}: {}",
+                        i + 1,
+                        e
+                    ));
                     break;
                 }
             }
         }
-        
-        crate::core::logging::info(&format!("[DecompilerPool] Initialized with {} workers", workers.len()));
-        
+
+        crate::core::logging::info(&format!(
+            "[DecompilerPool] Initialized with {} workers",
+            workers.len()
+        ));
+
         Ok(Self {
             workers,
             next_worker: std::sync::atomic::AtomicUsize::new(0),
             binary_loaded: std::sync::atomic::AtomicBool::new(false),
         })
     }
-    
+
     /// Create pool with default number of workers (CPU cores, max 4)
     pub fn new_default<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str) -> Result<Self> {
         let num_cpus = std::thread::available_parallelism()
@@ -418,35 +501,56 @@ impl DecompilerPool {
         let num_workers = num_cpus.min(4); // Max 4 workers to avoid memory issues
         Self::new(cli_path, sla_dir, num_workers)
     }
-    
+
     /// Load binary into ALL workers in the pool
-    pub fn load_binary(&self, bytes: &[u8], sla_dir: &str, image_base: u64, iat_symbols: &HashMap<u64, String>) -> Result<()> {
+    pub fn load_binary(
+        &self,
+        bytes: &[u8],
+        sla_dir: &str,
+        image_base: u64,
+        iat_symbols: &HashMap<u64, String>,
+        gdt_json_path: Option<&str>,
+    ) -> Result<()> {
         let workers_count = self.workers.len();
         let mut success_count = 0;
-        
+
         for (i, worker) in self.workers.iter().enumerate() {
             match worker.lock() {
                 Ok(mut guard) => {
-                    if let Err(e) = guard.load_binary(bytes, sla_dir, image_base, iat_symbols) {
-                         crate::core::logging::warn(&format!("[DecompilerPool] Worker {} failed to load binary: {}", i, e));
+                    if let Err(e) =
+                        guard.load_binary(bytes, sla_dir, image_base, iat_symbols, gdt_json_path)
+                    {
+                        crate::core::logging::warn(&format!(
+                            "[DecompilerPool] Worker {} failed to load binary: {}",
+                            i, e
+                        ));
                     } else {
-                         success_count += 1;
+                        success_count += 1;
                     }
-                },
-                Err(e) => crate::core::logging::warn(&format!("[DecompilerPool] Failed to lock worker {}: {}", i, e)),
+                }
+                Err(e) => crate::core::logging::warn(&format!(
+                    "[DecompilerPool] Failed to lock worker {}: {}",
+                    i, e
+                )),
             }
         }
-        
+
         if success_count == 0 && workers_count > 0 {
-            Err(FissionError::decompiler("All workers failed to load binary"))
+            Err(FissionError::decompiler(
+                "All workers failed to load binary",
+            ))
         } else {
             // Mark binary as loaded
-            self.binary_loaded.store(true, std::sync::atomic::Ordering::SeqCst);
-            crate::core::logging::info(&format!("[DecompilerPool] Binary loaded into {}/{} workers", success_count, workers_count));
+            self.binary_loaded
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            crate::core::logging::info(&format!(
+                "[DecompilerPool] Binary loaded into {}/{} workers",
+                success_count, workers_count
+            ));
             Ok(())
         }
     }
-    
+
     /// Decompile bytes using next available worker
     /// First tries to find any idle worker (non-blocking), then falls back to round-robin
     pub fn decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Result<String> {
@@ -455,11 +559,13 @@ impl DecompilerPool {
         let timeout = std::time::Duration::from_secs(10);
         while !self.binary_loaded.load(std::sync::atomic::Ordering::SeqCst) {
             if start.elapsed() > timeout {
-                return Err(FissionError::decompiler("Timeout waiting for binary to be loaded"));
+                return Err(FissionError::decompiler(
+                    "Timeout waiting for binary to be loaded",
+                ));
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        
+
         // Strategy 1: Try to find any available worker immediately (non-blocking)
         // This improves load distribution when some workers are processing large functions
         for worker in &self.workers {
@@ -469,20 +575,29 @@ impl DecompilerPool {
         }
 
         // Strategy 2: All workers busy - use round-robin to queue fairly
-        let worker_idx = self.next_worker.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % self.workers.len();
-        let mut worker = self.workers[worker_idx].lock()
+        let worker_idx = self
+            .next_worker
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            % self.workers.len();
+        let mut worker = self.workers[worker_idx]
+            .lock()
             .map_err(|_| FissionError::decompiler("Worker mutex poisoned"))?;
 
         worker.decompile(bytes, base_addr, is_64bit)
     }
-    
+
     /// Try to decompile without blocking (returns None if all workers busy)
-    pub fn try_decompile(&self, bytes: &[u8], base_addr: u64, is_64bit: bool) -> Option<Result<String>> {
+    pub fn try_decompile(
+        &self,
+        bytes: &[u8],
+        base_addr: u64,
+        is_64bit: bool,
+    ) -> Option<Result<String>> {
         // Don't attempt decompilation if binary isn't loaded yet
         if !self.binary_loaded.load(std::sync::atomic::Ordering::SeqCst) {
             return None;
         }
-        
+
         // Try each worker, return first one that's available
         for worker in &self.workers {
             if let Ok(mut guard) = worker.try_lock() {
@@ -491,12 +606,12 @@ impl DecompilerPool {
         }
         None // All workers busy
     }
-    
+
     /// Number of workers in the pool
     pub fn num_workers(&self) -> usize {
         self.workers.len()
     }
-    
+
     /// Shutdown all workers
     pub fn shutdown(&self) {
         for worker in &self.workers {
@@ -517,7 +632,11 @@ impl Drop for DecompilerPool {
 pub type SharedDecompilerPool = Arc<DecompilerPool>;
 
 /// Create a shared decompiler pool
-pub fn create_pool<P: AsRef<std::path::Path>>(cli_path: P, sla_dir: &str, num_workers: usize) -> Result<SharedDecompilerPool> {
+pub fn create_pool<P: AsRef<std::path::Path>>(
+    cli_path: P,
+    sla_dir: &str,
+    num_workers: usize,
+) -> Result<SharedDecompilerPool> {
     let pool = DecompilerPool::new(cli_path, sla_dir, num_workers)?;
     Ok(Arc::new(pool))
 }

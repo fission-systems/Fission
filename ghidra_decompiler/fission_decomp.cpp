@@ -70,11 +70,22 @@ std::vector<uint8_t> base64_decode(const std::string& encoded) {
 }
 
 // Simple JSON-like parser (minimal, no external deps)
+// Simple JSON-like parser (minimal, no external deps)
 std::string extract_json_string(const std::string& json, const std::string& key) {
-    std::string search = "\"" + key + "\":\"";
+    std::string search = "\"" + key + "\"";
     size_t pos = json.find(search);
     if (pos == std::string::npos) return "";
     pos += search.length();
+    
+    // Find colon
+    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == '\r')) pos++;
+    if (pos >= json.length() || json[pos] != ':') return "";
+    pos++;
+    
+    // Find opening quote
+    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == '\r')) pos++;
+    if (pos >= json.length() || json[pos] != '"') return "";
+    pos++;
     
     // Robust parsing: handle escaped quotes
     size_t end = pos;
@@ -90,11 +101,19 @@ std::string extract_json_string(const std::string& json, const std::string& key)
 }
 
 int64_t extract_json_int(const std::string& json, const std::string& key) {
-    std::string search = "\"" + key + "\":";
+    std::string search = "\"" + key + "\"";
     size_t pos = json.find(search);
     if (pos == std::string::npos) return 0;
     pos += search.length();
-    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t')) pos++;
+    
+    // Find colon
+    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == '\r')) pos++;
+    if (pos >= json.length() || json[pos] != ':') return 0;
+    pos++;
+    
+    // Skip whitespace after colon
+    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == '\r')) pos++;
+    
     std::string num;
     while (pos < json.length() && (isdigit(json[pos]) || json[pos] == '-')) {
         num += json[pos++];
@@ -245,6 +264,363 @@ std::string post_process_iat_calls(const std::string& code, const std::map<uint6
     return result;
 }
 
+// ============================================================================
+// Enum Groups for Context-Aware Constant Substitution
+// ============================================================================
+
+// Enum group: value -> constant name
+static std::map<std::string, std::map<uint64_t, std::string>> ENUM_GROUPS = {
+    {"PAGE_PROTECT", {
+        {0x01, "PAGE_NOACCESS"},
+        {0x02, "PAGE_READONLY"},
+        {0x04, "PAGE_READWRITE"},
+        {0x08, "PAGE_WRITECOPY"},
+        {0x10, "PAGE_EXECUTE"},
+        {0x20, "PAGE_EXECUTE_READ"},
+        {0x40, "PAGE_EXECUTE_READWRITE"},
+        {0x80, "PAGE_EXECUTE_WRITECOPY"},
+    }},
+    {"MEM_ALLOC", {
+        {0x1000, "MEM_COMMIT"},
+        {0x2000, "MEM_RESERVE"},
+        {0x3000, "MEM_COMMIT | MEM_RESERVE"},
+        {0x4000, "MEM_DECOMMIT"},
+        {0x8000, "MEM_RELEASE"},
+    }},
+    {"GENERIC_ACCESS", {
+        {0x80000000, "GENERIC_READ"},
+        {0x40000000, "GENERIC_WRITE"},
+        {0x20000000, "GENERIC_EXECUTE"},
+        {0x10000000, "GENERIC_ALL"},
+        {0xC0000000, "GENERIC_READ | GENERIC_WRITE"},
+    }},
+    {"FILE_SHARE", {
+        {0x01, "FILE_SHARE_READ"},
+        {0x02, "FILE_SHARE_WRITE"},
+        {0x03, "FILE_SHARE_READ | FILE_SHARE_WRITE"},
+        {0x04, "FILE_SHARE_DELETE"},
+    }},
+    {"FILE_CREATE", {
+        {1, "CREATE_NEW"},
+        {2, "CREATE_ALWAYS"},
+        {3, "OPEN_EXISTING"},
+        {4, "OPEN_ALWAYS"},
+        {5, "TRUNCATE_EXISTING"},
+    }},
+    {"PROCESS_ACCESS", {
+        {0x0001, "PROCESS_TERMINATE"},
+        {0x0002, "PROCESS_CREATE_THREAD"},
+        {0x0008, "PROCESS_VM_OPERATION"},
+        {0x0010, "PROCESS_VM_READ"},
+        {0x0020, "PROCESS_VM_WRITE"},
+        {0x0400, "PROCESS_QUERY_INFORMATION"},
+        {0x1F0FFF, "PROCESS_ALL_ACCESS"},
+        {0x1FFFFF, "PROCESS_ALL_ACCESS"},
+    }},
+    {"MB_TYPE", {
+        {0x00, "MB_OK"},
+        {0x01, "MB_OKCANCEL"},
+        {0x02, "MB_ABORTRETRYIGNORE"},
+        {0x03, "MB_YESNOCANCEL"},
+        {0x04, "MB_YESNO"},
+        {0x10, "MB_ICONERROR"},
+        {0x20, "MB_ICONQUESTION"},
+        {0x30, "MB_ICONWARNING"},
+        {0x40, "MB_ICONINFORMATION"},
+    }},
+    {"TH32CS", {
+        {0x01, "TH32CS_SNAPHEAPLIST"},
+        {0x02, "TH32CS_SNAPPROCESS"},
+        {0x04, "TH32CS_SNAPTHREAD"},
+        {0x08, "TH32CS_SNAPMODULE"},
+        {0x0F, "TH32CS_SNAPALL"},
+        {0x1F, "TH32CS_SNAPALL"},
+    }},
+    {"CREATION_FLAGS", {
+        {0x01, "DEBUG_PROCESS"},
+        {0x04, "CREATE_SUSPENDED"},
+        {0x08, "DETACHED_PROCESS"},
+        {0x10, "CREATE_NEW_CONSOLE"},
+        {0x08000000, "CREATE_NO_WINDOW"},
+    }},
+    {"HKEY_ROOT", {
+        {0x80000000, "HKEY_CLASSES_ROOT"},
+        {0x80000001, "HKEY_CURRENT_USER"},
+        {0x80000002, "HKEY_LOCAL_MACHINE"},
+        {0x80000003, "HKEY_USERS"},
+        {0x80000005, "HKEY_CURRENT_CONFIG"},
+    }},
+    {"REG_ACCESS", {
+        {0x0001, "KEY_QUERY_VALUE"},
+        {0x0002, "KEY_SET_VALUE"},
+        {0x0004, "KEY_CREATE_SUB_KEY"},
+        {0x0008, "KEY_ENUMERATE_SUB_KEYS"},
+        {0x20019, "KEY_READ"},
+        {0x20006, "KEY_WRITE"},
+        {0xF003F, "KEY_ALL_ACCESS"},
+    }},
+    {"WAIT_TIMEOUT", {
+        {0, "0"},
+        {0xFFFFFFFF, "INFINITE"},
+    }},
+    {"AF_FAMILY", {
+        {2, "AF_INET"},
+        {23, "AF_INET6"},
+    }},
+    {"SOCK_TYPE", {
+        {1, "SOCK_STREAM"},
+        {2, "SOCK_DGRAM"},
+        {3, "SOCK_RAW"},
+    }},
+    {"IPPROTO", {
+        {0, "IPPROTO_IP"},
+        {6, "IPPROTO_TCP"},
+        {17, "IPPROTO_UDP"},
+    }},
+    {"FILE_MAP", {
+        {0x0001, "FILE_MAP_COPY"},
+        {0x0002, "FILE_MAP_WRITE"},
+        {0x0004, "FILE_MAP_READ"},
+        {0x001F, "FILE_MAP_ALL_ACCESS"},
+    }},
+};
+
+// Dynamic flag combination resolver
+std::string resolve_flag_combination(uint64_t value, const std::map<uint64_t, std::string>& group) {
+    // Single value first
+    auto it = group.find(value);
+    if (it != group.end()) return it->second;
+    
+    // Try bit combinations
+    std::vector<std::string> flags;
+    uint64_t remaining = value;
+    
+    // Sort by value descending (greedy)
+    std::vector<std::pair<uint64_t, std::string>> sorted(group.begin(), group.end());
+    std::sort(sorted.begin(), sorted.end(), 
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    
+    for (const auto& [v, name] : sorted) {
+        if (v != 0 && (remaining & v) == v) {
+            flags.push_back(name);
+            remaining &= ~v;
+        }
+    }
+    
+    if (remaining == 0 && !flags.empty()) {
+        std::string result;
+        for (size_t i = 0; i < flags.size(); i++) {
+            if (i > 0) result += " | ";
+            result += flags[i];
+        }
+        return result;
+    }
+    
+    return "";  // Combination failed
+}
+
+// API parameter -> enum group mapping
+struct ApiParamMapping {
+    const char* func_name;
+    int param_index;
+    const char* enum_group;
+};
+
+static ApiParamMapping API_PARAM_MAPPINGS[] = {
+    // VirtualAlloc
+    {"VirtualAlloc", 2, "MEM_ALLOC"},
+    {"VirtualAlloc", 3, "PAGE_PROTECT"},
+    {"VirtualAllocEx", 3, "MEM_ALLOC"},
+    {"VirtualAllocEx", 4, "PAGE_PROTECT"},
+    {"VirtualFree", 2, "MEM_ALLOC"},
+    {"VirtualProtect", 2, "PAGE_PROTECT"},
+    // CreateFile
+    {"CreateFileA", 1, "GENERIC_ACCESS"},
+    {"CreateFileA", 2, "FILE_SHARE"},
+    {"CreateFileA", 4, "FILE_CREATE"},
+    {"CreateFileW", 1, "GENERIC_ACCESS"},
+    {"CreateFileW", 2, "FILE_SHARE"},
+    {"CreateFileW", 4, "FILE_CREATE"},
+    // Process
+    {"OpenProcess", 0, "PROCESS_ACCESS"},
+    {"CreateProcessA", 5, "CREATION_FLAGS"},
+    {"CreateProcessW", 5, "CREATION_FLAGS"},
+    // MessageBox
+    {"MessageBoxA", 3, "MB_TYPE"},
+    {"MessageBoxW", 3, "MB_TYPE"},
+    // Snapshot
+    {"CreateToolhelp32Snapshot", 0, "TH32CS"},
+    // Registry
+    {"RegOpenKeyExA", 0, "HKEY_ROOT"},
+    {"RegOpenKeyExA", 4, "REG_ACCESS"},
+    {"RegOpenKeyExW", 0, "HKEY_ROOT"},
+    {"RegOpenKeyExW", 4, "REG_ACCESS"},
+    {"RegCreateKeyExA", 0, "HKEY_ROOT"},
+    {"RegCreateKeyExW", 0, "HKEY_ROOT"},
+    // Thread
+    {"CreateThread", 4, "CREATION_FLAGS"},
+    {"CreateRemoteThread", 5, "CREATION_FLAGS"},
+    // File mapping
+    {"CreateFileMappingA", 2, "PAGE_PROTECT"},
+    {"CreateFileMappingW", 2, "PAGE_PROTECT"},
+    {"MapViewOfFile", 1, "FILE_MAP"},
+    // Socket
+    {"socket", 0, "AF_FAMILY"},
+    {"socket", 1, "SOCK_TYPE"},
+    {"socket", 2, "IPPROTO"},
+    {"WSASocketA", 0, "AF_FAMILY"},
+    {"WSASocketA", 1, "SOCK_TYPE"},
+    {"WSASocketW", 0, "AF_FAMILY"},
+    {"WSASocketW", 1, "SOCK_TYPE"},
+    // Wait
+    {"WaitForSingleObject", 1, "WAIT_TIMEOUT"},
+    {"WaitForMultipleObjects", 3, "WAIT_TIMEOUT"},
+};
+
+// Smart constant replacement: replaces constants based on API parameter context
+std::string smart_constant_replace(const std::string& code) {
+    std::string result = code;
+    
+    // For each known API function, find calls and replace parameter constants
+    for (const auto& mapping : API_PARAM_MAPPINGS) {
+        std::string func_name = mapping.func_name;
+        std::string search_pattern = func_name + "(";
+        
+        size_t pos = 0;
+        while ((pos = result.find(search_pattern, pos)) != std::string::npos) {
+            // Find the opening paren
+            size_t paren_start = pos + func_name.length();
+            if (paren_start >= result.length() || result[paren_start] != '(') {
+                pos++;
+                continue;
+            }
+            
+            // Find matching closing paren
+            int depth = 1;
+            size_t paren_end = paren_start + 1;
+            while (paren_end < result.length() && depth > 0) {
+                if (result[paren_end] == '(') depth++;
+                else if (result[paren_end] == ')') depth--;
+                paren_end++;
+            }
+            if (depth != 0) {
+                pos++;
+                continue;
+            }
+            paren_end--; // Point to closing paren
+            
+            // Extract arguments
+            std::string args_str = result.substr(paren_start + 1, paren_end - paren_start - 1);
+            
+            // Split by comma (simple split, doesn't handle nested parens perfectly)
+            std::vector<std::string> args;
+            std::string current_arg;
+            int arg_depth = 0;
+            for (char c : args_str) {
+                if (c == '(') arg_depth++;
+                else if (c == ')') arg_depth--;
+                else if (c == ',' && arg_depth == 0) {
+                    args.push_back(current_arg);
+                    current_arg.clear();
+                    continue;
+                }
+                current_arg += c;
+            }
+            if (!current_arg.empty()) args.push_back(current_arg);
+            
+            // Check if we have the target parameter
+            if (mapping.param_index < (int)args.size()) {
+                std::string& arg = args[mapping.param_index];
+                
+                // Look for hex constant in this argument
+                size_t hex_pos = arg.find("0x");
+                if (hex_pos != std::string::npos) {
+                    // Extract the hex value
+                    size_t hex_end = hex_pos + 2;
+                    while (hex_end < arg.length() && std::isxdigit(arg[hex_end])) hex_end++;
+                    
+                    std::string hex_str = arg.substr(hex_pos, hex_end - hex_pos);
+                    uint64_t value = std::stoull(hex_str, nullptr, 16);
+                    
+                    // Look up in enum group using dynamic flag resolver
+                    auto group_it = ENUM_GROUPS.find(mapping.enum_group);
+                    if (group_it != ENUM_GROUPS.end()) {
+                        std::string resolved = resolve_flag_combination(value, group_it->second);
+                        if (!resolved.empty()) {
+                            arg.replace(hex_pos, hex_end - hex_pos, resolved);
+                        }
+                    }
+                }
+            }
+            
+            // Reconstruct the call
+            std::string new_args;
+            for (size_t i = 0; i < args.size(); i++) {
+                if (i > 0) new_args += ",";
+                new_args += args[i];
+            }
+            
+            std::string new_call = func_name + "(" + new_args + ")";
+            result.replace(pos, paren_end - pos + 1, new_call);
+            pos += new_call.length();
+        }
+    }
+    
+    return result;
+}
+
+// Post-process decompiled output to replace numeric constants with symbolic names
+// Fallback for constants not matched by smart_constant_replace
+std::string post_process_constants(const std::string& code, const std::map<uint64_t, std::string>& enum_values) {
+    if (enum_values.empty()) return code;
+    
+    std::string result = code;
+    
+    // Process each enum value, starting with larger values to avoid partial replacements
+    std::vector<std::pair<uint64_t, std::string>> sorted_enums(enum_values.begin(), enum_values.end());
+    std::sort(sorted_enums.begin(), sorted_enums.end(), 
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    
+    for (const auto& [value, name] : sorted_enums) {
+        // Skip zero values and very small values that might cause false positives
+        if (value == 0 || value < 0x100) continue;  // Raised threshold to avoid conflicts
+        
+        // Generate hex pattern with 0x prefix
+        char pattern[32];
+        if (value <= 0xFFFFFFFF) {
+            snprintf(pattern, sizeof(pattern), "0x%x", (unsigned int)value);
+        } else {
+            snprintf(pattern, sizeof(pattern), "0x%llx", (unsigned long long)value);
+        }
+        
+        // Replace occurrences (be careful not to replace partial matches)
+        size_t pos = 0;
+        while ((pos = result.find(pattern, pos)) != std::string::npos) {
+            // Check that this is not part of a larger number
+            size_t end_pos = pos + strlen(pattern);
+            bool valid = true;
+            
+            // Check character after pattern isn't a hex digit
+            if (end_pos < result.length()) {
+                char c = result[end_pos];
+                if (std::isxdigit(c) || c == 'x' || c == 'X') {
+                    valid = false;
+                }
+            }
+            
+            if (valid) {
+                result.replace(pos, strlen(pattern), name);
+                pos += name.length();
+            } else {
+                pos += strlen(pattern);
+            }
+        }
+    }
+    
+    return result;
+}
+
+
 // Custom LoadImage for memory
 class MemoryLoadImage : public LoadImage {
     std::vector<uint8_t> data_;
@@ -307,6 +683,8 @@ struct ServerState {
     bool arch_32bit_ready = false;
     // Store IAT symbols for post-processing
     std::map<uint64_t, std::string> iat_symbols;
+    // Store enum/constant values for constant name substitution (value -> name)
+    std::map<uint64_t, std::string> enum_values;
     
     ~ServerState() {
         if (arch_64bit) delete arch_64bit;
@@ -330,13 +708,199 @@ struct GdtStruct {
     std::vector<GdtField> fields;
 };
 
+struct GdtTypedef {
+    std::string alias;
+    std::string base;
+};
+
+struct GdtEnum {
+    std::string name;
+    uint64_t value;
+};
+
+struct GdtData {
+    std::vector<GdtStruct> structs;
+    std::vector<GdtTypedef> typedefs;
+    std::vector<GdtEnum> enums;
+};
+
+// ============================================================================
+// resolve_gdt_type: "Smart" type resolver for GDT -> Ghidra type conversion
+// ============================================================================
+// This function handles two main problems:
+// 1. Primitive type name mismatch (GDT uses C names, Ghidra uses internal names)
+// 2. Pointer type parsing (GDT uses "char *", Ghidra needs dynamic pointer creation)
+//
+// Returns: Datatype* if resolved, nullptr if not found
+// ============================================================================
+Datatype* resolve_gdt_type(TypeFactory* types, const std::string& gdt_type_name, int ptr_size) {
+    if (!types || gdt_type_name.empty()) return nullptr;
+
+    std::string type_name = gdt_type_name;
+
+    // Trim whitespace
+    while (!type_name.empty() && (type_name.front() == ' ' || type_name.front() == '\t')) {
+        type_name.erase(type_name.begin());
+    }
+    while (!type_name.empty() && (type_name.back() == ' ' || type_name.back() == '\t')) {
+        type_name.pop_back();
+    }
+
+    if (type_name.empty()) return nullptr;
+
+    // =========================================================================
+    // Step 1: Handle pointer types (e.g., "char *", "void *", "int **")
+    // =========================================================================
+    int pointer_depth = 0;
+    while (!type_name.empty() && type_name.back() == '*') {
+        pointer_depth++;
+        type_name.pop_back();
+        // Trim trailing space before the *
+        while (!type_name.empty() && (type_name.back() == ' ' || type_name.back() == '\t')) {
+            type_name.pop_back();
+        }
+    }
+
+    // =========================================================================
+    // Step 2: Map C primitive types to Ghidra internal types
+    // =========================================================================
+    // GDT (C-style)          -> Ghidra internal name
+    // ---------------------------------------------------
+    // void                   -> void
+    // char                   -> char (or int1 for signed)
+    // unsigned char          -> uint1 / byte
+    // short                  -> int2
+    // unsigned short         -> uint2
+    // int                    -> int4
+    // unsigned int           -> uint4
+    // long                   -> int4 (Windows: 4 bytes)
+    // unsigned long          -> uint4
+    // long long              -> int8
+    // unsigned long long     -> uint8
+    // __int64                -> int8
+    // unsigned __int64       -> uint8
+    // float                  -> float4
+    // double                 -> float8
+    // wchar_t                -> wchar (or int2 on Windows)
+    // =========================================================================
+
+    Datatype* base_type = nullptr;
+
+    // Check for "unsigned" prefix
+    bool is_unsigned = false;
+    if (type_name.substr(0, 9) == "unsigned ") {
+        is_unsigned = true;
+        type_name = type_name.substr(9);
+        // Trim again
+        while (!type_name.empty() && type_name.front() == ' ') {
+            type_name.erase(type_name.begin());
+        }
+    }
+
+    // Check for "signed" prefix (rarely used but valid)
+    if (type_name.substr(0, 7) == "signed ") {
+        is_unsigned = false;
+        type_name = type_name.substr(7);
+        while (!type_name.empty() && type_name.front() == ' ') {
+            type_name.erase(type_name.begin());
+        }
+    }
+
+    // Map to Ghidra types
+    if (type_name == "void") {
+        base_type = types->getTypeVoid();
+    }
+    else if (type_name == "char") {
+        base_type = is_unsigned ? types->getBase(1, TYPE_UINT) : types->getBase(1, TYPE_INT);
+    }
+    else if (type_name == "short" || type_name == "short int") {
+        base_type = types->getBase(2, is_unsigned ? TYPE_UINT : TYPE_INT);
+    }
+    else if (type_name == "int") {
+        base_type = types->getBase(4, is_unsigned ? TYPE_UINT : TYPE_INT);
+    }
+    else if (type_name == "long" || type_name == "long int") {
+        // Windows: long is 4 bytes (LLP64 model)
+        base_type = types->getBase(4, is_unsigned ? TYPE_UINT : TYPE_INT);
+    }
+    else if (type_name == "long long" || type_name == "long long int") {
+        base_type = types->getBase(8, is_unsigned ? TYPE_UINT : TYPE_INT);
+    }
+    else if (type_name == "__int8") {
+        base_type = types->getBase(1, is_unsigned ? TYPE_UINT : TYPE_INT);
+    }
+    else if (type_name == "__int16") {
+        base_type = types->getBase(2, is_unsigned ? TYPE_UINT : TYPE_INT);
+    }
+    else if (type_name == "__int32") {
+        base_type = types->getBase(4, is_unsigned ? TYPE_UINT : TYPE_INT);
+    }
+    else if (type_name == "__int64") {
+        base_type = types->getBase(8, is_unsigned ? TYPE_UINT : TYPE_INT);
+    }
+    else if (type_name == "float") {
+        base_type = types->getBase(4, TYPE_FLOAT);
+    }
+    else if (type_name == "double") {
+        base_type = types->getBase(8, TYPE_FLOAT);
+    }
+    else if (type_name == "long double") {
+        // x86/x64: long double is typically 8 or 10 bytes, we use 8 for compatibility
+        base_type = types->getBase(8, TYPE_FLOAT);
+    }
+    else if (type_name == "wchar_t") {
+        // Windows: wchar_t is 2 bytes (UTF-16)
+        base_type = types->getBase(2, TYPE_INT);
+    }
+    else if (type_name == "bool" || type_name == "_Bool") {
+        base_type = types->getBase(1, TYPE_BOOL);
+    }
+    else {
+        // Not a primitive - try to find by name in TypeFactory
+        // This handles already-registered typedefs and structures
+        base_type = types->findByName(type_name);
+
+        // Also try with "struct " prefix removed if present
+        if (!base_type && type_name.substr(0, 7) == "struct ") {
+            base_type = types->findByName(type_name.substr(7));
+        }
+
+        // Try with "union " prefix removed
+        if (!base_type && type_name.substr(0, 6) == "union ") {
+            base_type = types->findByName(type_name.substr(6));
+        }
+
+        // Try with "enum " prefix removed
+        if (!base_type && type_name.substr(0, 5) == "enum ") {
+            base_type = types->findByName(type_name.substr(5));
+        }
+    }
+
+    // If base type not found, return nullptr
+    if (!base_type) {
+        return nullptr;
+    }
+
+    // =========================================================================
+    // Step 3: Wrap with pointer types if needed
+    // =========================================================================
+    Datatype* result = base_type;
+    for (int i = 0; i < pointer_depth; i++) {
+        result = types->getTypePointer(ptr_size, result, 0);
+        if (!result) return nullptr;
+    }
+
+    return result;
+}
+
 // Simple JSON parser for GDT types.json format
-// Extracts complete_structures array from the JSON file
-std::vector<GdtStruct> parse_gdt_json(const std::string& json_path) {
-    std::vector<GdtStruct> result;
+// Extracts complete_structures and typedef_aliases from the JSON file
+GdtData parse_gdt_json(const std::string& json_path) {
+    GdtData result;
     
     std::ifstream file(json_path);
     if (!file.is_open()) {
+        std::cerr << "[fission_decomp] Failed to open GDT JSON file: " << json_path << std::endl;
         return result;
     }
     
@@ -346,11 +910,17 @@ std::vector<GdtStruct> parse_gdt_json(const std::string& json_path) {
     
     // Find "complete_structures" array
     size_t pos = json.find("\"complete_structures\"");
-    if (pos == std::string::npos) return result;
+    if (pos == std::string::npos) {
+        std::cerr << "[fission_decomp] 'complete_structures' not found in JSON" << std::endl;
+        return result;
+    }
     
     // Find the array start
     pos = json.find('[', pos);
-    if (pos == std::string::npos) return result;
+    if (pos == std::string::npos) {
+         std::cerr << "[fission_decomp] Array start '[' not found after 'complete_structures'" << std::endl;
+         return result;
+    }
     
     // Parse structures (simplified nested object parsing)
     size_t depth = 1;
@@ -372,11 +942,9 @@ std::vector<GdtStruct> parse_gdt_json(const std::string& json_path) {
             
             // Extract this structure's JSON
             std::string struct_json = json.substr(struct_start, pos - struct_start + 1);
+            std::string meta_json = struct_json; // Copy for masking fields
             
             GdtStruct s;
-            s.name = extract_json_string(struct_json, "name");
-            s.size = (int)extract_json_int(struct_json, "size");
-            s.alignment = (int)extract_json_int(struct_json, "alignment");
             
             // Parse fields array within this struct
             size_t fields_pos = struct_json.find("\"fields\"");
@@ -409,42 +977,274 @@ std::vector<GdtStruct> parse_gdt_json(const std::string& json_path) {
                         else if (struct_json[fp] == ']') arr_depth--;
                         fp++;
                     }
+                    
+                    // Mask fields array in meta_json to avoid finding field properties as struct properties
+                    if (fp <= meta_json.size()) {
+                        for (size_t i = fields_pos; i < fp; i++) {
+                            meta_json[i] = ' ';
+                        }
+                    }
                 }
             }
             
+            s.name = extract_json_string(meta_json, "name");
+            s.size = (int)extract_json_int(meta_json, "size");
+            s.alignment = (int)extract_json_int(meta_json, "alignment");
+            
             if (!s.name.empty() && s.size > 0) {
-                result.push_back(s);
+                result.structs.push_back(s);
+            }
+        }
+    }
+
+    // Parse typedefs
+    pos = json.find("\"typedef_aliases\"");
+    if (pos != std::string::npos) {
+        pos = json.find('[', pos);
+        if (pos != std::string::npos) {
+            size_t depth = 1;
+            pos++;
+            while (pos < json.size() && depth > 0) {
+                if (json[pos] == '[') depth++;
+                else if (json[pos] == ']') depth--;
+                else if (json[pos] == '{' && depth == 1) {
+                    size_t start = pos;
+                    int d = 1;
+                    pos++;
+                    while (pos < json.size() && d > 0) {
+                        if (json[pos] == '{') d++;
+                        else if (json[pos] == '}') d--;
+                        pos++;
+                    }
+                    std::string td_json = json.substr(start, pos - start);
+                    GdtTypedef td;
+                    td.alias = extract_json_string(td_json, "alias");
+                    td.base = extract_json_string(td_json, "base");
+                    if (!td.alias.empty() && !td.base.empty()) {
+                        result.typedefs.push_back(td);
+                    }
+                    pos--;
+                }
+                pos++;
+            }
+        }
+    }
+
+    // Parse enum values
+    pos = json.find("\"enum_values\"");
+    if (pos != std::string::npos) {
+        pos = json.find('[', pos);
+        if (pos != std::string::npos) {
+            size_t depth = 1;
+            pos++;
+            while (pos < json.size() && depth > 0) {
+                if (json[pos] == '[') depth++;
+                else if (json[pos] == ']') depth--;
+                else if (json[pos] == '{' && depth == 1) {
+                    size_t start = pos;
+                    int d = 1;
+                    pos++;
+                    while (pos < json.size() && d > 0) {
+                        if (json[pos] == '{') d++;
+                        else if (json[pos] == '}') d--;
+                        pos++;
+                    }
+                    std::string enum_json = json.substr(start, pos - start);
+                    GdtEnum e;
+                    e.name = extract_json_string(enum_json, "name");
+                    e.value = extract_json_int(enum_json, "value");
+                    if (!e.name.empty() && e.value > 0) {
+                        result.enums.push_back(e);
+                    }
+                    pos--;
+                }
+                pos++;
             }
         }
     }
     
+    // std::cerr << "[fission_decomp] Parsed " << result.structs.size() << " structures and " << result.typedefs.size() << " typedefs from " << json_path << std::endl;
+    
     return result;
 }
 
-// Load GDT types into TypeFactory
-void load_gdt_types(CliArchitecture* arch, const std::string& gdt_json_path) {
-    if (!arch || gdt_json_path.empty()) return;
+// Primitive type mapping: C type names -> Ghidra (size, metatype)
+static std::map<std::string, std::pair<int, type_metatype>> PRIMITIVE_MAP = {
+    // Signed integers
+    {"char", {1, TYPE_INT}},
+    {"signed char", {1, TYPE_INT}},
+    {"short", {2, TYPE_INT}},
+    {"short int", {2, TYPE_INT}},
+    {"signed short", {2, TYPE_INT}},
+    {"int", {4, TYPE_INT}},
+    {"signed int", {4, TYPE_INT}},
+    {"long", {4, TYPE_INT}},          // Windows: long is 4 bytes
+    {"long int", {4, TYPE_INT}},
+    {"signed long", {4, TYPE_INT}},
+    {"long long", {8, TYPE_INT}},
+    {"long long int", {8, TYPE_INT}},
+    {"signed long long", {8, TYPE_INT}},
+    {"__int64", {8, TYPE_INT}},
+    {"__int32", {4, TYPE_INT}},
+    {"__int16", {2, TYPE_INT}},
+    {"__int8", {1, TYPE_INT}},
     
+    // Unsigned integers
+    {"unsigned char", {1, TYPE_UINT}},
+    {"unsigned short", {2, TYPE_UINT}},
+    {"unsigned short int", {2, TYPE_UINT}},
+    {"unsigned", {4, TYPE_UINT}},
+    {"unsigned int", {4, TYPE_UINT}},
+    {"unsigned long", {4, TYPE_UINT}},
+    {"unsigned long int", {4, TYPE_UINT}},
+    {"unsigned long long", {8, TYPE_UINT}},
+    {"unsigned long long int", {8, TYPE_UINT}},
+    {"unsigned __int64", {8, TYPE_UINT}},
+    {"unsigned __int32", {4, TYPE_UINT}},
+    {"unsigned __int16", {2, TYPE_UINT}},
+    {"unsigned __int8", {1, TYPE_UINT}},
+    
+    // Special types
+    {"void", {0, TYPE_VOID}},
+    {"bool", {1, TYPE_BOOL}},
+    {"_Bool", {1, TYPE_BOOL}},
+    {"wchar_t", {2, TYPE_INT}},
+    {"float", {4, TYPE_FLOAT}},
+    {"double", {8, TYPE_FLOAT}},
+    {"long double", {8, TYPE_FLOAT}},  // Simplified: treat as 8 bytes
+};
+
+// Resolve GDT type name to Ghidra Datatype
+// Handles: exact match, pointer syntax (char *), primitive mapping (int -> int4)
+Datatype* resolve_gdt_type(TypeFactory* types, const std::string& name, bool is_64bit) {
+    if (name.empty() || !types) return nullptr;
+    
+    // 1. Try exact match first
+    Datatype* dt = types->findByName(name);
+    if (dt) return dt;
+    
+    // 2. Handle pointer syntax (e.g., "char *", "void **", "HANDLE *")
+    std::string trimmed = name;
+    int pointer_depth = 0;
+    
+    // Trim trailing whitespace
+    while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t')) {
+        trimmed.pop_back();
+    }
+    
+    // Count and strip trailing '*' characters
+    while (!trimmed.empty() && trimmed.back() == '*') {
+        pointer_depth++;
+        trimmed.pop_back();
+        // Trim spaces between * and base type
+        while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t')) {
+            trimmed.pop_back();
+        }
+    }
+    
+    // If we have pointers, recursively resolve base type
+    if (pointer_depth > 0) {
+        Datatype* base_type = resolve_gdt_type(types, trimmed, is_64bit);
+        if (base_type) {
+            int ptr_size = is_64bit ? 8 : 4;
+            Datatype* result = base_type;
+            for (int i = 0; i < pointer_depth; i++) {
+                result = types->getTypePointer(ptr_size, result, 1);
+            }
+            return result;
+        }
+        return nullptr;  // Base type not found
+    }
+    
+    // 3. Try primitive type mapping
+    auto it = PRIMITIVE_MAP.find(trimmed);
+    if (it != PRIMITIVE_MAP.end()) {
+        if (it->second.second == TYPE_VOID) {
+            return types->getTypeVoid();
+        }
+        return types->getBase(it->second.first, it->second.second);
+    }
+    
+    // 4. Try with "struct " prefix removed
+    if (trimmed.length() > 7 && trimmed.substr(0, 7) == "struct ") {
+        dt = types->findByName(trimmed.substr(7));
+        if (dt) return dt;
+    }
+    
+    // 5. Try with "union " prefix removed
+    if (trimmed.length() > 6 && trimmed.substr(0, 6) == "union ") {
+        dt = types->findByName(trimmed.substr(6));
+        if (dt) return dt;
+    }
+    
+    // 6. Try with "enum " prefix removed
+    if (trimmed.length() > 5 && trimmed.substr(0, 5) == "enum ") {
+        dt = types->findByName(trimmed.substr(5));
+        if (dt) return dt;
+    }
+    
+    // 7. Windows pointer typedef heuristics: LPXXX -> XXX*, PXXX -> XXX*, LPCXXX -> XXX*
+    // This handles common Windows typedefs like LPHANDLE, LPDWORD, LPVOID, PHANDLE, etc.
+    int ptr_size = is_64bit ? 8 : 4;
+    
+    // LPC prefix (Long Pointer to Const): LPCSTR, LPCWSTR, etc.
+    if (trimmed.length() > 3 && trimmed.substr(0, 3) == "LPC") {
+        std::string base_name = trimmed.substr(3);  // Remove "LPC"
+        Datatype* base_type = resolve_gdt_type(types, base_name, is_64bit);
+        if (base_type) {
+            return types->getTypePointer(ptr_size, base_type, 1);
+        }
+    }
+    
+    // LP prefix (Long Pointer): LPHANDLE, LPDWORD, LPVOID, etc.
+    if (trimmed.length() > 2 && trimmed.substr(0, 2) == "LP") {
+        std::string base_name = trimmed.substr(2);  // Remove "LP"
+        Datatype* base_type = resolve_gdt_type(types, base_name, is_64bit);
+        if (base_type) {
+            return types->getTypePointer(ptr_size, base_type, 1);
+        }
+    }
+    
+    // P prefix (Pointer): PHANDLE, PDWORD, PVOID, etc. (but not PP for double pointer)
+    if (trimmed.length() > 1 && trimmed[0] == 'P' && std::isupper(trimmed[1]) && trimmed[1] != 'P') {
+        std::string base_name = trimmed.substr(1);  // Remove "P"
+        Datatype* base_type = resolve_gdt_type(types, base_name, is_64bit);
+        if (base_type) {
+            return types->getTypePointer(ptr_size, base_type, 1);
+        }
+    }
+    
+    return nullptr;
+}
+
+// Load GDT types into TypeFactory
+// Uses resolve_gdt_type for proper C type -> Ghidra type conversion
+void load_gdt_types(CliArchitecture* arch, const std::string& gdt_json_path, bool is_64bit = true) {
+    if (!arch || gdt_json_path.empty()) return;
+
     TypeFactory* types = arch->types;
     if (!types) return;
-    
-    std::vector<GdtStruct> gdt_structs = parse_gdt_json(gdt_json_path);
-    if (gdt_structs.empty()) {
+
+    // Pointer size depends on architecture
+    int ptr_size = is_64bit ? 8 : 4;
+
+    GdtData gdt_data = parse_gdt_json(gdt_json_path);
+    if (gdt_data.structs.empty() && gdt_data.typedefs.empty()) {
         std::cerr << "[fission_decomp] No GDT types loaded from: " << gdt_json_path << std::endl;
         return;
     }
-    
+
     int loaded = 0;
-    for (const auto& gdt : gdt_structs) {
+    for (const auto& gdt : gdt_data.structs) {
         try {
             // Check if type already exists
             Datatype* existing = types->findByName(gdt.name);
             if (existing != nullptr) continue;
-            
+
             // Create empty structure
             TypeStruct* ts = types->getTypeStruct(gdt.name);
             if (!ts) continue;
-            
+
             // Build field list
             std::vector<TypeField> fields;
             int field_id = 0;
@@ -464,14 +1264,14 @@ void load_gdt_types(CliArchitecture* arch, const std::string& gdt_json_path) {
                     Datatype* byte_type = types->getBase(1, TYPE_UINT);
                     field_type = types->getTypeArray(f.size, byte_type);
                 }
-                
+
                 if (field_type) {
                     TypeField tf(field_id, f.offset, f.name, field_type);
                     fields.push_back(tf);
                     field_id++;
                 }
             }
-            
+
             // Set fields on the structure
             if (!fields.empty()) {
                 types->setFields(fields, ts, gdt.size, gdt.alignment, 0);
@@ -481,10 +1281,74 @@ void load_gdt_types(CliArchitecture* arch, const std::string& gdt_json_path) {
             // Ignore type creation errors
         }
     }
-    
-    if (loaded > 0) {
-        std::cerr << "[fission_decomp] Loaded " << loaded << " GDT structures from " << gdt_json_path << std::endl;
+
+    // =========================================================================
+    // Register typedefs using resolve_gdt_type (Multi-pass for dependency resolution)
+    // =========================================================================
+    // Pass 1-N: Keep trying until no more progress is made
+    // This handles typedef chains like: LPSTR -> char* -> char
+    // =========================================================================
+    int loaded_typedefs = 0;
+    int last_pass_count = -1;
+    int pass = 0;
+    const int MAX_PASSES = 10; // Increased from 5 for deeper chains
+    std::vector<bool> registered_td(gdt_data.typedefs.size(), false);
+
+    while (pass < MAX_PASSES && (size_t)loaded_typedefs < gdt_data.typedefs.size() && loaded_typedefs != last_pass_count) {
+        last_pass_count = loaded_typedefs;
+        for (size_t i = 0; i < gdt_data.typedefs.size(); i++) {
+            if (registered_td[i]) continue;
+
+            try {
+                const std::string& base_name = gdt_data.typedefs[i].base;
+                const std::string& alias_name = gdt_data.typedefs[i].alias;
+
+                // Use resolve_gdt_type to handle C primitives and pointers
+                Datatype* base_type = resolve_gdt_type(types, base_name, is_64bit);
+
+                if (base_type) {
+                    // Check if alias already exists
+                    if (types->findByName(alias_name)) {
+                         registered_td[i] = true;
+                         loaded_typedefs++;
+                         continue;
+                    }
+
+                    // Create the typedef
+                    types->getTypedef(base_type, alias_name, 0, 0);
+                    registered_td[i] = true;
+                    loaded_typedefs++;
+                }
+            } catch (...) {}
+        }
+        pass++;
     }
+    
+    std::cerr << "[fission_decomp] Loaded " << loaded << " GDT structures and " 
+              << loaded_typedefs << " typedefs from " << gdt_json_path << std::endl;
+}
+
+// Load GDT enum values for constant name substitution
+// Returns a map of value -> name for post-processing
+std::map<uint64_t, std::string> load_gdt_enums(const std::string& gdt_json_path) {
+    std::map<uint64_t, std::string> result;
+    
+    if (gdt_json_path.empty()) return result;
+    
+    GdtData gdt_data = parse_gdt_json(gdt_json_path);
+    
+    for (const auto& e : gdt_data.enums) {
+        // Only add if value is not already mapped (first wins)
+        if (result.find(e.value) == result.end()) {
+            result[e.value] = e.name;
+        }
+    }
+    
+    if (!result.empty()) {
+        std::cerr << "[fission_decomp] Loaded " << result.size() << " enum constants for substitution" << std::endl;
+    }
+    
+    return result;
 }
 
 // Inject IAT symbols into Ghidra's symbol table
@@ -573,48 +1437,137 @@ void configure_arch(CliArchitecture* arch) {
 // Register Windows API types for better type inference
 void register_windows_types(CliArchitecture* arch, bool is_64bit) {
     if (!arch) return;
-    
+
     TypeFactory* types = arch->types;
     if (!types) return;
-    
+
     int ptrSize = is_64bit ? 8 : 4;
-    
+    int registered = 0;
+
     try {
-        // Get base void type for pointer creation
+        // Get base types for typedef creation
         Datatype* voidType = types->getTypeVoid();
-        Datatype* charType = types->getTypeChar(TYPE_INT);
+        Datatype* charType = types->getBase(1, TYPE_INT); // char as 1-byte signed int
+        Datatype* ucharType = types->getBase(1, TYPE_UINT);
         Datatype* wcharType = types->getBase(2, TYPE_INT); // wchar_t is 2 bytes on Windows
-        
-        // === Basic Windows Types ===
-        // DWORD = uint32
-        types->getBase(4, TYPE_UINT);
-        // WORD = uint16  
-        types->getBase(2, TYPE_UINT);
-        // BYTE = uint8
-        types->getBase(1, TYPE_UINT);
-        // QWORD = uint64
-        types->getBase(8, TYPE_UINT);
-        
-        // HANDLE = void*
-        types->getTypePointer(ptrSize, voidType, 0);
-        // LPSTR = char*
-        types->getTypePointer(ptrSize, charType, 0);
-        // LPWSTR = wchar_t*
-        types->getTypePointer(ptrSize, wcharType, 0);
-        
-        // BOOL = int32
-        types->getBase(4, TYPE_INT);
-        // LONG = int32
-        types->getBase(4, TYPE_INT);
-        // LONGLONG = int64
-        types->getBase(8, TYPE_INT);
-        
-        // SIZE_T = uintptr
-        types->getBase(ptrSize, TYPE_UINT);
-        // SSIZE_T = intptr
-        types->getBase(ptrSize, TYPE_INT);
-        
-        std::cerr << "[fission_decomp] Windows types registered (" << (is_64bit ? "64" : "32") << "-bit)" << std::endl;
+        Datatype* int16Type = types->getBase(2, TYPE_INT);
+        Datatype* uint16Type = types->getBase(2, TYPE_UINT);
+        Datatype* int32Type = types->getBase(4, TYPE_INT);
+        Datatype* uint32Type = types->getBase(4, TYPE_UINT);
+        Datatype* int64Type = types->getBase(8, TYPE_INT);
+        Datatype* uint64Type = types->getBase(8, TYPE_UINT);
+        Datatype* intptrType = types->getBase(ptrSize, TYPE_INT);
+        Datatype* uintptrType = types->getBase(ptrSize, TYPE_UINT);
+
+        // Pointer types
+        Datatype* voidPtrType = types->getTypePointer(ptrSize, voidType, 0);
+        Datatype* charPtrType = types->getTypePointer(ptrSize, charType, 0);
+        Datatype* wcharPtrType = types->getTypePointer(ptrSize, wcharType, 0);
+        Datatype* constCharPtrType = charPtrType;  // Ghidra doesn't distinguish const
+        Datatype* constWcharPtrType = wcharPtrType;
+        Datatype* voidPtrPtrType = types->getTypePointer(ptrSize, voidPtrType, 0);
+
+        // =========================================================================
+        // Register Windows typedefs using getTypedef
+        // These are the most common Windows API types
+        // =========================================================================
+
+        // --- Integer types ---
+        if (!types->findByName("BYTE")) { types->getTypedef(ucharType, "BYTE", 0, 0); registered++; }
+        if (!types->findByName("WORD")) { types->getTypedef(uint16Type, "WORD", 0, 0); registered++; }
+        if (!types->findByName("DWORD")) { types->getTypedef(uint32Type, "DWORD", 0, 0); registered++; }
+        if (!types->findByName("QWORD")) { types->getTypedef(uint64Type, "QWORD", 0, 0); registered++; }
+
+        if (!types->findByName("CHAR")) { types->getTypedef(charType, "CHAR", 0, 0); registered++; }
+        if (!types->findByName("WCHAR")) { types->getTypedef(wcharType, "WCHAR", 0, 0); registered++; }
+        if (!types->findByName("SHORT")) { types->getTypedef(int16Type, "SHORT", 0, 0); registered++; }
+        if (!types->findByName("USHORT")) { types->getTypedef(uint16Type, "USHORT", 0, 0); registered++; }
+        if (!types->findByName("INT")) { types->getTypedef(int32Type, "INT", 0, 0); registered++; }
+        if (!types->findByName("UINT")) { types->getTypedef(uint32Type, "UINT", 0, 0); registered++; }
+        if (!types->findByName("LONG")) { types->getTypedef(int32Type, "LONG", 0, 0); registered++; }
+        if (!types->findByName("ULONG")) { types->getTypedef(uint32Type, "ULONG", 0, 0); registered++; }
+        if (!types->findByName("LONGLONG")) { types->getTypedef(int64Type, "LONGLONG", 0, 0); registered++; }
+        if (!types->findByName("ULONGLONG")) { types->getTypedef(uint64Type, "ULONGLONG", 0, 0); registered++; }
+
+        if (!types->findByName("BOOL")) { types->getTypedef(int32Type, "BOOL", 0, 0); registered++; }
+        if (!types->findByName("BOOLEAN")) { types->getTypedef(ucharType, "BOOLEAN", 0, 0); registered++; }
+
+        // --- Size types (architecture-dependent) ---
+        if (!types->findByName("SIZE_T")) { types->getTypedef(uintptrType, "SIZE_T", 0, 0); registered++; }
+        if (!types->findByName("SSIZE_T")) { types->getTypedef(intptrType, "SSIZE_T", 0, 0); registered++; }
+        if (!types->findByName("ULONG_PTR")) { types->getTypedef(uintptrType, "ULONG_PTR", 0, 0); registered++; }
+        if (!types->findByName("LONG_PTR")) { types->getTypedef(intptrType, "LONG_PTR", 0, 0); registered++; }
+        if (!types->findByName("DWORD_PTR")) { types->getTypedef(uintptrType, "DWORD_PTR", 0, 0); registered++; }
+        if (!types->findByName("INT_PTR")) { types->getTypedef(intptrType, "INT_PTR", 0, 0); registered++; }
+        if (!types->findByName("UINT_PTR")) { types->getTypedef(uintptrType, "UINT_PTR", 0, 0); registered++; }
+
+        // --- Handle types (all void*) ---
+        if (!types->findByName("HANDLE")) { types->getTypedef(voidPtrType, "HANDLE", 0, 0); registered++; }
+        if (!types->findByName("HMODULE")) { types->getTypedef(voidPtrType, "HMODULE", 0, 0); registered++; }
+        if (!types->findByName("HINSTANCE")) { types->getTypedef(voidPtrType, "HINSTANCE", 0, 0); registered++; }
+        if (!types->findByName("HWND")) { types->getTypedef(voidPtrType, "HWND", 0, 0); registered++; }
+        if (!types->findByName("HDC")) { types->getTypedef(voidPtrType, "HDC", 0, 0); registered++; }
+        if (!types->findByName("HBRUSH")) { types->getTypedef(voidPtrType, "HBRUSH", 0, 0); registered++; }
+        if (!types->findByName("HFONT")) { types->getTypedef(voidPtrType, "HFONT", 0, 0); registered++; }
+        if (!types->findByName("HICON")) { types->getTypedef(voidPtrType, "HICON", 0, 0); registered++; }
+        if (!types->findByName("HCURSOR")) { types->getTypedef(voidPtrType, "HCURSOR", 0, 0); registered++; }
+        if (!types->findByName("HMENU")) { types->getTypedef(voidPtrType, "HMENU", 0, 0); registered++; }
+        if (!types->findByName("HBITMAP")) { types->getTypedef(voidPtrType, "HBITMAP", 0, 0); registered++; }
+        if (!types->findByName("HGLOBAL")) { types->getTypedef(voidPtrType, "HGLOBAL", 0, 0); registered++; }
+        if (!types->findByName("HLOCAL")) { types->getTypedef(voidPtrType, "HLOCAL", 0, 0); registered++; }
+        if (!types->findByName("HKEY")) { types->getTypedef(voidPtrType, "HKEY", 0, 0); registered++; }
+        if (!types->findByName("HFILE")) { types->getTypedef(int32Type, "HFILE", 0, 0); registered++; }
+        if (!types->findByName("HRESULT")) { types->getTypedef(int32Type, "HRESULT", 0, 0); registered++; }
+        if (!types->findByName("NTSTATUS")) { types->getTypedef(int32Type, "NTSTATUS", 0, 0); registered++; }
+
+        // --- Pointer types ---
+        if (!types->findByName("PVOID")) { types->getTypedef(voidPtrType, "PVOID", 0, 0); registered++; }
+        if (!types->findByName("LPVOID")) { types->getTypedef(voidPtrType, "LPVOID", 0, 0); registered++; }
+        if (!types->findByName("LPCVOID")) { types->getTypedef(voidPtrType, "LPCVOID", 0, 0); registered++; }
+        if (!types->findByName("PPVOID")) { types->getTypedef(voidPtrPtrType, "PPVOID", 0, 0); registered++; }
+
+        if (!types->findByName("LPSTR")) { types->getTypedef(charPtrType, "LPSTR", 0, 0); registered++; }
+        if (!types->findByName("LPCSTR")) { types->getTypedef(constCharPtrType, "LPCSTR", 0, 0); registered++; }
+        if (!types->findByName("PSTR")) { types->getTypedef(charPtrType, "PSTR", 0, 0); registered++; }
+        if (!types->findByName("PCSTR")) { types->getTypedef(constCharPtrType, "PCSTR", 0, 0); registered++; }
+
+        if (!types->findByName("LPWSTR")) { types->getTypedef(wcharPtrType, "LPWSTR", 0, 0); registered++; }
+        if (!types->findByName("LPCWSTR")) { types->getTypedef(constWcharPtrType, "LPCWSTR", 0, 0); registered++; }
+        if (!types->findByName("PWSTR")) { types->getTypedef(wcharPtrType, "PWSTR", 0, 0); registered++; }
+        if (!types->findByName("PCWSTR")) { types->getTypedef(constWcharPtrType, "PCWSTR", 0, 0); registered++; }
+
+        // TCHAR variants (assume Unicode)
+        if (!types->findByName("TCHAR")) { types->getTypedef(wcharType, "TCHAR", 0, 0); registered++; }
+        if (!types->findByName("LPTSTR")) { types->getTypedef(wcharPtrType, "LPTSTR", 0, 0); registered++; }
+        if (!types->findByName("LPCTSTR")) { types->getTypedef(constWcharPtrType, "LPCTSTR", 0, 0); registered++; }
+
+        // Pointer to integer types
+        if (!types->findByName("PBYTE")) { types->getTypedef(types->getTypePointer(ptrSize, ucharType, 0), "PBYTE", 0, 0); registered++; }
+        if (!types->findByName("LPBYTE")) { types->getTypedef(types->getTypePointer(ptrSize, ucharType, 0), "LPBYTE", 0, 0); registered++; }
+        if (!types->findByName("PWORD")) { types->getTypedef(types->getTypePointer(ptrSize, uint16Type, 0), "PWORD", 0, 0); registered++; }
+        if (!types->findByName("LPWORD")) { types->getTypedef(types->getTypePointer(ptrSize, uint16Type, 0), "LPWORD", 0, 0); registered++; }
+        if (!types->findByName("PDWORD")) { types->getTypedef(types->getTypePointer(ptrSize, uint32Type, 0), "PDWORD", 0, 0); registered++; }
+        if (!types->findByName("LPDWORD")) { types->getTypedef(types->getTypePointer(ptrSize, uint32Type, 0), "LPDWORD", 0, 0); registered++; }
+        if (!types->findByName("PLONG")) { types->getTypedef(types->getTypePointer(ptrSize, int32Type, 0), "PLONG", 0, 0); registered++; }
+        if (!types->findByName("LPLONG")) { types->getTypedef(types->getTypePointer(ptrSize, int32Type, 0), "LPLONG", 0, 0); registered++; }
+        if (!types->findByName("PBOOL")) { types->getTypedef(types->getTypePointer(ptrSize, int32Type, 0), "PBOOL", 0, 0); registered++; }
+        if (!types->findByName("LPBOOL")) { types->getTypedef(types->getTypePointer(ptrSize, int32Type, 0), "LPBOOL", 0, 0); registered++; }
+        if (!types->findByName("PINT")) { types->getTypedef(types->getTypePointer(ptrSize, int32Type, 0), "PINT", 0, 0); registered++; }
+        if (!types->findByName("LPINT")) { types->getTypedef(types->getTypePointer(ptrSize, int32Type, 0), "LPINT", 0, 0); registered++; }
+        if (!types->findByName("PUINT")) { types->getTypedef(types->getTypePointer(ptrSize, uint32Type, 0), "PUINT", 0, 0); registered++; }
+        if (!types->findByName("PSIZE_T")) { types->getTypedef(types->getTypePointer(ptrSize, uintptrType, 0), "PSIZE_T", 0, 0); registered++; }
+
+        // --- Special Win32 types ---
+        if (!types->findByName("WPARAM")) { types->getTypedef(uintptrType, "WPARAM", 0, 0); registered++; }
+        if (!types->findByName("LPARAM")) { types->getTypedef(intptrType, "LPARAM", 0, 0); registered++; }
+        if (!types->findByName("LRESULT")) { types->getTypedef(intptrType, "LRESULT", 0, 0); registered++; }
+        if (!types->findByName("ATOM")) { types->getTypedef(uint16Type, "ATOM", 0, 0); registered++; }
+        if (!types->findByName("COLORREF")) { types->getTypedef(uint32Type, "COLORREF", 0, 0); registered++; }
+
+        // --- Security types ---
+        if (!types->findByName("SECURITY_STATUS")) { types->getTypedef(int32Type, "SECURITY_STATUS", 0, 0); registered++; }
+
+        std::cerr << "[fission_decomp] Registered " << registered << " Windows typedefs (" << (is_64bit ? "64" : "32") << "-bit)" << std::endl;
     } catch (...) {
         // Type registration is best-effort
     }
@@ -703,9 +1656,9 @@ std::string process_request(ServerState& state, const std::string& input) {
                 state.arch_64bit->init(store);
                 configure_arch(state.arch_64bit);
                 register_windows_types(state.arch_64bit, true); // 64-bit
-                // Load GDT types if provided
+                // Load GDT types if provided (64-bit)
                 if (!gdt_json.empty()) {
-                    load_gdt_types(state.arch_64bit, gdt_json);
+                    load_gdt_types(state.arch_64bit, gdt_json, true);
                 }
                 state.arch_64bit_ready = true;
                 std::cerr << "[fission_decomp] Initialized 64-bit architecture (persistent)" << std::endl;
@@ -720,6 +1673,11 @@ std::string process_request(ServerState& state, const std::string& input) {
             inject_iat_symbols(state.arch_64bit, iat_symbols);
             // Store for post-processing
             state.iat_symbols = iat_symbols;
+            
+            // Load enum values for constant substitution (from 64-bit GDT)
+            if (!gdt_json.empty() && state.enum_values.empty()) {
+                state.enum_values = load_gdt_enums(gdt_json);
+            }
 
             // 32-bit
             if (!state.arch_32bit_ready) {
@@ -740,7 +1698,7 @@ std::string process_request(ServerState& state, const std::string& input) {
                     if (pos != std::string::npos) {
                         gdt_json_32.replace(pos, 2, "32");
                     }
-                    load_gdt_types(state.arch_32bit, gdt_json_32);
+                    load_gdt_types(state.arch_32bit, gdt_json_32, false);
                 }
                 state.arch_32bit_ready = true;
                  std::cerr << "[fission_decomp] Initialized 32-bit architecture (persistent)" << std::endl;
@@ -840,6 +1798,12 @@ std::string process_request(ServerState& state, const std::string& input) {
         std::cerr << "[fission_decomp] Step 6: Post-processing IAT calls" << std::endl;
         std::string c_code = c_stream.str();
         c_code = post_process_iat_calls(c_code, state.iat_symbols);
+        
+        // Step 6b: Smart constant replacement (context-aware based on API parameters)
+        c_code = smart_constant_replace(c_code);
+        
+        // Step 6c: Fallback constant replacement for remaining constants
+        c_code = post_process_constants(c_code, state.enum_values);
         
         std::cerr << "[fission_decomp] Step 7: Done!" << std::endl;
         return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_code) + "\"}";

@@ -241,6 +241,7 @@ fn worker_loop(
                     &sla_dir,
                     request.image_base,
                     &request.iat_symbols,
+                    request.gdt_json_path.as_deref(),
                 ) {
                     crate::core::logging::error(&format!(
                         "[decomp-worker] Failed to load binary: {}",
