@@ -32,6 +32,13 @@ A next-generation hybrid dynamic analysis platform that unifies the best feature
 - **Smart Load Balancing** - Idle worker prioritization
 - **Background Prefetching** - Pre-decompiles adjacent functions
 
+### Smart Decompilation
+- **Context-Aware Constant Substitution** - Replaces magic numbers with symbolic names based on API parameter context
+- **16 Enum Groups** - PAGE_PROTECT, MEM_ALLOC, GENERIC_ACCESS, HKEY_ROOT, AF_FAMILY, etc.
+- **43 API Mappings** - VirtualAlloc, CreateFile, OpenProcess, socket, RegOpenKeyEx, etc.
+- **Dynamic Flag Resolution** - Automatically detects OR combinations (e.g., `0x3000` → `MEM_COMMIT | MEM_RESERVE`)
+- **GDT Type Loading** - 5,700+ structures and 6,500+ typedefs from Ghidra data
+
 ### Extensibility
 - **Plugin System** - Native Rust and Python plugin support
 - **Event Bus** - Subscribe to binary load, decompile, debug events

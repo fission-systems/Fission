@@ -90,6 +90,10 @@ fn main() {
     let fields = GdtParser::extract_fields(&db);
     println!("✓ Parsed {} field definitions", fields.len());
 
+    // Extract enum/constant values
+    let enum_values = GdtParser::extract_enum_values(&db);
+    println!("✓ Extracted {} enum/constant values", enum_values.len());
+
     if dump_types {
         println!("\n=== Structure Type Names ===");
         for (i, name) in struct_types.iter().enumerate() {
@@ -189,6 +193,12 @@ fn main() {
         .map(|(id, name)| serde_json::json!({"id": id, "name": name}))
         .collect();
 
+    // Convert enum values to JSON format
+    let enum_json: Vec<_> = enum_values
+        .iter()
+        .map(|(name, value)| serde_json::json!({"name": name, "value": value}))
+        .collect();
+
     let json = serde_json::json!({
         "source": input_path,
         "total_types": all_types.len(),
@@ -197,12 +207,14 @@ fn main() {
         "id_mapping_count": id_map.len(),
         "field_count": fields.len(),
         "typedef_alias_count": alias_map.len(),
+        "enum_count": enum_values.len(),
         "structure_names": struct_types,
         "complete_structures": struct_json,
         "id_mappings": id_map_json,
-        "typedef_aliases": alias_map.iter().take(200).map(|(k, v)| {
+        "typedef_aliases": alias_map.iter().map(|(k, v)| {
             serde_json::json!({"alias": k, "base": v})
         }).collect::<Vec<_>>(),
+        "enum_values": enum_json,
     });
 
     let mut json_file = File::create(&json_path).expect("Failed to create JSON file");
