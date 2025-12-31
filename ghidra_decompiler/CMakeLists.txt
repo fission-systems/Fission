@@ -19,23 +19,36 @@ endif()
 # Find dependencies via vcpkg
 find_package(ZLIB REQUIRED)
 
-# Ghidra Core Sources
+# Ghidra Core Sources (in ghidra/ subdirectory)
+set(GHIDRA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ghidra)
 set(CORE_SOURCES
-    xml.cc marshal.cc space.cc float.cc address.cc pcoderaw.cc translate.cc opcodes.cc globalcontext.cc
-    capability.cc architecture.cc options.cc graph.cc cover.cc block.cc cast.cc typeop.cc database.cc
-    cpool.cc comment.cc stringmanage.cc modelrules.cc fspec.cc action.cc loadimage.cc grammar.cc
-    varnode.cc op.cc type.cc variable.cc varmap.cc jumptable.cc emulate.cc emulateutil.cc flow.cc
-    userop.cc multiprecision.cc funcdata.cc funcdata_block.cc funcdata_op.cc funcdata_varnode.cc
-    unionresolve.cc pcodeinject.cc heritage.cc prefersplit.cc rangeutil.cc ruleaction.cc subflow.cc
-    blockaction.cc merge.cc double.cc transform.cc constseq.cc coreaction.cc condexe.cc override.cc
-    dynamic.cc crc32.cc prettyprint.cc printlanguage.cc printc.cc printjava.cc memstate.cc opbehavior.cc
-    paramid.cc signature.cc sleigh.cc pcodeparse.cc pcodecompile.cc sleighbase.cc slghsymbol.cc
-    slghpatexpress.cc slghpattern.cc semantics.cc context.cc slaformat.cc compression.cc filemanage.cc
-    sleigh_arch.cc inject_sleigh.cc libdecomp.cc interface.cc ifaceterm.cc ifacedecomp.cc callgraph.cc
-    codedata.cc testfunction.cc rulecompile.cc
+    ${GHIDRA_DIR}/xml.cc ${GHIDRA_DIR}/marshal.cc ${GHIDRA_DIR}/space.cc ${GHIDRA_DIR}/float.cc
+    ${GHIDRA_DIR}/address.cc ${GHIDRA_DIR}/pcoderaw.cc ${GHIDRA_DIR}/translate.cc ${GHIDRA_DIR}/opcodes.cc
+    ${GHIDRA_DIR}/globalcontext.cc ${GHIDRA_DIR}/capability.cc ${GHIDRA_DIR}/architecture.cc
+    ${GHIDRA_DIR}/options.cc ${GHIDRA_DIR}/graph.cc ${GHIDRA_DIR}/cover.cc ${GHIDRA_DIR}/block.cc
+    ${GHIDRA_DIR}/cast.cc ${GHIDRA_DIR}/typeop.cc ${GHIDRA_DIR}/database.cc ${GHIDRA_DIR}/cpool.cc
+    ${GHIDRA_DIR}/comment.cc ${GHIDRA_DIR}/stringmanage.cc ${GHIDRA_DIR}/modelrules.cc ${GHIDRA_DIR}/fspec.cc
+    ${GHIDRA_DIR}/action.cc ${GHIDRA_DIR}/loadimage.cc ${GHIDRA_DIR}/grammar.cc ${GHIDRA_DIR}/varnode.cc
+    ${GHIDRA_DIR}/op.cc ${GHIDRA_DIR}/type.cc ${GHIDRA_DIR}/variable.cc ${GHIDRA_DIR}/varmap.cc
+    ${GHIDRA_DIR}/jumptable.cc ${GHIDRA_DIR}/emulate.cc ${GHIDRA_DIR}/emulateutil.cc ${GHIDRA_DIR}/flow.cc
+    ${GHIDRA_DIR}/userop.cc ${GHIDRA_DIR}/multiprecision.cc ${GHIDRA_DIR}/funcdata.cc
+    ${GHIDRA_DIR}/funcdata_block.cc ${GHIDRA_DIR}/funcdata_op.cc ${GHIDRA_DIR}/funcdata_varnode.cc
+    ${GHIDRA_DIR}/unionresolve.cc ${GHIDRA_DIR}/pcodeinject.cc ${GHIDRA_DIR}/heritage.cc
+    ${GHIDRA_DIR}/prefersplit.cc ${GHIDRA_DIR}/rangeutil.cc ${GHIDRA_DIR}/ruleaction.cc ${GHIDRA_DIR}/subflow.cc
+    ${GHIDRA_DIR}/blockaction.cc ${GHIDRA_DIR}/merge.cc ${GHIDRA_DIR}/double.cc ${GHIDRA_DIR}/transform.cc
+    ${GHIDRA_DIR}/constseq.cc ${GHIDRA_DIR}/coreaction.cc ${GHIDRA_DIR}/condexe.cc ${GHIDRA_DIR}/override.cc
+    ${GHIDRA_DIR}/dynamic.cc ${GHIDRA_DIR}/crc32.cc ${GHIDRA_DIR}/prettyprint.cc ${GHIDRA_DIR}/printlanguage.cc
+    ${GHIDRA_DIR}/printc.cc ${GHIDRA_DIR}/printjava.cc ${GHIDRA_DIR}/memstate.cc ${GHIDRA_DIR}/opbehavior.cc
+    ${GHIDRA_DIR}/paramid.cc ${GHIDRA_DIR}/signature.cc ${GHIDRA_DIR}/sleigh.cc ${GHIDRA_DIR}/pcodeparse.cc
+    ${GHIDRA_DIR}/pcodecompile.cc ${GHIDRA_DIR}/sleighbase.cc ${GHIDRA_DIR}/slghsymbol.cc
+    ${GHIDRA_DIR}/slghpatexpress.cc ${GHIDRA_DIR}/slghpattern.cc ${GHIDRA_DIR}/semantics.cc
+    ${GHIDRA_DIR}/context.cc ${GHIDRA_DIR}/slaformat.cc ${GHIDRA_DIR}/compression.cc ${GHIDRA_DIR}/filemanage.cc
+    ${GHIDRA_DIR}/sleigh_arch.cc ${GHIDRA_DIR}/inject_sleigh.cc ${GHIDRA_DIR}/libdecomp.cc
+    ${GHIDRA_DIR}/interface.cc ${GHIDRA_DIR}/ifaceterm.cc ${GHIDRA_DIR}/ifacedecomp.cc ${GHIDRA_DIR}/callgraph.cc
+    ${GHIDRA_DIR}/codedata.cc ${GHIDRA_DIR}/testfunction.cc ${GHIDRA_DIR}/rulecompile.cc
 )
 
-# CLI Executable (for subprocess decompilation)
+# Fission Decompiler CLI
 add_executable(fission_decomp
     fission_decomp.cpp
     ${CORE_SOURCES}
@@ -43,6 +56,8 @@ add_executable(fission_decomp
 
 target_include_directories(fission_decomp PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/ghidra
+    ${CMAKE_CURRENT_SOURCE_DIR}/fission
 )
 
 target_link_libraries(fission_decomp 
@@ -51,3 +66,5 @@ target_link_libraries(fission_decomp
 )
 
 message(STATUS "Ghidra Decompiler CLI Configured")
+message(STATUS "  Ghidra sources: ghidra/")
+message(STATUS "  Fission modules: fission/")
