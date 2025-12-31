@@ -30,6 +30,9 @@ public:
     
     // Store enum/constant values for constant name substitution (value -> name)
     std::map<uint64_t, std::string> enum_values;
+
+    // Store known GUIDs for substitution (UUID -> Name)
+    std::map<std::string, std::string> guid_map;
     
     DecompilerContext();
     ~DecompilerContext();

@@ -780,7 +780,7 @@ class TypeFactory {
   list<Datatype *> incompleteTypedef;	///< Incomplete data-types defined as a \e typedef
   Datatype *findNoName(Datatype &ct);	///< Find data-type (in this container) by function
   void insert(Datatype *newtype);	///< Insert pointer into the cross-reference sets
-  Datatype *findAdd(Datatype &ct);	///< Find data-type in this container or add it
+  // Datatype *findAdd(Datatype &ct);	///< Moved to public
   void orderRecurse(vector<Datatype *> &deporder,DatatypeSet &mark,Datatype *ct) const;	///< Write out dependency list
   void decodeAlignmentMap(Decoder &decoder);		///< Parse a \<size_alignment_map> element
   void setDefaultAlignmentMap(void);			///< Provide default alignments for data-types
@@ -826,6 +826,7 @@ public:
   void setEnumValues(const map<uintb,string> &nmap,TypeEnum *te);	///< Set named values for an enumeration
   Datatype *decodeType(Decoder &decoder);	///< Restore Datatype from a stream
   Datatype *decodeTypeWithCodeFlags(Decoder &decoder,bool isConstructor,bool isDestructor);
+  Datatype *findAdd(Datatype &ct);	///< Find data-type in this container or add it (Moved to Public for Fission)
   TypeVoid *getTypeVoid(void);					///< Get the "void" data-type
   Datatype *getBaseNoChar(int4 s,type_metatype m);		///< Get atomic type excluding "char"
   Datatype *getBase(int4 s,type_metatype m);			///< Get atomic type

@@ -14,5 +14,10 @@ std::string read_file_content(const std::string& path) {
     return buffer.str();
 }
 
+bool file_exists(const std::string& path) {
+    std::ifstream f(path);
+    return f.good();
+}
+
 } // namespace utils
 } // namespace fission

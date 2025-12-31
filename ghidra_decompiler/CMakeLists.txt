@@ -20,7 +20,7 @@ endif()
 find_package(ZLIB REQUIRED)
 
 # Ghidra Core Sources (in ghidra/ subdirectory)
-set(GHIDRA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ghidra)
+set(GHIDRA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/decompile)
 set(CORE_SOURCES
     ${GHIDRA_DIR}/xml.cc ${GHIDRA_DIR}/marshal.cc ${GHIDRA_DIR}/space.cc ${GHIDRA_DIR}/float.cc
     ${GHIDRA_DIR}/address.cc ${GHIDRA_DIR}/pcoderaw.cc ${GHIDRA_DIR}/translate.cc ${GHIDRA_DIR}/opcodes.cc
@@ -56,11 +56,20 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/utils/file_utils.cc
     ${FISSION_MODULES_DIR}/utils/logger.cc
     ${FISSION_MODULES_DIR}/types/GdtParser.cc
+    ${FISSION_MODULES_DIR}/types/GuidParser.cc
+    ${FISSION_MODULES_DIR}/types/RttiAnalyzer.cc
+    ${FISSION_MODULES_DIR}/types/PatternLoader.cc
     ${FISSION_MODULES_DIR}/types/TypeManager.cc
+    ${FISSION_MODULES_DIR}/types/StructureAnalyzer.cc
+    ${FISSION_MODULES_DIR}/analysis/EmulationAnalyzer.cc
+    ${FISSION_MODULES_DIR}/analysis/FunctionMatcher.cc
     ${FISSION_MODULES_DIR}/core/CliArchitecture.cc
     ${FISSION_MODULES_DIR}/core/DecompilerContext.cc
     ${FISSION_MODULES_DIR}/processing/Constants.cc
     ${FISSION_MODULES_DIR}/processing/PostProcessors.cc
+    ${FISSION_MODULES_DIR}/processing/StringScanner.cc
+    ${FISSION_MODULES_DIR}/loader/PeHeader.cc
+    ${FISSION_MODULES_DIR}/loader/SymbolLoader.cc
     # MemoryImage is header-only
 )
 
@@ -73,8 +82,7 @@ add_executable(fission_decomp
 
 target_include_directories(fission_decomp PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/ghidra
-    ${CMAKE_CURRENT_SOURCE_DIR}/fission
+    ${GHIDRA_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 

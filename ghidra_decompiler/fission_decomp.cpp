@@ -48,7 +48,18 @@ using namespace fission::loader;
 #include "fission/core/DecompilerContext.h"
 using namespace fission::types;
 using namespace fission::core;
+using namespace fission::core;
 using namespace fission::processing;
+using namespace fission::types;
+#include "fission/types/GuidParser.h"
+#include "fission/types/RttiAnalyzer.h"
+#include "fission/loader/PeHeader.h"
+#include "fission/processing/StringScanner.h"
+#include "fission/types/PatternLoader.h"
+#include "fission/types/StructureAnalyzer.h"
+#include "fission/loader/SymbolLoader.h"
+#include "fission/analysis/EmulationAnalyzer.h"
+using namespace fission::loader;
 
 // Constants
 static const int MAX_INSTRUCTIONS = 200000;
@@ -112,8 +123,62 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                 if (state.loader_64bit) delete state.loader_64bit;
                 if (state.arch_64bit) delete state.arch_64bit;
                 
+                std::cerr << "[fission_decomp] Debug: Detecting PE Arch..." << std::endl;
+                // PE Auto-Detection
+                bool is_pe = false;
+                std::string compiler_id = "windows"; // Default to windows for better safety
+                PeDetectionResult pe_info = detect_pe_arch(bin_bytes);
+                std::cerr << "[fission_decomp] Debug: PE Detection Result: is_pe=" << pe_info.is_pe << std::endl;
+                
+                if (pe_info.is_pe) {
+                    is_pe = true;
+                    if (!pe_info.compiler_id.empty()) {
+                         compiler_id = pe_info.compiler_id;
+                    }
+                    std::cerr << "[fission_decomp] Detected PE Binary: " << (pe_info.is_64bit ? "64-bit" : "32-bit") 
+                              << " Compiler: " << compiler_id << std::endl;
+                }
+
+                // RTTI Recovery
+                if (is_pe) {
+                    std::cerr << "[fission_decomp] Debug: Running RTTI Recovery..." << std::endl;
+                    std::map<uint64_t, std::string> recovered_classes = RttiAnalyzer::recover_class_names(bin_bytes, image_base, pe_info.is_64bit);
+                    if (!recovered_classes.empty()) {
+                        std::cerr << "[fission_decomp] Recovered " << recovered_classes.size() << " class names via RTTI." << std::endl;
+                    }
+                    
+                    // Phase 7: PDB Symbol Loading
+                    if (!pe_info.pdb_path.empty()) {
+                         // ... (keep existing logic) ...
+                    }
+                }
+                
+                std::cerr << "[fission_decomp] Debug: Loading Patterns..." << std::endl;
+                // Phase 7: Pattern Matching (FID Lite)
+                auto patterns = PatternLoader::load_standard_patterns();
+                
+                std::cerr << "[fission_decomp] Debug: Running Pattern Matching..." << std::endl;
+                auto matches = PatternLoader::match_functions(bin_bytes, image_base, patterns);
+                if (!matches.empty()) {
+                    std::cerr << "[fission_decomp] Identified " << matches.size() << " standard library functions via patterns." << std::endl;
+                    state.iat_symbols.insert(matches.begin(), matches.end());
+                }
+                
+                std::cerr << "[fission_decomp] Debug: String Scanning..." << std::endl;
+                // String Scanning (Phase 6)
+                auto ascii_strings = StringScanner::scan_ascii_strings(bin_bytes, image_base);
+                auto unicode_strings = StringScanner::scan_unicode_strings(bin_bytes, image_base);
+                std::cerr << "[fission_decomp] Scanned " << ascii_strings.size() << " ASCII and " << unicode_strings.size() << " Unicode strings." << std::endl;
+                
+                // Store in DecompilerContext for post-processing
+                state.enum_values.insert(ascii_strings.begin(), ascii_strings.end());
+                state.enum_values.insert(unicode_strings.begin(), unicode_strings.end());
+
+                std::cerr << "[fission_decomp] Debug: Creating Loader and Arch..." << std::endl;
                 state.loader_64bit = new MemoryLoadImage(bin_bytes, image_base);
-                state.arch_64bit = new CliArchitecture("x86:LE:64:default", state.loader_64bit, &fission::utils::null_stream());
+                // Use detected compiler ID
+                std::string arch_id = "x86:LE:64:default:" + compiler_id;
+                state.arch_64bit = new CliArchitecture(arch_id, state.loader_64bit, &fission::utils::null_stream());
                 DocumentStorage store;
                 state.arch_64bit->init(store);
                 configure_arch(state.arch_64bit);
@@ -124,6 +189,28 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                     if (!content.empty()) {
                         GdtData data = parse_gdt_json(content);
                         TypeManager::load_gdt_types(state.arch_64bit->types, data, 8);
+                    }
+                } else {
+                    // Autoload Windows GDT if available
+                    std::vector<std::string> candidates = {
+                        "../../ghidra/typeinfo/win32/windows_vs12_64.gdt.types.json",
+                        "../ghidra/typeinfo/win32/windows_vs12_64.gdt.types.json",
+                        "./ghidra/typeinfo/win32/windows_vs12_64.gdt.types.json"
+                    };
+                    for (const auto& path : candidates) {
+                        if (file_exists(path)) {
+                            std::cerr << "[fission_decomp] Autoloading GDT (64-bit) from: " << path << std::endl;
+                            std::string content = read_file_content(path);
+                            if (!content.empty()) {
+                                GdtData data = parse_gdt_json(content);
+                                TypeManager::load_gdt_types(state.arch_64bit->types, data, 8);
+                                // Also populate enum values for constant replacement
+                                if (state.enum_values.empty()) {
+                                    state.enum_values = load_gdt_enums(data);
+                                }
+                            }
+                            break;
+                        }
                     }
                 }
                 state.arch_64bit_ready = true;
@@ -172,6 +259,24 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                     if (!content.empty()) {
                         GdtData data = parse_gdt_json(content);
                         TypeManager::load_gdt_types(state.arch_32bit->types, data, 4);
+                    }
+                } else {
+                    // Autoload Windows GDT if available (32-bit)
+                    std::vector<std::string> candidates = {
+                        "../../ghidra/typeinfo/win32/windows_vs12_32.gdt.types.json",
+                        "../ghidra/typeinfo/win32/windows_vs12_32.gdt.types.json",
+                        "./ghidra/typeinfo/win32/windows_vs12_32.gdt.types.json"
+                    };
+                    for (const auto& path : candidates) {
+                        if (file_exists(path)) {
+                            std::cerr << "[fission_decomp] Autoloading GDT (32-bit) from: " << path << std::endl;
+                            std::string content = read_file_content(path);
+                            if (!content.empty()) {
+                                GdtData data = parse_gdt_json(content);
+                                TypeManager::load_gdt_types(state.arch_32bit->types, data, 4);
+                            }
+                            break;
+                        }
                     }
                 }
                 state.arch_32bit_ready = true;
@@ -264,6 +369,25 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         std::cerr << "[fission_decomp] Step 4: Performing decompilation (this may take time)..." << std::endl;
         arch->allacts.getCurrent()->perform(*fd);
 
+        // Step 4b: Advanced Structure Recovery (Auto-Struct)
+        // Now using TypeFactory::getTypeStruct() and setFields() for valid IDs
+        fission::types::StructureAnalyzer struct_analyzer;
+        bool structs_found = struct_analyzer.analyze_function_structures(fd);
+        
+        if (structs_found) {
+             std::cerr << "[fission_decomp] Step 4b: Structures inferred! Re-running decompilation..." << std::endl;
+             arch->allacts.getCurrent()->reset(*fd);
+             arch->allacts.getCurrent()->perform(*fd);
+        }
+
+        // Step 4c: Emulation-Assisted Analysis (Hyper-Context Tagging)
+        // Run a trace emulation to tag conditional branches and loops
+        fission::analysis::EmulationAnalyzer emu_analyzer;
+        bool emu_tags_found = emu_analyzer.analyze(fd);
+        if (emu_tags_found) {
+            std::cerr << "[fission_decomp] Step 4c: Emulation meta-tags added!" << std::endl;
+        }
+
         std::cerr << "[fission_decomp] Step 5: Generating output" << std::endl;
         std::ostringstream c_stream;
         arch->print->setOutputStream(&c_stream);
@@ -278,6 +402,38 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         
         // Step 6c: Fallback constant replacement for remaining constants
         c_code = post_process_constants(c_code, state.enum_values);
+        
+        // Step 6d: GUID substitution
+        // Load GUIDs if not already loaded (global check)
+        if (state.guid_map.empty()) {
+             // Autoload GUIDs from ghidra/typeinfo/win32/msvcrt/guids.txt and iids.txt
+             std::vector<std::string> guid_files = {
+                "../../ghidra/typeinfo/win32/msvcrt/guids.txt",
+                "../ghidra/typeinfo/win32/msvcrt/guids.txt",
+                "./ghidra/typeinfo/win32/msvcrt/guids.txt",
+                "../../ghidra/typeinfo/win32/msvcrt/iids.txt",
+                "../ghidra/typeinfo/win32/msvcrt/iids.txt",
+                "./ghidra/typeinfo/win32/msvcrt/iids.txt"
+             };
+             
+             for (const auto& path : guid_files) {
+                 if (file_exists(path)) {
+                     std::cerr << "[fission_decomp] Loading GUIDs from: " << path << std::endl;
+                     std::string content = read_file_content(path);
+                     if (!content.empty()) {
+                         std::map<std::string, std::string> loaded = load_guids_to_map(content);
+                         state.guid_map.insert(loaded.begin(), loaded.end());
+                     }
+                 }
+             }
+             if (!state.guid_map.empty()) {
+                 std::cerr << "[fission_decomp] Loaded " << state.guid_map.size() << " GUIDs/IIDs." << std::endl;
+             }
+        }
+        c_code = substitute_guids(c_code, state.guid_map);
+        
+        // Step 6e: Unicode String Recovery
+        c_code = recover_unicode_strings(c_code);
         
         std::cerr << "[fission_decomp] Step 7: Done!" << std::endl;
         return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_code) + "\"}";

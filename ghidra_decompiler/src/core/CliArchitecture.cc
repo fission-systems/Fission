@@ -42,8 +42,13 @@ void CliArchitecture::injectIatSymbols(const std::map<uint64_t, std::string>& sy
 }
 
 void configure_arch(CliArchitecture* arch) {
-    arch->max_instructions = MAX_INSTRUCTIONS;
+    arch->max_instructions = 500000; // Increased for Jump Table analysis (Phase 6)
     arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
+    
+    // === Analysis Improvements ===
+    arch->infer_pointers = true;      // Infers pointers from constants (e.g. 0x401000 -> func_401000)
+    arch->analyze_for_loops = true;   // Recovers for-loop structures
+    arch->readonlypropagate = true;   // Propagates read-only memory as constants
     
     // === Advanced Ghidra Decompiler Options ===
     
