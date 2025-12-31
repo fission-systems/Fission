@@ -48,16 +48,34 @@ set(CORE_SOURCES
     ${GHIDRA_DIR}/codedata.cc ${GHIDRA_DIR}/testfunction.cc ${GHIDRA_DIR}/rulecompile.cc
 )
 
+# Fission Modules
+set(FISSION_MODULES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set(FISSION_SOURCES
+    ${FISSION_MODULES_DIR}/utils/encoding.cc
+    ${FISSION_MODULES_DIR}/utils/json_utils.cc
+    ${FISSION_MODULES_DIR}/utils/file_utils.cc
+    ${FISSION_MODULES_DIR}/utils/logger.cc
+    ${FISSION_MODULES_DIR}/types/GdtParser.cc
+    ${FISSION_MODULES_DIR}/types/TypeManager.cc
+    ${FISSION_MODULES_DIR}/core/CliArchitecture.cc
+    ${FISSION_MODULES_DIR}/core/DecompilerContext.cc
+    ${FISSION_MODULES_DIR}/processing/Constants.cc
+    ${FISSION_MODULES_DIR}/processing/PostProcessors.cc
+    # MemoryImage is header-only
+)
+
 # Fission Decompiler CLI
 add_executable(fission_decomp
     fission_decomp.cpp
     ${CORE_SOURCES}
+    ${FISSION_SOURCES}
 )
 
 target_include_directories(fission_decomp PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/ghidra
     ${CMAKE_CURRENT_SOURCE_DIR}/fission
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_link_libraries(fission_decomp 

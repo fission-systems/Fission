@@ -1,0 +1,59 @@
+#include "fission/core/CliArchitecture.h"
+#include "flow.hh"
+
+namespace fission {
+namespace core {
+
+// Constants
+static const int MAX_INSTRUCTIONS = 200000;
+
+CliArchitecture::CliArchitecture(const std::string& sleigh_id, fission::loader::MemoryLoadImage* ldr, std::ostream* err)
+    : ghidra::SleighArchitecture("", sleigh_id, err), custom_loader(ldr) {}
+
+void CliArchitecture::buildLoader(ghidra::DocumentStorage& store) {
+    loader = custom_loader;
+}
+
+void CliArchitecture::injectIatSymbols(const std::map<uint64_t, std::string>& symbols) {
+    if (symbols.empty()) return;
+    
+    ghidra::Scope* global_scope = symboltab->getGlobalScope();
+    if (!global_scope) return;
+    
+    int injected = 0;
+    for (const auto& [addr, name] : symbols) {
+        try {
+            ghidra::Address sym_addr(getDefaultCodeSpace(), addr);
+            // Get or create function symbol
+            ghidra::Funcdata* existing = global_scope->findFunction(sym_addr);
+            if (existing == nullptr) {
+                // Create external/import symbol as function
+                global_scope->addFunction(sym_addr, name);
+                injected++;
+            }
+        } catch (...) {
+            // Ignore symbol injection errors
+        }
+    }
+    
+    if (injected > 0) {
+        std::cerr << "[fission_core] Injected " << injected << " IAT symbols" << std::endl;
+    }
+}
+
+void configure_arch(CliArchitecture* arch) {
+    arch->max_instructions = MAX_INSTRUCTIONS;
+    arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
+    
+    // === Advanced Ghidra Decompiler Options ===
+    
+    // 5. Output formatting options via PrintLanguage base class
+    if (arch->print) {
+        // Configure output options through base PrintLanguage class
+        arch->print->setFlat(false);          // Use indentation
+        arch->print->setIndentIncrement(2);   // 2 spaces per indent level
+    }
+}
+
+} // namespace core
+} // namespace fission
