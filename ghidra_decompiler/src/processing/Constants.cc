@@ -1,25 +1,16 @@
-/**
- * Fission Constants
- * 
- * Contains Windows API constant definitions, enum groups, and API signatures
- * for context-aware decompilation enhancements.
- */
-
-#ifndef FISSION_CONSTANTS_H
-#define FISSION_CONSTANTS_H
-
-#include <map>
-#include <string>
-#include <vector>
+#include "fission/processing/Constants.h"
 #include <algorithm>
-#include <cstdint>
+
+namespace fission {
+namespace processing {
 
 // ============================================================================
 // Enum Groups for Context-Aware Constant Substitution
 // ============================================================================
 
 // Enum group: value -> constant name
-static std::map<std::string, std::map<uint64_t, std::string>> ENUM_GROUPS = {
+// Enum group: value -> constant name
+std::map<std::string, std::map<uint64_t, std::string>> ENUM_GROUPS = {
     {"PAGE_PROTECT", {
         {0x01, "PAGE_NOACCESS"},
         {0x02, "PAGE_READONLY"},
@@ -139,13 +130,7 @@ static std::map<std::string, std::map<uint64_t, std::string>> ENUM_GROUPS = {
 // API Parameter -> Enum Group Mapping
 // ============================================================================
 
-struct ApiParamMapping {
-    const char* func_name;
-    int param_index;
-    const char* enum_group;
-};
-
-static ApiParamMapping API_PARAM_MAPPINGS[] = {
+std::vector<ApiParamMapping> API_PARAM_MAPPINGS = {
     // VirtualAlloc
     {"VirtualAlloc", 2, "MEM_ALLOC"},
     {"VirtualAlloc", 3, "PAGE_PROTECT"},
@@ -200,11 +185,7 @@ static ApiParamMapping API_PARAM_MAPPINGS[] = {
 // API Function Signatures for Parameter Name Application
 // ============================================================================
 
-struct ApiSignature {
-    std::vector<std::string> param_names;
-};
-
-static std::map<std::string, ApiSignature> API_SIGNATURES = {
+std::map<std::string, ApiSignature> API_SIGNATURES = {
     // Memory
     {"VirtualAlloc", {{"lpAddress", "dwSize", "flAllocationType", "flProtect"}}},
     {"VirtualAllocEx", {{"hProcess", "lpAddress", "dwSize", "flAllocationType", "flProtect"}}},
@@ -298,7 +279,7 @@ static std::map<std::string, ApiSignature> API_SIGNATURES = {
 // ============================================================================
 
 // Dynamic flag combination resolver
-inline std::string resolve_flag_combination(uint64_t value, const std::map<uint64_t, std::string>& group) {
+std::string resolve_flag_combination(uint64_t value, const std::map<uint64_t, std::string>& group) {
     // Single value first
     auto it = group.find(value);
     if (it != group.end()) return it->second;
@@ -331,4 +312,5 @@ inline std::string resolve_flag_combination(uint64_t value, const std::map<uint6
     return "";  // Combination failed
 }
 
-#endif // FISSION_CONSTANTS_H
+} // namespace processing
+} // namespace fission

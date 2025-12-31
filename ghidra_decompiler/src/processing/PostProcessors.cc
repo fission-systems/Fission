@@ -1,16 +1,5 @@
-/**
- * Fission Post-Processors
- * 
- * Post-processing functions for decompiled C code:
- * - IAT symbol replacement
- * - String literal inlining
- * - Function signature application
- * - Context-aware constant substitution
- * - Fallback constant replacement
- */
-
-#ifndef FISSION_POST_PROCESSORS_H
-#define FISSION_POST_PROCESSORS_H
+#include "fission/processing/PostProcessors.h"
+#include "fission/processing/Constants.h"
 
 #include <string>
 #include <map>
@@ -22,13 +11,14 @@
 #include <cctype>
 #include <algorithm>
 
-#include "constants.h"
+namespace fission {
+namespace processing {
 
 // ============================================================================
 // IAT Symbol Replacement
 // ============================================================================
 
-inline std::string post_process_iat_calls(const std::string& code, const std::map<uint64_t, std::string>& iat_symbols) {
+std::string post_process_iat_calls(const std::string& code, const std::map<uint64_t, std::string>& iat_symbols) {
     if (iat_symbols.empty()) return code;
     
     std::string result = code;
@@ -77,7 +67,7 @@ inline std::string post_process_iat_calls(const std::string& code, const std::ma
 // String Literal Inlining
 // ============================================================================
 
-inline std::string inline_strings(const std::string& code, const std::map<uint64_t, std::string>& string_table) {
+std::string inline_strings(const std::string& code, const std::map<uint64_t, std::string>& string_table) {
     if (string_table.empty()) return code;
     
     std::string result = code;
@@ -137,7 +127,7 @@ inline std::string inline_strings(const std::string& code, const std::map<uint64
 // Function Signature Application
 // ============================================================================
 
-inline std::string apply_function_signatures(const std::string& code) {
+std::string apply_function_signatures(const std::string& code) {
     std::string result = code;
     
     for (const auto& [func_name, sig] : API_SIGNATURES) {
@@ -230,7 +220,7 @@ inline std::string apply_function_signatures(const std::string& code) {
 // Smart Constant Replacement (Context-Aware)
 // ============================================================================
 
-inline std::string smart_constant_replace(const std::string& code) {
+std::string smart_constant_replace(const std::string& code) {
     std::string result = code;
     
     for (const auto& mapping : API_PARAM_MAPPINGS) {
@@ -315,7 +305,7 @@ inline std::string smart_constant_replace(const std::string& code) {
 // Fallback Constant Replacement
 // ============================================================================
 
-inline std::string post_process_constants(const std::string& code, const std::map<uint64_t, std::string>& enum_values) {
+std::string post_process_constants(const std::string& code, const std::map<uint64_t, std::string>& enum_values) {
     if (enum_values.empty()) return code;
     
     std::string result = code;
@@ -358,4 +348,5 @@ inline std::string post_process_constants(const std::string& code, const std::ma
     return result;
 }
 
-#endif // FISSION_POST_PROCESSORS_H
+} // namespace processing
+} // namespace fission
