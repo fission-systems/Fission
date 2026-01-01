@@ -43,8 +43,8 @@ private:
     std::map<unsigned long long, ghidra::TypeStruct*> inferred_structs;
     
     void collect_accesses(ghidra::Funcdata* fd);
-    void infer_structures(ghidra::TypeFactory* factory);
-    void apply_structures(ghidra::Funcdata* fd);
+    bool infer_structures(ghidra::TypeFactory* factory, uint64_t func_entry, int ptr_size);
+    void apply_structures(ghidra::Funcdata* fd, int ptr_size);
 };
 
 } // namespace types
