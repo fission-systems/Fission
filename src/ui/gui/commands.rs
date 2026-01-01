@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use crate::ui::gui::state::AppState;
 use crate::core::events::FissionEvent;
+use crate::analysis::loader::{LoadedBinary, SectionInfo};
 
 /// Trait for all undoable commands
 pub trait Command: Send + Sync {
@@ -13,6 +14,34 @@ pub trait Command: Send + Sync {
     /// Get description for UI (e.g. "Rename Function")
     fn description(&self) -> String;
 }
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Get the loaded binary from state, returning an error if not loaded.
+fn get_binary(state: &AppState) -> Result<&Arc<LoadedBinary>, String> {
+    state.analysis.loaded_binary.as_ref().ok_or_else(|| "No binary loaded".to_string())
+}
+
+/// Calculate file offset from a virtual address using section information.
+fn va_to_file_offset(sections: &[SectionInfo], address: u64) -> Result<u64, String> {
+    sections.iter()
+        .find(|s| address >= s.virtual_address && address < s.virtual_address + s.virtual_size)
+        .map(|s| s.file_offset + (address - s.virtual_address))
+        .ok_or_else(|| format!("Address 0x{:x} not mapped to any section", address))
+}
+
+/// Update the loaded binary in state and publish the event.
+fn update_binary(state: &mut AppState, binary: LoadedBinary) {
+    let new_arc = Arc::new(binary);
+    state.analysis.loaded_binary = Some(new_arc.clone());
+    state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
+}
+
+// ============================================================================
+// Command Manager
+// ============================================================================
 
 /// Manages the undo/redo stacks
 pub struct CommandManager {
@@ -96,8 +125,7 @@ pub struct RenameFunctionCommand {
 
 impl Command for RenameFunctionCommand {
     fn execute(&mut self, state: &mut AppState) -> Result<(), String> {
-        let binary_arc = state.analysis.loaded_binary.as_ref()
-            .ok_or("No binary loaded")?;
+        let binary_arc = get_binary(state)?;
             
         // Copy-on-Write: Clone the inner binary
         let mut binary = (**binary_arc).clone();
@@ -110,13 +138,8 @@ impl Command for RenameFunctionCommand {
             }
             func.name = self.new_name.clone();
             
-            // Re-wrap in Arc and replace in state
-            let new_arc = Arc::new(binary);
-            state.analysis.loaded_binary = Some(new_arc.clone());
-            
-            // Publish event
-            state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
             state.log(format!("Renamed function 0x{:x} to '{}'", self.address, self.new_name));
+            update_binary(state, binary);
             
             Ok(())
         } else {
@@ -125,19 +148,15 @@ impl Command for RenameFunctionCommand {
     }
 
     fn undo(&mut self, state: &mut AppState) -> Result<(), String> {
-         let binary_arc = state.analysis.loaded_binary.as_ref()
-            .ok_or("No binary loaded")?;
+        let binary_arc = get_binary(state)?;
             
         let mut binary = (**binary_arc).clone();
         
         if let Some(func) = binary.functions.iter_mut().find(|f| f.address == self.address) {
             func.name = self.old_name.clone();
             
-            let new_arc = Arc::new(binary);
-            state.analysis.loaded_binary = Some(new_arc.clone());
-            
-            state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
             state.log(format!("Reverted rename of function 0x{:x} to '{}'", self.address, self.old_name));
+            update_binary(state, binary);
             Ok(())
         } else {
             Err(format!("Function at 0x{:x} not found", self.address))
@@ -158,19 +177,12 @@ pub struct PatchBytesCommand {
 
 impl Command for PatchBytesCommand {
     fn execute(&mut self, state: &mut AppState) -> Result<(), String> {
-        let binary_arc = state.analysis.loaded_binary.as_ref()
-            .ok_or("No binary loaded")?;
+        let binary_arc = get_binary(state)?;
             
         let mut binary = (**binary_arc).clone();
         
-        // Calculate offset
-        // For simplicity, assuming flat binary or using rva_to_offset logic
-        // But LoadedBinary doesn't expose rva_to_offset helper publicly easily here?
-        // Let's iterate sections to find the offset.
-        let offset = binary.sections.iter()
-            .find(|s| self.address >= s.virtual_address && self.address < s.virtual_address + s.virtual_size)
-            .map(|s| s.file_offset + (self.address - s.virtual_address))
-            .ok_or(format!("Address 0x{:x} not mapped to any section", self.address))?;
+        // Calculate file offset from virtual address
+        let offset = va_to_file_offset(&binary.sections, self.address)?;
             
         if offset as usize + self.new_bytes.len() > binary.data.len() {
             return Err("Patch out of bounds".to_string());
@@ -186,35 +198,25 @@ impl Command for PatchBytesCommand {
             binary.data[offset as usize + i] = *b;
         }
         
-        let new_arc = Arc::new(binary);
-        state.analysis.loaded_binary = Some(new_arc.clone());
-        state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
-        
         state.log(format!("Patched {} bytes at 0x{:x}", self.new_bytes.len(), self.address));
+        update_binary(state, binary);
         Ok(())
     }
 
     fn undo(&mut self, state: &mut AppState) -> Result<(), String> {
-        let binary_arc = state.analysis.loaded_binary.as_ref()
-            .ok_or("No binary loaded")?;
+        let binary_arc = get_binary(state)?;
             
         let mut binary = (**binary_arc).clone();
         
-        let offset = binary.sections.iter()
-            .find(|s| self.address >= s.virtual_address && self.address < s.virtual_address + s.virtual_size)
-            .map(|s| s.file_offset + (self.address - s.virtual_address))
-            .ok_or(format!("Address 0x{:x} not mapped to any section", self.address))?;
+        let offset = va_to_file_offset(&binary.sections, self.address)?;
 
         // Revert patch
         for (i, b) in self.old_bytes.iter().enumerate() {
             binary.data[offset as usize + i] = *b;
         }
         
-        let new_arc = Arc::new(binary);
-        state.analysis.loaded_binary = Some(new_arc.clone());
-        state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
-        
         state.log(format!("Reverted patch at 0x{:x}", self.address));
+        update_binary(state, binary);
         Ok(())
     }
     
