@@ -33,6 +33,14 @@ impl Default for CliState {
     }
 }
 
+/// Print error message when no binary is loaded
+fn print_no_binary_error() {
+    println!(
+        "{} No binary loaded. Use 'load <path>' first.",
+        "[!]".yellow()
+    );
+}
+
 impl CliState {
     /// Get or create disassembler for the current binary
     fn get_disasm(&mut self) -> Option<&DisasmEngine> {
@@ -206,10 +214,7 @@ fn cmd_info(state: &CliState) {
             println!();
         }
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_error();
         }
     }
 }
@@ -267,10 +272,7 @@ fn cmd_functions(state: &CliState) {
             println!();
         }
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_error();
         }
     }
 }
@@ -279,10 +281,7 @@ fn cmd_disasm(state: &mut CliState, addr: u64, count: usize) {
     let binary = match &state.binary {
         Some(b) => b.clone(),
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_error();
             return;
         }
     };
@@ -420,10 +419,7 @@ fn cmd_decompile(state: &CliState, addr: u64) {
             println!();
         }
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_error();
         }
     }
 }
@@ -479,10 +475,7 @@ fn cmd_strings(state: &CliState) {
             println!();
         }
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_error();
         }
     }
 }
@@ -526,10 +519,7 @@ fn cmd_sections(state: &CliState) {
             println!();
         }
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_error();
         }
     }
 }
@@ -564,10 +554,7 @@ fn cmd_analyze(state: &mut CliState) {
             );
         }
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_error();
         }
     }
 }
