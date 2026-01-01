@@ -1,4 +1,5 @@
 #include "fission/types/GdtBinaryParser.h"
+#include "fission/util/BinaryReader.h"
 #include <iostream>
 #include <cstring>
 #include <algorithm>
@@ -9,6 +10,8 @@
 
 namespace fission {
 namespace types {
+
+using fission::util::BinaryReader;
 
 // Ghidra DB4 format constants
 static const char DB4_MAGIC[] = "/01,4),*";
@@ -31,29 +34,15 @@ GdtBinaryParser::GdtBinaryParser() : loaded(false), file_type(0), content_length
 GdtBinaryParser::~GdtBinaryParser() {}
 
 std::string GdtBinaryParser::read_java_utf(std::ifstream& file) {
-    uint8_t len_bytes[2];
-    file.read(reinterpret_cast<char*>(len_bytes), 2);
-    uint16_t length = (len_bytes[0] << 8) | len_bytes[1];
-    
-    std::string result(length, '\0');
-    file.read(&result[0], length);
-    return result;
+    return BinaryReader::read_java_utf(file);
 }
 
 int32_t GdtBinaryParser::read_java_int(std::ifstream& file) {
-    uint8_t bytes[4];
-    file.read(reinterpret_cast<char*>(bytes), 4);
-    return (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+    return BinaryReader::read_java_int(file);
 }
 
 int64_t GdtBinaryParser::read_java_long(std::ifstream& file) {
-    uint8_t bytes[8];
-    file.read(reinterpret_cast<char*>(bytes), 8);
-    int64_t result = 0;
-    for (int i = 0; i < 8; ++i) {
-        result = (result << 8) | bytes[i];
-    }
-    return result;
+    return BinaryReader::read_java_long(file);
 }
 
 bool GdtBinaryParser::parse_header(std::ifstream& file) {

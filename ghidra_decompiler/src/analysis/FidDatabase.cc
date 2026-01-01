@@ -1,4 +1,5 @@
 #include "fission/analysis/FidDatabase.h"
+#include "fission/util/BinaryReader.h"
 #include <iostream>
 #include <cstring>
 #include <algorithm>
@@ -7,34 +8,18 @@
 namespace fission {
 namespace analysis {
 
+using fission::util::BinaryReader;
+
+// Convenience aliases
+inline uint64_t read_be64(std::ifstream& file) { return BinaryReader::read_be64(file); }
+inline uint32_t read_be32(std::ifstream& file) { return BinaryReader::read_be32(file); }
+inline uint16_t read_be16(std::ifstream& file) { return BinaryReader::read_be16(file); }
+
 // Known offsets in FIDBF format (from reverse engineering)
 static const uint64_t HEADER_MAGIC_OFFSET = 0x0000;
 static const uint64_t TABLE_INDEX_OFFSET = 0x4000;
 static const uint64_t STRINGS_TABLE_HEADER = 0xBDC0;
 static const uint64_t FUNCTIONS_TABLE_HEADER = 0xBE80;
-
-// Endianness helpers (Ghidra DB4 is Big Endian)
-inline uint64_t read_be64(std::ifstream& file) {
-    uint8_t buf[8];
-    file.read((char*)buf, 8);
-    return ((uint64_t)buf[0] << 56) | ((uint64_t)buf[1] << 48) |
-           ((uint64_t)buf[2] << 40) | ((uint64_t)buf[3] << 32) |
-           ((uint64_t)buf[4] << 24) | ((uint64_t)buf[5] << 16) |
-           ((uint64_t)buf[6] << 8)  | (uint64_t)buf[7];
-}
-
-inline uint32_t read_be32(std::ifstream& file) {
-    uint8_t buf[4];
-    file.read((char*)buf, 4);
-    return ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) |
-           ((uint32_t)buf[2] << 8)  | (uint32_t)buf[3];
-}
-
-inline uint16_t read_be16(std::ifstream& file) {
-    uint8_t buf[2];
-    file.read((char*)buf, 2);
-    return ((uint16_t)buf[0] << 8) | (uint16_t)buf[1];
-}
 
 FidDatabase::FidDatabase() : loaded(false) {}
 FidDatabase::~FidDatabase() {}
@@ -54,81 +39,48 @@ bool FidDatabase::parse_header(std::ifstream& file) {
 }
 
 bool FidDatabase::parse_strings_table(std::ifstream& file, uint64_t offset, uint64_t count) {
-    // Strings table parsing (Heuristic Scraper)
-    // We found 'malloc' at 0x890AB5 in vs2019_x86.fidbf.
-    // The strings table likely starts around there.
+    // Strings table parsing
+    // Format: [Key 8 bytes BE] [Length 2 bytes BE] [String chars]
+    file.seekg(offset);
     
-    // Start scanning from 0x800000 (8MB) to find string data
-    // Format: ... [Length(2)] [String] ...
+    size_t parsed = 0;
+    size_t max_parse = std::min(count, (uint64_t)200000);
     
-    uint64_t scan_start = 0x800000;
-    file.seekg(0, std::ios::end);
-    uint64_t file_size = file.tellg();
-    
-    if (scan_start >= file_size) scan_start = 0;
-    
-    file.seekg(scan_start);
-    
-    const size_t BUFFER_SIZE = 1024 * 1024; // 1MB buffer
-    std::vector<char> buffer(BUFFER_SIZE);
-    
-    size_t strings_found = 0;
-    uint64_t current_pos = scan_start;
-    
-    while (current_pos < file_size) {
-        file.read(buffer.data(), BUFFER_SIZE);
-        size_t bytes_read = file.gcount();
-        if (bytes_read < 4) break;
+    while (parsed < max_parse && !file.eof()) {
+        // Read Key (8 bytes BE)
+        uint64_t key = read_be64(file);
+        if (file.eof()) break;
         
-        for (size_t i = 0; i < bytes_read - 2; ++i) {
-            // Heuristic A: Pascal-style string (Length (2 bytes BE) + Chars)
-            // Length must be reasonable (e.g., 3 < len < 200)
-            uint16_t len = ((uint8_t)buffer[i] << 8) | (uint8_t)buffer[i+1];
-            
-            if (len >= 3 && len < 200 && i + 2 + len < bytes_read) {
-                // Check if chars are printable ASCII
-                bool is_string = true;
-                bool has_alphanum = false;
-                for (int k = 0; k < len; ++k) {
-                    char c = buffer[i + 2 + k];
-                    if (c < 32 || c > 126) {
-                        is_string = false;
-                        break;
-                    }
-                    if (isalnum(c)) has_alphanum = true;
-                }
-                
-                if (is_string && has_alphanum) {
-                    // Extract string
-                    std::string s(&buffer[i + 2], len);
-                    
-                    // Simple ID mapping: simply index by order found or hash?
-                    // The Functions Table refers to "Name ID". In DB4, this is usually a Record ID.
-                    // Without the map table, we can't link ID -> String easily.
-                    // BUT: We observed that Name ID is often 0 or sequential.
-                    // Let's store by hash of the string? No, FunctionRecord has Key.
-                    
-                    // CRITICAL: We need to map NameID (from FunctionRecord) to this string.
-                    // If we can't map it, we can't show names.
-                    // For now, let's just populate a "reverse lookup" or guess IDs.
-                    // Actually, let's try to map the file offset as ID?
-                    // Or maybe the NameID is actually the offset in the Strings file?
-                    strings_table[current_pos + i] = s;
-                    
-                    // Also store by sequential index just in case
-                    strings_table[strings_found] = s;  // Try 0, 1, 2...
-                    
-                    strings_found++;
-                    i += 1 + len; // Skip string
-                }
-            }
+        // Read Length (2 bytes BE)
+        uint16_t len = read_be16(file);
+        if (file.eof()) break;
+        
+        // Sanity check
+        if (len > 1024 || len == 0) {
+            // Invalid record - try to resync by skipping ahead
+            // This might happen if we hit padding or different record type
+            break;
         }
         
-        current_pos += bytes_read;
-        // Overlap handling omitted for simplicity (small risk of missing string at boundary)
+        // Read string value
+        std::string value;
+        value.resize(len);
+        file.read(&value[0], len);
+        
+        if (file.gcount() != len) break;
+        
+        // Store in table
+        strings_table[key] = value;
+        parsed++;
+        
+        // Debug: Print first few
+        if (parsed <= 5) {
+            std::cerr << "[FidDatabase] String #" << parsed << ": key=0x" << std::hex << key 
+                      << " \"" << value << "\"" << std::dec << std::endl;
+        }
     }
     
-    std::cerr << "[FidDatabase] Scraped " << strings_found << " strings, mapped by offset and index" << std::endl;
+    std::cerr << "[FidDatabase] Parsed " << strings_table.size() << " strings" << std::endl;
     return true;
 }
 
@@ -231,11 +183,89 @@ bool FidDatabase::load(const std::string& path) {
         return false;
     }
     
+    // Read file into memory for pattern searching
+    std::vector<char> data(file_size);
+    file.seekg(0);
+    file.read(data.data(), file_size);
+    
+    // Find "Strings Table" header - schema: "String ID;String Value"
+    const char* strings_marker = "Strings Table";
+    size_t strings_table_offset = 0;
+    uint32_t strings_count = 0;
+    
+    for (size_t i = 0; i < file_size - 50; ++i) {
+        if (memcmp(&data[i], strings_marker, 13) == 0) {
+            // Found "Strings Table", look for schema and record count
+            // Format: [Name\0][Version?][Count BE32][...Schema...][0xFF sentinel][Data]
+            // Scan backwards for count (usually 4 bytes before the name)
+            if (i >= 8) {
+                // Count is at i-4 as BE32
+                strings_count = ((uint8_t)data[i-4] << 24) | ((uint8_t)data[i-3] << 16) |
+                                ((uint8_t)data[i-2] << 8) | (uint8_t)data[i-1];
+                if (strings_count > 1000000) strings_count = 0; // sanity
+            }
+            
+            // Find 0xFF sentinel after schema
+            for (size_t j = i; j < std::min(i + 200, file_size); ++j) {
+                if ((uint8_t)data[j] == 0xFF && (uint8_t)data[j+1] == 0xFF && 
+                    (uint8_t)data[j+2] == 0xFF && (uint8_t)data[j+3] == 0xFF) {
+                    strings_table_offset = j + 4; // Skip sentinel
+                    break;
+                }
+            }
+            
+            if (strings_table_offset > 0) {
+                std::cerr << "[FidDatabase] Found Strings Table at 0x" << std::hex 
+                          << strings_table_offset << " (count~" << std::dec << strings_count << ")" << std::endl;
+                break;
+            }
+        }
+    }
+    
+    // Find "Functions Table" header
+    const char* funcs_marker = "Functions Table";
+    size_t functions_table_offset = 0;
+    uint32_t functions_count = 0;
+    
+    for (size_t i = 0; i < file_size - 50; ++i) {
+        if (memcmp(&data[i], funcs_marker, 15) == 0) {
+            // Found "Functions Table"
+            if (i >= 8) {
+                functions_count = ((uint8_t)data[i-4] << 24) | ((uint8_t)data[i-3] << 16) |
+                                  ((uint8_t)data[i-2] << 8) | (uint8_t)data[i-1];
+                if (functions_count > 1000000) functions_count = 0;
+            }
+            
+            // Find 0xFF sentinel
+            for (size_t j = i; j < std::min(i + 200, file_size); ++j) {
+                if ((uint8_t)data[j] == 0xFF && (uint8_t)data[j+1] == 0xFF && 
+                    (uint8_t)data[j+2] == 0xFF && (uint8_t)data[j+3] == 0xFF) {
+                    functions_table_offset = j + 4;
+                    break;
+                }
+            }
+            
+            if (functions_table_offset > 0) {
+                std::cerr << "[FidDatabase] Found Functions Table at 0x" << std::hex 
+                          << functions_table_offset << " (count~" << std::dec << functions_count << ")" << std::endl;
+                break;
+            }
+        }
+    }
+    
     // Parse strings table first (needed for name resolution)
-    parse_strings_table(file, STRINGS_TABLE_HEADER, 100000);
+    if (strings_table_offset > 0) {
+        file.clear();
+        file.seekg(0);
+        parse_strings_table(file, strings_table_offset, strings_count > 0 ? strings_count : 100000);
+    }
     
     // Parse functions table
-    parse_functions_table(file, FUNCTIONS_TABLE_HEADER, 100000);
+    if (functions_table_offset > 0) {
+        file.clear();
+        file.seekg(0);
+        parse_functions_table(file, functions_table_offset, functions_count > 0 ? functions_count : 100000);
+    }
     
     std::cerr << "[FidDatabase] Loaded " << functions.size() << " functions, " 
               << strings_table.size() << " strings" << std::endl;
