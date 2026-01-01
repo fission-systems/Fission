@@ -47,6 +47,15 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                 ];
                 
                 for (tab, label, accent) in tabs {
+                    // Filter tabs based on mode
+                    let visible = match tab {
+                        BottomTab::Debug | BottomTab::Timeline => state.ui.dynamic_mode,
+                        BottomTab::Strings | BottomTab::Imports => !state.ui.dynamic_mode,
+                        _ => true,
+                    };
+                    
+                    if !visible { continue; }
+
                     let is_selected = state.ui.bottom_tab == tab;
                     let text = if is_selected {
                         egui::RichText::new(label).color(accent).strong()

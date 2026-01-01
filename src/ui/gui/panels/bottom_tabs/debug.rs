@@ -113,6 +113,23 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                             state.debug.process_list = crate::debug::enumerate_processes();
                         }
                     }
+
+                    // TitanEngine Actions (Dynamic Mode)
+                    if state.ui.dynamic_mode && is_attached {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        
+                        if ui.button(egui::RichText::new("💾 Dump").color(catppuccin::BLUE)).clicked() {
+                            state.debug.pending_debug_action = Some(DebugAction::Dump);
+                        }
+                        
+                        ui.add_space(4.0);
+                        
+                        if ui.button(egui::RichText::new("🔧 Import Rec").color(catppuccin::MAUVE)).clicked() {
+                            state.debug.pending_debug_action = Some(DebugAction::ImportRec);
+                        }
+                    }
                 });
             });
         });

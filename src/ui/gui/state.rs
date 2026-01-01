@@ -47,6 +47,45 @@ pub struct UIState {
     pub show_xrefs_window: bool,
     /// Selected address for xrefs viewing
     pub selected_xref_addr: Option<u64>,
+    /// Current cursor position (Line, Column)
+    pub cursor_pos: Option<(usize, usize)>,
+    /// Current memory usage in bytes
+    pub memory_usage: u64,
+    /// Current git branch
+    pub git_branch: String,
+    /// Current progress (percentage 0.0-1.0, message)
+    pub progress: Option<(f32, String)>,
+}
+
+impl Default for UIState {
+    fn default() -> Self {
+        Self {
+            bottom_tab: BottomTab::Console,
+            active_activity: Activity::Explorer,
+            sidebar_visible: true,
+            panel_visible: true,
+            open_tabs: Vec::new(),
+            active_tab_index: None,
+            dynamic_mode: false,
+            show_attach_dialog: false,
+            show_xrefs_window: false,
+            selected_xref_addr: None,
+            cursor_pos: None,
+            memory_usage: 0,
+            git_branch: get_git_branch(),
+            progress: None,
+        }
+    }
+}
+
+fn get_git_branch() -> String {
+    std::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 /// Analysis-related state (binary, functions, decompilation)
@@ -85,6 +124,8 @@ pub struct AnalysisState {
     pub user_function_names: std::collections::HashMap<u64, String>,
     /// Rename dialog state: (address, current_input)
     pub rename_dialog: Option<(u64, String)>,
+    /// Reconstructed imports (Dynamic Mode)
+    pub reconstructed_imports: Vec<crate::debug_engine::importer::ImportEntry>,
 }
 
 /// Debug-related state (debugger, breakpoints, memory)
@@ -114,6 +155,8 @@ pub struct DebugStateUI {
     pub timeline: crate::debug::ttd::Timeline,
     /// Process filter for attach dialog
     pub process_filter: String,
+    /// TitanEngine instance (Clean Room)
+    pub titan_engine: Option<Arc<RwLock<crate::debug_engine::engine::TitanEngine>>>,
 }
 
 /// Script-related state (Python scripting)
@@ -277,7 +320,11 @@ impl EditorTab {
 pub enum DebugAction {
     Continue,
     Step,
+    StepInto,
+    StepOver,
     Detach,
+    Dump,
+    ImportRec,
 }
 
 /// Breakpoint actions requested from UI
@@ -346,8 +393,7 @@ impl Default for AnalysisState {
             detection_result: None,
             xref_db: None,
             user_function_names: std::collections::HashMap::new(),
-            rename_dialog: None,
-        }
+            rename_dialog: None,            reconstructed_imports: Vec::new(),        }
     }
 }
 
@@ -366,6 +412,7 @@ impl Default for DebugStateUI {
             mem_dump: String::new(),
             timeline: crate::debug::ttd::Timeline::default(),
             process_filter: String::new(),
+            titan_engine: Some(Arc::new(RwLock::new(crate::debug_engine::engine::TitanEngine::new()))),
         }
     }
 }
@@ -392,22 +439,7 @@ impl Default for SettingsState {
     }
 }
 
-impl Default for UIState {
-    fn default() -> Self {
-        Self {
-            bottom_tab: BottomTab::Console,
-            active_activity: Activity::Explorer,
-            sidebar_visible: true,
-            panel_visible: true,
-            open_tabs: vec![EditorTab::Welcome],
-            active_tab_index: Some(0),
-            dynamic_mode: true,
-            show_attach_dialog: false,
-            show_xrefs_window: false,
-            selected_xref_addr: None,
-        }
-    }
-}
+
 
 impl Default for AppState {
     fn default() -> Self {
