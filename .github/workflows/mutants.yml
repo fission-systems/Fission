@@ -1,0 +1,23 @@
+name: Mutation Testing
+
+on:
+    push:
+        tags: ["v*"] # 태그 푸쉬 시 실행 (시간이 오래 걸리므로)
+    workflow_dispatch: # 수동 실행 가능
+
+jobs:
+    mutants:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Install cargo-mutants
+              uses: taiki-e/install-action@v2
+              with:
+                  tool: cargo-mutants
+
+            - name: Run Mutation Tests
+              run: cargo mutants --timeout 30 -- --all-features
