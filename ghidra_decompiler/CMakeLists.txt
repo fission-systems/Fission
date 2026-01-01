@@ -55,14 +55,17 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/utils/json_utils.cc
     ${FISSION_MODULES_DIR}/utils/file_utils.cc
     ${FISSION_MODULES_DIR}/utils/logger.cc
-    ${FISSION_MODULES_DIR}/types/GdtParser.cc
+    ${FISSION_MODULES_DIR}/types/GdtBinaryParser.cc
     ${FISSION_MODULES_DIR}/types/GuidParser.cc
     ${FISSION_MODULES_DIR}/types/RttiAnalyzer.cc
     ${FISSION_MODULES_DIR}/types/PatternLoader.cc
     ${FISSION_MODULES_DIR}/types/TypeManager.cc
     ${FISSION_MODULES_DIR}/types/StructureAnalyzer.cc
+    ${FISSION_MODULES_DIR}/types/PrototypeEnforcer.cc
     ${FISSION_MODULES_DIR}/analysis/EmulationAnalyzer.cc
     ${FISSION_MODULES_DIR}/analysis/FunctionMatcher.cc
+    ${FISSION_MODULES_DIR}/analysis/InternalMatcher.cc
+    ${FISSION_MODULES_DIR}/analysis/FidDatabase.cc
     ${FISSION_MODULES_DIR}/core/CliArchitecture.cc
     ${FISSION_MODULES_DIR}/core/DecompilerContext.cc
     ${FISSION_MODULES_DIR}/processing/Constants.cc

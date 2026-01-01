@@ -42,7 +42,6 @@
 using namespace ghidra;
 using namespace fission::utils;
 using namespace fission::loader;
-#include "fission/types/GdtParser.h"
 #include "fission/types/TypeManager.h"
 #include "fission/core/CliArchitecture.h"
 #include "fission/core/DecompilerContext.h"
@@ -59,6 +58,7 @@ using namespace fission::types;
 #include "fission/types/StructureAnalyzer.h"
 #include "fission/loader/SymbolLoader.h"
 #include "fission/analysis/EmulationAnalyzer.h"
+#include "fission/types/PrototypeEnforcer.h"
 using namespace fission::loader;
 
 // Constants
@@ -183,31 +183,20 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                 state.arch_64bit->init(store);
                 configure_arch(state.arch_64bit);
                 TypeManager::register_windows_types(state.arch_64bit->types, 8); // 64-bit
-                // Load GDT types if provided (64-bit)
-                if (!gdt_json.empty()) {
-                    std::string content = read_file_content(gdt_json);
-                    if (!content.empty()) {
-                        GdtData data = parse_gdt_json(content);
-                        TypeManager::load_gdt_types(state.arch_64bit->types, data, 8);
-                    }
-                } else {
-                    // Autoload Windows GDT if available
+                // Load GDT types using binary parser (64-bit)
+                {
+                    // Autoload Windows GDT (.gdt binary files)
                     std::vector<std::string> candidates = {
-                        "../../ghidra/typeinfo/win32/windows_vs12_64.gdt.types.json",
-                        "../ghidra/typeinfo/win32/windows_vs12_64.gdt.types.json",
-                        "./ghidra/typeinfo/win32/windows_vs12_64.gdt.types.json"
+                        "../../ghidra/typeinfo/win32/windows_vs12_64.gdt",
+                        "../ghidra/typeinfo/win32/windows_vs12_64.gdt",
+                        "./ghidra/typeinfo/win32/windows_vs12_64.gdt"
                     };
                     for (const auto& path : candidates) {
                         if (file_exists(path)) {
-                            std::cerr << "[fission_decomp] Autoloading GDT (64-bit) from: " << path << std::endl;
-                            std::string content = read_file_content(path);
-                            if (!content.empty()) {
-                                GdtData data = parse_gdt_json(content);
-                                TypeManager::load_gdt_types(state.arch_64bit->types, data, 8);
-                                // Also populate enum values for constant replacement
-                                if (state.enum_values.empty()) {
-                                    state.enum_values = load_gdt_enums(data);
-                                }
+                            std::cerr << "[fission_decomp] Loading GDT (64-bit) from: " << path << std::endl;
+                            GdtBinaryParser gdt;
+                            if (gdt.load(path)) {
+                                TypeManager::load_types_from_gdt(state.arch_64bit->types, &gdt, 8);
                             }
                             break;
                         }
@@ -227,15 +216,6 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
             // Store for post-processing
             state.iat_symbols = iat_symbols;
             
-            // Load enum values for constant substitution (from 64-bit GDT)
-            if (!gdt_json.empty() && state.enum_values.empty()) {
-                std::string content = read_file_content(gdt_json);
-                if (!content.empty()) {
-                   GdtData data = parse_gdt_json(content);
-                   state.enum_values = load_gdt_enums(data);
-                }
-            }
-
             // 32-bit
             if (!state.arch_32bit_ready) {
                 if (state.loader_32bit) delete state.loader_32bit;
@@ -247,33 +227,19 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                 state.arch_32bit->init(store);
                 configure_arch(state.arch_32bit);
                 TypeManager::register_windows_types(state.arch_32bit->types, 4); // 32-bit
-                // Load GDT types if provided (use 32-bit GDT for 32-bit arch if available)
-                if (!gdt_json.empty()) {
-                    // Try to find 32-bit version by replacing "64" with "32" in path
-                    std::string gdt_json_32 = gdt_json;
-                    size_t pos = gdt_json_32.find("64");
-                    if (pos != std::string::npos) {
-                        gdt_json_32.replace(pos, 2, "32");
-                    }
-                    std::string content = read_file_content(gdt_json_32);
-                    if (!content.empty()) {
-                        GdtData data = parse_gdt_json(content);
-                        TypeManager::load_gdt_types(state.arch_32bit->types, data, 4);
-                    }
-                } else {
-                    // Autoload Windows GDT if available (32-bit)
+                // Load GDT types using binary parser (32-bit)
+                {
                     std::vector<std::string> candidates = {
-                        "../../ghidra/typeinfo/win32/windows_vs12_32.gdt.types.json",
-                        "../ghidra/typeinfo/win32/windows_vs12_32.gdt.types.json",
-                        "./ghidra/typeinfo/win32/windows_vs12_32.gdt.types.json"
+                        "../../ghidra/typeinfo/win32/windows_vs12_32.gdt",
+                        "../ghidra/typeinfo/win32/windows_vs12_32.gdt",
+                        "./ghidra/typeinfo/win32/windows_vs12_32.gdt"
                     };
                     for (const auto& path : candidates) {
                         if (file_exists(path)) {
-                            std::cerr << "[fission_decomp] Autoloading GDT (32-bit) from: " << path << std::endl;
-                            std::string content = read_file_content(path);
-                            if (!content.empty()) {
-                                GdtData data = parse_gdt_json(content);
-                                TypeManager::load_gdt_types(state.arch_32bit->types, data, 4);
+                            std::cerr << "[fission_decomp] Loading GDT (32-bit) from: " << path << std::endl;
+                            GdtBinaryParser gdt;
+                            if (gdt.load(path)) {
+                                TypeManager::load_types_from_gdt(state.arch_32bit->types, &gdt, 4);
                             }
                             break;
                         }
@@ -365,12 +331,16 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
 
         std::cerr << "[fission_decomp] Step 3: Resetting actions" << std::endl;
         arch->allacts.getCurrent()->reset(*fd);
+
+        // Step 3b: Enforce GDT prototypes on IAT symbols
+        fission::types::PrototypeEnforcer proto_enforcer;
+        proto_enforcer.enforce_iat_prototypes(arch, state.iat_symbols);
         
         std::cerr << "[fission_decomp] Step 4: Performing decompilation (this may take time)..." << std::endl;
         arch->allacts.getCurrent()->perform(*fd);
 
         // Step 4b: Advanced Structure Recovery (Auto-Struct)
-        // Now using TypeFactory::getTypeStruct() and setFields() for valid IDs
+        // Now with type existence check to prevent duplicate type errors
         fission::types::StructureAnalyzer struct_analyzer;
         bool structs_found = struct_analyzer.analyze_function_structures(fd);
         
