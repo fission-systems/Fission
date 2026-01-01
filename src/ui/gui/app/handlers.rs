@@ -107,52 +107,9 @@ pub fn process_messages(
                     )
                 };
 
-                // Auto-generate GDT types.json if it doesn't exist
-                let gdt_json_path_opt = if std::path::Path::new(gdt_json_path).exists() {
-                    Some(gdt_json_path.to_string())
-                } else if std::path::Path::new(gdt_path).exists() {
-                    // GDT file exists but JSON not generated yet - parse it now
-                    state.log(format!("[*] Generating GDT types from {}...", gdt_path));
-
-                    let result: Option<String> = (|| {
-                        let parser = crate::analysis::gdt_parser::GdtParser::load(gdt_path).ok()?;
-                        let db = parser.extract_db().ok()?;
-                        let complete_structures =
-                            crate::analysis::gdt_parser::GdtParser::extract_complete_structures(
-                                &db,
-                            );
-
-                        // Generate JSON and save
-                        let json = serde_json::json!({
-                            "source": gdt_path,
-                            "complete_structure_count": complete_structures.len(),
-                            "complete_structures": complete_structures.iter().map(|s| {
-                                serde_json::json!({
-                                    "name": s.name,
-                                    "size": s.size,
-                                    "alignment": s.alignment,
-                                    "field_count": s.field_count,
-                                    "fields": s.fields.iter().map(|f| {
-                                        serde_json::json!({"name": f.name, "offset": f.offset, "size": f.size})
-                                    }).collect::<Vec<_>>(),
-                                })
-                            }).collect::<Vec<_>>(),
-                        });
-
-                        let mut file = std::fs::File::create(gdt_json_path).ok()?;
-                        serde_json::to_writer_pretty(&mut file, &json).ok()?;
-                        state.log(format!(
-                            "[*] Generated {} structures to {}",
-                            complete_structures.len(),
-                            gdt_json_path
-                        ));
-                        Some(gdt_json_path.to_string())
-                    })();
-
-                    if result.is_none() {
-                        state.log("[!] Failed to generate GDT types".to_string());
-                    }
-                    result
+                // GDT parsing is now handled by C++ GdtBinaryParser directly
+                let gdt_json_path_opt = if std::path::Path::new(gdt_path).exists() {
+                    Some(gdt_path.to_string())
                 } else {
                     None
                 };

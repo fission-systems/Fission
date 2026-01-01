@@ -6,17 +6,16 @@ pub mod decomp;
 pub mod detector;
 pub mod disasm;
 pub mod dotnet;
-pub mod gdt_parser;
 pub mod loader;
 pub mod patch;
 pub mod signatures;
 pub mod xrefs;
 
-pub use loader::{LoadedBinary, FunctionInfo, SectionInfo};
-pub use patch::{Patch, PatchManager, QuickPatch};
-pub use detector::{detect, Detection, DetectionResult, DetectionType, Confidence};
-pub use xrefs::{XrefDatabase, Xref, XrefType};
+pub use detector::{detect, Confidence, Detection, DetectionResult, DetectionType};
 pub use dotnet::{
-    parse_dotnet_metadata, disassemble_method_rva, DotNetError, DotNetMetadata, DotNetMethod,
+    disassemble_method_rva, parse_dotnet_metadata, DotNetError, DotNetMetadata, DotNetMethod,
     DotNetType, ILInstruction, IlDisassembler,
 };
+pub use loader::{FunctionInfo, LoadedBinary, SectionInfo};
+pub use patch::{Patch, PatchManager, QuickPatch};
+pub use xrefs::{Xref, XrefDatabase, XrefType};
