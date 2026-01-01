@@ -66,6 +66,10 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/analysis/FunctionMatcher.cc
     ${FISSION_MODULES_DIR}/analysis/InternalMatcher.cc
     ${FISSION_MODULES_DIR}/analysis/FidDatabase.cc
+    ${FISSION_MODULES_DIR}/analysis/TypePropagator.cc
+    ${FISSION_MODULES_DIR}/analysis/CallingConvDetector.cc
+    ${FISSION_MODULES_DIR}/analysis/StackFrameAnalyzer.cc
+    ${FISSION_MODULES_DIR}/analysis/TypeSharing.cc
     ${FISSION_MODULES_DIR}/core/CliArchitecture.cc
     ${FISSION_MODULES_DIR}/core/DecompilerContext.cc
     ${FISSION_MODULES_DIR}/processing/Constants.cc
