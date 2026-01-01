@@ -61,5 +61,54 @@ std::map<uint64_t, std::string> PatternLoader::match_functions(
     return matches;
 }
 
+std::vector<uint64_t> PatternLoader::scan_function_prologues(
+    const std::vector<uint8_t>& memory,
+    uint64_t base_address
+) {
+    std::vector<uint64_t> prologues;
+    const size_t SCAN_INTERVAL = 16;  // Every 16 bytes
+    const size_t MAX_SCAN = std::min(memory.size(), (size_t)(10 * 1024 * 1024));  // Max 10MB
+
+    for (size_t offset = 0; offset + 4 < MAX_SCAN; offset += SCAN_INTERVAL) {
+        uint8_t b0 = memory[offset];
+        uint8_t b1 = memory[offset + 1];
+        uint8_t b2 = memory[offset + 2];
+        uint8_t b3 = memory[offset + 3];
+        
+        bool is_prologue = false;
+        
+        // x86 Standard prologues
+        // push ebp; mov ebp, esp (55 8B EC)
+        if (b0 == 0x55 && b1 == 0x8B && b2 == 0xEC) is_prologue = true;
+        // push ebp; mov ebp, esp (55 89 E5)
+        else if (b0 == 0x55 && b1 == 0x89 && b2 == 0xE5) is_prologue = true;
+        // mov edi, edi; push ebp; mov ebp, esp (8B FF 55 8B)
+        else if (b0 == 0x8B && b1 == 0xFF && b2 == 0x55 && b3 == 0x8B) is_prologue = true;
+        // sub esp, XX (83 EC XX) - common for leaf functions
+        else if (b0 == 0x83 && b1 == 0xEC) is_prologue = true;
+        // push ebx (53)
+        else if (b0 == 0x53 && (b1 == 0x8B || b1 == 0x56 || b1 == 0x57)) is_prologue = true;
+        // push esi (56)
+        else if (b0 == 0x56 && (b1 == 0x8B || b1 == 0x57 || b1 == 0x53)) is_prologue = true;
+        // push edi (57)
+        else if (b0 == 0x57 && (b1 == 0x8B || b1 == 0x56 || b1 == 0x53)) is_prologue = true;
+        // push -1 for SEH (6A FF)
+        else if (b0 == 0x6A && b1 == 0xFF) is_prologue = true;
+        // mov eax, fs:[0] for SEH (64 A1 00 00 00 00)
+        else if (b0 == 0x64 && b1 == 0xA1) is_prologue = true;
+        // int 3 padding followed by prologue
+        else if (b0 == 0xCC && b1 == 0x55 && b2 == 0x8B) {
+            // Adjust offset to point to actual prologue
+            prologues.push_back(base_address + offset + 1);
+            continue;
+        }
+        
+        if (is_prologue) {
+            prologues.push_back(base_address + offset);
+        }
+    }
+    return prologues;
+}
+
 } // namespace types
 } // namespace fission
