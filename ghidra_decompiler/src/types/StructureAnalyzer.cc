@@ -9,11 +9,12 @@
 
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 
 namespace fission {
 namespace types {
 
-using namespace fission::core; // For ArchPolicy
+using namespace fission::core;
 
 StructureAnalyzer::StructureAnalyzer() {}
 StructureAnalyzer::~StructureAnalyzer() {}
@@ -21,23 +22,19 @@ StructureAnalyzer::~StructureAnalyzer() {}
 bool StructureAnalyzer::analyze_function_structures(ghidra::Funcdata* fd) {
     if (!fd) return false;
 
-    // Clear previous usage data
     access_map.clear();
     inferred_structs.clear();
 
-    // Get architecture-specific pointer size using Policy
     ghidra::Architecture* arch = fd->getArch();
     int ptr_size = ArchPolicy::getPointerSize(arch);
-    
-    // Get function entry address for unique naming (FIX #1)
     uint64_t func_entry = fd->getAddress().getOffset();
 
-    // 1. Collect Access Patterns (PTRSUB, etc.)
+    // 1. Collect Access Patterns (PTRSUB, PTRADD, INT_ADD)
     collect_accesses(fd);
 
     if (access_map.empty()) return false;
 
-    // 2. Infer Structures (Create TypeStruct objects)
+    // 2. Infer Structures
     ghidra::TypeFactory* factory = fd->getArch()->types;
     bool new_types_created = infer_structures(factory, func_entry, ptr_size);
 
@@ -46,39 +43,93 @@ bool StructureAnalyzer::analyze_function_structures(ghidra::Funcdata* fd) {
     // 3. Apply to Function Inputs
     apply_structures(fd, ptr_size);
 
-    // Only return true if NEW types were created (not reused)
-    // This prevents unnecessary re-decompilation (FIX #3)
     return new_types_created;
 }
 
 void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
-    // Iterate over all alive PcodeOps
     auto iter = fd->beginOpAll();
     auto end = fd->endOpAll();
 
     for (; iter != end; ++iter) {
         ghidra::PcodeOp* op = iter->second;
-        if (!op) continue;
-
-        // Ensure it's alive
-        if (op->isDead()) continue;
+        if (!op || op->isDead()) continue;
 
         ghidra::OpCode opcode = op->code();
+        ghidra::Varnode* base = nullptr;
+        uint64_t offset = 0;
+        bool found = false;
 
-        // We are looking for CPUI_PTRSUB: output = PTRSUB(base, offset)
-        // This is the canonical way Ghidra represents "add offset to pointer to struct"
         if (opcode == ghidra::CPUI_PTRSUB) {
-            ghidra::Varnode* base = op->getIn(0);
-            ghidra::Varnode* offset_vn = op->getIn(1);
+            // PTRSUB(base, offset)
+            base = op->getIn(0);
+            ghidra::Varnode* off_vn = op->getIn(1);
+            if (off_vn && off_vn->isConstant()) {
+                offset = off_vn->getOffset();
+                found = true;
+            }
+        } 
+        else if (opcode == ghidra::CPUI_INT_ADD) {
+            // INT_ADD(base, const) or INT_ADD(const, base)
+            ghidra::Varnode* vn0 = op->getIn(0);
+            ghidra::Varnode* vn1 = op->getIn(1);
+            if (vn0->isConstant()) {
+                offset = vn0->getOffset();
+                base = vn1;
+                found = true;
+            } else if (vn1->isConstant()) {
+                offset = vn1->getOffset();
+                base = vn0;
+                found = true;
+            }
+        }
+        else if (opcode == ghidra::CPUI_PTRADD) {
+            // PTRADD(base, index, elem_size)
+            // Handle only simple case: index is constant
+            base = op->getIn(0);
+            ghidra::Varnode* idx_vn = op->getIn(1);
+            ghidra::Varnode* size_vn = op->getIn(2);
+            
+            if (idx_vn && idx_vn->isConstant() && size_vn && size_vn->isConstant()) {
+                uint64_t idx = idx_vn->getOffset();
+                uint64_t elem_size = size_vn->getOffset();
+                offset = idx * elem_size;
+                found = true;
+            }
+        }
 
-            // Check if base is an Input to the function (Parameter)
-            if (base && base->isInput() && offset_vn && offset_vn->isConstant()) {
-                unsigned long long offset = offset_vn->getOffset();
-                // Store using the storage offset of the base varnode as key
-                unsigned long long storage_addr = base->getOffset();
-                
-                // Track this access
-                access_map[storage_addr].insert((int)offset);
+        if (found && base && base->isInput()) {
+            unsigned long long base_storage = base->getOffset();
+            
+            // Determine size of access by checking descendants (LOAD/STORE)
+            int access_size = 1; // Default
+            ghidra::Varnode* out_vn = op->getOut();
+            if (out_vn) {
+                auto desc_iter = out_vn->beginDescend();
+                auto desc_end = out_vn->endDescend();
+                for(; desc_iter != desc_end; ++desc_iter) {
+                    ghidra::PcodeOp* use_op = *desc_iter;
+                    if (!use_op) continue;
+                    ghidra::OpCode use_code = use_op->code();
+                    
+                    if (use_code == ghidra::CPUI_LOAD) {
+                        // output = LOAD(space, ptr) -> size of output
+                        if (use_op->getOut()) {
+                            access_size = std::max(access_size, (int)use_op->getOut()->getSize());
+                        }
+                    } else if (use_code == ghidra::CPUI_STORE) {
+                        // STORE(space, ptr, value) -> size of value (input 2)
+                        ghidra::Varnode* val = use_op->getIn(2);
+                        if (val) {
+                            access_size = std::max(access_size, (int)val->getSize());
+                        }
+                    }
+                }
+            }
+
+            // Update map: track max size for this offset
+            int& stored_size = access_map[base_storage][(int)offset];
+            if (access_size > stored_size) {
+                stored_size = access_size;
             }
         }
     }
@@ -91,72 +142,86 @@ bool StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory,
 
     bool new_types_created = false;
 
-    for (const auto& pair : access_map) {
+    // Iterate over inferred accesses
+    for (auto& pair : access_map) {
         unsigned long long base_addr = pair.first;
-        const std::set<int>& offsets = pair.second;
+        std::map<int, int>& offsets = pair.second; // Offset -> Size
 
         if (offsets.empty()) continue;
+        if (offsets.size() == 1 && offsets.begin()->first == 0) continue; // Heuristic: Skip if only accessing offset 0
+
+        // Calculate total struct size
+        int max_offset = offsets.rbegin()->first;
+        int last_field_size = offsets.rbegin()->second;
+        int struct_size = max_offset + last_field_size;
         
-        // Heuristic: ignore if only 0 is accessed (could be just int*)
-        if (offsets.size() == 1 && *offsets.begin() == 0) continue;
+        // Align struct size to pointer size
+        if (struct_size % ptr_size != 0) {
+            struct_size += (ptr_size - (struct_size % ptr_size));
+        }
 
-        int max_offset = *offsets.rbegin();
-        // FIX #2: Use architecture-specific pointer size
-        int struct_size = max_offset + ptr_size;
-
-        // FIX #1: Include function address in struct name for uniqueness
-        // Format: f_<func_addr>_arg_<storage_offset>
         std::stringstream ss;
         ss << "f_" << std::hex << func_entry << "_arg_" << base_addr;
         std::string struct_name = ss.str();
 
-        // Check if type already exists
+        // Reuse if exists
         ghidra::Datatype* existing = factory->findByName(struct_name);
         if (existing != nullptr) {
-            // Type already exists for THIS function - reuse it
             if (existing->getMetatype() == ghidra::TYPE_STRUCT) {
                 inferred_structs[base_addr] = (ghidra::TypeStruct*)existing;
-                // Note: This is a reuse, not a new creation
             }
-            continue;  // Skip creation
+            continue;
         }
 
-        // Create new struct with proper TypeFactory API
+        // Create new struct
         ghidra::TypeStruct* new_struct = factory->getTypeStruct(struct_name);
-        
-        // Create Fields with architecture-appropriate sizes
         std::vector<ghidra::TypeField> fields;
         int field_id = 0;
-        for (int off : offsets) {
+        
+        // Fill fields
+        for (auto const& [off, size] : offsets) {
             std::stringstream fss;
             fss << "field_" << std::hex << off;
-            // FIX #2: Use architecture-specific integer type
-            ghidra::Datatype* field_type = factory->getBase(ptr_size, ghidra::TYPE_INT);
             
+            // Try to find a suitable primitive type for the detected size
+            ghidra::Datatype* field_type = nullptr;
+            
+            // Basic primitives prefer signed int/long
+            if (size == 1) field_type = factory->getBase(1, ghidra::TYPE_INT); // char/byte
+            else if (size == 2) field_type = factory->getBase(2, ghidra::TYPE_INT); // short
+            else if (size == 4) field_type = factory->getBase(4, ghidra::TYPE_INT); // int/float
+            else if (size == 8) field_type = factory->getBase(8, ghidra::TYPE_INT); // long/double
+            else {
+                // For other sizes, fallback to unknown
+                field_type = factory->getBase(size, ghidra::TYPE_UNKNOWN);
+            }
+            
+            if(!field_type) field_type = factory->getBase(1, ghidra::TYPE_UNKNOWN); // Ultimate fallback
+
             fields.push_back(ghidra::TypeField(field_id++, off, fss.str(), field_type));
         }
 
-        // Set fields with architecture-specific alignment
+        // Apply/Finalize struct
+        // Passing 0 for flags handles padding automatically
         factory->setFields(fields, new_struct, struct_size, ptr_size, 0);
         
-        // Store result
         inferred_structs[base_addr] = new_struct;
-        new_types_created = true;  // FIX #3: Track that we created new types
+        new_types_created = true;
         
         std::cerr << "[StructureAnalyzer] Created " << struct_name 
-                  << " (" << (ptr_size * 8) << "-bit) with " 
-                  << fields.size() << " fields" << std::endl;
+                  << " (" << (struct_size) << " bytes) with " 
+                  << fields.size() << " detected fields" << std::endl;
     }
     
     return new_types_created;
 }
 
 void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
-    // Iterate input varnodes (Parameters)
-    auto iter = fd->beginLoc(); // Location order
-    auto end = fd->endLoc();
-
     ghidra::TypeFactory* factory = fd->getArch()->types;
+
+    // Use beginLoc for parameter order iteration
+    auto iter = fd->beginLoc();
+    auto end = fd->endLoc();
 
     for (; iter != end; ++iter) {
         ghidra::Varnode* vn = *iter;
@@ -164,12 +229,10 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
             unsigned long long storage = vn->getOffset();
             if (inferred_structs.count(storage)) {
                 ghidra::TypeStruct* st = inferred_structs[storage];
-                
-                // Use Policy for architecture-aware pointer creation
                 ghidra::TypePointer* ptr_type = ArchPolicy::getPointerType(factory, st, fd->getArch());
 
-                // Update the Varnode's type
-                vn->updateType(ptr_type, true, true); // Lock it!
+                // Aggressively update type AND lock it
+                vn->updateType(ptr_type, true, true);
                 
                 std::cerr << "[StructureAnalyzer] Applied " << ptr_type->getName() 
                           << " to Input @" << std::hex << storage << std::dec << std::endl;
@@ -180,4 +243,3 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
 
 } // namespace types
 } // namespace fission
-
