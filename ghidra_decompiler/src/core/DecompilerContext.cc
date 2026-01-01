@@ -100,7 +100,10 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             arch_64bit_ready = true;
             std::cerr << "[DecompilerContext] Initialized 64-bit architecture" << std::endl;
         } else {
-            loader_64bit->updateData(bytes, image_base);
+            // Only update data if bytes is not empty, otherwise preserve existing binary
+            if (!bytes.empty()) {
+                loader_64bit->updateData(bytes, image_base);
+            }
             arch_64bit->symboltab->getGlobalScope()->clear();
         }
     } else {
@@ -121,7 +124,10 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             arch_32bit_ready = true;
             std::cerr << "[DecompilerContext] Initialized 32-bit architecture" << std::endl;
         } else {
-            loader_32bit->updateData(bytes, image_base);
+            // Only update data if bytes is not empty, otherwise preserve existing binary
+            if (!bytes.empty()) {
+                loader_32bit->updateData(bytes, image_base);
+            }
             arch_32bit->symboltab->getGlobalScope()->clear();
         }
     }
