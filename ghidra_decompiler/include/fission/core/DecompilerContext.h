@@ -34,6 +34,9 @@ public:
     // Store known GUIDs for substitution (UUID -> Name)
     std::map<std::string, std::string> guid_map;
     
+    // FID-resolved function names (address -> name)
+    std::map<uint64_t, std::string> fid_function_names;
+    
     DecompilerContext();
     ~DecompilerContext();
     

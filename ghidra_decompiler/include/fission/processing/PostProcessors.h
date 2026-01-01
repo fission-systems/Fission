@@ -31,6 +31,21 @@ std::string substitute_guids(const std::string& code, const std::map<std::string
 // Recover unicode strings from raw byte arrays
 std::string recover_unicode_strings(const std::string& code);
 
+// Replace LOCK/UNLOCK + increment/decrement patterns with Interlocked APIs
+std::string replace_interlocked_patterns(const std::string& code);
+
+// Replace xunknown/undefined types with standard Windows types  
+std::string replace_xunknown_types(const std::string& code);
+
+// Clean up SEH boilerplate (FS_OFFSET, iRam/pcRam naming)
+std::string cleanup_seh_boilerplate(const std::string& code);
+
+// Improve internal function names (func_0x → sub_)
+std::string improve_internal_function_names(const std::string& code);
+
+// Apply FID-resolved function names (sub_XXXX → actual name)
+std::string apply_fid_names(const std::string& code, const std::map<uint64_t, std::string>& fid_names);
+
 } // namespace processing
 } // namespace fission
 

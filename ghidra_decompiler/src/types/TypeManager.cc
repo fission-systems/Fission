@@ -95,25 +95,123 @@ void TypeManager::register_windows_types(TypeFactory* types, int ptr_size) {
     types->getTypedef(void_ptr, "HWND", 0, 0);
     types->getTypedef(void_ptr, "HINSTANCE", 0, 0);
     types->getTypedef(void_ptr, "HMODULE", 0, 0);
+    types->getTypedef(void_ptr, "HKEY", 0, 0);
+    types->getTypedef(void_ptr, "HGLOBAL", 0, 0);
+    types->getTypedef(void_ptr, "HLOCAL", 0, 0);
+    types->getTypedef(void_ptr, "HDC", 0, 0);
+    types->getTypedef(void_ptr, "HBITMAP", 0, 0);
+    types->getTypedef(void_ptr, "HBRUSH", 0, 0);
+    types->getTypedef(void_ptr, "HFONT", 0, 0);
+    types->getTypedef(void_ptr, "HICON", 0, 0);
+    types->getTypedef(void_ptr, "HCURSOR", 0, 0);
+    types->getTypedef(void_ptr, "HMENU", 0, 0);
+    types->getTypedef(void_ptr, "HRGN", 0, 0);
+    types->getTypedef(void_ptr, "HPEN", 0, 0);
+    types->getTypedef(void_ptr, "HPALETTE", 0, 0);
+    types->getTypedef(void_ptr, "HRSRC", 0, 0);
+    types->getTypedef(void_ptr, "HTASK", 0, 0);
+    types->getTypedef(void_ptr, "HGDIOBJ", 0, 0);
+    types->getTypedef(void_ptr, "HMETAFILE", 0, 0);
+    types->getTypedef(void_ptr, "HENHMETAFILE", 0, 0);
+    types->getTypedef(void_ptr, "HWINEVENTHOOK", 0, 0);
+    types->getTypedef(void_ptr, "HHOOK", 0, 0);
+    types->getTypedef(void_ptr, "SC_HANDLE", 0, 0);
+    types->getTypedef(void_ptr, "SERVICE_STATUS_HANDLE", 0, 0);
     
     // Strings
     Datatype* char_t = types->getBase(1, TYPE_INT);
     Datatype* char_ptr = types->getTypePointer(ptr_size, char_t, 1);
     types->getTypedef(char_ptr, "LPSTR", 0, 0);
     types->getTypedef(char_ptr, "LPCSTR", 0, 0);
+    types->getTypedef(char_ptr, "PSTR", 0, 0);
+    types->getTypedef(char_ptr, "PCSTR", 0, 0);
     
     Datatype* wide_char_t = types->getBase(2, TYPE_INT);
     Datatype* wchar_ptr = types->getTypePointer(ptr_size, wide_char_t, 1);
     types->getTypedef(wchar_ptr, "LPWSTR", 0, 0);
     types->getTypedef(wchar_ptr, "LPCWSTR", 0, 0);
+    types->getTypedef(wchar_ptr, "PWSTR", 0, 0);
+    types->getTypedef(wchar_ptr, "PCWSTR", 0, 0);
+    types->getTypedef(wide_char_t, "WCHAR", 0, 0);
     
-    // Basic types
+    // Basic integer types
     types->getTypedef(types->getBase(1, TYPE_UINT), "BYTE", 0, 0);
     types->getTypedef(types->getBase(2, TYPE_UINT), "WORD", 0, 0);
     types->getTypedef(types->getBase(4, TYPE_UINT), "DWORD", 0, 0);
     types->getTypedef(types->getBase(8, TYPE_UINT), "QWORD", 0, 0);
     types->getTypedef(types->getBase(4, TYPE_INT), "LONG", 0, 0);
     types->getTypedef(types->getBase(4, TYPE_UINT), "ULONG", 0, 0);
+    types->getTypedef(types->getBase(4, TYPE_INT), "INT", 0, 0);
+    types->getTypedef(types->getBase(4, TYPE_UINT), "UINT", 0, 0);
+    types->getTypedef(types->getBase(2, TYPE_INT), "SHORT", 0, 0);
+    types->getTypedef(types->getBase(2, TYPE_UINT), "USHORT", 0, 0);
+    types->getTypedef(types->getBase(1, TYPE_INT), "CHAR", 0, 0);
+    types->getTypedef(types->getBase(1, TYPE_UINT), "UCHAR", 0, 0);
+    types->getTypedef(types->getBase(1, TYPE_BOOL), "BOOL", 0, 0);
+    types->getTypedef(types->getBase(1, TYPE_BOOL), "BOOLEAN", 0, 0);
+    
+    // Pointer-sized types
+    types->getTypedef(types->getBase(ptr_size, TYPE_UINT), "SIZE_T", 0, 0);
+    types->getTypedef(types->getBase(ptr_size, TYPE_INT), "SSIZE_T", 0, 0);
+    types->getTypedef(types->getBase(ptr_size, TYPE_UINT), "ULONG_PTR", 0, 0);
+    types->getTypedef(types->getBase(ptr_size, TYPE_INT), "LONG_PTR", 0, 0);
+    types->getTypedef(types->getBase(ptr_size, TYPE_UINT), "DWORD_PTR", 0, 0);
+    types->getTypedef(types->getBase(ptr_size, TYPE_INT), "INT_PTR", 0, 0);
+    types->getTypedef(types->getBase(ptr_size, TYPE_UINT), "UINT_PTR", 0, 0);
+    
+    // HRESULT and NTSTATUS
+    types->getTypedef(types->getBase(4, TYPE_INT), "HRESULT", 0, 0);
+    types->getTypedef(types->getBase(4, TYPE_INT), "NTSTATUS", 0, 0);
+    
+    // LARGE_INTEGER (8 bytes)
+    types->getTypedef(types->getBase(8, TYPE_INT), "LARGE_INTEGER", 0, 0);
+    types->getTypedef(types->getBase(8, TYPE_UINT), "ULARGE_INTEGER", 0, 0);
+    
+    // LRESULT, WPARAM, LPARAM (pointer-sized)
+    types->getTypedef(types->getBase(ptr_size, TYPE_INT), "LRESULT", 0, 0);
+    types->getTypedef(types->getBase(ptr_size, TYPE_UINT), "WPARAM", 0, 0);
+    types->getTypedef(types->getBase(ptr_size, TYPE_INT), "LPARAM", 0, 0);
+    
+    // COM interface types
+    types->getTypedef(void_ptr, "LPUNKNOWN", 0, 0);
+    types->getTypedef(void_ptr, "IUnknown*", 0, 0);
+    
+    // Security types
+    types->getTypedef(void_ptr, "PSID", 0, 0);
+    types->getTypedef(void_ptr, "PACL", 0, 0);
+    types->getTypedef(void_ptr, "PSECURITY_DESCRIPTOR", 0, 0);
+    
+    // SEH types (important for exception handling patterns)
+    types->getTypedef(void_ptr, "PEXCEPTION_RECORD", 0, 0);
+    types->getTypedef(void_ptr, "PCONTEXT", 0, 0);
+    types->getTypedef(void_ptr, "EXCEPTION_POINTERS*", 0, 0);
+    
+    // Thread/Process types
+    types->getTypedef(types->getBase(4, TYPE_UINT), "DWORD_THID", 0, 0);
+    types->getTypedef(types->getBase(4, TYPE_UINT), "DWORD_PRID", 0, 0);
+    
+    // Socket types
+    types->getTypedef(types->getBase(ptr_size, TYPE_UINT), "SOCKET", 0, 0);
+    
+    // Function pointer types (generic)
+    types->getTypedef(void_ptr, "FARPROC", 0, 0);
+    types->getTypedef(void_ptr, "NEARPROC", 0, 0);
+    types->getTypedef(void_ptr, "PROC", 0, 0);
+    types->getTypedef(void_ptr, "WNDPROC", 0, 0);
+    types->getTypedef(void_ptr, "DLGPROC", 0, 0);
+    types->getTypedef(void_ptr, "TIMERPROC", 0, 0);
+    types->getTypedef(void_ptr, "WNDENUMPROC", 0, 0);
+    types->getTypedef(void_ptr, "HOOKPROC", 0, 0);
+    types->getTypedef(void_ptr, "LPTHREAD_START_ROUTINE", 0, 0);
+    
+    // Atom types
+    types->getTypedef(types->getBase(2, TYPE_UINT), "ATOM", 0, 0);
+    
+    // COLORREF (used in GDI)
+    types->getTypedef(types->getBase(4, TYPE_UINT), "COLORREF", 0, 0);
+    
+    // File time
+    types->getTypedef(types->getBase(8, TYPE_UINT), "FILETIME", 0, 0);
 }
 
 } // namespace types

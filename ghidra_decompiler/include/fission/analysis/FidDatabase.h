@@ -20,6 +20,7 @@ struct FidFunctionRecord {
     uint64_t library_id;        ///< Library ID
     uint64_t name_id;           ///< String table index for name
     uint64_t entry_point;       ///< Entry point offset
+    uint64_t domain_path_id;    ///< Domain path string ID
     uint8_t flags;              ///< Flags (auto-pass, auto-fail, etc.)
     
     std::string name;           ///< Resolved function name
@@ -72,6 +73,12 @@ public:
     /// Lookup function by full hash
     /// \return vector of matching function names
     std::vector<std::string> lookup_by_hash(uint64_t full_hash) const;
+    
+    /// Lookup function by name pattern (contains check)
+    std::string lookup_name_contains(const std::string& pattern) const;
+    
+    /// Print sample hashes for debugging
+    void print_sample_hashes(size_t count = 10) const;
 
     /// Get all functions (for debugging)
     const std::vector<FidFunctionRecord>& get_all_functions() const { return functions; }

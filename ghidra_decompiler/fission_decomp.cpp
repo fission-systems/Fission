@@ -53,6 +53,8 @@ using namespace fission::types;
 #include "fission/types/GuidParser.h"
 #include "fission/types/RttiAnalyzer.h"
 #include "fission/loader/PeHeader.h"
+#include "fission/analysis/FidDatabase.h"
+#include "fission/analysis/FunctionMatcher.h"
 #include "fission/processing/StringScanner.h"
 #include "fission/types/PatternLoader.h"
 #include "fission/types/StructureAnalyzer.h"
@@ -255,6 +257,146 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
             // Inject IAT symbols for 32-bit arch
             state.arch_32bit->injectIatSymbols(iat_symbols);
             
+            // Load FID databases for function identification
+            {
+                std::vector<std::string> fid_candidates = {
+                    "./ghidra/funtionID/vs2019_x86.fidbf",
+                    "./ghidra/funtionID/vs2017_x86.fidbf",
+                    "./ghidra/funtionID/vs2015_x86.fidbf",
+                    "./ghidra/funtionID/vs2012_x86.fidbf",
+                    "../ghidra/funtionID/vs2019_x86.fidbf",
+                    "../../ghidra/funtionID/vs2019_x86.fidbf"
+                };
+                
+                static fission::analysis::FidDatabase fid_db;
+                static fission::analysis::FunctionMatcher func_matcher;
+                static bool fid_initialized = false;
+                
+                if (!fid_initialized) {
+                    for (const auto& path : fid_candidates) {
+                        if (file_exists(path)) {
+                            if (fid_db.load(path)) {
+                                std::cerr << "[fission_decomp] Loaded FID database: " << path 
+                                          << " (" << fid_db.get_function_count() << " functions)" << std::endl;
+                                func_matcher.set_fid_database(&fid_db);
+                                break;
+                            }
+                        }
+                    }
+                    fid_initialized = true;
+                }
+                
+                // Load ALL available FID databases for better coverage
+                static std::vector<fission::analysis::FidDatabase> all_fid_dbs;
+                if (all_fid_dbs.empty()) {
+                    std::vector<std::string> all_fidbf = {
+                        "./ghidra/funtionID/vs2019_x86.fidbf",
+                        "./ghidra/funtionID/vs2017_x86.fidbf",
+                        "./ghidra/funtionID/vs2015_x86.fidbf",
+                        "./ghidra/funtionID/vs2012_x86.fidbf",
+                        "./ghidra/funtionID/vsOlder_x86.fidbf"
+                    };
+                    for (const auto& path : all_fidbf) {
+                        if (file_exists(path)) {
+                            fission::analysis::FidDatabase db;
+                            if (db.load(path)) {
+                                all_fid_dbs.push_back(std::move(db));
+                            }
+                        }
+                    }
+                    std::cerr << "[fission_decomp] Loaded " << all_fid_dbs.size() << " FID databases total" << std::endl;
+                }
+                
+                // Improved function prologue detection
+                // Scan every 16 bytes (much denser than 4KB) for function prologues
+                size_t matched_count = 0;
+                size_t prologue_count = 0;
+                const size_t SCAN_INTERVAL = 16;  // Every 16 bytes
+                const size_t MAX_SCAN = std::min(bin_bytes.size(), (size_t)(10 * 1024 * 1024));  // Max 10MB
+                
+                for (size_t offset = 0; offset + 64 < MAX_SCAN; offset += SCAN_INTERVAL) {
+                    uint8_t b0 = bin_bytes[offset];
+                    uint8_t b1 = bin_bytes[offset + 1];
+                    uint8_t b2 = bin_bytes[offset + 2];
+                    uint8_t b3 = bin_bytes[offset + 3];
+                    
+                    bool is_prologue = false;
+                    
+                    // x86 Standard prologues
+                    // push ebp; mov ebp, esp (55 8B EC)
+                    if (b0 == 0x55 && b1 == 0x8B && b2 == 0xEC) is_prologue = true;
+                    // push ebp; mov ebp, esp (55 89 E5)
+                    else if (b0 == 0x55 && b1 == 0x89 && b2 == 0xE5) is_prologue = true;
+                    // mov edi, edi; push ebp; mov ebp, esp (8B FF 55 8B)
+                    else if (b0 == 0x8B && b1 == 0xFF && b2 == 0x55 && b3 == 0x8B) is_prologue = true;
+                    // sub esp, XX (83 EC XX) - common for leaf functions
+                    else if (b0 == 0x83 && b1 == 0xEC) is_prologue = true;
+                    // push ebx (53)
+                    else if (b0 == 0x53 && (b1 == 0x8B || b1 == 0x56 || b1 == 0x57)) is_prologue = true;
+                    // push esi (56)
+                    else if (b0 == 0x56 && (b1 == 0x8B || b1 == 0x57 || b1 == 0x53)) is_prologue = true;
+                    // push edi (57)
+                    else if (b0 == 0x57 && (b1 == 0x8B || b1 == 0x56 || b1 == 0x53)) is_prologue = true;
+                    // push -1 for SEH (6A FF)
+                    else if (b0 == 0x6A && b1 == 0xFF) is_prologue = true;
+                    // mov eax, fs:[0] for SEH (64 A1 00 00 00 00)
+                    else if (b0 == 0x64 && b1 == 0xA1) is_prologue = true;
+                    // int 3 padding followed by prologue
+                    else if (b0 == 0xCC && b1 == 0x55 && b2 == 0x8B) {
+                        offset++;  // Skip to actual prologue
+                        is_prologue = true;
+                    }
+                    
+                    if (is_prologue) {
+                        prologue_count++;
+                        uint64_t addr = image_base + offset;
+                        
+                        // Try each FID database
+                        for (auto& db : all_fid_dbs) {
+                            func_matcher.set_fid_database(&db);
+                            std::string name = func_matcher.match_by_fid(addr, &bin_bytes[offset], 64, true);
+                            if (!name.empty()) {
+                                state.fid_function_names[addr] = name;
+                                matched_count++;
+                                break;  // Found match, don't try other DBs
+                            }
+                        }
+                    }
+                }
+                
+                std::cerr << "[fission_decomp] Scanned " << prologue_count << " function prologues" << std::endl;
+                if (matched_count > 0) {
+                    std::cerr << "[fission_decomp] FID matched " << matched_count << " functions by hash" << std::endl;
+                }
+                
+                // Load common symbols (well-known function names) - fallback
+                std::vector<std::string> symbol_files = {
+                    "./ghidra/funtionID/common_symbols_win32.txt",
+                    "./ghidra/funtionID/common_symbols_win64.txt",
+                    "../ghidra/funtionID/common_symbols_win32.txt"
+                };
+                
+                for (const auto& path : symbol_files) {
+                    if (file_exists(path)) {
+                        std::ifstream ifs(path);
+                        std::string line;
+                        while (std::getline(ifs, line)) {
+                            // Format: address name (or just name)
+                            if (!line.empty() && line[0] != '#') {
+                                // Parse simple format: 0xADDRESS NAME or NAME
+                                size_t space = line.find(' ');
+                                if (space != std::string::npos && line.substr(0, 2) == "0x") {
+                                    uint64_t addr = std::stoull(line.substr(2, space - 2), nullptr, 16);
+                                    std::string name = line.substr(space + 1);
+                                    state.fid_function_names[addr] = name;
+                                }
+                            }
+                        }
+                        std::cerr << "[fission_decomp] Loaded common symbols from: " << path << std::endl;
+                    }
+                }
+            }
+            
             return "{\"status\":\"ok\",\"message\":\"Binary loaded\"}";
         }
         
@@ -414,6 +556,21 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         
         // Step 6e: Unicode String Recovery
         c_code = recover_unicode_strings(c_code);
+        
+        // Step 6f: Interlocked Pattern Replacement
+        c_code = replace_interlocked_patterns(c_code);
+        
+        // Step 6g: xunknown/undefined Type Replacement
+        c_code = replace_xunknown_types(c_code);
+        
+        // Step 6h: SEH Boilerplate Cleanup
+        c_code = cleanup_seh_boilerplate(c_code);
+        
+        // Step 6i: Internal Function Naming
+        c_code = improve_internal_function_names(c_code);
+        
+        // Step 6j: Apply FID-resolved function names
+        c_code = apply_fid_names(c_code, state.fid_function_names);
         
         std::cerr << "[fission_decomp] Step 7: Done!" << std::endl;
         return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_code) + "\"}";

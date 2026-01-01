@@ -156,5 +156,55 @@ std::string FunctionMatcher::match(uint64_t address, const uint8_t* bytes, int s
     return "";  // No match
 }
 
+std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes, size_t size, bool is_x86) {
+    static size_t debug_hash_count = 0;
+    
+    // Check cache first
+    auto it = matched_funcs.find(address);
+    if (it != matched_funcs.end()) {
+        return it->second;
+    }
+    
+    // Check if FID database is available
+    if (!fid_db || !fid_db->is_loaded()) {
+        return "";
+    }
+    
+    // Minimum function size for reliable matching
+    if (size < 8) {
+        return "";
+    }
+    
+    // Calculate FID hash
+    uint64_t hash = FidHasher::calculate_full_hash(bytes, std::min(size, (size_t)64));
+    
+    // Debug: Print first 3 computed hashes
+    if (debug_hash_count < 3) {
+        std::cerr << "[FunctionMatcher] Computed hash at 0x" << std::hex << address 
+                  << ": 0x" << hash << std::dec;
+        // Show first few bytes
+        std::cerr << " bytes=[";
+        for (size_t i = 0; i < std::min(size, (size_t)8); ++i) {
+            std::cerr << std::hex << (int)bytes[i] << " ";
+        }
+        std::cerr << "]" << std::dec << std::endl;
+        debug_hash_count++;
+    }
+    
+    // Lookup in FID database
+    std::vector<std::string> matches = fid_db->lookup_by_hash(hash);
+    
+    if (!matches.empty()) {
+        // Take first match (could implement scoring for multiple matches)
+        std::string name = matches[0];
+        matched_funcs[address] = name;
+        std::cerr << "[FunctionMatcher] FID MATCH! 0x" << std::hex << address 
+                  << " -> " << name << " (hash=0x" << hash << ")" << std::dec << std::endl;
+        return name;
+    }
+    
+    return "";  // No match
+}
+
 } // namespace analysis
 } // namespace fission
