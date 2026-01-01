@@ -109,9 +109,9 @@ impl Default for DecompilerConfig {
     fn default() -> Self {
         Self {
             mode: DecompilerMode::default(), // Single mode by default
-            num_workers: 0, // 0 = auto
+            num_workers: 1, // 1 = serialize requests (C++ server is single-threaded)
             max_workers: 8,
-            default_function_size: 4096, // 4KB
+            default_function_size: 4096,  // 4KB
             max_function_size: 64 * 1024, // 64KB
             min_function_size: 16,
             timeout_ms: 30000, // 30 seconds

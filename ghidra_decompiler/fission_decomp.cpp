@@ -346,8 +346,18 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         
         if (structs_found) {
              std::cerr << "[fission_decomp] Step 4b: Structures inferred! Re-running decompilation..." << std::endl;
-             arch->allacts.getCurrent()->reset(*fd);
-             arch->allacts.getCurrent()->perform(*fd);
+             try {
+                 // Clear the function state to reset processing_started flag
+                 fd->clear();
+                 // Note: Don't call startProcessing() - perform() handles it internally
+                 arch->allacts.getCurrent()->reset(*fd);
+                 arch->allacts.getCurrent()->perform(*fd);
+             } catch (const LowlevelError& e) {
+                 std::cerr << "[fission_decomp] Step 4b ERROR: " << e.explain << std::endl;
+                 // Continue with original decompilation result
+             } catch (const std::exception& e) {
+                 std::cerr << "[fission_decomp] Step 4b EXCEPTION: " << e.what() << std::endl;
+             }
         }
 
         // Step 4c: Emulation-Assisted Analysis (Hyper-Context Tagging)
