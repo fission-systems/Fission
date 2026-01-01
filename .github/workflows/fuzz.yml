@@ -1,0 +1,31 @@
+name: Fuzzing Smoke Test
+
+on:
+    schedule:
+        - cron: "0 3 * * 6" # 매주 토요일 새벽
+    workflow_dispatch:
+
+jobs:
+    fuzz:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Rust Nightly
+              uses: dtolnay/rust-toolchain@nightly
+
+            - name: Install cargo-fuzz
+              uses: taiki-e/install-action@cargo-fuzz
+
+            # 프로젝트에 퍼징 타겟이 있어야 동작함.
+            # 없다면 'cargo fuzz init' 이후 타겟을 추가해야 함.
+            # 여기서는 예시로 'fuzz_target_1'을 가정하고 실행.
+            # 실제로는 `cargo fuzz list`로 타겟을 찾아서 돌리는 스크립트가 필요함.
+            - name: List Fuzz Targets and Run
+              run: |
+                  # Fuzzing target이 없으면 스킵
+                  if [ -d "fuzz" ]; then
+                    cargo fuzz list | xargs -I {} cargo fuzz run {} -- -max_total_time=600 # 타겟당 10분
+                  else
+                    echo "No fuzz targets found. Skipping."
+                  fi

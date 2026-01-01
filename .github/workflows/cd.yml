@@ -1,0 +1,110 @@
+name: CD Release
+
+on:
+    push:
+        tags:
+            - "v*.*.*"
+
+permissions:
+    contents: write
+
+jobs:
+    build-and-release:
+        name: Build & Release
+        runs-on: ${{ matrix.os }}
+        strategy:
+            matrix:
+                include:
+                    - os: ubuntu-latest
+                      target: x86_64-unknown-linux-gnu
+                      artifact_name: fission
+                      asset_name: fission-linux-x64
+                      archive_ext: tar.gz
+                    - os: macos-latest
+                      target: aarch64-apple-darwin
+                      artifact_name: fission
+                      asset_name: fission-macos-arm64
+                      archive_ext: tar.gz
+                    - os: windows-latest
+                      target: x86_64-pc-windows-msvc
+                      artifact_name: fission.exe
+                      asset_name: fission-windows-x64
+                      archive_ext: zip
+
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  submodules: recursive
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: ${{ matrix.target }}
+
+            # --- C++ Decompiler Build Steps (Same as CI) ---
+
+            # [Linux/MacOS] Build Decompiler
+            - name: Build Decompiler (Unix)
+              if: runner.os != 'Windows'
+              run: |
+                  chmod +x scripts/build_decompiler.sh
+                  ./scripts/build_decompiler.sh
+
+            # [Windows] Build Decompiler with Vcpkg
+            - name: Build Decompiler (Windows)
+              if: runner.os == 'Windows'
+              run: |
+                  vcpkg install zlib:x64-windows
+                  cd ghidra_decompiler
+                  mkdir build
+                  cd build
+                  cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+                  cmake --build . --config Release
+
+            # --- Rust Build Steps ---
+
+            - name: Build Rust Binary (Release)
+              run: cargo build --release --target ${{ matrix.target }}
+
+            # --- Packaging ---
+
+            - name: Prepare Package Directory
+              shell: bash
+              run: |
+                  mkdir -p release_pkg
+                  # Copy Rust binary
+                  cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release_pkg/
+
+                  # Copy C++ Decompiler binary
+                  if [ "${{ runner.os }}" == "Windows" ]; then
+                    cp ghidra_decompiler/build/Release/fission_decomp.exe release_pkg/
+                  else
+                    cp ghidra_decompiler/build/fission_decomp release_pkg/
+                  fi
+
+                  # Copy Resources (Ghidra data)
+                  cp -r ghidra release_pkg/
+
+            - name: Create Archive (Unix)
+              if: runner.os != 'Windows'
+              run: |
+                  cd release_pkg
+                  tar -czf ../${{ matrix.asset_name }}.tar.gz *
+
+            - name: Create Archive (Windows)
+              if: runner.os == 'Windows'
+              run: |
+                  cd release_pkg
+                  7z a ../${{ matrix.asset_name }}.zip *
+
+            # --- Release Upload ---
+
+            - name: Upload Release Asset
+              uses: softprops/action-gh-release@v1
+              if: startsWith(github.ref, 'refs/tags/')
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  files: ${{ matrix.asset_name }}.${{ matrix.archive_ext }}
+                  draft: false
+                  prerelease: false

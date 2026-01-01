@@ -1,0 +1,33 @@
+name: Benchmark
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+permissions:
+    contents: write # 벤치마크 결과를 저장하거나 댓글을 달기 위함
+
+jobs:
+    benchmark:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: dtolnay/rust-toolchain@stable
+
+            # Criterion 기반 벤치마크 실행 후 결과 비교
+            # (프로젝트 내에 benches/ 디렉토리와 criterion 의존성이 있어야 함)
+            - name: Run Benchmark
+              run: cargo bench -- --output-format bencher | tee output.txt
+
+            - name: Store Benchmark Result
+              uses: benchmark-action/github-action-benchmark@v1
+              with:
+                  name: Rust Benchmark
+                  tool: "cargo"
+                  output-file-path: output.txt
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  auto-push: true
+                  # gh-pages 브랜치에 결과 저장 (필요시 활성화)
+                  # comment-on-alert: true
