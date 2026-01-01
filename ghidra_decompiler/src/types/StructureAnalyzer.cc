@@ -92,6 +92,17 @@ void StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory) {
         ss << "auto_struct_" << std::hex << base_addr;
         std::string struct_name = ss.str();
 
+        // === FIX: Check if type already exists ===
+        ghidra::Datatype* existing = factory->findByName(struct_name);
+        if (existing != nullptr) {
+            // Type already exists - reuse it
+            if (existing->getMetatype() == ghidra::TYPE_STRUCT) {
+                inferred_structs[base_addr] = (ghidra::TypeStruct*)existing;
+                std::cerr << "[StructureAnalyzer] Reusing existing " << struct_name << std::endl;
+            }
+            continue;  // Skip creation
+        }
+
         // === USE PROPER TypeFactory API ===
         // getTypeStruct creates an empty struct with a valid ID
         ghidra::TypeStruct* new_struct = factory->getTypeStruct(struct_name);

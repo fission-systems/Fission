@@ -1,0 +1,92 @@
+#ifndef __FID_DATABASE_H__
+#define __FID_DATABASE_H__
+
+#include <map>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <fstream>
+
+namespace fission {
+namespace analysis {
+
+/// \brief Single function record from FID database
+struct FidFunctionRecord {
+    uint64_t function_id;       ///< Record ID
+    uint16_t code_unit_size;    ///< Number of code units
+    uint64_t full_hash;         ///< Full hash (8 bytes)
+    uint8_t specific_hash_size; ///< Additional size for specific hash
+    uint64_t specific_hash;     ///< Specific hash (8 bytes)
+    uint64_t library_id;        ///< Library ID
+    uint64_t name_id;           ///< String table index for name
+    uint64_t entry_point;       ///< Entry point offset
+    uint8_t flags;              ///< Flags (auto-pass, auto-fail, etc.)
+    
+    std::string name;           ///< Resolved function name
+};
+
+/// \brief Library record from FID database
+struct FidLibraryRecord {
+    uint64_t library_id;
+    std::string family_name;
+    std::string version;
+    std::string language_id;    ///< e.g., "x86:LE:64:default"
+};
+
+/// \brief Ghidra FID Database (.fidbf) Parser
+///
+/// Parses the packed Ghidra Function ID database format
+/// to enable function signature matching without Ghidra Java runtime.
+class FidDatabase {
+private:
+    std::string filepath;
+    bool loaded;
+    
+    // In-memory tables
+    std::map<uint64_t, std::string> strings_table;
+    std::vector<FidLibraryRecord> libraries;
+    std::vector<FidFunctionRecord> functions;
+    
+    // Hash lookup index (full_hash -> function records)
+    std::multimap<uint64_t, size_t> hash_index;
+    
+    // Parse the packed DB4 format
+    bool parse_header(std::ifstream& file);
+    bool parse_strings_table(std::ifstream& file, uint64_t offset, uint64_t count);
+    bool parse_functions_table(std::ifstream& file, uint64_t offset, uint64_t count);
+    bool parse_libraries_table(std::ifstream& file, uint64_t offset, uint64_t count);
+
+public:
+    FidDatabase();
+    ~FidDatabase();
+
+    /// Load a .fidbf file
+    bool load(const std::string& filepath);
+
+    /// Check if database is loaded
+    bool is_loaded() const { return loaded; }
+
+    /// Get total function count
+    size_t get_function_count() const { return functions.size(); }
+
+    /// Lookup function by full hash
+    /// \return vector of matching function names
+    std::vector<std::string> lookup_by_hash(uint64_t full_hash) const;
+
+    /// Get all functions (for debugging)
+    const std::vector<FidFunctionRecord>& get_all_functions() const { return functions; }
+};
+
+/// \brief FID Hash Calculator
+///
+/// Calculates the same hash as Ghidra's MessageDigestFidHasher
+class FidHasher {
+public:
+    /// Calculate full hash from masked instruction bytes
+    static uint64_t calculate_full_hash(const uint8_t* bytes, size_t size);
+};
+
+} // namespace analysis
+} // namespace fission
+
+#endif // __FID_DATABASE_H__

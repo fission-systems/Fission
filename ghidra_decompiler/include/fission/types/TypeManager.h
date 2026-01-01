@@ -10,7 +10,7 @@
 #include <map>
 #include <vector>
 #include "type.hh"
-#include "fission/types/GdtParser.h"
+#include "fission/types/GdtBinaryParser.h"
 
 namespace fission {
 namespace types {
@@ -20,15 +20,15 @@ using namespace ghidra;
 class TypeManager {
 public:
     /**
-     * Resolve GDT C-style type string to Ghidra Datatype
+     * Resolve type name to Ghidra Datatype using GdtBinaryParser
      */
-    static Datatype* resolve_gdt_type(TypeFactory* types, const std::string& type_name, 
-                                      int size, const GdtData& gdt_data, int ptr_size);
+    static Datatype* resolve_type(TypeFactory* types, const std::string& type_name, 
+                                  int size, const GdtBinaryParser* gdt, int ptr_size);
     
     /**
-     * Load all types from GDT data into Ghidra TypeFactory
+     * Load all types from GdtBinaryParser into Ghidra TypeFactory
      */
-    static void load_gdt_types(TypeFactory* types, const GdtData& gdt_data, int ptr_size);
+    static void load_types_from_gdt(TypeFactory* types, const GdtBinaryParser* gdt, int ptr_size);
     
     /**
      * Register standard Windows types (BYTE, DWORD, HANDLE, etc.)
