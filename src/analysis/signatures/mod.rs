@@ -76,9 +76,13 @@ pub struct SignatureDatabase {
 
 impl SignatureDatabase {
     /// Create a new database with built-in signatures
+    ///
+    /// Performance: Pre-allocates vector capacity based on known signature count
+    /// to avoid reallocations during loading (~150 signatures)
     pub fn new() -> Self {
         let mut db = Self {
-            signatures: Vec::new(),
+            // Pre-allocate for ~150 known signatures to avoid reallocations
+            signatures: Vec::with_capacity(160),
         };
         db.load_msvc_signatures();
         db
