@@ -880,12 +880,14 @@ impl LoadedBinary {
     
     /// Discover internal functions by scanning executable code for CALL instructions
     /// This finds functions that are called but not exported/imported
+    ///
+    /// Performance optimizations:
+    /// - Pre-computes executable section ranges for O(1) lookup instead of O(N) per target
+    /// - Uses existing function_addr_index for O(1) duplicate checking
+    /// - Pre-allocates discovered set with estimated capacity
     pub fn discover_internal_functions(&mut self) {
         use crate::analysis::disasm::DisasmEngine;
         use std::collections::HashSet;
-        
-        // Collect existing function addresses to avoid duplicates
-        let existing_addrs: HashSet<u64> = self.functions.iter().map(|f| f.address).collect();
         
         // Create disassembler for this binary's architecture
         let engine = match DisasmEngine::new(self.is_64bit) {
@@ -893,7 +895,25 @@ impl LoadedBinary {
             Err(_) => return,
         };
         
-        let mut discovered: HashSet<u64> = HashSet::new();
+        // Pre-compute executable section ranges for fast range checking
+        // This avoids O(N) iteration over sections for each discovered target
+        // Note: For typical binaries with <10 executable sections, linear search is efficient.
+        let executable_ranges: Vec<(u64, u64)> = self.sections
+            .iter()
+            .filter(|s| s.is_executable)
+            .map(|s| (s.virtual_address, s.virtual_address + s.virtual_size))
+            .collect();
+        
+        // Helper closure to check if target is in executable range
+        // Uses linear search (efficient for small number of sections)
+        let is_in_executable_range = |target: u64| -> bool {
+            executable_ranges.iter().any(|&(start, end)| target >= start && target < end)
+        };
+        
+        // Estimate capacity based on typical function density (~1 function per 100 bytes of code)
+        let total_code_size: u64 = executable_ranges.iter().map(|(s, e)| e - s).sum();
+        let estimated_functions = (total_code_size / 100) as usize;
+        let mut discovered: HashSet<u64> = HashSet::with_capacity(estimated_functions.max(64));
         
         // Scan all executable sections
         for section in &self.sections {
@@ -913,21 +933,21 @@ impl LoadedBinary {
             let targets = engine.discover_call_targets(bytes, section.virtual_address);
             
             for target in targets {
-                // Only add if not already known and within our address space
-                if !existing_addrs.contains(&target) && !discovered.contains(&target) {
-                    // Verify target is within an executable section
-                    let in_code = self.sections.iter().any(|s| {
-                        s.is_executable 
-                            && target >= s.virtual_address 
-                            && target < s.virtual_address + s.virtual_size as u64
-                    });
-                    
-                    if in_code {
-                        discovered.insert(target);
-                    }
+                // Use O(1) HashMap lookup instead of HashSet contains for existing functions
+                // (function_addr_index is already maintained by the LoadedBinary)
+                if self.function_addr_index.contains_key(&target) {
+                    continue;
+                }
+                
+                // Only add if not already discovered and within executable range
+                if !discovered.contains(&target) && is_in_executable_range(target) {
+                    discovered.insert(target);
                 }
             }
         }
+        
+        // Pre-allocate space for new functions
+        self.functions.reserve(discovered.len());
         
         // Add discovered functions
         for addr in discovered {

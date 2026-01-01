@@ -103,6 +103,11 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
 }
 
 /// Extract strings from binary
+/// 
+/// Performance optimizations:
+/// - Pre-allocates string buffer with estimated capacity to reduce reallocations
+/// - Uses byte-level operations instead of char conversions where possible
+/// - Estimates result vector capacity based on binary size heuristics
 pub fn extract_strings_from_binary(state: &mut AppState) {
     state.analysis.extracted_strings.clear();
     
@@ -111,24 +116,49 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
     let min_len = CONFIG.analysis.min_string_length;
     let data = &binary.data;
     
-    // ASCII strings
-    let mut current_string = String::new();
+    // Pre-allocate with estimated capacity (heuristic: ~1 string per 1KB of data)
+    let estimated_strings = data.len() / 1024;
+    state.analysis.extracted_strings.reserve(estimated_strings.max(100));
+    
+    // Pre-allocate string buffer with reasonable capacity to reduce reallocations
+    // Most strings are < 256 bytes, but we allow growth if needed
+    let mut current_bytes: Vec<u8> = Vec::with_capacity(256);
     let mut start_offset: u64 = 0;
     
     for (i, &byte) in data.iter().enumerate() {
+        // Check if printable ASCII (0x20-0x7E)
         if byte >= 0x20 && byte <= 0x7E {
-            if current_string.is_empty() { start_offset = i as u64; }
-            current_string.push(byte as char);
+            if current_bytes.is_empty() { 
+                start_offset = i as u64; 
+            }
+            current_bytes.push(byte);
         } else {
-            if current_string.len() >= min_len {
+            if current_bytes.len() >= min_len {
+                // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
+                // Use std::mem::take to avoid clone allocation
+                let bytes = std::mem::take(&mut current_bytes);
+                let value = unsafe { String::from_utf8_unchecked(bytes) };
                 state.analysis.extracted_strings.push(ExtractedString {
                     offset: start_offset,
-                    value: current_string.clone(),
+                    value,
                     encoding: StringEncoding::Ascii,
                 });
+                // Re-allocate with same capacity for next string
+                current_bytes = Vec::with_capacity(256);
+            } else {
+                current_bytes.clear();
             }
-            current_string.clear();
         }
+    }
+    
+    // Handle any remaining string at end of data
+    if current_bytes.len() >= min_len {
+        let value = unsafe { String::from_utf8_unchecked(current_bytes) };
+        state.analysis.extracted_strings.push(ExtractedString {
+            offset: start_offset,
+            value,
+            encoding: StringEncoding::Ascii,
+        });
     }
     
     state.analysis.extracted_strings.sort_by_key(|s| s.offset);
