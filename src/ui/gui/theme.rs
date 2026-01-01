@@ -62,9 +62,9 @@ pub mod code {
 }
 
 /// Apply theme based on mode
-pub fn set_theme(ctx: &egui::Context, mode: crate::ui::gui::state::ThemeMode) {
+pub fn set_theme(ctx: &egui::Context, mode: crate::ui::gui::state::ThemeMode, dynamic_mode: bool) {
     match mode {
-        crate::ui::gui::state::ThemeMode::Dark => apply_catppuccin_theme(ctx),
+        crate::ui::gui::state::ThemeMode::Dark => apply_catppuccin_theme(ctx, dynamic_mode),
         crate::ui::gui::state::ThemeMode::Light => {
             let mut style = (*ctx.style()).clone();
             style.visuals = egui::Visuals::light();
@@ -83,10 +83,14 @@ pub fn set_theme(ctx: &egui::Context, mode: crate::ui::gui::state::ThemeMode) {
 }
 
 /// Apply Catppuccin theme to egui context
-pub fn apply_catppuccin_theme(ctx: &egui::Context) {
+pub fn apply_catppuccin_theme(ctx: &egui::Context, dynamic_mode: bool) {
     use catppuccin::*;
     
     let mut style = (*ctx.style()).clone();
+
+    // Define accent color based on mode
+    let accent_color = if dynamic_mode { RED } else { BLUE };
+    let secondary_accent = if dynamic_mode { MAROON } else { SAPPHIRE };
     
     // Spacing and sizing
     style.spacing.item_spacing = Vec2::new(8.0, 4.0);
@@ -135,23 +139,23 @@ pub fn apply_catppuccin_theme(ctx: &egui::Context) {
     visuals.widgets.hovered.bg_fill = SURFACE1;
     visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, TEXT);
     visuals.widgets.hovered.rounding = small_rounding;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, BLUE);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, accent_color);
     
     visuals.widgets.active.bg_fill = SURFACE2;
     visuals.widgets.active.fg_stroke = Stroke::new(1.0, TEXT);
     visuals.widgets.active.rounding = small_rounding;
-    visuals.widgets.active.bg_stroke = Stroke::new(2.0, BLUE);
+    visuals.widgets.active.bg_stroke = Stroke::new(2.0, accent_color);
     
     visuals.widgets.open.bg_fill = SURFACE1;
     visuals.widgets.open.fg_stroke = Stroke::new(1.0, TEXT);
     visuals.widgets.open.rounding = small_rounding;
     
     // Selection
-    visuals.selection.bg_fill = BLUE.linear_multiply(0.3);
-    visuals.selection.stroke = Stroke::new(1.0, BLUE);
+    visuals.selection.bg_fill = accent_color.linear_multiply(0.3);
+    visuals.selection.stroke = Stroke::new(1.0, accent_color);
     
     // Hyperlink
-    visuals.hyperlink_color = SAPPHIRE;
+    visuals.hyperlink_color = secondary_accent;
     
     // Faint background for striped tables
     visuals.faint_bg_color = SURFACE0.linear_multiply(0.5);
@@ -263,7 +267,7 @@ pub fn load_jetbrains_mono(ctx: &egui::Context) {
 
 /// Initialize theme and fonts
 pub fn init(ctx: &egui::Context) {
-    apply_catppuccin_theme(ctx);
+    apply_catppuccin_theme(ctx, false);
     configure_fonts(ctx);
     load_jetbrains_mono(ctx);
 }

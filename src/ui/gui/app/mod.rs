@@ -8,6 +8,9 @@ pub mod decompiler;
 pub mod decomp_worker;
 pub mod file_ops;
 pub mod handlers;
+pub mod titan_ops;
+pub mod script_ops;
+pub mod analysis_ops;
 
 use eframe::egui;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -19,11 +22,11 @@ use crate::debug::Debugger;
 #[cfg(target_os = "windows")]
 use crate::debug::PlatformDebugger;
 
-use super::state::{AppState, EditorTab, Activity, DebugAction};
+use super::state::{AppState, DebugAction};
 use super::messages::AsyncMessage;
 use super::menu::{self, MenuAction};
 use super::status_bar;
-use super::panels::{functions, assembly, decompile, bottom_tabs, activity_bar, side_bar, editor};
+use super::panels::{bottom_tabs, activity_bar, side_bar, editor};
 use super::panels::bottom_tabs::{ConsoleAction, ScriptAction};
 use crate::config::CONFIG;
 use crate::core::modules::ModuleManager;
@@ -72,6 +75,9 @@ pub struct FissionApp {
     
     /// Currently applied theme (to detect changes)
     current_theme: Option<crate::ui::gui::state::ThemeMode>,
+    
+    /// Track last dynamic mode to detect changes
+    last_dynamic_mode: bool,
 
     /// Python scripting bridge
     #[cfg(feature = "python")]
@@ -79,6 +85,11 @@ pub struct FissionApp {
     
     /// Module manager for lifecycle management
     module_manager: ModuleManager,
+    
+    /// System info for memory usage tracking
+    sysinfo: sysinfo::System,
+    /// Last memory update time
+    last_mem_update: std::time::Instant,
 }
 
 impl Default for FissionApp {
@@ -132,9 +143,12 @@ impl Default for FissionApp {
             latest_request_id,
             theme_initialized: false,
             current_theme: None,
+            last_dynamic_mode: false,
             #[cfg(feature = "python")]
             python_bridge: crate::script::PythonBridge::new(),
             module_manager,
+            sysinfo: sysinfo::System::new_all(),
+            last_mem_update: std::time::Instant::now(),
         }
     }
 }
@@ -152,9 +166,26 @@ impl eframe::App for FissionApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Initialize or update theme if changed
         let target_theme = self.state.settings.theme_mode;
-        if self.current_theme != Some(target_theme) {
-            super::theme::set_theme(ctx, target_theme);
+        let dynamic_mode = self.state.ui.dynamic_mode;
+
+        if self.current_theme != Some(target_theme) || self.last_dynamic_mode != dynamic_mode {
+            super::theme::set_theme(ctx, target_theme, dynamic_mode);
+            
+            // Handle tab switching if mode changed
+            if self.last_dynamic_mode != dynamic_mode {
+                 use crate::ui::gui::state::BottomTab;
+                 let invalid = match self.state.ui.bottom_tab {
+                     BottomTab::Debug | BottomTab::Timeline => !dynamic_mode,
+                     BottomTab::Strings | BottomTab::Imports => dynamic_mode,
+                     _ => false,
+                 };
+                 if invalid {
+                     self.state.ui.bottom_tab = BottomTab::Console;
+                 }
+            }
+
             self.current_theme = Some(target_theme);
+            self.last_dynamic_mode = dynamic_mode;
             
             // Re-configure fonts as they might need reloading or style update
             super::theme::configure_fonts(ctx);
@@ -167,6 +198,19 @@ impl eframe::App for FissionApp {
 
         // Apply UI Scale
         ctx.set_pixels_per_point(self.state.settings.ui_scale);
+
+        // Update memory usage every 2 seconds
+        if self.last_mem_update.elapsed().as_secs() >= 2 {
+            self.sysinfo.refresh_memory();
+            let pid = std::process::id();
+            // Note: sysinfo might not support getting memory for current process easily cross-platform without iterating
+            // For now, let's try to find our process
+            use sysinfo::Pid;
+            if let Some(process) = self.sysinfo.process(Pid::from(pid as usize)) {
+                self.state.ui.memory_usage = process.memory();
+            }
+            self.last_mem_update = std::time::Instant::now();
+        }
 
         // Process async messages
         #[cfg(target_os = "windows")]
@@ -190,7 +234,7 @@ impl eframe::App for FissionApp {
         self.handle_menu_action(menu_action);
 
         // Render status bar
-        status_bar::render(ctx, &self.state);
+        status_bar::render(ctx, &mut self.state);
 
         // VS CODE STYLE LAYOUT
         
@@ -204,7 +248,7 @@ impl eframe::App for FissionApp {
                     self.open_function_tabs(&func);
                 }
                 side_bar::SideBarAction::AnalyzeFunctions => {
-                    self.analyze_functions();
+                    analysis_ops::analyze_functions(&mut self.state);
                 }
                 side_bar::SideBarAction::RenameFunction(addr) => {
                     // Get current name for the function
@@ -226,7 +270,13 @@ impl eframe::App for FissionApp {
                 }
                 ConsoleAction::None => {}
             }
-            self.handle_script_action(script_action);
+            
+            #[cfg(feature = "python")]
+            script_ops::handle_action(&mut self.state, script_action, &mut self.python_bridge);
+            #[cfg(not(feature = "python"))]
+            if let ScriptAction::Execute(_) = script_action {
+                self.state.script.script_output.push("[Error] Python support not enabled".into());
+            }
         }
 
         // 4. Editor Area (Central)
@@ -238,9 +288,6 @@ impl eframe::App for FissionApp {
         // Process pending debug control requests
         self.handle_pending_debug_actions();
         
-        // Handle function click from Explorer/Functions panel
-        // (functions::render is now called inside side_bar)
-        
         // Render attach dialog
         self.render_attach_dialog(ctx);
         
@@ -248,7 +295,12 @@ impl eframe::App for FissionApp {
         use super::panels::xrefs;
         if let xrefs::XrefAction::NavigateTo(addr) = xrefs::render(ctx, &mut self.state) {
             // Navigate to address - find function containing this address
-            self.navigate_to_address(addr);
+            analysis_ops::navigate_to_address(
+                &mut self.state, 
+                addr, 
+                &self.decomp_request_tx, 
+                &self.latest_request_id
+            );
         }
     }
 
@@ -290,120 +342,22 @@ impl FissionApp {
         }
     }
 
-    fn handle_script_action(&mut self, action: ScriptAction) {
-        match action {
-            ScriptAction::Execute(code) => {
-                self.execute_python_script(&code);
-            }
-            ScriptAction::Load => {
-                self.load_script_file();
-            }
-            ScriptAction::Save => {
-                self.save_script_file();
-            }
-            ScriptAction::None => {}
-        }
-    }
-
-    fn load_script_file(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Python", &["py"])
-            .add_filter("All Files", &["*"])
-            .pick_file()
-        {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    self.state.script.script_code = content;
-                    self.state.script.script_path = Some(path.display().to_string());
-                    self.state.script.script_output.push(format!("[✓] Loaded: {}", path.display()));
-                }
-                Err(e) => {
-                    self.state.script.script_output.push(format!("[Error] Failed to load: {}", e));
-                }
-            }
-        }
-    }
-
-    fn save_script_file(&mut self) {
-        let default_path = self.state.script.script_path.as_ref()
-            .map(|p| std::path::PathBuf::from(p))
-            .unwrap_or_else(|| std::path::PathBuf::from("script.py"));
-        
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Python", &["py"])
-            .set_file_name(default_path.file_name().unwrap_or_default().to_str().unwrap_or("script.py"))
-            .save_file()
-        {
-            match std::fs::write(&path, &self.state.script.script_code) {
-                Ok(_) => {
-                    self.state.script.script_path = Some(path.display().to_string());
-                    self.state.script.script_output.push(format!("[✓] Saved: {}", path.display()));
-                }
-                Err(e) => {
-                    self.state.script.script_output.push(format!("[Error] Failed to save: {}", e));
-                }
-            }
-        }
-    }
-
-    #[cfg(feature = "python")]
-    fn execute_python_script(&mut self, code: &str) {
-        self.state.script.script_running = true;
-        self.state.script.script_output.push(format!(">>> Executing script..."));
-        
-        // Initialize Python if needed
-        if let Err(e) = self.python_bridge.initialize() {
-            self.state.script.script_output.push(format!("[Error] Failed to initialize Python: {}", e));
-            self.state.script.script_running = false;
-            return;
-        }
-
-        // Sync loaded binary to Python bridge
-        self.python_bridge.set_binary(self.state.analysis.loaded_binary.clone());
-        
-        // Execute the script
-        match self.python_bridge.run(code) {
-            Ok(_) => {
-                self.state.script.script_output.push("[✓] Script executed successfully".into());
-            }
-            Err(e) => {
-                self.state.script.script_output.push(format!("[Error] {}", e));
-            }
-        }
-        
-        self.state.script.script_running = false;
-    }
-
-    #[cfg(not(feature = "python"))]
-    fn execute_python_script(&mut self, _code: &str) {
-        self.state.script.script_output.push("[Error] Python support not enabled. Build with --features python".into());
-    }
-
     fn open_function_tabs(&mut self, func: &FunctionInfo) {
-        let asm_tab = EditorTab::Assembly(func.name.clone());
-        let decomp_tab = EditorTab::Decompiled(func.name.clone());
-        
-        // Open Assembly tab if not open
-        if !self.state.ui.open_tabs.contains(&asm_tab) {
-            self.state.ui.open_tabs.push(asm_tab.clone());
-        }
-        
-        // Open Decompiled tab if not open
-        if !self.state.ui.open_tabs.contains(&decomp_tab) {
-            self.state.ui.open_tabs.push(decomp_tab.clone());
-        }
-        
-        // Focus Decompiled tab by default
-        if let Some(pos) = self.state.ui.open_tabs.iter().position(|t| t == &decomp_tab) {
-            self.state.ui.active_tab_index = Some(pos);
-        }
-        
-        self.state.analysis.selected_function = Some(func.clone());
-        self.decompile_function(func);
+        analysis_ops::open_function_tabs(
+            &mut self.state, 
+            func, 
+            &self.decomp_request_tx, 
+            &self.latest_request_id
+        );
     }
 
     fn handle_pending_debug_actions(&mut self) {
         if let Some(action) = self.state.debug.pending_debug_action.take() {
+            // TitanEngine Actions (Dynamic Mode)
+            if titan_ops::handle_debug_action(&mut self.state, action) {
+                return;
+            }
+
             match action {
                 DebugAction::Detach => {
                     #[cfg(target_os = "windows")]
@@ -441,6 +395,41 @@ impl FissionApp {
     }
 
     fn update_debug_state(&mut self) {
+        // TitanEngine Integration (Dynamic Mode)
+        if self.state.ui.dynamic_mode {
+            #[cfg(target_os = "windows")]
+            if let Some(engine_lock) = &self.state.debug.titan_engine {
+                if let Ok(engine) = engine_lock.read() {
+                    if engine.active_process.is_some() {
+                        if let Ok(ctx) = engine.get_context() {
+                            let regs = crate::debug::types::RegisterState {
+                                rax: ctx.rax(),
+                                rbx: ctx.rbx(),
+                                rcx: ctx.rcx(),
+                                rdx: ctx.rdx(),
+                                rsi: ctx.rsi(),
+                                rdi: ctx.rdi(),
+                                rbp: ctx.rbp(),
+                                rsp: ctx.rsp(),
+                                r8: ctx.r8(),
+                                r9: ctx.r9(),
+                                r10: ctx.r10(),
+                                r11: ctx.r11(),
+                                r12: ctx.r12(),
+                                r13: ctx.r13(),
+                                r14: ctx.r14(),
+                                r15: ctx.r15(),
+                                rip: ctx.rip(),
+                                rflags: ctx.rflags(),
+                            };
+                            self.state.debug.debug_state.registers = Some(regs);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
         #[cfg(target_os = "windows")]
         {
             if let Some(dbg) = self.debugger.as_mut() {
@@ -495,6 +484,10 @@ impl FissionApp {
 
     #[cfg(target_os = "windows")]
     fn attach_to_process(&mut self, pid: u32) {
+        if titan_ops::attach(&mut self.state, pid) {
+            return;
+        }
+
         debug_ops::attach_to_process(
             &mut self.state,
             &mut self.debugger,
@@ -507,33 +500,6 @@ impl FissionApp {
     #[cfg(not(target_os = "windows"))]
     fn attach_to_process(&mut self, pid: u32) {
         debug_ops::attach_to_process(&mut self.state, pid);
-    }
-
-    /// Navigate to an address - find function containing this address and select it
-    fn navigate_to_address(&mut self, addr: u64) {
-        // Clone the functions list to avoid borrow issues
-        let functions: Vec<FunctionInfo> = self.state.analysis.loaded_binary
-            .as_ref()
-            .map(|b| b.functions.clone())
-            .unwrap_or_default();
-        
-        // Find function containing or starting at this address
-        for func in &functions {
-            // Check if address is within function range (configurable)
-            let range = CONFIG.analysis.function_address_range as u64;
-            if addr >= func.address && addr < func.address + range {
-                self.state.log(format!("[*] Navigating to function: {} at 0x{:08X}", func.name, func.address));
-                self.state.analysis.selected_function = Some(func.clone());
-                self.state.ui.selected_xref_addr = Some(func.address);
-                self.decompile_function(func);
-                return;
-            }
-        }
-        
-        // If no function found, just log
-        if !functions.is_empty() {
-            self.state.log(format!("[!] No function found at address 0x{:08X}", addr));
-        }
     }
 }
 
@@ -554,34 +520,4 @@ fn format_hexdump(addr: u64, data: &[u8]) -> String {
         output.push('\n');
     }
     output
-}
-
-impl FissionApp {
-    /// Analyze the loaded binary to discover internal functions from CALL instructions
-    fn analyze_functions(&mut self) {
-        // Clone the Arc first to avoid borrow checker issues
-        let binary_opt = self.state.analysis.loaded_binary.clone();
-        
-        if let Some(binary_arc) = binary_opt {
-            self.state.log("[*] Analyzing binary for internal functions...");
-            
-            // Clone the inner LoadedBinary to get a mutable copy
-            let mut binary = (*binary_arc).clone();
-            let before_count = binary.functions.len();
-            
-            // Discover internal functions
-            binary.discover_internal_functions();
-            
-            let after_count = binary.functions.len();
-            let discovered = after_count - before_count;
-            
-            // Replace with new Arc
-            self.state.analysis.loaded_binary = Some(std::sync::Arc::new(binary));
-            
-            self.state.log(format!("[✓] Found {} new internal functions ({} total)", 
-                discovered, after_count));
-        } else {
-            self.state.log("[!] No binary loaded");
-        }
-    }
 }

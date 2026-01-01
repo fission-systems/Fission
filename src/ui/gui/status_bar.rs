@@ -3,7 +3,7 @@ use crate::ui::gui::state::{AppState, Activity};
 use crate::ui::gui::theme::catppuccin;
 
 /// Render the bottom status bar
-pub fn render(ctx: &egui::Context, state: &AppState) {
+pub fn render(ctx: &egui::Context, state: &mut AppState) {
     egui::TopBottomPanel::bottom("status_bar")
         .default_height(24.0)
         .max_height(24.0)
@@ -47,8 +47,31 @@ pub fn render(ctx: &egui::Context, state: &AppState) {
                 ui.add_space(10.0);
                 ui.separator();
                 
-                // Center: Log Message (Most recent)
-                if let Some(last_log) = state.log_buffer.last() {
+                // Center: Log Message or Progress
+                if let Some((percentage, message)) = &state.ui.progress {
+                    // Render Progress Bar
+                    let progress_width = 200.0;
+                    let (rect, _response) = ui.allocate_exact_size(egui::vec2(progress_width, 14.0), egui::Sense::hover());
+                    
+                    // Background
+                    ui.painter().rect_filled(rect, 2.0, ui.visuals().faint_bg_color);
+                    
+                    // Fill
+                    let fill_rect = egui::Rect::from_min_size(
+                        rect.min, 
+                        egui::vec2(rect.width() * percentage, rect.height())
+                    );
+                    ui.painter().rect_filled(fill_rect, 2.0, catppuccin::BLUE);
+                    
+                    // Text
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        format!("{} {:.0}%", message, percentage * 100.0),
+                        egui::FontId::proportional(10.0),
+                        ui.visuals().text_color(),
+                    );
+                } else if let Some(last_log) = state.log_buffer.last() {
                      ui.label(egui::RichText::new(last_log)
                         .color(ui.visuals().weak_text_color())
                         .size(11.0)
@@ -59,22 +82,42 @@ pub fn render(ctx: &egui::Context, state: &AppState) {
                      ui.add_space(8.0);
                      
                      // Right: Branch
-                     ui.label(egui::RichText::new("main*").small().color(ui.visuals().strong_text_color()));
+                     ui.label(egui::RichText::new(&state.ui.git_branch).small().color(ui.visuals().strong_text_color()));
                      ui.label(egui::RichText::new("").small().color(ui.visuals().strong_text_color()));
                      ui.add_space(10.0);
 
                      // Right: Cursor Position
-                     if let Some(addr) = state.ui.selected_xref_addr {
-                         ui.label(egui::RichText::new(format!("Ln {}, Col 1", 0)).small().color(ui.visuals().weak_text_color())); // Placeholder
-                         ui.label(egui::RichText::new(format!("0x{:X}", addr)).monospace().size(11.0).color(ui.visuals().text_color()));
+                     if let Some((ln, col)) = state.ui.cursor_pos {
+                         ui.label(egui::RichText::new(format!("Ln {}, Col {}", ln, col)).small().color(ui.visuals().weak_text_color()));
                      } else {
-                         ui.label(egui::RichText::new("--").small().color(ui.visuals().weak_text_color()));
+                         ui.label(egui::RichText::new("Ln 0, Col 0").small().color(ui.visuals().weak_text_color()));
+                     }
+
+                     if let Some(addr) = state.ui.selected_xref_addr {
+                         ui.add_space(5.0);
+                         ui.label(egui::RichText::new(format!("0x{:X}", addr)).monospace().size(11.0).color(ui.visuals().text_color()));
                      }
 
                      ui.add_space(10.0);
+
+                     // Mode Switcher
+                     let (mode_text, mode_color) = if state.ui.dynamic_mode {
+                         ("DYNAMIC", catppuccin::RED)
+                     } else {
+                         ("STATIC", catppuccin::BLUE)
+                     };
                      
-                     // Right: Memory (Mock)
-                     ui.label(egui::RichText::new("128 MB").small().color(ui.visuals().weak_text_color()));
+                     if ui.add(egui::Button::new(
+                         egui::RichText::new(mode_text).strong().color(Color32::WHITE)
+                     ).fill(mode_color).small()).clicked() {
+                         state.ui.dynamic_mode = !state.ui.dynamic_mode;
+                     }
+                     
+                     ui.add_space(10.0);
+                     
+                     // Right: Memory
+                     let mem_mb = state.ui.memory_usage as f64 / 1024.0 / 1024.0;
+                     ui.label(egui::RichText::new(format!("{:.1} MB", mem_mb)).small().color(ui.visuals().weak_text_color()));
                      ui.label(egui::RichText::new("💾").small());
                 });
             });

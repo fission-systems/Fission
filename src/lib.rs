@@ -10,8 +10,10 @@
 pub mod analysis;
 pub mod core;
 pub mod debug;
+pub mod parser;
 pub mod plugin;
 pub mod script;
+pub mod debug_engine;
 pub mod ui;
 
 // Re-export core utilities at crate level for convenience

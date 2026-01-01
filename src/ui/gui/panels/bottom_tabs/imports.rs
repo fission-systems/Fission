@@ -8,6 +8,61 @@ use crate::ui::gui::widgets::empty_state;
 
 /// Render imports tab content with virtual scrolling
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
+    // Dynamic Mode: Show Reconstructed Imports
+    if state.ui.dynamic_mode {
+        let imports = &state.analysis.reconstructed_imports;
+        
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("Reconstructed Imports: {}", imports.len()))
+                .color(catppuccin::MAUVE));
+        });
+        
+        ui.separator();
+        
+        let available_height = ui.available_height();
+        
+        TableBuilder::new(ui)
+            .striped(true)
+            .resizable(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::exact(100.0)) // RVA
+            .column(Column::exact(100.0)) // Target
+            .column(Column::exact(150.0)) // Module
+            .column(Column::remainder())  // Function
+            .min_scrolled_height(0.0)
+            .max_scroll_height(available_height)
+            .header(20.0, |mut header| {
+                header.col(|ui| { ui.strong("RVA"); });
+                header.col(|ui| { ui.strong("Target"); });
+                header.col(|ui| { ui.strong("Module"); });
+                header.col(|ui| { ui.strong("Function"); });
+            })
+            .body(|body| {
+                body.rows(18.0, imports.len(), |mut row| {
+                    let imp = &imports[row.index()];
+                    row.col(|ui| {
+                        ui.label(egui::RichText::new(format!("{:08X}", imp.rva))
+                            .monospace().color(code::ADDRESS));
+                    });
+                    row.col(|ui| {
+                        ui.label(egui::RichText::new(format!("{:08X}", imp.target_address))
+                            .monospace().color(code::NUMBER));
+                    });
+                    row.col(|ui| {
+                        ui.label(egui::RichText::new(&imp.module_name)
+                            .color(catppuccin::BLUE));
+                    });
+                    row.col(|ui| {
+                        let name = imp.function_name.as_deref().unwrap_or("?");
+                        ui.label(egui::RichText::new(name)
+                            .color(catppuccin::MAUVE));
+                    });
+                });
+            });
+            
+        return;
+    }
+
     let Some(ref binary) = state.analysis.loaded_binary else {
         empty_state(ui, "Load a binary to view imports", None);
         return;

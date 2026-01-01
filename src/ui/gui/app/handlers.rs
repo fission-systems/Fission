@@ -182,12 +182,13 @@ pub fn process_messages(
                         total,
                         message,
                     } => {
-                        // TODO: Update status bar progress
-                        state.log(format!(
-                            "[Progress] {:.1}% - {}",
-                            (current as f64 / total as f64) * 100.0,
-                            message
-                        ));
+                        let percentage = (current as f32 / total as f32).clamp(0.0, 1.0);
+                        state.ui.progress = Some((percentage, message.clone()));
+                        
+                        // Clear progress when done
+                        if current >= total {
+                            state.ui.progress = None;
+                        }
                     }
                     crate::core::events::FissionEvent::SelectionChanged { address } => {
                         if let Some(addr) = address {
