@@ -99,8 +99,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
     action
 }
 
-/// Case-insensitive substring check without allocating new strings.
-/// Uses char-by-char comparison to avoid to_lowercase() allocation.
+/// Case-insensitive substring check using iterators to minimize allocations.
+/// For ASCII strings (common in function names), this avoids most allocations.
 #[inline]
 fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
@@ -110,19 +110,25 @@ fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
         return false;
     }
     
-    // Simple sliding window check with case-insensitive comparison
-    let needle_chars: Vec<char> = needle.chars().collect();
-    let haystack_chars: Vec<char> = haystack.chars().collect();
-    
-    'outer: for start in 0..=(haystack_chars.len().saturating_sub(needle_chars.len())) {
-        for (i, &nc) in needle_chars.iter().enumerate() {
-            let hc = haystack_chars[start + i];
-            // Compare lowercase versions of characters
-            if !hc.to_lowercase().eq(nc.to_lowercase()) {
-                continue 'outer;
+    // For ASCII strings, use byte-level comparison (most efficient)
+    if haystack.is_ascii() && needle.is_ascii() {
+        let needle_bytes = needle.as_bytes();
+        let haystack_bytes = haystack.as_bytes();
+        
+        'outer: for start in 0..=(haystack_bytes.len().saturating_sub(needle_bytes.len())) {
+            for (i, &nb) in needle_bytes.iter().enumerate() {
+                let hb = haystack_bytes[start + i];
+                // ASCII case-insensitive comparison
+                if hb.to_ascii_lowercase() != nb.to_ascii_lowercase() {
+                    continue 'outer;
+                }
             }
+            return true;
         }
-        return true;
+        return false;
     }
-    false
+    
+    // Fallback for non-ASCII: use standard library's to_lowercase()
+    // This allocates but handles Unicode correctly
+    haystack.to_lowercase().contains(&needle.to_lowercase())
 }

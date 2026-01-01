@@ -180,12 +180,15 @@ impl LoadedBinaryBuilder {
 
     pub fn build(self) -> Result<LoadedBinary> {
         // Build function indices for O(1) lookups
+        // Note: If there are duplicate function names, only the last one is indexed.
+        // This is acceptable because most lookups use the address index.
         let mut function_addr_index = std::collections::HashMap::with_capacity(self.functions.len());
         let mut function_name_index = std::collections::HashMap::with_capacity(self.functions.len());
         
         for (idx, func) in self.functions.iter().enumerate() {
             function_addr_index.insert(func.address, idx);
             if !func.name.is_empty() {
+                // Note: Duplicate names will overwrite previous entries
                 function_name_index.insert(func.name.clone(), idx);
             }
         }
@@ -767,9 +770,10 @@ impl LoadedBinary {
         }
         
         // Fall back to range check for addresses within function bounds (O(N))
-        // This is needed when the address is inside a function but not at its start
+        // This handles addresses inside a function body (not at the start)
+        // We check >= f.address to be safe in case the index is inconsistent
         self.functions.iter().find(|f| {
-            f.size > 0 && address > f.address && address < f.address + f.size
+            f.size > 0 && address >= f.address && address < f.address + f.size
         })
     }
 
