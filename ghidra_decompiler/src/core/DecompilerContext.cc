@@ -1,5 +1,6 @@
 #include "fission/core/DecompilerContext.h"
 #include "libdecomp.hh"
+#include "fission/core/ArchPolicy.h"
 #include "sleigh_arch.hh"
 #include "fission/types/TypeManager.h"
 #include "fission/types/GdtBinaryParser.h"
@@ -27,7 +28,7 @@ static void load_gdt_for_arch(ghidra::Architecture* arch, bool is_64bit) {
             std::cerr << "[DecompilerContext] Loading GDT (" << (is_64bit ? "64-bit" : "32-bit") << ") from: " << path << std::endl;
             GdtBinaryParser gdt;
             if (gdt.load(path)) {
-                TypeManager::load_types_from_gdt(arch->types, &gdt, is_64bit ? 8 : 4);
+                TypeManager::load_types_from_gdt(arch->types, &gdt, ArchPolicy::getPointerSize(arch));
             }
             break;
         }
@@ -94,7 +95,7 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             arch_64bit->init(store);
             configure_arch(arch_64bit);
             
-            TypeManager::register_windows_types(arch_64bit->types, 8);
+            TypeManager::register_windows_types(arch_64bit->types, ArchPolicy::getPointerSize(arch_64bit));
             load_gdt_for_arch(arch_64bit, true);
             
             arch_64bit_ready = true;
@@ -118,7 +119,7 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             arch_32bit->init(store);
             configure_arch(arch_32bit);
             
-            TypeManager::register_windows_types(arch_32bit->types, 4);
+            TypeManager::register_windows_types(arch_32bit->types, ArchPolicy::getPointerSize(arch_32bit));
             load_gdt_for_arch(arch_32bit, false);
             
             arch_32bit_ready = true;

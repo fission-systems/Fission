@@ -1,4 +1,5 @@
 #include "fission/types/StructureAnalyzer.h"
+#include "fission/core/ArchPolicy.h"
 
 // Ghidra headers
 #include "funcdata.hh"
@@ -12,6 +13,8 @@
 namespace fission {
 namespace types {
 
+using namespace fission::core; // For ArchPolicy
+
 StructureAnalyzer::StructureAnalyzer() {}
 StructureAnalyzer::~StructureAnalyzer() {}
 
@@ -22,9 +25,9 @@ bool StructureAnalyzer::analyze_function_structures(ghidra::Funcdata* fd) {
     access_map.clear();
     inferred_structs.clear();
 
-    // Get architecture-specific pointer size (4 for 32-bit, 8 for 64-bit)
+    // Get architecture-specific pointer size using Policy
     ghidra::Architecture* arch = fd->getArch();
-    int ptr_size = arch->getDefaultSize();  // FIX #2: Use architecture size
+    int ptr_size = ArchPolicy::getPointerSize(arch);
     
     // Get function entry address for unique naming (FIX #1)
     uint64_t func_entry = fd->getAddress().getOffset();
@@ -162,8 +165,8 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
             if (inferred_structs.count(storage)) {
                 ghidra::TypeStruct* st = inferred_structs[storage];
                 
-                // FIX #2: Use architecture-specific pointer size
-                ghidra::TypePointer* ptr_type = factory->getTypePointer(ptr_size, st, ptr_size);
+                // Use Policy for architecture-aware pointer creation
+                ghidra::TypePointer* ptr_type = ArchPolicy::getPointerType(factory, st, fd->getArch());
 
                 // Update the Varnode's type
                 vn->updateType(ptr_type, true, true); // Lock it!
