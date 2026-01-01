@@ -323,16 +323,29 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
 }
 
 /// Detect by strings in binary
+/// Detect by strings in binary
+///
+/// Performance optimizations:
+/// - Uses memmem-style byte pattern searching instead of string conversion
+/// - Searches raw bytes directly, avoiding UTF-8 lossy conversion allocation
+/// - Early exits once all patterns for a category are found
 fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     // Search in configurable range for better detection
     let search_limit = CONFIG.analysis.max_string_search_size.min(binary.data.len());
     let data = &binary.data[..search_limit];
     
-    // Convert to string for pattern matching
-    let data_str = String::from_utf8_lossy(data);
+    // Helper function to search for byte pattern in data
+    // Uses a simple but efficient sliding window search
+    #[inline]
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        if needle.is_empty() || needle.len() > haystack.len() {
+            return needle.is_empty();
+        }
+        haystack.windows(needle.len()).any(|window| window == needle)
+    }
     
     // Go detection
-    if data_str.contains("Go build ID:") || data_str.contains("runtime.gopanic") {
+    if contains_bytes(data, b"Go build ID:") || contains_bytes(data, b"runtime.gopanic") {
         result.add(Detection::new(
             DetectionType::Language,
             "Go",
@@ -348,7 +361,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     }
     
     // Rust detection
-    if data_str.contains("rust_panic") || data_str.contains("rustc/") || data_str.contains(".rustup") {
+    if contains_bytes(data, b"rust_panic") || contains_bytes(data, b"rustc/") || contains_bytes(data, b".rustup") {
         result.add(Detection::new(
             DetectionType::Language,
             "Rust",
@@ -364,11 +377,11 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     }
     
     // Python detection (PyInstaller, py2exe, cx_Freeze)
-    let has_pyinstaller = data_str.contains("PYZ-00") 
-        || data_str.contains("_MEIPASS") 
-        || data_str.contains("PyInstaller")
-        || data_str.contains("pyi-runtime")
-        || data_str.contains("PYTHONHOME");
+    let has_pyinstaller = contains_bytes(data, b"PYZ-00") 
+        || contains_bytes(data, b"_MEIPASS") 
+        || contains_bytes(data, b"PyInstaller")
+        || contains_bytes(data, b"pyi-runtime")
+        || contains_bytes(data, b"PYTHONHOME");
     
     if has_pyinstaller {
         result.add(Detection::new(
@@ -386,7 +399,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     }
     
     // py2exe detection
-    if data_str.contains("py2exe") || data_str.contains("PYTHONSCRIPT") {
+    if contains_bytes(data, b"py2exe") || contains_bytes(data, b"PYTHONSCRIPT") {
         result.add(Detection::new(
             DetectionType::Packer,
             "py2exe",
@@ -402,7 +415,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     }
     
     // cx_Freeze detection
-    if data_str.contains("cx_Freeze") {
+    if contains_bytes(data, b"cx_Freeze") {
         result.add(Detection::new(
             DetectionType::Packer,
             "cx_Freeze",
@@ -418,7 +431,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     }
     
     // AutoIt detection
-    if data_str.contains("AutoIt") || data_str.contains("AU3!") {
+    if contains_bytes(data, b"AutoIt") || contains_bytes(data, b"AU3!") {
         result.add(Detection::new(
             DetectionType::Language,
             "AutoIt",
@@ -428,7 +441,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     }
     
     // Nim detection
-    if data_str.contains("nimbase.h") || data_str.contains("@Nim") {
+    if contains_bytes(data, b"nimbase.h") || contains_bytes(data, b"@Nim") {
         result.add(Detection::new(
             DetectionType::Language,
             "Nim",
@@ -437,8 +450,10 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
         ));
     }
     
-    // GCC detection
-    if data_str.contains("GCC:") {
+    // GCC detection - need string conversion only if found
+    if contains_bytes(data, b"GCC:") {
+        // Only allocate string for version extraction if GCC pattern found
+        let data_str = String::from_utf8_lossy(data);
         let version = extract_gcc_version(&data_str);
         result.add(Detection::new(
             DetectionType::Compiler,
@@ -449,7 +464,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     }
     
     // Clang detection
-    if data_str.contains("clang version") {
+    if contains_bytes(data, b"clang version") {
         result.add(Detection::new(
             DetectionType::Compiler,
             "Clang",
@@ -458,8 +473,8 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
         ));
     }
     
-    // MinGW detection
-    if data_str.contains("mingw") || data_str.contains("MinGW") {
+    // MinGW detection (case-sensitive checks for both variants)
+    if contains_bytes(data, b"mingw") || contains_bytes(data, b"MinGW") {
         result.add(Detection::new(
             DetectionType::Compiler,
             "MinGW",
@@ -522,6 +537,8 @@ fn matches_signature(bytes: &[u8], sig: &[u8], mask: Option<&[u8]>) -> bool {
 }
 
 /// Detect .NET binaries
+///
+/// Performance optimization: Uses byte pattern search instead of string conversion
 fn detect_dotnet(binary: &LoadedBinary, result: &mut DetectionResult) {
     if binary.is_dotnet {
         result.add(Detection::new(
@@ -531,10 +548,18 @@ fn detect_dotnet(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
         
-        // Check for obfuscators
+        // Check for obfuscators using byte search (avoids string allocation)
+        let search_limit = (64 * 1024).min(binary.data.len());
+        let data = &binary.data[..search_limit];
+        
+        // Helper function for byte pattern search (inline for performance)
+        #[inline]
+        fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+            haystack.windows(needle.len()).any(|window| window == needle)
+        }
+        
         // ConfuserEx detection
-        let data_str = String::from_utf8_lossy(&binary.data[..64.min(binary.data.len()) * 1024]);
-        if data_str.contains("ConfuserEx") {
+        if contains_bytes(data, b"ConfuserEx") {
             result.add(Detection::new(
                 DetectionType::Protector,
                 "ConfuserEx",
@@ -544,7 +569,7 @@ fn detect_dotnet(binary: &LoadedBinary, result: &mut DetectionResult) {
         }
         
         // .NET Reactor detection
-        if data_str.contains(".NET Reactor") {
+        if contains_bytes(data, b".NET Reactor") {
             result.add(Detection::new(
                 DetectionType::Protector,
                 ".NET Reactor",

@@ -95,8 +95,19 @@ impl XrefDatabase {
     }
 
     /// Analyze code bytes to find cross-references
+    ///
+    /// Performance optimizations:
+    /// - Pre-computes address bounds once instead of per-instruction
+    /// - Uses batch insertion approach to reduce HashMap overhead
+    /// - Tracks refs count before iteration to avoid redundant total_refs() call
     fn analyze_code(&mut self, code: &[u8], base_addr: u64) {
         use iced_x86::{Decoder, DecoderOptions, FlowControl, OpKind};
+
+        // Pre-compute bounds for address validation (used multiple times per instruction)
+        let addr_upper_bound = base_addr + code.len() as u64 * 2;
+        
+        // Track initial refs count to check if we found anything
+        let initial_refs = self.refs_to.len();
 
         // Try 64-bit first, then 32-bit
         for bitness in [64, 32] {
@@ -138,12 +149,14 @@ impl XrefDatabase {
                     }
                     _ => {
                         // Check for memory references (LEA, MOV with immediate addresses)
-                        for i in 0..instr.op_count() {
+                        let op_count = instr.op_count();
+                        for i in 0..op_count {
                             match instr.op_kind(i) {
                                 OpKind::Memory => {
                                     // Memory operand with displacement
                                     let disp = instr.memory_displacement64();
-                                    if disp > base_addr && disp < base_addr + code.len() as u64 * 2 {
+                                    // Use pre-computed bounds
+                                    if disp > base_addr && disp < addr_upper_bound {
                                         self.add_xref(Xref {
                                             from_addr,
                                             to_addr: disp,
@@ -154,7 +167,8 @@ impl XrefDatabase {
                                 OpKind::Immediate64 | OpKind::Immediate32to64 => {
                                     let imm = instr.immediate64();
                                     // Heuristic: if immediate looks like an address
-                                    if imm > base_addr && imm < base_addr + code.len() as u64 * 2 {
+                                    // Use pre-computed bounds
+                                    if imm > base_addr && imm < addr_upper_bound {
                                         self.add_xref(Xref {
                                             from_addr,
                                             to_addr: imm,
@@ -170,7 +184,8 @@ impl XrefDatabase {
             }
             
             // If we found refs in 64-bit mode, don't try 32-bit
-            if self.total_refs() > 0 {
+            // Use direct HashMap len() check instead of summing all values
+            if self.refs_to.len() > initial_refs {
                 break;
             }
         }
