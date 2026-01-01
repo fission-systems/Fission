@@ -4,6 +4,7 @@ use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use crate::ui::gui::state::{AppState, DebugAction, DebugBpAction};
 use crate::ui::gui::theme::{catppuccin, code};
+use crate::ui::gui::widgets::empty_state;
 
 /// Render debug tab with improved layout
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
@@ -276,11 +277,7 @@ fn render_breakpoints_column(ui: &mut egui::Ui, state: &mut AppState, panel_widt
             });
             
             if state.debug.debug_state.breakpoints.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(egui::RichText::new("No breakpoints set")
-                        .color(catppuccin::OVERLAY0).italics());
-                });
+                empty_state(ui, "No breakpoints set", None);
             }
         });
 }
@@ -330,16 +327,7 @@ fn render_registers_column(ui: &mut egui::Ui, state: &AppState, panel_width: f32
                             });
                     });
             } else {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(30.0);
-                    ui.label(egui::RichText::new("⏸")
-                        .color(catppuccin::OVERLAY0).size(24.0));
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("No register data")
-                        .color(catppuccin::OVERLAY0));
-                    ui.label(egui::RichText::new("Attach to a process to view registers")
-                        .color(catppuccin::OVERLAY0).small().italics());
-                });
+                empty_state(ui, "No register data", Some("Attach to a process to view registers"));
             }
         });
 }

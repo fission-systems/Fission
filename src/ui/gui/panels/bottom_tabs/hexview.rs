@@ -5,6 +5,7 @@ use egui_extras::{Column, TableBuilder};
 use crate::config::CONFIG;
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::theme::{catppuccin, code};
+use crate::ui::gui::widgets::empty_state;
 use crate::analysis::patch::QuickPatch;
 
 /// Pending patch action to apply after UI rendering
@@ -23,12 +24,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         let rows = (len / 16) + if len % 16 != 0 { 1 } else { 0 };
         (len, rows)
     } else {
-        ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            ui.label(egui::RichText::new("No binary loaded")
-                .color(catppuccin::OVERLAY0)
-                .size(14.0));
-        });
+        empty_state(ui, "No binary loaded", None);
         return;
     };
 

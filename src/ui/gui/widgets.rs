@@ -4,6 +4,45 @@
 //! The main application logic is in app.rs.
 
 use eframe::egui;
+use super::theme::catppuccin;
+
+// ============================================================================
+// Common UI Helper Functions
+// ============================================================================
+
+/// Renders a centered empty state placeholder with a message and optional hint.
+/// 
+/// This is a common pattern used across many panels when there's nothing to display.
+/// 
+/// # Arguments
+/// * `ui` - The egui UI context
+/// * `message` - The main message to display
+/// * `hint` - Optional smaller hint text below the message
+/// * `vertical_space` - Optional amount of vertical space before the message (default: 20.0)
+/// 
+/// # Example
+/// ```ignore
+/// empty_state(ui, "No binary loaded", Some("File → Open to load"));
+/// ```
+pub fn empty_state(ui: &mut egui::Ui, message: &str, hint: Option<&str>) {
+    empty_state_with_spacing(ui, message, hint, 20.0);
+}
+
+/// Renders a centered empty state placeholder with customizable vertical spacing.
+pub fn empty_state_with_spacing(ui: &mut egui::Ui, message: &str, hint: Option<&str>, vertical_space: f32) {
+    ui.vertical_centered(|ui| {
+        ui.add_space(vertical_space);
+        ui.label(egui::RichText::new(message)
+            .color(catppuccin::OVERLAY0)
+            .size(14.0));
+        if let Some(hint_text) = hint {
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(hint_text)
+                .color(catppuccin::SUBTEXT0)
+                .small());
+        }
+    });
+}
 
 /// Disassembly view widget
 pub struct DisasmView {

@@ -5,6 +5,7 @@ use egui_extras::{Column, TableBuilder};
 use crate::config::CONFIG;
 use crate::ui::gui::state::{AppState, ExtractedString, StringEncoding};
 use crate::ui::gui::theme::{catppuccin, code};
+use crate::ui::gui::widgets::empty_state;
 
 /// Render strings tab content with virtual scrolling
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
@@ -28,16 +29,11 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     });
 
     if state.analysis.extracted_strings.is_empty() {
-        ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            if state.analysis.loaded_binary.is_some() {
-                ui.label(egui::RichText::new("Click 'Extract' to find strings")
-                    .color(catppuccin::OVERLAY0));
-            } else {
-                ui.label(egui::RichText::new("Load a binary first")
-                    .color(catppuccin::OVERLAY0));
-            }
-        });
+        if state.analysis.loaded_binary.is_some() {
+            empty_state(ui, "Click 'Extract' to find strings", None);
+        } else {
+            empty_state(ui, "Load a binary first", None);
+        }
         return;
     }
 

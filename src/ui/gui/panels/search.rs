@@ -6,6 +6,7 @@
 use eframe::egui;
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::theme::catppuccin;
+use crate::ui::gui::widgets::empty_state;
 
 /// Render the search panel in the side bar
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar::SideBarAction> {
@@ -28,10 +29,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
 
     let query = state.analysis.strings_filter.to_lowercase();
     if query.is_empty() {
-        ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new("Type to search...")
-                .color(catppuccin::OVERLAY0).italics());
-        });
+        empty_state(ui, "Type to search...", None);
         return None;
     }
 
