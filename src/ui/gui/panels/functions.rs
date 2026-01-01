@@ -5,6 +5,7 @@ use egui_extras::{Column, TableBuilder};
 use crate::analysis::loader::FunctionInfo;
 use super::super::state::AppState;
 use super::super::theme::catppuccin;
+use super::super::widgets::empty_state_with_spacing;
 
 /// Action returned from functions panel
 pub enum FunctionAction {
@@ -119,16 +120,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
                     });
                 });
         } else {
-            ui.vertical_centered(|ui| {
-                ui.add_space(40.0);
-                ui.label(egui::RichText::new("No binary loaded")
-                    .color(catppuccin::OVERLAY0)
-                    .size(14.0));
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("File → Open to load")
-                    .color(catppuccin::OVERLAY0)
-                    .small());
-            });
+            empty_state_with_spacing(ui, "No binary loaded", Some("File → Open to load"), 40.0);
         }
     });
     

@@ -4,6 +4,7 @@ use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use super::super::state::AppState;
 use super::super::theme::{catppuccin, code};
+use super::super::widgets::empty_state_with_spacing;
 
 /// Render the assembly view in the central panel with virtualized scrolling.
 pub fn render(ctx: &egui::Context, state: &AppState) {
@@ -24,16 +25,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
     ui.separator();
 
     if state.analysis.asm_instructions.is_empty() {
-        ui.vertical_centered(|ui| {
-            ui.add_space(40.0);
-            ui.label(egui::RichText::new("No disassembly available")
-                .color(catppuccin::OVERLAY0)
-                .size(16.0));
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Select a function to view assembly")
-                .color(catppuccin::OVERLAY0)
-                .small());
-        });
+        empty_state_with_spacing(ui, "No disassembly available", Some("Select a function to view assembly"), 40.0);
         return;
     }
 
