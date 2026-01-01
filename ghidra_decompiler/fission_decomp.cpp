@@ -448,16 +448,13 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         arch->allacts.getCurrent()->perform(*fd);
 
         // Step 4b: Advanced Structure Recovery (Auto-Struct)
-        // DISABLED: This causes double decompilation overhead for nearly every request,
-        // leading to timeouts on complex functions. The structure analyzer returns true
-        // for any function using pointer parameters (CPUI_PTRSUB), effectively doubling
-        // workload. Re-enable when the analyzer distinguishes new vs existing types.
-        /*
+        // Now fixed: Uses unique per-function type names and arch-specific sizes.
+        // Only triggers re-decompilation when NEW types are created (not reused).
         fission::types::StructureAnalyzer struct_analyzer;
         bool structs_found = struct_analyzer.analyze_function_structures(fd);
         
         if (structs_found) {
-             std::cerr << "[fission_decomp] Step 4b: Structures inferred! Re-running decompilation..." << std::endl;
+             std::cerr << "[fission_decomp] Step 4b: New structures inferred! Re-running decompilation..." << std::endl;
              try {
                  // Clear the function state to reset processing_started flag
                  fd->clear();
@@ -471,7 +468,6 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                  std::cerr << "[fission_decomp] Step 4b EXCEPTION: " << e.what() << std::endl;
              }
         }
-        */
 
         // Step 4c: Emulation-Assisted Analysis (Hyper-Context Tagging)
         // Run a trace emulation to tag conditional branches and loops
