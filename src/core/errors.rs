@@ -67,39 +67,39 @@ impl FissionError {
     pub fn loader(msg: impl Into<String>) -> Self {
         FissionError::Loader(msg.into())
     }
-    
+
     pub fn decompiler(msg: impl Into<String>) -> Self {
         FissionError::Decompiler(msg.into())
     }
-    
+
     pub fn disassembler(msg: impl Into<String>) -> Self {
         FissionError::Disassembler(msg.into())
     }
-    
+
     pub fn analysis(msg: impl Into<String>) -> Self {
         FissionError::Analysis(msg.into())
     }
-    
+
     pub fn debug(msg: impl Into<String>) -> Self {
         FissionError::Debug(msg.into())
     }
-    
+
     pub fn plugin(msg: impl Into<String>) -> Self {
         FissionError::Plugin(msg.into())
     }
-    
+
     pub fn script(msg: impl Into<String>) -> Self {
         FissionError::Script(msg.into())
     }
-    
+
     pub fn config(msg: impl Into<String>) -> Self {
         FissionError::Config(msg.into())
     }
-    
+
     pub fn ui(msg: impl Into<String>) -> Self {
         FissionError::Ui(msg.into())
     }
-    
+
     pub fn other(msg: impl Into<String>) -> Self {
         FissionError::Other(msg.into())
     }
@@ -158,11 +158,12 @@ impl FissionError {
 }
 
 /// Macro for creating errors quickly
-/// 
+///
 /// # Examples
 /// ```
 /// use fission::errors::*;
-/// 
+/// use fission::err;
+///
 /// fn example() -> Result<()> {
 ///     Err(err!(loader, "Failed to parse PE header"))
 /// }
@@ -202,11 +203,12 @@ macro_rules! err {
 }
 
 /// Macro for early return with error
-/// 
+///
 /// # Examples
 /// ```
 /// use fission::errors::*;
-/// 
+/// use fission::bail_if;
+///
 /// fn example(data: Option<&[u8]>) -> Result<()> {
 ///     let bytes = bail_if!(data.is_none(), loader, "No data provided");
 ///     Ok(())
