@@ -40,7 +40,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
             ui.heading(egui::RichText::new("Functions").size(12.0).strong());
             
             for func in &binary.functions {
-                if func.name.to_lowercase().contains(&query) {
+                // Use case-insensitive substring check
+                if contains_case_insensitive(&func.name, &query) {
                     func_matches += 1;
                     if func_matches > 50 {
                         ui.label(egui::RichText::new("... too many results").small());
@@ -68,7 +69,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
         let mut string_matches = 0;
         ui.heading(egui::RichText::new("Strings").size(12.0).strong());
         for s in &state.analysis.extracted_strings {
-            if s.value.to_lowercase().contains(&query) {
+            // Use case-insensitive substring check
+            if contains_case_insensitive(&s.value, &query) {
                 string_matches += 1;
                 if string_matches > 50 {
                     ui.label(egui::RichText::new("... too many results").small());
@@ -95,4 +97,32 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
     });
 
     action
+}
+
+/// Case-insensitive substring check without allocating new strings.
+/// Uses char-by-char comparison to avoid to_lowercase() allocation.
+#[inline]
+fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    
+    // Simple sliding window check with case-insensitive comparison
+    let needle_chars: Vec<char> = needle.chars().collect();
+    let haystack_chars: Vec<char> = haystack.chars().collect();
+    
+    'outer: for start in 0..=(haystack_chars.len().saturating_sub(needle_chars.len())) {
+        for (i, &nc) in needle_chars.iter().enumerate() {
+            let hc = haystack_chars[start + i];
+            // Compare lowercase versions of characters
+            if !hc.to_lowercase().eq(nc.to_lowercase()) {
+                continue 'outer;
+            }
+        }
+        return true;
+    }
+    false
 }

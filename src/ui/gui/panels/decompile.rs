@@ -84,6 +84,19 @@ fn render_highlighted_code(ui: &mut egui::Ui, code_text: &str) {
     }
 }
 
+/// Static arrays for C syntax keywords and types to avoid repeated allocations
+static C_KEYWORDS: &[&str] = &[
+    "if", "else", "while", "for", "return", "break", "continue", 
+    "switch", "case", "default", "do", "goto", "sizeof"
+];
+
+static C_TYPES: &[&str] = &[
+    "void", "int", "char", "short", "long", "unsigned", "signed",
+    "float", "double", "struct", "union", "enum", "typedef",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+    "int8_t", "int16_t", "int32_t", "int64_t", "size_t", "bool"
+];
+
 /// Apply C syntax highlighting to a single line
 fn highlight_c_line(line: &str) -> egui::RichText {
     let trimmed = line.trim();
@@ -94,27 +107,19 @@ fn highlight_c_line(line: &str) -> egui::RichText {
     }
     
     // Preprocessor directives
-    if trimmed.starts_with("#") {
+    if trimmed.starts_with('#') {
         return egui::RichText::new(line).color(catppuccin::MAUVE).monospace();
     }
     
-    // Simple keyword detection
-    let keywords = ["if", "else", "while", "for", "return", "break", "continue", 
-                   "switch", "case", "default", "do", "goto", "sizeof"];
-    let types = ["void", "int", "char", "short", "long", "unsigned", "signed",
-                "float", "double", "struct", "union", "enum", "typedef",
-                "uint8_t", "uint16_t", "uint32_t", "uint64_t",
-                "int8_t", "int16_t", "int32_t", "int64_t", "size_t", "bool"];
-    
     // Check if line starts with a type (function definition or declaration)
-    for typ in types {
+    for &typ in C_TYPES {
         if trimmed.starts_with(typ) {
             return egui::RichText::new(line).color(code::TYPE).monospace();
         }
     }
     
     // Check for keywords
-    for kw in keywords {
+    for &kw in C_KEYWORDS {
         if trimmed.starts_with(kw) && (trimmed.len() == kw.len() || 
             !trimmed.chars().nth(kw.len()).unwrap_or(' ').is_alphanumeric()) {
             return egui::RichText::new(line).color(code::KEYWORD).monospace();
@@ -127,7 +132,7 @@ fn highlight_c_line(line: &str) -> egui::RichText {
     }
     
     // Function calls (contains parentheses but not control flow)
-    if trimmed.contains('(') && !keywords.iter().any(|k| trimmed.starts_with(k)) {
+    if trimmed.contains('(') && !C_KEYWORDS.iter().any(|&k| trimmed.starts_with(k)) {
         return egui::RichText::new(line).color(code::FUNCTION).monospace();
     }
     
