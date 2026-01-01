@@ -71,9 +71,14 @@ pub struct WinApiDatabase {
 }
 
 impl WinApiDatabase {
+    /// Create a new WinApiDatabase with all built-in signatures
+    ///
+    /// Performance: Pre-allocates HashMap capacity based on known API count
+    /// to avoid rehashing during loading (~130 APIs across all DLLs)
     pub fn new() -> Self {
         let mut db = Self {
-            signatures: HashMap::new(),
+            // Pre-allocate for ~130 known APIs to minimize HashMap rehashing
+            signatures: HashMap::with_capacity(140),
         };
         db.load_kernel32();
         db.load_user32();
