@@ -7,6 +7,10 @@ pub mod win_api;
 pub mod win_constants;
 pub mod win_types;
 
+// Re-export lazily-initialized global databases for efficient reuse
+pub use win_api::WIN_API_DB;
+pub use win_constants::WIN_CONSTANTS_DB;
+
 use std::collections::HashMap;
 
 /// A function signature pattern for matching
