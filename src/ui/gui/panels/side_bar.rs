@@ -125,7 +125,7 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     let mut toggle_action: Option<(String, bool, String)> = None; // (id, was_enabled, name)
     
     if plugins.is_empty() {
-        empty_state(ui, "No plugins installed", Some("Load a plugin to extend\nFission's functionality"));
+        empty_state(ui, "No plugins installed", Some("Load a plugin to extend Fission's functionality"));
     } else {
         egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
             for plugin in &plugins {
