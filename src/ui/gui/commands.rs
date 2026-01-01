@@ -138,8 +138,8 @@ impl Command for RenameFunctionCommand {
             }
             func.name = self.new_name.clone();
             
-            state.log(format!("Renamed function 0x{:x} to '{}'", self.address, self.new_name));
             update_binary(state, binary);
+            state.log(format!("Renamed function 0x{:x} to '{}'", self.address, self.new_name));
             
             Ok(())
         } else {
@@ -155,8 +155,8 @@ impl Command for RenameFunctionCommand {
         if let Some(func) = binary.functions.iter_mut().find(|f| f.address == self.address) {
             func.name = self.old_name.clone();
             
-            state.log(format!("Reverted rename of function 0x{:x} to '{}'", self.address, self.old_name));
             update_binary(state, binary);
+            state.log(format!("Reverted rename of function 0x{:x} to '{}'", self.address, self.old_name));
             Ok(())
         } else {
             Err(format!("Function at 0x{:x} not found", self.address))
@@ -198,8 +198,8 @@ impl Command for PatchBytesCommand {
             binary.data[offset as usize + i] = *b;
         }
         
-        state.log(format!("Patched {} bytes at 0x{:x}", self.new_bytes.len(), self.address));
         update_binary(state, binary);
+        state.log(format!("Patched {} bytes at 0x{:x}", self.new_bytes.len(), self.address));
         Ok(())
     }
 
@@ -215,8 +215,8 @@ impl Command for PatchBytesCommand {
             binary.data[offset as usize + i] = *b;
         }
         
-        state.log(format!("Reverted patch at 0x{:x}", self.address));
         update_binary(state, binary);
+        state.log(format!("Reverted patch at 0x{:x}", self.address));
         Ok(())
     }
     
