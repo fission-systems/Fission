@@ -37,6 +37,7 @@
 #include "fission/utils/json_utils.h"
 #include "fission/utils/file_utils.h"
 #include "fission/utils/logger.h"
+#include "fission/utils/StepTimer.h"
 #include "fission/loader/MemoryImage.h"
 
 using namespace ghidra;
@@ -444,29 +445,39 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         fission::types::PrototypeEnforcer proto_enforcer;
         proto_enforcer.enforce_iat_prototypes(arch, state.iat_symbols);
         
-        std::cerr << "[fission_decomp] Step 4: Performing decompilation (this may take time)..." << std::endl;
-        arch->allacts.getCurrent()->perform(*fd);
+        // Step 4: Primary Decompilation
+        {
+            fission::utils::StepTimer timer("Step 4: Decompilation");
+            std::cerr << "[fission_decomp] Step 4: Performing decompilation..." << std::endl;
+            arch->allacts.getCurrent()->perform(*fd);
+        }
 
-        // Step 4b: Advanced Structure Recovery (Auto-Struct)
-        // Now fixed: Uses unique per-function type names and arch-specific sizes.
-        // Only triggers re-decompilation when NEW types are created (not reused).
-        fission::types::StructureAnalyzer struct_analyzer;
-        bool structs_found = struct_analyzer.analyze_function_structures(fd);
+        // Step 4b: Advanced Structure Recovery (Guarded)
+        // Budget guards: Skip for large functions or excessive operations
+        static constexpr size_t MAX_FUNCTION_SIZE = 10000;  // 10KB code limit
+        static constexpr int MAX_PTRSUB_OPS = 100;          // Limit analyzed operations
         
-        if (structs_found) {
-             std::cerr << "[fission_decomp] Step 4b: New structures inferred! Re-running decompilation..." << std::endl;
-             try {
-                 // Clear the function state to reset processing_started flag
-                 fd->clear();
-                 // Note: Don't call startProcessing() - perform() handles it internally
-                 arch->allacts.getCurrent()->reset(*fd);
-                 arch->allacts.getCurrent()->perform(*fd);
-             } catch (const LowlevelError& e) {
-                 std::cerr << "[fission_decomp] Step 4b ERROR: " << e.explain << std::endl;
-                 // Continue with original decompilation result
-             } catch (const std::exception& e) {
-                 std::cerr << "[fission_decomp] Step 4b EXCEPTION: " << e.what() << std::endl;
-             }
+        size_t func_size = fd->getSize();
+        if (func_size < MAX_FUNCTION_SIZE) {
+            fission::utils::StepTimer timer("Step 4b: Structure Recovery");
+            fission::types::StructureAnalyzer struct_analyzer;
+            bool structs_found = struct_analyzer.analyze_function_structures(fd);
+            
+            if (structs_found) {
+                std::cerr << "[fission_decomp] Step 4b: New structures inferred! Re-running decompilation..." << std::endl;
+                try {
+                    fd->clear();
+                    arch->allacts.getCurrent()->reset(*fd);
+                    arch->allacts.getCurrent()->perform(*fd);
+                } catch (const LowlevelError& e) {
+                    std::cerr << "[fission_decomp] Step 4b ERROR: " << e.explain << std::endl;
+                } catch (const std::exception& e) {
+                    std::cerr << "[fission_decomp] Step 4b EXCEPTION: " << e.what() << std::endl;
+                }
+            }
+        } else {
+            std::cerr << "[fission_decomp] Step 4b: Skipped (function too large: " 
+                      << func_size << " bytes > " << MAX_FUNCTION_SIZE << " limit)" << std::endl;
         }
 
         // Step 4c: Emulation-Assisted Analysis (Hyper-Context Tagging)
