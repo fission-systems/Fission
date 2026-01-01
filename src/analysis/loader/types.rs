@@ -123,12 +123,12 @@ impl LoadedBinaryBuilder {
         self.is_64bit = is_64bit;
         self
     }
-    
+
     pub fn is_dotnet(mut self, is_dotnet: bool) -> Self {
         self.is_dotnet = is_dotnet;
         self
     }
-    
+
     pub fn dotnet_runtime_version(mut self, version: Option<String>) -> Self {
         self.dotnet_runtime_version = version;
         self
@@ -153,17 +153,17 @@ impl LoadedBinaryBuilder {
         self.sections.push(section);
         self
     }
-    
+
     pub fn add_sections(mut self, sections: impl IntoIterator<Item = SectionInfo>) -> Self {
         self.sections.extend(sections);
         self
     }
-    
+
     pub fn add_iat_symbol(mut self, va: u64, name: String) -> Self {
         self.iat_symbols.insert(va, name);
         self
     }
-    
+
     pub fn add_iat_symbols(mut self, symbols: std::collections::HashMap<u64, String>) -> Self {
         self.iat_symbols.extend(symbols);
         self
@@ -218,14 +218,14 @@ impl LoadedBinary {
                 std::cmp::Ordering::Equal
             }
         });
-        
+
         if let Ok(idx) = idx {
             let section = &self.sections[idx];
             let offset_in_section = address - section.virtual_address;
             let file_offset = section.file_offset + offset_in_section;
             let end = (file_offset as usize + size).min(self.data.len());
             let start = file_offset as usize;
-            
+
             if start < self.data.len() {
                 return Some(self.data[start..end].to_vec());
             }
@@ -258,13 +258,13 @@ impl LoadedBinary {
         if let Some(&idx) = self.function_addr_index.get(&address) {
             return self.functions.get(idx);
         }
-        
+
         // Fall back to range check for addresses within function bounds (O(N))
         // This handles addresses inside a function body (not at the start)
         // We check >= f.address to be safe in case the index is inconsistent
-        self.functions.iter().find(|f| {
-            f.size > 0 && address >= f.address && address < f.address + f.size
-        })
+        self.functions
+            .iter()
+            .find(|f| f.size > 0 && address >= f.address && address < f.address + f.size)
     }
 
     /// Find function at exact address only (no range check) - O(1) lookup
@@ -297,7 +297,7 @@ impl LoadedBinary {
             self.functions.len()
         )
     }
-    
+
     /// Convert a virtual address to file offset using binary search for O(log N) lookup
     pub fn va_to_file_offset(&self, va: u64) -> Option<usize> {
         // Binary search to find the section containing this VA
@@ -307,7 +307,7 @@ impl LoadedBinary {
             } else {
                 section.file_size
             };
-            
+
             if va < section.virtual_address {
                 std::cmp::Ordering::Greater
             } else if va >= section.virtual_address + section_size {
@@ -316,7 +316,7 @@ impl LoadedBinary {
                 std::cmp::Ordering::Equal
             }
         });
-        
+
         if let Ok(idx) = idx {
             let section = &self.sections[idx];
             let offset_in_section = va - section.virtual_address;
@@ -324,50 +324,74 @@ impl LoadedBinary {
         }
         None
     }
-    
+
     /// Create a memory-mapped representation of the binary for the decompiler.
     /// This places each section at its virtual address offset (relative to image_base).
     /// The returned Vec starts at image_base, so loadFill(VA) can use offset = VA - image_base.
     pub fn get_memory_mapped_data(&self) -> Vec<u8> {
         // Find the maximum virtual address extent to determine buffer size
-        let max_va_end = self.sections.iter()
+        let max_va_end = self
+            .sections
+            .iter()
             .map(|s| {
-                let size = if s.virtual_size > 0 { s.virtual_size } else { s.file_size };
+                let size = if s.virtual_size > 0 {
+                    s.virtual_size
+                } else {
+                    s.file_size
+                };
                 s.virtual_address + size
             })
             .max()
             .unwrap_or(self.image_base);
-        
+
         // Calculate required buffer size (max_va relative to image_base)
         let buffer_size = if max_va_end > self.image_base {
             (max_va_end - self.image_base) as usize
         } else {
             0
         };
-        
+
         // Create zeroed buffer
         let mut mapped = vec![0u8; buffer_size];
-        
+
+        // IMPORTANT: Copy PE/ELF headers at offset 0
+        // The headers are NOT in a section but are needed for format detection.
+        // For PE, the first section typically starts at 0x1000 (after headers).
+        // We copy the raw file data from 0 up to the first section's file offset.
+        let first_section_offset = self
+            .sections
+            .iter()
+            .filter(|s| s.file_offset > 0)
+            .map(|s| s.file_offset as usize)
+            .min()
+            .unwrap_or(0x1000.min(self.data.len()));
+
+        // Copy headers to offset 0 in memory-mapped buffer
+        let header_copy_size = first_section_offset.min(self.data.len()).min(mapped.len());
+        if header_copy_size > 0 {
+            mapped[..header_copy_size].copy_from_slice(&self.data[..header_copy_size]);
+        }
+
         // Map each section into the buffer at its RVA offset
         for section in &self.sections {
             let rva = section.virtual_address.saturating_sub(self.image_base);
             let file_start = section.file_offset as usize;
             let file_end = (section.file_offset + section.file_size) as usize;
-            
+
             if file_end <= self.data.len() {
                 let section_data = &self.data[file_start..file_end];
                 let dest_start = rva as usize;
                 let dest_end = dest_start + section_data.len();
-                
+
                 if dest_end <= mapped.len() {
                     mapped[dest_start..dest_end].copy_from_slice(section_data);
                 }
             }
         }
-        
+
         mapped
     }
-    
+
     /// Discover internal functions by scanning executable code for CALL instructions
     /// This finds functions that are called but not exported/imported
     ///
@@ -378,39 +402,42 @@ impl LoadedBinary {
     pub fn discover_internal_functions(&mut self) {
         use crate::analysis::disasm::DisasmEngine;
         use std::collections::HashSet;
-        
+
         // Create disassembler for this binary's architecture
         let engine = match DisasmEngine::new(self.is_64bit) {
             Ok(e) => e,
             Err(_) => return,
         };
-        
+
         // Pre-compute executable section ranges for fast range checking
         // This avoids O(N) iteration over sections for each discovered target
         // Note: For typical binaries with <10 executable sections, linear search is efficient.
-        let executable_ranges: Vec<(u64, u64)> = self.sections
+        let executable_ranges: Vec<(u64, u64)> = self
+            .sections
             .iter()
             .filter(|s| s.is_executable)
             .map(|s| (s.virtual_address, s.virtual_address + s.virtual_size))
             .collect();
-        
+
         // Helper closure to check if target is in executable range
         // Uses linear search (efficient for small number of sections)
         let is_in_executable_range = |target: u64| -> bool {
-            executable_ranges.iter().any(|&(start, end)| target >= start && target < end)
+            executable_ranges
+                .iter()
+                .any(|&(start, end)| target >= start && target < end)
         };
-        
+
         // Estimate capacity based on typical function density (~1 function per 100 bytes of code)
         let total_code_size: u64 = executable_ranges.iter().map(|(s, e)| e - s).sum();
         let estimated_functions = (total_code_size / 100) as usize;
         let mut discovered: HashSet<u64> = HashSet::with_capacity(estimated_functions.max(64));
-        
+
         // Scan all executable sections
         for section in &self.sections {
             if !section.is_executable {
                 continue;
             }
-            
+
             // Get section bytes
             let start = section.file_offset as usize;
             let size = section.file_size as usize;
@@ -418,27 +445,27 @@ impl LoadedBinary {
                 continue;
             }
             let bytes = &self.data[start..start + size];
-            
+
             // Discover call targets in this section
             let targets = engine.discover_call_targets(bytes, section.virtual_address);
-            
+
             for target in targets {
                 // Use O(1) HashMap lookup instead of HashSet contains for existing functions
                 // (function_addr_index is already maintained by the LoadedBinary)
                 if self.function_addr_index.contains_key(&target) {
                     continue;
                 }
-                
+
                 // Only add if not already discovered and within executable range
                 if !discovered.contains(&target) && is_in_executable_range(target) {
                     discovered.insert(target);
                 }
             }
         }
-        
+
         // Pre-allocate space for new functions
         self.functions.reserve(discovered.len());
-        
+
         // Add discovered functions
         for addr in discovered {
             self.functions.push(FunctionInfo {
@@ -449,19 +476,19 @@ impl LoadedBinary {
                 is_import: false,
             });
         }
-        
+
         // Sort functions by address
         self.functions.sort_by_key(|f| f.address);
-        
+
         // Rebuild function indices after adding new functions
         self.rebuild_function_indices();
     }
-    
+
     /// Rebuild function lookup indices after modifying the functions vector
     pub fn rebuild_function_indices(&mut self) {
         self.function_addr_index.clear();
         self.function_name_index.clear();
-        
+
         for (idx, func) in self.functions.iter().enumerate() {
             self.function_addr_index.insert(func.address, idx);
             if !func.name.is_empty() {
@@ -469,62 +496,70 @@ impl LoadedBinary {
             }
         }
     }
-    
+
     // ========================================================================
     // Binary Patching
     // ========================================================================
-    
+
     /// Patch bytes at a file offset
     /// Returns the original bytes that were replaced
     pub fn patch_bytes(&mut self, offset: u64, new_bytes: &[u8]) -> Option<Vec<u8>> {
         let offset = offset as usize;
         let end = offset + new_bytes.len();
-        
+
         if end > self.data.len() {
             return None;
         }
-        
+
         // Save original bytes
         let original = self.data[offset..end].to_vec();
-        
+
         // Apply patch
         self.data[offset..end].copy_from_slice(new_bytes);
-        
+
         Some(original)
     }
-    
+
     /// Patch bytes at a virtual address
     /// Converts VA to file offset and applies the patch
     pub fn patch_bytes_va(&mut self, va: u64, new_bytes: &[u8]) -> Option<Vec<u8>> {
         let offset = self.va_to_file_offset(va)?;
         self.patch_bytes(offset as u64, new_bytes)
     }
-    
+
     /// Get bytes at a file offset (for displaying original)
     pub fn get_bytes_at_offset(&self, offset: u64, size: usize) -> Option<Vec<u8>> {
         let offset = offset as usize;
         let end = offset + size;
-        
+
         if end > self.data.len() {
             return None;
         }
-        
+
         Some(self.data[offset..end].to_vec())
     }
-    
+
     /// Save the (potentially patched) binary to a file
     pub fn save_as<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         std::fs::write(path, &self.data)?;
         Ok(())
     }
-    
+
     /// Apply a quick patch at a file offset
-    pub fn apply_quick_patch(&mut self, offset: u64, patch_type: crate::analysis::patch::QuickPatch) -> Option<Vec<u8>> {
+    pub fn apply_quick_patch(
+        &mut self,
+        offset: u64,
+        patch_type: crate::analysis::patch::QuickPatch,
+    ) -> Option<Vec<u8>> {
         self.patch_bytes(offset, &patch_type.bytes())
     }
-    
+
     /// Apply a quick patch at a virtual address
-    pub fn apply_quick_patch_va(&mut self, va: u64, patch_type: crate::analysis::patch::QuickPatch) -> Option<Vec<u8>> {
+    pub fn apply_quick_patch_va(
+        &mut self,
+        va: u64,
+        patch_type: crate::analysis::patch::QuickPatch,
+    ) -> Option<Vec<u8>> {
         let offset = self.va_to_file_offset(va)?;
         self.patch_bytes(offset as u64, &patch_type.bytes())
     }

@@ -40,44 +40,104 @@ bool FidDatabase::parse_header(std::ifstream& file) {
 
 bool FidDatabase::parse_strings_table(std::ifstream& file, uint64_t offset, uint64_t count) {
     // Strings table parsing
-    // Format: [Key 8 bytes BE] [Length 2 bytes BE] [String chars]
+    // DB4 format uses paged storage - string data is NOT contiguous after header
+    // We'll try direct parsing first, then fall back to heuristic scraping
+    
     file.seekg(offset);
     
     size_t parsed = 0;
     size_t max_parse = std::min(count, (uint64_t)200000);
     
+    // Try direct Key(8)+Len(2)+Value parsing
     while (parsed < max_parse && !file.eof()) {
-        // Read Key (8 bytes BE)
         uint64_t key = read_be64(file);
         if (file.eof()) break;
         
-        // Read Length (2 bytes BE)
         uint16_t len = read_be16(file);
         if (file.eof()) break;
         
         // Sanity check
         if (len > 1024 || len == 0) {
-            // Invalid record - try to resync by skipping ahead
-            // This might happen if we hit padding or different record type
-            break;
+            break; // Data format doesn't match, try heuristic
         }
         
-        // Read string value
         std::string value;
         value.resize(len);
         file.read(&value[0], len);
         
         if (file.gcount() != len) break;
         
-        // Store in table
         strings_table[key] = value;
         parsed++;
         
-        // Debug: Print first few
-        if (parsed <= 5) {
+        if (parsed <= 3) {
             std::cerr << "[FidDatabase] String #" << parsed << ": key=0x" << std::hex << key 
                       << " \"" << value << "\"" << std::dec << std::endl;
         }
+    }
+    
+    // If direct parsing failed, use heuristic scraping from file
+    if (parsed < 100) {
+        std::cerr << "[FidDatabase] Direct parsing got " << parsed << " strings, trying heuristic scan..." << std::endl;
+        
+        // Scan from ~50% of file size to find string data blocks
+        file.clear();
+        file.seekg(0, std::ios::end);
+        size_t file_size = file.tellg();
+        
+        // Start scanning from 50% of file (strings usually in second half for FIDBF)
+        size_t scan_start = file_size / 2;
+        file.seekg(scan_start);
+        
+        const size_t BUFFER_SIZE = 1024 * 1024; // 1MB chunks
+        std::vector<char> buffer(BUFFER_SIZE);
+        size_t strings_found = 0;
+        
+        while (file.tellg() < (std::streampos)(file_size - 10) && strings_found < max_parse) {
+            size_t pos = file.tellg();
+            file.read(buffer.data(), BUFFER_SIZE);
+            size_t bytes_read = file.gcount();
+            if (bytes_read < 20) break;
+            
+            for (size_t i = 0; i < bytes_read - 12; ++i) {
+                // Look for pattern: Key(8) + Len(2, BE) + printable ASCII
+                uint16_t len = ((uint8_t)buffer[i+8] << 8) | (uint8_t)buffer[i+9];
+                
+                if (len >= 3 && len < 200 && i + 10 + len <= bytes_read) {
+                    bool is_valid = true;
+                    bool has_alpha = false;
+                    for (size_t k = 0; k < len; ++k) {
+                        char c = buffer[i + 10 + k];
+                        if (c < 32 || c > 126) { is_valid = false; break; }
+                        if (std::isalpha(c)) has_alpha = true;
+                    }
+                    
+                    if (is_valid && has_alpha) {
+                        uint64_t key = ((uint64_t)(uint8_t)buffer[i] << 56) | 
+                                       ((uint64_t)(uint8_t)buffer[i+1] << 48) |
+                                       ((uint64_t)(uint8_t)buffer[i+2] << 40) | 
+                                       ((uint64_t)(uint8_t)buffer[i+3] << 32) |
+                                       ((uint64_t)(uint8_t)buffer[i+4] << 24) | 
+                                       ((uint64_t)(uint8_t)buffer[i+5] << 16) |
+                                       ((uint64_t)(uint8_t)buffer[i+6] << 8)  | 
+                                       (uint64_t)(uint8_t)buffer[i+7];
+                        
+                        std::string s(&buffer[i + 10], len);
+                        strings_table[key] = s;
+                        strings_found++;
+                        
+                        if (strings_found <= 5) {
+                            std::cerr << "[FidDatabase] Heuristic String #" << strings_found 
+                                      << ": key=0x" << std::hex << key << " \"" << s << "\"" << std::dec << std::endl;
+                        }
+                        
+                        i += 9 + len; // Skip past this string
+                    }
+                }
+            }
+        }
+        
+        parsed = strings_found;
     }
     
     std::cerr << "[FidDatabase] Parsed " << strings_table.size() << " strings" << std::endl;
@@ -195,28 +255,29 @@ bool FidDatabase::load(const std::string& path) {
     
     for (size_t i = 0; i < file_size - 50; ++i) {
         if (memcmp(&data[i], strings_marker, 13) == 0) {
-            // Found "Strings Table", look for schema and record count
-            // Format: [Name\0][Version?][Count BE32][...Schema...][0xFF sentinel][Data]
-            // Scan backwards for count (usually 4 bytes before the name)
-            if (i >= 8) {
-                // Count is at i-4 as BE32
-                strings_count = ((uint8_t)data[i-4] << 24) | ((uint8_t)data[i-3] << 16) |
-                                ((uint8_t)data[i-2] << 8) | (uint8_t)data[i-1];
-                if (strings_count > 1000000) strings_count = 0; // sanity
-            }
-            
-            // Find 0xFF sentinel after schema
-            for (size_t j = i; j < std::min(i + 200, file_size); ++j) {
+            // Found "Strings Table", find 0xFFFFFFFF sentinel after schema
+            for (size_t j = i; j < std::min(i + 200, file_size - 12); ++j) {
                 if ((uint8_t)data[j] == 0xFF && (uint8_t)data[j+1] == 0xFF && 
                     (uint8_t)data[j+2] == 0xFF && (uint8_t)data[j+3] == 0xFF) {
-                    strings_table_offset = j + 4; // Skip sentinel
+                    
+                    // After sentinel: [8 bytes hash?] [4 bytes count BE]
+                    // Read count from j+4+8 = j+12
+                    if (j + 16 < file_size) {
+                        strings_count = ((uint8_t)data[j+12] << 24) | ((uint8_t)data[j+13] << 16) |
+                                        ((uint8_t)data[j+14] << 8) | (uint8_t)data[j+15];
+                        if (strings_count > 500000) strings_count = 100000; // sanity
+                    }
+                    
+                    // Data starts after the header info block
+                    // Skip: sentinel(4) + hash(8) + count(4) + unknown(4) = 20 bytes
+                    strings_table_offset = j + 20;
                     break;
                 }
             }
             
             if (strings_table_offset > 0) {
                 std::cerr << "[FidDatabase] Found Strings Table at 0x" << std::hex 
-                          << strings_table_offset << " (count~" << std::dec << strings_count << ")" << std::endl;
+                          << strings_table_offset << " (count=" << std::dec << strings_count << ")" << std::endl;
                 break;
             }
         }
@@ -230,24 +291,25 @@ bool FidDatabase::load(const std::string& path) {
     for (size_t i = 0; i < file_size - 50; ++i) {
         if (memcmp(&data[i], funcs_marker, 15) == 0) {
             // Found "Functions Table"
-            if (i >= 8) {
-                functions_count = ((uint8_t)data[i-4] << 24) | ((uint8_t)data[i-3] << 16) |
-                                  ((uint8_t)data[i-2] << 8) | (uint8_t)data[i-1];
-                if (functions_count > 1000000) functions_count = 0;
-            }
-            
-            // Find 0xFF sentinel
-            for (size_t j = i; j < std::min(i + 200, file_size); ++j) {
+            for (size_t j = i; j < std::min(i + 200, file_size - 12); ++j) {
                 if ((uint8_t)data[j] == 0xFF && (uint8_t)data[j+1] == 0xFF && 
                     (uint8_t)data[j+2] == 0xFF && (uint8_t)data[j+3] == 0xFF) {
-                    functions_table_offset = j + 4;
+                    
+                    // Read count from j+12
+                    if (j + 16 < file_size) {
+                        functions_count = ((uint8_t)data[j+12] << 24) | ((uint8_t)data[j+13] << 16) |
+                                          ((uint8_t)data[j+14] << 8) | (uint8_t)data[j+15];
+                        if (functions_count > 500000) functions_count = 100000;
+                    }
+                    
+                    functions_table_offset = j + 20;
                     break;
                 }
             }
             
             if (functions_table_offset > 0) {
                 std::cerr << "[FidDatabase] Found Functions Table at 0x" << std::hex 
-                          << functions_table_offset << " (count~" << std::dec << functions_count << ")" << std::endl;
+                          << functions_table_offset << " (count=" << std::dec << functions_count << ")" << std::endl;
                 break;
             }
         }

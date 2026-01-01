@@ -114,6 +114,13 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
             int64_t image_base = extract_json_int(input, "image_base");
             std::cerr << "[fission_decomp] load_bin: size=" << bin_bytes.size() << " image_base=0x" << std::hex << image_base << std::dec << std::endl;
             
+            // Debug: Print first 16 bytes to verify binary data
+            std::cerr << "[fission_decomp] First 16 bytes: ";
+            for (size_t i = 0; i < std::min((size_t)16, bin_bytes.size()); ++i) {
+                std::cerr << std::hex << std::setw(2) << std::setfill('0') << (int)bin_bytes[i] << " ";
+            }
+            std::cerr << std::dec << std::endl;
+            
             // Initialize Ghidra if needed
             if (sla_dir.empty()) {
                 return "{\"status\":\"error\",\"message\":\"Missing sla_dir for load_bin\"}";
