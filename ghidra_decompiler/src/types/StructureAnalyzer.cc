@@ -22,6 +22,13 @@ bool StructureAnalyzer::analyze_function_structures(ghidra::Funcdata* fd) {
     access_map.clear();
     inferred_structs.clear();
 
+    // Get architecture-specific pointer size (4 for 32-bit, 8 for 64-bit)
+    ghidra::Architecture* arch = fd->getArch();
+    int ptr_size = arch->getDefaultSize();  // FIX #2: Use architecture size
+    
+    // Get function entry address for unique naming (FIX #1)
+    uint64_t func_entry = fd->getAddress().getOffset();
+
     // 1. Collect Access Patterns (PTRSUB, etc.)
     collect_accesses(fd);
 
@@ -29,14 +36,16 @@ bool StructureAnalyzer::analyze_function_structures(ghidra::Funcdata* fd) {
 
     // 2. Infer Structures (Create TypeStruct objects)
     ghidra::TypeFactory* factory = fd->getArch()->types;
-    infer_structures(factory);
+    bool new_types_created = infer_structures(factory, func_entry, ptr_size);
 
     if (inferred_structs.empty()) return false;
 
     // 3. Apply to Function Inputs
-    apply_structures(fd);
+    apply_structures(fd, ptr_size);
 
-    return true;
+    // Only return true if NEW types were created (not reused)
+    // This prevents unnecessary re-decompilation (FIX #3)
+    return new_types_created;
 }
 
 void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
@@ -72,8 +81,12 @@ void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
     }
 }
 
-void StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory) {
-    if (!factory) return;
+bool StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory, 
+                                          uint64_t func_entry, 
+                                          int ptr_size) {
+    if (!factory) return false;
+
+    bool new_types_created = false;
 
     for (const auto& pair : access_map) {
         unsigned long long base_addr = pair.first;
@@ -85,53 +98,57 @@ void StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory) {
         if (offsets.size() == 1 && *offsets.begin() == 0) continue;
 
         int max_offset = *offsets.rbegin();
-        int struct_size = max_offset + 8; // Assuming 64-bit pointer size
+        // FIX #2: Use architecture-specific pointer size
+        int struct_size = max_offset + ptr_size;
 
-        // Generate struct name
+        // FIX #1: Include function address in struct name for uniqueness
+        // Format: f_<func_addr>_arg_<storage_offset>
         std::stringstream ss;
-        ss << "auto_struct_" << std::hex << base_addr;
+        ss << "f_" << std::hex << func_entry << "_arg_" << base_addr;
         std::string struct_name = ss.str();
 
-        // === FIX: Check if type already exists ===
+        // Check if type already exists
         ghidra::Datatype* existing = factory->findByName(struct_name);
         if (existing != nullptr) {
-            // Type already exists - reuse it
+            // Type already exists for THIS function - reuse it
             if (existing->getMetatype() == ghidra::TYPE_STRUCT) {
                 inferred_structs[base_addr] = (ghidra::TypeStruct*)existing;
-                std::cerr << "[StructureAnalyzer] Reusing existing " << struct_name << std::endl;
+                // Note: This is a reuse, not a new creation
             }
             continue;  // Skip creation
         }
 
-        // === USE PROPER TypeFactory API ===
-        // getTypeStruct creates an empty struct with a valid ID
+        // Create new struct with proper TypeFactory API
         ghidra::TypeStruct* new_struct = factory->getTypeStruct(struct_name);
         
-        // Create Fields
+        // Create Fields with architecture-appropriate sizes
         std::vector<ghidra::TypeField> fields;
         int field_id = 0;
         for (int off : offsets) {
             std::stringstream fss;
             fss << "field_" << std::hex << off;
-            // Default to 8-byte int type
-            ghidra::Datatype* field_type = factory->getBase(8, ghidra::TYPE_INT);
+            // FIX #2: Use architecture-specific integer type
+            ghidra::Datatype* field_type = factory->getBase(ptr_size, ghidra::TYPE_INT);
             
             fields.push_back(ghidra::TypeField(field_id++, off, fss.str(), field_type));
         }
 
-        // === USE TypeFactory::setFields to properly configure the struct ===
-        // setFields(fields, struct_ptr, size, alignment, flags)
-        factory->setFields(fields, new_struct, struct_size, 8, 0);
+        // Set fields with architecture-specific alignment
+        factory->setFields(fields, new_struct, struct_size, ptr_size, 0);
         
         // Store result
         inferred_structs[base_addr] = new_struct;
+        new_types_created = true;  // FIX #3: Track that we created new types
         
         std::cerr << "[StructureAnalyzer] Created " << struct_name 
-                  << " with " << fields.size() << " fields" << std::endl;
+                  << " (" << (ptr_size * 8) << "-bit) with " 
+                  << fields.size() << " fields" << std::endl;
     }
+    
+    return new_types_created;
 }
 
-void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd) {
+void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
     // Iterate input varnodes (Parameters)
     auto iter = fd->beginLoc(); // Location order
     auto end = fd->endLoc();
@@ -145,9 +162,8 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd) {
             if (inferred_structs.count(storage)) {
                 ghidra::TypeStruct* st = inferred_structs[storage];
                 
-                // Construct a Pointer to this struct
-                // Using TypeFactory::getTypePointer for proper ID handling
-                ghidra::TypePointer* ptr_type = factory->getTypePointer(8, st, 8);
+                // FIX #2: Use architecture-specific pointer size
+                ghidra::TypePointer* ptr_type = factory->getTypePointer(ptr_size, st, ptr_size);
 
                 // Update the Varnode's type
                 vn->updateType(ptr_type, true, true); // Lock it!
@@ -161,3 +177,4 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd) {
 
 } // namespace types
 } // namespace fission
+
