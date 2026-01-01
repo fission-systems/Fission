@@ -4,15 +4,12 @@ use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::theme::{catppuccin, code};
+use crate::ui::gui::widgets::empty_state;
 
 /// Render imports tab content with virtual scrolling
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(ref binary) = state.analysis.loaded_binary else {
-        ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            ui.label(egui::RichText::new("Load a binary to view imports")
-                .color(catppuccin::OVERLAY0));
-        });
+        empty_state(ui, "Load a binary to view imports", None);
         return;
     };
 

@@ -3,6 +3,7 @@
 use eframe::egui;
 use super::super::state::AppState;
 use super::super::theme::{catppuccin, code};
+use super::super::widgets::empty_state_with_spacing;
 
 /// Render the decompiled code as a fixed right panel.
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
@@ -44,16 +45,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) {
     ui.separator();
 
     if state.analysis.decompiled_code.is_empty() && !state.analysis.decompiling {
-        ui.vertical_centered(|ui| {
-            ui.add_space(60.0);
-            ui.label(egui::RichText::new("No decompilation available")
-                .color(catppuccin::OVERLAY0)
-                .size(14.0));
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Select a function to decompile")
-                .color(catppuccin::OVERLAY0)
-                .small());
-        });
+        empty_state_with_spacing(ui, "No decompilation available", Some("Select a function to decompile"), 60.0);
         return;
     }
 

@@ -5,6 +5,7 @@
 use eframe::egui;
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::theme::catppuccin;
+use crate::ui::gui::widgets::empty_state;
 use crate::analysis::xrefs::XrefType;
 
 /// Action from xrefs window
@@ -62,14 +63,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> XrefAction {
 
             // Check if we have xref database
             if state.analysis.xref_db.is_none() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(egui::RichText::new("No cross-references available")
-                        .color(catppuccin::OVERLAY0));
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Load a binary to analyze references")
-                        .color(catppuccin::SUBTEXT0).small());
-                });
+                empty_state(ui, "No cross-references available", Some("Load a binary to analyze references"));
                 return;
             }
 
@@ -181,11 +175,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> XrefAction {
                     refs_to_count, refs_from_count
                 )).small().color(catppuccin::SUBTEXT0));
             } else {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.label(egui::RichText::new("Select a function to view cross-references")
-                        .color(catppuccin::OVERLAY0));
-                });
+                empty_state(ui, "Select a function to view cross-references", None);
             }
         });
 
