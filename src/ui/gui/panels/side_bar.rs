@@ -3,6 +3,7 @@
 use eframe::egui;
 use crate::ui::gui::state::{AppState, Activity};
 use crate::ui::gui::theme::catppuccin;
+use crate::ui::gui::widgets::empty_state;
 use super::functions::{self, FunctionAction};
 
 /// Result from side bar render
@@ -124,14 +125,7 @@ fn render_plugins_sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     let mut toggle_action: Option<(String, bool, String)> = None; // (id, was_enabled, name)
     
     if plugins.is_empty() {
-        ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            ui.label(egui::RichText::new("No plugins installed")
-                .color(ui.visuals().weak_text_color()).small().italics());
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Load a plugin to extend\nFission's functionality")
-                .color(ui.visuals().weak_text_color()).small());
-        });
+        empty_state(ui, "No plugins installed", Some("Load a plugin to extend Fission's functionality"));
     } else {
         egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
             for plugin in &plugins {
