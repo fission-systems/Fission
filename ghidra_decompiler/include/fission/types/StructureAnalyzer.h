@@ -37,7 +37,8 @@ private:
     // Key: Base Varnode UID (or just pointer if suitable, but Varnodes die)
     // Actually we want to map Input Storage (Address) to Offsets
     // map<StorageAddress, set<Offset>>
-    std::map<unsigned long long, std::set<int>> access_map; 
+    // map<StorageAddress, map<Offset, Size>>
+    std::map<unsigned long long, std::map<int, int>> access_map; 
     
     // Map of inferred structures (Base Address -> New Type)
     std::map<unsigned long long, ghidra::TypeStruct*> inferred_structs;
