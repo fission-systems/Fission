@@ -4,6 +4,11 @@
 //! Each group contains constants that belong to a specific API parameter context.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+/// Global lazily-initialized Windows constants database for efficient reuse.
+/// This avoids recreating the database with 16 enum groups on each use.
+pub static WIN_CONSTANTS_DB: LazyLock<WinConstantsDb> = LazyLock::new(WinConstantsDb::new);
 
 /// A group of related enum constants
 #[derive(Debug, Clone)]
