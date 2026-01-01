@@ -135,14 +135,19 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
         } else {
             if current_bytes.len() >= min_len {
                 // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
-                let value = unsafe { String::from_utf8_unchecked(current_bytes.clone()) };
+                // Use std::mem::take to avoid clone allocation
+                let bytes = std::mem::take(&mut current_bytes);
+                let value = unsafe { String::from_utf8_unchecked(bytes) };
                 state.analysis.extracted_strings.push(ExtractedString {
                     offset: start_offset,
                     value,
                     encoding: StringEncoding::Ascii,
                 });
+                // Re-allocate with same capacity for next string
+                current_bytes = Vec::with_capacity(256);
+            } else {
+                current_bytes.clear();
             }
-            current_bytes.clear();
         }
     }
     
