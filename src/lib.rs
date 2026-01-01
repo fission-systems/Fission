@@ -3,9 +3,13 @@
 //! This library provides the core functionality for binary analysis,
 //! debugging, and decompilation.
 
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
+#![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(dead_code)] # TODO: Remove this in production
+#![allow(unused_imports)] # TODO: Remove this in production
+#![allow(unused_variables)] # TODO: Remove this in production
 
 pub mod analysis;
 pub mod core;
