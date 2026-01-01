@@ -40,7 +40,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
             ui.heading(egui::RichText::new("Functions").size(12.0).strong());
             
             for func in &binary.functions {
-                if func.name.to_lowercase().contains(&query) {
+                // Use case-insensitive substring check
+                if contains_case_insensitive(&func.name, &query) {
                     func_matches += 1;
                     if func_matches > 50 {
                         ui.label(egui::RichText::new("... too many results").small());
@@ -68,7 +69,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
         let mut string_matches = 0;
         ui.heading(egui::RichText::new("Strings").size(12.0).strong());
         for s in &state.analysis.extracted_strings {
-            if s.value.to_lowercase().contains(&query) {
+            // Use case-insensitive substring check
+            if contains_case_insensitive(&s.value, &query) {
                 string_matches += 1;
                 if string_matches > 50 {
                     ui.label(egui::RichText::new("... too many results").small());
@@ -95,4 +97,38 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
     });
 
     action
+}
+
+/// Case-insensitive substring check using iterators to minimize allocations.
+/// For ASCII strings (common in function names), this avoids most allocations.
+#[inline]
+fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    
+    // For ASCII strings, use byte-level comparison (most efficient)
+    if haystack.is_ascii() && needle.is_ascii() {
+        let needle_bytes = needle.as_bytes();
+        let haystack_bytes = haystack.as_bytes();
+        
+        'outer: for start in 0..=(haystack_bytes.len().saturating_sub(needle_bytes.len())) {
+            for (i, &nb) in needle_bytes.iter().enumerate() {
+                let hb = haystack_bytes[start + i];
+                // ASCII case-insensitive comparison
+                if hb.to_ascii_lowercase() != nb.to_ascii_lowercase() {
+                    continue 'outer;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+    
+    // Fallback for non-ASCII: use standard library's to_lowercase()
+    // This allocates but handles Unicode correctly
+    haystack.to_lowercase().contains(&needle.to_lowercase())
 }

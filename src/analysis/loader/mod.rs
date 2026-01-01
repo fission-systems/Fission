@@ -73,6 +73,10 @@ pub struct LoadedBinary {
     pub format: String,
     /// IAT address to symbol name mapping for decompiler output
     pub iat_symbols: std::collections::HashMap<u64, String>,
+    /// Index for O(1) function lookup by address (maps address to index in functions Vec)
+    function_addr_index: std::collections::HashMap<u64, usize>,
+    /// Index for O(1) function lookup by name (maps name to index in functions Vec)
+    function_name_index: std::collections::HashMap<String, usize>,
 }
 
 /// Builder for LoadedBinary
@@ -175,6 +179,20 @@ impl LoadedBinaryBuilder {
     }
 
     pub fn build(self) -> Result<LoadedBinary> {
+        // Build function indices for O(1) lookups
+        // Note: If there are duplicate function names, only the last one is indexed.
+        // This is acceptable because most lookups use the address index.
+        let mut function_addr_index = std::collections::HashMap::with_capacity(self.functions.len());
+        let mut function_name_index = std::collections::HashMap::with_capacity(self.functions.len());
+        
+        for (idx, func) in self.functions.iter().enumerate() {
+            function_addr_index.insert(func.address, idx);
+            if !func.name.is_empty() {
+                // Note: Duplicate names will overwrite previous entries
+                function_name_index.insert(func.name.clone(), idx);
+            }
+        }
+        
         Ok(LoadedBinary {
             path: self.path,
             data: self.data,
@@ -188,6 +206,8 @@ impl LoadedBinaryBuilder {
             dotnet_runtime_version: self.dotnet_runtime_version,
             format: self.format,
             iat_symbols: self.iat_symbols,
+            function_addr_index,
+            function_name_index,
         })
     }
 }
@@ -735,20 +755,34 @@ impl LoadedBinary {
         funcs
     }
 
-    /// Find a function by name
+    /// Find a function by name using O(1) HashMap lookup
     pub fn find_function(&self, name: &str) -> Option<&FunctionInfo> {
-        self.functions.iter().find(|f| f.name == name)
+        self.function_name_index
+            .get(name)
+            .and_then(|&idx| self.functions.get(idx))
     }
 
-    /// Find function at address
+    /// Find function at exact address using O(1) HashMap lookup
     pub fn function_at(&self, address: u64) -> Option<&FunctionInfo> {
+        // First try exact address match using the index (O(1))
+        if let Some(&idx) = self.function_addr_index.get(&address) {
+            return self.functions.get(idx);
+        }
+        
+        // Fall back to range check for addresses within function bounds (O(N))
+        // This handles addresses inside a function body (not at the start)
+        // We check >= f.address to be safe in case the index is inconsistent
         self.functions.iter().find(|f| {
-            if f.size > 0 {
-                address >= f.address && address < f.address + f.size
-            } else {
-                address == f.address
-            }
+            f.size > 0 && address >= f.address && address < f.address + f.size
         })
+    }
+
+    /// Find function at exact address only (no range check) - O(1) lookup
+    #[inline]
+    pub fn function_at_exact(&self, address: u64) -> Option<&FunctionInfo> {
+        self.function_addr_index
+            .get(&address)
+            .and_then(|&idx| self.functions.get(idx))
     }
 
     /// Get summary string
@@ -908,6 +942,22 @@ impl LoadedBinary {
         
         // Sort functions by address
         self.functions.sort_by_key(|f| f.address);
+        
+        // Rebuild function indices after adding new functions
+        self.rebuild_function_indices();
+    }
+    
+    /// Rebuild function lookup indices after modifying the functions vector
+    pub fn rebuild_function_indices(&mut self) {
+        self.function_addr_index.clear();
+        self.function_name_index.clear();
+        
+        for (idx, func) in self.functions.iter().enumerate() {
+            self.function_addr_index.insert(func.address, idx);
+            if !func.name.is_empty() {
+                self.function_name_index.insert(func.name.clone(), idx);
+            }
+        }
     }
     
     // ========================================================================
@@ -1030,5 +1080,69 @@ mod tests {
         
         let func = binary.find_function("main").unwrap();
         assert_eq!(func.address, 0x1000);
+    }
+    
+    #[test]
+    fn test_function_lookup_o1() {
+        // Test that O(1) function lookups work correctly
+        let builder = LoadedBinaryBuilder::new("test.bin".to_string(), vec![0x90; 1000])
+            .format("RAW")
+            .entry_point(0x1000)
+            .image_base(0x1000)
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "func_a".to_string(),
+                address: 0x1000,
+                size: 50,
+                is_export: true,
+                is_import: false,
+            })
+            .add_function(FunctionInfo {
+                name: "func_b".to_string(),
+                address: 0x1100,
+                size: 100,
+                is_export: false,
+                is_import: false,
+            })
+            .add_function(FunctionInfo {
+                name: "func_c".to_string(),
+                address: 0x1200,
+                size: 0,  // Unknown size
+                is_export: false,
+                is_import: true,
+            })
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 1000,
+                file_offset: 0,
+                file_size: 1000,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            });
+            
+        let binary = builder.build().expect("Failed to build LoadedBinary");
+        
+        // Test find_function by name (O(1) lookup)
+        assert!(binary.find_function("func_a").is_some());
+        assert!(binary.find_function("func_b").is_some());
+        assert!(binary.find_function("func_c").is_some());
+        assert!(binary.find_function("nonexistent").is_none());
+        
+        // Test function_at_exact (O(1) lookup)
+        assert!(binary.function_at_exact(0x1000).is_some());
+        assert_eq!(binary.function_at_exact(0x1000).unwrap().name, "func_a");
+        assert!(binary.function_at_exact(0x1100).is_some());
+        assert_eq!(binary.function_at_exact(0x1100).unwrap().name, "func_b");
+        assert!(binary.function_at_exact(0x1050).is_none()); // Not at start of function
+        
+        // Test function_at with range check (exact match is O(1), range check is O(N))
+        assert!(binary.function_at(0x1000).is_some());
+        assert_eq!(binary.function_at(0x1000).unwrap().name, "func_a");
+        assert!(binary.function_at(0x1020).is_some()); // Inside func_a (size=50)
+        assert_eq!(binary.function_at(0x1020).unwrap().name, "func_a");
+        assert!(binary.function_at(0x1150).is_some()); // Inside func_b (size=100)
+        assert_eq!(binary.function_at(0x1150).unwrap().name, "func_b");
     }
 }

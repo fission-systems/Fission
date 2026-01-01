@@ -4,6 +4,11 @@
 //! to improve decompiler output quality.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+/// Global lazily-initialized Windows API database for efficient reuse.
+/// This avoids recreating the database with 100+ signatures on each use.
+pub static WIN_API_DB: LazyLock<WinApiDatabase> = LazyLock::new(WinApiDatabase::new);
 
 /// Parameter type information with optional enum group for context-aware constant resolution
 #[derive(Debug, Clone)]
