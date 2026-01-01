@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include "FidDatabase.h"
 
 namespace fission {
 namespace analysis {
@@ -28,6 +29,7 @@ class FunctionMatcher {
 private:
     std::vector<FunctionSignature> signatures;      ///< Loaded signatures
     std::map<uint64_t, std::string> matched_funcs;  ///< Address -> function name
+    const FidDatabase* fid_db = nullptr;            ///< FID database for hash lookups
 
     /// Load built-in MSVC x64 signatures
     void load_builtin_msvc_x64();
@@ -39,14 +41,20 @@ public:
     FunctionMatcher();
     ~FunctionMatcher();
 
+    /// Set FID database for hash-based matching
+    void set_fid_database(const FidDatabase* db) { fid_db = db; }
+
     /// Load signatures from JSON file
     bool load_signatures(const std::string& json_path);
 
     /// Load built-in signatures for a specific platform
     void load_builtin_signatures(const std::string& platform);
 
-    /// Match function bytes and return name if matched
+    /// Match function bytes and return name if matched (pattern-based)
     std::string match(uint64_t address, const uint8_t* bytes, int size);
+    
+    /// Match function bytes using FID hash (FidDatabase lookup)
+    std::string match_by_fid(uint64_t address, const uint8_t* bytes, size_t size, bool is_x86);
 
     /// Get all matched functions
     const std::map<uint64_t, std::string>& get_matches() const { return matched_funcs; }
