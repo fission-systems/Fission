@@ -895,15 +895,21 @@ impl LoadedBinary {
             Err(_) => return,
         };
         
-        // Pre-compute executable section ranges for fast O(1) range checking
+        // Pre-compute executable section ranges for fast range checking
         // This avoids O(N) iteration over sections for each discovered target
-        let executable_ranges: Vec<(u64, u64)> = self.sections
+        // Note: For typical binaries with <10 executable sections, linear search is efficient.
+        // Binary search would only benefit binaries with many executable sections.
+        let mut executable_ranges: Vec<(u64, u64)> = self.sections
             .iter()
             .filter(|s| s.is_executable)
             .map(|s| (s.virtual_address, s.virtual_address + s.virtual_size))
             .collect();
         
-        // Helper closure to check if target is in executable range (binary search friendly)
+        // Sort ranges by start address for potential binary search optimization
+        executable_ranges.sort_by_key(|&(start, _)| start);
+        
+        // Helper closure to check if target is in executable range
+        // Uses linear search (efficient for small number of sections)
         let is_in_executable_range = |target: u64| -> bool {
             executable_ranges.iter().any(|&(start, end)| target >= start && target < end)
         };

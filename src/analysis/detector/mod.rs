@@ -11,6 +11,21 @@ mod signatures;
 use crate::analysis::loader::LoadedBinary;
 use crate::config::CONFIG;
 
+/// Helper function to search for byte pattern in data.
+/// Uses sliding window search which is efficient for small patterns.
+/// 
+/// Performance: O(n*m) worst case, but typically much faster for short patterns.
+#[inline]
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|window| window == needle)
+}
+
 /// Detection confidence level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Confidence {
@@ -323,7 +338,6 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
 }
 
 /// Detect by strings in binary
-/// Detect by strings in binary
 ///
 /// Performance optimizations:
 /// - Uses memmem-style byte pattern searching instead of string conversion
@@ -333,16 +347,6 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     // Search in configurable range for better detection
     let search_limit = CONFIG.analysis.max_string_search_size.min(binary.data.len());
     let data = &binary.data[..search_limit];
-    
-    // Helper function to search for byte pattern in data
-    // Uses a simple but efficient sliding window search
-    #[inline]
-    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-        if needle.is_empty() || needle.len() > haystack.len() {
-            return needle.is_empty();
-        }
-        haystack.windows(needle.len()).any(|window| window == needle)
-    }
     
     // Go detection
     if contains_bytes(data, b"Go build ID:") || contains_bytes(data, b"runtime.gopanic") {
@@ -552,13 +556,7 @@ fn detect_dotnet(binary: &LoadedBinary, result: &mut DetectionResult) {
         let search_limit = (64 * 1024).min(binary.data.len());
         let data = &binary.data[..search_limit];
         
-        // Helper function for byte pattern search (inline for performance)
-        #[inline]
-        fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-            haystack.windows(needle.len()).any(|window| window == needle)
-        }
-        
-        // ConfuserEx detection
+        // ConfuserEx detection (uses module-level contains_bytes helper)
         if contains_bytes(data, b"ConfuserEx") {
             result.add(Detection::new(
                 DetectionType::Protector,
