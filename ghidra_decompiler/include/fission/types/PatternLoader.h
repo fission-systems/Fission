@@ -30,6 +30,17 @@ public:
         uint64_t base_address,
         const std::vector<BytePattern>& patterns
     );
+
+    /**
+     * Scan for function prologues in the binary
+     * @param memory Binary bytes
+     * @param base_address Image base address
+     * @return Vector of potential function entry points (addresses)
+     */
+    static std::vector<uint64_t> scan_function_prologues(
+        const std::vector<uint8_t>& memory,
+        uint64_t base_address
+    );
 };
 
 } // namespace types

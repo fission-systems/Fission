@@ -20,12 +20,6 @@ using namespace ghidra;
 class TypeManager {
 public:
     /**
-     * Resolve type name to Ghidra Datatype using GdtBinaryParser
-     */
-    static Datatype* resolve_type(TypeFactory* types, const std::string& type_name, 
-                                  int size, const GdtBinaryParser* gdt, int ptr_size);
-    
-    /**
      * Load all types from GdtBinaryParser into Ghidra TypeFactory
      */
     static void load_types_from_gdt(TypeFactory* types, const GdtBinaryParser* gdt, int ptr_size);

@@ -62,17 +62,22 @@ using namespace fission::types;
 #include "fission/analysis/EmulationAnalyzer.h"
 #include "fission/types/PrototypeEnforcer.h"
 using namespace fission::loader;
+using namespace fission::analysis;
 
 // Constants
 static const int MAX_INSTRUCTIONS = 200000;
 
+// Helper function to select FID database
+std::string get_fid_filename(bool is_64bit, const std::string& compiler_id) {
+    std::string suffix = is_64bit ? "_x64.fidbf" : "_x86.fidbf";
+    std::string fid_filename = "vs2019" + suffix; // Default
 
-
-
-// GDT logic moved to fission/types module
-
-
-
+    if (compiler_id.find("vs2017") != std::string::npos) fid_filename = "vs2017" + suffix;
+    else if (compiler_id.find("vs2015") != std::string::npos) fid_filename = "vs2015" + suffix;
+    else if (compiler_id.find("vs2012") != std::string::npos) fid_filename = "vs2012" + suffix;
+    
+    return fid_filename;
+}
 
 // Process a single decompilation request
 std::string process_request(DecompilerContext& state, const std::string& input) {
@@ -96,6 +101,7 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         std::string sla_dir = extract_json_string(input, "sla_dir");
         std::string load_bin_cmd = extract_json_string(input, "load_bin");
         std::string gdt_json = extract_json_string(input, "gdt_json"); // GDT types JSON path
+        std::string compiler_id = "windows"; // Default compiler ID
 
         // Handle "load_bin" command
         if (!load_bin_cmd.empty()) {
@@ -119,28 +125,28 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
             // Initialize/Update loaders for both architectures with complete binary
             // Use image_base as the base address for correct address translation!
             
+            std::cerr << "[fission_decomp] Debug: Detecting PE Arch..." << std::endl;
+            // PE Auto-Detection
+            bool is_pe = false;
+            std::string compiler_id = "windows"; // Default to windows for better safety
+            PeDetectionResult pe_info = detect_pe_arch(bin_bytes);
+            std::cerr << "[fission_decomp] Debug: PE Detection Result: is_pe=" << pe_info.is_pe << std::endl;
+            
+            if (pe_info.is_pe) {
+                is_pe = true;
+                if (!pe_info.compiler_id.empty()) {
+                     compiler_id = pe_info.compiler_id;
+                }
+                std::cerr << "[fission_decomp] Detected PE Binary: " << (pe_info.is_64bit ? "64-bit" : "32-bit") 
+                          << " Compiler: " << compiler_id << std::endl;
+            }
+
             // 64-bit
             if (!state.arch_64bit_ready) {
                 // Safety: delete if exists (defensive programming)
                 if (state.loader_64bit) delete state.loader_64bit;
                 if (state.arch_64bit) delete state.arch_64bit;
                 
-                std::cerr << "[fission_decomp] Debug: Detecting PE Arch..." << std::endl;
-                // PE Auto-Detection
-                bool is_pe = false;
-                std::string compiler_id = "windows"; // Default to windows for better safety
-                PeDetectionResult pe_info = detect_pe_arch(bin_bytes);
-                std::cerr << "[fission_decomp] Debug: PE Detection Result: is_pe=" << pe_info.is_pe << std::endl;
-                
-                if (pe_info.is_pe) {
-                    is_pe = true;
-                    if (!pe_info.compiler_id.empty()) {
-                         compiler_id = pe_info.compiler_id;
-                    }
-                    std::cerr << "[fission_decomp] Detected PE Binary: " << (pe_info.is_64bit ? "64-bit" : "32-bit") 
-                              << " Compiler: " << compiler_id << std::endl;
-                }
-
                 // RTTI Recovery
                 if (is_pe) {
                     std::cerr << "[fission_decomp] Debug: Running RTTI Recovery..." << std::endl;
@@ -165,6 +171,71 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                     std::cerr << "[fission_decomp] Identified " << matches.size() << " standard library functions via patterns." << std::endl;
                     state.iat_symbols.insert(matches.begin(), matches.end());
                 }
+
+                // Phase 8: Full FID Analysis (Ghidra Function ID)
+                std::string fid_filename;
+                if (is_pe) {
+                    fid_filename = get_fid_filename(pe_info.is_64bit, compiler_id);
+                }
+
+                if (!fid_filename.empty()) {
+                    std::vector<std::string> fid_paths = {
+                        "../../ghidra/funtionID/" + fid_filename,
+                        "../ghidra/funtionID/" + fid_filename,
+                        "./ghidra/funtionID/" + fid_filename
+                    };
+                    
+                    for (const auto& fid_path : fid_paths) {
+                        if (file_exists(fid_path)) {
+                            std::cerr << "[fission_decomp] Loading FID database: " << fid_path << std::endl;
+                            FidDatabase fid_db;
+                            if (fid_db.load(fid_path)) {
+                                int matches_found = 0;
+                                // Scan for function prologues and hash
+                                // Simple heuristic scan
+                                size_t step = 1;
+                                for (size_t i = 0; i < bin_bytes.size() - 32; i += step) {
+                                    bool possible_start = false;
+                                    if (pe_info.is_64bit) {
+                                        // x64 Prologues
+                                        uint8_t b0 = bin_bytes[i];
+                                        uint8_t b1 = bin_bytes[i+1];
+                                        // push rbx/rbp/rsi/rdi (40 53/55/56/57)
+                                        if (b0 == 0x40 && (b1 == 0x53 || b1 == 0x55 || b1 == 0x56 || b1 == 0x57)) possible_start = true;
+                                        // sub rsp, imm (48 83 EC / 48 81 EC)
+                                        if (b0 == 0x48 && (b1 == 0x83 || b1 == 0x81) && bin_bytes[i+2] == 0xEC) possible_start = true;
+                                        // mov [rsp+...], reg (48 89 ...)
+                                        if (b0 == 0x48 && b1 == 0x89) possible_start = true;
+                                    } else {
+                                        // x86 Prologues
+                                        // push ebp; mov ebp, esp (55 8B EC)
+                                        if (bin_bytes[i] == 0x55 && bin_bytes[i+1] == 0x8B && bin_bytes[i+2] == 0xEC) possible_start = true;
+                                        // sub esp, imm (83 EC / 81 EC)
+                                        if ((bin_bytes[i] == 0x83 || bin_bytes[i] == 0x81) && bin_bytes[i+1] == 0xEC) possible_start = true;
+                                    }
+
+                                    if (possible_start) {
+                                        size_t len = std::min((size_t)64, bin_bytes.size() - i);
+                                        uint64_t hash = FidHasher::calculate_full_hash(&bin_bytes[i], len);
+                                        auto names = fid_db.lookup_by_hash(hash);
+                                        if (!names.empty()) {
+                                            uint64_t addr = image_base + i;
+                                            // Use the first name, but prefer non-generic ones if possible
+                                            std::string name = names[0];
+                                            // Avoid overwriting if we already have a better name (e.g. from exports)
+                                            if (state.iat_symbols.find(addr) == state.iat_symbols.end()) {
+                                                state.iat_symbols[addr] = name;
+                                                matches_found++;
+                                            }
+                                        }
+                                    }
+                                }
+                                std::cerr << "[fission_decomp] FID Analysis: Identified " << matches_found << " functions." << std::endl;
+                            }
+                            break; // Loaded one DB, stop
+                        }
+                    }
+                }
                 
                 std::cerr << "[fission_decomp] Debug: String Scanning..." << std::endl;
                 // String Scanning (Phase 6)
@@ -177,35 +248,8 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                 state.enum_values.insert(unicode_strings.begin(), unicode_strings.end());
 
                 std::cerr << "[fission_decomp] Debug: Creating Loader and Arch..." << std::endl;
-                state.loader_64bit = new MemoryLoadImage(bin_bytes, image_base);
-                // Use detected compiler ID
-                std::string arch_id = "x86:LE:64:default:" + compiler_id;
-                state.arch_64bit = new CliArchitecture(arch_id, state.loader_64bit, &fission::utils::null_stream());
-                DocumentStorage store;
-                state.arch_64bit->init(store);
-                configure_arch(state.arch_64bit);
-                TypeManager::register_windows_types(state.arch_64bit->types, 8); // 64-bit
-                // Load GDT types using binary parser (64-bit)
-                {
-                    // Autoload Windows GDT (.gdt binary files)
-                    std::vector<std::string> candidates = {
-                        "../../ghidra/typeinfo/win32/windows_vs12_64.gdt",
-                        "../ghidra/typeinfo/win32/windows_vs12_64.gdt",
-                        "./ghidra/typeinfo/win32/windows_vs12_64.gdt"
-                    };
-                    for (const auto& path : candidates) {
-                        if (file_exists(path)) {
-                            std::cerr << "[fission_decomp] Loading GDT (64-bit) from: " << path << std::endl;
-                            GdtBinaryParser gdt;
-                            if (gdt.load(path)) {
-                                TypeManager::load_types_from_gdt(state.arch_64bit->types, &gdt, 8);
-                            }
-                            break;
-                        }
-                    }
-                }
-                state.arch_64bit_ready = true;
-                std::cerr << "[fission_decomp] Initialized 64-bit architecture (persistent)" << std::endl;
+                // Use centralized architecture setup
+                state.setup_architecture(true, bin_bytes, image_base, compiler_id);
             } else {
                  state.loader_64bit->updateData(bin_bytes, image_base);
                  state.arch_64bit->symboltab->getGlobalScope()->clear();
@@ -220,35 +264,8 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
             
             // 32-bit
             if (!state.arch_32bit_ready) {
-                if (state.loader_32bit) delete state.loader_32bit;
-                if (state.arch_32bit) delete state.arch_32bit;
-
-                state.loader_32bit = new MemoryLoadImage(bin_bytes, image_base);
-                state.arch_32bit = new CliArchitecture("x86:LE:32:default", state.loader_32bit, &fission::utils::null_stream());
-                DocumentStorage store;
-                state.arch_32bit->init(store);
-                configure_arch(state.arch_32bit);
-                TypeManager::register_windows_types(state.arch_32bit->types, 4); // 32-bit
-                // Load GDT types using binary parser (32-bit)
-                {
-                    std::vector<std::string> candidates = {
-                        "../../ghidra/typeinfo/win32/windows_vs12_32.gdt",
-                        "../ghidra/typeinfo/win32/windows_vs12_32.gdt",
-                        "./ghidra/typeinfo/win32/windows_vs12_32.gdt"
-                    };
-                    for (const auto& path : candidates) {
-                        if (file_exists(path)) {
-                            std::cerr << "[fission_decomp] Loading GDT (32-bit) from: " << path << std::endl;
-                            GdtBinaryParser gdt;
-                            if (gdt.load(path)) {
-                                TypeManager::load_types_from_gdt(state.arch_32bit->types, &gdt, 4);
-                            }
-                            break;
-                        }
-                    }
-                }
-                state.arch_32bit_ready = true;
-                 std::cerr << "[fission_decomp] Initialized 32-bit architecture (persistent)" << std::endl;
+                // Use centralized architecture setup
+                state.setup_architecture(false, bin_bytes, image_base, compiler_id);
             } else {
                  state.loader_32bit->updateData(bin_bytes, image_base);
                  state.arch_32bit->symboltab->getGlobalScope()->clear();
@@ -310,56 +327,22 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                 // Improved function prologue detection
                 // Scan every 16 bytes (much denser than 4KB) for function prologues
                 size_t matched_count = 0;
-                size_t prologue_count = 0;
-                const size_t SCAN_INTERVAL = 16;  // Every 16 bytes
-                const size_t MAX_SCAN = std::min(bin_bytes.size(), (size_t)(10 * 1024 * 1024));  // Max 10MB
                 
-                for (size_t offset = 0; offset + 64 < MAX_SCAN; offset += SCAN_INTERVAL) {
-                    uint8_t b0 = bin_bytes[offset];
-                    uint8_t b1 = bin_bytes[offset + 1];
-                    uint8_t b2 = bin_bytes[offset + 2];
-                    uint8_t b3 = bin_bytes[offset + 3];
-                    
-                    bool is_prologue = false;
-                    
-                    // x86 Standard prologues
-                    // push ebp; mov ebp, esp (55 8B EC)
-                    if (b0 == 0x55 && b1 == 0x8B && b2 == 0xEC) is_prologue = true;
-                    // push ebp; mov ebp, esp (55 89 E5)
-                    else if (b0 == 0x55 && b1 == 0x89 && b2 == 0xE5) is_prologue = true;
-                    // mov edi, edi; push ebp; mov ebp, esp (8B FF 55 8B)
-                    else if (b0 == 0x8B && b1 == 0xFF && b2 == 0x55 && b3 == 0x8B) is_prologue = true;
-                    // sub esp, XX (83 EC XX) - common for leaf functions
-                    else if (b0 == 0x83 && b1 == 0xEC) is_prologue = true;
-                    // push ebx (53)
-                    else if (b0 == 0x53 && (b1 == 0x8B || b1 == 0x56 || b1 == 0x57)) is_prologue = true;
-                    // push esi (56)
-                    else if (b0 == 0x56 && (b1 == 0x8B || b1 == 0x57 || b1 == 0x53)) is_prologue = true;
-                    // push edi (57)
-                    else if (b0 == 0x57 && (b1 == 0x8B || b1 == 0x56 || b1 == 0x53)) is_prologue = true;
-                    // push -1 for SEH (6A FF)
-                    else if (b0 == 0x6A && b1 == 0xFF) is_prologue = true;
-                    // mov eax, fs:[0] for SEH (64 A1 00 00 00 00)
-                    else if (b0 == 0x64 && b1 == 0xA1) is_prologue = true;
-                    // int 3 padding followed by prologue
-                    else if (b0 == 0xCC && b1 == 0x55 && b2 == 0x8B) {
-                        offset++;  // Skip to actual prologue
-                        is_prologue = true;
-                    }
-                    
-                    if (is_prologue) {
-                        prologue_count++;
-                        uint64_t addr = image_base + offset;
-                        
-                        // Try each FID database
-                        for (auto& db : all_fid_dbs) {
-                            func_matcher.set_fid_database(&db);
-                            std::string name = func_matcher.match_by_fid(addr, &bin_bytes[offset], 64, true);
-                            if (!name.empty()) {
-                                state.fid_function_names[addr] = name;
-                                matched_count++;
-                                break;  // Found match, don't try other DBs
-                            }
+                std::vector<uint64_t> prologues = PatternLoader::scan_function_prologues(bin_bytes, image_base);
+                size_t prologue_count = prologues.size();
+                
+                for (uint64_t addr : prologues) {
+                    size_t offset = addr - image_base;
+                    if (offset + 64 >= bin_bytes.size()) continue;
+
+                    // Try each FID database
+                    for (auto& db : all_fid_dbs) {
+                        func_matcher.set_fid_database(&db);
+                        std::string name = func_matcher.match_by_fid(addr, &bin_bytes[offset], 64, true);
+                        if (!name.empty()) {
+                            state.fid_function_names[addr] = name;
+                            matched_count++;
+                            break;  // Found match, don't try other DBs
                         }
                     }
                 }
@@ -413,45 +396,21 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         MemoryLoadImage* loader = nullptr;
         CliArchitecture* arch = nullptr;
 
-        if (is_64bit) {
-            if (!state.arch_64bit_ready) {
-                 // Fallback initialization
-                 std::vector<uint8_t> bytes;
-                 if (!bytes_b64.empty()) bytes = base64_decode(bytes_b64);
-                 
-                 if (state.loader_64bit) delete state.loader_64bit;
-                 if (state.arch_64bit) delete state.arch_64bit;
+        std::vector<uint8_t> bytes;
+        if (!bytes_b64.empty()) bytes = base64_decode(bytes_b64);
 
-                 state.loader_64bit = new MemoryLoadImage(bytes, address);
-                 state.arch_64bit = new CliArchitecture("x86:LE:64:default", state.loader_64bit, &fission::utils::null_stream());
-                 DocumentStorage store;
-                 state.arch_64bit->init(store);
-                 configure_arch(state.arch_64bit);
-                 state.arch_64bit_ready = true;
-            }
+        // Use centralized architecture setup
+        state.setup_architecture(is_64bit, bytes, address, compiler_id);
+
+        if (is_64bit) {
             loader = state.loader_64bit;
             arch = state.arch_64bit;
         } else {
-            if (!state.arch_32bit_ready) {
-                 std::vector<uint8_t> bytes;
-                 if (!bytes_b64.empty()) bytes = base64_decode(bytes_b64);
-                 
-                 if (state.loader_32bit) delete state.loader_32bit;
-                 if (state.arch_32bit) delete state.arch_32bit;
-
-                 state.loader_32bit = new MemoryLoadImage(bytes, address);
-                 state.arch_32bit = new CliArchitecture("x86:LE:32:default", state.loader_32bit, &fission::utils::null_stream());
-                 DocumentStorage store;
-                 state.arch_32bit->init(store);
-                 configure_arch(state.arch_32bit);
-                 state.arch_32bit_ready = true;
-            }
             loader = state.loader_32bit;
             arch = state.arch_32bit;
         }
 
-        if (!bytes_b64.empty()) {
-            std::vector<uint8_t> bytes = base64_decode(bytes_b64);
+        if (!bytes.empty()) {
             loader->updateData(bytes, address);
         }
         

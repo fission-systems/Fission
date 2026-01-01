@@ -42,6 +42,9 @@ public:
     
     // Initialize Ghidra library (only once)
     bool initialize(const std::string& sleigh_directory);
+
+    // Setup architecture for a specific mode
+    void setup_architecture(bool is_64bit, const std::vector<uint8_t>& bytes, uint64_t image_base, const std::string& compiler_id);
 };
 
 } // namespace core

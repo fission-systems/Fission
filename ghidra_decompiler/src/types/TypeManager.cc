@@ -28,45 +28,7 @@ static std::map<std::string, std::pair<int, type_metatype>> PRIMITIVE_MAP = {
     {"double", {8, TYPE_FLOAT}}
 };
 
-Datatype* TypeManager::resolve_type(TypeFactory* types, const std::string& type_name, 
-                                    int size, const GdtBinaryParser* gdt, int ptr_size) {
-    // 1. Check if it's a pointer type first (contains '*')
-    if (type_name.find('*') != std::string::npos) {
-        size_t star_pos = type_name.rfind('*');
-        std::string base_name = type_name.substr(0, star_pos);
-        while (!base_name.empty() && base_name.back() == ' ') base_name.pop_back();
-        
-        Datatype* base_type = resolve_type(types, base_name, 0, gdt, ptr_size);
-        if (base_type) {
-            return types->getTypePointer(size > 0 ? size : ptr_size, base_type, 1);
-        }
-        return types->getTypePointer(size > 0 ? size : ptr_size, types->getTypeVoid(), 1);
-    }
-    
-    // 2. Check Primitive Map
-    auto it = PRIMITIVE_MAP.find(type_name);
-    if (it != PRIMITIVE_MAP.end()) {
-        if (it->second.second == TYPE_VOID) return types->getTypeVoid();
-        return types->getBase(it->second.first, it->second.second);
-    }
 
-    // 3. Check registered types
-    Datatype* existing = types->findByName(type_name);
-    if (existing) return existing;
-    
-    // 4. Check GDT types if available
-    if (gdt) {
-        const GdtDataType* gdt_type = gdt->find_type(type_name);
-        if (gdt_type) {
-            // Create typedef for Windows types
-            Datatype* base = types->getBase(gdt_type->size, TYPE_UINT);
-            return types->getTypedef(base, type_name, 0, 0);
-        }
-    }
-    
-    // Fallback
-    return nullptr;
-}
 
 void TypeManager::load_types_from_gdt(TypeFactory* types, const GdtBinaryParser* gdt, int ptr_size) {
     if (!gdt || !gdt->is_loaded()) return;
