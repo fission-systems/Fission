@@ -6,7 +6,7 @@
 use thiserror::Error;
 
 use crate::analysis::loader::LoadedBinary;
-use crate::core::errors::{Result, FissionError};
+use crate::core::errors::{FissionError, Result};
 
 pub mod il_disasm;
 pub mod metadata;
@@ -32,34 +32,48 @@ pub type DotNetResult<T> = std::result::Result<T, DotNetError>;
 /// Parse CLR metadata from a loaded PE binary.
 pub fn parse_dotnet_metadata(binary: &LoadedBinary) -> Result<DotNetMetadata> {
     if binary.format.starts_with("ELF") || binary.format.starts_with("Mach-O") {
-        return Err(FissionError::analysis("Unsupported format for .NET parsing"));
+        return Err(FissionError::analysis(
+            "Unsupported format for .NET parsing",
+        ));
     }
     if !binary.is_dotnet {
         return Err(FissionError::analysis("CLR runtime header not found"));
     }
 
-    let pe = goblin::pe::PE::parse(&binary.data)
-        .map_err(|e| FissionError::analysis(format!("Parsing PE for CLR metadata: {}", e)))?;
-    
-    // CLR header is at data directory index 14 (IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR)
-    let optional_header = pe.header.optional_header
-        .ok_or_else(|| FissionError::analysis("Missing PE optional header"))?;
-    let clr_dir = optional_header
-        .data_directories
-        .get_clr_runtime_header()
-        .ok_or_else(|| FissionError::analysis("CLR runtime header not found"))?;
-    
-    let clr_rva = clr_dir.virtual_address;
-    let clr_size = clr_dir.size;
-    
+    // Use binrw to parse PE headers to find CLR directory
+    use crate::analysis::loader::pe::schema::{OptionalHeader, PeFile};
+    use binrw::BinRead;
+    use std::io::Cursor;
+
+    let mut cursor = Cursor::new(&binary.data);
+    let pe_file = PeFile::read_le(&mut cursor)
+        .map_err(|e| FissionError::analysis(format!("Parsing PE headers: {}", e)))?;
+
+    let (clr_rva, clr_size) = match pe_file.nt_headers.optional_header {
+        OptionalHeader::Pe32(opt) => {
+            if let Some(dir) = opt.data_directories.get(14) {
+                (dir.virtual_address, dir.size)
+            } else {
+                (0, 0)
+            }
+        }
+        OptionalHeader::Pe32Plus(opt) => {
+            if let Some(dir) = opt.data_directories.get(14) {
+                (dir.virtual_address, dir.size)
+            } else {
+                (0, 0)
+            }
+        }
+    };
+
     if clr_rva == 0 || clr_size == 0 {
         return Err(FissionError::analysis("CLR runtime header not found"));
     }
-    
+
     // Read COR20 header to get metadata RVA
-    let cor20_offset = rva_to_offset(&pe, clr_rva)
+    let cor20_offset = rva_to_offset(binary, clr_rva)
         .ok_or_else(|| FissionError::analysis("Cannot map COR20 header RVA"))?;
-    
+
     // COR20 header: at offset 8 is the metadata RVA (4 bytes) and size (4 bytes)
     let metadata_rva = u32::from_le_bytes([
         binary.data[cor20_offset + 8],
@@ -74,7 +88,7 @@ pub fn parse_dotnet_metadata(binary: &LoadedBinary) -> Result<DotNetMetadata> {
         binary.data[cor20_offset + 15],
     ]) as usize;
 
-    let offset = rva_to_offset(&pe, metadata_rva)
+    let offset = rva_to_offset(binary, metadata_rva)
         .ok_or_else(|| FissionError::analysis("Unable to map metadata RVA"))?;
     let end = offset
         .checked_add(metadata_size)
@@ -96,10 +110,9 @@ pub fn disassemble_method_rva(binary: &LoadedBinary, rva: u32) -> Result<Vec<ILI
         return Err(FissionError::analysis("CLR runtime header not found"));
     }
 
-    let pe = goblin::pe::PE::parse(&binary.data)
-        .map_err(|e| FissionError::analysis(format!("Parsing PE for IL disassembly: {}", e)))?;
-    let offset = rva_to_offset(&pe, rva)
-        .ok_or_else(|| FissionError::analysis(format!("Cannot map method RVA 0x{rva:x} to file offset")))?;
+    let offset = rva_to_offset(binary, rva).ok_or_else(|| {
+        FissionError::analysis(format!("Cannot map method RVA 0x{rva:x} to file offset"))
+    })?;
 
     let il_data = binary
         .data
@@ -111,17 +124,25 @@ pub fn disassemble_method_rva(binary: &LoadedBinary, rva: u32) -> Result<Vec<ILI
         .map_err(|e| FissionError::analysis(format!("Disassembling IL body: {}", e)))
 }
 
-fn rva_to_offset(pe: &goblin::pe::PE<'_>, rva: u32) -> Option<usize> {
-    for section in &pe.sections {
+fn rva_to_offset(binary: &LoadedBinary, rva: u32) -> Option<usize> {
+    for section in &binary.sections {
+        // LoadedBinary sections logic (assuming virtual_address is absolute VA, need to handle RVA)
+        // Or LoadedBinary might store ImageBase + RVA?
+        // LoadedBinary.sections[i].virtual_address IS the absolute address (ImageBase + RVA).
+        // BUT section.virtual_address in `PeLoader` was calculated as `image_base + section.virtual_address`.
+
         let start = section.virtual_address;
-        let size = if section.virtual_size == 0 {
-            section.size_of_raw_data
-        } else {
-            section.virtual_size
-        };
-        if rva >= start && rva < start + size {
-            let delta = rva - start;
-            return Some(section.pointer_to_raw_data as usize + delta as usize);
+        let size = section.virtual_size.max(section.file_size); // Covering max range
+
+        // Convert RVA to VA
+        let rva_va = binary.image_base + rva as u64;
+
+        if rva_va >= start && rva_va < start + size {
+            let delta = rva_va - start;
+            // Check file bounds
+            if delta < section.file_size {
+                return Some((section.file_offset + delta) as usize);
+            }
         }
     }
     None

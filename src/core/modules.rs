@@ -1,8 +1,8 @@
+use crate::core::events::EventBus;
+use crate::core::prelude::*;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::core::events::EventBus;
-use crate::core::prelude::*;
 
 /// Module lifecycle state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,7 +34,8 @@ impl ModuleContext {
     }
 
     pub fn get_service<T: Any + Send + Sync>(&self, name: &str) -> Option<Arc<T>> {
-        self.services.get(name)
+        self.services
+            .get(name)
             .and_then(|any| any.downcast_ref::<Arc<T>>().cloned())
     }
 }
@@ -43,13 +44,13 @@ impl ModuleContext {
 pub trait FissionModule: Send + Sync {
     /// Unique name of the module
     fn name(&self) -> &str;
-    
+
     /// Initialization phase: Register services, load config
     fn on_init(&mut self, ctx: &mut ModuleContext) -> Result<()>;
-    
+
     /// Start phase: Start background threads, active logic
     fn on_start(&mut self, ctx: &mut ModuleContext) -> Result<()>;
-    
+
     /// Shutdown phase: Cleanup resources
     fn on_shutdown(&mut self, ctx: &mut ModuleContext) -> Result<()>;
 }
@@ -90,18 +91,29 @@ impl ModuleManager {
             match entry.module.on_init(&mut self.context) {
                 Ok(()) => {
                     entry.state = ModuleState::Initialized;
-                    crate::core::logging::info(&format!("[ModuleManager] {} initialized", entry.module.name()));
+                    crate::core::logging::info(&format!(
+                        "[ModuleManager] {} initialized",
+                        entry.module.name()
+                    ));
                 }
                 Err(e) => {
                     entry.state = ModuleState::Failed;
-                    crate::core::logging::error(&format!("[ModuleManager] {} failed to initialize: {}", entry.module.name(), e));
+                    crate::core::logging::error(&format!(
+                        "[ModuleManager] {} failed to initialize: {}",
+                        entry.module.name(),
+                        e
+                    ));
                     all_ok = false;
                     // Continue with other modules (graceful degradation)
                 }
             }
         }
         self.manager_state = ModuleState::Initialized;
-        if all_ok { Ok(()) } else { Ok(()) } // Log errors but don't fail startup
+        if all_ok {
+            Ok(())
+        } else {
+            Ok(())
+        } // Log errors but don't fail startup
     }
 
     /// Start all initialized modules with graceful degradation
@@ -113,11 +125,18 @@ impl ModuleManager {
             match entry.module.on_start(&mut self.context) {
                 Ok(()) => {
                     entry.state = ModuleState::Running;
-                    crate::core::logging::info(&format!("[ModuleManager] {} started", entry.module.name()));
+                    crate::core::logging::info(&format!(
+                        "[ModuleManager] {} started",
+                        entry.module.name()
+                    ));
                 }
                 Err(e) => {
                     entry.state = ModuleState::Failed;
-                    crate::core::logging::error(&format!("[ModuleManager] {} failed to start: {}", entry.module.name(), e));
+                    crate::core::logging::error(&format!(
+                        "[ModuleManager] {} failed to start: {}",
+                        entry.module.name(),
+                        e
+                    ));
                     // Continue with other modules
                 }
             }
@@ -135,10 +154,17 @@ impl ModuleManager {
             match entry.module.on_shutdown(&mut self.context) {
                 Ok(()) => {
                     entry.state = ModuleState::Stopped;
-                    crate::core::logging::info(&format!("[ModuleManager] {} stopped", entry.module.name()));
+                    crate::core::logging::info(&format!(
+                        "[ModuleManager] {} stopped",
+                        entry.module.name()
+                    ));
                 }
                 Err(e) => {
-                    crate::core::logging::warn(&format!("[ModuleManager] {} failed to shutdown cleanly: {}", entry.module.name(), e));
+                    crate::core::logging::warn(&format!(
+                        "[ModuleManager] {} failed to shutdown cleanly: {}",
+                        entry.module.name(),
+                        e
+                    ));
                     entry.state = ModuleState::Stopped; // Mark stopped anyway
                 }
             }

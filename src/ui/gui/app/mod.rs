@@ -3,31 +3,31 @@
 //! This module assembles all UI panels and handles the main event loop.
 //! Individual panels are defined in the `panels` module.
 
+pub mod analysis_ops;
 pub mod debug_ops;
-pub mod decompiler;
 pub mod decomp_worker;
+pub mod decompiler;
 pub mod file_ops;
 pub mod handlers;
-pub mod titan_ops;
 pub mod script_ops;
-pub mod analysis_ops;
+pub mod titan_ops;
 
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
 
 use crate::analysis::loader::FunctionInfo;
 use crate::debug::Debugger;
 #[cfg(target_os = "windows")]
 use crate::debug::PlatformDebugger;
 
-use super::state::{AppState, DebugAction};
-use super::messages::AsyncMessage;
 use super::menu::{self, MenuAction};
-use super::status_bar;
-use super::panels::{bottom_tabs, activity_bar, side_bar, editor};
+use super::messages::AsyncMessage;
 use super::panels::bottom_tabs::{ConsoleAction, ScriptAction};
+use super::panels::{activity_bar, bottom_tabs, editor, side_bar};
+use super::state::{AppState, DebugAction};
+use super::status_bar;
 use crate::config::CONFIG;
 use crate::core::modules::ModuleManager;
 use crate::plugin::module::PluginModule;
@@ -37,18 +37,17 @@ use once_cell::sync::Lazy;
 use tokio::runtime::Runtime;
 
 /// Global Tokio runtime for async operations
-pub static TOKIO_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
-    Runtime::new().expect("Failed to create global Tokio runtime")
-});
+pub static TOKIO_RUNTIME: Lazy<Runtime> =
+    Lazy::new(|| Runtime::new().expect("Failed to create global Tokio runtime"));
 
 /// Main application struct that implements eframe::App
 pub struct FissionApp {
     /// Shared application state
     state: AppState,
-    
+
     /// Channel for receiving async messages
     rx: Receiver<AsyncMessage>,
-    
+
     /// Channel sender (cloned for async tasks)
     tx: Sender<AsyncMessage>,
 
@@ -58,34 +57,33 @@ pub struct FissionApp {
 
     /// Debug event receiver (Windows)
     #[cfg(target_os = "windows")]
-    dbg_event_rx: Option<std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>>,
-    /// Debug event loop stop sender
-    #[cfg(target_os = "windows")]
-    dbg_stop_tx: Option<std::sync::mpsc::Sender<()>>,
+    dbg_event_rx: Option<crossbeam_channel::Receiver<crate::debug::types::DebugEvent>>,
 
+    // Channel to send stop command to debug thread
+    dbg_stop_tx: Option<crossbeam_channel::Sender<()>>,
 
     /// Decompile request sender (to worker thread)
     decomp_request_tx: Sender<decomp_worker::DecompileRequest>,
-    
+
     /// Latest request ID for debouncing
     latest_request_id: Arc<AtomicU64>,
 
     /// Theme initialization flag (legacy, now tracked by current_theme)
     theme_initialized: bool,
-    
+
     /// Currently applied theme (to detect changes)
     current_theme: Option<crate::ui::gui::state::ThemeMode>,
-    
+
     /// Track last dynamic mode to detect changes
     last_dynamic_mode: bool,
 
     /// Python scripting bridge
     #[cfg(feature = "python")]
     python_bridge: crate::script::PythonBridge,
-    
+
     /// Module manager for lifecycle management
     module_manager: ModuleManager,
-    
+
     /// System info for memory usage tracking
     sysinfo: sysinfo::System,
     /// Last memory update time
@@ -94,33 +92,29 @@ pub struct FissionApp {
 
 impl Default for FissionApp {
     fn default() -> Self {
-        let (tx, rx) = channel();
-        let (decomp_tx, decomp_rx) = channel();
+        let (tx, rx) = unbounded();
+        let (decomp_tx, decomp_rx) = unbounded();
         let latest_request_id = Arc::new(AtomicU64::new(0));
-        
+
         // Spawn the decompiler worker thread
-        decomp_worker::spawn_worker(
-            decomp_rx,
-            tx.clone(),
-            latest_request_id.clone(),
-        );
-        
+        decomp_worker::spawn_worker(decomp_rx, tx.clone(), latest_request_id.clone());
+
         // Initialize state early to access event bus
         let state = AppState::default();
-        
+
         // Bridge EventBus to UI AsyncMessage channel
         let tx_clone = tx.clone();
         state.event_bus().subscribe(move |event| {
             let _ = tx_clone.send(AsyncMessage::Event(event.clone()));
         });
-        
+
         // Initialize Module Manager with lifecycle management
         let mut module_manager = ModuleManager::new(state.event_bus().clone());
-        
+
         // Register PluginModule
         let plugin_manager = Arc::new(Mutex::new(PluginManager::new()));
         module_manager.register_module(Box::new(PluginModule::new(plugin_manager)));
-        
+
         // Run lifecycle: init -> start
         if let Err(e) = module_manager.init_all() {
             crate::core::logging::warn(&format!("[FissionApp] Module init failed: {}", e));
@@ -128,7 +122,7 @@ impl Default for FissionApp {
         if let Err(e) = module_manager.start_all() {
             crate::core::logging::warn(&format!("[FissionApp] Module start failed: {}", e));
         }
-        
+
         Self {
             state,
             rx,
@@ -137,7 +131,6 @@ impl Default for FissionApp {
             debugger: Some(PlatformDebugger::default()),
             #[cfg(target_os = "windows")]
             dbg_event_rx: None,
-            #[cfg(target_os = "windows")]
             dbg_stop_tx: None,
             decomp_request_tx: decomp_tx,
             latest_request_id,
@@ -170,23 +163,23 @@ impl eframe::App for FissionApp {
 
         if self.current_theme != Some(target_theme) || self.last_dynamic_mode != dynamic_mode {
             super::theme::set_theme(ctx, target_theme, dynamic_mode);
-            
+
             // Handle tab switching if mode changed
             if self.last_dynamic_mode != dynamic_mode {
-                 use crate::ui::gui::state::BottomTab;
-                 let invalid = match self.state.ui.bottom_tab {
-                     BottomTab::Debug | BottomTab::Timeline => !dynamic_mode,
-                     BottomTab::Strings | BottomTab::Imports => dynamic_mode,
-                     _ => false,
-                 };
-                 if invalid {
-                     self.state.ui.bottom_tab = BottomTab::Console;
-                 }
+                use crate::ui::gui::state::BottomTab;
+                let invalid = match self.state.ui.bottom_tab {
+                    BottomTab::Debug | BottomTab::Timeline => !dynamic_mode,
+                    BottomTab::Strings | BottomTab::Imports => dynamic_mode,
+                    _ => false,
+                };
+                if invalid {
+                    self.state.ui.bottom_tab = BottomTab::Console;
+                }
             }
 
             self.current_theme = Some(target_theme);
             self.last_dynamic_mode = dynamic_mode;
-            
+
             // Re-configure fonts as they might need reloading or style update
             super::theme::configure_fonts(ctx);
             // Only load fonts once if possible, or check if needed
@@ -222,12 +215,7 @@ impl eframe::App for FissionApp {
             &self.dbg_event_rx,
         );
         #[cfg(not(target_os = "windows"))]
-        handlers::process_messages(
-            &mut self.state,
-            &self.rx,
-            &self.tx,
-            &self.decomp_request_tx,
-        );
+        handlers::process_messages(&mut self.state, &self.rx, &self.tx, &self.decomp_request_tx);
 
         // Render menu bar and handle actions
         let menu_action = menu::render(ctx, &mut self.state);
@@ -237,10 +225,10 @@ impl eframe::App for FissionApp {
         status_bar::render(ctx, &mut self.state);
 
         // VS CODE STYLE LAYOUT
-        
+
         // 1. Activity Bar (Far left)
         activity_bar::render(ctx, &mut self.state);
-        
+
         // 2. Side Bar (Left)
         if let Some(action) = side_bar::render(ctx, &mut self.state) {
             match action {
@@ -252,7 +240,10 @@ impl eframe::App for FissionApp {
                 }
                 side_bar::SideBarAction::RenameFunction(addr) => {
                     // Get current name for the function
-                    let current_name = self.state.analysis.user_function_names
+                    let current_name = self
+                        .state
+                        .analysis
+                        .user_function_names
                         .get(&addr)
                         .cloned()
                         .unwrap_or_else(|| format!("sub_{:x}", addr));
@@ -260,7 +251,7 @@ impl eframe::App for FissionApp {
                 }
             }
         }
-        
+
         // 3. Bottom Panel (Terminal/Output style)
         if self.state.ui.panel_visible {
             let (console_action, script_action) = bottom_tabs::render(ctx, &mut self.state);
@@ -270,12 +261,15 @@ impl eframe::App for FissionApp {
                 }
                 ConsoleAction::None => {}
             }
-            
+
             #[cfg(feature = "python")]
             script_ops::handle_action(&mut self.state, script_action, &mut self.python_bridge);
             #[cfg(not(feature = "python"))]
             if let ScriptAction::Execute(_) = script_action {
-                self.state.script.script_output.push("[Error] Python support not enabled".into());
+                self.state
+                    .script
+                    .script_output
+                    .push("[Error] Python support not enabled".into());
             }
         }
 
@@ -287,19 +281,19 @@ impl eframe::App for FissionApp {
 
         // Process pending debug control requests
         self.handle_pending_debug_actions();
-        
+
         // Render attach dialog
         self.render_attach_dialog(ctx);
-        
+
         // Render xrefs window
         use super::panels::xrefs;
         if let xrefs::XrefAction::NavigateTo(addr) = xrefs::render(ctx, &mut self.state) {
             // Navigate to address - find function containing this address
             analysis_ops::navigate_to_address(
-                &mut self.state, 
-                addr, 
-                &self.decomp_request_tx, 
-                &self.latest_request_id
+                &mut self.state,
+                addr,
+                &self.decomp_request_tx,
+                &self.latest_request_id,
             );
         }
     }
@@ -317,6 +311,8 @@ impl FissionApp {
     fn handle_menu_action(&mut self, action: MenuAction) {
         match action {
             MenuAction::OpenFile => file_ops::open_file_dialog(self.tx.clone()),
+            MenuAction::SaveSnapshot => file_ops::save_snapshot_dialog(self.tx.clone()),
+            MenuAction::LoadSnapshot => file_ops::load_snapshot_dialog(self.tx.clone()),
             MenuAction::AttachToProcess => {
                 self.state.ui.show_attach_dialog = true;
                 self.state.debug.process_list = crate::debug::enumerate_processes();
@@ -329,10 +325,12 @@ impl FissionApp {
             MenuAction::ClearCache => {
                 let count = self.state.analysis.decompile_cache.len();
                 self.state.analysis.decompile_cache.clear();
-                self.state.log(format!("[*] Cleared {} cached items", count));
+                self.state
+                    .log(format!("[*] Cleared {} cached items", count));
             }
             MenuAction::ShowAbout => {
-                self.state.log("[*] Fission v0.1.0 - Ghidra-Powered Analysis Platform");
+                self.state
+                    .log("[*] Fission v0.1.0 - Ghidra-Powered Analysis Platform");
             }
             MenuAction::ShowXrefs => {
                 self.state.ui.show_xrefs_window = true;
@@ -344,10 +342,10 @@ impl FissionApp {
 
     fn open_function_tabs(&mut self, func: &FunctionInfo) {
         analysis_ops::open_function_tabs(
-            &mut self.state, 
-            func, 
-            &self.decomp_request_tx, 
-            &self.latest_request_id
+            &mut self.state,
+            func,
+            &self.decomp_request_tx,
+            &self.latest_request_id,
         );
     }
 
@@ -434,8 +432,15 @@ impl FissionApp {
         {
             if let Some(dbg) = self.debugger.as_mut() {
                 // Update registers if suspended
-                if self.state.debug.debug_state.status == crate::debug::types::DebugStatus::Suspended {
-                    if let Some(tid) = self.state.debug.debug_state.last_thread_id.or(self.state.debug.debug_state.main_thread_id) {
+                if self.state.debug.debug_state.status
+                    == crate::debug::types::DebugStatus::Suspended
+                {
+                    if let Some(tid) = self.state.debug.debug_state.last_thread_id.or(self
+                        .state
+                        .debug
+                        .debug_state
+                        .main_thread_id)
+                    {
                         if let Ok(regs) = dbg.fetch_registers(tid) {
                             self.state.debug.debug_state.registers = Some(regs);
                         }
@@ -470,13 +475,14 @@ impl FissionApp {
     fn render_attach_dialog(&mut self, ctx: &egui::Context) {
         if let Some(process) = debug_ops::render_attach_dialog(&mut self.state, ctx) {
             self.state.ui.show_attach_dialog = false;
-            
+
             // Load binary if exe_path is available
             if let Some(ref exe_path) = process.exe_path {
-                self.state.log(format!("[*] Loading binary from: {}", exe_path));
+                self.state
+                    .log(format!("[*] Loading binary from: {}", exe_path));
                 file_ops::load_binary(&mut self.state, self.tx.clone(), exe_path);
             }
-            
+
             // Attach to process
             self.attach_to_process(process.pid);
         }
@@ -506,16 +512,25 @@ impl FissionApp {
 fn format_hexdump(addr: u64, data: &[u8]) -> String {
     let mut output = String::new();
     for chunk in data.chunks(16) {
-        output.push_str(&format!("{:016X}: ", addr + (output.len() as u64 / 75 * 16)));
+        output.push_str(&format!(
+            "{:016X}: ",
+            addr + (output.len() as u64 / 75 * 16)
+        ));
         for b in chunk {
             output.push_str(&format!("{:02X} ", b));
         }
         if chunk.len() < 16 {
-            for _ in 0..(16 - chunk.len()) { output.push_str("   "); }
+            for _ in 0..(16 - chunk.len()) {
+                output.push_str("   ");
+            }
         }
         output.push_str(" | ");
         for b in chunk {
-            output.push(if *b >= 0x20 && *b <= 0x7E { *b as char } else { '.' });
+            output.push(if *b >= 0x20 && *b <= 0x7E {
+                *b as char
+            } else {
+                '.'
+            });
         }
         output.push('\n');
     }

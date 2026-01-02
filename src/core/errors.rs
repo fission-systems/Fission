@@ -137,12 +137,6 @@ impl From<std::num::ParseIntError> for FissionError {
     }
 }
 
-impl From<goblin::error::Error> for FissionError {
-    fn from(err: goblin::error::Error) -> Self {
-        FissionError::Loader(err.to_string())
-    }
-}
-
 // Allow implicit conversion from serde_json errors
 impl From<serde_json::Error> for FissionError {
     fn from(err: serde_json::Error) -> Self {

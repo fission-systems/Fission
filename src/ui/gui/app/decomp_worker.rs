@@ -10,8 +10,8 @@ use crate::analysis::decomp::{DecompilerPool, DecompilerServer};
 use crate::config::{DecompilerMode, CONFIG};
 use crate::core::errors::FissionError;
 use crate::ui::gui::messages::AsyncMessage;
+use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
@@ -243,7 +243,7 @@ fn worker_loop(
                     &request.iat_symbols,
                     request.gdt_json_path.as_deref(),
                 ) {
-                    crate::core::logging::error(&format!(
+                    crate::core::logging::debug(&format!(
                         "[decomp-worker] Failed to load binary: {}",
                         e
                     ));

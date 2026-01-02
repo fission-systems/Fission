@@ -26,14 +26,16 @@ struct Args {
 fn main() -> fission::prelude::Result<()> {
     // 1. Initialize logger with verbosity level
     fission::logging::init(match std::env::args().filter(|a| a == "-v").count() {
-        0 => fission::logging::LogLevel::Warn,
-        1 => fission::logging::LogLevel::Info,
-        2 => fission::logging::LogLevel::Debug,
-        _ => fission::logging::LogLevel::Trace,
+        0 => fission::logging::LogLevel::WARN,
+        1 => fission::logging::LogLevel::INFO,
+        2 => fission::logging::LogLevel::DEBUG,
+        _ => fission::logging::LogLevel::TRACE,
     });
-    
+
     // Also init env_logger for dependencies if needed (optional)
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    // Also init env_logger for dependencies if needed (optional)
+    // env_logger replaced by tracing
+    // env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
     // 2. Parse command line arguments
     let args = Args::parse();

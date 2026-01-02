@@ -1,6 +1,6 @@
 //! Message and command handlers.
 
-use std::sync::mpsc::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use crate::ui::gui::messages::AsyncMessage;
@@ -16,8 +16,8 @@ pub fn process_messages(
     rx: &Receiver<AsyncMessage>,
     tx: &Sender<AsyncMessage>,
     decomp_tx: &Sender<super::decomp_worker::DecompileRequest>,
-    #[cfg(target_os = "windows")] dbg_event_rx: &Option<
-        std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>,
+    #[cfg(target_os = "windows")] dbg_event_rx: &mut Option<
+        crossbeam_channel::Receiver<crate::debug::types::DebugEvent>,
     >,
 ) {
     while let Ok(msg) = rx.try_recv() {
@@ -184,7 +184,7 @@ pub fn process_messages(
                     } => {
                         let percentage = (current as f32 / total as f32).clamp(0.0, 1.0);
                         state.ui.progress = Some((percentage, message.clone()));
-                        
+
                         // Clear progress when done
                         if current >= total {
                             state.ui.progress = None;
@@ -197,6 +197,30 @@ pub fn process_messages(
                         }
                     }
                     _ => {} // Ignore others for now (or handle specifically)
+                }
+            }
+            AsyncMessage::SaveSnapshot(path) => {
+                if let Some(binary) = &state.analysis.loaded_binary {
+                    if let Err(e) =
+                        crate::core::snapshot::save_snapshot(binary, std::path::Path::new(&path))
+                    {
+                        state.log(format!("[!] Error saving snapshot: {}", e));
+                    } else {
+                        state.log(format!("[✓] Snapshot saved to: {}", path));
+                    }
+                } else {
+                    state.log("[!] No binary loaded to save");
+                }
+            }
+            AsyncMessage::LoadSnapshot(path) => {
+                match crate::core::snapshot::load_snapshot(std::path::Path::new(&path)) {
+                    Ok(binary) => {
+                        state.log(format!("[✓] Snapshot loaded from: {}", path));
+                        let _ = tx.send(AsyncMessage::BinaryLoaded(Ok(Arc::new(binary))));
+                    }
+                    Err(e) => {
+                        state.log(format!("[!] Error loading snapshot: {}", e));
+                    }
                 }
             }
         }
