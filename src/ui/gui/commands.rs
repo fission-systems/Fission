@@ -260,7 +260,7 @@ mod tests {
         // Verify rename
         {
             let binary = state.analysis.loaded_binary.as_ref().unwrap();
-            let func = binary.functions.iter().find(|f| f.address == 0x1000).unwrap();
+            let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "renamed_func");
         }
 
@@ -270,7 +270,7 @@ mod tests {
         // Verify revert
         {
             let binary = state.analysis.loaded_binary.as_ref().unwrap();
-            let func = binary.functions.iter().find(|f| f.address == 0x1000).unwrap();
+            let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "func1");
         }
 
@@ -280,7 +280,7 @@ mod tests {
         // Verify re-rename
         {
             let binary = state.analysis.loaded_binary.as_ref().unwrap();
-            let func = binary.functions.iter().find(|f| f.address == 0x1000).unwrap();
+            let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "renamed_func");
         }
     }

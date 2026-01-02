@@ -1,5 +1,6 @@
 //! TTD Recorder - Records execution step by step.
 
+use std::collections::HashMap;
 use std::time::Instant;
 use super::snapshot::{ExecutionSnapshot, MemoryDelta, SnapshotStats};
 use super::super::types::RegisterState;
@@ -17,12 +18,16 @@ pub enum RecordingStatus {
 }
 
 /// TTD Recorder - Records execution snapshots
+/// 
+/// Performance: Uses both a Vec for ordering and a HashMap for O(1) lookup by step index.
 #[derive(Debug)]
 pub struct TTDRecorder {
     /// Current recording status
     status: RecordingStatus,
-    /// All recorded snapshots
+    /// All recorded snapshots in order
     snapshots: Vec<ExecutionSnapshot>,
+    /// Index for O(1) lookup by step index
+    snapshot_index: HashMap<u64, usize>,
     /// Current step index
     current_step: u64,
     /// Recording start time
@@ -39,6 +44,7 @@ impl TTDRecorder {
         Self {
             status: RecordingStatus::Idle,
             snapshots: Vec::new(),
+            snapshot_index: HashMap::new(),
             current_step: 0,
             start_time: None,
             max_snapshots: CONFIG.debug.max_snapshots,
@@ -60,6 +66,7 @@ impl TTDRecorder {
         self.start_time = Some(Instant::now());
         self.current_step = 0;
         self.snapshots.clear();
+        self.snapshot_index.clear();
         self.prev_registers = None;
     }
     
@@ -93,14 +100,29 @@ impl TTDRecorder {
         
         // Enforce max snapshots limit (remove oldest)
         if self.snapshots.len() >= self.max_snapshots {
+            if let Some(oldest) = self.snapshots.first() {
+                self.snapshot_index.remove(&oldest.step_index);
+            }
             self.snapshots.remove(0);
+            // Rebuild index after removal (indices shift)
+            self.rebuild_index();
         }
         
+        let idx = self.snapshots.len();
+        self.snapshot_index.insert(step_index, idx);
         self.snapshots.push(snapshot);
         self.prev_registers = Some(registers);
         self.current_step += 1;
         
         Some(step_index)
+    }
+    
+    /// Rebuild the snapshot index after removals
+    fn rebuild_index(&mut self) {
+        self.snapshot_index.clear();
+        for (idx, snapshot) in self.snapshots.iter().enumerate() {
+            self.snapshot_index.insert(snapshot.step_index, idx);
+        }
     }
     
     /// Record a step with memory changes
@@ -123,9 +145,15 @@ impl TTDRecorder {
         
         // Enforce max snapshots limit
         if self.snapshots.len() >= self.max_snapshots {
+            if let Some(oldest) = self.snapshots.first() {
+                self.snapshot_index.remove(&oldest.step_index);
+            }
             self.snapshots.remove(0);
+            self.rebuild_index();
         }
         
+        let idx = self.snapshots.len();
+        self.snapshot_index.insert(step_index, idx);
         self.snapshots.push(snapshot);
         self.prev_registers = Some(registers);
         self.current_step += 1;
@@ -133,9 +161,11 @@ impl TTDRecorder {
         Some(step_index)
     }
     
-    /// Get a snapshot by step index
+    /// Get a snapshot by step index using O(1) HashMap lookup
     pub fn get_snapshot(&self, step_index: u64) -> Option<&ExecutionSnapshot> {
-        self.snapshots.iter().find(|s| s.step_index == step_index)
+        self.snapshot_index
+            .get(&step_index)
+            .and_then(|&idx| self.snapshots.get(idx))
     }
     
     /// Get the latest snapshot
@@ -193,6 +223,7 @@ impl TTDRecorder {
     /// Clear all recordings
     pub fn clear(&mut self) {
         self.snapshots.clear();
+        self.snapshot_index.clear();
         self.current_step = 0;
         self.start_time = None;
         self.prev_registers = None;

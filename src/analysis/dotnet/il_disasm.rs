@@ -1,4 +1,6 @@
 use crate::analysis::dotnet::{DotNetError, DotNetResult};
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 /// A single IL instruction with decoded opcode and operand text.
 #[derive(Debug, Clone)]
@@ -220,8 +222,24 @@ fn decode_operand(
     Ok(operand)
 }
 
+/// Lazily initialized HashMap for O(1) opcode lookup.
+/// 
+/// This provides significant performance improvement over linear search
+/// when disassembling large method bodies, as opcode lookup is called
+/// for every instruction.
+static OPCODE_MAP: Lazy<HashMap<u16, &'static OpCodeDef>> = Lazy::new(|| {
+    let mut map = HashMap::with_capacity(OPCODES.len());
+    for op in OPCODES {
+        map.insert(op.code, op);
+    }
+    map
+});
+
+/// O(1) opcode lookup using pre-built HashMap.
+/// 
+/// Performance: Reduced from O(n) linear search (~220 opcodes) to O(1) hash lookup.
 fn lookup_opcode(code: u16) -> Option<&'static OpCodeDef> {
-    OPCODES.iter().find(|op| op.code == code)
+    OPCODE_MAP.get(&code).copied()
 }
 
 const UNKNOWN_OPCODE: OpCodeDef = OpCodeDef {

@@ -244,10 +244,9 @@ pub fn cmd_disasm(state: &mut CliState, addr: u64, count: usize) {
 pub fn cmd_decompile(state: &CliState, addr: u64) {
     match &state.binary {
         Some(binary) => {
-            // Find function at address
-            let func = binary.functions.iter().find(|f| {
-                f.address == addr || (f.size > 0 && addr >= f.address && addr < f.address + f.size)
-            });
+            // Find function at address using optimized lookup
+            // First try exact match with O(1) HashMap, then fall back to range check
+            let func = binary.function_at(addr);
 
             let func_name = func.map(|f| f.name.as_str()).unwrap_or("unknown");
 
