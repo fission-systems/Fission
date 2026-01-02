@@ -272,7 +272,9 @@ impl LoadedBinary {
 
     /// Get iterator over functions (already sorted by address)
     /// 
-    /// Performance: Zero-allocation iterator when functions are pre-sorted.
+    /// Performance: Always zero-allocation since it returns a slice iterator.
+    /// Prefer this over functions_sorted() to avoid Vec allocation when
+    /// only iteration is needed.
     #[inline]
     pub fn functions_iter(&self) -> impl Iterator<Item = &FunctionInfo> {
         self.functions.iter()
