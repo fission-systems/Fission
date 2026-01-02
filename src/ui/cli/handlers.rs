@@ -8,6 +8,29 @@ use std::sync::Arc;
 use crate::analysis::disasm::DisasmEngine;
 use crate::analysis::loader::LoadedBinary;
 
+/// Print the standard "No binary loaded" message.
+/// This is used by multiple CLI command handlers.
+fn print_no_binary_message() {
+    println!(
+        "{} No binary loaded. Use 'load <path>' first.",
+        "[!]".yellow()
+    );
+}
+
+/// Helper macro to check if a binary is loaded and get a reference to it.
+/// Returns early with the standard error message if no binary is loaded.
+macro_rules! require_binary {
+    ($state:expr) => {
+        match &$state.binary {
+            Some(b) => b,
+            None => {
+                print_no_binary_message();
+                return;
+            }
+        }
+    };
+}
+
 /// CLI session state
 pub struct CliState {
     /// Currently loaded binary
@@ -73,115 +96,96 @@ pub fn cmd_load(state: &mut CliState, path: &str) {
 }
 
 pub fn cmd_info(state: &CliState) {
-    match &state.binary {
-        Some(binary) => {
-            println!();
-            println!("{}", "Binary Information".bold().underline());
-            println!();
-            println!("  {} {}", "Path:".bold(), binary.path);
-            println!("  {} {}", "Format:".bold(), binary.format);
-            println!("  {} {}", "Architecture:".bold(), binary.arch_spec);
-            println!(
-                "  {} {}",
-                "Bitness:".bold(),
-                if binary.is_64bit { "64-bit" } else { "32-bit" }
-            );
-            println!("  {} 0x{:016X}", "Entry Point:".bold(), binary.entry_point);
-            println!("  {} 0x{:016X}", "Image Base:".bold(), binary.image_base);
-            println!("  {} {} bytes", "File Size:".bold(), binary.data.len());
-            println!("  {} {}", "Sections:".bold(), binary.sections.len());
-            println!("  {} {}", "Functions:".bold(), binary.functions.len());
+    let binary = require_binary!(state);
 
-            if binary.is_dotnet {
-                println!(
-                    "  {} {}",
-                    ".NET Runtime:".bold(),
-                    binary
-                        .dotnet_runtime_version
-                        .as_deref()
-                        .unwrap_or("unknown")
-                );
-            }
-            println!();
-        }
-        None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
-        }
+    println!();
+    println!("{}", "Binary Information".bold().underline());
+    println!();
+    println!("  {} {}", "Path:".bold(), binary.path);
+    println!("  {} {}", "Format:".bold(), binary.format);
+    println!("  {} {}", "Architecture:".bold(), binary.arch_spec);
+    println!(
+        "  {} {}",
+        "Bitness:".bold(),
+        if binary.is_64bit { "64-bit" } else { "32-bit" }
+    );
+    println!("  {} 0x{:016X}", "Entry Point:".bold(), binary.entry_point);
+    println!("  {} 0x{:016X}", "Image Base:".bold(), binary.image_base);
+    println!("  {} {} bytes", "File Size:".bold(), binary.data.len());
+    println!("  {} {}", "Sections:".bold(), binary.sections.len());
+    println!("  {} {}", "Functions:".bold(), binary.functions.len());
+
+    if binary.is_dotnet {
+        println!(
+            "  {} {}",
+            ".NET Runtime:".bold(),
+            binary
+                .dotnet_runtime_version
+                .as_deref()
+                .unwrap_or("unknown")
+        );
     }
+    println!();
 }
 
 pub fn cmd_functions(state: &CliState) {
-    match &state.binary {
-        Some(binary) => {
-            let funcs = binary.functions_sorted();
+    let binary = require_binary!(state);
 
-            if funcs.is_empty() {
-                println!("{} No functions found.", "[!]".yellow());
-                return;
-            }
+    let funcs = binary.functions_sorted();
 
-            println!();
-            println!("{} ({} total)", "Functions".bold().underline(), funcs.len());
-            println!();
-            println!(
-                "  {:<18} {:<8} {:<6} {}",
-                "Address".bold(),
-                "Size".bold(),
-                "Type".bold(),
-                "Name".bold()
-            );
-            println!("  {}", "─".repeat(60));
-
-            for func in funcs.iter().take(50) {
-                let type_str = if func.is_import {
-                    "IMP".yellow()
-                } else if func.is_export {
-                    "EXP".green()
-                } else {
-                    "INT".dimmed()
-                };
-
-                println!(
-                    "  0x{:016X} {:>8} {:^6} {}",
-                    func.address,
-                    if func.size > 0 {
-                        format!("{}", func.size)
-                    } else {
-                        "-".to_string()
-                    },
-                    type_str,
-                    func.name
-                );
-            }
-
-            if funcs.len() > 50 {
-                println!(
-                    "  {}",
-                    format!("... and {} more", funcs.len() - 50).dimmed()
-                );
-            }
-            println!();
-        }
-        None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
-        }
+    if funcs.is_empty() {
+        println!("{} No functions found.", "[!]".yellow());
+        return;
     }
+
+    println!();
+    println!("{} ({} total)", "Functions".bold().underline(), funcs.len());
+    println!();
+    println!(
+        "  {:<18} {:<8} {:<6} {}",
+        "Address".bold(),
+        "Size".bold(),
+        "Type".bold(),
+        "Name".bold()
+    );
+    println!("  {}", "─".repeat(60));
+
+    for func in funcs.iter().take(50) {
+        let type_str = if func.is_import {
+            "IMP".yellow()
+        } else if func.is_export {
+            "EXP".green()
+        } else {
+            "INT".dimmed()
+        };
+
+        println!(
+            "  0x{:016X} {:>8} {:^6} {}",
+            func.address,
+            if func.size > 0 {
+                format!("{}", func.size)
+            } else {
+                "-".to_string()
+            },
+            type_str,
+            func.name
+        );
+    }
+
+    if funcs.len() > 50 {
+        println!(
+            "  {}",
+            format!("... and {} more", funcs.len() - 50).dimmed()
+        );
+    }
+    println!();
 }
 
 pub fn cmd_disasm(state: &mut CliState, addr: u64, count: usize) {
     let binary = match &state.binary {
         Some(b) => b.clone(),
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_message();
             return;
         }
     };
@@ -242,194 +246,170 @@ pub fn cmd_disasm(state: &mut CliState, addr: u64, count: usize) {
 }
 
 pub fn cmd_decompile(state: &CliState, addr: u64) {
-    match &state.binary {
-        Some(binary) => {
-            // Find function at address using optimized lookup
-            // First try exact match with O(1) HashMap, then fall back to range check
-            let func = binary.function_at(addr);
+    let binary = require_binary!(state);
 
-            let func_name = func.map(|f| f.name.as_str()).unwrap_or("unknown");
+    // Find function at address using optimized lookup
+    // First try exact match with O(1) HashMap, then fall back to range check
+    let func = binary.function_at(addr);
 
-            println!();
-            println!(
-                "{} {} @ 0x{:X}",
-                "Decompile".bold().underline(),
-                func_name,
-                addr
-            );
-            println!();
+    let func_name = func.map(|f| f.name.as_str()).unwrap_or("unknown");
 
-            // Try to use the decompiler
-            use crate::analysis::decomp::native::{find_cli, DecompilerServer};
+    println!();
+    println!(
+        "{} {} @ 0x{:X}",
+        "Decompile".bold().underline(),
+        func_name,
+        addr
+    );
+    println!();
 
-            match find_cli() {
-                Some(cli_path) => {
-                    println!("{} Using decompiler at {:?}", "[*]".blue(), cli_path);
+    // Try to use the decompiler
+    use crate::analysis::decomp::native::{find_cli, DecompilerServer};
 
-                    // Get SLA directory
-                    let sla_dir = cli_path
-                        .parent()
-                        .and_then(|p| p.parent())
-                        .map(|p| p.join("ghidra_decompiler/processors"))
-                        .unwrap_or_default();
+    match find_cli() {
+        Some(cli_path) => {
+            println!("{} Using decompiler at {:?}", "[*]".blue(), cli_path);
 
-                    match DecompilerServer::new(&cli_path, sla_dir.to_str().unwrap_or("")) {
-                        Ok(mut server) => {
-                            // Load binary into decompiler
-                            let mapped_data = binary.get_memory_mapped_data();
-                            if let Err(e) = server.load_binary(
-                                &mapped_data,
-                                binary.arch_spec.as_str(),
-                                binary.image_base,
-                                &binary.iat_symbols,
-                                None,
-                            ) {
-                                println!(
-                                    "{} Failed to load binary into decompiler: {}",
-                                    "[!]".red(),
-                                    e
-                                );
-                                return;
-                            }
+            // Get SLA directory
+            let sla_dir = cli_path
+                .parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.join("ghidra_decompiler/processors"))
+                .unwrap_or_default();
 
-                            // Decompile
-                            match server.decompile(&[], addr, binary.is_64bit) {
-                                Ok(code) => {
-                                    println!("{}", code);
-                                }
-                                Err(e) => {
-                                    println!("{} Decompilation failed: {}", "[!]".red(), e);
-                                }
-                            }
+            match DecompilerServer::new(&cli_path, sla_dir.to_str().unwrap_or("")) {
+                Ok(mut server) => {
+                    // Load binary into decompiler
+                    let mapped_data = binary.get_memory_mapped_data();
+                    if let Err(e) = server.load_binary(
+                        &mapped_data,
+                        binary.arch_spec.as_str(),
+                        binary.image_base,
+                        &binary.iat_symbols,
+                        None,
+                    ) {
+                        println!(
+                            "{} Failed to load binary into decompiler: {}",
+                            "[!]".red(),
+                            e
+                        );
+                        return;
+                    }
+
+                    // Decompile
+                    match server.decompile(&[], addr, binary.is_64bit) {
+                        Ok(code) => {
+                            println!("{}", code);
                         }
                         Err(e) => {
-                            println!("{} Failed to start decompiler: {}", "[!]".red(), e);
+                            println!("{} Decompilation failed: {}", "[!]".red(), e);
                         }
                     }
                 }
-                None => {
-                    println!(
-                        "{} Decompiler CLI not found. Build the decompiler first.",
-                        "[!]".yellow()
-                    );
-                    println!("  Run: cd ghidra_decompiler && mkdir build && cd build && cmake .. && make");
+                Err(e) => {
+                    println!("{} Failed to start decompiler: {}", "[!]".red(), e);
                 }
             }
-            println!();
         }
         None => {
             println!(
-                "{} No binary loaded. Use 'load <path>' first.",
+                "{} Decompiler CLI not found. Build the decompiler first.",
                 "[!]".yellow()
             );
+            println!("  Run: cd ghidra_decompiler && mkdir build && cd build && cmake .. && make");
         }
     }
+    println!();
 }
 
 pub fn cmd_strings(state: &CliState) {
-    match &state.binary {
-        Some(binary) => {
-            let min_len = 4;
-            let mut strings = Vec::new();
+    let binary = require_binary!(state);
 
-            // Simple ASCII string extraction
-            let mut current_string = String::new();
-            let mut start_offset = 0usize;
+    let min_len = 4;
+    let mut strings = Vec::new();
 
-            for (i, &byte) in binary.data.iter().enumerate() {
-                if byte >= 0x20 && byte <= 0x7E {
-                    if current_string.is_empty() {
-                        start_offset = i;
-                    }
-                    current_string.push(byte as char);
-                } else {
-                    if current_string.len() >= min_len {
-                        strings.push((start_offset, current_string.clone()));
-                    }
-                    current_string.clear();
-                }
+    // Simple ASCII string extraction
+    let mut current_string = String::new();
+    let mut start_offset = 0usize;
+
+    for (i, &byte) in binary.data.iter().enumerate() {
+        if byte >= 0x20 && byte <= 0x7E {
+            if current_string.is_empty() {
+                start_offset = i;
             }
-
-            println!();
-            println!(
-                "{} ({} found, min length: {})",
-                "Strings".bold().underline(),
-                strings.len(),
-                min_len
-            );
-            println!();
-
-            for (offset, s) in strings.iter().take(100) {
-                let display = if s.len() > 60 {
-                    format!("{}...", &s[..57])
-                } else {
-                    s.clone()
-                };
-                println!("  {:08X}  {}", offset, display.green());
+            current_string.push(byte as char);
+        } else {
+            if current_string.len() >= min_len {
+                strings.push((start_offset, current_string.clone()));
             }
-
-            if strings.len() > 100 {
-                println!(
-                    "  {}",
-                    format!("... and {} more", strings.len() - 100).dimmed()
-                );
-            }
-            println!();
-        }
-        None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            current_string.clear();
         }
     }
+
+    println!();
+    println!(
+        "{} ({} found, min length: {})",
+        "Strings".bold().underline(),
+        strings.len(),
+        min_len
+    );
+    println!();
+
+    for (offset, s) in strings.iter().take(100) {
+        let display = if s.len() > 60 {
+            format!("{}...", &s[..57])
+        } else {
+            s.clone()
+        };
+        println!("  {:08X}  {}", offset, display.green());
+    }
+
+    if strings.len() > 100 {
+        println!(
+            "  {}",
+            format!("... and {} more", strings.len() - 100).dimmed()
+        );
+    }
+    println!();
 }
 
 pub fn cmd_sections(state: &CliState) {
-    match &state.binary {
-        Some(binary) => {
-            println!();
-            println!("{}", "Sections".bold().underline());
-            println!();
-            println!(
-                "  {:<12} {:<18} {:<12} {}",
-                "Name".bold(),
-                "Virtual Addr".bold(),
-                "Size".bold(),
-                "Flags".bold()
-            );
-            println!("  {}", "─".repeat(60));
+    let binary = require_binary!(state);
 
-            for section in &binary.sections {
-                let flags = format!(
-                    "{}{}{}",
-                    if section.is_readable { "R" } else { "-" },
-                    if section.is_writable { "W" } else { "-" },
-                    if section.is_executable { "X" } else { "-" }
-                );
+    println!();
+    println!("{}", "Sections".bold().underline());
+    println!();
+    println!(
+        "  {:<12} {:<18} {:<12} {}",
+        "Name".bold(),
+        "Virtual Addr".bold(),
+        "Size".bold(),
+        "Flags".bold()
+    );
+    println!("  {}", "─".repeat(60));
 
-                let flags_colored = if section.is_executable {
-                    flags.red()
-                } else if section.is_writable {
-                    flags.yellow()
-                } else {
-                    flags.normal()
-                };
+    for section in &binary.sections {
+        let flags = format!(
+            "{}{}{}",
+            if section.is_readable { "R" } else { "-" },
+            if section.is_writable { "W" } else { "-" },
+            if section.is_executable { "X" } else { "-" }
+        );
 
-                println!(
-                    "  {:<12} 0x{:016X} {:>10} {}",
-                    section.name, section.virtual_address, section.virtual_size, flags_colored
-                );
-            }
-            println!();
-        }
-        None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
-        }
+        let flags_colored = if section.is_executable {
+            flags.red()
+        } else if section.is_writable {
+            flags.yellow()
+        } else {
+            flags.normal()
+        };
+
+        println!(
+            "  {:<12} 0x{:016X} {:>10} {}",
+            section.name, section.virtual_address, section.virtual_size, flags_colored
+        );
     }
+    println!();
 }
 
 pub fn cmd_analyze(state: &mut CliState) {
@@ -462,10 +442,7 @@ pub fn cmd_analyze(state: &mut CliState) {
             );
         }
         None => {
-            println!(
-                "{} No binary loaded. Use 'load <path>' first.",
-                "[!]".yellow()
-            );
+            print_no_binary_message();
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::analysis::loader::types::{
-    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
+    extract_cstring, extract_fixed_string, FunctionInfo, LoadedBinary, LoadedBinaryBuilder,
+    SectionInfo,
 };
 use crate::core::prelude::*;
 use binrw::BinRead;
@@ -105,7 +106,7 @@ impl MachoLoader {
                     }
 
                     sections_info.push(SectionInfo {
-                        name: Self::clean_name(&sect.sectname),
+                        name: extract_fixed_string(&sect.sectname),
                         virtual_address: sect.addr,
                         virtual_size: sect.size,
                         file_offset: sect.offset as u64,
@@ -176,11 +177,6 @@ impl MachoLoader {
             .build()
     }
 
-    fn clean_name(bytes: &[u8]) -> String {
-        let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-        String::from_utf8_lossy(&bytes[..len]).to_string()
-    }
-
     fn parse_symbols_64(
         data: &[u8],
         symtab: &SymtabCommand,
@@ -204,14 +200,19 @@ impl MachoLoader {
             if let Ok(nlist) = Nlist64::read_options(&mut reader, endian, ()) {
                 // If n_type & N_STAB == 0 && (n_type & N_EXT)
                 if (nlist.n_type & 0xE0) == 0 && (nlist.n_type & 0x01) != 0 && nlist.n_value != 0 {
-                    // Extract name
-                    let name_offset = str_off + nlist.n_strx as u64;
-                    let name = if name_offset < data.len() as u64 {
-                        let slice = &data[name_offset as usize..];
-                        let len = slice.iter().position(|&b| b == 0).unwrap_or(0);
-                        String::from_utf8_lossy(&slice[..len]).to_string()
+                    // Extract name using shared utility function
+                    let name_offset = str_off as usize + nlist.n_strx as usize;
+                    let name = if name_offset < data.len() {
+                        extract_cstring(data, name_offset)
                     } else {
                         format!("sub_{:x}", nlist.n_value)
+                    };
+
+                    // If name is empty after extraction, use fallback
+                    let name = if name.is_empty() {
+                        format!("sub_{:x}", nlist.n_value)
+                    } else {
+                        name
                     };
 
                     out.push(FunctionInfo {

@@ -1,4 +1,6 @@
-use crate::analysis::loader::types::{LoadedBinary, LoadedBinaryBuilder, SectionInfo};
+use crate::analysis::loader::types::{
+    extract_cstring, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
+};
 use crate::core::prelude::*;
 use binrw::BinRead;
 use std::io::Cursor;
@@ -161,21 +163,8 @@ impl<'a> PeLoaderImpl<'a> {
         T::read_le(&mut cursor).map_err(|e| err!(loader, "binrw read error: {}", e))
     }
 
-    fn read_string_at(&self, offset: u64) -> Result<String> {
-        let mut s = String::new();
-        let mut cursor = Cursor::new(self.data);
-        cursor.set_position(offset);
-        loop {
-            let mut buf = [0u8; 1];
-            if std::io::Read::read(&mut cursor, &mut buf).unwrap_or(0) == 0 {
-                break;
-            }
-            if buf[0] == 0 {
-                break;
-            }
-            s.push(buf[0] as char); // ASCII only for now
-        }
-        Ok(s)
+    fn read_string_at(&self, offset: u64) -> String {
+        extract_cstring(self.data, offset as usize)
     }
 
     fn rva_to_file_offset(&self, rva: u32, image_base: u64) -> Option<u64> {
@@ -241,7 +230,7 @@ impl<'a> PeLoaderImpl<'a> {
                     if name_rva != 0 {
                         let name_offset =
                             self.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
-                        let name = self.read_string_at(name_offset).unwrap_or_default();
+                        let name = self.read_string_at(name_offset);
 
                         // Lookup function RVA using ordinal
                         // AddressOfFunctions is indexed by Ordinal (Base subtracted)
@@ -300,9 +289,14 @@ impl<'a> PeLoaderImpl<'a> {
 
             // Read DLL Name
             let name_offset = self.rva_to_file_offset(desc.name, image_base).unwrap_or(0);
-            let dll_name = self
-                .read_string_at(name_offset)
-                .unwrap_or_else(|_| "unknown.dll".to_string());
+            let dll_name = {
+                let name = self.read_string_at(name_offset);
+                if name.is_empty() {
+                    "unknown.dll".to_string()
+                } else {
+                    name
+                }
+            };
 
             // Read Thunks (use OriginalFirstThunk (ILT) preferably, else FirstThunk (IAT))
             let thunk_rva = if desc.original_first_thunk != 0 {
@@ -310,7 +304,7 @@ impl<'a> PeLoaderImpl<'a> {
             } else {
                 desc.first_thunk
             };
-            let mut thunk_offset = self.rva_to_file_offset(thunk_rva, image_base).unwrap_or(0);
+            let thunk_offset = self.rva_to_file_offset(thunk_rva, image_base).unwrap_or(0);
 
             let iat_base_rva = desc.first_thunk;
 
@@ -345,8 +339,12 @@ impl<'a> PeLoaderImpl<'a> {
                             self.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
                         // Hint (2 bytes) + Name (ASCIIZ)
                         if name_offset != 0 {
-                            self.read_string_at(name_offset + 2)
-                                .unwrap_or_else(|_| format!("func_{}", idx))
+                            let name = self.read_string_at(name_offset + 2);
+                            if name.is_empty() {
+                                format!("func_{}", idx)
+                            } else {
+                                name
+                            }
                         } else {
                             format!("func_{}", idx)
                         }
