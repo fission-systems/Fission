@@ -1,5 +1,5 @@
 use crate::analysis::loader::types::{
-    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
+    extract_cstring, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
 };
 use crate::core::prelude::*;
 use binrw::BinRead;
@@ -95,7 +95,7 @@ impl ElfLoader {
                     image_base = shdr.sh_addr;
                 }
 
-                let name = Self::get_string(&strtab_data, shdr.sh_name as usize);
+                let name = extract_cstring(&strtab_data, shdr.sh_name as usize);
 
                 sections_info.push(SectionInfo {
                     name: name.clone(),
@@ -202,7 +202,7 @@ impl ElfLoader {
                     image_base = shdr.sh_addr as u64;
                 }
 
-                let name = Self::get_string(&strtab_data, shdr.sh_name as usize);
+                let name = extract_cstring(&strtab_data, shdr.sh_name as usize);
 
                 sections_info.push(SectionInfo {
                     name,
@@ -231,17 +231,6 @@ impl ElfLoader {
             .is_64bit(is_64bit)
             .add_sections(sections_info)
             .build()
-    }
-
-    fn get_string(table: &[u8], idx: usize) -> String {
-        if idx >= table.len() {
-            return "".to_string();
-        }
-        let mut end = idx;
-        while end < table.len() && table[end] != 0 {
-            end += 1;
-        }
-        String::from_utf8_lossy(&table[idx..end]).to_string()
     }
 
     fn parse_symbols_64(
