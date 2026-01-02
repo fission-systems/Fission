@@ -79,6 +79,8 @@ pub struct SignatureDatabase {
     /// Index of signatures by their first non-wildcard byte for O(1) initial filtering.
     /// Key: first byte value, Value: indices into signatures vec
     first_byte_index: HashMap<u8, Vec<usize>>,
+    /// Indices of signatures that start with wildcards (must be checked for all inputs)
+    wildcard_signatures: Vec<usize>,
 }
 
 impl SignatureDatabase {
@@ -91,6 +93,7 @@ impl SignatureDatabase {
             // Pre-allocate for ~150 known signatures to avoid reallocations
             signatures: Vec::with_capacity(160),
             first_byte_index: HashMap::with_capacity(64),
+            wildcard_signatures: Vec::new(),
         };
         db.load_msvc_signatures();
         db.build_index();
@@ -100,6 +103,7 @@ impl SignatureDatabase {
     /// Build the first-byte index for faster lookups
     fn build_index(&mut self) {
         self.first_byte_index.clear();
+        self.wildcard_signatures.clear();
         for (idx, sig) in self.signatures.iter().enumerate() {
             // Find the first non-wildcard byte in the pattern
             if let Some(&Some(first_byte)) = sig.pattern.first() {
@@ -107,6 +111,9 @@ impl SignatureDatabase {
                     .entry(first_byte)
                     .or_insert_with(Vec::new)
                     .push(idx);
+            } else if sig.pattern.first() == Some(&None) {
+                // Signature starts with wildcard
+                self.wildcard_signatures.push(idx);
             }
         }
     }
@@ -1012,12 +1019,12 @@ impl SignatureDatabase {
             }
         }
         
-        // Fall back to checking signatures that start with wildcards
-        // (these won't be in the first_byte_index)
-        for sig in &self.signatures {
-            // Only check if pattern starts with wildcard (None)
-            if sig.pattern.first() == Some(&None) && sig.matches(bytes) {
-                return Some(sig);
+        // Check signatures that start with wildcards (pre-indexed, no full scan needed)
+        for &idx in &self.wildcard_signatures {
+            if let Some(sig) = self.signatures.get(idx) {
+                if sig.matches(bytes) {
+                    return Some(sig);
+                }
             }
         }
         
@@ -1038,6 +1045,9 @@ impl SignatureDatabase {
                 .entry(first_byte)
                 .or_insert_with(Vec::new)
                 .push(idx);
+        } else if sig.pattern.first() == Some(&None) {
+            // Wildcard signature
+            self.wildcard_signatures.push(idx);
         }
         self.signatures.push(sig);
     }
