@@ -16,7 +16,9 @@ pub enum XrefType {
 }
 
 /// A single cross-reference
-#[derive(Debug, Clone)]
+/// 
+/// Implements Copy since all fields are Copy types, avoiding heap allocations
+#[derive(Debug, Clone, Copy)]
 pub struct Xref {
     /// Source address (where the reference originates)
     pub from_addr: u64,
@@ -33,6 +35,9 @@ pub struct XrefDatabase {
     refs_to: HashMap<u64, Vec<Xref>>,
     /// References FROM an address (key = source address)
     refs_from: HashMap<u64, Vec<Xref>>,
+    /// Cached total reference count for O(1) lookup
+    /// Updated incrementally on each add_xref call
+    total_count: usize,
 }
 
 impl XrefDatabase {
@@ -42,15 +47,22 @@ impl XrefDatabase {
     }
 
     /// Add a cross-reference
+    /// 
+    /// Performance: Uses Copy trait for efficient duplication. Also updates
+    /// total_count incrementally for O(1) total_refs() lookup.
     pub fn add_xref(&mut self, xref: Xref) {
+        // Store copy in refs_to (Xref is Copy, so this is a cheap memcpy)
         self.refs_to
             .entry(xref.to_addr)
             .or_default()
-            .push(xref.clone());
+            .push(xref);
+        // Store original in refs_from
         self.refs_from
             .entry(xref.from_addr)
             .or_default()
             .push(xref);
+        // Update cached count
+        self.total_count += 1;
     }
 
     /// Get all references TO an address (who calls/references this address?)
@@ -64,8 +76,10 @@ impl XrefDatabase {
     }
 
     /// Total number of cross-references
+    /// 
+    /// Performance: O(1) using cached count instead of O(N) iteration
     pub fn total_refs(&self) -> usize {
-        self.refs_to.values().map(|v| v.len()).sum()
+        self.total_count
     }
 
     /// Build xref database from disassembled code
