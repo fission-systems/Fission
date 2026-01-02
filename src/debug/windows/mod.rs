@@ -4,30 +4,29 @@ mod process;
 
 pub use process::enumerate_processes;
 
-use super::types::{DebugState, DebugStatus, ProcessInfo, RegisterState, Breakpoint};
 use super::traits::Debugger;
 use super::ttd::Timeline;
+use super::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
 
-use std::sync::mpsc::{Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use std::ffi::c_void;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::{
-    DebugActiveProcess, DebugActiveProcessStop, WaitForDebugEvent, ContinueDebugEvent,
-    ReadProcessMemory, WriteProcessMemory, GetThreadContext, SetThreadContext, CONTEXT,
-    DEBUG_EVENT, EXCEPTION_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT,
-    EXIT_THREAD_DEBUG_EVENT, CREATE_PROCESS_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT,
-    LOAD_DLL_DEBUG_EVENT, CONTEXT_FLAGS,
-};
-use windows::Win32::System::Threading::{
-    OpenProcess, OpenThread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
+    ContinueDebugEvent, DebugActiveProcess, DebugActiveProcessStop, GetThreadContext,
+    ReadProcessMemory, SetThreadContext, WaitForDebugEvent, WriteProcessMemory, CONTEXT,
+    CONTEXT_FLAGS, CREATE_PROCESS_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT, DEBUG_EVENT,
+    EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT, LOAD_DLL_DEBUG_EVENT,
 };
 use windows::Win32::System::Memory::{
     VirtualProtectEx, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS,
 };
-use windows::Win32::Foundation::{NTSTATUS, HANDLE, CloseHandle};
-use std::ffi::c_void;
+use windows::Win32::System::Threading::{
+    OpenProcess, OpenThread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
+};
 
 const DBG_CONTINUE: NTSTATUS = NTSTATUS(0x00010002i32);
 const EXCEPTION_BREAKPOINT_CODE: u32 = 0x80000003;
@@ -40,7 +39,11 @@ const CONTEXT_SEGMENTS: u32 = CONTEXT_AMD64 | 0x4;
 const CONTEXT_FLOATING_POINT: u32 = CONTEXT_AMD64 | 0x8;
 const CONTEXT_DEBUG_REGISTERS: u32 = CONTEXT_AMD64 | 0x10;
 const CONTEXT_FULL: u32 = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_FLOATING_POINT;
-const CONTEXT_ALL: u32 = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS | CONTEXT_FLOATING_POINT | CONTEXT_DEBUG_REGISTERS;
+const CONTEXT_ALL: u32 = CONTEXT_CONTROL
+    | CONTEXT_INTEGER
+    | CONTEXT_SEGMENTS
+    | CONTEXT_FLOATING_POINT
+    | CONTEXT_DEBUG_REGISTERS;
 
 /// Windows debugger implementation
 pub struct WindowsDebugger {
@@ -61,7 +64,7 @@ impl WindowsDebugger {
             ttd_timeline: None,
         }
     }
-    
+
     /// Set the TTD timeline for auto-recording during debugging
     pub fn set_ttd_timeline(&mut self, timeline: Arc<Mutex<Timeline>>) {
         self.ttd_timeline = Some(timeline);
@@ -85,13 +88,15 @@ impl WindowsDebugger {
             Ok(h)
         }
     }
-    
+
     /// Record a TTD snapshot if recording is active
     fn record_ttd_snapshot(&self, thread_id: u32, registers: &super::types::RegisterState) {
         if let Some(timeline_arc) = &self.ttd_timeline {
             if let Ok(mut timeline) = timeline_arc.lock() {
                 if timeline.recorder().is_recording() {
-                    timeline.recorder_mut().record_step(registers.clone(), thread_id);
+                    timeline
+                        .recorder_mut()
+                        .record_step(registers.clone(), thread_id);
                 }
             }
         }
@@ -99,11 +104,7 @@ impl WindowsDebugger {
 }
 
 /// Start debug event loop for the attached process
-pub fn start_event_loop(
-    pid: u32,
-    tx: Sender<super::types::DebugEvent>,
-    stop_rx: Receiver<()>,
-) {
+pub fn start_event_loop(pid: u32, tx: Sender<super::types::DebugEvent>, stop_rx: Receiver<()>) {
     thread::spawn(move || {
         let mut debug_event = DEBUG_EVENT::default();
         loop {
@@ -129,7 +130,11 @@ pub fn start_event_loop(
                         } else if code_raw == EXCEPTION_SINGLE_STEP_CODE {
                             Some(super::types::DebugEvent::SingleStep { thread_id })
                         } else {
-                            Some(super::types::DebugEvent::Exception { code: code_raw, address, first_chance: is_first })
+                            Some(super::types::DebugEvent::Exception {
+                                code: code_raw,
+                                address,
+                                first_chance: is_first,
+                            })
                         }
                     },
                     CREATE_PROCESS_DEBUG_EVENT => Some(super::types::DebugEvent::ProcessCreated {
@@ -140,7 +145,9 @@ pub fn start_event_loop(
                         let exit_code = unsafe { debug_event.u.ExitProcess.dwExitCode };
                         Some(super::types::DebugEvent::ProcessExited { exit_code })
                     }
-                    CREATE_THREAD_DEBUG_EVENT => Some(super::types::DebugEvent::ThreadCreated { thread_id }),
+                    CREATE_THREAD_DEBUG_EVENT => {
+                        Some(super::types::DebugEvent::ThreadCreated { thread_id })
+                    }
                     EXIT_THREAD_DEBUG_EVENT => {
                         let _exit_code = unsafe { debug_event.u.ExitThread.dwExitCode };
                         Some(super::types::DebugEvent::ThreadExited { thread_id })
@@ -180,41 +187,45 @@ impl Debugger for WindowsDebugger {
 
     fn attach(&mut self, pid: u32) -> Result<(), String> {
         self.state.status = DebugStatus::Attaching;
-        
+
         unsafe {
             DebugActiveProcess(pid)
                 .map_err(|e| format!("Failed to attach to process {}: {:?}", pid, e))?;
         }
-        
+
         self.state.attached_pid = Some(pid);
         self.state.status = DebugStatus::Running;
         self.state.last_event = Some(format!("Attached to PID {}", pid));
-        
+
         // Open process handle immediately
         let _ = self.ensure_process_handle();
-        
+
         Ok(())
     }
 
     fn detach(&mut self) -> Result<(), String> {
-        let pid = self.state.attached_pid
+        let pid = self
+            .state
+            .attached_pid
             .ok_or_else(|| "Not attached to any process".to_string())?;
-        
+
         unsafe {
             DebugActiveProcessStop(pid)
                 .map_err(|e| format!("Failed to detach from process {}: {:?}", pid, e))?;
         }
-        
+
         if let Some(h) = self.process_handle.take() {
-            unsafe { let _ = CloseHandle(h); }
+            unsafe {
+                let _ = CloseHandle(h);
+            }
         }
-        
+
         self.state.attached_pid = None;
         self.state.main_thread_id = None;
         self.state.last_thread_id = None;
         self.state.status = DebugStatus::Detached;
         self.state.last_event = Some("Detached".to_string());
-        
+
         Ok(())
     }
 
@@ -228,8 +239,12 @@ impl Debugger for WindowsDebugger {
 
     fn continue_execution(&mut self) -> Result<(), String> {
         let pid = self.state.attached_pid.ok_or("Not attached")?;
-        let tid = self.state.last_thread_id.or(self.state.main_thread_id).ok_or("No thread id")?;
-        
+        let tid = self
+            .state
+            .last_thread_id
+            .or(self.state.main_thread_id)
+            .ok_or("No thread id")?;
+
         unsafe {
             ContinueDebugEvent(pid, tid, DBG_CONTINUE)
                 .map_err(|e| format!("Continue failed: {:?}", e))?;
@@ -239,16 +254,20 @@ impl Debugger for WindowsDebugger {
     }
 
     fn single_step(&mut self) -> Result<(), String> {
-        let tid = self.state.last_thread_id.or(self.state.main_thread_id).ok_or("No thread id")?;
+        let tid = self
+            .state
+            .last_thread_id
+            .or(self.state.main_thread_id)
+            .ok_or("No thread id")?;
         unsafe {
             let h_thread = OpenThread(THREAD_ALL_ACCESS, false, tid)
                 .map_err(|e| format!("OpenThread failed: {:?}", e))?;
-            
+
             let mut ctx: CONTEXT = std::mem::zeroed();
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
             GetThreadContext(h_thread, &mut ctx)
                 .map_err(|e| format!("GetThreadContext failed: {:?}", e))?;
-            
+
             // Record TTD snapshot before step (if recording is active)
             let registers = super::types::RegisterState {
                 rax: ctx.Rax,
@@ -271,23 +290,27 @@ impl Debugger for WindowsDebugger {
                 rflags: ctx.EFlags as u64,
             };
             self.record_ttd_snapshot(tid, &registers);
-            
+
             ctx.EFlags |= 0x100; // Set Trap Flag
-            
+
             SetThreadContext(h_thread, &ctx)
                 .map_err(|e| format!("SetThreadContext failed: {:?}", e))?;
-            
+
             let _ = CloseHandle(h_thread);
         }
-        
+
         // Continue to let the CPU execute one instruction and hit the trap
         let pid = self.state.attached_pid.ok_or("Not attached")?;
-        let tid = self.state.last_thread_id.or(self.state.main_thread_id).ok_or("No thread id")?;
+        let tid = self
+            .state
+            .last_thread_id
+            .or(self.state.main_thread_id)
+            .ok_or("No thread id")?;
         unsafe {
             ContinueDebugEvent(pid, tid, DBG_CONTINUE)
                 .map_err(|e| format!("Continue for step failed: {:?}", e))?;
         }
-        
+
         self.state.status = DebugStatus::Running;
         Ok(())
     }
@@ -298,10 +321,10 @@ impl Debugger for WindowsDebugger {
         if original_byte == 0xCC {
             return Err("Breakpoint already exists at this address".into());
         }
-        
+
         // Patch with INT3 (0xCC)
         self.write_memory(address, &[0xCC])?;
-        
+
         let bp = super::types::Breakpoint {
             address,
             original_byte,
@@ -313,11 +336,15 @@ impl Debugger for WindowsDebugger {
     }
 
     fn remove_sw_breakpoint(&mut self, address: u64) -> Result<(), String> {
-        let bp = self.state.breakpoints.get(&address).ok_or("Breakpoint not found")?;
-        
+        let bp = self
+            .state
+            .breakpoints
+            .get(&address)
+            .ok_or("Breakpoint not found")?;
+
         // Restore original byte
         self.write_memory(address, &[bp.original_byte])?;
-        
+
         self.state.breakpoints.remove(&address);
         self.state.last_event = Some(format!("Breakpoint removed 0x{:016x}", address));
         Ok(())
@@ -328,7 +355,7 @@ impl Debugger for WindowsDebugger {
         unsafe {
             let mut buffer = vec![0u8; size];
             let mut bytes_read = 0;
-            
+
             let res = ReadProcessMemory(
                 h_process,
                 address as *const c_void,
@@ -336,9 +363,9 @@ impl Debugger for WindowsDebugger {
                 size,
                 Some(&mut bytes_read),
             );
-            
+
             res.map_err(|e| format!("ReadProcessMemory failed at 0x{:x}: {:?}", address, e))?;
-            
+
             buffer.truncate(bytes_read);
             Ok(buffer)
         }
@@ -355,8 +382,9 @@ impl Debugger for WindowsDebugger {
                 data.len(),
                 PAGE_EXECUTE_READWRITE,
                 &mut old_protect,
-            ).map_err(|e| format!("VirtualProtectEx failed: {:?}", e))?;
-            
+            )
+            .map_err(|e| format!("VirtualProtectEx failed: {:?}", e))?;
+
             let mut bytes_written = 0;
             let res = WriteProcessMemory(
                 h_process,
@@ -365,7 +393,7 @@ impl Debugger for WindowsDebugger {
                 data.len(),
                 Some(&mut bytes_written),
             );
-            
+
             // Restore protection
             let mut _unused = PAGE_PROTECTION_FLAGS::default();
             let _ = VirtualProtectEx(
@@ -375,13 +403,18 @@ impl Debugger for WindowsDebugger {
                 old_protect,
                 &mut _unused,
             );
-            
+
             res.map_err(|e| format!("WriteProcessMemory failed at 0x{:x}: {:?}", address, e))?;
-            
+
             if bytes_written != data.len() {
-                return Err(format!("Incomplete write at 0x{:x}: {}/{}", address, bytes_written, data.len()));
+                return Err(format!(
+                    "Incomplete write at 0x{:x}: {}/{}",
+                    address,
+                    bytes_written,
+                    data.len()
+                ));
             }
-            
+
             Ok(())
         }
     }
@@ -390,15 +423,15 @@ impl Debugger for WindowsDebugger {
         unsafe {
             let h_thread = OpenThread(THREAD_ALL_ACCESS, false, thread_id)
                 .map_err(|e| format!("OpenThread failed: {:?}", e))?;
-            
+
             let mut ctx: CONTEXT = std::mem::zeroed();
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
-            
+
             let res = GetThreadContext(h_thread, &mut ctx);
             let _ = CloseHandle(h_thread);
-            
+
             res.map_err(|e| format!("GetThreadContext failed: {:?}", e))?;
-            
+
             // Map Windows CONTEXT to our RegisterState (x64)
             Ok(super::types::RegisterState {
                 rax: ctx.Rax,

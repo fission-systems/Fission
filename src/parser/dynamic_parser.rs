@@ -1,11 +1,11 @@
-use crate::core::prelude::*;
-use crate::analysis::loader::types::LoadedBinary;
 use super::BinaryParser;
+use crate::analysis::loader::types::LoadedBinary;
+use crate::core::prelude::*;
 
-/// Dynamic Parser intended for handling memory dumps, running processes, 
+/// Dynamic Parser intended for handling memory dumps, running processes,
 /// and obfuscated binaries where standard static parsers (like goblin) might fail.
-/// 
-/// This parser should be more lenient and capable of reconstructing headers 
+///
+/// This parser should be more lenient and capable of reconstructing headers
 /// from memory structures.
 pub struct DynamicParser;
 
@@ -20,7 +20,7 @@ impl BinaryParser for DynamicParser {
         // Use the new DebugEngine loader for dynamic parsing
         // This simulates the OS loader to provide an accurate memory view
         crate::core::logging::info("Using DebugEngine for dynamic parsing...");
-        
+
         let loader = crate::debug_engine::TitanLoader::new();
         loader.load(&data, &path)
     }

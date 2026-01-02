@@ -1,7 +1,7 @@
-use std::path::PathBuf;
-use std::fs;
+use crate::core::errors::{FissionError, Result};
 use crate::ui::gui::SettingsState;
-use crate::core::errors::{Result, FissionError};
+use std::fs;
+use std::path::PathBuf;
 
 const CONFIG_DIR: &str = ".fission";
 const CONFIG_FILE: &str = "config.toml";
@@ -19,7 +19,7 @@ pub fn load() -> SettingsState {
         Ok(settings) => {
             crate::core::logging::info("Loaded configuration from disk");
             settings
-        },
+        }
         Err(e) => {
             crate::core::logging::warn(&format!("Failed to load config, using defaults: {}", e));
             SettingsState::default()
@@ -42,7 +42,7 @@ fn load_internal() -> Result<SettingsState> {
 /// Save settings to disk
 pub fn save(settings: &SettingsState) -> Result<()> {
     let path = get_config_path()?;
-    
+
     // Ensure directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

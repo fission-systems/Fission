@@ -1,23 +1,29 @@
 //! Debug operations - Process attach/detach, debug actions, breakpoints.
 
-use eframe::egui;
 use crate::ui::gui::state::{AppState, DebugAction, DebugBpAction};
+use eframe::egui;
 
 #[cfg(target_os = "windows")]
-use crate::debug::PlatformDebugger;
-#[cfg(target_os = "windows")]
 use crate::debug::Debugger;
+#[cfg(target_os = "windows")]
+use crate::debug::PlatformDebugger;
 
 /// Handle a debug event from the event loop
 pub fn handle_debug_event(state: &mut AppState, evt: crate::debug::types::DebugEvent) {
     use crate::debug::types::DebugEvent::*;
     match evt {
-        ProcessCreated { pid, main_thread_id } => {
+        ProcessCreated {
+            pid,
+            main_thread_id,
+        } => {
             state.debug.debug_state.attached_pid = Some(pid);
             state.debug.debug_state.main_thread_id = Some(main_thread_id);
             state.debug.debug_state.last_thread_id = Some(main_thread_id);
             state.debug.debug_state.status = crate::debug::types::DebugStatus::Running;
-            state.log(format!("[*] Process created pid={} tid={}", pid, main_thread_id));
+            state.log(format!(
+                "[*] Process created pid={} tid={}",
+                pid, main_thread_id
+            ));
         }
         ProcessExited { exit_code } => {
             state.debug.debug_state.status = crate::debug::types::DebugStatus::Terminated;
@@ -35,22 +41,49 @@ pub fn handle_debug_event(state: &mut AppState, evt: crate::debug::types::DebugE
         BreakpointHit { address, thread_id } => {
             state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
             state.debug.debug_state.last_thread_id = Some(thread_id);
-            state.debug.debug_state.last_event = Some(format!("BP hit 0x{address:016x} tid={thread_id}"));
-            state.log(state.debug.debug_state.last_event.clone().unwrap_or_default());
+            state.debug.debug_state.last_event =
+                Some(format!("BP hit 0x{address:016x} tid={thread_id}"));
+            state.log(
+                state
+                    .debug
+                    .debug_state
+                    .last_event
+                    .clone()
+                    .unwrap_or_default(),
+            );
         }
         SingleStep { thread_id } => {
             state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
             state.debug.debug_state.last_thread_id = Some(thread_id);
             state.debug.debug_state.last_event = Some(format!("[*] Single step tid={}", thread_id));
-            state.log(state.debug.debug_state.last_event.clone().unwrap_or_default());
+            state.log(
+                state
+                    .debug
+                    .debug_state
+                    .last_event
+                    .clone()
+                    .unwrap_or_default(),
+            );
         }
-        Exception { code, address, first_chance, .. } => {
+        Exception {
+            code,
+            address,
+            first_chance,
+            ..
+        } => {
             state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
             state.debug.debug_state.last_event = Some(format!(
                 "[!] Exception code=0x{:x} addr=0x{:016x} first_chance={}",
                 code, address, first_chance
             ));
-            state.log(state.debug.debug_state.last_event.clone().unwrap_or_default());
+            state.log(
+                state
+                    .debug
+                    .debug_state
+                    .last_event
+                    .clone()
+                    .unwrap_or_default(),
+            );
         }
     }
 }
@@ -60,8 +93,8 @@ pub fn handle_debug_event(state: &mut AppState, evt: crate::debug::types::DebugE
 pub fn attach_to_process(
     state: &mut AppState,
     debugger: &mut Option<PlatformDebugger>,
-    dbg_event_rx: &mut Option<std::sync::mpsc::Receiver<crate::debug::types::DebugEvent>>,
-    dbg_stop_tx: &mut Option<std::sync::mpsc::Sender<()>>,
+    dbg_event_rx: &mut Option<crossbeam_channel::Receiver<crate::debug::types::DebugEvent>>,
+    dbg_stop_tx: &mut Option<crossbeam_channel::Sender<()>>,
     pid: u32,
 ) {
     let dbg = debugger.get_or_insert_with(PlatformDebugger::default);
@@ -73,8 +106,8 @@ pub fn attach_to_process(
             state.log(format!("[✓] Attached to PID {}", pid));
 
             // Start event loop
-            let (tx_evt, rx_evt) = std::sync::mpsc::channel();
-            let (tx_stop, rx_stop) = std::sync::mpsc::channel();
+            let (tx_evt, rx_evt) = crossbeam_channel::unbounded();
+            let (tx_stop, rx_stop) = crossbeam_channel::unbounded();
             *dbg_event_rx = Some(rx_evt);
             *dbg_stop_tx = Some(tx_stop);
             crate::debug::windows::start_event_loop(pid, tx_evt, rx_stop);
@@ -192,9 +225,12 @@ pub fn handle_bp_action(state: &mut AppState, _action: DebugBpAction) {
 }
 
 /// Render "Attach to Process" dialog - returns selected process info for binary loading
-pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option<crate::debug::types::ProcessInfo> {
+pub fn render_attach_dialog(
+    state: &mut AppState,
+    ctx: &egui::Context,
+) -> Option<crate::debug::types::ProcessInfo> {
     use crate::ui::gui::theme::catppuccin;
-    
+
     if !state.ui.show_attach_dialog {
         return None;
     }
@@ -215,25 +251,28 @@ pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option
                 if ui.button("🔄 Refresh").clicked() {
                     state.debug.process_list = crate::debug::enumerate_processes();
                 }
-                
+
                 ui.separator();
-                
+
                 // Search filter
                 ui.label("🔍");
                 ui.add(
                     egui::TextEdit::singleline(&mut state.debug.process_filter)
                         .desired_width(150.0)
-                        .hint_text("Filter...")
+                        .hint_text("Filter..."),
                 );
-                
+
                 ui.separator();
-                
-                ui.label(egui::RichText::new(format!("{} processes", state.debug.process_list.len()))
-                    .color(catppuccin::SUBTEXT0).small());
+
+                ui.label(
+                    egui::RichText::new(format!("{} processes", state.debug.process_list.len()))
+                        .color(catppuccin::SUBTEXT0)
+                        .small(),
+                );
             });
-            
+
             ui.separator();
-            
+
             // Process list with fixed columns
             egui::ScrollArea::vertical()
                 .max_height(300.0)
@@ -244,43 +283,67 @@ pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option
                         .min_col_width(0.0)
                         .show(ui, |ui| {
                             // Header
-                            ui.label(egui::RichText::new("PID").strong().color(catppuccin::SUBTEXT1));
-                            ui.label(egui::RichText::new("Name").strong().color(catppuccin::SUBTEXT1));
-                            ui.label(egui::RichText::new("Path").strong().color(catppuccin::SUBTEXT1));
+                            ui.label(
+                                egui::RichText::new("PID")
+                                    .strong()
+                                    .color(catppuccin::SUBTEXT1),
+                            );
+                            ui.label(
+                                egui::RichText::new("Name")
+                                    .strong()
+                                    .color(catppuccin::SUBTEXT1),
+                            );
+                            ui.label(
+                                egui::RichText::new("Path")
+                                    .strong()
+                                    .color(catppuccin::SUBTEXT1),
+                            );
                             ui.label("");
                             ui.end_row();
-                            
+
                             let filter = state.debug.process_filter.to_lowercase();
-                            
+
                             for process in &state.debug.process_list {
                                 // Apply filter
                                 if !filter.is_empty() {
-                                    let matches_name = process.name.to_lowercase().contains(&filter);
+                                    let matches_name =
+                                        process.name.to_lowercase().contains(&filter);
                                     let matches_pid = process.pid.to_string().contains(&filter);
-                                    let matches_path = process.exe_path.as_ref()
+                                    let matches_path = process
+                                        .exe_path
+                                        .as_ref()
                                         .is_some_and(|p| p.to_lowercase().contains(&filter));
-                                    
+
                                     if !matches_name && !matches_pid && !matches_path {
                                         continue;
                                     }
                                 }
-                                
+
                                 ui.push_id(process.pid, |ui| {
                                     // PID (fixed width)
-                                    ui.add_sized([60.0, 18.0], 
-                                        egui::Label::new(egui::RichText::new(format!("{}", process.pid))
-                                            .monospace().color(catppuccin::SAPPHIRE)));
-                                    
+                                    ui.add_sized(
+                                        [60.0, 18.0],
+                                        egui::Label::new(
+                                            egui::RichText::new(format!("{}", process.pid))
+                                                .monospace()
+                                                .color(catppuccin::SAPPHIRE),
+                                        ),
+                                    );
+
                                     // Name (fixed width)
                                     let name_display = if process.name.len() > 25 {
                                         format!("{}...", &process.name[..22])
                                     } else {
                                         process.name.clone()
                                     };
-                                    ui.add_sized([180.0, 18.0],
-                                        egui::Label::new(egui::RichText::new(name_display)
-                                            .color(catppuccin::TEXT)));
-                                    
+                                    ui.add_sized(
+                                        [180.0, 18.0],
+                                        egui::Label::new(
+                                            egui::RichText::new(name_display)
+                                                .color(catppuccin::TEXT),
+                                        ),
+                                    );
+
                                     // Path (truncated, tooltip shows full)
                                     let path_display = if let Some(ref path) = process.exe_path {
                                         // Show just filename or last part
@@ -292,37 +355,53 @@ pub fn render_attach_dialog(state: &mut AppState, ctx: &egui::Context) -> Option
                                     } else {
                                         "—".to_string()
                                     };
-                                    let path_label = ui.add_sized([200.0, 18.0],
-                                        egui::Label::new(egui::RichText::new(&path_display)
-                                            .color(catppuccin::OVERLAY1).small()));
+                                    let path_label = ui.add_sized(
+                                        [200.0, 18.0],
+                                        egui::Label::new(
+                                            egui::RichText::new(&path_display)
+                                                .color(catppuccin::OVERLAY1)
+                                                .small(),
+                                        ),
+                                    );
                                     if let Some(ref path) = process.exe_path {
                                         path_label.on_hover_text(path);
                                     }
-                                    
+
                                     // Attach button
-                                    if ui.add_sized([60.0, 18.0],
-                                        egui::Button::new(egui::RichText::new("Attach")
-                                            .color(catppuccin::GREEN))
-                                    ).clicked() {
+                                    if ui
+                                        .add_sized(
+                                            [60.0, 18.0],
+                                            egui::Button::new(
+                                                egui::RichText::new("Attach")
+                                                    .color(catppuccin::GREEN),
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
                                         selected_process = Some(process.clone());
                                     }
-                                    
+
                                     ui.end_row();
                                 });
                             }
                         });
                 });
-                
+
             ui.separator();
-            
+
             // Hint
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("💡 Tip: Attach will also load the binary for static analysis")
-                    .color(catppuccin::OVERLAY0).small().italics());
+                ui.label(
+                    egui::RichText::new(
+                        "💡 Tip: Attach will also load the binary for static analysis",
+                    )
+                    .color(catppuccin::OVERLAY0)
+                    .small()
+                    .italics(),
+                );
             });
         });
 
     state.ui.show_attach_dialog = open;
     selected_process
 }
-

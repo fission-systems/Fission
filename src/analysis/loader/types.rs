@@ -1,8 +1,11 @@
 use crate::core::prelude::*;
+use bytecheck::CheckBytes;
+use rkyv::{Archive, Deserialize, Serialize};
 use std::path::Path;
 
 /// Information about a function found in the binary
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[archive(check_bytes)]
 pub struct FunctionInfo {
     /// Function name (may be empty for unnamed functions)
     pub name: String,
@@ -17,7 +20,8 @@ pub struct FunctionInfo {
 }
 
 /// Information about a section in the binary
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[archive(check_bytes)]
 pub struct SectionInfo {
     /// Section name
     pub name: String,
@@ -38,7 +42,8 @@ pub struct SectionInfo {
 }
 
 /// Parsed binary information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[archive(check_bytes)]
 pub struct LoadedBinary {
     /// Original file path
     pub path: String,

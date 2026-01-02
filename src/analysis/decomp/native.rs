@@ -41,7 +41,7 @@ pub struct DecompilerServer {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     /// Thread for reading stdout asynchronously
-    stdout_rx: Option<std::sync::mpsc::Receiver<String>>,
+    stdout_rx: Option<crossbeam_channel::Receiver<String>>,
     /// Handle for reader thread (for clean shutdown)
     reader_handle: Option<JoinHandle<()>>,
     /// Context cache for crash recovery
@@ -120,7 +120,7 @@ impl DecompilerServer {
 
         // Spawn background reader thread for stdout
         if let Some(stdout) = child.stdout.take() {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = crossbeam_channel::unbounded();
             let handle = std::thread::spawn(move || {
                 let reader = BufReader::new(stdout);
                 for line in reader.lines() {
@@ -329,10 +329,10 @@ impl DecompilerServer {
                     }
                     Ok(response)
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(FissionError::decompiler(
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(FissionError::decompiler(
                     format!("Decompiler timed out after {}ms", timeout_ms),
                 )),
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => Err(
                     FissionError::decompiler("Decompiler process exited unexpectedly"),
                 ),
             }
