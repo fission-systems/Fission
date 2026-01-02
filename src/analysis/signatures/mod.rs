@@ -70,8 +70,17 @@ impl FunctionSignature {
 }
 
 /// CRT Signature Database
+/// 
+/// Uses a first-byte index for faster signature matching. Most signatures
+/// start with a unique or semi-unique first byte, so indexing by this byte
+/// reduces the number of signatures to check from ~150 to typically 1-10.
 pub struct SignatureDatabase {
     signatures: Vec<FunctionSignature>,
+    /// Index of signatures by their first non-wildcard byte for O(1) initial filtering.
+    /// Key: first byte value, Value: indices into signatures vec
+    first_byte_index: HashMap<u8, Vec<usize>>,
+    /// Indices of signatures that start with wildcards (must be checked for all inputs)
+    wildcard_signatures: Vec<usize>,
 }
 
 impl SignatureDatabase {
@@ -83,9 +92,30 @@ impl SignatureDatabase {
         let mut db = Self {
             // Pre-allocate for ~150 known signatures to avoid reallocations
             signatures: Vec::with_capacity(160),
+            first_byte_index: HashMap::with_capacity(64),
+            wildcard_signatures: Vec::new(),
         };
         db.load_msvc_signatures();
+        db.build_index();
         db
+    }
+
+    /// Build the first-byte index for faster lookups
+    fn build_index(&mut self) {
+        self.first_byte_index.clear();
+        self.wildcard_signatures.clear();
+        for (idx, sig) in self.signatures.iter().enumerate() {
+            // Find the first non-wildcard byte in the pattern
+            if let Some(&Some(first_byte)) = sig.pattern.first() {
+                self.first_byte_index
+                    .entry(first_byte)
+                    .or_insert_with(Vec::new)
+                    .push(idx);
+            } else if sig.pattern.first() == Some(&None) {
+                // Signature starts with wildcard
+                self.wildcard_signatures.push(idx);
+            }
+        }
     }
 
     /// Load MSVC CRT signatures
@@ -968,12 +998,36 @@ impl SignatureDatabase {
     }
 
     /// Try to match a function's bytes against known signatures
+    /// 
+    /// Performance: Uses first-byte index to reduce candidates from ~150 to typically 1-10,
+    /// providing significant speedup for large binaries with many functions.
     pub fn identify(&self, bytes: &[u8]) -> Option<&FunctionSignature> {
-        for sig in &self.signatures {
-            if sig.matches(bytes) {
-                return Some(sig);
+        if bytes.is_empty() {
+            return None;
+        }
+        
+        let first_byte = bytes[0];
+        
+        // Use the index to only check signatures that start with the same first byte
+        if let Some(indices) = self.first_byte_index.get(&first_byte) {
+            for &idx in indices {
+                if let Some(sig) = self.signatures.get(idx) {
+                    if sig.matches(bytes) {
+                        return Some(sig);
+                    }
+                }
             }
         }
+        
+        // Check signatures that start with wildcards (pre-indexed, no full scan needed)
+        for &idx in &self.wildcard_signatures {
+            if let Some(sig) = self.signatures.get(idx) {
+                if sig.matches(bytes) {
+                    return Some(sig);
+                }
+            }
+        }
+        
         None
     }
 
@@ -984,6 +1038,17 @@ impl SignatureDatabase {
 
     /// Add a custom signature
     pub fn add_signature(&mut self, sig: FunctionSignature) {
+        let idx = self.signatures.len();
+        // Update index if signature has a non-wildcard first byte
+        if let Some(&Some(first_byte)) = sig.pattern.first() {
+            self.first_byte_index
+                .entry(first_byte)
+                .or_insert_with(Vec::new)
+                .push(idx);
+        } else if sig.pattern.first() == Some(&None) {
+            // Wildcard signature
+            self.wildcard_signatures.push(idx);
+        }
         self.signatures.push(sig);
     }
 
