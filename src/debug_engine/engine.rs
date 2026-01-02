@@ -2,10 +2,8 @@ use super::types::*;
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::*,
-    Win32::Foundation::*,
+    core::*, Win32::Foundation::*, Win32::System::Diagnostics::Debug::*,
     Win32::System::Threading::*,
-    Win32::System::Diagnostics::Debug::*,
 };
 
 /// The core debugging engine, mimicking TitanEngine's DebugLoop.
@@ -33,7 +31,10 @@ impl TitanEngine {
                 // Note: We don't get handles immediately, we must wait for CREATE_PROCESS_DEBUG_EVENT
                 Ok(())
             } else {
-                Err(format!("DebugActiveProcess failed: {:?}", std::io::Error::last_os_error()))
+                Err(format!(
+                    "DebugActiveProcess failed: {:?}",
+                    std::io::Error::last_os_error()
+                ))
             }
         }
     }
@@ -49,7 +50,7 @@ impl TitanEngine {
             let mut si = STARTUPINFOW::default();
             si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
             let mut pi = PROCESS_INFORMATION::default();
-            
+
             // Convert path to wide string (UTF-16)
             let mut wide_path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
             let command_line = PWSTR(wide_path.as_mut_ptr());
@@ -79,7 +80,10 @@ impl TitanEngine {
                 });
                 Ok(())
             } else {
-                Err(format!("CreateProcess failed: {:?}", std::io::Error::last_os_error()))
+                Err(format!(
+                    "CreateProcess failed: {:?}",
+                    std::io::Error::last_os_error()
+                ))
             }
         }
     }
@@ -88,7 +92,7 @@ impl TitanEngine {
     pub fn run(&mut self, _path: &str) -> Result<(), String> {
         Err("TitanEngine is only supported on Windows".to_string())
     }
-    
+
     #[cfg(target_os = "windows")]
     pub fn wait_for_debug_event(&mut self, timeout_ms: u32) -> Result<Option<DebugEvent>, String> {
         unsafe {
@@ -104,7 +108,8 @@ impl TitanEngine {
                         }
 
                         // Initialize Importer
-                        self.importer = Some(super::importer::ImportReconstructor::new(info.hProcess));
+                        self.importer =
+                            Some(super::importer::ImportReconstructor::new(info.hProcess));
 
                         Some(DebugEvent::ProcessCreated(ProcessInfo {
                             process_id: debug_event.dwProcessId,
@@ -114,7 +119,7 @@ impl TitanEngine {
                             image_base: info.lpBaseOfImage as u64,
                             entry_point: info.lpStartAddress.unwrap() as usize as u64,
                         }))
-                    },
+                    }
                     EXIT_PROCESS_DEBUG_EVENT => Some(DebugEvent::ProcessExit),
                     EXCEPTION_DEBUG_EVENT => {
                         let record = debug_event.u.Exception.ExceptionRecord;
@@ -127,8 +132,8 @@ impl TitanEngine {
                             // Check if it's one of our breakpoints
                             // Note: Windows moves RIP to Address + 1 after INT 3
                             // But ExceptionAddress points to the INT 3 instruction itself (unlike Linux ptrace sometimes)
-                            let bp_address = address; 
-                            
+                            let bp_address = address;
+
                             if self.bp_manager.has_breakpoint(bp_address) {
                                 // It is our breakpoint!
                                 // We should probably restore the original byte here or let the UI decide.
@@ -145,14 +150,15 @@ impl TitanEngine {
                                 first_chance,
                             })
                         }
-                    },
+                    }
                     _ => None, // Handle other events
                 };
-                
+
                 Ok(event)
             } else {
                 // Timeout or error
-                if std::io::Error::last_os_error().raw_os_error() == Some(121) { // ERROR_SEM_TIMEOUT
+                if std::io::Error::last_os_error().raw_os_error() == Some(121) {
+                    // ERROR_SEM_TIMEOUT
                     Ok(None)
                 } else {
                     Err(format!("WaitForDebugEvent failed"))
@@ -160,12 +166,18 @@ impl TitanEngine {
             }
         }
     }
-    
+
     #[cfg(target_os = "windows")]
-    pub fn continue_debug_event(&self, pid: u32, tid: u32, continue_status: u32) -> Result<(), String> {
+    pub fn continue_debug_event(
+        &self,
+        pid: u32,
+        tid: u32,
+        continue_status: u32,
+    ) -> Result<(), String> {
         unsafe {
             // continue_status should be DBG_CONTINUE (0x00010002) or DBG_EXCEPTION_NOT_HANDLED (0x80010001)
-            let status = windows::Win32::System::Diagnostics::Debug::NTSTATUS(continue_status as i32);
+            let status =
+                windows::Win32::System::Diagnostics::Debug::NTSTATUS(continue_status as i32);
             if ContinueDebugEvent(pid, tid, status).as_bool() {
                 Ok(())
             } else {
@@ -220,7 +232,10 @@ impl TitanEngine {
     // --- Import Reconstruction ---
 
     #[cfg(target_os = "windows")]
-    pub fn resolve_import(&mut self, address: u64) -> Result<(String, Option<String>, u32), String> {
+    pub fn resolve_import(
+        &mut self,
+        address: u64,
+    ) -> Result<(String, Option<String>, u32), String> {
         if let Some(importer) = &mut self.importer {
             importer.update_modules()?;
             importer.resolve_address(address)
@@ -241,14 +256,18 @@ impl TitanEngine {
     }
 
     #[cfg(target_os = "windows")]
-    pub fn dump_and_fix(&self, output_path: &str, imports: &[super::importer::ImportEntry]) -> Result<(), String> {
+    pub fn dump_and_fix(
+        &self,
+        output_path: &str,
+        imports: &[super::importer::ImportEntry],
+    ) -> Result<(), String> {
         if let Some(proc) = &self.active_process {
             // 1. Dump Process
             super::dumper::dump_process(proc.process_handle, proc.image_base, output_path)?;
-            
+
             // 2. Rebuild Imports
             super::dumper::rebuild_imports(output_path, imports, proc.image_base)?;
-            
+
             Ok(())
         } else {
             Err("No active process".to_string())
@@ -269,7 +288,8 @@ impl TitanEngine {
     #[cfg(target_os = "windows")]
     pub fn remove_breakpoint(&mut self, address: u64) -> Result<(), String> {
         if let Some(proc) = &self.active_process {
-            self.bp_manager.remove_breakpoint(proc.process_handle, address)
+            self.bp_manager
+                .remove_breakpoint(proc.process_handle, address)
         } else {
             Err("No active process".to_string())
         }

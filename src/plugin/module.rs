@@ -1,7 +1,7 @@
-use std::sync::{Arc, Mutex};
 use crate::core::modules::{FissionModule, ModuleContext};
 use crate::core::prelude::*;
 use crate::plugin::PluginManager;
+use std::sync::{Arc, Mutex};
 
 /// Module responsible for the Plugin System
 pub struct PluginModule {
@@ -22,20 +22,21 @@ impl FissionModule for PluginModule {
     fn on_init(&mut self, ctx: &mut ModuleContext) -> Result<()> {
         // Register PluginManager as a service so others can use it
         ctx.register_service("PluginManager", self.manager.clone());
-        
+
         let mut mgr = self.manager.lock().unwrap();
         // Inject dependencies using set_event_bus which we added earlier
         mgr.set_event_bus(ctx.event_bus.clone());
-        
+
         Ok(())
     }
 
     fn on_start(&mut self, ctx: &mut ModuleContext) -> Result<()> {
-        ctx.event_bus.publish(crate::core::events::FissionEvent::LogMessage { 
-            level: "info".into(), 
-            message: "Plugin System Started".into(), 
-            target: "PluginModule".into() 
-        });
+        ctx.event_bus
+            .publish(crate::core::events::FissionEvent::LogMessage {
+                level: "info".into(),
+                message: "Plugin System Started".into(),
+                target: "PluginModule".into(),
+            });
         Ok(())
     }
 

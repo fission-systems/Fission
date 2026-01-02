@@ -2,7 +2,7 @@
 //!
 //! Contains byte patterns to identify compilers and packers by their entry point code.
 
-use super::{DetectionType, Confidence};
+use super::{Confidence, DetectionType};
 
 /// An entry point signature
 pub struct EntryPointSignature {
@@ -28,40 +28,36 @@ pub static ENTRY_POINT_SIGNATURES: &[EntryPointSignature] = &[
         version: Some("Debug"),
         detection_type: DetectionType::Compiler,
         confidence: Confidence::High,
-        bytes: &[0x55, 0x8B, 0xEC],  // push ebp; mov ebp, esp
+        bytes: &[0x55, 0x8B, 0xEC], // push ebp; mov ebp, esp
         mask: None,
     },
-    
     // MSVC x64
     EntryPointSignature {
         name: "Microsoft Visual C++",
         version: Some("x64"),
         detection_type: DetectionType::Compiler,
         confidence: Confidence::Medium,
-        bytes: &[0x48, 0x83, 0xEC],  // sub rsp, XX
+        bytes: &[0x48, 0x83, 0xEC], // sub rsp, XX
         mask: None,
     },
-    
     // UPX packed
     EntryPointSignature {
         name: "UPX",
         version: None,
         detection_type: DetectionType::Packer,
         confidence: Confidence::High,
-        bytes: &[0x60, 0xBE],  // pushad; mov esi, XX
+        bytes: &[0x60, 0xBE], // pushad; mov esi, XX
         mask: None,
     },
-    
     // UPX 3.x
     EntryPointSignature {
         name: "UPX",
         version: Some("3.x"),
         detection_type: DetectionType::Packer,
         confidence: Confidence::High,
-        bytes: &[0x60, 0xE8, 0x00, 0x00, 0x00, 0x00],  // pushad; call $+5
+        bytes: &[0x60, 0xE8, 0x00, 0x00, 0x00, 0x00], // pushad; call $+5
         mask: None,
     },
-    
     // ASPack
     EntryPointSignature {
         name: "ASPack",
@@ -71,37 +67,33 @@ pub static ENTRY_POINT_SIGNATURES: &[EntryPointSignature] = &[
         bytes: &[0x60, 0xE8, 0x03, 0x00, 0x00, 0x00],
         mask: None,
     },
-    
     // Borland Delphi
     EntryPointSignature {
         name: "Borland Delphi",
         version: None,
         detection_type: DetectionType::Compiler,
         confidence: Confidence::High,
-        bytes: &[0x55, 0x8B, 0xEC, 0x83, 0xC4, 0xF0],  // push ebp; mov ebp,esp; add esp,-10h
+        bytes: &[0x55, 0x8B, 0xEC, 0x83, 0xC4, 0xF0], // push ebp; mov ebp,esp; add esp,-10h
         mask: None,
     },
-    
     // Borland C++
     EntryPointSignature {
         name: "Borland C++",
         version: None,
         detection_type: DetectionType::Compiler,
         confidence: Confidence::High,
-        bytes: &[0xEB, 0x10, 0x66, 0x62, 0x3A, 0x43],  // jmp XX; "fb:C"
+        bytes: &[0xEB, 0x10, 0x66, 0x62, 0x3A, 0x43], // jmp XX; "fb:C"
         mask: None,
     },
-    
     // MinGW/GCC
     EntryPointSignature {
         name: "MinGW/GCC",
         version: None,
         detection_type: DetectionType::Compiler,
         confidence: Confidence::Medium,
-        bytes: &[0x55, 0x89, 0xE5],  // push ebp; mov ebp, esp
+        bytes: &[0x55, 0x89, 0xE5], // push ebp; mov ebp, esp
         mask: None,
     },
-    
     // PECompact
     EntryPointSignature {
         name: "PECompact",
@@ -111,7 +103,6 @@ pub static ENTRY_POINT_SIGNATURES: &[EntryPointSignature] = &[
         bytes: &[0xB8, 0x00, 0x00, 0x00, 0x00, 0x50, 0x64, 0xFF, 0x35],
         mask: Some(&[0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF]),
     },
-    
     // Themida/WinLicense
     EntryPointSignature {
         name: "Themida",
@@ -121,7 +112,6 @@ pub static ENTRY_POINT_SIGNATURES: &[EntryPointSignature] = &[
         bytes: &[0xB8, 0x00, 0x00, 0x00, 0x00, 0x60, 0x0B, 0xC0],
         mask: Some(&[0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF]),
     },
-    
     // VMProtect
     EntryPointSignature {
         name: "VMProtect",
@@ -131,7 +121,6 @@ pub static ENTRY_POINT_SIGNATURES: &[EntryPointSignature] = &[
         bytes: &[0x68, 0x00, 0x00, 0x00, 0x00, 0xE8],
         mask: Some(&[0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF]),
     },
-    
     // MPRESS
     EntryPointSignature {
         name: "MPRESS",
@@ -141,7 +130,6 @@ pub static ENTRY_POINT_SIGNATURES: &[EntryPointSignature] = &[
         bytes: &[0x60, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x58, 0x05],
         mask: None,
     },
-    
     // Inno Setup
     EntryPointSignature {
         name: "Inno Setup",
@@ -151,7 +139,6 @@ pub static ENTRY_POINT_SIGNATURES: &[EntryPointSignature] = &[
         bytes: &[0x55, 0x8B, 0xEC, 0x83, 0xC4, 0xB8],
         mask: None,
     },
-    
     // NSIS
     EntryPointSignature {
         name: "NSIS",
@@ -161,7 +148,6 @@ pub static ENTRY_POINT_SIGNATURES: &[EntryPointSignature] = &[
         bytes: &[0x83, 0xEC, 0x20, 0x53, 0x55, 0x56],
         mask: None,
     },
-    
     // AutoIt
     EntryPointSignature {
         name: "AutoIt",

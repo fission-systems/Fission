@@ -16,7 +16,7 @@ pub enum XrefType {
 }
 
 /// A single cross-reference
-/// 
+///
 /// Implements Copy since all fields are Copy types, avoiding heap allocations
 #[derive(Debug, Clone, Copy)]
 pub struct Xref {
@@ -47,20 +47,14 @@ impl XrefDatabase {
     }
 
     /// Add a cross-reference
-    /// 
+    ///
     /// Performance: Uses Copy trait for efficient duplication. Also updates
     /// total_count incrementally for O(1) total_refs() lookup.
     pub fn add_xref(&mut self, xref: Xref) {
         // Store copy in refs_to (Xref is Copy, so this is a cheap memcpy)
-        self.refs_to
-            .entry(xref.to_addr)
-            .or_default()
-            .push(xref);
+        self.refs_to.entry(xref.to_addr).or_default().push(xref);
         // Store original in refs_from
-        self.refs_from
-            .entry(xref.from_addr)
-            .or_default()
-            .push(xref);
+        self.refs_from.entry(xref.from_addr).or_default().push(xref);
         // Update cached count
         self.total_count += 1;
     }
@@ -72,11 +66,14 @@ impl XrefDatabase {
 
     /// Get all references FROM an address (what does this address call/reference?)
     pub fn get_refs_from(&self, addr: u64) -> &[Xref] {
-        self.refs_from.get(&addr).map(|v| v.as_slice()).unwrap_or(&[])
+        self.refs_from
+            .get(&addr)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Total number of cross-references
-    /// 
+    ///
     /// Performance: O(1) using cached count instead of O(N) iteration
     pub fn total_refs(&self) -> usize {
         self.total_count
@@ -85,15 +82,18 @@ impl XrefDatabase {
     /// Build xref database from disassembled code
     pub fn build_from_binary(binary: &crate::analysis::loader::LoadedBinary) -> Self {
         let mut db = Self::new();
-        
+
         // Get image base for address calculation
         let image_base = binary.image_base;
-        
+
         // Analyze each section that might contain code
         for section in &binary.sections {
             // Skip non-executable sections (heuristic: .text, CODE, etc.)
             let name_lower = section.name.to_lowercase();
-            if !name_lower.contains("text") && !name_lower.contains("code") && section.name != ".text" {
+            if !name_lower.contains("text")
+                && !name_lower.contains("code")
+                && section.name != ".text"
+            {
                 continue;
             }
 
@@ -119,7 +119,7 @@ impl XrefDatabase {
 
         // Pre-compute bounds for address validation (used multiple times per instruction)
         let addr_upper_bound = base_addr + code.len() as u64 * 2;
-        
+
         // Track initial refs count to check if we found anything
         let initial_refs = self.refs_to.len();
 
@@ -138,7 +138,10 @@ impl XrefDatabase {
                     FlowControl::Call | FlowControl::IndirectCall => {
                         // Direct call target
                         if instr.op_count() > 0 {
-                            if let OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64 = instr.op0_kind() {
+                            if let OpKind::NearBranch16
+                            | OpKind::NearBranch32
+                            | OpKind::NearBranch64 = instr.op0_kind()
+                            {
                                 let to_addr = instr.near_branch_target();
                                 self.add_xref(Xref {
                                     from_addr,
@@ -151,7 +154,10 @@ impl XrefDatabase {
                     FlowControl::UnconditionalBranch | FlowControl::ConditionalBranch => {
                         // Jump target
                         if instr.op_count() > 0 {
-                            if let OpKind::NearBranch16 | OpKind::NearBranch32 | OpKind::NearBranch64 = instr.op0_kind() {
+                            if let OpKind::NearBranch16
+                            | OpKind::NearBranch32
+                            | OpKind::NearBranch64 = instr.op0_kind()
+                            {
                                 let to_addr = instr.near_branch_target();
                                 self.add_xref(Xref {
                                     from_addr,
@@ -196,7 +202,7 @@ impl XrefDatabase {
                     }
                 }
             }
-            
+
             // If we found refs in 64-bit mode, don't try 32-bit
             // Use direct HashMap len() check instead of summing all values
             if self.refs_to.len() > initial_refs {
@@ -213,13 +219,13 @@ mod tests {
     #[test]
     fn test_xref_database() {
         let mut db = XrefDatabase::new();
-        
+
         db.add_xref(Xref {
             from_addr: 0x1000,
             to_addr: 0x2000,
             xref_type: XrefType::Call,
         });
-        
+
         db.add_xref(Xref {
             from_addr: 0x1100,
             to_addr: 0x2000,

@@ -3,8 +3,8 @@
 //! Provides unified memory read/write/mapping operations across platforms.
 //! Uses platform-specific implementations via the `platform` module.
 
-use thiserror::Error;
 use super::platform::{PlatformMemory, PlatformMemoryImpl};
+use thiserror::Error;
 
 /// Memory operation errors
 #[derive(Error, Debug)]

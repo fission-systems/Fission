@@ -1,9 +1,9 @@
 //! Editor area panel - Tabbed interface for assembly, decompiled code, etc.
 
-use eframe::egui;
+use super::{assembly, decompile};
 use crate::ui::gui::state::{AppState, EditorTab};
 use crate::ui::gui::theme::catppuccin;
-use super::{assembly, decompile};
+use eframe::egui;
 
 /// Render the central editor area with tabs.
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
@@ -11,9 +11,9 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
         .frame(egui::Frame::none().fill(catppuccin::BASE))
         .show(ctx, |ui| {
             render_tabs(ui, state);
-            
+
             ui.separator();
-            
+
             render_active_tab_content(ui, state);
         });
 }
@@ -21,42 +21,63 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
 fn render_tabs(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 0.0;
-        
+
         let mut close_tab = None;
-        
+
         for (i, tab) in state.ui.open_tabs.iter().enumerate() {
             let is_active = state.ui.active_tab_index == Some(i);
-            
-            let bg = if is_active { catppuccin::BASE } else { catppuccin::MANTLE };
-            let text_color = if is_active { catppuccin::TEXT } else { catppuccin::OVERLAY1 };
-            
+
+            let bg = if is_active {
+                catppuccin::BASE
+            } else {
+                catppuccin::MANTLE
+            };
+            let text_color = if is_active {
+                catppuccin::TEXT
+            } else {
+                catppuccin::OVERLAY1
+            };
+
             let response = egui::Frame::none()
                 .fill(bg)
                 .inner_margin(egui::Margin::symmetric(12.0, 8.0))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.selectable_label(is_active, egui::RichText::new(tab.title()).color(text_color)).clicked() {
+                        if ui
+                            .selectable_label(
+                                is_active,
+                                egui::RichText::new(tab.title()).color(text_color),
+                            )
+                            .clicked()
+                        {
                             state.ui.active_tab_index = Some(i);
                         }
-                        
-                        if ui.add(egui::Button::new(egui::RichText::new(" × ").small()).frame(false)).clicked() {
+
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new(" × ").small()).frame(false))
+                            .clicked()
+                        {
                             close_tab = Some(i);
                         }
                     });
-                }).response;
-            
+                })
+                .response;
+
             if is_active {
                 // Active tab top indicator
                 let rect = response.rect;
                 ui.painter().line_segment(
-                    [egui::pos2(rect.left(), rect.top() + 1.0), egui::pos2(rect.right(), rect.top() + 1.0)],
-                    egui::Stroke::new(2.0, catppuccin::BLUE)
+                    [
+                        egui::pos2(rect.left(), rect.top() + 1.0),
+                        egui::pos2(rect.right(), rect.top() + 1.0),
+                    ],
+                    egui::Stroke::new(2.0, catppuccin::BLUE),
                 );
             }
-            
+
             ui.separator();
         }
-        
+
         if let Some(i) = close_tab {
             state.ui.open_tabs.remove(i);
             if state.ui.open_tabs.is_empty() {
@@ -77,9 +98,9 @@ fn render_active_tab_content(ui: &mut egui::Ui, state: &mut AppState) {
         render_empty_state(ui);
         return;
     };
-    
+
     let tab = &state.ui.open_tabs[idx].clone(); // Clone to avoid borrow issues
-    
+
     match tab {
         EditorTab::Assembly(_name) => {
             assembly::render_inside(ui, state);
@@ -99,9 +120,16 @@ fn render_active_tab_content(ui: &mut egui::Ui, state: &mut AppState) {
 fn render_empty_state(ui: &mut egui::Ui) {
     ui.vertical_centered(|ui| {
         ui.add_space(ui.available_height() / 3.0);
-        ui.label(egui::RichText::new("FISSION").size(40.0).strong().color(catppuccin::SURFACE1));
+        ui.label(
+            egui::RichText::new("FISSION")
+                .size(40.0)
+                .strong()
+                .color(catppuccin::SURFACE1),
+        );
         ui.add_space(20.0);
-        ui.label(egui::RichText::new("Open a binary to start analyzing").color(catppuccin::OVERLAY0));
+        ui.label(
+            egui::RichText::new("Open a binary to start analyzing").color(catppuccin::OVERLAY0),
+        );
     });
 }
 
@@ -110,11 +138,20 @@ fn render_welcome(ui: &mut egui::Ui) {
         ui.add_space(60.0);
         ui.label(egui::RichText::new("🔬").size(80.0));
         ui.add_space(20.0);
-        ui.heading(egui::RichText::new("FISSION").size(32.0).strong().color(catppuccin::LAVENDER));
-        ui.label(egui::RichText::new("Split the Binary, Fuse the Power.").italics().color(catppuccin::SUBTEXT0));
-        
+        ui.heading(
+            egui::RichText::new("FISSION")
+                .size(32.0)
+                .strong()
+                .color(catppuccin::LAVENDER),
+        );
+        ui.label(
+            egui::RichText::new("Split the Binary, Fuse the Power.")
+                .italics()
+                .color(catppuccin::SUBTEXT0),
+        );
+
         ui.add_space(40.0);
-        
+
         ui.group(|ui| {
             ui.set_width(300.0);
             ui.vertical(|ui| {
@@ -131,4 +168,3 @@ fn render_welcome(ui: &mut egui::Ui) {
         });
     });
 }
-

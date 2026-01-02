@@ -41,7 +41,11 @@ pub enum DebugEvent {
     /// Single step completed
     SingleStep { thread_id: u32 },
     /// Exception occurred
-    Exception { code: u32, address: u64, first_chance: bool },
+    Exception {
+        code: u32,
+        address: u64,
+        first_chance: bool,
+    },
 }
 
 /// Debug session status

@@ -303,7 +303,7 @@ impl DecompilerServer {
     }
 
     /// Helper to read response with timeout (with empty line limit)
-    fn read_response_with_timeout(&mut self, timeout_ms: u64) -> Result<String> {
+    fn read_response_with_timeout(&self, timeout_ms: u64) -> Result<String> {
         if let Some(ref rx) = self.stdout_rx {
             match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
                 Ok(line) => {

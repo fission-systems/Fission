@@ -265,7 +265,7 @@ impl<'a> PeLoaderImpl<'a> {
         Vec<crate::analysis::loader::types::FunctionInfo>,
         std::collections::HashMap<u64, String>,
     )> {
-        let mut offset = self
+        let offset = self
             .rva_to_file_offset(dir_rva, image_base)
             .ok_or(err!(loader, "Invalid Import Dir RVA"))?;
         let mut functions = Vec::new();

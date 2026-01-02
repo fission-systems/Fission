@@ -37,7 +37,7 @@ impl Default for LinuxDebugger {
 /// Enumerate running processes on Linux by reading /proc
 pub fn enumerate_processes() -> Vec<ProcessInfo> {
     let mut processes = Vec::new();
-    
+
     if let Ok(entries) = std::fs::read_dir("/proc") {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
@@ -48,13 +48,13 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
                     let process_name = std::fs::read_to_string(&comm_path)
                         .map(|s| s.trim().to_string())
                         .unwrap_or_else(|_| "<unknown>".to_string());
-                    
+
                     // Read exe path from /proc/[pid]/exe
                     let exe_path = path.join("exe");
                     let exe = std::fs::read_link(&exe_path)
                         .ok()
                         .and_then(|p| p.to_str().map(String::from));
-                    
+
                     processes.push(ProcessInfo {
                         pid,
                         name: process_name,
@@ -64,7 +64,7 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
             }
         }
     }
-    
+
     // Sort by PID
     processes.sort_by_key(|p| p.pid);
     processes
@@ -80,7 +80,7 @@ impl Debugger for LinuxDebugger {
         use nix::unistd::Pid;
 
         self.state.status = DebugStatus::Attaching;
-        
+
         ptrace::attach(Pid::from_raw(pid as i32))
             .map_err(|e| format!("Failed to attach to process {}: {}", pid, e))?;
 
@@ -88,7 +88,7 @@ impl Debugger for LinuxDebugger {
         self.state.attached_pid = Some(pid);
         self.state.status = DebugStatus::Suspended; // ptrace attach sends SIGSTOP
         self.state.last_event = Some(format!("Attached to PID {}", pid));
-        
+
         Ok(())
     }
 
@@ -96,7 +96,8 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid
+        let pid = self
+            .target_pid
             .ok_or_else(|| "Not attached to any process".to_string())?;
 
         ptrace::detach(Pid::from_raw(pid as i32), None)
@@ -106,7 +107,7 @@ impl Debugger for LinuxDebugger {
         self.state.attached_pid = None;
         self.state.status = DebugStatus::Detached;
         self.state.last_event = Some("Detached".to_string());
-        
+
         Ok(())
     }
 
@@ -122,8 +123,7 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid
-            .ok_or_else(|| "Not attached".to_string())?;
+        let pid = self.target_pid.ok_or_else(|| "Not attached".to_string())?;
 
         ptrace::cont(Pid::from_raw(pid as i32), None)
             .map_err(|e| format!("Continue failed: {}", e))?;
@@ -136,8 +136,7 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid
-            .ok_or_else(|| "Not attached".to_string())?;
+        let pid = self.target_pid.ok_or_else(|| "Not attached".to_string())?;
 
         ptrace::step(Pid::from_raw(pid as i32), None)
             .map_err(|e| format!("Single step failed: {}", e))?;
@@ -150,12 +149,12 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid
-            .ok_or_else(|| "Not attached".to_string())?;
+        let pid = self.target_pid.ok_or_else(|| "Not attached".to_string())?;
 
         // Read original byte using ptrace PEEKDATA
-        let original_word = ptrace::read(Pid::from_raw(pid as i32), address as *mut std::ffi::c_void)
-            .map_err(|e| format!("Failed to read memory at 0x{:x}: {}", address, e))?;
+        let original_word =
+            ptrace::read(Pid::from_raw(pid as i32), address as *mut std::ffi::c_void)
+                .map_err(|e| format!("Failed to read memory at 0x{:x}: {}", address, e))?;
 
         let original_byte = (original_word & 0xFF) as u8;
 
@@ -166,7 +165,8 @@ impl Debugger for LinuxDebugger {
                 Pid::from_raw(pid as i32),
                 address as *mut std::ffi::c_void,
                 new_word as *mut std::ffi::c_void,
-            ).map_err(|e| format!("Failed to write breakpoint at 0x{:x}: {}", address, e))?;
+            )
+            .map_err(|e| format!("Failed to write breakpoint at 0x{:x}: {}", address, e))?;
         }
 
         let bp = super::types::Breakpoint {
@@ -176,7 +176,7 @@ impl Debugger for LinuxDebugger {
         };
         self.state.breakpoints.insert(address, bp);
         self.state.last_event = Some(format!("Breakpoint set at 0x{:016x}", address));
-        
+
         Ok(())
     }
 
@@ -184,15 +184,18 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid
-            .ok_or_else(|| "Not attached".to_string())?;
+        let pid = self.target_pid.ok_or_else(|| "Not attached".to_string())?;
 
-        let bp = self.state.breakpoints.get(&address)
+        let bp = self
+            .state
+            .breakpoints
+            .get(&address)
             .ok_or_else(|| "Breakpoint not found".to_string())?;
 
         // Read current word
-        let current_word = ptrace::read(Pid::from_raw(pid as i32), address as *mut std::ffi::c_void)
-            .map_err(|e| format!("Failed to read memory at 0x{:x}: {}", address, e))?;
+        let current_word =
+            ptrace::read(Pid::from_raw(pid as i32), address as *mut std::ffi::c_void)
+                .map_err(|e| format!("Failed to read memory at 0x{:x}: {}", address, e))?;
 
         // Restore original byte
         let new_word = (current_word & !0xFF) | (bp.original_byte as i64);
@@ -201,22 +204,22 @@ impl Debugger for LinuxDebugger {
                 Pid::from_raw(pid as i32),
                 address as *mut std::ffi::c_void,
                 new_word as *mut std::ffi::c_void,
-            ).map_err(|e| format!("Failed to restore breakpoint at 0x{:x}: {}", address, e))?;
+            )
+            .map_err(|e| format!("Failed to restore breakpoint at 0x{:x}: {}", address, e))?;
         }
 
         self.state.breakpoints.remove(&address);
         self.state.last_event = Some(format!("Breakpoint removed at 0x{:016x}", address));
-        
+
         Ok(())
     }
 
     fn read_memory(&self, address: u64, size: usize) -> Result<Vec<u8>, String> {
-        let pid = self.target_pid
-            .ok_or_else(|| "Not attached".to_string())?;
+        let pid = self.target_pid.ok_or_else(|| "Not attached".to_string())?;
 
         // Read from /proc/[pid]/mem
         use std::io::{Read, Seek, SeekFrom};
-        
+
         let mem_path = format!("/proc/{}/mem", pid);
         let mut file = std::fs::File::open(&mem_path)
             .map_err(|e| format!("Failed to open {}: {}", mem_path, e))?;
@@ -232,12 +235,11 @@ impl Debugger for LinuxDebugger {
     }
 
     fn write_memory(&mut self, address: u64, data: &[u8]) -> Result<(), String> {
-        let pid = self.target_pid
-            .ok_or_else(|| "Not attached".to_string())?;
+        let pid = self.target_pid.ok_or_else(|| "Not attached".to_string())?;
 
         // Write to /proc/[pid]/mem
-        use std::io::{Seek, SeekFrom, Write};
         use std::fs::OpenOptions;
+        use std::io::{Seek, SeekFrom, Write};
 
         let mem_path = format!("/proc/{}/mem", pid);
         let mut file = OpenOptions::new()
@@ -248,8 +250,14 @@ impl Debugger for LinuxDebugger {
         file.seek(SeekFrom::Start(address))
             .map_err(|e| format!("Failed to seek to 0x{:x}: {}", address, e))?;
 
-        file.write_all(data)
-            .map_err(|e| format!("Failed to write {} bytes at 0x{:x}: {}", data.len(), address, e))?;
+        file.write_all(data).map_err(|e| {
+            format!(
+                "Failed to write {} bytes at 0x{:x}: {}",
+                data.len(),
+                address,
+                e
+            )
+        })?;
 
         Ok(())
     }
@@ -258,8 +266,7 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid
-            .ok_or_else(|| "Not attached".to_string())?;
+        let pid = self.target_pid.ok_or_else(|| "Not attached".to_string())?;
 
         // Get registers using ptrace GETREGS
         let regs = ptrace::getregs(Pid::from_raw(pid as i32))
@@ -287,4 +294,3 @@ impl Debugger for LinuxDebugger {
         })
     }
 }
-

@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use crate::core::events::{EventBus, FissionEvent, FissionEventType};
-use super::hooks::{PluginHook, HookPriority};
-use super::api::{PluginInfo, PluginType, PluginAPI, BinaryInfo};
+use super::api::{BinaryInfo, PluginAPI, PluginInfo, PluginType};
+use super::hooks::{HookPriority, PluginHook};
 use super::traits::{FissionPlugin, PluginContext};
+use crate::core::events::{EventBus, FissionEvent, FissionEventType};
 
 /// Callback function type for plugin hooks
 pub type HookCallback = Box<dyn Fn(&FissionEvent) + Send + Sync>;
@@ -61,7 +61,7 @@ impl PluginManager {
             python_runtime: super::python::PythonRuntime::default(),
         }
     }
-    
+
     /// Set the API instance for plugins to use
     pub fn set_api(&mut self, api: Arc<dyn PluginAPI>) {
         self.api = Some(api);
@@ -71,20 +71,23 @@ impl PluginManager {
     pub fn set_event_bus(&mut self, event_bus: Arc<EventBus>) {
         self.event_bus = Some(event_bus);
     }
-    
+
     /// Add a plugin search path
     pub fn add_search_path<P: AsRef<Path>>(&mut self, path: P) {
         self.search_paths.push(path.as_ref().to_path_buf());
     }
-    
+
     /// Register a native Rust plugin
-    pub fn register_native_plugin(&mut self, mut plugin: Box<dyn FissionPlugin>) -> Result<String, String> {
+    pub fn register_native_plugin(
+        &mut self,
+        mut plugin: Box<dyn FissionPlugin>,
+    ) -> Result<String, String> {
         let id = plugin.id().to_string();
-        
+
         if self.plugins.contains_key(&id) {
             return Err(format!("Plugin '{}' already loaded", id));
         }
-        
+
         // Initialize plugin logic
         if let Some(api) = &self.api {
             let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
@@ -92,7 +95,7 @@ impl PluginManager {
                 return Err(format!("Failed to load plugin '{}': {:?}", id, e));
             }
         }
-        
+
         let info = PluginInfo {
             id: id.clone(),
             name: plugin.name().to_string(),
@@ -102,14 +105,14 @@ impl PluginManager {
             plugin_type: PluginType::Native,
             enabled: true,
         };
-        
+
         let loaded = LoadedPlugin {
             info,
             hooks: Vec::new(),
             instance: Some(plugin),
             state: None,
         };
-        
+
         self.plugins.insert(id.clone(), loaded);
         Ok(id)
     }
@@ -117,7 +120,7 @@ impl PluginManager {
     /// Load a plugin from a file
     pub fn load_plugin<P: AsRef<Path>>(&mut self, path: P) -> Result<String, String> {
         let path = path.as_ref();
-        
+
         // Determine plugin type from extension
         let plugin_type = match path.extension().and_then(|e| e.to_str()) {
             Some("py") => PluginType::Python,
@@ -125,33 +128,34 @@ impl PluginManager {
             Some("so") | Some("dll") | Some("dylib") => PluginType::Native,
             _ => return Err("Unknown plugin type".into()),
         };
-        
+
         // Generate plugin ID from filename
         let plugin_id = path
             .file_stem()
             .and_then(|s| s.to_str())
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("plugin_{}", self.plugins.len()));
-        
+
         // Check if already loaded
         if self.plugins.contains_key(&plugin_id) {
             return Err(format!("Plugin '{}' already loaded", plugin_id));
         }
-        
+
         let info = if plugin_type == PluginType::Python {
             #[cfg(feature = "python")]
             {
-                 // Load into Python runtime
-                 self.python_runtime.load_plugin(path, &plugin_id)
-                     .map_err(|e| format!("Python load error: {}", e))?
+                // Load into Python runtime
+                self.python_runtime
+                    .load_plugin(path, &plugin_id)
+                    .map_err(|e| format!("Python load error: {}", e))?
             }
             #[cfg(not(feature = "python"))]
             {
                 return Err("Python support disabled".into());
             }
         } else {
-             // Create basic plugin info for other types
-             PluginInfo {
+            // Create basic plugin info for other types
+            PluginInfo {
                 id: plugin_id.clone(),
                 name: plugin_id.clone(),
                 version: "0.1.0".into(),
@@ -169,12 +173,12 @@ impl PluginManager {
             instance: None,
             state: None,
         };
-        
+
         self.plugins.insert(plugin_id.clone(), loaded);
-        
+
         Ok(plugin_id)
     }
-    
+
     /// Unload a plugin
     pub fn unload_plugin(&mut self, plugin_id: &str) -> Result<(), String> {
         if let Some(mut plugin) = self.plugins.remove(plugin_id) {
@@ -185,18 +189,18 @@ impl PluginManager {
                     let _ = instance.on_unload(&ctx);
                 }
             }
-            
+
             // Remove all hooks registered by this plugin
             for hook_id in plugin.hooks {
                 self.hooks.remove(&hook_id);
             }
-            
+
             Ok(())
         } else {
             Err(format!("Plugin '{}' not found", plugin_id))
         }
     }
-    
+
     /// Register a hook for a plugin
     pub fn register_hook<F>(
         &mut self,
@@ -208,123 +212,137 @@ impl PluginManager {
     where
         F: Fn(&FissionEvent) + Send + Sync + 'static,
     {
-        let plugin = self.plugins.get_mut(plugin_id)
+        let plugin = self
+            .plugins
+            .get_mut(plugin_id)
             .ok_or_else(|| format!("Plugin '{}' not found", plugin_id))?;
-        
+
         let hook_id = self.next_hook_id;
         self.next_hook_id += 1;
-        
+
         let hook = PluginHook {
             id: hook_id,
             plugin_id: plugin_id.to_string(),
             event_type,
             priority,
         };
-        
+
         plugin.hooks.push(hook_id);
         self.hooks.insert(hook_id, (hook, Box::new(callback)));
-        
+
         Ok(hook_id)
     }
-    
+
     /// Unregister a hook
     pub fn unregister_hook(&mut self, hook_id: u64) -> Result<(), String> {
-        let (hook, _) = self.hooks.remove(&hook_id)
+        let (hook, _) = self
+            .hooks
+            .remove(&hook_id)
             .ok_or_else(|| format!("Hook {} not found", hook_id))?;
-        
+
         // Remove from plugin's hook list
         if let Some(plugin) = self.plugins.get_mut(&hook.plugin_id) {
             plugin.hooks.retain(|&id| id != hook_id);
         }
-        
+
         Ok(())
     }
-    
+
     /// Emit an event to all registered hooks and plugins
     pub fn emit_event(&self, event: &FissionEvent) {
         // 1. Dispatch to trait-based plugins
         if let Some(api) = &self.api {
             let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
-            
+
             for plugin in self.plugins.values() {
-                if !plugin.info.enabled { continue; }
-                
+                if !plugin.info.enabled {
+                    continue;
+                }
+
                 if let Some(instance) = &plugin.instance {
                     match event {
                         FissionEvent::BinaryLoaded(binary) => {
                             let info = BinaryInfo::from(binary.as_ref());
                             instance.on_binary_loaded(&ctx, &info)
-                        },
+                        }
                         FissionEvent::DecompilationSuccess { address, code, .. } => {
                             instance.on_function_decompiled(&ctx, *address, code)
-                        },
+                        }
                         _ => {} // Other events not mapped to trait methods yet
                     }
                 }
             }
-
         }
 
         // 2. Dispatch to Python plugins
         #[cfg(feature = "python")]
         {
-             self.python_runtime.dispatch_event(event, self.event_bus.as_deref());
+            self.python_runtime
+                .dispatch_event(event, self.event_bus.as_deref());
         }
 
         // 3. Dispatch to registered hooks
         let event_type = event.event_type();
-        
+
         // Collect matching hooks and sort by priority
-        let mut matching_hooks: Vec<_> = self.hooks.values()
+        let mut matching_hooks: Vec<_> = self
+            .hooks
+            .values()
             .filter(|(hook, _)| {
                 // Check if plugin is enabled
                 if let Some(plugin) = self.plugins.get(&hook.plugin_id) {
-                    if !plugin.info.enabled { return false; }
+                    if !plugin.info.enabled {
+                        return false;
+                    }
                 }
-                
+
                 hook.event_type == event_type || hook.event_type == FissionEventType::All
             })
             .collect();
-        
+
         matching_hooks.sort_by_key(|(hook, _)| hook.priority);
-        
+
         // Call each hook
         for (_, callback) in matching_hooks {
             callback(event);
         }
     }
-    
+
     /// List all loaded plugins
     pub fn list_plugins(&self) -> Vec<&PluginInfo> {
         self.plugins.values().map(|p| &p.info).collect()
     }
-    
+
     /// Get plugin info by ID
     pub fn get_plugin(&self, plugin_id: &str) -> Option<&PluginInfo> {
         self.plugins.get(plugin_id).map(|p| &p.info)
     }
-    
+
     /// Enable a plugin
     pub fn enable_plugin(&mut self, plugin_id: &str) -> Result<(), String> {
-        let plugin = self.plugins.get_mut(plugin_id)
+        let plugin = self
+            .plugins
+            .get_mut(plugin_id)
             .ok_or_else(|| format!("Plugin '{}' not found", plugin_id))?;
         plugin.info.enabled = true;
         Ok(())
     }
-    
+
     /// Disable a plugin
     pub fn disable_plugin(&mut self, plugin_id: &str) -> Result<(), String> {
-        let plugin = self.plugins.get_mut(plugin_id)
+        let plugin = self
+            .plugins
+            .get_mut(plugin_id)
             .ok_or_else(|| format!("Plugin '{}' not found", plugin_id))?;
         plugin.info.enabled = false;
         Ok(())
     }
-    
+
     /// Get plugin count
     pub fn plugin_count(&self) -> usize {
         self.plugins.len()
     }
-    
+
     /// Get hook count
     pub fn hook_count(&self) -> usize {
         self.hooks.len()
@@ -341,35 +359,39 @@ impl Default for PluginManager {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
-    
+
     struct MockPlugin {
         id: String,
         load_count: Arc<AtomicU32>,
     }
-    
+
     impl FissionPlugin for MockPlugin {
-        fn id(&self) -> &str { &self.id }
-        fn name(&self) -> &str { "Mock Plugin" }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn name(&self) -> &str {
+            "Mock Plugin"
+        }
         fn on_load(&mut self, _ctx: &PluginContext) -> crate::core::prelude::Result<()> {
             self.load_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
-    
+
     #[test]
     fn test_trait_plugin() {
         let mut pm = PluginManager::new();
         let count = Arc::new(AtomicU32::new(0));
-        
+
         let plugin = MockPlugin {
             id: "mock".into(),
             load_count: count.clone(),
         };
-        
+
         // Note: register_native_plugin calls on_load ONLY if API is set.
         // For this test we just register it and check it exists.
         pm.register_native_plugin(Box::new(plugin)).unwrap();
-        
+
         assert_eq!(pm.plugin_count(), 1);
         assert!(pm.get_plugin("mock").is_some());
     }
@@ -377,7 +399,7 @@ mod tests {
     #[test]
     fn test_plugin_manager_basic() {
         let mut pm = PluginManager::new();
-        
+
         // Register a "fake" plugin manually
         let plugin_id = "test_plugin".to_string();
         let info = PluginInfo {
@@ -385,32 +407,37 @@ mod tests {
             name: "Test Plugin".into(),
             ..Default::default()
         };
-        pm.plugins.insert(plugin_id.clone(), LoadedPlugin {
-            info,
-            hooks: Vec::new(),
-            instance: None,
-            state: None,
-        });
-        
+        pm.plugins.insert(
+            plugin_id.clone(),
+            LoadedPlugin {
+                info,
+                hooks: Vec::new(),
+                instance: None,
+                state: None,
+            },
+        );
+
         // Register a hook
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
-        
-        let hook_id = pm.register_hook(
-            &plugin_id,
-            FissionEventType::AppStarted,
-            HookPriority::Normal,
-            move |_| {
-                counter_clone.fetch_add(1, Ordering::SeqCst);
-            },
-        ).unwrap();
-        
+
+        let hook_id = pm
+            .register_hook(
+                &plugin_id,
+                FissionEventType::AppStarted,
+                HookPriority::Normal,
+                move |_| {
+                    counter_clone.fetch_add(1, Ordering::SeqCst);
+                },
+            )
+            .unwrap();
+
         assert_eq!(pm.hook_count(), 1);
-        
+
         // Emit event
         pm.emit_event(&FissionEvent::AppStarted);
         assert_eq!(counter.load(Ordering::SeqCst), 1);
-        
+
         // Unregister hook
         pm.unregister_hook(hook_id).unwrap();
         assert_eq!(pm.hook_count(), 0);
@@ -421,11 +448,15 @@ mod tests {
     }
 
     impl FissionPlugin for EventBusPlugin {
-        fn id(&self) -> &str { &self.id }
-        fn name(&self) -> &str { "EventBus Plugin" }
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn name(&self) -> &str {
+            "EventBus Plugin"
+        }
         fn on_load(&mut self, ctx: &PluginContext) -> crate::core::prelude::Result<()> {
             if let Some(bus) = &ctx.event_bus {
-                bus.publish(FissionEvent::LogMessage { 
+                bus.publish(FissionEvent::LogMessage {
                     level: "info".into(),
                     message: "Plugin loaded".into(),
                     target: "plugin".into(),
@@ -440,18 +471,30 @@ mod tests {
         let mut pm = PluginManager::new();
         let event_bus = Arc::new(EventBus::new());
         pm.set_event_bus(event_bus.clone());
-        
+
         // Mock API is needed for on_load to be called
         struct MockApi;
         impl PluginAPI for MockApi {
-            fn get_binary(&self) -> Option<BinaryInfo> { None }
-            fn get_functions(&self) -> Vec<crate::analysis::loader::FunctionInfo> { Vec::new() }
-            fn read_binary_bytes(&self, _addr: u64, _size: usize) -> Option<Vec<u8>> { None }
+            fn get_binary(&self) -> Option<BinaryInfo> {
+                None
+            }
+            fn get_functions(&self) -> Vec<crate::analysis::loader::FunctionInfo> {
+                Vec::new()
+            }
+            fn read_binary_bytes(&self, _addr: u64, _size: usize) -> Option<Vec<u8>> {
+                None
+            }
             fn log(&self, _msg: &str) {}
             fn log_error(&self, _msg: &str) {}
-            fn decompile(&self, _addr: u64) -> Option<String> { None }
-            fn get_current_decompiled_code(&self) -> Option<String> { None }
-            fn disassemble(&self, _addr: u64, _size: usize) -> Vec<String> { Vec::new() }
+            fn decompile(&self, _addr: u64) -> Option<String> {
+                None
+            }
+            fn get_current_decompiled_code(&self) -> Option<String> {
+                None
+            }
+            fn disassemble(&self, _addr: u64, _size: usize) -> Vec<String> {
+                Vec::new()
+            }
         }
         pm.set_api(Arc::new(MockApi));
 
@@ -466,7 +509,9 @@ mod tests {
             }
         });
 
-        let plugin = EventBusPlugin { id: "eb_plugin".into() };
+        let plugin = EventBusPlugin {
+            id: "eb_plugin".into(),
+        };
         pm.register_native_plugin(Box::new(plugin)).unwrap();
 
         assert_eq!(counter.load(Ordering::SeqCst), 1);

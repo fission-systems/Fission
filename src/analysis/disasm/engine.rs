@@ -2,8 +2,8 @@
 //!
 //! Provides fast, accurate x86/x64 disassembly for immediate feedback.
 
-use thiserror::Error;
 use iced_x86::{Decoder, DecoderOptions, Formatter, Instruction, IntelFormatter, Mnemonic};
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum DisasmError {
@@ -51,24 +51,30 @@ impl DisasmEngine {
     }
 
     /// Disassemble a byte slice starting at address
-    pub fn disassemble(&self, bytes: &[u8], address: u64) -> Result<Vec<DisassembledInstruction>, DisasmError> {
+    pub fn disassemble(
+        &self,
+        bytes: &[u8],
+        address: u64,
+    ) -> Result<Vec<DisassembledInstruction>, DisasmError> {
         let mut decoder = Decoder::with_ip(self.bitness, bytes, address, DecoderOptions::NONE);
         let mut formatter = IntelFormatter::new();
-        
+
         // Customize formatter for readability
         formatter.options_mut().set_uppercase_mnemonics(false);
         formatter.options_mut().set_uppercase_registers(false);
-        formatter.options_mut().set_space_after_operand_separator(true);
+        formatter
+            .options_mut()
+            .set_space_after_operand_separator(true);
         formatter.options_mut().set_hex_prefix("0x");
         formatter.options_mut().set_hex_suffix("");
-        
+
         let mut results = Vec::new();
         let mut instruction = Instruction::default();
-        
+
         let mut offset = 0usize;
         while decoder.can_decode() {
             decoder.decode_out(&mut instruction);
-            
+
             let insn_len = instruction.len();
             let insn_bytes = if offset + insn_len <= bytes.len() {
                 bytes[offset..offset + insn_len].to_vec()
@@ -76,21 +82,24 @@ impl DisasmEngine {
                 vec![]
             };
             offset += insn_len;
-            
+
             // Format the instruction
             let mut output = String::new();
             formatter.format(&instruction, &mut output);
-            
+
             // Split mnemonic and operands
             let (mnemonic, operands) = if let Some(space_idx) = output.find(' ') {
-                (output[..space_idx].to_string(), output[space_idx + 1..].to_string())
+                (
+                    output[..space_idx].to_string(),
+                    output[space_idx + 1..].to_string(),
+                )
             } else {
                 (output.clone(), String::new())
             };
-            
+
             // Check if flow control
             let is_flow_control = is_flow_control_mnemonic(instruction.mnemonic());
-            
+
             results.push(DisassembledInstruction {
                 address: instruction.ip(),
                 bytes: insn_bytes,
@@ -100,22 +109,22 @@ impl DisasmEngine {
                 is_flow_control,
             });
         }
-        
+
         Ok(results)
     }
-    
+
     /// Discover call targets by scanning code for CALL instructions
     /// Returns a set of unique addresses that are called (potential function entries)
     pub fn discover_call_targets(&self, bytes: &[u8], base_address: u64) -> Vec<u64> {
         use std::collections::HashSet;
-        
+
         let mut decoder = Decoder::with_ip(self.bitness, bytes, base_address, DecoderOptions::NONE);
         let mut instruction = Instruction::default();
         let mut targets: HashSet<u64> = HashSet::new();
-        
+
         while decoder.can_decode() {
             decoder.decode_out(&mut instruction);
-            
+
             // Check if this is a CALL instruction
             if instruction.mnemonic() == Mnemonic::Call {
                 // Get the target address if it's a near call (direct)
@@ -129,7 +138,7 @@ impl DisasmEngine {
                 }
             }
         }
-        
+
         // Sort and return
         let mut result: Vec<u64> = targets.into_iter().collect();
         result.sort();
@@ -140,9 +149,10 @@ impl DisasmEngine {
 /// Check if mnemonic is a flow control instruction (jump/call/ret)
 fn is_flow_control_mnemonic(mnemonic: Mnemonic) -> bool {
     use Mnemonic::*;
-    matches!(mnemonic,
+    matches!(
+        mnemonic,
         // Jumps
-        Jmp | 
+        Jmp |
         Jo | Jno | Jb | Jae | Je | Jne | Jbe | Ja |
         Js | Jns | Jp | Jnp | Jl | Jge | Jle | Jg |
         Jcxz | Jecxz | Jrcxz |

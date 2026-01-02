@@ -47,23 +47,21 @@ pub fn parse_command(input: &str) -> Command {
                 Command::Unknown("load requires a path".into())
             }
         }
-        
+
         "info" | "i" => Command::Info,
-        
+
         "funcs" | "functions" | "f" => Command::Functions,
-        
+
         "sections" | "sec" => Command::Sections,
-        
+
         "strings" | "str" => Command::Strings,
-        
+
         "analyze" | "anal" | "a" => Command::Analyze,
-        
+
         "disasm" | "dis" | "d" => {
             if let Some(addr_str) = arg1 {
                 if let Some(addr) = parse_address(addr_str) {
-                    let count = arg2
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(20);
+                    let count = arg2.and_then(|s| s.parse().ok()).unwrap_or(20);
                     Command::Disasm { addr, count }
                 } else {
                     Command::Unknown(format!("Invalid address: {}", addr_str))
@@ -72,7 +70,7 @@ pub fn parse_command(input: &str) -> Command {
                 Command::Unknown("disasm requires an address".into())
             }
         }
-        
+
         "decompile" | "dec" | "decomp" => {
             if let Some(addr_str) = arg1 {
                 if let Some(addr) = parse_address(addr_str) {
@@ -84,15 +82,15 @@ pub fn parse_command(input: &str) -> Command {
                 Command::Unknown("decompile requires an address".into())
             }
         }
-        
+
         "help" | "?" | "h" => Command::Help,
-        
+
         "clear" | "cls" => Command::Clear,
-        
+
         "quit" | "exit" | "q" => Command::Quit,
-        
+
         "" => Command::Unknown(String::new()),
-        
+
         _ => Command::Unknown(cmd),
     }
 }
@@ -100,17 +98,17 @@ pub fn parse_command(input: &str) -> Command {
 /// Parse an address from hex or decimal string
 pub fn parse_address(s: &str) -> Option<u64> {
     let s = s.trim();
-    
+
     // Handle 0x prefix explicitly
     if let Some(hex_str) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         return u64::from_str_radix(hex_str, 16).ok();
     }
-    
+
     // If it looks like hex (long string or contains a-f), parse as hex
     if s.len() > 4 && s.chars().all(|c| c.is_ascii_hexdigit()) {
         return u64::from_str_radix(s, 16).ok();
     }
-    
+
     // Otherwise try decimal first, then hex
     s.parse().ok().or_else(|| u64::from_str_radix(s, 16).ok())
 }
@@ -132,10 +130,18 @@ mod tests {
     fn test_parse_command() {
         assert!(matches!(parse_command("load test.exe"), Command::Load(_)));
         assert!(matches!(parse_command("funcs"), Command::Functions));
-        assert!(matches!(parse_command("disasm 0x1000"), Command::Disasm { .. }));
-        assert!(matches!(parse_command("disasm 0x1000 50"), Command::Disasm { addr: 0x1000, count: 50 }));
+        assert!(matches!(
+            parse_command("disasm 0x1000"),
+            Command::Disasm { .. }
+        ));
+        assert!(matches!(
+            parse_command("disasm 0x1000 50"),
+            Command::Disasm {
+                addr: 0x1000,
+                count: 50
+            }
+        ));
         assert!(matches!(parse_command("quit"), Command::Quit));
         assert!(matches!(parse_command("unknown_cmd"), Command::Unknown(_)));
     }
 }
-

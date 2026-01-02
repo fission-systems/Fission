@@ -1,19 +1,18 @@
 //! GUI Module
-//! 
+//!
 //! Contains the main application and reusable widgets for the egui-based interface.
 
 mod app;
-mod state;
-mod messages;
-mod menu;
 pub mod commands;
-mod status_bar;
+mod menu;
+mod messages;
 mod panels;
-mod widgets;
+mod state;
+mod status_bar;
 pub mod theme;
+mod widgets;
 
 pub use app::FissionApp;
-pub use state::{AppState, SettingsState, ThemeMode};
 pub use messages::AsyncMessage;
+pub use state::{AppState, SettingsState, ThemeMode};
 pub use widgets::*;
-
