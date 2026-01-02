@@ -1,4 +1,5 @@
 #include "fission/types/StructureAnalyzer.h"
+#include "fission/types/TypeResolver.h"
 #include "fission/core/ArchPolicy.h"
 
 // Ghidra headers
@@ -102,6 +103,9 @@ void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
             
             // Determine size of access by checking descendants (LOAD/STORE)
             int access_size = 1; // Default
+            bool is_float = false;
+            bool is_pointer = false;
+            
             ghidra::Varnode* out_vn = op->getOut();
             if (out_vn) {
                 auto desc_iter = out_vn->beginDescend();
@@ -113,24 +117,41 @@ void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
                     
                     if (use_code == ghidra::CPUI_LOAD) {
                         // output = LOAD(space, ptr) -> size of output
-                        if (use_op->getOut()) {
-                            access_size = std::max(access_size, (int)use_op->getOut()->getSize());
+                        ghidra::Varnode* load_out = use_op->getOut();
+                        if (load_out) {
+                            access_size = std::max(access_size, (int)load_out->getSize());
+                            // Check if loaded value is used as float
+                            if (TypeResolver::is_used_as_float(load_out)) {
+                                is_float = true;
+                            }
+                            // Check if loaded value is used as pointer
+                            int ptr_size = fd->getArch()->types->getSizeOfPointer();
+                            if (TypeResolver::is_pointer_access(load_out, ptr_size)) {
+                                is_pointer = true;
+                            }
                         }
                     } else if (use_code == ghidra::CPUI_STORE) {
                         // STORE(space, ptr, value) -> size of value (input 2)
                         ghidra::Varnode* val = use_op->getIn(2);
                         if (val) {
                             access_size = std::max(access_size, (int)val->getSize());
+                            // Check source of stored value for float ops
+                            ghidra::PcodeOp* def_op = val->getDef();
+                            if (def_op && TypeResolver::is_float_operation(def_op)) {
+                                is_float = true;
+                            }
                         }
                     }
                 }
             }
 
-            // Update map: track max size for this offset
-            int& stored_size = access_map[base_storage][(int)offset];
-            if (access_size > stored_size) {
-                stored_size = access_size;
+            // Update map: track field info for this offset
+            FieldInfo& info = access_map[base_storage][(int)offset];
+            if (access_size > info.size) {
+                info.size = access_size;
             }
+            if (is_float) info.is_float = true;
+            if (is_pointer) info.is_pointer = true;
         }
     }
 }
@@ -145,14 +166,14 @@ bool StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory,
     // Iterate over inferred accesses
     for (auto& pair : access_map) {
         unsigned long long base_addr = pair.first;
-        std::map<int, int>& offsets = pair.second; // Offset -> Size
+        std::map<int, FieldInfo>& offsets = pair.second; // Offset -> FieldInfo
 
         if (offsets.empty()) continue;
         if (offsets.size() == 1 && offsets.begin()->first == 0) continue; // Heuristic: Skip if only accessing offset 0
 
         // Calculate total struct size
         int max_offset = offsets.rbegin()->first;
-        int last_field_size = offsets.rbegin()->second;
+        int last_field_size = offsets.rbegin()->second.size;
         int struct_size = max_offset + last_field_size;
         
         // Align struct size to pointer size
@@ -178,25 +199,29 @@ bool StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory,
         std::vector<ghidra::TypeField> fields;
         int field_id = 0;
         
-        // Fill fields
-        for (auto const& [off, size] : offsets) {
+        // Fill fields with precise type detection
+        for (auto const& [off, info] : offsets) {
             std::stringstream fss;
-            fss << "field_" << std::hex << off;
             
-            // Try to find a suitable primitive type for the detected size
-            ghidra::Datatype* field_type = nullptr;
-            
-            // Basic primitives prefer signed int/long
-            if (size == 1) field_type = factory->getBase(1, ghidra::TYPE_INT); // char/byte
-            else if (size == 2) field_type = factory->getBase(2, ghidra::TYPE_INT); // short
-            else if (size == 4) field_type = factory->getBase(4, ghidra::TYPE_INT); // int/float
-            else if (size == 8) field_type = factory->getBase(8, ghidra::TYPE_INT); // long/double
-            else {
-                // For other sizes, fallback to unknown
-                field_type = factory->getBase(size, ghidra::TYPE_UNKNOWN);
+            // Generate descriptive field name based on detected type
+            if (info.is_float) {
+                fss << ((info.size == 4) ? "flt_" : "dbl_") << std::hex << off;
+            } else if (info.is_pointer) {
+                fss << "ptr_" << std::hex << off;
+            } else {
+                fss << "field_" << std::hex << off;
             }
             
-            if(!field_type) field_type = factory->getBase(1, ghidra::TYPE_UNKNOWN); // Ultimate fallback
+            // Use TypeResolver for precise type selection
+            ghidra::Datatype* field_type = TypeResolver::get_field_type(
+                factory,
+                info.size,
+                info.is_float,
+                info.is_pointer,
+                ptr_size
+            );
+            
+            if (!field_type) field_type = factory->getBase(1, ghidra::TYPE_UNKNOWN);
 
             fields.push_back(ghidra::TypeField(field_id++, off, fss.str(), field_type));
         }
@@ -229,17 +254,67 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
             unsigned long long storage = vn->getOffset();
             if (inferred_structs.count(storage)) {
                 ghidra::TypeStruct* st = inferred_structs[storage];
+                if (!st) continue;
+                
                 ghidra::TypePointer* ptr_type = ArchPolicy::getPointerType(factory, st, fd->getArch());
+                if (!ptr_type) {
+                    std::cerr << "[StructureAnalyzer] ERROR: Failed to create pointer type for " 
+                              << st->getName() << std::endl;
+                    continue;
+                }
 
                 // Aggressively update type AND lock it
                 vn->updateType(ptr_type, true, true);
                 
-                std::cerr << "[StructureAnalyzer] Applied " << ptr_type->getName() 
-                          << " to Input @" << std::hex << storage << std::dec << std::endl;
+                std::cerr << "[StructureAnalyzer] Applied " << st->getName() << "* "
+                          << "to Input @" << std::hex << storage << std::dec << std::endl;
             }
         }
     }
 }
 
+
+    std::string StructureAnalyzer::generate_struct_definitions() const {
+        std::stringstream ss;
+        if (inferred_structs.empty()) return "";
+
+        ss << "// Inferred Structure Definitions\n";
+        
+        for (auto const& [addr, type] : inferred_structs) {
+            if (!type) continue;
+            
+            std::string name = type->getName();
+            ss << "typedef struct " << name << " {\n";
+            
+            auto iter = type->beginField();
+            auto end = type->endField();
+            
+            // Sort fields by offset if not already
+            // TypeStruct stores them in a vector, usually sorted by offset
+            
+            for (; iter != end; ++iter) {
+                // TypeField members are public: offset, name, type
+                std::string field_type = "undefined";
+                if (iter->type) {
+                    field_type = iter->type->getName();
+                }
+                
+                // Indent
+                ss << "    " << field_type << " " << iter->name << "; // Offset " << std::hex << iter->offset << std::dec << "\n";
+            }
+            
+            ss << "} " << name << ";\n\n";
+        }
+        
+        return ss.str();
+    }
+
+    std::map<std::string, std::string> StructureAnalyzer::get_type_replacements() const {
+        // Future implementation: Return map for precise type replacement
+        // e.g. "DWORD *param_1" -> "f_... *param_1"
+        return std::map<std::string, std::string>();
+    }
+
 } // namespace types
 } // namespace fission
+

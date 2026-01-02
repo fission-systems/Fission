@@ -61,8 +61,11 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/types/PatternLoader.cc
     ${FISSION_MODULES_DIR}/types/TypeManager.cc
     ${FISSION_MODULES_DIR}/types/StructureAnalyzer.cc
+    ${FISSION_MODULES_DIR}/types/TypeResolver.cc
     ${FISSION_MODULES_DIR}/types/PrototypeEnforcer.cc
+    ${FISSION_MODULES_DIR}/types/GlobalTypeRegistry.cc
     ${FISSION_MODULES_DIR}/analysis/EmulationAnalyzer.cc
+    ${FISSION_MODULES_DIR}/analysis/CallGraphAnalyzer.cc
     ${FISSION_MODULES_DIR}/analysis/FunctionMatcher.cc
     ${FISSION_MODULES_DIR}/analysis/InternalMatcher.cc
     ${FISSION_MODULES_DIR}/analysis/FidDatabase.cc
@@ -70,6 +73,8 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/analysis/CallingConvDetector.cc
     ${FISSION_MODULES_DIR}/analysis/StackFrameAnalyzer.cc
     ${FISSION_MODULES_DIR}/analysis/TypeSharing.cc
+    ${FISSION_MODULES_DIR}/analysis/GlobalDataAnalyzer.cc
+    ${FISSION_MODULES_DIR}/analysis/VTableAnalyzer.cc
     ${FISSION_MODULES_DIR}/core/CliArchitecture.cc
     ${FISSION_MODULES_DIR}/core/DecompilerContext.cc
     ${FISSION_MODULES_DIR}/processing/Constants.cc
@@ -77,6 +82,7 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/processing/StringScanner.cc
     ${FISSION_MODULES_DIR}/loader/PeHeader.cc
     ${FISSION_MODULES_DIR}/loader/SymbolLoader.cc
+    ${FISSION_MODULES_DIR}/loader/BinaryDetector.cc
     # MemoryImage is header-only
 )
 
