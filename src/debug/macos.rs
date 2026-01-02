@@ -7,7 +7,7 @@ use super::traits::Debugger;
 use super::types::{DebugState, DebugStatus, ProcessInfo, RegisterState};
 
 /// macOS debugger implementation (stub)
-/// 
+///
 /// Note: Full implementation requires:
 /// - task_for_pid() which needs the com.apple.security.cs.debugger entitlement
 /// - Code signing with the entitlement
@@ -38,11 +38,11 @@ impl Default for MacOSDebugger {
 }
 
 /// Enumerate running processes on macOS
-/// 
+///
 /// Uses sysctl to get process list (doesn't require special permissions)
 pub fn enumerate_processes() -> Vec<ProcessInfo> {
     let mut processes = Vec::new();
-    
+
     // Use ps command as a simple approach
     // A more robust implementation would use sysctl with KERN_PROC
     if let Ok(output) = std::process::Command::new("ps")
@@ -64,7 +64,7 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
             }
         }
     }
-    
+
     processes.sort_by_key(|p| p.pid);
     processes
 }
@@ -105,23 +105,38 @@ impl Debugger for MacOSDebugger {
     }
 
     fn set_sw_breakpoint(&mut self, address: u64) -> Result<(), String> {
-        Err(format!("Cannot set breakpoint at 0x{:x}: not attached", address))
+        Err(format!(
+            "Cannot set breakpoint at 0x{:x}: not attached",
+            address
+        ))
     }
 
     fn remove_sw_breakpoint(&mut self, address: u64) -> Result<(), String> {
-        Err(format!("Cannot remove breakpoint at 0x{:x}: not attached", address))
+        Err(format!(
+            "Cannot remove breakpoint at 0x{:x}: not attached",
+            address
+        ))
     }
 
     fn read_memory(&self, address: u64, size: usize) -> Result<Vec<u8>, String> {
-        Err(format!("Cannot read {} bytes at 0x{:x}: not attached", size, address))
+        Err(format!(
+            "Cannot read {} bytes at 0x{:x}: not attached",
+            size, address
+        ))
     }
 
     fn write_memory(&mut self, address: u64, data: &[u8]) -> Result<(), String> {
-        Err(format!("Cannot write {} bytes at 0x{:x}: not attached", data.len(), address))
+        Err(format!(
+            "Cannot write {} bytes at 0x{:x}: not attached",
+            data.len(),
+            address
+        ))
     }
 
     fn fetch_registers(&mut self, thread_id: u32) -> Result<RegisterState, String> {
-        Err(format!("Cannot fetch registers for thread {}: not attached", thread_id))
+        Err(format!(
+            "Cannot fetch registers for thread {}: not attached",
+            thread_id
+        ))
     }
 }
-

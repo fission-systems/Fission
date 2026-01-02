@@ -170,8 +170,8 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
 /// Replace pcRamXXXXXXXX and func_0xXXXXXXXX patterns with actual IAT symbol names
 /// Uses combined regex for single-pass O(N) complexity
 fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, String>) -> String {
-    use once_cell::sync::Lazy;
     use regex::Regex;
+    use std::sync::LazyLock;
 
     if iat_symbols.is_empty() {
         return code.to_string();
@@ -179,8 +179,8 @@ fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, St
 
     // Combined regex pattern for both pcRam and func_0x patterns
     // Matches: pcRam00403050 or func_0x00403050
-    static COMBINED_RE: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?:pcRam|func_0x)([0-9a-fA-F]{8})").unwrap());
+    static COMBINED_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?:pcRam|func_0x)([0-9a-fA-F]{8})").unwrap());
 
     // Single pass replacement for both patterns
     let result = COMBINED_RE.replace_all(code, |caps: &regex::Captures| {

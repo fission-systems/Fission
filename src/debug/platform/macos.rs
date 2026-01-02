@@ -40,7 +40,7 @@ impl PlatformMemory for MacOSMemory {
     fn open_process(&mut self, pid: u32) -> Result<(), MemoryError> {
         // Store PID for future implementation
         self._target_pid = Some(pid);
-        
+
         // For now, return success but operations will fail
         // A full implementation would call task_for_pid here
         Ok(())
@@ -70,4 +70,3 @@ impl PlatformMemory for MacOSMemory {
         self._target_pid.is_some()
     }
 }
-

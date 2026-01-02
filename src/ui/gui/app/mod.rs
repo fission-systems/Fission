@@ -33,12 +33,12 @@ use crate::core::modules::ModuleManager;
 use crate::plugin::module::PluginModule;
 use crate::plugin::PluginManager;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use tokio::runtime::Runtime;
 
 /// Global Tokio runtime for async operations
-pub static TOKIO_RUNTIME: Lazy<Runtime> =
-    Lazy::new(|| Runtime::new().expect("Failed to create global Tokio runtime"));
+pub static TOKIO_RUNTIME: LazyLock<Runtime> =
+    LazyLock::new(|| Runtime::new().expect("Failed to create global Tokio runtime"));
 
 /// Main application struct that implements eframe::App
 pub struct FissionApp {
@@ -392,6 +392,7 @@ impl FissionApp {
         );
     }
 
+    #[allow(clippy::needless_pass_by_ref_mut)] // Needs mut on Windows platform
     fn update_debug_state(&mut self) {
         // TitanEngine Integration (Dynamic Mode)
         if self.state.ui.dynamic_mode {

@@ -5,9 +5,9 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use thiserror::Error;
 use std::sync::Arc;
 use std::sync::RwLock;
+use thiserror::Error;
 
 use super::types::{PyBinaryInfo, PyFunctionInfo, PySection};
 use crate::analysis::loader::LoadedBinary;
@@ -154,7 +154,8 @@ impl FissionAPI {
   api.write_memory(addr, data) - Write memory (debug mode)
   api.set_breakpoint(addr)  - Set breakpoint at address
   api.get_rip()             - Get current instruction pointer
-"#.to_string()
+"#
+        .to_string()
     }
 
     /// Get information about the loaded binary
@@ -183,13 +184,17 @@ impl FissionAPI {
             Some(b) => b,
             None => return Vec::new(),
         };
-        binary.functions.iter().map(|f| PyFunctionInfo {
-            name: f.name.clone(),
-            address: f.address,
-            size: f.size,
-            is_export: f.is_export,
-            is_import: f.is_import,
-        }).collect()
+        binary
+            .functions
+            .iter()
+            .map(|f| PyFunctionInfo {
+                name: f.name.clone(),
+                address: f.address,
+                size: f.size,
+                is_export: f.is_export,
+                is_import: f.is_import,
+            })
+            .collect()
     }
 
     /// Get list of all sections in the binary
@@ -202,23 +207,26 @@ impl FissionAPI {
             Some(b) => b,
             None => return Vec::new(),
         };
-        binary.sections.iter().map(|s| PySection {
-            name: s.name.clone(),
-            virtual_address: s.virtual_address,
-            virtual_size: s.virtual_size,
-            file_offset: s.file_offset,
-            file_size: s.file_size,
-            is_executable: s.is_executable,
-            is_writable: s.is_writable,
-        }).collect()
+        binary
+            .sections
+            .iter()
+            .map(|s| PySection {
+                name: s.name.clone(),
+                virtual_address: s.virtual_address,
+                virtual_size: s.virtual_size,
+                file_offset: s.file_offset,
+                file_size: s.file_size,
+                is_executable: s.is_executable,
+                is_writable: s.is_writable,
+            })
+            .collect()
     }
 
     /// Read memory from the target process
     fn read_memory(&self, address: u64, size: usize) -> PyResult<Vec<u8>> {
         crate::core::logging::debug(&format!(
             "Python requested memory read: {:#x} ({} bytes)",
-            address,
-            size
+            address, size
         ));
         Ok(vec![0u8; size])
     }
@@ -263,7 +271,7 @@ pub struct PythonBridge {
 impl PythonBridge {
     /// Create a new Python bridge
     pub fn new() -> Self {
-        Self { 
+        Self {
             initialized: false,
             state: Arc::new(RwLock::new(SharedScriptState::default())),
         }

@@ -107,4 +107,3 @@ pub type PlatformMemoryImpl = MacOSMemory;
 pub fn new_platform_memory() -> PlatformMemoryImpl {
     PlatformMemoryImpl::new()
 }
-

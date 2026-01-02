@@ -1,7 +1,7 @@
 //! Timeline - Manages recorded history and navigation.
 
-use super::snapshot::ExecutionSnapshot;
 use super::recorder::TTDRecorder;
+use super::snapshot::ExecutionSnapshot;
 
 /// Timeline navigation result
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ impl Timeline {
             replay_mode: false,
         }
     }
-    
+
     /// Create a timeline from an existing recorder
     pub fn from_recorder(recorder: TTDRecorder) -> Self {
         let position = recorder.latest_snapshot().map(|s| s.step_index);
@@ -44,30 +44,30 @@ impl Timeline {
             replay_mode: false,
         }
     }
-    
+
     /// Get mutable access to the recorder
     pub fn recorder_mut(&mut self) -> &mut TTDRecorder {
         &mut self.recorder
     }
-    
+
     /// Get read access to the recorder
     pub fn recorder(&self) -> &TTDRecorder {
         &self.recorder
     }
-    
+
     /// Start recording (delegates to recorder)
     pub fn start_recording(&mut self) {
         self.recorder.start_recording();
         self.current_position = None;
         self.replay_mode = false;
     }
-    
+
     /// Stop recording (delegates to recorder)
     pub fn stop_recording(&mut self) {
         self.recorder.stop_recording();
         self.current_position = self.recorder.latest_snapshot().map(|s| s.step_index);
     }
-    
+
     /// Enter replay mode at current position
     pub fn enter_replay_mode(&mut self) {
         if self.recorder.snapshot_count() > 0 {
@@ -77,27 +77,27 @@ impl Timeline {
             }
         }
     }
-    
+
     /// Exit replay mode
     pub fn exit_replay_mode(&mut self) {
         self.replay_mode = false;
     }
-    
+
     /// Is in replay mode?
     pub fn is_replay_mode(&self) -> bool {
         self.replay_mode
     }
-    
+
     /// Seek to a specific step index
     pub fn seek_to(&mut self, step_index: u64) -> SeekResult {
         if self.recorder.snapshot_count() == 0 {
             return SeekResult::Empty;
         }
-        
+
         let snapshots = self.recorder.snapshots();
         let min_step = snapshots.first().map(|s| s.step_index).unwrap_or(0);
         let max_step = snapshots.last().map(|s| s.step_index).unwrap_or(0);
-        
+
         if step_index < min_step || step_index > max_step {
             return SeekResult::OutOfBounds {
                 min: min_step,
@@ -105,7 +105,7 @@ impl Timeline {
                 requested: step_index,
             };
         }
-        
+
         if let Some(snapshot) = self.recorder.get_snapshot(step_index) {
             self.current_position = Some(step_index);
             self.replay_mode = true;
@@ -119,7 +119,7 @@ impl Timeline {
             }
         }
     }
-    
+
     /// Rewind N steps from current position
     pub fn rewind(&mut self, steps: u64) -> SeekResult {
         match self.current_position {
@@ -130,7 +130,7 @@ impl Timeline {
             None => SeekResult::Empty,
         }
     }
-    
+
     /// Forward N steps from current position
     pub fn forward(&mut self, steps: u64) -> SeekResult {
         match self.current_position {
@@ -141,7 +141,7 @@ impl Timeline {
             None => SeekResult::Empty,
         }
     }
-    
+
     /// Go to the first snapshot
     pub fn seek_start(&mut self) -> SeekResult {
         if let Some(first) = self.recorder.snapshots().first() {
@@ -150,7 +150,7 @@ impl Timeline {
             SeekResult::Empty
         }
     }
-    
+
     /// Go to the last snapshot
     pub fn seek_end(&mut self) -> SeekResult {
         if let Some(last) = self.recorder.snapshots().last() {
@@ -159,18 +159,18 @@ impl Timeline {
             SeekResult::Empty
         }
     }
-    
+
     /// Get current position
     pub fn current_position(&self) -> Option<u64> {
         self.current_position
     }
-    
+
     /// Get current snapshot
     pub fn current_snapshot(&self) -> Option<&ExecutionSnapshot> {
         self.current_position
             .and_then(|pos| self.recorder.get_snapshot(pos))
     }
-    
+
     /// Get the range of available steps
     pub fn step_range(&self) -> Option<(u64, u64)> {
         let snapshots = self.recorder.snapshots();
@@ -181,12 +181,12 @@ impl Timeline {
         let max = snapshots.last().map(|s| s.step_index).unwrap_or(0);
         Some((min, max))
     }
-    
+
     /// Get total number of available snapshots
     pub fn snapshot_count(&self) -> usize {
         self.recorder.snapshot_count()
     }
-    
+
     /// Clear the timeline
     pub fn clear(&mut self) {
         self.recorder.clear();
@@ -205,25 +205,25 @@ impl Default for Timeline {
 mod tests {
     use super::*;
     use crate::debug::types::RegisterState;
-    
+
     #[test]
     fn test_timeline_basic() {
         let mut timeline = Timeline::new();
         timeline.start_recording();
-        
+
         // Record some steps
         for i in 0..5 {
             let mut regs = RegisterState::default();
             regs.rip = 0x401000 + i * 4;
             timeline.recorder_mut().record_step(regs, 1);
         }
-        
+
         timeline.stop_recording();
-        
+
         // Check range
         assert_eq!(timeline.step_range(), Some((0, 4)));
         assert_eq!(timeline.snapshot_count(), 5);
-        
+
         // Seek to middle
         if let SeekResult::Success(snap) = timeline.seek_to(2) {
             assert_eq!(snap.step_index, 2);
@@ -231,14 +231,14 @@ mod tests {
         } else {
             panic!("Seek failed");
         }
-        
+
         // Rewind
         if let SeekResult::Success(snap) = timeline.rewind(1) {
             assert_eq!(snap.step_index, 1);
         } else {
             panic!("Rewind failed");
         }
-        
+
         // Forward
         if let SeekResult::Success(snap) = timeline.forward(2) {
             assert_eq!(snap.step_index, 3);

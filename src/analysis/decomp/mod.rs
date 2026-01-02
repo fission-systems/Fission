@@ -9,10 +9,6 @@ pub mod native;
 
 // Re-export native interfaces
 pub use native::{
-    DecompilerServer, 
-    DecompilerPool,
-    SharedDecompilerServer, 
-    SharedDecompilerPool,
-    create_shared_server,
-    create_pool,
+    create_pool, create_shared_server, DecompilerPool, DecompilerServer, SharedDecompilerPool,
+    SharedDecompilerServer,
 };

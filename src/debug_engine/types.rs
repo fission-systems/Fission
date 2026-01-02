@@ -5,17 +5,17 @@ use windows::Win32::Foundation::HANDLE;
 pub struct ProcessInfo {
     pub process_id: u32,
     pub thread_id: u32,
-    
+
     #[cfg(target_os = "windows")]
     pub process_handle: HANDLE,
     #[cfg(not(target_os = "windows"))]
     pub process_handle: usize,
-    
+
     #[cfg(target_os = "windows")]
     pub thread_handle: HANDLE,
     #[cfg(not(target_os = "windows"))]
     pub thread_handle: usize,
-    
+
     pub image_base: u64,
     pub entry_point: u64,
 }

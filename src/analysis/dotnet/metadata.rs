@@ -154,8 +154,10 @@ pub fn parse_metadata(
         &[row_counts[2], row_counts[1], row_counts[27]],
         2, // TypeDefOrRef coded index
     );
-    let resolution_scope_size =
-        coded_index_size(&[row_counts[0], row_counts[1], row_counts[26], row_counts[35]], 2);
+    let resolution_scope_size = coded_index_size(
+        &[row_counts[0], row_counts[1], row_counts[26], row_counts[35]],
+        2,
+    );
 
     let field_index_size = table_index_size(row_counts[4]);
     let method_index_size = table_index_size(row_counts[6]);
@@ -255,8 +257,7 @@ pub fn parse_metadata(
             }
             6 => {
                 // MethodDef
-                let row_size =
-                    4 + 2 + 2 + heap_sizes.strings + heap_sizes.blobs + param_index_size;
+                let row_size = 4 + 2 + 2 + heap_sizes.strings + heap_sizes.blobs + param_index_size;
                 for i in 0..rows {
                     let row_offset = offset + row_size * i;
                     let mut cursor = Cursor::with_offset(tables_stream, row_offset);
@@ -302,13 +303,9 @@ pub fn parse_metadata(
             .skip(method_start.saturating_sub(1))
             .take(method_end.saturating_sub(method_start))
         {
-            let signature = decode_method_signature(
-                &m.signature,
-                &type_refs,
-                &type_defs,
-                strings_heap,
-            )
-            .unwrap_or_else(|_| format!("sig_{:08x}", m.token));
+            let signature =
+                decode_method_signature(&m.signature, &type_refs, &type_defs, strings_heap)
+                    .unwrap_or_else(|_| format!("sig_{:08x}", m.token));
 
             type_methods.push(DotNetMethod {
                 token: m.token,
@@ -368,7 +365,9 @@ fn parse_metadata_header<'a>(
     cursor.skip(4)?; // reserved
     let version_len = cursor.read_u32()? as usize;
     let version_bytes = cursor.read_bytes(version_len)?;
-    let version_str = String::from_utf8_lossy(version_bytes).trim_matches('\0').to_string();
+    let version_str = String::from_utf8_lossy(version_bytes)
+        .trim_matches('\0')
+        .to_string();
     cursor.align(4);
 
     let _flags = cursor.read_u16()?;
@@ -452,7 +451,11 @@ fn coded_index_size(row_counts: &[u32], tag_bits: u8) -> usize {
 }
 
 fn table_index_size(rows: u32) -> usize {
-    if rows < 0x10000 { 2 } else { 4 }
+    if rows < 0x10000 {
+        2
+    } else {
+        4
+    }
 }
 
 fn next_list_limit<F>(
@@ -476,7 +479,7 @@ fn guess_row_size(table: usize, heaps: &HeapSizes) -> usize {
     match table {
         8 => 4 + heaps.strings + heaps.blobs, // Param
         10 => heaps.strings + heaps.blobs + coded_index_size(&[0, 0, 0, 0, 0], 3), // MemberRef-ish
-        11 => 2 + 1 + heaps.blobs,           // Constant
+        11 => 2 + 1 + heaps.blobs,            // Constant
         _ => 4 + heaps.strings + heaps.blobs,
     }
 }
@@ -528,11 +531,7 @@ fn decode_method_signature(
         head.push_str(" generic");
     }
 
-    Ok(format!(
-        "{head} {} ({})",
-        ret_type,
-        params.join(", ")
-    ))
+    Ok(format!("{head} {} ({})", ret_type, params.join(", ")))
 }
 
 fn decode_field_signature(
@@ -662,10 +661,7 @@ fn read_compressed(cursor: &mut Cursor<'_>) -> DotNetResult<u32> {
         let b2 = cursor.read_u8()?;
         let b3 = cursor.read_u8()?;
         let b4 = cursor.read_u8()?;
-        Ok((((first & 0x1F) as u32) << 24)
-            | (b2 as u32) << 16
-            | (b3 as u32) << 8
-            | b4 as u32)
+        Ok((((first & 0x1F) as u32) << 24) | (b2 as u32) << 16 | (b3 as u32) << 8 | b4 as u32)
     }
 }
 

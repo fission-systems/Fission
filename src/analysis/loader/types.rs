@@ -183,7 +183,7 @@ impl LoadedBinaryBuilder {
         // Sort functions by address during build for efficient sorted access
         let mut functions = self.functions;
         functions.sort_by_key(|f| f.address);
-        
+
         let mut binary = LoadedBinary {
             path: self.path,
             data: self.data,
@@ -254,7 +254,7 @@ impl LoadedBinary {
     }
 
     /// Get functions sorted by address
-    /// 
+    ///
     /// Performance: Returns references to already-sorted functions when possible.
     /// Functions are sorted during build() and discover_internal_functions(),
     /// avoiding redundant sorting on each call.
@@ -271,7 +271,7 @@ impl LoadedBinary {
     }
 
     /// Get iterator over functions (already sorted by address)
-    /// 
+    ///
     /// Performance: Always zero-allocation since it returns a slice iterator.
     /// Prefer this over functions_sorted() to avoid Vec allocation when
     /// only iteration is needed.
