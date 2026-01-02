@@ -29,7 +29,7 @@
 use super::types::{ProcessInfo, RegisterState};
 
 /// Platform-agnostic debugger trait
-/// 
+///
 /// This trait defines the common interface for all platform-specific debugger implementations.
 /// Each platform (Windows, Linux, macOS) provides its own implementation.
 pub trait Debugger: Send {
@@ -37,16 +37,16 @@ pub trait Debugger: Send {
     fn enumerate_processes() -> Vec<ProcessInfo>
     where
         Self: Sized;
-    
+
     /// Attach to a process by PID
     fn attach(&mut self, pid: u32) -> Result<(), String>;
-    
+
     /// Detach from the current process
     fn detach(&mut self) -> Result<(), String>;
-    
+
     /// Check if currently attached to a process
     fn is_attached(&self) -> bool;
-    
+
     /// Get the attached process ID (if any)
     fn attached_pid(&self) -> Option<u32>;
 
@@ -71,4 +71,3 @@ pub trait Debugger: Send {
     /// Fetch CPU registers for a thread
     fn fetch_registers(&mut self, thread_id: u32) -> Result<RegisterState, String>;
 }
-

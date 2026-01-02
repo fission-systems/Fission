@@ -2,10 +2,8 @@ use super::types::*;
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::*,
-    Win32::Foundation::*,
+    core::*, Win32::Foundation::*, Win32::System::Diagnostics::Debug::*,
     Win32::System::Threading::*,
-    Win32::System::Diagnostics::Debug::*,
 };
 
 /// Wrapper around platform-specific CONTEXT structure.
@@ -32,7 +30,7 @@ impl ThreadContext {
     }
 
     // --- Register Accessors (x64) ---
-    
+
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
     pub fn rip(&self) -> u64 {
         self.raw.Rip
@@ -52,7 +50,7 @@ impl ThreadContext {
     pub fn set_rax(&mut self, value: u64) {
         self.raw.Rax = value;
     }
-    
+
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
     pub fn rsp(&self) -> u64 {
         self.raw.Rsp
@@ -62,7 +60,7 @@ impl ThreadContext {
 }
 
 /// Get thread context.
-/// 
+///
 /// # Arguments
 /// * `thread_handle` - Handle to the thread.
 /// * `suspend` - Whether to suspend the thread before getting context (recommended if running).
@@ -71,7 +69,10 @@ pub fn get_thread_context(thread_handle: HANDLE, suspend: bool) -> Result<Thread
     unsafe {
         if suspend {
             if SuspendThread(thread_handle) == u32::MAX {
-                return Err(format!("SuspendThread failed: {:?}", std::io::Error::last_os_error()));
+                return Err(format!(
+                    "SuspendThread failed: {:?}",
+                    std::io::Error::last_os_error()
+                ));
             }
         }
 
@@ -87,7 +88,10 @@ pub fn get_thread_context(thread_handle: HANDLE, suspend: bool) -> Result<Thread
         if result.as_bool() {
             Ok(ThreadContext { raw: ctx })
         } else {
-            Err(format!("GetThreadContext failed: {:?}", std::io::Error::last_os_error()))
+            Err(format!(
+                "GetThreadContext failed: {:?}",
+                std::io::Error::last_os_error()
+            ))
         }
     }
 }
@@ -99,11 +103,18 @@ pub fn get_thread_context(_thread_handle: usize, _suspend: bool) -> Result<Threa
 
 /// Set thread context.
 #[cfg(target_os = "windows")]
-pub fn set_thread_context(thread_handle: HANDLE, context: &ThreadContext, suspend: bool) -> Result<(), String> {
+pub fn set_thread_context(
+    thread_handle: HANDLE,
+    context: &ThreadContext,
+    suspend: bool,
+) -> Result<(), String> {
     unsafe {
         if suspend {
             if SuspendThread(thread_handle) == u32::MAX {
-                return Err(format!("SuspendThread failed: {:?}", std::io::Error::last_os_error()));
+                return Err(format!(
+                    "SuspendThread failed: {:?}",
+                    std::io::Error::last_os_error()
+                ));
             }
         }
 
@@ -116,12 +127,19 @@ pub fn set_thread_context(thread_handle: HANDLE, context: &ThreadContext, suspen
         if result.as_bool() {
             Ok(())
         } else {
-            Err(format!("SetThreadContext failed: {:?}", std::io::Error::last_os_error()))
+            Err(format!(
+                "SetThreadContext failed: {:?}",
+                std::io::Error::last_os_error()
+            ))
         }
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn set_thread_context(_thread_handle: usize, _context: &ThreadContext, _suspend: bool) -> Result<(), String> {
+pub fn set_thread_context(
+    _thread_handle: usize,
+    _context: &ThreadContext,
+    _suspend: bool,
+) -> Result<(), String> {
     Err("Not supported on this OS".to_string())
 }

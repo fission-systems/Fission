@@ -22,11 +22,11 @@
 //! ```
 
 // Core modules
-pub mod traits;
-pub mod types;
-pub mod platform;
 pub mod memory;
+pub mod platform;
+pub mod traits;
 pub mod ttd;
+pub mod types;
 
 // Platform-specific implementations
 #[cfg(target_os = "windows")]
@@ -42,10 +42,7 @@ pub mod macos;
 pub use traits::Debugger;
 
 // Re-export commonly used types
-pub use types::{
-    DebugEvent, DebugState, DebugStatus, 
-    Breakpoint, RegisterState, ProcessInfo
-};
+pub use types::{Breakpoint, DebugEvent, DebugState, DebugStatus, ProcessInfo, RegisterState};
 
 // ============================================================================
 // Platform-specific exports

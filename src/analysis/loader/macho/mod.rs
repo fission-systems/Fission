@@ -85,7 +85,7 @@ impl MachoLoader {
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
-        let mut entry_point = 0; // Mach-O entry is usually in LC_MAIN or LC_UNIXTHREAD, tricky to parse fully for POC
+        let entry_point = 0; // Mach-O entry is usually in LC_MAIN or LC_UNIXTHREAD, tricky to parse fully for POC
 
         // Iterate Commands
         for _ in 0..header.ncmds {

@@ -233,15 +233,16 @@ impl ElfLoader {
             .build()
     }
 
+    #[allow(clippy::needless_pass_by_ref_mut, dead_code)]
     fn parse_symbols_64(
-        full_data: &[u8],
-        offset: u64,
-        size: u64,
-        entsize: u64,
-        strtab_shndx: usize,
-        sections: &[SectionInfo],
-        out_funcs: &mut Vec<FunctionInfo>,
-        endian: binrw::Endian,
+        _full_data: &[u8],
+        _offset: u64,
+        _size: u64,
+        _entsize: u64,
+        _strtab_shndx: usize,
+        _sections: &[SectionInfo],
+        _out_funcs: &mut Vec<FunctionInfo>,
+        _endian: binrw::Endian,
     ) {
         // Find string table data from previously parsed sections info
         // Limitation: SectionsInfo array indices match SH headers, but we only stored processed info.

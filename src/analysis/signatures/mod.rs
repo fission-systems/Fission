@@ -70,7 +70,7 @@ impl FunctionSignature {
 }
 
 /// CRT Signature Database
-/// 
+///
 /// Uses a first-byte index for faster signature matching. Most signatures
 /// start with a unique or semi-unique first byte, so indexing by this byte
 /// reduces the number of signatures to check from ~150 to typically 1-10.
@@ -998,16 +998,16 @@ impl SignatureDatabase {
     }
 
     /// Try to match a function's bytes against known signatures
-    /// 
+    ///
     /// Performance: Uses first-byte index to reduce candidates from ~150 to typically 1-10,
     /// providing significant speedup for large binaries with many functions.
     pub fn identify(&self, bytes: &[u8]) -> Option<&FunctionSignature> {
         if bytes.is_empty() {
             return None;
         }
-        
+
         let first_byte = bytes[0];
-        
+
         // Use the index to only check signatures that start with the same first byte
         if let Some(indices) = self.first_byte_index.get(&first_byte) {
             for &idx in indices {
@@ -1018,7 +1018,7 @@ impl SignatureDatabase {
                 }
             }
         }
-        
+
         // Check signatures that start with wildcards (pre-indexed, no full scan needed)
         for &idx in &self.wildcard_signatures {
             if let Some(sig) = self.signatures.get(idx) {
@@ -1027,7 +1027,7 @@ impl SignatureDatabase {
                 }
             }
         }
-        
+
         None
     }
 

@@ -1,7 +1,7 @@
 //! Plugin API - Interface exposed to plugins for interacting with Fission.
 
+use crate::analysis::loader::{FunctionInfo, LoadedBinary};
 use std::sync::Arc;
-use crate::analysis::loader::{LoadedBinary, FunctionInfo};
 
 /// Information about a loaded binary (safe to send to plugins)
 #[derive(Debug, Clone)]
@@ -40,25 +40,25 @@ impl From<&LoadedBinary> for BinaryInfo {
 pub trait PluginAPI: Send + Sync {
     /// Get information about the loaded binary
     fn get_binary(&self) -> Option<BinaryInfo>;
-    
+
     /// Get list of all functions
     fn get_functions(&self) -> Vec<FunctionInfo>;
-    
+
     /// Read memory from the loaded binary (static analysis)
     fn read_binary_bytes(&self, address: u64, size: usize) -> Option<Vec<u8>>;
-    
+
     /// Log a message to the console
     fn log(&self, message: &str);
-    
+
     /// Log an error message
     fn log_error(&self, message: &str);
-    
+
     /// Decompile a function at the given address
     fn decompile(&self, address: u64) -> Option<String>;
-    
+
     /// Get the current decompiled code (if any)
     fn get_current_decompiled_code(&self) -> Option<String>;
-    
+
     /// Get disassembly for an address range
     fn disassemble(&self, address: u64, size: usize) -> Vec<String>;
 }

@@ -11,9 +11,9 @@ mod script;
 mod strings;
 mod timeline;
 
-use eframe::egui;
 use crate::ui::gui::state::{AppState, BottomTab};
 use crate::ui::gui::theme::catppuccin;
+use eframe::egui;
 
 // Re-export actions for external use
 pub use console::ConsoleAction;
@@ -23,7 +23,7 @@ pub use script::ScriptAction;
 pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, ScriptAction) {
     let mut console_action = ConsoleAction::None;
     let mut script_action = ScriptAction::None;
-    
+
     egui::TopBottomPanel::bottom("bottom_panel")
         .resizable(true)
         .default_height(200.0)
@@ -32,7 +32,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
         .show(ctx, |ui| {
             // Force minimum height to prevent panel collapse
             ui.set_min_height(ui.available_height());
-            
+
             // Tab bar with styled tabs
             ui.horizontal(|ui| {
                 let tabs = [
@@ -45,7 +45,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                     (BottomTab::Timeline, "Timeline", catppuccin::TEAL),
                     (BottomTab::Plugins, "Plugins", catppuccin::PINK),
                 ];
-                
+
                 for (tab, label, accent) in tabs {
                     // Filter tabs based on mode
                     let visible = match tab {
@@ -53,8 +53,10 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                         BottomTab::Strings | BottomTab::Imports => !state.ui.dynamic_mode,
                         _ => true,
                     };
-                    
-                    if !visible { continue; }
+
+                    if !visible {
+                        continue;
+                    }
 
                     let is_selected = state.ui.bottom_tab == tab;
                     let text = if is_selected {
@@ -66,9 +68,12 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                         state.ui.bottom_tab = tab;
                     }
                 }
-                
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new(" × ").small()).frame(false)).clicked() {
+                    if ui
+                        .add(egui::Button::new(egui::RichText::new(" × ").small()).frame(false))
+                        .clicked()
+                    {
                         state.ui.panel_visible = false;
                     }
                 });
@@ -117,7 +122,6 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                 }
             });
         });
-    
+
     (console_action, script_action)
 }
-

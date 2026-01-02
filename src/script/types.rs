@@ -79,10 +79,7 @@ pub struct PyInstruction {
 #[pymethods]
 impl PyInstruction {
     fn __repr__(&self) -> String {
-        format!(
-            "{:#x}: {} {}",
-            self.address, self.mnemonic, self.operands
-        )
+        format!("{:#x}: {} {}", self.address, self.mnemonic, self.operands)
     }
 }
 

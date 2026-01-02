@@ -2,7 +2,7 @@
 //!
 //! Tests the CLI command parsing and validation logic.
 
-use fission::ui::cli::commands::{Command, parse_command, parse_address};
+use fission::ui::cli::commands::{parse_address, parse_command, Command};
 
 /// Test basic command parsing - help
 #[test]
@@ -27,7 +27,7 @@ fn test_parse_load_command() {
         Command::Load(path) => assert_eq!(path, "/path/to/file.exe"),
         _ => panic!("Expected Load command"),
     }
-    
+
     // Load without path should be Unknown
     assert!(matches!(parse_command("load"), Command::Unknown(_)));
 }
@@ -61,7 +61,7 @@ fn test_parse_disassemble_command() {
         Command::Disasm { addr, count: _ } => assert_eq!(addr, 0x401000),
         _ => panic!("Expected Disasm command"),
     }
-    
+
     // Without address should be Unknown
     assert!(matches!(parse_command("disasm"), Command::Unknown(_)));
 }
@@ -73,7 +73,7 @@ fn test_parse_decompile_command() {
         Command::Decompile(addr) => assert_eq!(addr, 0x140001000),
         _ => panic!("Expected Decompile command"),
     }
-    
+
     // Short form
     match parse_command("dec 0x1000") {
         Command::Decompile(addr) => assert_eq!(addr, 0x1000),
@@ -117,13 +117,13 @@ fn test_parse_address_formats() {
     // Hex format with 0x prefix
     assert_eq!(parse_address("0x1234"), Some(0x1234));
     assert_eq!(parse_address("0X1234"), Some(0x1234));
-    
+
     // Hex format with hex digits
     assert_eq!(parse_address("0xDEADBEEF"), Some(0xDEADBEEF));
-    
+
     // Decimal format
     assert_eq!(parse_address("1000"), Some(1000));
-    
+
     // Invalid format
     assert_eq!(parse_address("not_a_number"), None);
     assert_eq!(parse_address(""), None);

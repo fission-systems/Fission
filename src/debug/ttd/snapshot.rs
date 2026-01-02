@@ -1,8 +1,7 @@
 //! Execution Snapshot - Captures complete state at a point in time.
 
-use std::time::Instant;
 use super::super::types::RegisterState;
-
+use std::time::Instant;
 
 /// Memory change record for delta compression
 #[derive(Debug, Clone)]
@@ -24,7 +23,7 @@ impl MemoryDelta {
             new_value,
         }
     }
-    
+
     /// Size of the changed region
     pub fn size(&self) -> usize {
         self.new_value.len()
@@ -48,11 +47,7 @@ pub struct ExecutionSnapshot {
 
 impl ExecutionSnapshot {
     /// Create a new snapshot
-    pub fn new(
-        step_index: u64,
-        registers: RegisterState,
-        thread_id: u32,
-    ) -> Self {
+    pub fn new(step_index: u64, registers: RegisterState, thread_id: u32) -> Self {
         Self {
             step_index,
             timestamp: Instant::now(),
@@ -61,23 +56,23 @@ impl ExecutionSnapshot {
             thread_id,
         }
     }
-    
+
     /// Add a memory change to this snapshot
     pub fn add_memory_delta(&mut self, delta: MemoryDelta) {
         self.memory_deltas.push(delta);
     }
-    
 
-    
     /// Get the instruction pointer (RIP) at this snapshot
     pub fn rip(&self) -> u64 {
         self.registers.rip
     }
-    
+
     /// Estimate memory usage of this snapshot in bytes
     pub fn memory_usage(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.memory_deltas.iter()
+            + self
+                .memory_deltas
+                .iter()
                 .map(|d| d.old_value.len() + d.new_value.len())
                 .sum::<usize>()
     }
