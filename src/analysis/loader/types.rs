@@ -55,7 +55,7 @@ pub struct LoadedBinary {
     pub entry_point: u64,
     /// Image base address
     pub image_base: u64,
-    /// All discovered functions
+    /// All discovered functions (kept sorted by address for efficient access)
     pub functions: Vec<FunctionInfo>,
     /// All sections
     pub sections: Vec<SectionInfo>,
@@ -73,6 +73,11 @@ pub struct LoadedBinary {
     pub function_addr_index: std::collections::HashMap<u64, usize>,
     /// Index of functions by name for O(1) lookup
     pub function_name_index: std::collections::HashMap<String, usize>,
+    /// Flag indicating functions are sorted by address
+    /// This is set during build() and after discover_internal_functions()
+    /// Note: This is a runtime-only flag, serialized as false by default
+    #[with(rkyv::with::Skip)]
+    functions_sorted: bool,
 }
 
 /// Builder for LoadedBinary
@@ -175,13 +180,17 @@ impl LoadedBinaryBuilder {
     }
 
     pub fn build(self) -> Result<LoadedBinary> {
+        // Sort functions by address during build for efficient sorted access
+        let mut functions = self.functions;
+        functions.sort_by_key(|f| f.address);
+        
         let mut binary = LoadedBinary {
             path: self.path,
             data: self.data,
             arch_spec: self.arch_spec,
             entry_point: self.entry_point,
             image_base: self.image_base,
-            functions: self.functions,
+            functions,
             sections: self.sections,
             is_64bit: self.is_64bit,
             is_dotnet: self.is_dotnet,
@@ -190,6 +199,7 @@ impl LoadedBinaryBuilder {
             iat_symbols: self.iat_symbols,
             function_addr_index: std::collections::HashMap::new(),
             function_name_index: std::collections::HashMap::new(),
+            functions_sorted: true,
         };
 
         // Build indices
@@ -244,10 +254,28 @@ impl LoadedBinary {
     }
 
     /// Get functions sorted by address
+    /// 
+    /// Performance: Returns references to already-sorted functions when possible.
+    /// Functions are sorted during build() and discover_internal_functions(),
+    /// avoiding redundant sorting on each call.
     pub fn functions_sorted(&self) -> Vec<&FunctionInfo> {
-        let mut funcs: Vec<_> = self.functions.iter().collect();
-        funcs.sort_by_key(|f| f.address);
-        funcs
+        if self.functions_sorted {
+            // Functions are already sorted, just return references
+            self.functions.iter().collect()
+        } else {
+            // Fallback: sort on demand (should rarely happen after build)
+            let mut funcs: Vec<_> = self.functions.iter().collect();
+            funcs.sort_by_key(|f| f.address);
+            funcs
+        }
+    }
+
+    /// Get iterator over functions (already sorted by address)
+    /// 
+    /// Performance: Zero-allocation iterator when functions are pre-sorted.
+    #[inline]
+    pub fn functions_iter(&self) -> impl Iterator<Item = &FunctionInfo> {
+        self.functions.iter()
     }
 
     /// Find a function by name using O(1) HashMap lookup
@@ -484,6 +512,7 @@ impl LoadedBinary {
 
         // Sort functions by address
         self.functions.sort_by_key(|f| f.address);
+        self.functions_sorted = true;
 
         // Rebuild function indices after adding new functions
         self.rebuild_function_indices();
