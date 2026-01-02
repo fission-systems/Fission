@@ -201,22 +201,22 @@ impl MachoLoader {
                 // If n_type & N_STAB == 0 && (n_type & N_EXT)
                 if (nlist.n_type & 0xE0) == 0 && (nlist.n_type & 0x01) != 0 && nlist.n_value != 0 {
                     // Extract name using shared utility function
-                    let name_offset = str_off as usize + nlist.n_strx as usize;
-                    let name = if name_offset < data.len() {
-                        extract_cstring(data, name_offset)
-                    } else {
-                        format!("sub_{:x}", nlist.n_value)
+                    // Use checked_add to prevent potential overflow
+                    let name_offset = (str_off as usize).checked_add(nlist.n_strx as usize);
+                    let extracted_name = match name_offset {
+                        Some(offset) if offset < data.len() => extract_cstring(data, offset),
+                        _ => String::new(),
                     };
 
-                    // If name is empty after extraction, use fallback
-                    let name = if name.is_empty() {
+                    // Use fallback name if extracted name is empty or extraction failed
+                    let final_name = if extracted_name.is_empty() {
                         format!("sub_{:x}", nlist.n_value)
                     } else {
-                        name
+                        extracted_name
                     };
 
                     out.push(FunctionInfo {
-                        name,
+                        name: final_name,
                         address: nlist.n_value,
                         size: 0,
                         is_export: true,
