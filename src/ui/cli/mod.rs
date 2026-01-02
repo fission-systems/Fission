@@ -37,7 +37,9 @@ pub fn run_cli() -> Result<()> {
                     Command::Load(path) => handlers::cmd_load(&mut state, &path),
                     Command::Info => handlers::cmd_info(&state),
                     Command::Functions => handlers::cmd_functions(&state),
-                    Command::Disasm { addr, count } => handlers::cmd_disasm(&mut state, addr, count),
+                    Command::Disasm { addr, count } => {
+                        handlers::cmd_disasm(&mut state, addr, count)
+                    }
                     Command::Decompile(addr) => handlers::cmd_decompile(&state, addr),
                     Command::Strings => handlers::cmd_strings(&state),
                     Command::Sections => handlers::cmd_sections(&state),

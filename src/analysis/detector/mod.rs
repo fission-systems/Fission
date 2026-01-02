@@ -13,7 +13,7 @@ use crate::config::CONFIG;
 
 /// Helper function to search for byte pattern in data.
 /// Uses sliding window search which is efficient for small patterns.
-/// 
+///
 /// Performance: O(n*m) worst case, but typically much faster for short patterns.
 #[inline]
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
@@ -23,7 +23,9 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.len() > haystack.len() {
         return false;
     }
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// Detection confidence level
@@ -105,12 +107,12 @@ impl Detection {
             details: None,
         }
     }
-    
+
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
         self.details = Some(details.into());
         self
     }
-    
+
     /// Format as display string
     pub fn display(&self) -> String {
         let mut s = format!("{}: {}", self.detection_type, self.name);
@@ -131,74 +133,84 @@ pub struct DetectionResult {
 
 impl DetectionResult {
     pub fn new() -> Self {
-        Self { detections: Vec::new() }
+        Self {
+            detections: Vec::new(),
+        }
     }
-    
+
     pub fn add(&mut self, detection: Detection) {
         self.detections.push(detection);
     }
-    
+
     /// Get detections by type
     pub fn by_type(&self, dt: DetectionType) -> Vec<&Detection> {
-        self.detections.iter().filter(|d| d.detection_type == dt).collect()
+        self.detections
+            .iter()
+            .filter(|d| d.detection_type == dt)
+            .collect()
     }
-    
+
     /// Check if packed
     pub fn is_packed(&self) -> bool {
         !self.by_type(DetectionType::Packer).is_empty()
     }
-    
+
     /// Check if protected
     pub fn is_protected(&self) -> bool {
         !self.by_type(DetectionType::Protector).is_empty()
     }
-    
+
     /// Get primary compiler
     pub fn compiler(&self) -> Option<&Detection> {
-        self.by_type(DetectionType::Compiler).into_iter().max_by_key(|d| d.confidence)
+        self.by_type(DetectionType::Compiler)
+            .into_iter()
+            .max_by_key(|d| d.confidence)
     }
-    
+
     /// Get primary language
     pub fn language(&self) -> Option<&Detection> {
-        self.by_type(DetectionType::Language).into_iter().max_by_key(|d| d.confidence)
+        self.by_type(DetectionType::Language)
+            .into_iter()
+            .max_by_key(|d| d.confidence)
     }
 }
 
 /// Detect binary characteristics
 pub fn detect(binary: &LoadedBinary) -> DetectionResult {
     let mut result = DetectionResult::new();
-    
+
     // Run all detection methods
     detect_by_sections(binary, &mut result);
     detect_by_imports(binary, &mut result);
     detect_by_strings(binary, &mut result);
     detect_by_entry_point(binary, &mut result);
     detect_dotnet(binary, &mut result);
-    
+
     // Sort by confidence (highest first)
-    result.detections.sort_by(|a, b| b.confidence.cmp(&a.confidence));
-    
+    result
+        .detections
+        .sort_by(|a, b| b.confidence.cmp(&a.confidence));
+
     result
 }
 
 /// Detect by section names
 fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
-    let section_names: Vec<&str> = binary.sections.iter()
-        .map(|s| s.name.as_str())
-        .collect();
-    
+    let section_names: Vec<&str> = binary.sections.iter().map(|s| s.name.as_str()).collect();
+
     // UPX detection
     if section_names.iter().any(|s| s.starts_with("UPX")) {
-        result.add(Detection::new(
-            DetectionType::Packer,
-            "UPX",
-            None,
-            Confidence::High,
-        ).with_details("UPX section names detected"));
+        result.add(
+            Detection::new(DetectionType::Packer, "UPX", None, Confidence::High)
+                .with_details("UPX section names detected"),
+        );
     }
-    
+
     // ASPack detection
-    if section_names.iter().any(|s| *s == ".aspack" || *s == ".adata") {
+    if section_names
+        .iter()
+        .any(|s| *s == ".aspack" || *s == ".adata")
+    {
         result.add(Detection::new(
             DetectionType::Packer,
             "ASPack",
@@ -206,7 +218,7 @@ fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // PECompact detection
     if section_names.iter().any(|s| s.starts_with("PEC")) {
         result.add(Detection::new(
@@ -216,9 +228,12 @@ fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // MPRESS detection
-    if section_names.iter().any(|s| *s == ".MPRESS1" || *s == ".MPRESS2") {
+    if section_names
+        .iter()
+        .any(|s| *s == ".MPRESS1" || *s == ".MPRESS2")
+    {
         result.add(Detection::new(
             DetectionType::Packer,
             "MPRESS",
@@ -226,7 +241,7 @@ fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // VMProtect detection
     if section_names.iter().any(|s| s.starts_with(".vmp")) {
         result.add(Detection::new(
@@ -236,9 +251,12 @@ fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // Themida/WinLicense detection
-    if section_names.iter().any(|s| *s == ".themida" || *s == ".winlice") {
+    if section_names
+        .iter()
+        .any(|s| *s == ".themida" || *s == ".winlice")
+    {
         result.add(Detection::new(
             DetectionType::Protector,
             "Themida/WinLicense",
@@ -246,7 +264,7 @@ fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // Enigma detection
     if section_names.iter().any(|s| s.starts_with(".enigma")) {
         result.add(Detection::new(
@@ -256,7 +274,7 @@ fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // NSIS installer detection
     if section_names.contains(&".ndata") {
         result.add(Detection::new(
@@ -270,14 +288,12 @@ fn detect_by_sections(binary: &LoadedBinary, result: &mut DetectionResult) {
 
 /// Detect by imports
 fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
-    let imports: Vec<&str> = binary.iat_symbols.values()
-        .map(|s| s.as_str())
-        .collect();
-    
+    let imports: Vec<&str> = binary.iat_symbols.values().map(|s| s.as_str()).collect();
+
     // MSVC runtime detection
-    let has_msvcrt = imports.iter().any(|s| 
-        s.starts_with("MSVCR") || s.starts_with("VCRUNTIME") || s.starts_with("ucrt")
-    );
+    let has_msvcrt = imports
+        .iter()
+        .any(|s| s.starts_with("MSVCR") || s.starts_with("VCRUNTIME") || s.starts_with("ucrt"));
     if has_msvcrt {
         result.add(Detection::new(
             DetectionType::Compiler,
@@ -286,9 +302,12 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::Medium,
         ));
     }
-    
+
     // Delphi/C++ Builder detection
-    if imports.iter().any(|s| s.contains("borlndmm") || s.contains("cc32")) {
+    if imports
+        .iter()
+        .any(|s| s.contains("borlndmm") || s.contains("cc32"))
+    {
         result.add(Detection::new(
             DetectionType::Compiler,
             "Borland/Embarcadero",
@@ -302,19 +321,20 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // MFC detection
     if imports.iter().any(|s| s.starts_with("MFC")) {
-        result.add(Detection::new(
-            DetectionType::Library,
-            "MFC",
-            None,
-            Confidence::High,
-        ).with_details("Microsoft Foundation Classes"));
+        result.add(
+            Detection::new(DetectionType::Library, "MFC", None, Confidence::High)
+                .with_details("Microsoft Foundation Classes"),
+        );
     }
-    
+
     // Qt detection
-    if imports.iter().any(|s| s.starts_with("Qt") || s.contains("QT_")) {
+    if imports
+        .iter()
+        .any(|s| s.starts_with("Qt") || s.contains("QT_"))
+    {
         result.add(Detection::new(
             DetectionType::Library,
             "Qt",
@@ -322,18 +342,21 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // Python runtime detection (embedded Python - PyInstaller, py2exe, etc.)
-    let python_dll = imports.iter().find(|s| 
-        s.to_lowercase().contains("python") && s.to_lowercase().ends_with(".dll")
-    );
+    let python_dll = imports
+        .iter()
+        .find(|s| s.to_lowercase().contains("python") && s.to_lowercase().ends_with(".dll"));
     if python_dll.is_some() {
-        result.add(Detection::new(
-            DetectionType::Language,
-            "Python (Embedded)",
-            None,
-            Confidence::High,
-        ).with_details("Python runtime embedded (likely PyInstaller/py2exe)"));
+        result.add(
+            Detection::new(
+                DetectionType::Language,
+                "Python (Embedded)",
+                None,
+                Confidence::High,
+            )
+            .with_details("Python runtime embedded (likely PyInstaller/py2exe)"),
+        );
     }
 }
 
@@ -345,9 +368,12 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
 /// - Early exits once all patterns for a category are found
 fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     // Search in configurable range for better detection
-    let search_limit = CONFIG.analysis.max_string_search_size.min(binary.data.len());
+    let search_limit = CONFIG
+        .analysis
+        .max_string_search_size
+        .min(binary.data.len());
     let data = &binary.data[..search_limit];
-    
+
     // Go detection
     if contains_bytes(data, b"Go build ID:") || contains_bytes(data, b"runtime.gopanic") {
         result.add(Detection::new(
@@ -363,9 +389,12 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // Rust detection
-    if contains_bytes(data, b"rust_panic") || contains_bytes(data, b"rustc/") || contains_bytes(data, b".rustup") {
+    if contains_bytes(data, b"rust_panic")
+        || contains_bytes(data, b"rustc/")
+        || contains_bytes(data, b".rustup")
+    {
         result.add(Detection::new(
             DetectionType::Language,
             "Rust",
@@ -379,21 +408,19 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // Python detection (PyInstaller, py2exe, cx_Freeze)
-    let has_pyinstaller = contains_bytes(data, b"PYZ-00") 
-        || contains_bytes(data, b"_MEIPASS") 
+    let has_pyinstaller = contains_bytes(data, b"PYZ-00")
+        || contains_bytes(data, b"_MEIPASS")
         || contains_bytes(data, b"PyInstaller")
         || contains_bytes(data, b"pyi-runtime")
         || contains_bytes(data, b"PYTHONHOME");
-    
+
     if has_pyinstaller {
-        result.add(Detection::new(
-            DetectionType::Packer,
-            "PyInstaller",
-            None,
-            Confidence::High,
-        ).with_details("Python application packaged with PyInstaller"));
+        result.add(
+            Detection::new(DetectionType::Packer, "PyInstaller", None, Confidence::High)
+                .with_details("Python application packaged with PyInstaller"),
+        );
         result.add(Detection::new(
             DetectionType::Language,
             "Python",
@@ -401,7 +428,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // py2exe detection
     if contains_bytes(data, b"py2exe") || contains_bytes(data, b"PYTHONSCRIPT") {
         result.add(Detection::new(
@@ -417,7 +444,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // cx_Freeze detection
     if contains_bytes(data, b"cx_Freeze") {
         result.add(Detection::new(
@@ -433,7 +460,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // AutoIt detection
     if contains_bytes(data, b"AutoIt") || contains_bytes(data, b"AU3!") {
         result.add(Detection::new(
@@ -443,7 +470,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // Nim detection
     if contains_bytes(data, b"nimbase.h") || contains_bytes(data, b"@Nim") {
         result.add(Detection::new(
@@ -453,7 +480,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // GCC detection - need string conversion only if found
     if contains_bytes(data, b"GCC:") {
         // Only allocate string for version extraction if GCC pattern found
@@ -466,7 +493,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // Clang detection
     if contains_bytes(data, b"clang version") {
         result.add(Detection::new(
@@ -476,7 +503,7 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             Confidence::High,
         ));
     }
-    
+
     // MinGW detection (case-sensitive checks for both variants)
     if contains_bytes(data, b"mingw") || contains_bytes(data, b"MinGW") {
         result.add(Detection::new(
@@ -511,7 +538,7 @@ fn detect_by_entry_point(binary: &LoadedBinary, result: &mut DetectionResult) {
     // Get entry point bytes
     let ep_bytes = binary.get_bytes(binary.entry_point, 32);
     let Some(bytes) = ep_bytes else { return };
-    
+
     // Check against known signatures
     for sig in signatures::ENTRY_POINT_SIGNATURES {
         if matches_signature(&bytes, sig.bytes, sig.mask) {
@@ -530,7 +557,7 @@ fn matches_signature(bytes: &[u8], sig: &[u8], mask: Option<&[u8]>) -> bool {
     if bytes.len() < sig.len() {
         return false;
     }
-    
+
     for (i, &s) in sig.iter().enumerate() {
         let m = mask.map_or(0xFF, |m| m.get(i).copied().unwrap_or(0xFF));
         if (bytes[i] & m) != (s & m) {
@@ -551,11 +578,11 @@ fn detect_dotnet(binary: &LoadedBinary, result: &mut DetectionResult) {
             binary.dotnet_runtime_version.clone(),
             Confidence::High,
         ));
-        
+
         // Check for obfuscators using byte search (avoids string allocation)
         let search_limit = (64 * 1024).min(binary.data.len());
         let data = &binary.data[..search_limit];
-        
+
         // ConfuserEx detection (uses module-level contains_bytes helper)
         if contains_bytes(data, b"ConfuserEx") {
             result.add(Detection::new(
@@ -565,7 +592,7 @@ fn detect_dotnet(binary: &LoadedBinary, result: &mut DetectionResult) {
                 Confidence::High,
             ));
         }
-        
+
         // .NET Reactor detection
         if contains_bytes(data, b".NET Reactor") {
             result.add(Detection::new(
@@ -581,13 +608,13 @@ fn detect_dotnet(binary: &LoadedBinary, result: &mut DetectionResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_matches_signature() {
         let bytes = [0x55, 0x8B, 0xEC, 0x83];
         let sig = [0x55, 0x8B, 0xEC];
         assert!(matches_signature(&bytes, &sig, None));
-        
+
         // With mask
         let mask = [0xFF, 0xFF, 0x00]; // Ignore third byte
         let bytes2 = [0x55, 0x8B, 0xFF, 0x83];

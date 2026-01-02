@@ -5,15 +5,15 @@
 //!
 //! Plugins can subscribe to `FissionEvent` for system-wide events.
 
+pub mod api;
 pub mod hooks;
 pub mod manager;
-pub mod api;
-pub mod traits;
+pub mod module;
 #[cfg(feature = "python")]
 pub mod python;
-pub mod module;
+pub mod traits;
 
-pub use hooks::{FissionEvent, FissionEventType, PluginHook, HookPriority};
-pub use manager::PluginManager;
 pub use api::PluginAPI;
+pub use hooks::{FissionEvent, FissionEventType, HookPriority, PluginHook};
+pub use manager::PluginManager;
 pub use traits::{FissionPlugin, PluginContext};

@@ -1,8 +1,8 @@
-use crate::core::prelude::*;
 use crate::analysis::loader::types::LoadedBinary;
+use crate::core::prelude::*;
 
-pub mod static_parser;
 pub mod dynamic_parser;
+pub mod static_parser;
 
 /// Trait for binary parsers
 pub trait BinaryParser {

@@ -1,9 +1,9 @@
 //! Console tab panel - Command input and log output.
 
-use eframe::egui;
-use egui_extras::{Column, TableBuilder};
 use crate::ui::gui::state::AppState;
 use crate::ui::gui::theme::catppuccin;
+use eframe::egui;
+use egui_extras::{Column, TableBuilder};
 
 /// Actions that can be triggered from the console
 pub enum ConsoleAction {
@@ -14,25 +14,34 @@ pub enum ConsoleAction {
 /// Render console tab content using TableBuilder for stable scrolling
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ConsoleAction {
     let mut action = ConsoleAction::None;
-    
+
     // Header buttons
     ui.horizontal(|ui| {
-        if ui.small_button(egui::RichText::new("Clear").color(catppuccin::RED)).clicked() {
+        if ui
+            .small_button(egui::RichText::new("Clear").color(catppuccin::RED))
+            .clicked()
+        {
             state.log_buffer.clear();
         }
-        if ui.small_button(egui::RichText::new("📋 Copy").color(catppuccin::BLUE)).clicked() {
+        if ui
+            .small_button(egui::RichText::new("📋 Copy").color(catppuccin::BLUE))
+            .clicked()
+        {
             let all_logs = state.log_buffer.join("\n");
             ui.output_mut(|o| o.copied_text = all_logs);
         }
         ui.separator();
-        ui.label(egui::RichText::new(format!("{} lines", state.log_buffer.len()))
-            .color(catppuccin::SUBTEXT0).small());
+        ui.label(
+            egui::RichText::new(format!("{} lines", state.log_buffer.len()))
+                .color(catppuccin::SUBTEXT0)
+                .small(),
+        );
     });
 
     // Virtual scrolling table for console logs
     let available_height = ui.available_height() - 35.0;
     let num_logs = state.log_buffer.len();
-    
+
     TableBuilder::new(ui)
         .striped(false)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -71,7 +80,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ConsoleAction {
             response.request_focus();
         }
 
-        if ui.button(egui::RichText::new("Run").color(catppuccin::GREEN)).clicked() {
+        if ui
+            .button(egui::RichText::new("Run").color(catppuccin::GREEN))
+            .clicked()
+        {
             let cmd = state.cli_input.trim().to_string();
             if !cmd.is_empty() {
                 state.log_buffer.push(format!("> {}", cmd));
@@ -80,7 +92,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ConsoleAction {
             }
         }
     });
-    
+
     action
 }
 
@@ -97,4 +109,3 @@ fn get_log_color(log: &str) -> egui::Color32 {
         catppuccin::SUBTEXT0
     }
 }
-

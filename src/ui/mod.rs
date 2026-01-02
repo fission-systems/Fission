@@ -2,5 +2,5 @@
 //!
 //! Contains both GUI (egui) and CLI (reedline) interfaces.
 
-pub mod gui;
 pub mod cli;
+pub mod gui;

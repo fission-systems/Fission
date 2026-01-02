@@ -7,6 +7,8 @@ description = "Next-Gen Dynamic Instrumentation Platform"
 license = "MIT"
 repository = "https://github.com/sjkim1127/Fission"
 default-run = "fission"
+keywords = ["binary-analysis", "decompiler", "disassembler", "reverse-engineering", "debugging"]
+categories = ["development-tools", "command-line-utilities"]
 
 [lib]
 name = "fission"

@@ -4,19 +4,19 @@
 //! Organized into domain-specific sub-states for maintainability.
 //!
 //! ## Architecture
-//! 
+//!
 //! - `FissionContext`: Core application context (event bus, plugins) - shared with non-GUI code
 //! - `AppState`: GUI-specific state that wraps the context and adds UI-related fields
 
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::time::Instant;
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 use lru::LruCache;
 
-use crate::analysis::loader::{LoadedBinary, FunctionInfo};
 use crate::analysis::disasm::DisassembledInstruction;
+use crate::analysis::loader::{FunctionInfo, LoadedBinary};
 use crate::config::CONFIG;
 use crate::core::context::FissionContext;
 
@@ -210,12 +210,12 @@ pub struct CachedDecompile {
 // ============================================================================
 
 /// Main application state container
-/// 
+///
 /// This struct holds all shared state that panels need to read/modify.
 /// Organized into domain-specific sub-states for better maintainability.
-/// 
+///
 /// ## Design Notes
-/// 
+///
 /// - `ctx`: Core application context (shared with non-GUI components)
 /// - Domain states (`analysis`, `debug`, `script`): Organized by feature area
 /// - `ui`: Pure GUI state (tabs, visibility, layout)
@@ -224,15 +224,13 @@ pub struct AppState {
     // =========================================================================
     // Core Context (shared infrastructure)
     // =========================================================================
-    
     /// Core application context (event bus, plugins, etc.)
     /// This is the bridge between GUI and core systems.
     pub ctx: FissionContext,
-    
+
     // =========================================================================
     // Console / CLI State
     // =========================================================================
-    
     /// Log buffer for the output console
     pub log_buffer: Vec<String>,
     /// Current command input in the integrated CLI
@@ -243,7 +241,6 @@ pub struct AppState {
     // =========================================================================
     // Domain-Specific States
     // =========================================================================
-    
     /// UI state (tabs, visibility, layout)
     pub ui: UIState,
     /// Analysis state (binary, functions, decompilation)
@@ -254,11 +251,10 @@ pub struct AppState {
     pub script: ScriptState,
     /// Settings state
     pub settings: SettingsState,
-    
+
     // =========================================================================
     // UI-Specific Components
     // =========================================================================
-    
     /// Plugin panel state
     pub plugin_panel_state: crate::ui::gui::panels::bottom_tabs::plugins::PluginPanelState,
     /// Undo/Redo Command Manager
@@ -272,7 +268,7 @@ impl AppState {
     pub fn event_bus(&self) -> &Arc<crate::core::events::EventBus> {
         &self.ctx.event_bus
     }
-    
+
     /// Get the plugin manager (convenience accessor)
     #[inline]
     pub fn plugin_manager(&self) -> &Arc<RwLock<crate::plugin::PluginManager>> {
@@ -393,7 +389,9 @@ impl Default for AnalysisState {
             detection_result: None,
             xref_db: None,
             user_function_names: std::collections::HashMap::new(),
-            rename_dialog: None,            reconstructed_imports: Vec::new(),        }
+            rename_dialog: None,
+            reconstructed_imports: Vec::new(),
+        }
     }
 }
 
@@ -412,7 +410,9 @@ impl Default for DebugStateUI {
             mem_dump: String::new(),
             timeline: crate::debug::ttd::Timeline::default(),
             process_filter: String::new(),
-            titan_engine: Some(Arc::new(RwLock::new(crate::debug_engine::engine::TitanEngine::new()))),
+            titan_engine: Some(Arc::new(RwLock::new(
+                crate::debug_engine::engine::TitanEngine::new(),
+            ))),
         }
     }
 }
@@ -439,13 +439,11 @@ impl Default for SettingsState {
     }
 }
 
-
-
 impl Default for AppState {
     fn default() -> Self {
         // Create the core context first
         let ctx = FissionContext::new();
-        
+
         Self {
             ctx,
             log_buffer: vec![

@@ -1,16 +1,16 @@
-use std::sync::Arc;
-use crate::ui::gui::state::AppState;
-use crate::core::events::FissionEvent;
 use crate::analysis::loader::{LoadedBinary, SectionInfo};
+use crate::core::events::FissionEvent;
+use crate::ui::gui::state::AppState;
+use std::sync::Arc;
 
 /// Trait for all undoable commands
 pub trait Command: Send + Sync {
     /// Execute the command
     fn execute(&mut self, state: &mut AppState) -> Result<(), String>;
-    
+
     /// Undo the command
     fn undo(&mut self, state: &mut AppState) -> Result<(), String>;
-    
+
     /// Get description for UI (e.g. "Rename Function")
     fn description(&self) -> String;
 }
@@ -21,12 +21,17 @@ pub trait Command: Send + Sync {
 
 /// Get the loaded binary from state, returning an error if not loaded.
 fn get_binary(state: &AppState) -> Result<&Arc<LoadedBinary>, String> {
-    state.analysis.loaded_binary.as_ref().ok_or_else(|| "No binary loaded".to_string())
+    state
+        .analysis
+        .loaded_binary
+        .as_ref()
+        .ok_or_else(|| "No binary loaded".to_string())
 }
 
 /// Calculate file offset from a virtual address using section information.
 fn va_to_file_offset(sections: &[SectionInfo], address: u64) -> Result<u64, String> {
-    sections.iter()
+    sections
+        .iter()
         .find(|s| address >= s.virtual_address && address < s.virtual_address + s.virtual_size)
         .map(|s| s.file_offset + (address - s.virtual_address))
         .ok_or_else(|| format!("Address 0x{:x} not mapped to any section", address))
@@ -36,7 +41,9 @@ fn va_to_file_offset(sections: &[SectionInfo], address: u64) -> Result<u64, Stri
 fn update_binary(state: &mut AppState, binary: LoadedBinary) {
     let new_arc = Arc::new(binary);
     state.analysis.loaded_binary = Some(new_arc.clone());
-    state.event_bus().publish(FissionEvent::BinaryLoaded(new_arc));
+    state
+        .event_bus()
+        .publish(FissionEvent::BinaryLoaded(new_arc));
 }
 
 // ============================================================================
@@ -60,16 +67,20 @@ impl CommandManager {
     }
 
     /// Execute a new command and push to undo stack
-    pub fn execute(&mut self, mut command: Box<dyn Command>, state: &mut AppState) -> Result<(), String> {
+    pub fn execute(
+        &mut self,
+        mut command: Box<dyn Command>,
+        state: &mut AppState,
+    ) -> Result<(), String> {
         command.execute(state)?;
         self.undo_stack.push(command);
         self.redo_stack.clear();
-        
+
         // Limit history
         if self.undo_stack.len() > self.max_history {
             self.undo_stack.remove(0);
         }
-        
+
         Ok(())
     }
 
@@ -126,21 +137,28 @@ pub struct RenameFunctionCommand {
 impl Command for RenameFunctionCommand {
     fn execute(&mut self, state: &mut AppState) -> Result<(), String> {
         let binary_arc = get_binary(state)?;
-            
+
         // Copy-on-Write: Clone the inner binary
         let mut binary = (**binary_arc).clone();
-        
+
         // Find and update function
-        if let Some(func) = binary.functions.iter_mut().find(|f| f.address == self.address) {
+        if let Some(func) = binary
+            .functions
+            .iter_mut()
+            .find(|f| f.address == self.address)
+        {
             // Save old name if not set (first run)
             if self.old_name.is_empty() {
                 self.old_name = func.name.clone();
             }
             func.name = self.new_name.clone();
-            
+
             update_binary(state, binary);
-            state.log(format!("Renamed function 0x{:x} to '{}'", self.address, self.new_name));
-            
+            state.log(format!(
+                "Renamed function 0x{:x} to '{}'",
+                self.address, self.new_name
+            ));
+
             Ok(())
         } else {
             Err(format!("Function at 0x{:x} not found", self.address))
@@ -149,14 +167,21 @@ impl Command for RenameFunctionCommand {
 
     fn undo(&mut self, state: &mut AppState) -> Result<(), String> {
         let binary_arc = get_binary(state)?;
-            
+
         let mut binary = (**binary_arc).clone();
-        
-        if let Some(func) = binary.functions.iter_mut().find(|f| f.address == self.address) {
+
+        if let Some(func) = binary
+            .functions
+            .iter_mut()
+            .find(|f| f.address == self.address)
+        {
             func.name = self.old_name.clone();
-            
+
             update_binary(state, binary);
-            state.log(format!("Reverted rename of function 0x{:x} to '{}'", self.address, self.old_name));
+            state.log(format!(
+                "Reverted rename of function 0x{:x} to '{}'",
+                self.address, self.old_name
+            ));
             Ok(())
         } else {
             Err(format!("Function at 0x{:x} not found", self.address))
@@ -164,7 +189,10 @@ impl Command for RenameFunctionCommand {
     }
 
     fn description(&self) -> String {
-        format!("Rename function at 0x{:x} to '{}'", self.address, self.new_name)
+        format!(
+            "Rename function at 0x{:x} to '{}'",
+            self.address, self.new_name
+        )
     }
 }
 
@@ -178,64 +206,73 @@ pub struct PatchBytesCommand {
 impl Command for PatchBytesCommand {
     fn execute(&mut self, state: &mut AppState) -> Result<(), String> {
         let binary_arc = get_binary(state)?;
-            
+
         let mut binary = (**binary_arc).clone();
-        
+
         // Calculate file offset from virtual address
         let offset = va_to_file_offset(&binary.sections, self.address)?;
-            
+
         if offset as usize + self.new_bytes.len() > binary.data.len() {
             return Err("Patch out of bounds".to_string());
         }
-        
+
         // Save old bytes if not set (first run)
         if self.old_bytes.is_empty() {
-             self.old_bytes = binary.data[offset as usize..offset as usize + self.new_bytes.len()].to_vec();
+            self.old_bytes =
+                binary.data[offset as usize..offset as usize + self.new_bytes.len()].to_vec();
         }
-        
+
         // Apply patch
         for (i, b) in self.new_bytes.iter().enumerate() {
             binary.data[offset as usize + i] = *b;
         }
-        
+
         update_binary(state, binary);
-        state.log(format!("Patched {} bytes at 0x{:x}", self.new_bytes.len(), self.address));
+        state.log(format!(
+            "Patched {} bytes at 0x{:x}",
+            self.new_bytes.len(),
+            self.address
+        ));
         Ok(())
     }
 
     fn undo(&mut self, state: &mut AppState) -> Result<(), String> {
         let binary_arc = get_binary(state)?;
-            
+
         let mut binary = (**binary_arc).clone();
-        
+
         let offset = va_to_file_offset(&binary.sections, self.address)?;
 
         // Revert patch
         for (i, b) in self.old_bytes.iter().enumerate() {
             binary.data[offset as usize + i] = *b;
         }
-        
+
         update_binary(state, binary);
         state.log(format!("Reverted patch at 0x{:x}", self.address));
         Ok(())
     }
-    
+
     fn description(&self) -> String {
-        format!("Patch {} bytes at 0x{:x}", self.new_bytes.len(), self.address)
+        format!(
+            "Patch {} bytes at 0x{:x}",
+            self.new_bytes.len(),
+            self.address
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::loader::{LoadedBinaryBuilder, FunctionInfo};
+    use crate::analysis::loader::{FunctionInfo, LoadedBinaryBuilder};
 
     #[test]
     fn test_command_undo_redo() {
         // Setup AppState with a dummy binary
         let mut state = AppState::default();
-        let builder = LoadedBinaryBuilder::new("test.bin".to_string(), vec![])
-            .add_function(FunctionInfo {
+        let builder =
+            LoadedBinaryBuilder::new("test.bin".to_string(), vec![]).add_function(FunctionInfo {
                 name: "func1".to_string(),
                 address: 0x1000,
                 size: 10,

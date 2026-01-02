@@ -3,12 +3,10 @@
 use super::super::types::ProcessInfo;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, MAX_PATH};
-use windows::Win32::System::ProcessStatus::{
-    EnumProcesses, GetModuleBaseNameW,
-};
+use windows::Win32::System::ProcessStatus::{EnumProcesses, GetModuleBaseNameW};
 use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-    PROCESS_QUERY_INFORMATION, PROCESS_VM_READ, PROCESS_QUERY_LIMITED_INFORMATION,
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_INFORMATION,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
 };
 
 /// Enumerate all running processes
@@ -23,7 +21,9 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
             pids.as_mut_ptr(),
             (pids.len() * std::mem::size_of::<u32>()) as u32,
             &mut bytes_returned,
-        ).is_err() {
+        )
+        .is_err()
+        {
             return processes;
         }
 
@@ -35,11 +35,8 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
             }
 
             // Try to open process with query info rights
-            let handle = match OpenProcess(
-                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-                false,
-                pid,
-            ) {
+            let handle = match OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid)
+            {
                 Ok(h) => h,
                 Err(_) => {
                     // Try with limited info
@@ -52,13 +49,17 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
 
             // Get process name
             let name = get_process_name(handle).unwrap_or_else(|| format!("<PID {}>", pid));
-            
+
             // Get executable path
             let exe_path = get_process_exe_path(handle);
-            
+
             let _ = CloseHandle(handle);
 
-            processes.push(ProcessInfo { pid, name, exe_path });
+            processes.push(ProcessInfo {
+                pid,
+                name,
+                exe_path,
+            });
         }
     }
 
@@ -74,7 +75,7 @@ fn get_process_name(handle: HANDLE) -> Option<String> {
 
     unsafe {
         let len = GetModuleBaseNameW(handle, None, &mut name_buf);
-        
+
         if len == 0 {
             return None;
         }
@@ -94,7 +95,10 @@ fn get_process_exe_path(handle: HANDLE) -> Option<String> {
             PROCESS_NAME_FORMAT(0),
             windows::core::PWSTR(path_buf.as_mut_ptr()),
             &mut size,
-        ).is_ok() && size > 0 {
+        )
+        .is_ok()
+            && size > 0
+        {
             Some(String::from_utf16_lossy(&path_buf[..size as usize]))
         } else {
             None

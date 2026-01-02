@@ -148,16 +148,12 @@ impl PlatformMemory for LinuxMemory {
         let pid = self.get_pid()?;
         let maps_path = format!("/proc/{}/maps", pid);
 
-        let content =
-            std::fs::read_to_string(&maps_path).map_err(|e| MemoryError::ReadFailed {
-                address: 0,
-                reason: format!("Failed to read {}: {}", maps_path, e),
-            })?;
+        let content = std::fs::read_to_string(&maps_path).map_err(|e| MemoryError::ReadFailed {
+            address: 0,
+            reason: format!("Failed to read {}: {}", maps_path, e),
+        })?;
 
-        let regions = content
-            .lines()
-            .filter_map(Self::parse_maps_line)
-            .collect();
+        let regions = content.lines().filter_map(Self::parse_maps_line).collect();
 
         Ok(regions)
     }
@@ -166,4 +162,3 @@ impl PlatformMemory for LinuxMemory {
         self.target_pid.is_some()
     }
 }
-

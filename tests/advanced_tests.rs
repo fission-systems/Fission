@@ -31,7 +31,7 @@ fn test_decompilation_snapshot_example() {
 // 무작위 입력값에 대해 로직이 견고한지(패닉하지 않는지) 검증합니다.
 
 // 테스트할 가상의 파서 함수
-fn parse_header(data: &[u8]) -> Result<u32, &'static str> {
+fn parse_header(data: &[u8]) -> std::result::Result<u32, &'static str> {
     if data.len() < 4 {
         return Err("Too short");
     }

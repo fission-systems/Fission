@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use super::types::*;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Breakpoint {
@@ -22,7 +22,11 @@ impl BreakpointManager {
     /// Sets a software breakpoint (INT 3) at the specified address.
     /// Returns true if successful.
     #[cfg(target_os = "windows")]
-    pub fn set_breakpoint(&mut self, process_handle: windows::Win32::Foundation::HANDLE, address: u64) -> Result<(), String> {
+    pub fn set_breakpoint(
+        &mut self,
+        process_handle: windows::Win32::Foundation::HANDLE,
+        address: u64,
+    ) -> Result<(), String> {
         // 1. Check if already exists
         if let Some(bp) = self.breakpoints.get_mut(&address) {
             if bp.enabled {
@@ -43,18 +47,25 @@ impl BreakpointManager {
         super::memory::write_memory(process_handle, address, &int3)?;
 
         // 4. Store record
-        self.breakpoints.insert(address, Breakpoint {
+        self.breakpoints.insert(
             address,
-            original_byte,
-            enabled: true,
-        });
+            Breakpoint {
+                address,
+                original_byte,
+                enabled: true,
+            },
+        );
 
         Ok(())
     }
 
     /// Removes a software breakpoint, restoring the original byte.
     #[cfg(target_os = "windows")]
-    pub fn remove_breakpoint(&mut self, process_handle: windows::Win32::Foundation::HANDLE, address: u64) -> Result<(), String> {
+    pub fn remove_breakpoint(
+        &mut self,
+        process_handle: windows::Win32::Foundation::HANDLE,
+        address: u64,
+    ) -> Result<(), String> {
         if let Some(bp) = self.breakpoints.get(&address) {
             if bp.enabled {
                 // Restore original byte
@@ -79,7 +90,11 @@ impl BreakpointManager {
     pub fn set_breakpoint(&mut self, _process_handle: usize, _address: u64) -> Result<(), String> {
         Err("Not supported on this OS".to_string())
     }
-    pub fn remove_breakpoint(&mut self, _process_handle: usize, _address: u64) -> Result<(), String> {
+    pub fn remove_breakpoint(
+        &mut self,
+        _process_handle: usize,
+        _address: u64,
+    ) -> Result<(), String> {
         Err("Not supported on this OS".to_string())
     }
 }

@@ -1,39 +1,34 @@
-use std::sync::{Arc, RwLock};
-use std::collections::HashMap;
 use std::any::Any;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::analysis::loader::LoadedBinary;
 use crate::debug::types::RegisterState;
 
 /// System-wide events for Fission
-/// 
+///
 /// This is the unified event system for the entire application.
 /// Both core components and plugins subscribe to these events.
 #[derive(Debug, Clone)]
 pub enum FissionEvent {
     // ===== Application Lifecycle =====
-    
     /// Application has started
     AppStarted,
-    
+
     /// Application is shutting down
     AppShutdown,
-    
+
     // ===== Binary Analysis =====
-    
     /// A binary has been successfully loaded
     BinaryLoaded(Arc<LoadedBinary>),
-    
+
     /// Binary loading failed
     BinaryLoadFailed(String),
-    
+
     // ===== Decompilation =====
-    
     /// Decompilation started for an address
-    DecompilationStarted {
-        address: u64,
-    },
-    
+    DecompilationStarted { address: u64 },
+
     /// Decompilation finished successfully
     DecompilationSuccess {
         address: u64,
@@ -41,48 +36,35 @@ pub enum FissionEvent {
         function_name: Option<String>,
         code: String,
     },
-    
+
     /// Decompilation failed
-    DecompilationFailed {
-        address: u64,
-        error: String,
-    },
-    
+    DecompilationFailed { address: u64, error: String },
+
     // ===== Debugging =====
-    
     /// A breakpoint was hit
-    BreakpointHit {
-        address: u64,
-        thread_id: u32,
-    },
-    
+    BreakpointHit { address: u64, thread_id: u32 },
+
     /// A debug step was executed
     DebugStep {
         registers: RegisterState,
         thread_id: u32,
     },
-    
+
     // ===== User Interaction =====
-    
     /// User executed a command (CLI or UI)
-    CommandExecuted {
-        command: String,
-    },
-    
+    CommandExecuted { command: String },
+
     /// User interface focus/selection change
-    SelectionChanged {
-        address: Option<u64>,
-    },
-    
+    SelectionChanged { address: Option<u64> },
+
     // ===== System Messages =====
-    
     /// Log message to be displayed/stored
     LogMessage {
         level: String, // "info", "warn", "error", etc.
         message: String,
         target: String, // Component name
     },
-    
+
     /// Generic progress update
     Progress {
         task_id: String,
@@ -150,9 +132,9 @@ impl EventBus {
     }
 
     /// Subscribe to all events
-    pub fn subscribe<F>(&self, handler: F) -> u64 
-    where 
-        F: Fn(&FissionEvent) + Send + Sync + 'static 
+    pub fn subscribe<F>(&self, handler: F) -> u64
+    where
+        F: Fn(&FissionEvent) + Send + Sync + 'static,
     {
         let mut id_guard = self.next_id.write().unwrap();
         let id = *id_guard;
@@ -161,7 +143,7 @@ impl EventBus {
 
         let mut subs = self.subscribers.write().unwrap();
         subs.insert(id, Box::new(handler));
-        
+
         id
     }
 
