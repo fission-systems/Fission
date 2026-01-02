@@ -23,6 +23,13 @@ struct StructureMember {
     std::string name;
 };
 
+// Type hint for each field access
+struct FieldInfo {
+    int size = 1;
+    bool is_float = false;
+    bool is_pointer = false;
+};
+
 class StructureAnalyzer {
 public:
     StructureAnalyzer();
@@ -31,14 +38,26 @@ public:
     // Analyze a function to find potential structures
     // Returns true if any structures were inferred/updated
     bool analyze_function_structures(ghidra::Funcdata* fd);
+    
+    // Generate C-style struct definitions for all inferred structures
+    // Returns multi-line string with typedef struct definitions
+    std::string generate_struct_definitions() const;
+    
+    // Get type replacement map for post-processing output
+    // Key: original type pattern (e.g., "DWORD *param_1")
+    // Value: replacement pattern (e.g., "f_140001450_arg_8 *param_1")
+    std::map<std::string, std::string> get_type_replacements() const;
+    
+    // Get the inferred struct types (for external access)
+    const std::map<unsigned long long, ghidra::TypeStruct*>& get_inferred_structs() const {
+        return inferred_structs;
+    }
 
 private:
     // Tracks offsets accessed for a given base varnode
-    // Key: Base Varnode UID (or just pointer if suitable, but Varnodes die)
-    // Actually we want to map Input Storage (Address) to Offsets
-    // map<StorageAddress, set<Offset>>
-    // map<StorageAddress, map<Offset, Size>>
-    std::map<unsigned long long, std::map<int, int>> access_map; 
+    // Key: Base Varnode storage offset
+    // Value: Map of field offset -> FieldInfo
+    std::map<unsigned long long, std::map<int, FieldInfo>> access_map; 
     
     // Map of inferred structures (Base Address -> New Type)
     std::map<unsigned long long, ghidra::TypeStruct*> inferred_structs;

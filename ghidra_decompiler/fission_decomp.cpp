@@ -54,6 +54,7 @@ using namespace fission::types;
 #include "fission/types/GuidParser.h"
 #include "fission/types/RttiAnalyzer.h"
 #include "fission/loader/PeHeader.h"
+#include "fission/loader/BinaryDetector.h"
 #include "fission/analysis/FidDatabase.h"
 #include "fission/analysis/FunctionMatcher.h"
 #include "fission/processing/StringScanner.h"
@@ -62,11 +63,147 @@ using namespace fission::types;
 #include "fission/loader/SymbolLoader.h"
 #include "fission/analysis/EmulationAnalyzer.h"
 #include "fission/types/PrototypeEnforcer.h"
+#include "fission/types/GlobalTypeRegistry.h"
+#include "fission/analysis/GlobalDataAnalyzer.h"
+#include "fission/analysis/VTableAnalyzer.h"
+#include "fission/analysis/CallGraphAnalyzer.h"
 using namespace fission::loader;
 using namespace fission::analysis;
 
 // Constants
 static const int MAX_INSTRUCTIONS = 200000;
+
+// Phase 18: Global Structure Registry for Reverse Propagation
+// Map: FunctionAddress -> (ParamIndex -> StructName)
+static std::map<uint64_t, std::map<int, std::string>> global_struct_registry;
+
+// Helper: Convert integer constants to string literals if they look like ASCII
+// e.g. 0x6d65744974736554 -> (QWORD)"TestItem"
+std::string convert_integer_constants(std::string c_code) {
+    // Regex is heavy, we'll use a manual scan for hex patterns
+    // Pattern: 0x[0-9a-fA-F]+
+    size_t pos = 0;
+    while ((pos = c_code.find("0x", pos)) != std::string::npos) {
+        size_t start = pos;
+        size_t end = start + 2;
+        while (end < c_code.length() && isxdigit(c_code[end])) {
+            end++;
+        }
+        
+        size_t len = end - start;
+        if (len > 4) { // Only check if longer than single byte (0xXX)
+            std::string hex_str = c_code.substr(start, len);
+            try {
+                unsigned long long val = std::stoull(hex_str, nullptr, 16);
+                
+                // Check bytes
+                std::string decoded;
+                bool is_ascii = true;
+                int byte_count = 0;
+                unsigned long long temp = val;
+                
+                // Extract bytes (Little Endian for x86)
+                // Need to handle 4 bytes or 8 bytes typically
+                // But the string might be partial.
+                // Let's check if it forms a readable string 3+ chars
+                
+                std::vector<char> bytes;
+                while (temp > 0) {
+                    char c = (char)(temp & 0xFF);
+                    bytes.push_back(c);
+                    temp >>= 8;
+                }
+                
+                // If 0, it was 0x0, which is valid but not a string
+                if (bytes.empty()) is_ascii = false;
+                
+                int valid_chars = 0;
+                for (char c : bytes) {
+                    if (c == 0) continue; // Allow null terminators
+                    if (isalnum(c) || ispunct(c) || c == ' ') {
+                        valid_chars++;
+                        decoded += c;
+                    } else {
+                        is_ascii = false;
+                        break;
+                    }
+                }
+                
+                if (is_ascii && valid_chars >= 3) {
+                     // Found a string! Replace it.
+                     // Format: (QWORD)"string" or just "string"
+                     // Casting helps understand size.
+                     std::string replacement = "\"" + decoded + "\"";
+                     if (len > 10) replacement = "(QWORD)" + replacement; // > 4 bytes -> QWORD likely
+                     else replacement = "(DWORD)" + replacement;
+                     
+                     c_code.replace(start, len, replacement);
+                     // Adjust pos to skip replacement
+                     pos = start + replacement.length();
+                     continue;
+                }
+            } catch (...) {
+                // Ignore conversion errors
+            }
+        }
+        pos = end;
+    }
+    return c_code;
+}
+
+// Helper: Apply Reverse Type Propagation
+// Scans CALL instructions in 'fd'. If target is in 'registry', updating args in 'fd'.
+bool propagate_reverse_types(ghidra::Funcdata* fd, ghidra::TypeFactory* type_factory) {
+    bool changed = false;
+    if (!fd) return false;
+    
+    auto iter = fd->beginOpAll();
+    auto end_iter = fd->endOpAll();
+    
+    for (; iter != end_iter; ++iter) {
+        ghidra::PcodeOp* op = iter->second;
+        if (!op || op->isDead()) continue;
+        
+        if (op->code() == ghidra::CPUI_CALL) {
+            ghidra::Varnode* target = op->getIn(0);
+            if (target && target->isConstant()) {
+                uint64_t callee_addr = target->getOffset();
+                
+                if (global_struct_registry.count(callee_addr)) {
+                    const auto& params_map = global_struct_registry[callee_addr];
+                    
+                    // Iterate arguments (Input 1+)
+                    int num_inputs = op->numInput();
+                    for (int i=1; i<num_inputs; ++i) {
+                        int param_index = i - 1; // 0-based param index
+                        if (params_map.count(param_index)) {
+                            std::string struct_name = params_map.at(param_index);
+                            
+                            // Find type by name
+                            ghidra::Datatype* type = type_factory->findByName(struct_name);
+                            if (type) {
+                                // Create pointer to struct
+                                ghidra::Datatype* ptr_type = type_factory->getTypePointer(8, type, 0); // 8-byte ptr
+                                
+                                ghidra::Varnode* arg = op->getIn(i);
+                                
+                                // FORCE update the argument type!
+                                // We use lock=true to ensure it sticks.
+                                if (arg) {
+                                    arg->updateType(ptr_type, true, true);
+                                    changed = true;
+                                    std::cerr << "[ReverseProp] Applied " << struct_name << "* to arg " << i << " of call to 0x" << std::hex << callee_addr << std::dec << std::endl;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return changed;
+}
+
 
 // Helper function to select FID database
 std::string get_fid_filename(bool is_64bit, const std::string& compiler_id) {
@@ -78,6 +215,73 @@ std::string get_fid_filename(bool is_64bit, const std::string& compiler_id) {
     else if (compiler_id.find("vs2012") != std::string::npos) fid_filename = "vs2012" + suffix;
     
     return fid_filename;
+}
+
+// Helper: Apply inferred struct types to function parameters in C output
+// Replaces "DWORD *param_1" with "struct_name *param_1"
+std::string apply_struct_types(std::string c_code, ghidra::Funcdata* fd, 
+                             const std::map<unsigned long long, ghidra::TypeStruct*>& structs) {
+    if (!fd || structs.empty()) return c_code;
+
+    const ghidra::FuncProto& proto = fd->getFuncProto();
+    int numParams = proto.numParams();
+    
+    for(int i=0; i<numParams; ++i) {
+        ghidra::ProtoParameter* param = proto.getParam(i);
+        if (!param) continue;
+        
+        // Match by storage offset
+        // Note: Varnode/Param addresses are offsets in their space.
+        // inferred_structs uses offset from Varnode::getOffset()
+        uint64_t off = param->getAddress().getOffset();
+        
+        if (structs.count(off)) {
+            ghidra::TypeStruct* st = structs.at(off);
+            if (!st) continue;
+            
+            std::string sname = st->getName();
+            std::string pname = param->getName(); // e.g., "param_1"
+            
+            // Search for pointer declaration: "*pname" or "* pname"
+            // We want to replace the type preceding it.
+            // Example: "DWORD *param_1" -> "f_... *param_1"
+            
+            std::string target = "*" + pname;
+            size_t pos = c_code.find(target);
+            
+            // Try with space if not found
+            if (pos == std::string::npos) {
+                target = "* " + pname;
+                pos = c_code.find(target);
+            }
+            
+            if (pos != std::string::npos) {
+                // Found declaration. Now backtrack to find the Type name start.
+                // Skip spaces backwards from '*'
+                size_t type_end = pos;
+                while (type_end > 0 && (c_code[type_end-1] == ' ' || c_code[type_end-1] == '\t')) {
+                    type_end--;
+                }
+                
+                // Now backwards to find start of token
+                size_t type_start = type_end;
+                while (type_start > 0) {
+                    char c = c_code[type_start-1];
+                    if (c == ' ' || c == '\t' || c == '\n' || c == '(' || c == ',') break;
+                    type_start--;
+                }
+                
+                if (type_start < type_end) {
+                    // Replace the type word with struct name
+                    std::string old_type = c_code.substr(type_start, type_end - type_start);
+                    // Avoid replacing "void" or "return" accidentally, but current logic is tight to "*pname"
+                    c_code.replace(type_start, type_end - type_start, sname);
+                    std::cerr << "[apply_struct_types] Replaced type '" << old_type << "' for " << pname << " with " << sname << std::endl;
+                }
+            }
+        }
+    }
+    return c_code;
 }
 
 // Process a single decompilation request
@@ -133,21 +337,34 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
             // Initialize/Update loaders for both architectures with complete binary
             // Use image_base as the base address for correct address translation!
             
-            std::cerr << "[fission_decomp] Debug: Detecting PE Arch..." << std::endl;
-            // PE Auto-Detection
-            bool is_pe = false;
-            std::string compiler_id = "windows"; // Default to windows for better safety
-            PeDetectionResult pe_info = detect_pe_arch(bin_bytes);
-            std::cerr << "[fission_decomp] Debug: PE Detection Result: is_pe=" << pe_info.is_pe << std::endl;
+            std::cerr << "[fission_decomp] Debug: Detecting Binary Format..." << std::endl;
+            // Unified Binary Format Detection (PE, ELF, Mach-O)
+            BinaryInfo bin_info = BinaryDetector::detect(bin_bytes.data(), bin_bytes.size());
             
-            if (pe_info.is_pe) {
-                is_pe = true;
-                if (!pe_info.compiler_id.empty()) {
-                     compiler_id = pe_info.compiler_id;
-                }
-                std::cerr << "[fission_decomp] Detected PE Binary: " << (pe_info.is_64bit ? "64-bit" : "32-bit") 
-                          << " Compiler: " << compiler_id << std::endl;
+            bool is_pe = (bin_info.format == BinaryFormat::PE);
+            bool is_elf = (bin_info.format == BinaryFormat::ELF);
+            bool is_macho = (bin_info.format == BinaryFormat::MACHO);
+            std::string compiler_id = bin_info.compiler_id.empty() ? "default" : bin_info.compiler_id;
+            
+            if (bin_info.format != BinaryFormat::UNKNOWN) {
+                std::cerr << "[fission_decomp] Detected Binary: " 
+                          << (is_pe ? "PE" : (is_elf ? "ELF" : (is_macho ? "Mach-O" : "Unknown")))
+                          << " " << (bin_info.is_64bit ? "64-bit" : "32-bit") 
+                          << " Arch=" << bin_info.sleigh_id
+                          << " Compiler=" << compiler_id << std::endl;
+            } else {
+                std::cerr << "[fission_decomp] Warning: Unknown binary format, assuming PE x64" << std::endl;
+                bin_info.format = BinaryFormat::PE;
+                bin_info.is_64bit = true;
+                bin_info.sleigh_id = "x86:LE:64:default";
+                compiler_id = "windows";
             }
+            
+            // Backward compatibility: create pe_info for existing code paths
+            PeDetectionResult pe_info;
+            pe_info.is_pe = is_pe;
+            pe_info.is_64bit = bin_info.is_64bit;
+            pe_info.compiler_id = compiler_id;
 
             // 64-bit
             if (!state.arch_64bit_ready) {
@@ -156,18 +373,35 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
                 if (state.arch_64bit) delete state.arch_64bit;
                 
                 // RTTI Recovery
-                if (is_pe) {
+                std::map<uint64_t, std::string> recovered_classes;
+                if (is_pe || is_elf || is_macho) {
                     std::cerr << "[fission_decomp] Debug: Running RTTI Recovery..." << std::endl;
-                    std::map<uint64_t, std::string> recovered_classes = RttiAnalyzer::recover_class_names(bin_bytes, image_base, pe_info.is_64bit);
+                    recovered_classes = RttiAnalyzer::recover_class_names(bin_bytes, image_base, bin_info.is_64bit);
                     if (!recovered_classes.empty()) {
                         std::cerr << "[fission_decomp] Recovered " << recovered_classes.size() << " class names via RTTI." << std::endl;
                     }
                     
                     // Phase 7: PDB Symbol Loading
-                    if (!pe_info.pdb_path.empty()) {
+                    if (is_pe && !pe_info.pdb_path.empty()) {
                          // ... (keep existing logic) ...
                     }
                 }
+                
+                // Phase 17: VTable Analysis
+                VTableAnalyzer vtable_analyzer;
+                vtable_analyzer.scan_vtables(bin_bytes.data(), bin_bytes.size(), image_base, bin_info.is_64bit);
+                if (!recovered_classes.empty()) {
+                    vtable_analyzer.link_with_rtti(recovered_classes);
+                }
+                std::cerr << "[fission_decomp] VTable scan complete: " << vtable_analyzer.get_vtables().size() << " vtables found" << std::endl;
+                
+                // Phase 17: Global Data Analyzer - set up for later use
+                GlobalDataAnalyzer global_analyzer;
+                // TODO: Parse PE/ELF sections to get precise .data/.bss ranges
+                // For now, estimate based on image size
+                uint64_t data_start = image_base + (bin_bytes.size() / 2);  // Rough estimate
+                uint64_t data_end = image_base + bin_bytes.size();
+                global_analyzer.set_data_section(data_start, data_end);
                 
                 std::cerr << "[fission_decomp] Debug: Loading Patterns..." << std::endl;
                 // Phase 7: Pattern Matching (FID Lite)
@@ -453,6 +687,9 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         }
 
         // Step 4b: Advanced Structure Recovery (Guarded)
+        std::string inferred_struct_defs;
+        std::map<unsigned long long, ghidra::TypeStruct*> captured_structs;
+
         // Budget guards: Skip for large functions or excessive operations
         static constexpr size_t MAX_FUNCTION_SIZE = 10000;  // 10KB code limit
         static constexpr int MAX_PTRSUB_OPS = 100;          // Limit analyzed operations
@@ -466,15 +703,44 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
             if (structs_found) {
                 std::cerr << "[fission_decomp] Step 4b: New structures inferred! Re-running decompilation..." << std::endl;
                 try {
+                    // Capture definitions and map
+                    inferred_struct_defs = struct_analyzer.generate_struct_definitions();
+                    captured_structs = struct_analyzer.get_inferred_structs();
+
                     fd->clear();
                     arch->allacts.getCurrent()->reset(*fd);
                     arch->allacts.getCurrent()->perform(*fd);
+                    
+                    // Register inferred types to Global Registry for future Reverse Propagation
+                    std::cerr << "[fission_decomp] Registering inferred types for 0x" << std::hex << fd->getAddress().getOffset() << std::dec << std::endl;
+                    const ghidra::FuncProto& proto = fd->getFuncProto();
+                    int num = proto.numParams();
+                    for(int i=0; i<num; ++i) {
+                        ghidra::ProtoParameter* param = proto.getParam(i);
+                        uint64_t off = param->getAddress().getOffset();
+                        if (captured_structs.count(off)) {
+                            std::string sname = captured_structs[off]->getName();
+                            global_struct_registry[fd->getAddress().getOffset()][i] = sname;
+                        }
+                    }
+
                 } catch (const LowlevelError& e) {
                     std::cerr << "[fission_decomp] Step 4b ERROR: " << e.explain << std::endl;
                 } catch (const std::exception& e) {
                     std::cerr << "[fission_decomp] Step 4b EXCEPTION: " << e.what() << std::endl;
                 }
             }
+            
+            // Step 4b-2: Reverse Type Propagation (Apply types from callees to current local vars)
+            fission::utils::StepTimer timer_rev("Step 4b-2: Reverse Propagation");
+            bool reverse_changed = propagate_reverse_types(fd, arch->types);
+            if (reverse_changed) {
+                 std::cerr << "[fission_decomp] Step 4b-2: Reverse propagation applied! Re-running decompilation..." << std::endl;
+                 fd->clear();
+                 arch->allacts.getCurrent()->reset(*fd);
+                 arch->allacts.getCurrent()->perform(*fd);
+            }
+
         } else {
             std::cerr << "[fission_decomp] Step 4b: Skipped (function too large: " 
                       << func_size << " bytes > " << MAX_FUNCTION_SIZE << " limit)" << std::endl;
@@ -495,6 +761,14 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         
         std::cerr << "[fission_decomp] Step 6: Post-processing IAT calls" << std::endl;
         std::string c_code = c_stream.str();
+
+        // Inject inferred struct definitions
+        if (!inferred_struct_defs.empty()) {
+            c_code = inferred_struct_defs + "\n" + c_code;
+            // Also apply type replacements in signature
+            c_code = apply_struct_types(c_code, fd, captured_structs);
+        }
+
         c_code = post_process_iat_calls(c_code, state.iat_symbols);
         
         // Step 6b: Smart constant replacement (context-aware based on API parameters)
@@ -550,6 +824,12 @@ std::string process_request(DecompilerContext& state, const std::string& input) 
         // Step 6j: Apply FID-resolved function names
         c_code = apply_fid_names(c_code, state.fid_function_names);
         
+        // Step 6j: Apply FID-resolved function names
+        c_code = apply_fid_names(c_code, state.fid_function_names);
+        
+        // Step 6k: String Constant Recovery (Hex -> String)
+        c_code = convert_integer_constants(c_code);
+
         std::cerr << "[fission_decomp] Step 7: Done!" << std::endl;
         return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_code) + "\"}";
         

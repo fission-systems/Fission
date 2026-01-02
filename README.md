@@ -15,17 +15,20 @@ A next-generation hybrid dynamic analysis platform that unifies the best feature
 ## Features
 
 ### Static Analysis
+
 - **Ghidra-Powered Decompiler** - High-performance C code decompilation via subprocess pool
 - **iced-x86 Disassembler** - Pure Rust x86/x64 disassembly with syntax highlighting
 - **.NET Binary Support** - CLR metadata parsing, IL disassembly, native stub analysis
 - **Cross-Platform** - Windows (PE) and Linux (ELF) binary support
 
 ### Dynamic Analysis
+
 - **Process Debugging** - Attach/detach, breakpoints, register/memory access
 - **Time Travel Debugging** - Execution timeline with snapshot navigation
 - **Live Memory Patching** - Modify running process memory
 
 ### Performance
+
 - **Decompiler Pool** - Multi-process parallelization (auto-detects CPU cores)
 - **Architecture Caching** - Reuses Ghidra objects across requests
 - **LRU Result Cache** - Configurable cache with automatic eviction
@@ -33,13 +36,24 @@ A next-generation hybrid dynamic analysis platform that unifies the best feature
 - **Background Prefetching** - Pre-decompiles adjacent functions
 
 ### Smart Decompilation
+
 - **Context-Aware Constant Substitution** - Replaces magic numbers with symbolic names based on API parameter context
 - **16 Enum Groups** - PAGE_PROTECT, MEM_ALLOC, GENERIC_ACCESS, HKEY_ROOT, AF_FAMILY, etc.
 - **100+ API Mappings** - 9 DLLs supported (kernel32, user32, ntdll, advapi32, ws2_32, winhttp, wininet, shell32, bcrypt)
 - **Dynamic Flag Resolution** - Automatically detects OR combinations (e.g., `0x3000` → `MEM_COMMIT | MEM_RESERVE`)
+- **Dynamic Flag Resolution** - Automatically detects OR combinations (e.g., `0x3000` → `MEM_COMMIT | MEM_RESERVE`)
 - **GDT Type Loading** - 5,700+ structures and 6,500+ typedefs from Ghidra data
 
+### Advanced Decompilation Features
+
+- **Auto-Inferred Structures** - Automatically detects structure layouts and generates C `typedef` definitions.
+- **Reverse Type Propagation** - Propagates inferred types from callees back to callers for better variable typing.
+- **Smart String Recovery** - Converts hex constants (`0x6d65...`) into readable string literals (`"TestItem"`).
+- **VTable Analysis** - Recovers C++ virtual tables and resolves indirect calls (`call [rax+0x10]` → `Class::method`).
+- **Precise Field Typing** - Distinguishes `float`/`double` fields via FPU instruction analysis.
+
 ### Extensibility
+
 - **Plugin System** - Native Rust and Python plugin support
 - **Event Bus** - Subscribe to binary load, decompile, debug events
 - **Hook Priority** - Control plugin execution order
@@ -271,7 +285,9 @@ Fission/
 - [x] .NET Support - CLR detection, metadata, IL disassembly
 - [x] Debugging - Attach, breakpoints, registers, memory
 - [x] Plugin System - Native Rust and Python plugins
+- [x] Plugin System - Native Rust and Python plugins
 - [x] Performance Optimization - Pool, caching, prefetch
+- [x] Advanced Type Analysis - Struct inference, VTable, Type Propagation
 - [ ] Advanced TTD - Full time travel debugging
 - [ ] Remote Debugging - Network-based debug sessions
 
@@ -325,21 +341,25 @@ cargo test -- --nocapture
 ```
 
 ### Phase 1: AI Integration
+
 - [ ] LLM API 연동 (OpenAI, Claude, Local)
 - [ ] Observer 에이전트 - 디컴파일 결과 분석
 - [ ] 함수 목적 추론 및 이름 제안
 
 ### Phase 2: Dynamic Analysis AI
+
 - [ ] Executor 에이전트 - 실행 추적 분석
 - [ ] I/O 패턴 및 시스템 콜 분석
 - [ ] 동적 데이터 흐름 매핑
 
 ### Phase 3: Code Generation
+
 - [ ] Author 에이전트 - 코드 생성 및 검증
 - [ ] 생성된 코드 빌드 및 테스트
 - [ ] 원본과의 기능 동등성 검증
 
 ### Phase 4: Full Restoration
+
 - [ ] 3 에이전트 협업 오케스트레이션
 - [ ] 증분 복원 (함수 → 모듈 → 프로젝트)
 - [ ] 빌드 시스템 및 의존성 복원
