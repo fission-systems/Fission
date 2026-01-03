@@ -93,13 +93,15 @@ impl DisasmEngine {
             formatter.format(&instruction, &mut output);
 
             // Split mnemonic and operands
+            // Note: We need to allocate new Strings here because DisassembledInstruction
+            // owns its data. Using string slices would require lifetime changes to the public API.
             let (mnemonic, operands) = if let Some(space_idx) = output.find(' ') {
                 (
                     output[..space_idx].to_string(),
                     output[space_idx + 1..].to_string(),
                 )
             } else {
-                (output.clone(), String::new())
+                (std::mem::take(&mut output), String::new())
             };
 
             // Check if flow control

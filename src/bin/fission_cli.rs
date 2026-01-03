@@ -472,15 +472,10 @@ fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Result<()> {
         } else {
             if current_bytes.len() >= min_len {
                 // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
-                // Use std::mem::take to avoid clone allocation
-                let bytes = std::mem::take(&mut current_bytes);
-                let value = unsafe { String::from_utf8_unchecked(bytes) };
+                let value = unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
                 strings.push((start_offset, value));
-                // Re-allocate with same capacity for next string
-                current_bytes = Vec::with_capacity(256);
-            } else {
-                current_bytes.clear();
             }
+            current_bytes.clear();
         }
     }
     // Don't forget last string
