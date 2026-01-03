@@ -4,7 +4,7 @@
 //! between headless CLI and full GUI modes.
 
 use clap::Parser;
-use fission::ui;
+use fission::{cli, ui};
 use std::path::PathBuf;
 
 /// Fission: Hybrid Dynamic Analysis Platform
@@ -110,7 +110,7 @@ fn main() -> fission::prelude::Result<()> {
             ));
         };
         
-        ui::cli::run_cli_with_args(
+        cli::interactive::run_cli_with_args(
             target_path,
             args.address,
             args.asm,
