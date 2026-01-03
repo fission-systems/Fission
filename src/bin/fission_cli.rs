@@ -1,18 +1,6 @@
 //! Fission CLI - Enhanced command-line interface for binary analysis
 //!
-//! Usage:
-//!   fission-cli <binary> [OPTIONS]
-//!
-//! Commands:
-//!   --info           Show binary information
-//!   --list           List all functions
-//!   --sections       Show section information
-//!   --imports        List imported functions
-//!   --exports        List exported functions
-//!   --strings        Extract strings from binary
-//!   --disasm <ADDR>  Disassemble at address
-//!   -a <ADDR>        Decompile function at address
-//!   --all            Decompile all functions
+//! A powerful, user-friendly binary analysis tool with decompilation capabilities.
 
 use clap::Parser;
 use std::fs;
@@ -25,20 +13,21 @@ use fission::analysis::decomp::ffi::DecompilerNative;
 use fission::analysis::loader::{FunctionInfo, LoadedBinary};
 
 #[derive(Parser, Debug)]
-#[command(name = "fission-cli")]
+#[command(name = "fission")]
 #[command(author = "Fission Dev Team")]
 #[command(version = "0.2.0")]
-#[command(about = "Next-Gen Binary Analysis CLI", long_about = None)]
+#[command(about = "🔬 Next-Gen Binary Analysis & Decompilation")]
+#[command(long_about = "Fission - A powerful binary analysis tool with native Ghidra decompilation support.\n\nQuick Start:\n  fission binary.exe -i              # Show info\n  fission binary.exe -l              # List functions\n  fission binary.exe --decomp 0x1400 # Decompile function\n  fission binary.exe --asm 0x1400    # Disassemble\n")]
 struct Cli {
     /// Path to the binary file to analyze
     binary: PathBuf,
 
     /// Decompile function at specific address (hex, e.g., 0x140001400)
-    #[arg(short, long, value_parser = parse_hex_address)]
+    #[arg(short, long, alias = "decomp", value_parser = parse_hex_address)]
     address: Option<u64>,
 
     /// Decompile all discovered functions
-    #[arg(short = 'A', long)]
+    #[arg(short = 'A', long, alias = "decomp-all")]
     all: bool,
 
     /// List all discovered functions
@@ -66,7 +55,7 @@ struct Cli {
     strings: Option<usize>,
 
     /// Disassemble at address (with optional count)
-    #[arg(short = 'd', long, value_parser = parse_hex_address)]
+    #[arg(short = 'd', long, alias = "asm", value_parser = parse_hex_address)]
     disasm: Option<u64>,
 
     /// Number of instructions to disassemble
@@ -181,7 +170,6 @@ fn run() -> io::Result<()> {
             eprintln!("Run with: cargo run --bin fission_cli --features native_decomp -- ...");
             std::process::exit(1);
         }
-        return Ok(());
     }
 
     // Default: show help
@@ -190,34 +178,45 @@ fn run() -> io::Result<()> {
 }
 
 fn print_help() {
-    eprintln!("Fission CLI - Binary Analysis Tool");
-    eprintln!();
-    eprintln!("Usage: fission_cli <binary> [OPTIONS]");
-    eprintln!();
-    eprintln!("Information:");
-    eprintln!("  -i, --info       Show binary information");
-    eprintln!("  -S, --sections   Show section details");
-    eprintln!("  -l, --list       List all functions");
-    eprintln!("  -I, --imports    List imported functions");
-    eprintln!("  -E, --exports    List exported functions");
-    eprintln!();
-    eprintln!("Analysis:");
-    eprintln!("  -d, --disasm <ADDR>  Disassemble at address");
-    eprintln!("  -n, --count <N>      Number of instructions (default: 20)");
-    eprintln!("  --strings [MIN]      Extract strings (min length, default: 4)");
-    eprintln!();
-    eprintln!("Decompilation:");
-    eprintln!("  -a, --address <ADDR>  Decompile function at address");
-    eprintln!("  -A, --all             Decompile all functions");
-    eprintln!();
-    eprintln!("Output:");
-    eprintln!("  -o, --output <FILE>   Write to file");
-    eprintln!("  -j, --json            JSON output format");
-    eprintln!("  -v, --verbose         Verbose output");
+    println!("\x1b[1;36m╔══════════════════════════════════════════════════════════╗\x1b[0m");
+    println!("\x1b[1;36m║\x1b[0m  \x1b[1;35m🔬 Fission\x1b[0m - Next-Gen Binary Analysis          \x1b[1;36m║\x1b[0m");
+    println!("\x1b[1;36m╚══════════════════════════════════════════════════════════╝\x1b[0m");
+    println!();
+    println!("\x1b[1;33mUsage:\x1b[0m fission <binary> [OPTIONS]");
+    println!();
+    println!("\x1b[1;32m📊 Information:\x1b[0m");
+    println!("  \x1b[1m-i\x1b[0m, --info          Show binary info (format, arch, entry point)");
+    println!("  \x1b[1m-S\x1b[0m, --sections      Show all sections with permissions");
+    println!("  \x1b[1m-l\x1b[0m, --list          List all discovered functions");
+    println!("  \x1b[1m-I\x1b[0m, --imports       List imported functions");
+    println!("  \x1b[1m-E\x1b[0m, --exports       List exported functions");
+    println!();
+    println!("\x1b[1;34m🔍 Analysis:\x1b[0m");
+    println!("  \x1b[1m-d\x1b[0m, --asm <ADDR>    Disassemble at address (alias: --disasm)");
+    println!("  \x1b[1m-n\x1b[0m, --count <N>     Number of instructions (default: 20)");
+    println!("      --strings [MIN]  Extract strings (min length: 4)");
+    println!();
+    println!("\x1b[1;35m⚙️  Decompilation:\x1b[0m");
+    println!("  \x1b[1m-a\x1b[0m, --decomp <ADDR> Decompile function (alias: --address)");
+    println!("  \x1b[1m-A\x1b[0m, --decomp-all    Decompile all functions (alias: --all)");
+    println!();
+    println!("\x1b[1;36m💾 Output:\x1b[0m");
+    println!("  \x1b[1m-o\x1b[0m, --output <FILE> Write results to file");
+    println!("  \x1b[1m-j\x1b[0m, --json          JSON output format");
+    println!("  \x1b[1m-v\x1b[0m, --verbose       Show detailed progress");
+    println!();
+    println!("\x1b[1;33m📚 Examples:\x1b[0m");
+    println!("  fission app.exe -i                    \x1b[90m# Show binary info\x1b[0m");
+    println!("  fission app.exe -l                    \x1b[90m# List functions\x1b[0m");
+    println!("  fission app.exe --asm 0x140001000     \x1b[90m# Disassemble\x1b[0m");
+    println!("  fission app.exe --decomp 0x140001000  \x1b[90m# Decompile\x1b[0m");
+    println!("  fission app.exe --decomp-all -o out/  \x1b[90m# Decompile all\x1b[0m");
+    println!();
 }
 
 fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
+    
     if json {
         writeln!(
             stdout,
@@ -237,18 +236,9 @@ fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result<()> {
             .unwrap()
         )?;
     } else {
-        writeln!(
-            stdout,
-            "╔══════════════════════════════════════════════════════════╗"
-        )?;
-        writeln!(
-            stdout,
-            "║                    BINARY INFORMATION                    ║"
-        )?;
-        writeln!(
-            stdout,
-            "╠══════════════════════════════════════════════════════════╣"
-        )?;
+        writeln!(stdout, "\x1b[1;36m╔══════════════════════════════════════════════════════════╗\x1b[0m")?;
+        writeln!(stdout, "\x1b[1;36m║\x1b[0m          \x1b[1;35m📊 BINARY INFORMATION\x1b[0m                    \x1b[1;36m║\x1b[0m")?;
+        writeln!(stdout, "\x1b[1;36m╠══════════════════════════════════════════════════════════╣\x1b[0m")?;
         writeln!(stdout, "║ Path:       {:<46} ║", truncate(&binary.path, 46))?;
         writeln!(stdout, "║ Format:     {:<46} ║", &binary.format)?;
         writeln!(
@@ -458,7 +448,7 @@ fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Result<()> {
     // Pre-allocate with estimated capacity (heuristic: ~1 string per 1KB of data)
     let estimated_strings = data.len() / 1024;
     let mut strings: Vec<(usize, String)> = Vec::with_capacity(estimated_strings.max(100));
-    
+
     // Pre-allocate buffer with reasonable capacity to reduce reallocations
     let mut current_bytes: Vec<u8> = Vec::with_capacity(256);
     let mut start_offset = 0;
@@ -472,7 +462,8 @@ fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Result<()> {
         } else {
             if current_bytes.len() >= min_len {
                 // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
-                let value = unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
+                let value =
+                    unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
                 strings.push((start_offset, value));
             }
             current_bytes.clear();
@@ -643,6 +634,97 @@ fn run_decompilation(cli: &Cli, binary: &LoadedBinary, binary_data: &[u8]) -> io
 
     // Add IAT symbols
     decomp.add_symbols(&binary.iat_symbols);
+
+    // Add memory blocks (sections) to improve analysis
+    if cli.verbose {
+        eprintln!("[*] Registering {} memory sections...", binary.sections.len());
+    }
+    
+    for section in &binary.sections {
+        if let Err(e) = decomp.add_memory_block(
+            &section.name,
+            section.virtual_address,
+            section.virtual_size,
+            section.file_offset as u64,
+            section.file_size as u64,
+            section.is_executable,
+            section.is_writable,
+        ) {
+            if cli.verbose {
+                eprintln!("[!] Failed to register section {}: {}", section.name, e);
+            }
+        }
+    }
+
+    // Add all known functions to improve decompilation quality
+    if cli.verbose {
+        eprintln!("[*] Registering {} known functions...", binary.functions.len());
+    }
+    
+    let mut registered_count = 0;
+    for func in &binary.functions {
+        if func.address != 0 && !func.name.is_empty() {
+            if let Err(e) = decomp.add_function(func.address, Some(&func.name)) {
+                if cli.verbose {
+                    eprintln!("[!] Failed to register function at 0x{:x}: {}", func.address, e);
+                }
+            } else {
+                registered_count += 1;
+            }
+        }
+    }
+    
+    if cli.verbose {
+        eprintln!("[*] Successfully registered {}/{} functions", registered_count, binary.functions.len());
+    }
+
+    // Try to load FID databases if available (load all matching ones)
+    let fid_paths = [
+        "ghidra/funtionID/vs2019_x64.fidbf",
+        "ghidra/funtionID/vs2017_x64.fidbf",
+        "ghidra/funtionID/vs2015_x64.fidbf",
+        "ghidra/funtionID/vs2012_x64.fidbf",
+        "ghidra/funtionID/vsOlder_x64.fidbf",
+        "ghidra/funtionID/vs2019_x86.fidbf",
+        "ghidra/funtionID/vs2017_x86.fidbf",
+        "ghidra/funtionID/vs2015_x86.fidbf",
+        "ghidra/funtionID/vs2012_x86.fidbf",
+        "ghidra/funtionID/vsOlder_x86.fidbf",
+    ];
+
+    // Filter FID databases by architecture
+    let target_suffix = if binary.is_64bit { "_x64.fidbf" } else { "_x86.fidbf" };
+    let matching_fid_paths: Vec<_> = fid_paths
+        .iter()
+        .filter(|p| p.ends_with(target_suffix))
+        .collect();
+
+    // Load all available FID databases for better matching coverage
+    let mut fid_loaded_count = 0;
+    for fid_path in matching_fid_paths {
+        if let Ok(full_path) = std::env::current_dir() {
+            let fid_full = full_path.join(fid_path);
+            if fid_full.exists() {
+                if cli.verbose {
+                    eprintln!("[*] Loading FID database: {}", fid_full.display());
+                }
+                if let Err(e) = decomp.load_fid_database(&fid_full.to_string_lossy()) {
+                    if cli.verbose {
+                        eprintln!("[!] Warning: Failed to load FID database: {}", e);
+                    }
+                } else {
+                    fid_loaded_count += 1;
+                    if cli.verbose {
+                        eprintln!("[✓] FID database loaded");
+                    }
+                }
+            }
+        }
+    }
+
+    if cli.verbose && fid_loaded_count > 0 {
+        eprintln!("[✓] Loaded {} FID database(s) for function matching", fid_loaded_count);
+    }
 
     if cli.verbose {
         eprintln!("[✓] Decompiler ready");

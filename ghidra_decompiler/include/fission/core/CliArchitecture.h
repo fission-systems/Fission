@@ -13,10 +13,10 @@ namespace fission {
 namespace core {
 
 class CliArchitecture : public ghidra::SleighArchitecture {
-    fission::loader::MemoryLoadImage* custom_loader;
+    ghidra::LoadImage* custom_loader;
 
 public:
-    CliArchitecture(const std::string& sleigh_id, fission::loader::MemoryLoadImage* ldr, std::ostream* err);
+    CliArchitecture(const std::string& sleigh_id, ghidra::LoadImage* ldr, std::ostream* err);
     virtual ~CliArchitecture() = default;
 
     virtual void buildLoader(ghidra::DocumentStorage& store) override;

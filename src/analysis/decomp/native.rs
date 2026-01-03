@@ -1,8 +1,17 @@
 //! Subprocess-based Ghidra Decompiler interface.
 //!
+//! **DEPRECATED**: This module provides legacy subprocess-based decompilation.
+//! Consider using `DecompilerNative` (FFI) instead for better performance.
+//!
 //! Two modes:
 //! - `DecompilerServer`: Persistent server process for faster repeated requests
 //! - `DecompilerPool`: Pool of server processes for parallel decompilation
+//!
+//! The FFI approach (`ffi::DecompilerNative`) is now recommended because:
+//! - No subprocess spawn overhead
+//! - Better memory efficiency
+//! - FID (Function ID) support
+//! - Simpler error handling
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::Deserialize;
@@ -35,6 +44,12 @@ struct DecompilerResponse {
 }
 
 /// Persistent decompiler server (reuses single process for multiple requests)
+///
+/// **DEPRECATED**: Consider using `DecompilerNative` (FFI) for better performance.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use ffi::DecompilerNative instead for better performance and FID support"
+)]
 pub struct DecompilerServer {
     cli_path: std::path::PathBuf,
     sla_dir: String,
@@ -433,6 +448,13 @@ pub fn find_cli() -> Option<std::path::PathBuf> {
     None
 }
 
+///
+/// **DEPRECATED**: Consider using `DecompilerNative` (FFI) for better performance.
+/// FFI provides similar throughput without the overhead of multiple processes.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use ffi::DecompilerNative instead for better performance and FID support"
+)]
 // Keep old function name for compatibility
 pub fn find_library() -> Option<std::path::PathBuf> {
     find_cli()

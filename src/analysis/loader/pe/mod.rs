@@ -128,6 +128,30 @@ impl PeLoader {
             });
         }
 
+        // Parse Exception Directory (PDATA) for x64 binaries - contains function metadata
+        // DataDirectory[3] is Exception Table (.pdata section)
+        if is_64bit {
+            let exception_dir_rva = match &pe_file.nt_headers.optional_header {
+                OptionalHeader::Pe32Plus(opt) => opt
+                    .data_directories
+                    .get(3)
+                    .map(|d| (d.virtual_address, d.size))
+                    .unwrap_or((0, 0)),
+                _ => (0, 0),
+            };
+
+            if exception_dir_rva.0 != 0 && exception_dir_rva.1 > 0 {
+                if let Ok(pdata_functions) = loader.parse_pdata(exception_dir_rva.0, exception_dir_rva.1, image_base) {
+                    // Merge with existing functions, avoiding duplicates
+                    for pdata_func in pdata_functions {
+                        if !functions_info.iter().any(|f| f.address == pdata_func.address) {
+                            functions_info.push(pdata_func);
+                        }
+                    }
+                }
+            }
+        }
+
         LoadedBinaryBuilder::new(path, data)
             .format("PE (binrw)")
             .arch_spec(arch_spec)
@@ -371,6 +395,69 @@ impl<'a> PeLoaderImpl<'a> {
         }
 
         Ok((functions, symbol_map))
+    }
+
+    fn parse_pdata(
+        &self,
+        pdata_rva: u32,
+        pdata_size: u32,
+        image_base: u64,
+    ) -> Result<Vec<crate::analysis::loader::types::FunctionInfo>> {
+        let mut functions = Vec::new();
+
+        // PDATA contains RUNTIME_FUNCTION structures (12 bytes each for x64)
+        // struct RUNTIME_FUNCTION {
+        //     DWORD BeginAddress;  // RVA of function start
+        //     DWORD EndAddress;    // RVA of function end
+        //     DWORD UnwindInfoAddress; // RVA of unwind info
+        // }
+        
+        let pdata_offset = match self.rva_to_file_offset(pdata_rva, image_base) {
+            Some(off) => off,
+            None => return Ok(functions),
+        };
+
+        let entry_count = (pdata_size / 12) as usize; // 12 bytes per entry
+        
+        for i in 0..entry_count {
+            let entry_offset = pdata_offset + (i * 12) as u64;
+            
+            if entry_offset + 12 > self.data.len() as u64 {
+                break;
+            }
+
+            // Read 3 DWORDs (little-endian)
+            let begin_rva = u32::from_le_bytes([
+                self.data[entry_offset as usize],
+                self.data[(entry_offset + 1) as usize],
+                self.data[(entry_offset + 2) as usize],
+                self.data[(entry_offset + 3) as usize],
+            ]);
+
+            let end_rva = u32::from_le_bytes([
+                self.data[(entry_offset + 4) as usize],
+                self.data[(entry_offset + 5) as usize],
+                self.data[(entry_offset + 6) as usize],
+                self.data[(entry_offset + 7) as usize],
+            ]);
+
+            if begin_rva == 0 || begin_rva >= end_rva {
+                continue;
+            }
+
+            let func_addr = image_base + begin_rva as u64;
+            let func_size = (end_rva - begin_rva) as u64;
+
+            functions.push(crate::analysis::loader::types::FunctionInfo {
+                name: format!("FUN_0x{:x}", func_addr),
+                address: func_addr,
+                size: func_size,
+                is_export: false,
+                is_import: false,
+            });
+        }
+
+        Ok(functions)
     }
 }
 

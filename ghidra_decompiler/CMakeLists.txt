@@ -95,6 +95,11 @@ add_executable(fission_decomp
 
 # Fission Decompiler Shared Library (for FFI)
 set(FFI_SOURCES
+    ${FISSION_MODULES_DIR}/ffi/DecompContext.cpp
+    ${FISSION_MODULES_DIR}/ffi/MemoryManager.cpp
+    ${FISSION_MODULES_DIR}/ffi/SymbolManager.cpp
+    ${FISSION_MODULES_DIR}/ffi/FidManager.cpp
+    ${FISSION_MODULES_DIR}/ffi/DecompilerCore.cpp
     ${FISSION_MODULES_DIR}/ffi/libdecomp_ffi.cpp
 )
 

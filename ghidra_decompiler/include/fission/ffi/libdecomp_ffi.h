@@ -26,8 +26,15 @@ extern "C" {
     #define DECOMP_API __attribute__((visibility("default")))
 #endif
 
-// Opaque handle to decompiler context
-typedef struct DecompContext DecompContext;
+// Forward declaration - actual definition in DecompContext.h
+namespace fission {
+namespace ffi {
+    struct DecompContext;
+}
+}
+
+// Use fission::ffi::DecompContext in C API
+using DecompContext = fission::ffi::DecompContext;
 
 // Error codes
 typedef enum DecompError {
@@ -37,6 +44,7 @@ typedef enum DecompError {
     DECOMP_ERR_DECOMPILE = -3,
     DECOMP_ERR_INVALID_CONTEXT = -4,
     DECOMP_ERR_OUT_OF_MEMORY = -5,
+    DECOMP_ERR_FID_LOAD = -6,
 } DecompError;
 
 // ============================================================================
@@ -106,6 +114,48 @@ DECOMP_API void decomp_add_symbol(
  */
 DECOMP_API void decomp_clear_symbols(DecompContext* ctx);
 
+/**
+ * Declare a function at the given address.
+ * This helps Ghidra recognize function boundaries and improves
+ * decompilation quality by pre-defining known function locations.
+ * 
+ * @param ctx Decompiler context
+ * @param addr Address where the function starts
+ * @param name Optional function name (NULL for auto-generated)
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_add_function(
+    DecompContext* ctx,
+    uint64_t addr,
+    const char* name
+);
+
+/**
+ * Add a memory block (section) to the decompiler context.
+ * This helps Ghidra understand the memory layout and distinguish
+ * between code and data sections, and maps virtual addresses to file offsets.
+ * 
+ * @param ctx Decompiler context
+ * @param name Section name (e.g., ".text", ".data")
+ * @param va_addr Virtual address of the section
+ * @param va_size Size of the section in virtual memory
+ * @param file_offset Offset of section in PE file
+ * @param file_size Size of section in PE file
+ * @param is_executable Whether this section contains executable code
+ * @param is_writable Whether this section is writable
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_add_memory_block(
+    DecompContext* ctx,
+    const char* name,
+    uint64_t va_addr,
+    uint64_t va_size,
+    uint64_t file_offset,
+    uint64_t file_size,
+    int is_executable,
+    int is_writable
+);
+
 // ============================================================================
 // Decompilation
 // ============================================================================
@@ -164,6 +214,30 @@ DECOMP_API void decomp_set_feature(
     const char* feature,
     int enabled
 );
+
+// ============================================================================
+// FID (Function ID) Analysis
+// ============================================================================
+
+/**
+ * Load a Function ID database (.fidbf file).
+ * 
+ * @param ctx Decompiler context
+ * @param db_path Path to .fidbf file
+ * @return DECOMP_OK on success, DECOMP_ERR_FID_LOAD on failure
+ */
+DECOMP_API DecompError decomp_load_fid_db(DecompContext* ctx, const char* db_path);
+
+/**
+ * Try to match a function using FID.
+ * 
+ * @param ctx Decompiler context
+ * @param addr Address of the function start
+ * @param len Length of the function code in bytes
+ * @return Allocated string with matched function name, or NULL if no match.
+ *         Caller must free with decomp_free_string().
+ */
+DECOMP_API char* decomp_get_fid_match(DecompContext* ctx, uint64_t addr, size_t len);
 
 #ifdef __cplusplus
 }
