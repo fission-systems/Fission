@@ -68,8 +68,13 @@ impl DisasmEngine {
         formatter.options_mut().set_hex_prefix("0x");
         formatter.options_mut().set_hex_suffix("");
 
-        let mut results = Vec::new();
+        // Pre-allocate results with estimated capacity
+        // Average x86/x64 instruction is ~4 bytes, so estimate instruction count
+        let estimated_count = bytes.len() / 4;
+        let mut results = Vec::with_capacity(estimated_count.max(16));
         let mut instruction = Instruction::default();
+        // Pre-allocate output string buffer to reduce reallocations
+        let mut output = String::with_capacity(64);
 
         let mut offset = 0usize;
         while decoder.can_decode() {
@@ -84,7 +89,7 @@ impl DisasmEngine {
             offset += insn_len;
 
             // Format the instruction
-            let mut output = String::new();
+            output.clear();
             formatter.format(&instruction, &mut output);
 
             // Split mnemonic and operands
