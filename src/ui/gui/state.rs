@@ -125,7 +125,7 @@ pub struct AnalysisState {
     /// Rename dialog state: (address, current_input)
     pub rename_dialog: Option<(u64, String)>,
     /// Reconstructed imports (Dynamic Mode)
-    pub reconstructed_imports: Vec<crate::debug_engine::importer::ImportEntry>,
+    pub reconstructed_imports: Vec<crate::unpacker::importer::ImportEntry>,
 }
 
 /// Debug-related state (debugger, breakpoints, memory)
@@ -156,7 +156,7 @@ pub struct DebugStateUI {
     /// Process filter for attach dialog
     pub process_filter: String,
     /// TitanEngine instance (Clean Room)
-    pub titan_engine: Option<Arc<RwLock<crate::debug_engine::engine::TitanEngine>>>,
+    pub titan_engine: Option<Arc<RwLock<crate::unpacker::engine::TitanEngine>>>,
 }
 
 /// Script-related state (Python scripting)
@@ -370,7 +370,7 @@ impl Default for AnalysisState {
     fn default() -> Self {
         // Use configured cache size or default to 100
         let cache_size = NonZeroUsize::new(CONFIG.analysis.decompile_cache_size)
-            .unwrap_or(NonZeroUsize::new(100).unwrap());
+            .unwrap_or_else(|| NonZeroUsize::new(100).expect("100 is non-zero"));
 
         Self {
             loaded_binary: None,
@@ -411,7 +411,7 @@ impl Default for DebugStateUI {
             timeline: crate::debug::ttd::Timeline::default(),
             process_filter: String::new(),
             titan_engine: Some(Arc::new(RwLock::new(
-                crate::debug_engine::engine::TitanEngine::new(),
+                crate::unpacker::engine::TitanEngine::new(),
             ))),
         }
     }

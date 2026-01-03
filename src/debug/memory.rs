@@ -151,19 +151,34 @@ impl MemoryManager {
     /// Read a u64 value from memory (little-endian)
     pub fn read_u64(&self, address: u64) -> Result<u64, MemoryError> {
         let data = self.read(address, 8)?;
-        Ok(u64::from_le_bytes(data.try_into().unwrap()))
+        let bytes: [u8; 8] = data.try_into()
+            .map_err(|_| MemoryError::ReadFailed {
+                address,
+                reason: "Invalid data length for u64".to_string()
+            })?;
+        Ok(u64::from_le_bytes(bytes))
     }
 
     /// Read a u32 value from memory (little-endian)
     pub fn read_u32(&self, address: u64) -> Result<u32, MemoryError> {
         let data = self.read(address, 4)?;
-        Ok(u32::from_le_bytes(data.try_into().unwrap()))
+        let bytes: [u8; 4] = data.try_into()
+            .map_err(|_| MemoryError::ReadFailed {
+                address,
+                reason: "Invalid data length for u32".to_string()
+            })?;
+        Ok(u32::from_le_bytes(bytes))
     }
 
     /// Read a u16 value from memory (little-endian)
     pub fn read_u16(&self, address: u64) -> Result<u16, MemoryError> {
         let data = self.read(address, 2)?;
-        Ok(u16::from_le_bytes(data.try_into().unwrap()))
+        let bytes: [u8; 2] = data.try_into()
+            .map_err(|_| MemoryError::ReadFailed {
+                address,
+                reason: "Invalid data length for u16".to_string()
+            })?;
+        Ok(u16::from_le_bytes(bytes))
     }
 
     /// Read a u8 value from memory

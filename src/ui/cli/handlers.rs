@@ -271,12 +271,17 @@ pub fn cmd_decompile(state: &CliState, addr: u64) {
         println!("{} Initializing native decompiler...", "[*]".blue());
 
         // Get SLA directory
-        let sla_dir = std::env::current_dir()
-            .unwrap()
-            .join("ghidra_decompiler")
-            .join("languages")
-            .to_string_lossy()
-            .into_owned();
+        let sla_dir = match std::env::current_dir() {
+            Ok(dir) => dir
+                .join("ghidra_decompiler")
+                .join("languages")
+                .to_string_lossy()
+                .into_owned(),
+            Err(e) => {
+                println!("{} Failed to get current directory: {}", "[!]".red(), e);
+                return;
+            }
+        };
 
         match DecompilerNative::new(&sla_dir) {
             Ok(mut native) => {
@@ -291,8 +296,30 @@ pub fn cmd_decompile(state: &CliState, addr: u64) {
                     return;
                 }
 
+                // Register all sections for proper VA-to-file-offset mapping
+                println!("{} Registering {} sections...", "[*]".blue(), binary.sections.len());
+                for section in &binary.sections {
+                    if let Err(e) = native.add_memory_block(
+                        &section.name,
+                        section.virtual_address,
+                        section.virtual_size,
+                        section.file_offset,
+                        section.file_size,
+                        section.is_executable,
+                        section.is_writable,
+                    ) {
+                        println!(
+                            "{} Warning: Failed to add section {}: {}",
+                            "[!]".yellow(),
+                            section.name,
+                            e
+                        );
+                    }
+                }
+
                 // Add symbols
                 native.add_symbols(&binary.iat_symbols);
+                println!("{} Decompiling...", "[*]".blue());
 
                 // Decompile
                 match native.decompile(addr) {
@@ -449,6 +476,78 @@ pub fn cmd_analyze(state: &mut CliState) {
                 discovered,
                 after
             );
+        }
+        None => {
+            print_no_binary_message();
+        }
+    }
+}
+
+pub fn cmd_xrefs(state: &CliState, addr: u64) {
+    match &state.binary {
+        Some(binary) => {
+            println!();
+            println!("{}", "Cross-Reference Analysis".cyan().bold());
+            println!("{} {}", "Target Address:".dimmed(), format!("0x{:x}", addr).cyan());
+            println!();
+            
+            // Find function containing this address
+            let mut found_function = None;
+            for func in &binary.functions {
+                if addr >= func.address && addr < func.address + func.size {
+                    found_function = Some(func);
+                    break;
+                }
+            }
+            
+            if let Some(func) = found_function {
+                println!("{}", "Function Information:".yellow());
+                println!("  Name:    {}", func.name.as_str());
+                println!("  Address: 0x{:x}", func.address);
+                println!("  Size:    {} bytes", func.size);
+                if func.is_import {
+                    println!("  Type:    {}", "IMPORT".cyan());
+                } else if func.is_export {
+                    println!("  Type:    {}", "EXPORT".cyan());
+                } else {
+                    println!("  Type:    {}", "INTERNAL".dimmed());
+                }
+                println!();
+            } else {
+                println!("{}", "Address is not within any known function".dimmed());
+                println!();
+            }
+            
+            // Show potential callers (functions that might call near this address)
+            println!("{}", "Potential Callers:".yellow());
+            let mut call_count = 0;
+            
+            for func in &binary.functions {
+                // Simple heuristic: show functions in reasonable range
+                let distance = if func.address > addr {
+                    func.address - addr
+                } else {
+                    addr - func.address
+                };
+                
+                if distance < 0x100000 && func.address != addr {
+                    if call_count < 10 {  // Limit to first 10
+                        println!(
+                            "  {} 0x{:08x}  {}",
+                            if distance < 0x1000 { "▸".green() } else { "·".dimmed() },
+                            func.address,
+                            func.name.as_str().dimmed()
+                        );
+                        call_count += 1;
+                    }
+                }
+            }
+            
+            if call_count == 0 {
+                println!("  {}", "No nearby functions found".dimmed());
+            } else if call_count == 10 {
+                println!("  {}", "... (showing first 10)".dimmed());
+            }
         }
         None => {
             print_no_binary_message();

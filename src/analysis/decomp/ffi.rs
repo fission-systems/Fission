@@ -85,10 +85,21 @@ extern "C" {
 ///
 /// This provides direct in-process access to the Ghidra decompiler,
 /// avoiding subprocess spawn overhead.
+///
+/// # Safety
+///
+/// This struct wraps a raw C++ pointer and is marked as Send to allow
+/// use across threads. However, the underlying C++ object is NOT thread-safe.
+/// Users must ensure:
+/// - Only one thread accesses this instance at a time (use Mutex if sharing)
+/// - The instance is properly dropped before the thread terminates
+/// - No use-after-free by keeping references after drop
 #[cfg(feature = "native_decomp")]
 pub struct DecompilerNative {
     ctx: *mut DecompContext,
     sla_dir: String,
+    // Track if context is valid to prevent use-after-free
+    is_valid: bool,
 }
 
 #[cfg(feature = "native_decomp")]
@@ -98,8 +109,12 @@ unsafe impl Send for DecompilerNative {}
 impl DecompilerNative {
     /// Create a new native decompiler instance
     pub fn new(sla_dir: &str) -> Result<Self> {
+        if sla_dir.is_empty() {
+            return Err(FissionError::decompiler("SLA directory cannot be empty"));
+        }
+        
         let sla_cstr = CString::new(sla_dir)
-            .map_err(|_| FissionError::decompiler("Invalid SLA directory path"))?;
+            .map_err(|_| FissionError::decompiler("Invalid SLA directory path (contains null byte)"))?;
 
         let ctx = unsafe { decomp_create(sla_cstr.as_ptr()) };
         if ctx.is_null() {
@@ -111,11 +126,28 @@ impl DecompilerNative {
         Ok(Self {
             ctx,
             sla_dir: sla_dir.to_string(),
+            is_valid: true,
         })
+    }
+    
+    /// Check if the decompiler context is still valid
+    fn check_valid(&self) -> Result<()> {
+        if !self.is_valid {
+            return Err(FissionError::decompiler("Decompiler context has been invalidated"));
+        }
+        if self.ctx.is_null() {
+            return Err(FissionError::decompiler("Decompiler context pointer is null"));
+        }
+        Ok(())
     }
 
     /// Load a binary into the decompiler context
     pub fn load_binary(&mut self, data: &[u8], base_addr: u64, is_64bit: bool) -> Result<()> {
+        self.check_valid()?;
+        
+        if data.is_empty() {
+            return Err(FissionError::decompiler("Cannot load empty binary"));
+        }
         let result = unsafe {
             decomp_load_binary(
                 self.ctx,
@@ -135,6 +167,9 @@ impl DecompilerNative {
 
     /// Add a symbol (function name) at the given address
     pub fn add_symbol(&mut self, addr: u64, name: &str) {
+        if self.check_valid().is_err() || name.is_empty() {
+            return;
+        }
         if let Ok(name_cstr) = CString::new(name) {
             unsafe { decomp_add_symbol(self.ctx, addr, name_cstr.as_ptr()) };
         }
@@ -142,6 +177,9 @@ impl DecompilerNative {
 
     /// Add multiple symbols from IAT or symbol table
     pub fn add_symbols(&mut self, symbols: &HashMap<u64, String>) {
+        if self.check_valid().is_err() {
+            return;
+        }
         for (addr, name) in symbols {
             self.add_symbol(*addr, name);
         }
@@ -158,9 +196,11 @@ impl DecompilerNative {
     /// decompilation quality. Should be called after load_binary()
     /// with all known function addresses.
     pub fn add_function(&mut self, addr: u64, name: Option<&str>) -> Result<()> {
+        self.check_valid()?;
+        
         let name_cstr = if let Some(n) = name {
             Some(CString::new(n)
-                .map_err(|_| FissionError::decompiler("Invalid function name"))?)
+                .map_err(|_| FissionError::decompiler("Invalid function name (contains null byte)"))?)
         } else {
             None
         };
@@ -190,8 +230,14 @@ impl DecompilerNative {
         is_executable: bool,
         is_writable: bool,
     ) -> Result<()> {
+        self.check_valid()?;
+        
+        if name.is_empty() {
+            return Err(FissionError::decompiler("Section name cannot be empty"));
+        }
+        
         let name_cstr = CString::new(name)
-            .map_err(|_| FissionError::decompiler("Invalid section name"))?;
+            .map_err(|_| FissionError::decompiler("Invalid section name (contains null byte)"))?;
 
         let result = unsafe {
             decomp_add_memory_block(
@@ -215,6 +261,8 @@ impl DecompilerNative {
 
     /// Decompile a function at the given address
     pub fn decompile(&self, addr: u64) -> Result<String> {
+        self.check_valid()?;
+        
         let result_ptr = unsafe { decomp_function(self.ctx, addr) };
 
         if result_ptr.is_null() {
@@ -233,8 +281,14 @@ impl DecompilerNative {
 
     /// Set GDT (Ghidra Data Type) file for type information
     pub fn set_gdt(&mut self, gdt_path: &str) -> Result<()> {
+        self.check_valid()?;
+        
+        if gdt_path.is_empty() {
+            return Err(FissionError::decompiler("GDT path cannot be empty"));
+        }
+        
         let path_cstr =
-            CString::new(gdt_path).map_err(|_| FissionError::decompiler("Invalid GDT path"))?;
+            CString::new(gdt_path).map_err(|_| FissionError::decompiler("Invalid GDT path (contains null byte)"))?;
 
         let result = unsafe { decomp_set_gdt(self.ctx, path_cstr.as_ptr()) };
 
@@ -247,6 +301,9 @@ impl DecompilerNative {
 
     /// Enable or disable a decompiler feature
     pub fn set_feature(&mut self, feature: &str, enabled: bool) {
+        if self.check_valid().is_err() || feature.is_empty() {
+            return;
+        }
         if let Ok(feat_cstr) = CString::new(feature) {
             unsafe {
                 decomp_set_feature(self.ctx, feat_cstr.as_ptr(), if enabled { 1 } else { 0 });
@@ -256,8 +313,14 @@ impl DecompilerNative {
 
     /// Load FID (Function ID) database for library function recognition
     pub fn load_fid_database(&mut self, db_path: &str) -> Result<()> {
+        self.check_valid()?;
+        
+        if db_path.is_empty() {
+            return Err(FissionError::decompiler("FID database path cannot be empty"));
+        }
+        
         let path_cstr = CString::new(db_path)
-            .map_err(|_| FissionError::decompiler("Invalid FID database path"))?;
+            .map_err(|_| FissionError::decompiler("Invalid FID database path (contains null byte)"))?;
 
         let result = unsafe { decomp_load_fid_db(self.ctx, path_cstr.as_ptr()) };
 
@@ -307,6 +370,9 @@ impl DecompilerNative {
 #[cfg(feature = "native_decomp")]
 impl Drop for DecompilerNative {
     fn drop(&mut self) {
+        // Invalidate context first to prevent use-after-free
+        self.is_valid = false;
+        
         if !self.ctx.is_null() {
             unsafe { decomp_destroy(self.ctx) };
             self.ctx = ptr::null_mut();

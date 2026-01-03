@@ -23,7 +23,8 @@ impl FissionModule for PluginModule {
         // Register PluginManager as a service so others can use it
         ctx.register_service("PluginManager", self.manager.clone());
 
-        let mut mgr = self.manager.lock().unwrap();
+        let mut mgr = self.manager.lock()
+            .map_err(|e| FissionError::Plugin(format!("Failed to lock plugin manager: {}", e)))?;
         // Inject dependencies using set_event_bus which we added earlier
         mgr.set_event_bus(ctx.event_bus.clone());
 

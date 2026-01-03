@@ -192,6 +192,22 @@ impl eframe::App for FissionApp {
         // Apply UI Scale
         ctx.set_pixels_per_point(self.state.settings.ui_scale);
 
+        // Clear selected function if no binary is loaded (prevents egui state restoration issues)
+        if self.state.analysis.loaded_binary.is_none() {
+            if self.state.analysis.selected_function.is_some() {
+                self.state.analysis.selected_function = None;
+            }
+            // Reset decompiler context flag if no binary
+            if self.state.analysis.decompiler_context_loaded {
+                self.state.analysis.decompiler_context_loaded = false;
+            }
+            // Also clear any open tabs since they're invalid without a binary
+            if !self.state.ui.open_tabs.is_empty() {
+                self.state.ui.open_tabs.clear();
+                self.state.ui.active_tab_index = None;
+            }
+        }
+
         // Update memory usage every 2 seconds
         if self.last_mem_update.elapsed().as_secs() >= 2 {
             self.sysinfo.refresh_memory();
@@ -341,6 +357,12 @@ impl FissionApp {
     }
 
     fn open_function_tabs(&mut self, func: &FunctionInfo) {
+        // Skip if no binary is loaded
+        if self.state.analysis.loaded_binary.is_none() {
+            self.state.log("[!] Cannot open function: No binary loaded".to_string());
+            return;
+        }
+        
         analysis_ops::open_function_tabs(
             &mut self.state,
             func,
