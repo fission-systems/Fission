@@ -161,11 +161,18 @@ pub fn spawn_worker(
     let native_decomp: Arc<Mutex<Option<DecompilerNative>>> = Arc::new(Mutex::new(None));
 
     // Get worker count from config
+    // IMPORTANT: Native FFI mode uses single worker because Ghidra's global state
+    // (SleighArchitecture::specpaths, print languages) is not thread-safe
+    #[cfg(feature = "native_decomp")]
+    let num_workers = 1; // Single worker for FFI to avoid Ghidra thread-safety issues
+    #[cfg(not(feature = "native_decomp"))]
     let num_workers = CONFIG.decompiler.effective_num_workers();
 
     // Log which backend will be used
     #[cfg(feature = "native_decomp")]
-    crate::core::logging::info("[decomp-worker] Native FFI backend enabled (10-100x faster)");
+    crate::core::logging::info(
+        "[decomp-worker] Native FFI backend (single worker for thread safety)",
+    );
     #[cfg(not(feature = "native_decomp"))]
     crate::core::logging::info("[decomp-worker] Using subprocess pool backend");
 
