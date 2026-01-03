@@ -8,14 +8,19 @@
 #include "fission/ffi/libdecomp_ffi.h"
 #include "fission/core/DecompilerContext.h"
 #include "fission/core/CliArchitecture.h"
+#include "fission/core/ArchPolicy.h"
 #include "fission/loader/MemoryImage.h"
 #include "fission/loader/BinaryDetector.h"
+#include "fission/types/TypeManager.h"
 #include "fission/types/GdtBinaryParser.h"
 #include "fission/types/PrototypeEnforcer.h"
 #include "fission/types/StructureAnalyzer.h"
+#include "fission/types/GuidParser.h"
 #include "fission/analysis/FunctionMatcher.h"
 #include "fission/processing/PostProcessors.h"
+#include "fission/processing/Constants.h"
 #include "fission/processing/StringScanner.h"
+#include "fission/utils/file_utils.h"
 #include "libdecomp.hh"
 #include "sleigh_arch.hh"
 
@@ -24,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <fstream>
 
 using namespace ghidra;
 using namespace fission::core;
@@ -31,6 +37,7 @@ using namespace fission::loader;
 using namespace fission::types;
 using namespace fission::analysis;
 using namespace fission::processing;
+using namespace fission::utils;
 
 // ============================================================================
 // Internal Context Structure
@@ -267,6 +274,64 @@ extern "C" DECOMP_API void decomp_set_feature(
 // Internal Helpers
 // ============================================================================
 
+// Helper: Load GDT types for architecture
+static void load_gdt_for_arch(ghidra::Architecture* arch, bool is_64bit) {
+    std::string suffix = is_64bit ? "_64.gdt" : "_32.gdt";
+    std::vector<std::string> candidates = {
+        "../../ghidra/typeinfo/win32/windows_vs12" + suffix,
+        "../ghidra/typeinfo/win32/windows_vs12" + suffix,
+        "./ghidra/typeinfo/win32/windows_vs12" + suffix,
+        "ghidra/typeinfo/win32/windows_vs12" + suffix
+    };
+    
+    for (const auto& path : candidates) {
+        if (file_exists(path)) {
+            std::cerr << "[libdecomp FFI] Loading GDT from: " << path << std::endl;
+            GdtBinaryParser gdt;
+            if (gdt.load(path)) {
+                TypeManager::load_types_from_gdt(arch->types, &gdt, ArchPolicy::getPointerSize(arch));
+            }
+            break;
+        }
+    }
+}
+
+// Helper: Load GUID maps for substitution
+static std::map<std::string, std::string> load_guid_maps() {
+    std::map<std::string, std::string> guid_map;
+    
+    std::vector<std::string> guid_files = {
+        "../../ghidra/typeinfo/win32/msvcrt/guids.txt",
+        "../ghidra/typeinfo/win32/msvcrt/guids.txt",
+        "./ghidra/typeinfo/win32/msvcrt/guids.txt",
+        "ghidra/typeinfo/win32/msvcrt/guids.txt",
+        "../../ghidra/typeinfo/win32/msvcrt/iids.txt",
+        "../ghidra/typeinfo/win32/msvcrt/iids.txt",
+        "./ghidra/typeinfo/win32/msvcrt/iids.txt",
+        "ghidra/typeinfo/win32/msvcrt/iids.txt"
+    };
+    
+    for (const auto& path : guid_files) {
+        if (file_exists(path)) {
+            std::string content = read_file_content(path);
+            if (!content.empty()) {
+                std::map<std::string, std::string> loaded = load_guids_to_map(content);
+                guid_map.insert(loaded.begin(), loaded.end());
+            }
+        }
+    }
+    
+    if (!guid_map.empty()) {
+        std::cerr << "[libdecomp FFI] Loaded " << guid_map.size() << " GUIDs/IIDs" << std::endl;
+    }
+    
+    return guid_map;
+}
+
+// Global GUID map (loaded once)
+static std::map<std::string, std::string> g_guid_map;
+static bool g_guid_map_loaded = false;
+
 static void ensure_architecture(DecompContext* ctx) {
     if (ctx->arch) return;
     
@@ -281,16 +346,27 @@ static void ensure_architecture(DecompContext* ctx) {
     );
     
     // CRITICAL: Initialize Sleigh engine and register print languages
-    // Without this, we get "No print languages registered" error
     ghidra::DocumentStorage store;
     ctx->arch->init(store);
     
     // Configure advanced options (infer_pointers, analyze_loops, etc.)
     configure_arch(ctx->arch.get());
     
+    // Register Windows types (DWORD, HANDLE, etc.)
+    TypeManager::register_windows_types(ctx->arch->types, ArchPolicy::getPointerSize(ctx->arch.get()));
+    
+    // Load GDT type information
+    load_gdt_for_arch(ctx->arch.get(), ctx->is_64bit);
+    
     // Inject IAT symbols
     if (!ctx->symbols.empty()) {
         ctx->arch->injectIatSymbols(ctx->symbols);
+    }
+    
+    // Load GUID map (once)
+    if (!g_guid_map_loaded) {
+        g_guid_map = load_guid_maps();
+        g_guid_map_loaded = true;
     }
     
     std::cerr << "[libdecomp FFI] Architecture initialized: " << sleigh_id << std::endl;
@@ -373,13 +449,49 @@ static std::string run_decompilation(DecompContext* ctx, uint64_t addr) {
     
     std::string result = ss.str();
     
-    std::cerr << "[libdecomp FFI] Decompilation complete, " << result.size() << " bytes" << std::endl;
+    std::cerr << "[libdecomp FFI] Raw output: " << result.size() << " bytes, post-processing..." << std::endl;
     
-    // Apply post-processing (SEH cleanup, type fixups, etc.)
-    result = fission::processing::cleanup_seh_boilerplate(result);
-    result = fission::processing::replace_xunknown_types(result);
-    result = fission::processing::replace_interlocked_patterns(result);
-    result = fission::processing::improve_internal_function_names(result);
+    // ========================================================================
+    // Full Post-Processing Chain (matching Pool mode fission_decomp.cpp)
+    // ========================================================================
+    
+    // Step 1: IAT symbol replacement (pcRamXXX -> function_name)
+    result = post_process_iat_calls(result, ctx->symbols);
+    
+    // Step 2: Smart constant replacement (context-aware API parameter naming)
+    result = smart_constant_replace(result);
+    
+    // Step 3: Fallback constant replacement for enum values
+    // Using empty map for now - could be expanded to load from config
+    std::map<uint64_t, std::string> enum_values;
+    result = post_process_constants(result, enum_values);
+    
+    // Step 4: GUID substitution (IID_IUnknown, CLSID_*, etc.)
+    if (!g_guid_map.empty()) {
+        result = substitute_guids(result, g_guid_map);
+    }
+    
+    // Step 5: Unicode string recovery
+    result = recover_unicode_strings(result);
+    
+    // Step 6: Interlocked pattern replacement (LOCK prefix -> Interlocked*)
+    result = replace_interlocked_patterns(result);
+    
+    // Step 7: xunknown/undefined type replacement
+    result = replace_xunknown_types(result);
+    
+    // Step 8: SEH boilerplate cleanup
+    result = cleanup_seh_boilerplate(result);
+    
+    // Step 9: Internal function naming improvement (func_0x -> sub_)
+    result = improve_internal_function_names(result);
+    
+    // Step 10: Apply FID-resolved function names (if any loaded)
+    // Using empty map for now - could integrate with FID database
+    std::map<uint64_t, std::string> fid_names;
+    result = apply_fid_names(result, fid_names);
+    
+    std::cerr << "[libdecomp FFI] Decompilation complete, " << result.size() << " bytes after post-processing" << std::endl;
     
     return result;
 }

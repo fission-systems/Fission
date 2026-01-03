@@ -29,6 +29,7 @@ codegen-units = 1
 default = ["gui", "cli"]
 gui = ["dep:eframe", "dep:egui", "dep:rfd", "dep:egui_extras"]
 cli = ["dep:reedline", "dep:clap"]
+tui = ["dep:ratatui", "dep:crossterm", "dep:clap"]
 python = ["dep:pyo3"]
 native_decomp = []
 
@@ -45,6 +46,10 @@ libloading = "0.8"
 reedline = { version = "0.30", optional = true }
 clap = { version = "4.5", features = ["derive"], optional = true }
 
+# 2b. TUI
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
+
 # 3. Binary Parsing & Disassembly
 
 object = "0.32"
@@ -58,6 +63,8 @@ bytes = "1.5"
 tokio = { version = "1.36", features = ["full", "rt-multi-thread"] }
 anyhow = "1.0"
 thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
@@ -70,8 +77,6 @@ base64 = "0.22"
 colored = "2.1"
 regex = "1.10"  # For efficient pattern matching
 lru = "0.12"    # LRU cache for decompilation results
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 toml = "0.8"
 dirs = "5.0"
 flate2 = "1.1.5"
