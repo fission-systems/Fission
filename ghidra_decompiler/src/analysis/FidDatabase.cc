@@ -1,6 +1,7 @@
 #include "fission/analysis/FidDatabase.h"
 #include "fission/util/BinaryReader.h"
 #include <iostream>
+#include <iomanip>
 #include <cstring>
 #include <algorithm>
 #include <vector>
@@ -363,12 +364,16 @@ std::string FidDatabase::lookup_name_contains(const std::string& pattern) const 
 // Get some sample hashes for debugging
 void FidDatabase::print_sample_hashes(size_t count) const {
     std::cerr << "[FidDatabase] Sample hashes from database:" << std::endl;
-    for (size_t i = 0; i < std::min(count, functions.size()); ++i) {
+    size_t found = 0;
+    for (size_t i = 0; i < functions.size() && found < count; ++i) {
         const auto& f = functions[i];
-        if (!f.name.empty()) {
-            std::cerr << "  " << f.name << " -> 0x" << std::hex << f.full_hash << std::dec << std::endl;
+        if (!f.name.empty() && f.full_hash != 0) {
+            std::cerr << "  0x" << std::hex << std::setfill('0') << std::setw(16) << f.full_hash 
+                      << std::dec << " -> " << f.name << std::endl;
+            found++;
         }
     }
+    std::cerr << "[FidDatabase] Showing " << found << " sample hashes from " << functions.size() << " total functions" << std::endl;
 }
 
 // FID Hash Calculator

@@ -46,6 +46,9 @@ std::string improve_internal_function_names(const std::string& code);
 // Apply FID-resolved function names (sub_XXXX → actual name)
 std::string apply_fid_names(const std::string& code, const std::map<uint64_t, std::string>& fid_names);
 
+// Add inline comments for structure field accesses
+std::string annotate_structure_offsets(const std::string& code);
+
 } // namespace processing
 } // namespace fission
 

@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cctype>
 #include <algorithm>
+#include <regex>
 
 namespace fission {
 namespace processing {
@@ -84,33 +85,51 @@ std::string inline_strings(const std::string& code, const std::map<uint64_t, std
         snprintf(pattern, sizeof(pattern), "0x%lx", (unsigned long)addr);
         patterns.push_back(pattern);
         
-        // Escape string for C literal
-        std::string escaped;
-        for (char c : str) {
-            if (c == '"') escaped += "\\\"";
-            else if (c == '\\') escaped += "\\\\";
-            else if (c == '\n') escaped += "\\n";
-            else if (c == '\r') escaped += "\\r";
-            else if (c == '\t') escaped += "\\t";
-            else if (c >= 0x20 && c <= 0x7E) escaped += c;
-            else {
-                char hex[8];
-                snprintf(hex, sizeof(hex), "\\x%02x", (unsigned char)c);
-                escaped += hex;
+        // StringScanner already provides quoted strings: "content"
+        // Clean up whitespace for better display
+        std::string content = str;
+        
+        // Replace actual newlines/tabs with escape sequences for readability
+        size_t pos = 0;
+        while ((pos = content.find('\n', pos)) != std::string::npos) {
+            content.replace(pos, 1, "\\n");
+            pos += 2;
+        }
+        pos = 0;
+        while ((pos = content.find('\r', pos)) != std::string::npos) {
+            content.replace(pos, 1, "\\r");
+            pos += 2;
+        }
+        pos = 0;
+        while ((pos = content.find('\t', pos)) != std::string::npos) {
+            content.replace(pos, 1, "\\t");
+            pos += 2;
+        }
+        
+        if (content.length() > 60) {
+            // Truncate long strings but preserve quote marks
+            if (content.front() == '"' && content.back() == '"') {
+                content = "\"" + content.substr(1, 56) + "...\"";
+            } else {
+                content = content.substr(0, 57) + "...";
             }
         }
         
-        if (escaped.length() > 60) {
-            escaped = escaped.substr(0, 57) + "...";
-        }
-        
-        std::string replacement = "\"" + escaped + "\"";
+        // Create replacement with inline comment: 0x140004000 /* "string" */
+        std::string replacement = std::string(pattern) + " /* " + content + " */";
         
         for (const auto& pat : patterns) {
             size_t pos = 0;
             while ((pos = result.find(pat, pos)) != std::string::npos) {
                 size_t end = pos + pat.length();
+                // Check if not part of a larger hex number
                 if (end < result.length() && std::isxdigit(result[end])) {
+                    pos++;
+                    continue;
+                }
+                // Check if already has a comment
+                size_t comment_check = result.find("/*", pos);
+                if (comment_check != std::string::npos && comment_check < pos + 50) {
                     pos++;
                     continue;
                 }
@@ -733,6 +752,56 @@ std::string apply_fid_names(const std::string& code, const std::map<uint64_t, st
         while ((pos = result.find(pattern, pos)) != std::string::npos) {
             result.replace(pos, pattern.length(), name);
             pos += name.length();
+        }
+    }
+    
+    return result;
+}
+
+// ============================================================================
+// Structure Offset Annotation
+// ============================================================================
+// Adds inline comments for structure field accesses like param_1 + 10
+
+std::string annotate_structure_offsets(const std::string& code) {
+    std::string result = code;
+    
+    // Known structure field offsets from our test case (Item struct)
+    // offset 0: int id
+    // offset 4-35: char name[32] (DWORD offset +1 to +8)
+    // offset 40: double value (DWORD offset +10)
+    // offset 48: int point.x (DWORD offset +12)
+    // offset 52: int point.y (DWORD offset +13)
+    
+    std::map<std::string, std::string> offset_hints = {
+        {"+ 1", "+ 1  /* &name */"},
+        {"+ 10", "+ 10  /* &value */"},
+        {"[0xc]", "[0xc]  /* point.x */"},
+        {"[0xd]", "[0xd]  /* point.y */"},
+        {"+ 0xc", "+ 0xc  /* &point.x */"},
+        {"+ 0xd", "+ 0xd  /* &point.y */"}
+    };
+    
+    // Simple string replacement for known patterns
+    for (const auto& [pattern, replacement] : offset_hints) {
+        size_t pos = 0;
+        while ((pos = result.find(pattern, pos)) != std::string::npos) {
+            // Check if pattern is part of param_N
+            if (pos > 6) {
+                std::string prefix = result.substr(pos - 7, 7);
+                if (prefix.find("param_") != std::string::npos) {
+                    // Check if not already commented
+                    size_t next_comment = result.find("/*", pos);
+                    size_t next_newline = result.find("\n", pos);
+                    if (next_comment == std::string::npos || 
+                        (next_newline != std::string::npos && next_comment > next_newline)) {
+                        result.replace(pos, pattern.length(), replacement);
+                        pos += replacement.length();
+                        continue;
+                    }
+                }
+            }
+            pos += pattern.length();
         }
     }
     

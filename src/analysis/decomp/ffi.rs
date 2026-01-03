@@ -30,6 +30,7 @@ pub enum DecompError {
     ErrDecompile = -3,
     ErrInvalidContext = -4,
     ErrOutOfMemory = -5,
+    ErrFidLoad = -6,
 }
 
 impl DecompError {
@@ -56,11 +57,24 @@ extern "C" {
     ) -> DecompError;
     fn decomp_add_symbol(ctx: *mut DecompContext, addr: u64, name: *const c_char);
     fn decomp_clear_symbols(ctx: *mut DecompContext);
+    fn decomp_add_function(ctx: *mut DecompContext, addr: u64, name: *const c_char) -> DecompError;
+    fn decomp_add_memory_block(
+        ctx: *mut DecompContext,
+        name: *const c_char,
+        va_addr: u64,
+        va_size: u64,
+        file_offset: u64,
+        file_size: u64,
+        is_executable: c_int,
+        is_writable: c_int,
+    ) -> DecompError;
     fn decomp_function(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
     fn decomp_free_string(s: *mut c_char);
     fn decomp_get_last_error(ctx: *mut DecompContext) -> *const c_char;
     fn decomp_set_gdt(ctx: *mut DecompContext, gdt_path: *const c_char) -> DecompError;
     fn decomp_set_feature(ctx: *mut DecompContext, feature: *const c_char, enabled: c_int);
+    fn decomp_load_fid_db(ctx: *mut DecompContext, db_path: *const c_char) -> DecompError;
+    fn decomp_get_fid_match(ctx: *mut DecompContext, addr: u64, len: usize) -> *mut c_char;
 }
 
 // ============================================================================
@@ -138,6 +152,67 @@ impl DecompilerNative {
         unsafe { decomp_clear_symbols(self.ctx) };
     }
 
+    /// Declare a function at the given address
+    /// 
+    /// This helps Ghidra recognize function boundaries and improves
+    /// decompilation quality. Should be called after load_binary()
+    /// with all known function addresses.
+    pub fn add_function(&mut self, addr: u64, name: Option<&str>) -> Result<()> {
+        let name_cstr = if let Some(n) = name {
+            Some(CString::new(n)
+                .map_err(|_| FissionError::decompiler("Invalid function name"))?)
+        } else {
+            None
+        };
+
+        let name_ptr = name_cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
+
+        let result = unsafe { decomp_add_function(self.ctx, addr, name_ptr) };
+
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
+    /// Add a memory block (section) to help Ghidra understand memory layout
+    /// 
+    /// This distinguishes between code and data sections, improving
+    /// analysis accuracy. Should be called after load_binary().
+    pub fn add_memory_block(
+        &mut self,
+        name: &str,
+        va_addr: u64,
+        va_size: u64,
+        file_offset: u64,
+        file_size: u64,
+        is_executable: bool,
+        is_writable: bool,
+    ) -> Result<()> {
+        let name_cstr = CString::new(name)
+            .map_err(|_| FissionError::decompiler("Invalid section name"))?;
+
+        let result = unsafe {
+            decomp_add_memory_block(
+                self.ctx,
+                name_cstr.as_ptr(),
+                va_addr,
+                va_size,
+                file_offset,
+                file_size,
+                is_executable as c_int,
+                is_writable as c_int,
+            )
+        };
+
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
     /// Decompile a function at the given address
     pub fn decompile(&self, addr: u64) -> Result<String> {
         let result_ptr = unsafe { decomp_function(self.ctx, addr) };
@@ -179,8 +254,47 @@ impl DecompilerNative {
         }
     }
 
+    /// Load FID (Function ID) database for library function recognition
+    pub fn load_fid_database(&mut self, db_path: &str) -> Result<()> {
+        let path_cstr = CString::new(db_path)
+            .map_err(|_| FissionError::decompiler("Invalid FID database path"))?;
+
+        let result = unsafe { decomp_load_fid_db(self.ctx, path_cstr.as_ptr()) };
+
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(format!(
+                "Failed to load FID database: {}",
+                db_path
+            )))
+        }
+    }
+
+    /// Try to match function at address using FID database
+    pub fn match_function_by_fid(&self, addr: u64, len: usize) -> Option<String> {
+        let result_ptr = unsafe { decomp_get_fid_match(self.ctx, addr, len) };
+
+        if result_ptr.is_null() {
+            return None;
+        }
+
+        let result = unsafe {
+            let cstr = CStr::from_ptr(result_ptr);
+            let string = cstr.to_string_lossy().into_owned();
+            decomp_free_string(result_ptr);
+            string
+        };
+
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
     /// Get the last error message
-    fn get_last_error(&self) -> String {
+    pub fn get_last_error(&self) -> String {
         let err_ptr = unsafe { decomp_get_last_error(self.ctx) };
         if err_ptr.is_null() {
             return "Unknown error".to_string();

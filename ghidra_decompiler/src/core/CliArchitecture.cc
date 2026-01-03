@@ -7,7 +7,7 @@ namespace core {
 // Constants
 static const int MAX_INSTRUCTIONS = 200000;
 
-CliArchitecture::CliArchitecture(const std::string& sleigh_id, fission::loader::MemoryLoadImage* ldr, std::ostream* err)
+CliArchitecture::CliArchitecture(const std::string& sleigh_id, ghidra::LoadImage* ldr, std::ostream* err)
     : ghidra::SleighArchitecture("", sleigh_id, err), custom_loader(ldr) {}
 
 void CliArchitecture::buildLoader(ghidra::DocumentStorage& store) {
@@ -21,6 +21,7 @@ void CliArchitecture::injectIatSymbols(const std::map<uint64_t, std::string>& sy
     if (!global_scope) return;
     
     int injected = 0;
+    std::vector<uint64_t> injected_addrs;
     for (const auto& [addr, name] : symbols) {
         try {
             ghidra::Address sym_addr(getDefaultCodeSpace(), addr);
@@ -30,6 +31,7 @@ void CliArchitecture::injectIatSymbols(const std::map<uint64_t, std::string>& sy
                 // Create external/import symbol as function
                 global_scope->addFunction(sym_addr, name);
                 injected++;
+                injected_addrs.push_back(addr);
             }
         } catch (...) {
             // Ignore symbol injection errors
@@ -38,6 +40,11 @@ void CliArchitecture::injectIatSymbols(const std::map<uint64_t, std::string>& sy
     
     if (injected > 0) {
         std::cerr << "[fission_core] Injected " << injected << " IAT symbols" << std::endl;
+        std::cerr << "[fission_core] First few injected: ";
+        for (size_t i = 0; i < std::min(size_t(5), injected_addrs.size()); i++) {
+            std::cerr << "0x" << std::hex << injected_addrs[i] << std::dec << " ";
+        }
+        std::cerr << std::endl;
     }
 }
 

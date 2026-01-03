@@ -27,7 +27,7 @@ fn main() {
         let binary_path = &args[1];
         eprintln!("[*] Loading binary: {}", binary_path);
 
-        let binary_data = match fs::read(binary_path) {
+        let binary_data: Vec<u8> = match fs::read(binary_path) {
             Ok(data) => data,
             Err(e) => {
                 eprintln!("Error reading file: {}", e);
@@ -41,6 +41,7 @@ fn main() {
         let sla_dir = env::current_dir()
             .unwrap()
             .join("ghidra_decompiler")
+            .join("languages")
             .to_string_lossy()
             .into_owned();
 

@@ -18,6 +18,20 @@ path = "src/lib.rs"
 name = "fission"
 path = "src/main.rs"
 
+[[bin]]
+name = "fission_tui"
+path = "src/bin/fission_tui.rs"
+required-features = ["tui"]
+
+[[bin]]
+name = "fission_cli"
+path = "src/bin/fission_cli.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "ffi_test"
+path = "src/bin/ffi_test.rs"
+
 # Release optimizations
 [profile.release]
 opt-level = 3

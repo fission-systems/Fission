@@ -263,61 +263,59 @@ pub fn cmd_decompile(state: &CliState, addr: u64) {
     );
     println!();
 
-    // Try to use the decompiler
-    use crate::analysis::decomp::native::{find_cli, DecompilerServer};
+    // Try to use the FFI decompiler
+    #[cfg(feature = "native_decomp")]
+    {
+        use crate::analysis::decomp::ffi::DecompilerNative;
 
-    match find_cli() {
-        Some(cli_path) => {
-            println!("{} Using decompiler at {:?}", "[*]".blue(), cli_path);
+        println!("{} Initializing native decompiler...", "[*]".blue());
 
-            // Get SLA directory
-            let sla_dir = cli_path
-                .parent()
-                .and_then(|p| p.parent())
-                .map(|p| p.join("ghidra_decompiler/processors"))
-                .unwrap_or_default();
+        // Get SLA directory
+        let sla_dir = std::env::current_dir()
+            .unwrap()
+            .join("ghidra_decompiler")
+            .join("languages")
+            .to_string_lossy()
+            .into_owned();
 
-            match DecompilerServer::new(&cli_path, sla_dir.to_str().unwrap_or("")) {
-                Ok(mut server) => {
-                    // Load binary into decompiler
-                    let mapped_data = binary.get_memory_mapped_data();
-                    if let Err(e) = server.load_binary(
-                        &mapped_data,
-                        binary.arch_spec.as_str(),
-                        binary.image_base,
-                        &binary.iat_symbols,
-                        None,
-                    ) {
-                        println!(
-                            "{} Failed to load binary into decompiler: {}",
-                            "[!]".red(),
-                            e
-                        );
-                        return;
-                    }
-
-                    // Decompile
-                    match server.decompile(&[], addr, binary.is_64bit) {
-                        Ok(code) => {
-                            println!("{}", code);
-                        }
-                        Err(e) => {
-                            println!("{} Decompilation failed: {}", "[!]".red(), e);
-                        }
-                    }
+        match DecompilerNative::new(&sla_dir) {
+            Ok(mut native) => {
+                // Load binary into decompiler
+                if let Err(e) = native.load_binary(&binary.data, binary.image_base, binary.is_64bit)
+                {
+                    println!(
+                        "{} Failed to load binary into decompiler: {}",
+                        "[!]".red(),
+                        e
+                    );
+                    return;
                 }
-                Err(e) => {
-                    println!("{} Failed to start decompiler: {}", "[!]".red(), e);
+
+                // Add symbols
+                native.add_symbols(&binary.iat_symbols);
+
+                // Decompile
+                match native.decompile(addr) {
+                    Ok(c_code) => {
+                        println!("{}", c_code);
+                    }
+                    Err(e) => {
+                        println!("{} Decompilation failed: {}", "[!]".red(), e);
+                    }
                 }
             }
+            Err(e) => {
+                println!("{} Failed to start decompiler: {}", "[!]".red(), e);
+            }
         }
-        None => {
-            println!(
-                "{} Decompiler CLI not found. Build the decompiler first.",
-                "[!]".yellow()
-            );
-            println!("  Run: cd ghidra_decompiler && mkdir build && cd build && cmake .. && make");
-        }
+    }
+
+    #[cfg(not(feature = "native_decomp"))]
+    {
+        println!(
+            "{} Native decompiler not available. Build with --features native_decomp",
+            "[!]".yellow()
+        );
     }
     println!();
 }
@@ -344,7 +342,8 @@ pub fn cmd_strings(state: &CliState) {
         } else {
             if current_bytes.len() >= min_len {
                 // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
-                let value = unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
+                let value =
+                    unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
                 strings.push((start_offset, value));
             }
             current_bytes.clear();
