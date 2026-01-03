@@ -9,14 +9,14 @@ use std::path::PathBuf;
 
 use crate::core::errors::Result;
 
-pub mod commands;
 pub mod handlers;
+pub mod commands_parser;
 
-use commands::{parse_command, Command};
-use handlers::CliState;
+use handlers::{CliState, *};
+pub use commands_parser::{parse_command, Command};
 
 /// Parse address from string (supports 0x prefix and decimal)
-fn parse_address(addr_str: &str) -> Result<u64> {
+pub fn parse_address(addr_str: &str) -> Result<u64> {
     if let Some(hex) = addr_str.strip_prefix("0x") {
         u64::from_str_radix(hex, 16)
     } else if let Some(hex) = addr_str.strip_prefix("0X") {
@@ -110,7 +110,7 @@ pub fn run_cli_with_args(
         if show_asm {
             println!("{} 0x{:x}", "Disassembling:".cyan(), address);
             println!("{}", "─".repeat(60).dimmed());
-            handlers::cmd_disasm(&mut state, address, instruction_count);
+            handlers::cmd_disasm(&mut state, Some(address), Some(instruction_count));
             println!();
         }
 
@@ -118,7 +118,7 @@ pub fn run_cli_with_args(
         if !show_asm {
             println!("{} 0x{:x}", "Decompiling:".cyan(), address);
             println!("{}", "─".repeat(60).dimmed());
-            handlers::cmd_decompile(&state, address);
+            handlers::cmd_decompile(&state, Some(address));
         }
 
         return Ok(());
@@ -151,16 +151,17 @@ pub fn run_cli() -> Result<()> {
                     Command::Load(path) => handlers::cmd_load(&mut state, &path),
                     Command::Info => handlers::cmd_info(&state),
                     Command::Functions => handlers::cmd_functions(&state),
-                    Command::Disasm { addr, count } => {
-                        handlers::cmd_disasm(&mut state, addr, count)
+                    Command::Disasm { address, count } => {
+                        handlers::cmd_disasm(&mut state, address, count)
                     }
-                    Command::Decompile(addr) => handlers::cmd_decompile(&state, addr),
+                    Command::Decompile { address } => handlers::cmd_decompile(&state, address),
                     Command::Strings => handlers::cmd_strings(&state),
                     Command::Sections => handlers::cmd_sections(&state),
                     Command::Analyze => handlers::cmd_analyze(&mut state),
+                    Command::Xrefs { address } => handlers::cmd_xrefs(&state, address),
                     Command::Help => handlers::cmd_help(),
                     Command::Clear => handlers::cmd_clear(),
-                    Command::Quit => {
+                    Command::Exit => {
                         println!("{}", "Goodbye!".cyan());
                         break;
                     }
