@@ -93,13 +93,38 @@ add_executable(fission_decomp
     ${FISSION_SOURCES}
 )
 
+# Fission Decompiler Shared Library (for FFI)
+set(FFI_SOURCES
+    ${FISSION_MODULES_DIR}/ffi/libdecomp_ffi.cpp
+)
+
+add_library(decomp SHARED
+    ${CORE_SOURCES}
+    ${FISSION_SOURCES}
+    ${FFI_SOURCES}
+)
+
+# Export symbols for shared library
+target_compile_definitions(decomp PRIVATE DECOMP_EXPORTS)
+
 target_include_directories(fission_decomp PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${GHIDRA_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_include_directories(decomp PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${GHIDRA_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 target_link_libraries(fission_decomp 
+    PRIVATE 
+    ZLIB::ZLIB
+)
+
+target_link_libraries(decomp 
     PRIVATE 
     ZLIB::ZLIB
 )

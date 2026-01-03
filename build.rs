@@ -1,132 +1,70 @@
-//! Fission Build Script
+//! Build script for Fission
 //!
-//! Handles:
-//! 1. Linking native Ghidra library (if native_decomp feature enabled)
-//! 2. Cross-platform library discovery
+//! When the `native_decomp` feature is enabled, this script:
+//! 1. Builds the libdecomp shared library via CMake
+//! 2. Sets up linker paths for Rust to find the library
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Legacy FFI Linking (optional)
+fn main() {
+    // Only run cmake build when native_decomp feature is enabled
     #[cfg(feature = "native_decomp")]
-    {
-        println!("cargo:rerun-if-changed=build/Release/ghidra_decompiler.lib");
-        println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
-        link_ghidra_library();
-    }
+    build_libdecomp();
 
-    Ok(())
+    // For all builds, add the standard library search paths
+    println!("cargo:rerun-if-changed=build.rs");
 }
 
 #[cfg(feature = "native_decomp")]
-fn link_ghidra_library() {
-    use std::env;
+fn build_libdecomp() {
     use std::path::PathBuf;
+    use std::process::Command;
 
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let decomp_dir = PathBuf::from(&manifest_dir).join("ghidra_decompiler");
+    let build_dir = decomp_dir.join("build");
 
-    // Determine library directory based on platform
-    #[cfg(target_os = "windows")]
-    let lib_dir = manifest_dir.join("build").join("Release");
+    // Ensure build directory exists
+    std::fs::create_dir_all(&build_dir).expect("Failed to create build directory");
 
-    #[cfg(not(target_os = "windows"))]
-    let lib_dir = manifest_dir.join("build");
+    // Run cmake configure
+    let cmake_status = Command::new("cmake")
+        .arg("..")
+        .current_dir(&build_dir)
+        .status()
+        .expect("Failed to run cmake configure");
 
-    // Check if our library exists
-    #[cfg(target_os = "windows")]
-    let lib_file = "ghidra_decompiler.lib";
-
-    #[cfg(not(target_os = "windows"))]
-    let lib_file = "libghidra_decompiler.a";
-
-    if !lib_dir.join(lib_file).exists() {
-        // Library not built yet, skip linking
-        return;
+    if !cmake_status.success() {
+        panic!("CMake configure failed");
     }
 
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    // Build the decomp target
+    let make_status = Command::new("make")
+        .args(["-j4", "decomp"])
+        .current_dir(&build_dir)
+        .status()
+        .expect("Failed to run make");
 
-    #[cfg(target_os = "windows")]
-    {
-        println!("cargo:rustc-link-lib=static=ghidra_decompiler");
-
-        // Find vcpkg libraries using VCPKG_ROOT environment variable
-        if let Ok(vcpkg_root) = env::var("VCPKG_ROOT") {
-            let vcpkg_lib_dir = PathBuf::from(&vcpkg_root)
-                .join("installed")
-                .join("x64-windows")
-                .join("lib");
-
-            if vcpkg_lib_dir.exists() {
-                println!("cargo:rustc-link-search=native={}", vcpkg_lib_dir.display());
-                println!("cargo:rustc-link-lib=static=zlib");
-            } else {
-                println!(
-                    "cargo:warning=VCPKG_ROOT set but lib directory not found: {}",
-                    vcpkg_lib_dir.display()
-                );
-            }
-        } else {
-            // Fallback: try common install locations
-            let common_paths = [
-                "C:/vcpkg/installed/x64-windows/lib",
-                "D:/vcpkg/installed/x64-windows/lib",
-            ];
-
-            for path in &common_paths {
-                let p = PathBuf::from(path);
-                if p.exists() {
-                    println!("cargo:rustc-link-search=native={}", p.display());
-                    println!("cargo:rustc-link-lib=static=zlib");
-                    break;
-                }
-            }
-
-            println!(
-                "cargo:warning=VCPKG_ROOT not set. Set it to your vcpkg installation directory."
-            );
-        }
-
-        println!("cargo:rustc-link-lib=dylib=msvcrt");
+    if !make_status.success() {
+        panic!("Make failed to build libdecomp");
     }
+
+    // Tell cargo where to find the library
+    println!("cargo:rustc-link-search=native={}", build_dir.display());
+
+    // Link against libdecomp
+    println!("cargo:rustc-link-lib=dylib=decomp");
+
+    // Also need to link against zlib (dependency of libdecomp)
+    println!("cargo:rustc-link-lib=z");
+
+    // Set rpath for runtime library discovery
+    #[cfg(target_os = "macos")]
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", build_dir.display());
 
     #[cfg(target_os = "linux")]
-    {
-        println!("cargo:rustc-link-lib=static=ghidra_decompiler");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", build_dir.display());
 
-        // Use pkg-config for zlib on Linux
-        if let Ok(output) = std::process::Command::new("pkg-config")
-            .args(["--libs", "zlib"])
-            .output()
-        {
-            if output.status.success() {
-                println!("cargo:rustc-link-lib=z");
-            }
-        }
-
-        println!("cargo:rustc-link-lib=stdc++");
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        println!("cargo:rustc-link-lib=static=ghidra_decompiler");
-
-        // macOS typically has zlib in system
-        println!("cargo:rustc-link-lib=z");
-        println!("cargo:rustc-link-lib=c++");
-
-        // Homebrew location
-        if let Ok(brew_prefix) = std::process::Command::new("brew")
-            .args(["--prefix"])
-            .output()
-        {
-            if brew_prefix.status.success() {
-                let prefix = String::from_utf8_lossy(&brew_prefix.stdout)
-                    .trim()
-                    .to_string();
-                let lib_path = PathBuf::from(&prefix).join("lib");
-                if lib_path.exists() {
-                    println!("cargo:rustc-link-search=native={}", lib_path.display());
-                }
-            }
-        }
-    }
+    // Rerun if any C++ files change
+    println!("cargo:rerun-if-changed=ghidra_decompiler/CMakeLists.txt");
+    println!("cargo:rerun-if-changed=ghidra_decompiler/src/ffi/libdecomp_ffi.cpp");
+    println!("cargo:rerun-if-changed=ghidra_decompiler/include/fission/ffi/libdecomp_ffi.h");
 }
