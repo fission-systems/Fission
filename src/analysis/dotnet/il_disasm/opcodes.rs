@@ -1,230 +1,17 @@
-use crate::analysis::dotnet::{DotNetError, DotNetResult};
+//! IL Opcode Definitions
+//!
+//! Complete table of CIL opcodes with their operand types
+
+use super::types::{OpCodeDef, OperandType};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-/// A single IL instruction with decoded opcode and operand text.
-#[derive(Debug, Clone)]
-pub struct ILInstruction {
-    pub offset: u32,
-    pub opcode: String,
-    pub operand: Option<String>,
-    pub size: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OperandType {
-    InlineNone,
-    InlineBrTarget,
-    InlineField,
-    InlineI,
-    InlineI8,
-    InlineMethod,
-    InlineR,
-    InlineSig,
-    InlineString,
-    InlineSwitch,
-    InlineTok,
-    InlineType,
-    InlineVar,
-    ShortInlineBrTarget,
-    ShortInlineI,
-    ShortInlineR,
-    ShortInlineVar,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct OpCodeDef {
-    code: u16,
-    name: &'static str,
-    operand: OperandType,
-    size: u8,
-}
-
-/// Simple IL disassembler aimed at readability and compatibility with ildasm-like output.
-pub struct IlDisassembler;
-
-impl IlDisassembler {
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Disassemble a method body starting at the supplied byte slice.
-    /// The slice should begin at the method header (tiny or fat format).
-    pub fn disassemble(&self, data: &[u8]) -> DotNetResult<Vec<ILInstruction>> {
-        let (code_start, code_size) = parse_body_header(data)?;
-        let code = data
-            .get(code_start..code_start + code_size)
-            .ok_or_else(|| DotNetError::Malformed("Method body truncated".into()))?;
-
-        let mut cursor = 0usize;
-        let mut result = Vec::new();
-        while cursor < code.len() {
-            let instr_offset = cursor;
-            let opcode_byte = *code
-                .get(cursor)
-                .ok_or_else(|| DotNetError::Malformed("Unexpected end of IL stream".into()))?;
-            cursor += 1;
-
-            let opcode = if opcode_byte == 0xFE {
-                let next = *code.get(cursor).ok_or_else(|| {
-                    DotNetError::Malformed("Missing two-byte opcode suffix".into())
-                })?;
-                cursor += 1;
-                0xFE00 | next as u16
-            } else {
-                opcode_byte as u16
-            };
-
-            let op_def = lookup_opcode(opcode).unwrap_or(&UNKNOWN_OPCODE);
-            let operand = decode_operand(op_def, code, &mut cursor, instr_offset)?;
-            result.push(ILInstruction {
-                offset: instr_offset as u32,
-                opcode: op_def.name.to_string(),
-                operand,
-                size: cursor - instr_offset,
-            });
-        }
-
-        Ok(result)
-    }
-}
-
-fn parse_body_header(data: &[u8]) -> DotNetResult<(usize, usize)> {
-    let first = *data
-        .first()
-        .ok_or_else(|| DotNetError::Malformed("Empty method body".into()))?;
-    match first & 0x3 {
-        0x2 => {
-            // Tiny format: 1-byte header, code size encoded in upper 6 bits.
-            let code_size = (first >> 2) as usize;
-            Ok((1, code_size))
-        }
-        0x3 => {
-            // Fat format
-            if data.len() < 12 {
-                return Err(DotNetError::Malformed(
-                    "Fat method header shorter than 12 bytes".into(),
-                ));
-            }
-            let flags_and_size = u16::from_le_bytes([data[0], data[1]]);
-            let header_size_dwords = (flags_and_size >> 12) as usize;
-            if header_size_dwords < 3 {
-                return Err(DotNetError::Malformed("Invalid fat header size".into()));
-            }
-            let code_size = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
-            let code_start = header_size_dwords * 4;
-            if code_start + code_size > data.len() {
-                return Err(DotNetError::Malformed(
-                    "Method body extends past available data".into(),
-                ));
-            }
-            Ok((code_start, code_size))
-        }
-        _ => Err(DotNetError::Malformed(
-            "Unknown method header format".into(),
-        )),
-    }
-}
-
-fn decode_operand(
-    op: &OpCodeDef,
-    code: &[u8],
-    cursor: &mut usize,
-    instr_start: usize,
-) -> DotNetResult<Option<String>> {
-    let read_u8 = |buf: &[u8], offset: &mut usize| -> DotNetResult<u8> {
-        let byte = *buf
-            .get(*offset)
-            .ok_or_else(|| DotNetError::Malformed("Unexpected end of IL stream".into()))?;
-        *offset += 1;
-        Ok(byte)
-    };
-
-    let read_i8 =
-        |buf: &[u8], offset: &mut usize| -> DotNetResult<i8> { Ok(read_u8(buf, offset)? as i8) };
-
-    let read_u16 = |buf: &[u8], offset: &mut usize| -> DotNetResult<u16> {
-        let b0 = read_u8(buf, offset)? as u16;
-        let b1 = read_u8(buf, offset)? as u16;
-        Ok(b0 | (b1 << 8))
-    };
-
-    let read_u32 = |buf: &[u8], offset: &mut usize| -> DotNetResult<u32> {
-        let b0 = read_u8(buf, offset)? as u32;
-        let b1 = read_u8(buf, offset)? as u32;
-        let b2 = read_u8(buf, offset)? as u32;
-        let b3 = read_u8(buf, offset)? as u32;
-        Ok(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24))
-    };
-
-    let read_i32 =
-        |buf: &[u8], offset: &mut usize| -> DotNetResult<i32> { Ok(read_u32(buf, offset)? as i32) };
-
-    let read_f32 = |buf: &[u8], offset: &mut usize| -> DotNetResult<f32> {
-        let bits = read_u32(buf, offset)?;
-        Ok(f32::from_bits(bits))
-    };
-
-    let read_f64 = |buf: &[u8], offset: &mut usize| -> DotNetResult<f64> {
-        let lo = read_u32(buf, offset)? as u64;
-        let hi = read_u32(buf, offset)? as u64;
-        Ok(f64::from_bits(lo | (hi << 32)))
-    };
-
-    let operand = match op.operand {
-        OperandType::InlineNone => None,
-        OperandType::ShortInlineI => Some((read_i8(code, cursor)? as i32).to_string()),
-        OperandType::InlineI => Some(read_i32(code, cursor)?.to_string()),
-        OperandType::InlineI8 => {
-            let low = read_u32(code, cursor)? as u64;
-            let high = read_u32(code, cursor)? as u64;
-            let val = (high << 32) | low;
-            Some((val as i64).to_string())
-        }
-        OperandType::ShortInlineR => Some(format!("{:.6}", read_f32(code, cursor)?)),
-        OperandType::InlineR => Some(format!("{:.6}", read_f64(code, cursor)?)),
-        OperandType::InlineMethod
-        | OperandType::InlineField
-        | OperandType::InlineType
-        | OperandType::InlineTok
-        | OperandType::InlineString
-        | OperandType::InlineSig => Some(format!("0x{:08X}", read_u32(code, cursor)?)),
-        OperandType::InlineVar => Some(read_u16(code, cursor)?.to_string()),
-        OperandType::ShortInlineVar => Some(read_u8(code, cursor)?.to_string()),
-        OperandType::ShortInlineBrTarget => {
-            let rel = read_i8(code, cursor)? as isize;
-            let base = *cursor as isize;
-            let target = (base + rel).max(0) as usize;
-            Some(format!("IL_{target:04X}"))
-        }
-        OperandType::InlineBrTarget => {
-            let rel = read_i32(code, cursor)? as isize;
-            let base = *cursor as isize;
-            let target = (base + rel).max(0) as usize;
-            Some(format!("IL_{target:04X}"))
-        }
-        OperandType::InlineSwitch => {
-            let count = read_u32(code, cursor)? as usize;
-            let mut targets = Vec::new();
-            let base = (*cursor + count * 4) as isize;
-            for _ in 0..count {
-                let delta = read_i32(code, cursor)? as isize;
-                let dst = (base + delta).max(0) as usize;
-                targets.push(format!("IL_{dst:04X}"));
-            }
-            Some(format!("[{}]", targets.join(", ")))
-        }
-    };
-
-    Ok(operand)
-}
-
-/// Lazily initialized HashMap for O(1) opcode lookup.
+/// Opcode lookup map for O(1) access.
 ///
-/// This provides significant performance improvement over linear search
+/// Performance: Pre-built HashMap allows constant-time opcode lookup
 /// when disassembling large method bodies, as opcode lookup is called
 /// for every instruction.
-static OPCODE_MAP: LazyLock<HashMap<u16, &'static OpCodeDef>> = LazyLock::new(|| {
+pub(super) static OPCODE_MAP: LazyLock<HashMap<u16, &'static OpCodeDef>> = LazyLock::new(|| {
     let mut map = HashMap::with_capacity(OPCODES.len());
     for op in OPCODES {
         map.insert(op.code, op);
@@ -232,14 +19,7 @@ static OPCODE_MAP: LazyLock<HashMap<u16, &'static OpCodeDef>> = LazyLock::new(||
     map
 });
 
-/// O(1) opcode lookup using pre-built HashMap.
-///
-/// Performance: Reduced from O(n) linear search (~220 opcodes) to O(1) hash lookup.
-fn lookup_opcode(code: u16) -> Option<&'static OpCodeDef> {
-    OPCODE_MAP.get(&code).copied()
-}
-
-const UNKNOWN_OPCODE: OpCodeDef = OpCodeDef {
+pub(super) const UNKNOWN_OPCODE: OpCodeDef = OpCodeDef {
     code: 0xFFFF,
     name: "???",
     operand: OperandType::InlineNone,

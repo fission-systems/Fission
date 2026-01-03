@@ -2,7 +2,8 @@
 //!
 //! Tests the CLI command parsing and validation logic.
 
-use fission::ui::cli::commands::{parse_address, parse_command, Command};
+use fission::ui::cli::commands_parser::{parse_command, Command};
+use fission::ui::cli::parse_address;
 
 /// Test basic command parsing - help
 #[test]
@@ -15,9 +16,9 @@ fn test_parse_help_command() {
 /// Test quit/exit commands
 #[test]
 fn test_parse_quit_commands() {
-    assert!(matches!(parse_command("quit"), Command::Quit));
-    assert!(matches!(parse_command("exit"), Command::Quit));
-    assert!(matches!(parse_command("q"), Command::Quit));
+    assert!(matches!(parse_command("quit"), Command::Exit));
+    assert!(matches!(parse_command("exit"), Command::Exit));
+    assert!(matches!(parse_command("q"), Command::Exit));
 }
 
 /// Test load command parsing
@@ -58,25 +59,25 @@ fn test_parse_strings_command() {
 #[test]
 fn test_parse_disassemble_command() {
     match parse_command("disasm 0x401000") {
-        Command::Disasm { addr, count: _ } => assert_eq!(addr, 0x401000),
+        Command::Disasm { address, count: _ } => assert_eq!(address.unwrap(), 0x401000),
         _ => panic!("Expected Disasm command"),
     }
 
-    // Without address should be Unknown
-    assert!(matches!(parse_command("disasm"), Command::Unknown(_)));
+    // Without address should still be Disasm (with None)
+    assert!(matches!(parse_command("disasm"), Command::Disasm { address: None, .. }));
 }
 
 /// Test decompile command with address
 #[test]
 fn test_parse_decompile_command() {
     match parse_command("decompile 0x140001000") {
-        Command::Decompile(addr) => assert_eq!(addr, 0x140001000),
+        Command::Decompile { address } => assert_eq!(address.unwrap(), 0x140001000),
         _ => panic!("Expected Decompile command"),
     }
 
     // Short form
     match parse_command("dec 0x1000") {
-        Command::Decompile(addr) => assert_eq!(addr, 0x1000),
+        Command::Decompile { address } => assert_eq!(address.unwrap(), 0x1000),
         _ => panic!("Expected Decompile command"),
     }
 }
@@ -106,7 +107,7 @@ fn test_parse_empty_input() {
 #[test]
 fn test_parse_unknown_command() {
     match parse_command("foobar xyz 123") {
-        Command::Unknown(cmd) => assert_eq!(cmd, "foobar"), // Only stores the command name
+        Command::Unknown(cmd) => assert_eq!(cmd, "foobar xyz 123"), // Stores full input
         _ => panic!("Expected Unknown command"),
     }
 }
@@ -115,18 +116,18 @@ fn test_parse_unknown_command() {
 #[test]
 fn test_parse_address_formats() {
     // Hex format with 0x prefix
-    assert_eq!(parse_address("0x1234"), Some(0x1234));
-    assert_eq!(parse_address("0X1234"), Some(0x1234));
+    assert_eq!(parse_address("0x1234").ok(), Some(0x1234));
+    assert_eq!(parse_address("0X1234").ok(), Some(0x1234));
 
     // Hex format with hex digits
-    assert_eq!(parse_address("0xDEADBEEF"), Some(0xDEADBEEF));
+    assert_eq!(parse_address("0xDEADBEEF").ok(), Some(0xDEADBEEF));
 
     // Decimal format
-    assert_eq!(parse_address("1000"), Some(1000));
+    assert_eq!(parse_address("1000").ok(), Some(1000));
 
     // Invalid format
-    assert_eq!(parse_address("not_a_number"), None);
-    assert_eq!(parse_address(""), None);
+    assert!(parse_address("not_a_number").is_err());
+    assert!(parse_address("").is_err());
 }
 
 /// Test case insensitivity
@@ -134,7 +135,7 @@ fn test_parse_address_formats() {
 fn test_command_case_insensitivity() {
     assert!(matches!(parse_command("HELP"), Command::Help));
     assert!(matches!(parse_command("Help"), Command::Help));
-    assert!(matches!(parse_command("QUIT"), Command::Quit));
+    assert!(matches!(parse_command("QUIT"), Command::Exit));
 }
 
 /// Test analyze command
