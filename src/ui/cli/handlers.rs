@@ -344,15 +344,10 @@ pub fn cmd_strings(state: &CliState) {
         } else {
             if current_bytes.len() >= min_len {
                 // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
-                // Use std::mem::take to avoid clone allocation
-                let bytes = std::mem::take(&mut current_bytes);
-                let value = unsafe { String::from_utf8_unchecked(bytes) };
+                let value = unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
                 strings.push((start_offset, value));
-                // Re-allocate with same capacity for next string
-                current_bytes = Vec::with_capacity(256);
-            } else {
-                current_bytes.clear();
             }
+            current_bytes.clear();
         }
     }
 
@@ -372,15 +367,10 @@ pub fn cmd_strings(state: &CliState) {
     println!();
 
     for (offset, s) in strings.iter().take(100) {
-        let display: &str = if s.len() > 60 {
-            &s[..57]
-        } else {
-            s
-        };
         if s.len() > 60 {
-            println!("  {:08X}  {}...", offset, display.green());
+            println!("  {:08X}  {}...", offset, s[..57].green());
         } else {
-            println!("  {:08X}  {}", offset, display.green());
+            println!("  {:08X}  {}", offset, s.green());
         }
     }
 
