@@ -191,6 +191,7 @@
 #![allow(deprecated)]
 
 pub mod analysis;
+pub mod cli;
 pub mod core;
 pub mod debug;
 pub mod unpacker;
