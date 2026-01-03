@@ -129,6 +129,13 @@ extern "C" DECOMP_API DecompContext* decomp_create(const char* sla_dir) {
 
 extern "C" DECOMP_API void decomp_destroy(DecompContext* ctx) {
     if (ctx) {
+        // WORKAROUND: Release the architecture pointer instead of destroying it
+        // Ghidra's Architecture destructor can crash after decompilation due to
+        // internal state corruption. This is a minor memory leak but prevents crash.
+        // The architecture lives for the process lifetime anyway.
+        if (ctx->arch) {
+            ctx->arch.release(); // Leak instead of crash
+        }
         delete ctx;
     }
 }
@@ -394,6 +401,10 @@ static std::string run_decompilation(DecompContext* ctx, uint64_t addr) {
     if (!global_scope) {
         throw std::runtime_error("Global scope not initialized");
     }
+    
+    // CRITICAL: Clear global scope before each decompilation to prevent zombie Function objects
+    // Without this, repeated decompilations corrupt internal state and cause crashes
+    global_scope->clear();
     
     // Create function address
     AddrSpace* code_space = ctx->arch->getDefaultCodeSpace();
