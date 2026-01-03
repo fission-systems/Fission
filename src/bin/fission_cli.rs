@@ -455,26 +455,33 @@ fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Result<()> {
 
 fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    let mut strings: Vec<(usize, String)> = Vec::new();
-    let mut current = String::new();
+    // Pre-allocate with estimated capacity (heuristic: ~1 string per 1KB of data)
+    let estimated_strings = data.len() / 1024;
+    let mut strings: Vec<(usize, String)> = Vec::with_capacity(estimated_strings.max(100));
+    
+    // Pre-allocate buffer with reasonable capacity to reduce reallocations
+    let mut current_bytes: Vec<u8> = Vec::with_capacity(256);
     let mut start_offset = 0;
 
     for (i, &byte) in data.iter().enumerate() {
         if byte >= 0x20 && byte < 0x7f {
-            if current.is_empty() {
+            if current_bytes.is_empty() {
                 start_offset = i;
             }
-            current.push(byte as char);
+            current_bytes.push(byte);
         } else {
-            if current.len() >= min_len {
-                strings.push((start_offset, current.clone()));
+            if current_bytes.len() >= min_len {
+                // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
+                let value = unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
+                strings.push((start_offset, value));
             }
-            current.clear();
+            current_bytes.clear();
         }
     }
     // Don't forget last string
-    if current.len() >= min_len {
-        strings.push((start_offset, current));
+    if current_bytes.len() >= min_len {
+        let value = unsafe { String::from_utf8_unchecked(current_bytes) };
+        strings.push((start_offset, value));
     }
 
     if json {
@@ -503,12 +510,11 @@ fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Result<()> {
         writeln!(stdout, "{:─<60}", "")?;
         for (off, s) in &strings {
             // Truncate long strings for display
-            let display = if s.len() > 60 {
-                format!("{}...", &s[..57])
+            if s.len() > 60 {
+                writeln!(stdout, "  0x{:08x}  {}...", off, &s[..57])?;
             } else {
-                s.clone()
-            };
-            writeln!(stdout, "  0x{:08x}  {}", off, display)?;
+                writeln!(stdout, "  0x{:08x}  {}", off, s)?;
+            }
         }
     }
     Ok(())
@@ -554,8 +560,10 @@ fn disassemble(
 
     let mut decoder = Decoder::with_ip(decoder_options, bytes, base, DecoderOptions::NONE);
     let mut formatter = IntelFormatter::new();
-    let mut output = String::new();
-    let mut instructions = Vec::new();
+    // Pre-allocate output string buffer to reduce reallocations
+    let mut output = String::with_capacity(64);
+    // Pre-allocate results vector with requested count
+    let mut instructions = Vec::with_capacity(count);
 
     for _ in 0..count {
         if !decoder.can_decode() {
