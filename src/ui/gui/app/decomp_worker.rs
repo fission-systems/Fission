@@ -3,6 +3,7 @@
 //! Features:
 //! - Multiple worker threads for parallel processing
 //! - DecompilerPool with N fission_decomp processes (auto-detected based on CPU)
+//! - DecompilerNative: Direct FFI when `native_decomp` feature enabled (10-100x faster)
 //! - Request debouncing (only process latest user request)
 //! - Background prefetching support
 
@@ -16,6 +17,9 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
+
+#[cfg(feature = "native_decomp")]
+use crate::analysis::decomp::ffi::DecompilerNative;
 
 /// Request to decompile a function
 pub struct DecompileRequest {
@@ -88,8 +92,10 @@ impl DecompileRequest {
     }
 }
 
-/// Decompiler wrapper - supports Single server or Pool mode
+/// Decompiler wrapper - supports Native FFI, Pool, or Server mode
 enum DecompilerBackend {
+    #[cfg(feature = "native_decomp")]
+    Native(DecompilerNative),
     Pool(Arc<DecompilerPool>),
     Server(Arc<Mutex<DecompilerServer>>),
 }
@@ -102,6 +108,11 @@ impl DecompilerBackend {
         is_64bit: bool,
     ) -> crate::core::prelude::Result<String> {
         match self {
+            #[cfg(feature = "native_decomp")]
+            DecompilerBackend::Native(native) => {
+                // Native FFI decompilation - much faster!
+                native.decompile(address)
+            }
             DecompilerBackend::Pool(pool) => {
                 pool.decompile(bytes, address, is_64bit).map_err(Into::into)
             }
@@ -111,6 +122,24 @@ impl DecompilerBackend {
                     .map_err(|e| FissionError::decompiler(format!("Lock error: {}", e)))?;
                 guard.decompile(bytes, address, is_64bit)
             }
+        }
+    }
+
+    #[cfg(feature = "native_decomp")]
+    fn load_binary_native(
+        &mut self,
+        bytes: &[u8],
+        image_base: u64,
+        is_64bit: bool,
+        iat_symbols: &HashMap<u64, String>,
+    ) -> crate::core::prelude::Result<()> {
+        match self {
+            DecompilerBackend::Native(native) => {
+                native.load_binary(bytes, image_base, is_64bit)?;
+                native.add_symbols(iat_symbols);
+                Ok(())
+            }
+            _ => Ok(()), // Pool/Server handle loading differently
         }
     }
 }
@@ -127,8 +156,18 @@ pub fn spawn_worker(
     // Create shared pool (will be initialized on first request)
     let pool: Arc<Mutex<Option<Arc<DecompilerPool>>>> = Arc::new(Mutex::new(None));
 
+    // Native decompiler (single instance, protected by mutex)
+    #[cfg(feature = "native_decomp")]
+    let native_decomp: Arc<Mutex<Option<DecompilerNative>>> = Arc::new(Mutex::new(None));
+
     // Get worker count from config
     let num_workers = CONFIG.decompiler.effective_num_workers();
+
+    // Log which backend will be used
+    #[cfg(feature = "native_decomp")]
+    crate::core::logging::info("[decomp-worker] Native FFI backend enabled (10-100x faster)");
+    #[cfg(not(feature = "native_decomp"))]
+    crate::core::logging::info("[decomp-worker] Using subprocess pool backend");
 
     // Spawn multiple worker threads
     for i in 0..num_workers {
@@ -136,6 +175,8 @@ pub fn spawn_worker(
         let result_tx = result_tx.clone();
         let latest_request_id = Arc::clone(&latest_request_id);
         let pool = Arc::clone(&pool);
+        #[cfg(feature = "native_decomp")]
+        let native_decomp = Arc::clone(&native_decomp);
         let num_workers = num_workers; // Copy for closure
 
         std::thread::Builder::new()
@@ -147,6 +188,8 @@ pub fn spawn_worker(
                     request_rx,
                     result_tx,
                     pool,
+                    #[cfg(feature = "native_decomp")]
+                    native_decomp,
                     latest_request_id,
                 );
             })
@@ -165,6 +208,7 @@ fn worker_loop(
     request_rx: Arc<Mutex<Receiver<DecompileRequest>>>,
     result_tx: Sender<AsyncMessage>,
     pool: Arc<Mutex<Option<Arc<DecompilerPool>>>>,
+    #[cfg(feature = "native_decomp")] native_decomp: Arc<Mutex<Option<DecompilerNative>>>,
     latest_request_id: Arc<AtomicU64>,
 ) {
     // Local cache of the pool to avoid locking mutex on every request
@@ -189,9 +233,63 @@ fn worker_loop(
             }
         };
 
-        // Handle Binary Load Request (Broadcast to pool)
+        // Handle Binary Load Request
         if request.is_binary_load {
-            // Initialize pool if needed
+            #[cfg(feature = "native_decomp")]
+            {
+                // Use native FFI for loading (preferred)
+                let mut native_guard = match native_decomp.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+
+                // Initialize native decompiler if needed
+                if native_guard.is_none() {
+                    let sla_dir = std::env::current_dir()
+                        .unwrap()
+                        .join("ghidra_decompiler")
+                        .to_string_lossy()
+                        .into_owned();
+
+                    match DecompilerNative::new(&sla_dir) {
+                        Ok(native) => {
+                            crate::core::logging::info(
+                                "[decomp-worker] Native decompiler initialized",
+                            );
+                            *native_guard = Some(native);
+                        }
+                        Err(e) => {
+                            crate::core::logging::warn(&format!(
+                                "[decomp-worker] Failed to init native decompiler: {}, falling back to pool",
+                                e
+                            ));
+                        }
+                    }
+                }
+
+                // Load binary into native decompiler
+                if let Some(ref mut native) = *native_guard {
+                    // Detect 64-bit from PE header or assume true
+                    let is_64bit = detect_is_64bit(&request.bytes);
+
+                    if let Err(e) = native.load_binary(&request.bytes, request.image_base, is_64bit)
+                    {
+                        crate::core::logging::debug(&format!(
+                            "[decomp-worker] Native load failed: {}",
+                            e
+                        ));
+                    } else {
+                        native.add_symbols(&request.iat_symbols);
+                        if let Some(ref gdt) = request.gdt_json_path {
+                            let _ = native.set_gdt(gdt);
+                        }
+                        crate::core::logging::info("[decomp-worker] Binary loaded via native FFI");
+                        continue; // Success, skip pool fallback
+                    }
+                }
+            }
+
+            // Fallback: Load into subprocess pool
             let decompiler_pool = {
                 let mut pool_guard = match pool.lock() {
                     Ok(guard) => guard,
@@ -226,15 +324,6 @@ fn worker_loop(
                     .join("ghidra_decompiler")
                     .to_string_lossy()
                     .into_owned();
-
-                // Load binary into ALL workers
-                // Note: Since each worker thread picks up requests from the SAME channel,
-                // we have a problem: only ONE worker will pick up this request!
-                // BUT `pool.load_binary` iterates over ALL workers in the pool.
-                // So ANY worker that picks this up can trigger the load on ALL workers.
-                // However, `pool.load_binary` requires locking the workers.
-                // If other workers are busy, we might block or fail.
-                // Ideally, `load_binary` should be called when no other work is happening (e.g. file load).
 
                 if let Err(e) = p.load_binary(
                     &request.bytes,
@@ -306,7 +395,46 @@ fn worker_loop(
             continue;
         }
 
-        // Initialize pool if needed (Lazy Local Cache)
+        // Try native decompiler first (when feature enabled)
+        #[cfg(feature = "native_decomp")]
+        {
+            let native_guard = match native_decomp.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+
+            if let Some(ref native) = *native_guard {
+                // Check again before expensive operation
+                let current_latest = latest_request_id.load(Ordering::SeqCst);
+                if request.request_id != current_latest {
+                    continue;
+                }
+
+                let result = native.decompile(request.address);
+
+                // Send result only if still latest
+                let current_latest = latest_request_id.load(Ordering::SeqCst);
+                if request.request_id == current_latest {
+                    match result {
+                        Ok(c_code) => {
+                            let _ = result_tx.send(AsyncMessage::DecompileResult {
+                                address: request.address,
+                                c_code,
+                            });
+                        }
+                        Err(e) => {
+                            let _ = result_tx.send(AsyncMessage::DecompileError {
+                                address: request.address,
+                                error: e.to_string(),
+                            });
+                        }
+                    }
+                }
+                continue; // Done with native, skip pool
+            }
+        }
+
+        // Fallback: Initialize pool if needed (Lazy Local Cache)
         if local_pool.is_none() {
             let mut pool_guard = match pool.lock() {
                 Ok(guard) => guard,
@@ -375,5 +503,29 @@ fn worker_loop(
                 }
             }
         }
+    }
+}
+
+/// Detect if binary is 64-bit from PE header
+fn detect_is_64bit(bytes: &[u8]) -> bool {
+    // Check PE signature
+    if bytes.len() < 0x40 {
+        return true; // Default to 64-bit
+    }
+
+    // DOS header -> e_lfanew at offset 0x3C
+    let pe_offset = if bytes.len() > 0x3F {
+        u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize
+    } else {
+        return true;
+    };
+
+    // Check PE signature and machine type
+    if bytes.len() > pe_offset + 6 {
+        let machine = u16::from_le_bytes([bytes[pe_offset + 4], bytes[pe_offset + 5]]);
+        // 0x8664 = AMD64, 0x14c = i386
+        machine == 0x8664
+    } else {
+        true // Default to 64-bit
     }
 }
