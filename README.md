@@ -42,6 +42,7 @@ TODO: Add screenshot when available
 - [Security](#security)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
+- [Documentation](#documentation)
 
 ---
 
@@ -316,10 +317,19 @@ cargo run --release
 
 ```bash
 # Launch in headless/CLI mode
-cargo run --release -- --headless
+cargo run --release -- --cli <binary_path>
+
+# Or run the compiled binary directly
+./target/release/fission --cli <binary_path>
+
+# Quick analysis without entering REPL
+./target/release/fission --cli binary.exe --info
+./target/release/fission --cli binary.exe --sections
+./target/release/fission --cli binary.exe --strings
+./target/release/fission --cli binary.exe --xrefs 0x140001000
 
 # With increased verbosity
-cargo run --release -- --headless -vvv
+cargo run --release -- --cli binary.exe -vvv
 ```
 
 ---
@@ -387,6 +397,13 @@ The left sidebar shows all discovered functions:
 | `help` | `?`, `h` | `help` | Show available commands |
 | `quit` | `exit`, `q` | `quit` | Exit the program |
 
+**Direct Analysis Flags** (skip REPL, run once and exit):
+- `--info` - Display binary information and exit
+- `--sections` - Show section table and exit
+- `--strings` - Extract strings and exit
+- `--xrefs <addr>` - Show cross-references and exit
+- `--count` - Show counts of functions, strings, sections, and imports
+
 **Address Formats Supported:**
 - Hexadecimal: `0x1000`, `0x140001000`
 - Decimal: `4096`, `5368713216`
@@ -395,34 +412,52 @@ The left sidebar shows all discovered functions:
 ### CLI Examples
 
 ```bash
-# Load a binary
-fission> load /path/to/binary.exe
-[+] Loaded: binary.exe (PE64, x86_64)
-
-# Show binary info
+# Load a binary in REPL mode
+$ fission --cli /path/to/binary.exe
 fission> info
 Format:      PE64
 Architecture: x86_64
 Entry Point: 0x140001000
 Sections:    5
-Imports:     127
-Exports:     0
 
-# List functions
+# Direct analysis (one-shot commands)
+$ fission --cli binary.exe --info
+Format:      PE64
+Architecture: x86_64
+Entry Point: 0x140001000
+...
+
+$ fission --cli binary.exe --sections
+[.text]     0x1000 - 0x5000 (RX)
+[.rdata]    0x6000 - 0x8000 (R)
+[.data]     0x9000 - 0xA000 (RW)
+...
+
+$ fission --cli binary.exe --strings
+[0x402000] "Hello World"
+[0x402010] "config.txt"
+[0x402020] "Error: Failed to initialize"
+...
+
+$ fission --cli binary.exe --xrefs 0x140001234
+References to 0x140001234:
+  0x140001100: call 0x140001234
+  0x140001500: jmp 0x140001234
+...
+
+# REPL mode commands
 fission> funcs
 [0x140001000] entry
 [0x140001234] sub_140001234
 [0x140001500] malloc
 ...
 
-# Disassemble at entry point
 fission> disasm 0x140001000 20
 0x140001000: push rbp
 0x140001001: mov rbp, rsp
 0x140001004: sub rsp, 0x20
 ...
 
-# Decompile a function
 fission> decompile 0x140001234
 int sub_140001234(void) {
     HANDLE hFile;
@@ -1196,6 +1231,14 @@ Fission would not be possible without these amazing open source projects:
 - [**PyO3**](https://pyo3.rs/) - Rust bindings for Python
 
 Special thanks to all contributors and the reverse engineering community for their feedback and support.
+
+---
+
+## Documentation
+
+For detailed information about Fission's architecture and design:
+
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - Comprehensive overview of Fission's module structure, design principles, and analysis pipeline
 
 ---
 
