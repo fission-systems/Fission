@@ -5,6 +5,7 @@
 
 use colored::Colorize;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
+use std::path::PathBuf;
 
 use crate::core::errors::Result;
 
@@ -13,6 +14,119 @@ pub mod handlers;
 
 use commands::{parse_command, Command};
 use handlers::CliState;
+
+/// Parse address from string (supports 0x prefix and decimal)
+fn parse_address(addr_str: &str) -> Result<u64> {
+    if let Some(hex) = addr_str.strip_prefix("0x") {
+        u64::from_str_radix(hex, 16)
+    } else if let Some(hex) = addr_str.strip_prefix("0X") {
+        u64::from_str_radix(hex, 16)
+    } else {
+        addr_str.parse::<u64>()
+    }
+    .map_err(|_| crate::core::errors::FissionError::Other("Invalid address format".to_string()))
+}
+
+/// Print section header with title
+fn print_section_header(title: &str) {
+    println!();
+    println!("{}", title.cyan().bold());
+    println!("{}", "─".repeat(60).dimmed());
+}
+
+/// Run CLI with command-line arguments (for direct decompilation)
+pub fn run_cli_with_args(
+    target_path: String,
+    address: Option<String>,
+    show_asm: bool,
+    list_functions: bool,
+    show_sections: bool,
+    show_strings: bool,
+    show_info: bool,
+    instruction_count: usize,
+    show_xrefs: Option<String>,
+) -> Result<()> {
+    print_banner();
+
+    let mut state = CliState::default();
+    let target = PathBuf::from(target_path);
+    let target_str = target.to_string_lossy();
+
+    // Only show loading message if not just listing
+    if !list_functions || address.is_some() {
+        println!("{} {}", "Loading:".cyan(), target.display());
+    }
+
+    handlers::cmd_load(&mut state, &target_str);
+
+    if state.binary.is_none() {
+        eprintln!("{}", "Failed to load binary".red());
+        return Ok(());
+    }
+
+    // Handle information display commands (no address required)
+    if address.is_none() {
+        if list_functions {
+            print_section_header("Function List");
+            handlers::cmd_functions(&state);
+            return Ok(());
+        }
+
+        if show_sections {
+            print_section_header("Section Information");
+            handlers::cmd_sections(&state);
+            return Ok(());
+        }
+
+        if show_strings {
+            print_section_header("Strings");
+            handlers::cmd_strings(&state);
+            return Ok(());
+        }
+
+        if show_info {
+            println!();
+            handlers::cmd_info(&state);
+            return Ok(());
+        }
+
+        if let Some(ref addr_str) = show_xrefs {
+            let address = parse_address(addr_str)?;
+            print_section_header(&format!("Cross-References for: 0x{:x}", address));
+            handlers::cmd_xrefs(&state, address);
+            return Ok(());
+        }
+
+        // No flags, enter interactive mode
+        return run_cli();
+    }
+
+    // If address is provided, do decompilation/disassembly
+    if let Some(addr_str) = address {
+        let address = parse_address(&addr_str)?;
+        println!();
+
+        // Show assembly if requested
+        if show_asm {
+            println!("{} 0x{:x}", "Disassembling:".cyan(), address);
+            println!("{}", "─".repeat(60).dimmed());
+            handlers::cmd_disasm(&mut state, address, instruction_count);
+            println!();
+        }
+
+        // Show decompilation (default behavior, unless only --asm)
+        if !show_asm {
+            println!("{} 0x{:x}", "Decompiling:".cyan(), address);
+            println!("{}", "─".repeat(60).dimmed());
+            handlers::cmd_decompile(&state, address);
+        }
+
+        return Ok(());
+    }
+
+    // Otherwise, run interactive REPL
+    run_cli()
+}
 
 /// Run the CLI REPL
 pub fn run_cli() -> Result<()> {

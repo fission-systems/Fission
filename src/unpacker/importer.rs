@@ -118,7 +118,11 @@ impl ImportReconstructor {
             if chunk.len() < 8 {
                 break;
             }
-            let ptr = u64::from_le_bytes(chunk.try_into().unwrap());
+            let bytes: [u8; 8] = match chunk.try_into() {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let ptr = u64::from_le_bytes(bytes);
 
             if ptr != 0 {
                 // Try to resolve
@@ -176,7 +180,11 @@ impl ImportReconstructor {
                     if chunk.len() < 8 {
                         break;
                     }
-                    let ptr = u64::from_le_bytes(chunk.try_into().unwrap());
+                    let bytes: [u8; 8] = match chunk.try_into() {
+                        Ok(b) => b,
+                        Err(_) => continue,
+                    };
+                    let ptr = u64::from_le_bytes(bytes);
                     let addr_here = current_addr + (offset * 8) as u64;
 
                     let is_valid_import = if ptr > 0 {
@@ -249,7 +257,9 @@ impl ImportReconstructor {
 
         if let Some((base, mod_name)) = target_module {
             // Check if we have exports cached
-            let needs_parsing = self.module_cache.get(&base).unwrap().exports.is_none();
+            let needs_parsing = self.module_cache.get(&base)
+                .map(|info| info.exports.is_none())
+                .unwrap_or(true);
 
             if needs_parsing {
                 if let Ok(dos) = pe::read_dos_header(self.process_handle, base) {

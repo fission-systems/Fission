@@ -21,7 +21,7 @@ impl BinaryParser for DynamicParser {
         // This simulates the OS loader to provide an accurate memory view
         crate::core::logging::info("Using DebugEngine for dynamic parsing...");
 
-        let loader = crate::debug_engine::TitanLoader::new();
+        let loader = crate::unpacker::TitanLoader::new();
         loader.load(&data, &path)
     }
 }

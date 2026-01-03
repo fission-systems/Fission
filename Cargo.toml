@@ -40,7 +40,7 @@ strip = true
 codegen-units = 1
 
 [features]
-default = ["gui", "cli"]
+default = ["gui", "cli", "native_decomp"]
 gui = ["dep:eframe", "dep:egui", "dep:rfd", "dep:egui_extras"]
 cli = ["dep:reedline", "dep:clap"]
 tui = ["dep:ratatui", "dep:crossterm", "dep:clap"]

@@ -173,7 +173,10 @@ pub fn rebuild_imports(
     let mut layout = std::collections::HashMap::new();
 
     for mod_name in &sorted_modules {
-        let imps = modules.get(mod_name).unwrap();
+        let imps = match modules.get(mod_name) {
+            Some(i) => i,
+            None => continue,
+        };
 
         // Module Name string
         let name_len = mod_name.len() + 1;
@@ -223,8 +226,14 @@ pub fn rebuild_imports(
     let mut descriptor_offset = 0;
 
     for mod_name in &sorted_modules {
-        let imps = modules.get(mod_name).unwrap();
-        let mod_layout = layout.get(mod_name).unwrap();
+        let imps = match modules.get(mod_name) {
+            Some(i) => i,
+            None => continue,
+        };
+        let mod_layout = match layout.get(mod_name) {
+            Some(l) => l,
+            None => continue,
+        };
 
         // Write Module Name
         let name_bytes = mod_name.as_bytes();
@@ -314,16 +323,45 @@ pub fn rebuild_imports(
 
     descriptor_offset = 0;
     for mod_name in &sorted_modules {
-        let mod_layout = layout.get(mod_name).unwrap();
-        let imps = modules.get(mod_name).unwrap();
+        let mod_layout = match layout.get(mod_name) {
+            Some(l) => l,
+            None => continue,
+        };
+        let imps = match modules.get(mod_name) {
+            Some(i) => i,
+            None => continue,
+        };
 
         // Fix ILT/IAT values (if they are names)
         let mut current_thunk_offset = 0;
         for imp in *imps {
             if imp.function_name.is_some() {
                 let ilt_pos = mod_layout.iat_offset + current_thunk_offset;
-                let offset_val =
-                    u64::from_le_bytes(new_section_data[ilt_pos..ilt_pos + 8].try_into().unwrap());
+                let offset_bytes = if thunk_size == 8 {
+                    &new_section_data[ilt_pos..ilt_pos + 8]
+                } else {
+                    &new_section_data[ilt_pos..ilt_pos + 4]
+                };
+                
+                let offset_val = if thunk_size == 8 {
+                    let bytes: [u8; 8] = match offset_bytes.try_into() {
+                        Ok(b) => b,
+                        Err(_) => {
+                            current_thunk_offset += thunk_size;
+                            continue;
+                        }
+                    };
+                    u64::from_le_bytes(bytes)
+                } else {
+                    let bytes: [u8; 4] = match offset_bytes.try_into() {
+                        Ok(b) => b,
+                        Err(_) => {
+                            current_thunk_offset += thunk_size;
+                            continue;
+                        }
+                    };
+                    u32::from_le_bytes(bytes) as u64
+                };
 
                 // If it's not ordinal (high bit not set), it's an offset to Hint/Name
                 if (offset_val & (1u64 << 63)) == 0 {

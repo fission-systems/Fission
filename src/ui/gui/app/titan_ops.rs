@@ -1,4 +1,4 @@
-use crate::debug_engine::engine::TitanEngine;
+use crate::unpacker::engine::TitanEngine;
 use crate::ui::gui::state::{AppState, DebugAction};
 use std::sync::{Arc, RwLock};
 
@@ -54,11 +54,11 @@ pub fn handle_debug_action(state: &mut AppState, action: DebugAction) -> bool {
                             if let Some(proc) = &engine.active_process {
                                 let base = proc.image_base;
                                 // Read DOS & NT Headers to find Import Directory
-                                if let Ok(dos) = crate::debug_engine::pe::read_dos_header(
+                                if let Ok(dos) = crate::unpacker::pe::read_dos_header(
                                     proc.process_handle,
                                     base,
                                 ) {
-                                    if let Ok(nt) = crate::debug_engine::pe::read_nt_headers64(
+                                    if let Ok(nt) = crate::unpacker::pe::read_nt_headers64(
                                         proc.process_handle,
                                         base,
                                         dos.e_lfanew,
@@ -109,7 +109,7 @@ pub fn handle_debug_action(state: &mut AppState, action: DebugAction) -> bool {
 
                                             if use_heuristic {
                                                 if let Ok(sections) =
-                                                    crate::debug_engine::pe::read_section_headers(
+                                                    crate::unpacker::pe::read_section_headers(
                                                         proc.process_handle,
                                                         base,
                                                         dos.e_lfanew,

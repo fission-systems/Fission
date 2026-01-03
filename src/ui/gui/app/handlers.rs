@@ -115,16 +115,24 @@ pub fn process_messages(
                 };
 
                 // Trigger background binary load for decompiler context
-                // Use memory-mapped data so sections are at their virtual addresses
+                // Pass RAW binary data - C++ will use sections to map VAs to file offsets
                 state.log(format!(
                     "[*] IAT symbols extracted: {} entries",
                     binary.iat_symbols.len()
                 ));
+                
+                state.log(format!(
+                    "[*] Binary data: {} bytes (image_base: 0x{:x})",
+                    binary.data.len(),
+                    binary.image_base
+                ));
+                
                 let request = super::decomp_worker::DecompileRequest::load_binary(
-                    binary.get_memory_mapped_data(),
+                    binary.data.clone(),
                     binary.image_base,
                     combined_symbols,
                     gdt_json_path_opt,
+                    binary.sections.clone(),
                 );
                 if let Err(e) = decomp_tx.send(request) {
                     state.log(format!(

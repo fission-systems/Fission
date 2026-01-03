@@ -42,13 +42,28 @@ pub fn decompile_function(
         return;
     }
 
+    // CRITICAL: Check if binary is loaded AND decompiler context is ready
     if state.analysis.loaded_binary.is_none() {
-        state.log("[!] No binary loaded");
+        state.log("[!] No binary loaded".to_string());
+        state.analysis.decompiled_code = "// No binary loaded\n// Use File → Open to load a binary".to_string();
+        return;
+    }
+    
+    // Extra safety: Check decompiler context is loaded (prevents race conditions)
+    if !state.analysis.decompiler_context_loaded {
+        state.log("[!] Decompiler context not ready".to_string());
+        state.analysis.decompiled_code = "// Decompiler initializing...\n// Please wait a moment and try again".to_string();
         return;
     }
 
     let (bytes, is_64bit) = {
-        let binary = state.analysis.loaded_binary.as_ref().unwrap();
+        let binary = match state.analysis.loaded_binary.as_ref() {
+            Some(b) => b,
+            None => {
+                state.analysis.decompiled_code = "// Error: No binary loaded".to_string();
+                return;
+            }
+        };
 
         // Get function bytes (use config default if size is unknown)
         let mut func_size = if func.size > 0 {
@@ -133,6 +148,7 @@ pub fn decompile_function(
         image_base: 0,
         iat_symbols: std::collections::HashMap::new(),
         gdt_json_path: None,
+        sections: Vec::new(),
     };
 
     if let Err(e) = decomp_tx.send(request) {

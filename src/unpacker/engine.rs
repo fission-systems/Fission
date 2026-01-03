@@ -101,10 +101,14 @@ impl TitanEngine {
                 let event = match debug_event.dwDebugEventCode {
                     CREATE_PROCESS_DEBUG_EVENT => {
                         let info = debug_event.u.CreateProcessInfo;
+                        let entry_point = info.lpStartAddress
+                            .map(|p| p as usize as u64)
+                            .unwrap_or(0);
+                        
                         // Update our process info if needed
                         if let Some(proc) = &mut self.active_process {
                             proc.image_base = info.lpBaseOfImage as u64;
-                            proc.entry_point = info.lpStartAddress.unwrap() as usize as u64;
+                            proc.entry_point = entry_point;
                         }
 
                         // Initialize Importer
@@ -117,7 +121,7 @@ impl TitanEngine {
                             process_handle: info.hProcess,
                             thread_handle: info.hThread,
                             image_base: info.lpBaseOfImage as u64,
-                            entry_point: info.lpStartAddress.unwrap() as usize as u64,
+                            entry_point,
                         }))
                     }
                     EXIT_PROCESS_DEBUG_EVENT => Some(DebugEvent::ProcessExit),

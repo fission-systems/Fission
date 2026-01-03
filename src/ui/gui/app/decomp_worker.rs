@@ -15,6 +15,7 @@ use crate::analysis::decomp::ffi::DecompilerNative;
 #[cfg(not(feature = "native_decomp"))]
 compile_error!("GUI requires native_decomp feature. Build with: cargo build --features native_decomp");
 
+use crate::analysis::loader::types::SectionInfo;
 use crate::config::CONFIG;
 use crate::core::errors::FissionError;
 use crate::ui::gui::messages::AsyncMessage;
@@ -46,6 +47,8 @@ pub struct DecompileRequest {
     pub iat_symbols: HashMap<u64, String>,
     /// GDT types JSON path for Windows structure definitions
     pub gdt_json_path: Option<String>,
+    /// Binary sections for memory mapping
+    pub sections: Vec<SectionInfo>,
 }
 
 impl DecompileRequest {
@@ -60,6 +63,7 @@ impl DecompileRequest {
             image_base: 0,
             iat_symbols: HashMap::new(),
             gdt_json_path: None,
+            sections: Vec::new(),
         }
     }
 
@@ -68,6 +72,7 @@ impl DecompileRequest {
         image_base: u64,
         iat_symbols: HashMap<u64, String>,
         gdt_json_path: Option<String>,
+        sections: Vec<SectionInfo>,
     ) -> Self {
         Self {
             request_id: 0, // Load request doesn't use ID
@@ -79,6 +84,7 @@ impl DecompileRequest {
             image_base,
             iat_symbols,
             gdt_json_path,
+            sections,
         }
     }
 
@@ -93,6 +99,7 @@ impl DecompileRequest {
             image_base: 0,
             iat_symbols: HashMap::new(),
             gdt_json_path: None,
+            sections: Vec::new(),
         }
     }
 }
@@ -212,6 +219,24 @@ fn worker_loop(
                         e
                     ));
                 } else {
+                    // Register sections with the decompiler
+                    for section in &request.sections {
+                        if let Err(e) = native.add_memory_block(
+                            &section.name,
+                            section.virtual_address,
+                            section.virtual_size,
+                            section.file_offset,
+                            section.file_size,
+                            section.is_executable,
+                            section.is_writable,
+                        ) {
+                            crate::core::logging::warn(&format!(
+                                "[decomp-worker] Failed to add section {}: {}",
+                                section.name, e
+                            ));
+                        }
+                    }
+
                     native.add_symbols(&request.iat_symbols);
                     if let Some(ref gdt) = request.gdt_json_path {
                         let _ = native.set_gdt(gdt);
@@ -257,13 +282,14 @@ fn worker_loop(
                     });
                 }
                 Err(e) => {
-                    crate::core::logging::error(&format!(
+                    // Log as debug to avoid spam when binary isn't loaded
+                    crate::core::logging::debug(&format!(
                         "[decomp-worker-{}] Decompile failed for 0x{:x}: {}",
                         worker_id, request.address, e
                     ));
                     let _ = result_tx.send(AsyncMessage::DecompileResult {
                         address: request.address,
-                        c_code: format!("// Decompile failed: {}", e),
+                        c_code: format!("// Decompile failed: {}\n// Load a binary first", e),
                     });
                 }
             }
