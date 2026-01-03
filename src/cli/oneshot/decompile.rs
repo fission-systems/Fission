@@ -1,0 +1,279 @@
+use crate::analysis::decomp::ffi::DecompilerNative;
+use crate::analysis::loader::{FunctionInfo, LoadedBinary};
+use crate::cli::args::OneShotArgs;
+use std::fs;
+use std::io::{self, Write};
+
+pub(super) fn run_decompilation(
+    cli: &OneShotArgs,
+    binary: &LoadedBinary,
+    binary_data: &[u8],
+) -> io::Result<()> {
+    // Initialize decompiler
+    let sla_dir = std::env::current_dir()
+        .unwrap()
+        .join("ghidra_decompiler")
+        .to_string_lossy()
+        .into_owned();
+
+    if cli.verbose {
+        eprintln!("[*] Initializing native decompiler...");
+    }
+
+    let mut decomp = match DecompilerNative::new(&sla_dir) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Error: Failed to create decompiler: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Load binary
+    if let Err(e) = decomp.load_binary(binary_data, binary.image_base, binary.is_64bit) {
+        eprintln!("Error: Failed to load binary: {}", e);
+        std::process::exit(1);
+    }
+
+    // Add IAT symbols
+    decomp.add_symbols(&binary.iat_symbols);
+
+    // Add memory blocks (sections) to improve analysis
+    if cli.verbose {
+        eprintln!(
+            "[*] Registering {} memory sections...",
+            binary.sections.len()
+        );
+    }
+
+    for section in &binary.sections {
+        if let Err(e) = decomp.add_memory_block(
+            &section.name,
+            section.virtual_address,
+            section.virtual_size,
+            section.file_offset as u64,
+            section.file_size as u64,
+            section.is_executable,
+            section.is_writable,
+        ) {
+            if cli.verbose {
+                eprintln!("[!] Failed to register section {}: {}", section.name, e);
+            }
+        }
+    }
+
+    // Add all known functions to improve decompilation quality
+    if cli.verbose {
+        eprintln!(
+            "[*] Registering {} known functions...",
+            binary.functions.len()
+        );
+    }
+
+    let mut registered_count = 0;
+    for func in &binary.functions {
+        if func.address != 0 && !func.name.is_empty() {
+            if let Err(e) = decomp.add_function(func.address, Some(&func.name)) {
+                if cli.verbose {
+                    eprintln!(
+                        "[!] Failed to register function at 0x{:x}: {}",
+                        func.address, e
+                    );
+                }
+            } else {
+                registered_count += 1;
+            }
+        }
+    }
+
+    if cli.verbose {
+        eprintln!(
+            "[*] Successfully registered {}/{} functions",
+            registered_count,
+            binary.functions.len()
+        );
+    }
+
+    // Try to load FID databases if available (load all matching ones)
+    let fid_paths = [
+        "ghidra/funtionID/vs2019_x64.fidbf",
+        "ghidra/funtionID/vs2017_x64.fidbf",
+        "ghidra/funtionID/vs2015_x64.fidbf",
+        "ghidra/funtionID/vs2012_x64.fidbf",
+        "ghidra/funtionID/vsOlder_x64.fidbf",
+        "ghidra/funtionID/vs2019_x86.fidbf",
+        "ghidra/funtionID/vs2017_x86.fidbf",
+        "ghidra/funtionID/vs2015_x86.fidbf",
+        "ghidra/funtionID/vs2012_x86.fidbf",
+        "ghidra/funtionID/vsOlder_x86.fidbf",
+    ];
+
+    // Filter FID databases by architecture
+    let target_suffix = if binary.is_64bit {
+        "_x64.fidbf"
+    } else {
+        "_x86.fidbf"
+    };
+    let matching_fid_paths: Vec<_> = fid_paths
+        .iter()
+        .filter(|p| p.ends_with(target_suffix))
+        .collect();
+
+    // Load all available FID databases for better matching coverage
+    let mut fid_loaded_count = 0;
+    for fid_path in matching_fid_paths {
+        if let Ok(full_path) = std::env::current_dir() {
+            let fid_full = full_path.join(fid_path);
+            if fid_full.exists() {
+                if cli.verbose {
+                    eprintln!("[*] Loading FID database: {}", fid_full.display());
+                }
+                if let Err(e) = decomp.load_fid_database(&fid_full.to_string_lossy()) {
+                    if cli.verbose {
+                        eprintln!("[!] Warning: Failed to load FID database: {}", e);
+                    }
+                } else {
+                    fid_loaded_count += 1;
+                    if cli.verbose {
+                        eprintln!("[✓] FID database loaded");
+                    }
+                }
+            }
+        }
+    }
+
+    if cli.verbose && fid_loaded_count > 0 {
+        eprintln!(
+            "[✓] Loaded {} FID database(s) for function matching",
+            fid_loaded_count
+        );
+    }
+
+    if cli.verbose {
+        eprintln!("[✓] Decompiler ready");
+    }
+
+    // Collect functions to decompile
+    let functions: Vec<&FunctionInfo> = if let Some(addr) = cli.address {
+        binary
+            .functions
+            .iter()
+            .filter(|f| f.address == addr)
+            .collect()
+    } else if cli.all {
+        binary.functions.iter().filter(|f| !f.is_import).collect()
+    } else {
+        vec![]
+    };
+
+    if functions.is_empty() && cli.address.is_some() {
+        eprintln!(
+            "Warning: No function found at address 0x{:x}",
+            cli.address.unwrap()
+        );
+        // Try to decompile anyway
+        let addr = cli.address.unwrap();
+        decompile_and_output(cli, &decomp, addr, &format!("sub_{:x}", addr))?;
+        return Ok(());
+    }
+
+    // Decompile each function
+    let mut all_output = String::new();
+    let mut json_results: Vec<serde_json::Value> = Vec::new();
+
+    for func in &functions {
+        if cli.verbose {
+            eprintln!("[*] Decompiling {} (0x{:x})...", func.name, func.address);
+        }
+
+        match decomp.decompile(func.address) {
+            Ok(code) => {
+                if cli.json {
+                    json_results.push(serde_json::json!({
+                        "address": format!("0x{:x}", func.address),
+                        "name": func.name,
+                        "code": code
+                    }));
+                } else {
+                    all_output.push_str(&format!(
+                        "// ============================================\n"
+                    ));
+                    all_output.push_str(&format!(
+                        "// Function: {} @ 0x{:x}\n",
+                        func.name, func.address
+                    ));
+                    all_output.push_str(&format!(
+                        "// ============================================\n\n"
+                    ));
+                    all_output.push_str(&code);
+                    all_output.push_str("\n\n");
+                }
+            }
+            Err(e) => {
+                if cli.json {
+                    json_results.push(serde_json::json!({
+                        "address": format!("0x{:x}", func.address),
+                        "name": func.name,
+                        "error": e.to_string()
+                    }));
+                } else {
+                    all_output.push_str(&format!(
+                        "// Error decompiling {} (0x{:x}): {}\n\n",
+                        func.name, func.address, e
+                    ));
+                }
+            }
+        }
+    }
+
+    // Output results
+    let final_output = if cli.json {
+        serde_json::to_string_pretty(&json_results).unwrap()
+    } else {
+        all_output
+    };
+
+    if let Some(ref output_path) = cli.output {
+        let mut file = fs::File::create(output_path).expect("Failed to create output file");
+        file.write_all(final_output.as_bytes())?;
+        if cli.verbose {
+            eprintln!("[✓] Output written to: {}", output_path.display());
+        }
+    } else {
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(final_output.as_bytes())?;
+    }
+    Ok(())
+}
+
+pub(super) fn decompile_and_output(
+    cli: &OneShotArgs,
+    decomp: &DecompilerNative,
+    addr: u64,
+    name: &str,
+) -> io::Result<()> {
+    match decomp.decompile(addr) {
+        Ok(code) => {
+            let mut stdout = io::stdout().lock();
+            if cli.json {
+                writeln!(
+                    stdout,
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "address": format!("0x{:x}", addr),
+                        "name": name,
+                        "code": code
+                    }))
+                    .unwrap()
+                )?;
+            } else {
+                writeln!(stdout, "// Function: {} @ 0x{:x}\n", name, addr)?;
+                writeln!(stdout, "{}", code)?;
+            }
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
