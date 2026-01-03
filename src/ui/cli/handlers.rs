@@ -326,24 +326,35 @@ pub fn cmd_strings(state: &CliState) {
     let binary = require_binary!(state);
 
     let min_len = 4;
-    let mut strings = Vec::new();
+    // Pre-allocate with estimated capacity (heuristic: ~1 string per 1KB of data)
+    let estimated_strings = binary.data.len() / 1024;
+    let mut strings: Vec<(usize, String)> = Vec::with_capacity(estimated_strings.max(100));
 
     // Simple ASCII string extraction
-    let mut current_string = String::new();
+    // Pre-allocate buffer with reasonable capacity to reduce reallocations
+    let mut current_bytes: Vec<u8> = Vec::with_capacity(256);
     let mut start_offset = 0usize;
 
     for (i, &byte) in binary.data.iter().enumerate() {
         if byte >= 0x20 && byte <= 0x7E {
-            if current_string.is_empty() {
+            if current_bytes.is_empty() {
                 start_offset = i;
             }
-            current_string.push(byte as char);
+            current_bytes.push(byte);
         } else {
-            if current_string.len() >= min_len {
-                strings.push((start_offset, current_string.clone()));
+            if current_bytes.len() >= min_len {
+                // SAFETY: We only pushed bytes in 0x20-0x7E range, which are valid ASCII/UTF-8
+                let value = unsafe { String::from_utf8_unchecked(std::mem::take(&mut current_bytes)) };
+                strings.push((start_offset, value));
             }
-            current_string.clear();
+            current_bytes.clear();
         }
+    }
+
+    // Handle any remaining string at end of data
+    if current_bytes.len() >= min_len {
+        let value = unsafe { String::from_utf8_unchecked(current_bytes) };
+        strings.push((start_offset, value));
     }
 
     println!();
@@ -356,12 +367,11 @@ pub fn cmd_strings(state: &CliState) {
     println!();
 
     for (offset, s) in strings.iter().take(100) {
-        let display = if s.len() > 60 {
-            format!("{}...", &s[..57])
+        if s.len() > 60 {
+            println!("  {:08X}  {}...", offset, s[..57].green());
         } else {
-            s.clone()
-        };
-        println!("  {:08X}  {}", offset, display.green());
+            println!("  {:08X}  {}", offset, s.green());
+        }
     }
 
     if strings.len() > 100 {
