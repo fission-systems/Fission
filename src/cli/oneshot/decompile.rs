@@ -69,7 +69,6 @@ pub(super) fn run_decompilation(
         );
     }
 
-    let mut registered_count = 0;
     for func in &binary.functions {
         if func.address != 0 && !func.name.is_empty() {
             if let Err(e) = decomp.add_function(func.address, Some(&func.name)) {
@@ -79,48 +78,36 @@ pub(super) fn run_decompilation(
                         func.address, e
                     );
                 }
-            } else {
-                registered_count += 1;
             }
         }
     }
 
-    if cli.verbose {
-        eprintln!(
-            "[*] Successfully registered {}/{} functions",
-            registered_count,
-            binary.functions.len()
-        );
-    }
-
     // Try to load FID databases if available (load all matching ones)
-    let fid_paths = [
-        "ghidra/funtionID/vs2019_x64.fidbf",
-        "ghidra/funtionID/vs2017_x64.fidbf",
-        "ghidra/funtionID/vs2015_x64.fidbf",
-        "ghidra/funtionID/vs2012_x64.fidbf",
-        "ghidra/funtionID/vsOlder_x64.fidbf",
-        "ghidra/funtionID/vs2019_x86.fidbf",
-        "ghidra/funtionID/vs2017_x86.fidbf",
-        "ghidra/funtionID/vs2015_x86.fidbf",
-        "ghidra/funtionID/vs2012_x86.fidbf",
-        "ghidra/funtionID/vsOlder_x86.fidbf",
-    ];
-
-    // Filter FID databases by architecture
     let target_suffix = if binary.is_64bit {
         "_x64.fidbf"
     } else {
         "_x86.fidbf"
     };
-    let matching_fid_paths: Vec<_> = fid_paths
-        .iter()
-        .filter(|p| p.ends_with(target_suffix))
-        .collect();
+    
+    // Build comprehensive FID database list
+    // Prioritize: GCC/MinGW for Linux/MinGW binaries, MSVC for Windows native
+    let fid_paths = vec![
+        // GCC/MinGW databases (for cross-compiled and native GCC binaries)
+        format!("ghidra/funtionID/gcc13{}", target_suffix),
+        format!("ghidra/funtionID/gcc12{}", target_suffix),
+        format!("ghidra/funtionID/gcc11{}", target_suffix),
+        format!("ghidra/funtionID/mingw{}", target_suffix),
+        // MSVC databases (for native Windows binaries)
+        format!("ghidra/funtionID/vs2019{}", target_suffix),
+        format!("ghidra/funtionID/vs2017{}", target_suffix),
+        format!("ghidra/funtionID/vs2015{}", target_suffix),
+        format!("ghidra/funtionID/vs2012{}", target_suffix),
+        format!("ghidra/funtionID/vsOlder{}", target_suffix),
+    ];
 
     // Load all available FID databases for better matching coverage
     let mut fid_loaded_count = 0;
-    for fid_path in matching_fid_paths {
+    for fid_path in &fid_paths {
         if let Ok(full_path) = std::env::current_dir() {
             let fid_full = full_path.join(fid_path);
             if fid_full.exists() {

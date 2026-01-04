@@ -84,8 +84,8 @@ pub(super) fn disassemble(
         writeln!(stdout, "Disassembly at 0x{:x}:", addr)?;
         writeln!(
             stdout,
-            "{:>18}  {:24}  {}",
-            "Address", "Bytes", "Instruction"
+            "{:>18}  {:24}  Instruction",
+            "Address", "Bytes"
         )?;
         writeln!(stdout, "{:─<70}", "")?;
         for (ip, bytes, mnemonic) in &instructions {

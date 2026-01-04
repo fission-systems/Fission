@@ -83,6 +83,11 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/loader/PeHeader.cc
     ${FISSION_MODULES_DIR}/loader/SymbolLoader.cc
     ${FISSION_MODULES_DIR}/loader/BinaryDetector.cc
+    # New modular decompiler components
+    ${FISSION_MODULES_DIR}/decompiler/PostProcessor.cc
+    ${FISSION_MODULES_DIR}/decompiler/TypeEnhancer.cc
+    ${FISSION_MODULES_DIR}/decompiler/DecompilationPipeline.cc
+    ${FISSION_MODULES_DIR}/decompiler/ServerMode.cc
     # MemoryImage is header-only
 )
 

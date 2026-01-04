@@ -38,8 +38,8 @@ impl Default for MacOSMemory {
 
 impl PlatformMemory for MacOSMemory {
     fn open_process(&mut self, pid: u32) -> Result<(), MemoryError> {
-        // Store PID for future implementation
-        self._target_pid = Some(pid);
+        // Store PID for future implementation (unused in stub)
+        let _ = pid;
 
         // For now, return success but operations will fail
         // A full implementation would call task_for_pid here
@@ -67,6 +67,6 @@ impl PlatformMemory for MacOSMemory {
     }
 
     fn is_open(&self) -> bool {
-        self._target_pid.is_some()
+        false // Stub implementation always returns false
     }
 }

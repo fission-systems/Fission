@@ -20,7 +20,7 @@ pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Resu
         writeln!(stdout, "{}", serde_json::to_string_pretty(&funcs).unwrap())?;
     } else {
         writeln!(stdout, "Functions ({}):", binary.functions.len())?;
-        writeln!(stdout, "{:>18}  {:>8}  {}", "Address", "Size", "Name")?;
+        writeln!(stdout, "{:>18}  {:>8}  Name", "Address", "Size")?;
         writeln!(stdout, "{:─<60}", "")?;
         for func in &binary.functions {
             let marker = if func.is_import {
