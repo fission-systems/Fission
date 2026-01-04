@@ -44,11 +44,7 @@ pub fn cmd_xrefs(state: &CliState, addr: u64) {
             
             for func in &binary.functions {
                 // Simple heuristic: show functions in reasonable range
-                let distance = if func.address > addr {
-                    func.address - addr
-                } else {
-                    addr - func.address
-                };
+                let distance = func.address.abs_diff(addr);
                 
                 if distance < 0x100000 && func.address != addr {
                     if call_count < 10 {  // Limit to first 10

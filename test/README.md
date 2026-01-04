@@ -1,91 +1,259 @@
-# Fission Test Cases
+# Fission Test Suite
 
-This directory contains test binaries for validating Fission's analysis capabilities.
+This directory contains comprehensive C test programs designed to evaluate Fission's decompilation capabilities across various scenarios.
 
 ## Test Files
 
-### struct_test.c / struct_test.exe
-**Purpose**: Test structure recovery and type inference
+### 1. `struct_test.c` - Structure Recovery
+Tests Fission's ability to recover and reconstruct structure definitions from compiled binaries.
 
-**Features tested**:
-- Structure field detection
-- Nested structure handling
-- Pointer dereferencing
-- Type propagation through function calls
+**Key Features:**
+- Nested structures
+- Structure pointer handling
+- Field access patterns
+- Memory allocation with structures
 
-**Expected results**:
-- Fission should recover the `Item` structure definition
-- Field accesses should be properly typed
-- Nested structure (`point`) should be detected
+**Compile:**
+```bash
+# Windows (MSVC)
+cl /O2 struct_test.c
 
-### winapi_test.c / winapi_test.exe
-**Purpose**: Test FID (Function ID) matching and constant substitution
+# Linux/macOS (GCC) - x86-64
+gcc -O2 -o struct_test struct_test.c
 
-**Features tested**:
+# macOS (Apple Silicon) - x86-64
+gcc -arch x86_64 -O2 -o struct_test_x64 struct_test.c
+
+# Cross-compile for Windows (MinGW)
+x86_64-w64-mingw32-gcc -O2 -o struct_test_x64.exe struct_test.c  # 64-bit
+i686-w64-mingw32-gcc -O2 -o struct_test_x86.exe struct_test.c    # 32-bit
+```
+
+### 2. `winapi_test.c` - Windows API Function Identification
 - Automatic function name recognition via FID database
-- Windows API constant resolution (GENERIC_READ, MEM_COMMIT, etc.)
-- Multiple DLL coverage (kernel32, advapi32, ws2_32, bcrypt)
-- Flag combination detection (e.g., `0x3000` → `MEM_COMMIT | MEM_RESERVE`)
+Tests FID (Function ID) matching and Windows API constant resolution.
 
-**Expected results**:
-- Import functions should be named (not `FUN_140001234`)
-- Constants should be substituted with symbolic names
-- Function signatures should match Windows API prototypes
+**Key Features:**
+- File I/O operations (kernel32.dll)
+- Memory management (VirtualAlloc, HeapAlloc)
+- Registry operations (advapi32.dll)
+- Network operations (ws2_32.dll)
+- Message boxes and UI (user32.dll)
+- Cryptography (advapi32.dll)
+- Process/Thread creation
 
-**Covered APIs**:
-- **File I/O**: CreateFileA, WriteFile, CloseHandle
-- **Memory**: VirtualAlloc, VirtualFree, HeapAlloc, HeapFree
-- **Registry**: RegOpenKeyExA, RegQueryValueExA, RegCloseKey
-- **Network**: WSAStartup, socket, closesocket, WSACleanup
-- **Process**: GetCurrentProcess, CreateThread, ResumeThread, WaitForSingleObject
-- **Crypto**: BCryptOpenAlgorithmProvider, BCryptCloseAlgorithmProvider
+**Compile:**
+```bash
+# Windows (MSVC)
+cl /O2 winapi_test.c advapi32.lib user32.lib ws2_32.lib
 
-## Building Tests
-
-### Windows (Visual Studio)
-```cmd
-cl /Od /Zi struct_test.c
-cl /Od /Zi winapi_test.c ws2_32.lib advapi32.lib bcrypt.lib
+# MinGW
+x86_64-w64-mingw32-gcc -O2 -o winapi_test.exe winapi_test.c -ladvapi32 -luser32 -lws2_32
 ```
 
-### Windows (MinGW)
+### 3. `control_flow_test.c` - Control Flow Analysis ✨ NEW
+Tests decompilation of various control flow patterns and language constructs.
+
+**Key Features:**
+- **Switch statements** - Jump table recovery
+- **Nested loops** - Loop detection and structuring
+- **Recursion** - Direct and tail recursion
+- **Complex conditionals** - If-else chains
+- **Bitwise operations** - Bit manipulation patterns
+- **Pointer arithmetic** - Array manipulation
+- **Function pointers** - Indirect calls
+- **Variadic functions** - Variable argument lists
+- **Inline assembly** - ASM block detection
+- **String operations** - Memory manipulation
+- **Structure arrays** - Complex data structures
+
+**Compile:**
 ```bash
-gcc -O0 -g struct_test.c -o struct_test.exe
-gcc -O0 -g winapi_test.c -o winapi_test.exe -lws2_32 -ladvapi32 -lbcrypt
+# Windows (MSVC)
+cl /O2 control_flow_test.c
+
+# Linux/macOS (GCC) - x86-64
+gcc -O2 -o control_flow_test control_flow_test.c
+
+# macOS (Apple Silicon) - x86-64
+gcc -arch x86_64 -O2 -o control_flow_test_x64 control_flow_test.c
+
+# Cross-compile for Windows (MinGW)
+x86_64-w64-mingw32-gcc -O2 -o control_flow_test_x64.exe control_flow_test.c  # 64-bit
+i686-w64-mingw32-gcc -O2 -o control_flow_test_x86.exe control_flow_test.c    # 32-bit
 ```
 
-### Cross-compile from Linux (mingw-w64)
+### 4. `datatype_test.c` - Data Type Analysis ✨ NEW
+Tests Fission's type inference and data structure recognition.
+
+**Key Features:**
+- **Integer boundaries** - Overflow and type limits
+- **Floating point** - Precision, infinity, NaN
+- **Type casting** - Implicit/explicit conversions
+- **Struct alignment** - Packed vs natural alignment
+- **Union type punning** - Type reinterpretation
+- **Bitfields** - Bit-level field access
+- **Array decay** - Array-to-pointer conversion
+- **Volatile qualifier** - Memory-mapped I/O
+- **Const correctness** - Immutability patterns
+- **Static variables** - Persistent state
+
+**Compile:**
 ```bash
-x86_64-w64-mingw32-gcc -O0 -g struct_test.c -o struct_test.exe
-x86_64-w64-mingw32-gcc -O0 -g winapi_test.c -o winapi_test.exe -lws2_32 -ladvapi32 -lbcrypt
+# Windows (MSVC)
+cl /O2 datatype_test.c
+
+# Linux/macOS (GCC) - x86-64
+gcc -O2 -o datatype_test datatype_test.c
+
+# macOS (Apple Silicon) - x86-64
+gcc -arch x86_64 -O2 -o datatype_test_x64 datatype_test.c
+
+# Cross-compile for Windows (MinGW)
+x86_64-w64-mingw32-gcc -O2 -o datatype_test_x64.exe datatype_test.c  # 64-bit
+i686-w64-mingw32-gcc -O2 -o datatype_test_x86.exe datatype_test.c    # 32-bit
 ```
 
-## Running Tests
+## Testing with Fission
 
-### Direct Analysis
+### Basic Usage
+
 ```bash
-# Structure recovery test
-fission --cli test/struct_test.exe --info
-fission --cli test/struct_test.exe --sections
+# Show binary info
+fission test/control_flow_test.exe --info
 
-# FID matching test
-fission --cli test/winapi_test.exe --info
-fission --cli test/winapi_test.exe --count
+# List all functions
+fission test/control_flow_test.exe --list
 
 # Decompile specific function
-fission --cli test/winapi_test.exe
-fission> funcs
-fission> decompile 0x140001000  # Replace with actual address
+fission test/control_flow_test.exe --decomp 0x140001000
+
+# Decompile all functions
+fission test/control_flow_test.exe --decomp-all -o output/
+
+# JSON output
+fission test/control_flow_test.exe --decomp 0x140001000 --json
 ```
 
-### REPL Mode
+### Testing Specific Features
+
+**Control Flow:**
 ```bash
-fission --cli test/winapi_test.exe
-fission> info
-fission> sections
-fission> funcs
-fission> decompile <address>
+# Test switch statement recovery
+fission test/control_flow_test.exe --decomp classify_number
+
+# Test recursion
+fission test/control_flow_test.exe --decomp fibonacci
+
+# Test function pointers
+fission test/control_flow_test.exe --decomp calculate
 ```
+
+**Data Types:**
+```bash
+# Test struct alignment
+fission test/datatype_test.exe --decomp test_struct_alignment
+
+# Test union punning
+fission test/datatype_test.exe --decomp test_union_punning
+
+# Test bitfields
+fission test/datatype_test.exe --decomp test_bitfields
+```
+
+**Windows API:**
+```bash
+# Test FID matching
+fission test/winapi_test.exe --decomp test_file_operations
+
+# With verbose mode to see FID loading
+fission test/winapi_test.exe --decomp test_memory_operations -v
+```
+
+## Build Script
+
+```bash
+#!/bin/bash
+# build_tests.sh
+
+echo "Building Fission test suite..."
+
+# Determine architecture
+if [[ $(uname -m) == "arm64" ]]; then
+    echo "Detected Apple Silicon - compiling for x86-64"
+    ARCH_FLAG="-arch x86_64"
+else
+    ARCH_FLAG=""
+fi
+
+# Control flow tests
+echo "Building control_flow_test..."
+gcc $ARCH_FLAG -O2 -o control_flow_test_x64 control_flow_test.c
+x86_64-w64-mingw32-gcc -O2 -o control_flow_test_x64.exe control_flow_test.c
+i686-w64-mingw32-gcc -O2 -o control_flow_test_x86.exe control_flow_test.c
+
+# Data type tests
+echo "Building datatype_test..."
+gcc $ARCH_FLAG -O2 -o datatype_test_x64 datatype_test.c
+x86_64-w64-mingw32-gcc -O2 -o datatype_test_x64.exe datatype_test.c
+i686-w64-mingw32-gcc -O2 -o datatype_test_x86.exe datatype_test.c
+
+# Structure tests
+echo "Building struct_test..."
+gcc $ARCH_FLAG -O2 -o struct_test_x64 struct_test.c
+x86_64-w64-mingw32-gcc -O2 -o struct_test_x64.exe struct_test.c
+i686-w64-mingw32-gcc -O2 -o struct_test_x86.exe struct_test.c
+
+# Windows API tests (Windows only)
+echo "Building winapi_test..."
+x86_64-w64-mingw32-gcc -O2 -o winapi_test.exe winapi_test.c -ladvapi32 -luser32 -lws2_32
+
+echo "All tests built successfully!"
+```
+
+## Expected Decompilation Quality
+
+### Excellent (95-100% accuracy):
+- Simple arithmetic functions (add, subtract, multiply, divide)
+- Basic control flow (if/else, simple loops)
+- Structure field access
+- String references and constants
+- Windows API calls with FID
+
+**Test Results (Windows PE x86-64):**
+- ✅ `add()` - Perfectly recovered: `return param_1 + param_2;`
+- ✅ `classify_number()` - String references preserved with addresses
+- ✅ Simple conditionals and comparisons
+
+### Good (85-95% accuracy):
+- Switch statements (may optimize to jump tables)
+- Nested loops and recursion
+- Function pointers
+- Type inference
+- Pointer arithmetic
+
+**Test Results (Windows PE x86-64):**
+- ✅ `fibonacci()` - Recursive structure preserved with loop optimization
+- ✅ `factorial()` - Tail recursion converted to loop
+- ✅ `reverse_array()` - Pointer manipulation correctly decompiled
+
+### Moderate (70-85% accuracy):
+- Inline assembly
+- Variadic functions
+- Union type punning
+- Optimized tail calls
+- Complex pointer arithmetic
+
+**Test Results (Windows PE x86-64):**
+- ⚠️ printf calls - Shows function pointer calls but not formatted strings
+- ⚠️ Complex control flow with multiple optimizations
+
+### Challenging (<70% accuracy):
+- Heavy optimization (inlining, unrolling)
+- SIMD intrinsics
+- Template instantiation artifacts
+- Exception handling (C++)
+- Mach-O binaries (limited support, PE is preferred)
 
 ## Validation Checklist
 
@@ -98,14 +266,47 @@ fission> decompile <address>
 ### For winapi_test.exe:
 - [ ] Import functions have correct names (not generic sub_*)
 - [ ] Constants are resolved (GENERIC_READ, MEM_COMMIT, etc.)
+- [ ] Constants are resolved (GENERIC_READ, MEM_COMMIT, etc.)
 - [ ] Flag combinations are detected (e.g., GENERIC_READ | GENERIC_WRITE)
 - [ ] Function signatures match Windows API
 - [ ] DLL names are correct (kernel32.dll, advapi32.dll, etc.)
-- [ ] Cross-references work for API calls
 
-## Notes
+### For control_flow_test.exe ✨ NEW:
+- [ ] Switch statement recovers as switch (not if-else chain)
+- [ ] Loop structures properly detected
+- [ ] Recursion shows function calls (not tail-call jumps)
+- [ ] Function pointer calls identified
+- [ ] Inline assembly blocks preserved
 
-- Test binaries should be compiled with symbols (`/Zi` or `-g`) for easier validation
+### For datatype_test.exe ✨ NEW:
+- [ ] Integer types correctly inferred
+- [ ] Struct padding/alignment detected
+- [ ] Union members identified
+- [ ] Bitfield access patterns recognized
+- [ ] Const/volatile qualifiers preserved
+
+## Contributing
+
+When adding new test cases:
+
+1. **Document the purpose** - What decompilation feature does it test?
+2. **Keep it focused** - One test per specific feature
+3. **Add expected output** - What should the decompiler produce?
+4. **Test across compilers** - MSVC, GCC, Clang
+5. **Vary optimization levels** - `/O1`, `/O2`, `/Ox`
+
+## Known Issues
+
+- **Tail call optimization**: May appear as jumps instead of calls
+- **Loop unrolling**: Duplicated code instead of loop structures  
+- **Inline assembly**: Platform-specific, may not decompile cleanly
+- **Floating point**: Precision issues with constant folding
+
+## References
+
+- Ghidra Decompiler: https://ghidra-sre.org/
+- IDA Hex-Rays: https://hex-rays.com/
+- FID Database Format: See `ghidra/funtionID/building_fid.txt`
 - Use `-O0` to prevent aggressive optimization that might obscure patterns
 - For FID testing, ensure the appropriate `.fidbf` file is loaded (VS2019 recommended)
 - Some API calls may fail at runtime (by design) but should still be recognizable in static analysis

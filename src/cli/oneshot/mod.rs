@@ -113,10 +113,7 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
     if cli.address.is_some() || cli.all {
         #[cfg(feature = "native_decomp")]
         {
-            if let Err(e) = run_decompilation(&cli, &binary, &binary_data) {
-                // Return IO errors (like BrokenPipe), suppress others handled internally if needed
-                return Err(e);
-            }
+            run_decompilation(&cli, &binary, &binary_data)?;
         }
 
         #[cfg(not(feature = "native_decomp"))]

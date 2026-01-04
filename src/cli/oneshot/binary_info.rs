@@ -151,7 +151,7 @@ pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()>
         writeln!(stdout, "{}", serde_json::to_string_pretty(&funcs).unwrap())?;
     } else {
         writeln!(stdout, "Imported Functions ({}):", imports.len())?;
-        writeln!(stdout, "{:>18}  {}", "Address", "Name")?;
+        writeln!(stdout, "{:>18}  Name", "Address")?;
         writeln!(stdout, "{:─<60}", "")?;
         for func in imports {
             writeln!(stdout, "  0x{:012x}  {}", func.address, func.name)?;
@@ -178,7 +178,7 @@ pub(super) fn print_exports(binary: &LoadedBinary, json: bool) -> io::Result<()>
         writeln!(stdout, "{}", serde_json::to_string_pretty(&funcs).unwrap())?;
     } else {
         writeln!(stdout, "Exported Functions ({}):", exports.len())?;
-        writeln!(stdout, "{:>18}  {:>8}  {}", "Address", "Size", "Name")?;
+        writeln!(stdout, "{:>18}  {:>8}  Name", "Address", "Size")?;
         writeln!(stdout, "{:─<60}", "")?;
         for func in exports {
             writeln!(

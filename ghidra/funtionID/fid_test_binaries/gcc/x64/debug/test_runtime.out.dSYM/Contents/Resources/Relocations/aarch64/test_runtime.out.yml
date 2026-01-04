@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     'fid_test_binaries/gcc/x64/debug/test_runtime.out'
+relocations:     []
+...

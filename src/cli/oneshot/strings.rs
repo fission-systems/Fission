@@ -54,7 +54,7 @@ pub(super) fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Resu
             strings.len(),
             min_len
         )?;
-        writeln!(stdout, "{:>12}  {}", "Offset", "String")?;
+        writeln!(stdout, "{:>12}  String", "Offset")?;
         writeln!(stdout, "{:─<60}", "")?;
         for (off, s) in &strings {
             // Truncate long strings for display
