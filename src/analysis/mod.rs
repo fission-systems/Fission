@@ -7,7 +7,9 @@ pub mod detector;
 pub mod disasm;
 pub mod dotnet;
 pub mod loader;
+pub mod optimizer;
 pub mod patch;
+pub mod pcode;
 pub mod signatures;
 pub mod xrefs;
 
@@ -17,5 +19,6 @@ pub use dotnet::{
     DotNetType, ILInstruction, IlDisassembler,
 };
 pub use loader::{FunctionInfo, LoadedBinary, SectionInfo};
+pub use optimizer::{Optimizer, OptimizerConfig};
 pub use patch::{Patch, PatchManager, QuickPatch};
 pub use xrefs::{Xref, XrefDatabase, XrefType};

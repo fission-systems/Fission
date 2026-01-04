@@ -76,7 +76,7 @@ TODO: Add screenshot when available
 
 | Feature | Description |
 |---------|-------------|
-| **Ghidra-Powered Decompiler** | High-performance C code decompilation via subprocess pool with parallel execution |
+| **Ghidra-Powered Decompiler** | High-performance C code decompilation via direct FFI integration with optimized Pcode IR |
 | **iced-x86 Disassembler** | Pure Rust x86/x64 disassembly with syntax highlighting |
 | **.NET Binary Support** | CLR metadata parsing, IL disassembly, native stub analysis |
 | **Cross-Platform Binaries** | Windows (PE), Linux (ELF), and macOS (Mach-O) support |
@@ -117,12 +117,12 @@ TODO: Add screenshot when available
 
 | Feature | Description |
 |---------|-------------|
-| **Decompiler Pool** | Multi-process parallelization (auto-detects CPU cores, max 8) |
+| **Direct FFI Integration** | Zero-copy decompilation via native C++ bindings (no IPC overhead) |
+| **Pcode IR Optimizer** | 32+ optimization rules with def-use tracking and NZMask analysis |
 | **Architecture Caching** | Reuses Ghidra objects across requests |
 | **LRU Result Cache** | Configurable cache with automatic eviction (default: 100 entries) |
-| **Smart Load Balancing** | Idle worker prioritization for optimal throughput |
+| **Advanced Optimizations** | Constant folding, dead code elimination, shift-bitops, AND-mask optimization |
 | **Background Prefetching** | Pre-decompiles adjacent functions for faster navigation |
-| **Memory Management** | Automatic subprocess restart to prevent memory leaks |
 
 ### Extensibility
 
@@ -478,12 +478,12 @@ Fission stores its configuration in `~/.config/fission/config.toml` (Linux/macOS
 # Example configuration file
 
 [decompiler]
-mode = "pool"           # "single" or "pool"
-num_workers = 0         # 0 = auto-detect (uses CPU cores, max 8)
-max_workers = 8         # Maximum workers when auto-detecting
+mode = "ffi"            # Direct FFI integration (default)
 timeout_ms = 30000      # Decompilation timeout in milliseconds
 enable_prefetch = true  # Pre-decompile adjacent functions
 prefetch_count = 3      # Number of functions to prefetch
+enable_optimizer = true # Enable Pcode IR optimizer (Phase 1 + Phase 2 rules)
+optimizer_max_passes = 10  # Maximum optimization iterations
 
 [analysis]
 max_string_length = 262144   # Max bytes to search for strings
@@ -567,22 +567,15 @@ UiConfig {
 │  │                    Analysis Core                             │ │
 │  │  ┌─────────┐  ┌──────────┐  ┌─────────┐  ┌───────────────┐  │ │
 │  │  │ Loader  │  │ Disasm   │  │ Decomp  │  │ Debug Engine  │  │ │
-│  │  │ PE/ELF  │  │ iced-x86 │  │ Pool    │  │ Win32/ptrace  │  │ │
+│  │  │ PE/ELF  │  │ iced-x86 │  │  FFI    │  │ Win32/ptrace  │  │ │
 │  │  └─────────┘  └──────────┘  └────┬────┘  └───────────────┘  │ │
 │  └──────────────────────────────────┼──────────────────────────┘ │
 └─────────────────────────────────────┼────────────────────────────┘
-                                      │ stdin/stdout (JSON)
-                    ┌─────────────────┼─────────────────┐
-                    │                 │                 │
-              ┌─────┴─────┐     ┌─────┴─────┐     ┌─────┴─────┐
-              │ Worker 1  │     │ Worker 2  │     │ Worker N  │
-              │ fission_  │     │ fission_  │     │ fission_  │
-              │ decomp    │     │ decomp    │     │ decomp    │
-              └───────────┘     └───────────┘     └───────────┘
-                    │                 │                 │
-              ┌─────┴─────────────────┴─────────────────┴─────┐
-              │              Ghidra Engine (C++)              │
-              │  SleighArch → Funcdata → PrintC → C Code     │
+                                      │ Direct FFI (zero-copy)
+              ┌───────────────────────┴───────────────────────┐
+              │          Ghidra Engine (C++)                  │
+              │  SleighArch → Funcdata → Pcode Optimizer →   │
+              │  → PrintC → C Code (via CXX bridge)          │
               └───────────────────────────────────────────────┘
 ```
 
@@ -595,9 +588,23 @@ UiConfig {
 | **Plugin Manager** | Loads and manages Rust/Python plugins |
 | **Loader** | Parses PE, ELF, and Mach-O binary formats |
 | **Disasm** | x86/x64 disassembly using iced-x86 |
-| **Decomp Pool** | Manages multiple decompiler subprocesses |
+| **Decomp FFI** | Direct C++ integration via CXX bridge (zero IPC overhead) |
+| **Pcode Optimizer** | 32+ optimization rules with def-use tracking and NZMask analysis |
 | **Debug Engine** | Platform-specific debugging (Win32/ptrace) |
-| **fission_decomp** | C++ subprocess using Ghidra's decompiler engine |
+| **Ghidra Engine** | Native C++ decompiler with optimized Pcode IR |
+
+### Decompilation Pipeline
+
+```
+Binary → SleighArch → Raw Pcode → Optimizer (32+ rules) → Optimized Pcode
+  ↓                                    ↓
+Entry        Phase 1: Constant folding, algebraic simplification
+Point        Phase 2: Def-use tracking, NZMask, shift-bitops, AND-mask
+  ↓                                    ↓
+Funcdata ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ↓
+  ↓
+PrintC → C Code (optimized, with type info)
+```
 
 ---
 
@@ -891,18 +898,27 @@ Fission/
 ### Completed Features
 
 - [x] **CLI Base** - Binary loader, disassembler, REPL interface
-- [x] **Ghidra Integration** - Native subprocess decompilation
+- [x] **Ghidra Integration** - Direct FFI integration via CXX bridge (zero-copy)
+- [x] **Pcode IR Optimizer** - Phase 1 (30+ rules) + Phase 2 (def-use tracking, NZMask analysis)
 - [x] **VS Code Style GUI** - Tabs, Activity Bar, Catppuccin theme
 - [x] **.NET Support** - CLR detection, metadata parsing, IL disassembly
 - [x] **Debugging** - Attach, breakpoints, registers, memory access
 - [x] **Plugin System** - Native Rust and Python plugin support
-- [x] **Performance Optimization** - Worker pool, LRU caching, prefetch
+- [x] **Performance Optimization** - Direct FFI, LRU caching, prefetch, optimizer
 - [x] **Advanced Type Analysis** - Struct inference, VTable, type propagation
 - [x] **Cross-Reference Analysis** - Code and data xref detection
 - [x] **Smart Constant Substitution** - Windows API parameter mapping
 
+### Recent Updates (January 2026)
+
+- ✅ **Decompiler Architecture** - Migrated from subprocess pool to direct FFI integration
+- ✅ **Pcode Optimizer Phase 1** - 30+ optimization rules (constant folding, algebraic simplification, dead code elimination)
+- ✅ **Pcode Optimizer Phase 2** - Def-use tracking, NZMask analysis, RuleShiftBitops, RuleAndMask
+- ✅ **Zero-Copy Integration** - Eliminated IPC overhead with native C++ bindings
+
 ### In Progress
 
+- [ ] **Pcode Optimizer Phase 3** - CSE, RulePullSubIndirect, pointer arithmetic optimizations
 - [ ] **Advanced TTD** - Full time travel debugging with complete state replay
 - [ ] **Remote Debugging** - Network-based debug sessions
 

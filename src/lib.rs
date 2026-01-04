@@ -206,3 +206,7 @@ pub use crate::core::constants;
 pub use crate::core::errors;
 pub use crate::core::logging;
 pub use crate::core::prelude;
+
+// Ensure FFI functions are compiled and exported
+// These are used by the C++ decompiler bridge
+pub use crate::analysis::pcode::ffi::*;
