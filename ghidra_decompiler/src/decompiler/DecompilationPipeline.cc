@@ -1,6 +1,6 @@
 #include "fission/decompiler/DecompilationPipeline.h"
 #include "fission/decompiler/PostProcessor.h"
-#include "fission/decompiler/TypeEnhancer.h"
+#include "fission/analysis/TypePropagator.h"
 #include "fission/utils/json_utils.h"
 #include "fission/utils/encoding.h"
 #include "fission/utils/file_utils.h"
@@ -186,7 +186,7 @@ std::string DecompilationPipeline::handle_load_bin(
         // Phase 7: FID Analysis
         std::string fid_filename;
         if (is_pe) {
-            fid_filename = TypeEnhancer::get_fid_filename(pe_info.is_64bit, compiler_id);
+            fid_filename = fission::analysis::TypePropagator::get_fid_filename(pe_info.is_64bit, compiler_id);
         }
         
         if (!fid_filename.empty()) {
@@ -202,38 +202,109 @@ std::string DecompilationPipeline::handle_load_bin(
                     FidDatabase fid_db;
                     if (fid_db.load(fid_path)) {
                         int matches_found = 0;
-                        // Scan for function prologues
+                        // Scan for function prologues (enhanced pattern matching)
                         size_t step = 1;
                         for (size_t i = 0; i < bin_bytes.size() - 32; i += step) {
                             bool possible_start = false;
                             if (pe_info.is_64bit) {
-                                // x64 Prologues
+                                // x64 Prologues (comprehensive patterns)
                                 uint8_t b0 = bin_bytes[i];
-                                uint8_t b1 = bin_bytes[i+1];
-                                if (b0 == 0x40 && (b1 == 0x53 || b1 == 0x55 || b1 == 0x56 || b1 == 0x57)) 
+                                uint8_t b1 = (i+1 < bin_bytes.size()) ? bin_bytes[i+1] : 0;
+                                uint8_t b2 = (i+2 < bin_bytes.size()) ? bin_bytes[i+2] : 0;
+                                uint8_t b3 = (i+3 < bin_bytes.size()) ? bin_bytes[i+3] : 0;
+                                
+                                // Push register prologues (40 5x, 41 5x)
+                                if (b0 == 0x40 && (b1 >= 0x50 && b1 <= 0x57)) 
                                     possible_start = true;
-                                if (b0 == 0x48 && (b1 == 0x83 || b1 == 0x81) && bin_bytes[i+2] == 0xEC) 
+                                if (b0 == 0x41 && (b1 >= 0x50 && b1 <= 0x57))
                                     possible_start = true;
+                                
+                                // Stack frame setup: sub rsp, imm (48 83 EC xx, 48 81 EC xx xx xx xx)
+                                if (b0 == 0x48 && b1 == 0x83 && b2 == 0xEC) 
+                                    possible_start = true;
+                                if (b0 == 0x48 && b1 == 0x81 && b2 == 0xEC)
+                                    possible_start = true;
+                                
+                                // Frame pointer setup: mov [rsp+x], reg (48 89 xx, 4C 89 xx)
                                 if (b0 == 0x48 && b1 == 0x89) 
                                     possible_start = true;
-                            } else {
-                                // x86 Prologues
-                                if (bin_bytes[i] == 0x55 && bin_bytes[i+1] == 0x8B && bin_bytes[i+2] == 0xEC) 
+                                if (b0 == 0x4C && b1 == 0x89)
                                     possible_start = true;
-                                if ((bin_bytes[i] == 0x83 || bin_bytes[i] == 0x81) && bin_bytes[i+1] == 0xEC) 
+                                
+                                // Leaf functions: mov eax, imm (B8 xx xx xx xx)
+                                if (b0 >= 0xB8 && b0 <= 0xBF)
+                                    possible_start = true;
+                                
+                                // Simple return functions: xor eax, eax (31 C0 or 33 C0)
+                                if ((b0 == 0x31 || b0 == 0x33) && b1 == 0xC0)
+                                    possible_start = true;
+                                
+                                // Test/cmp patterns at function start
+                                if (b0 == 0x48 && b1 == 0x85 && (b2 >= 0xC0 && b2 <= 0xFF))  // test reg, reg
+                                    possible_start = true;
+                                
+                                // CRT/MinGW patterns: push rbp; mov rbp, rsp (55 48 89 E5)
+                                if (b0 == 0x55 && b1 == 0x48 && b2 == 0x89 && b3 == 0xE5)
+                                    possible_start = true;
+                                    
+                            } else {
+                                // x86 Prologues (comprehensive patterns)
+                                uint8_t b0 = bin_bytes[i];
+                                uint8_t b1 = (i+1 < bin_bytes.size()) ? bin_bytes[i+1] : 0;
+                                uint8_t b2 = (i+2 < bin_bytes.size()) ? bin_bytes[i+2] : 0;
+                                uint8_t b3 = (i+3 < bin_bytes.size()) ? bin_bytes[i+3] : 0;
+                                
+                                // Classic frame setup: push ebp; mov ebp, esp (55 8B EC or 55 89 E5)
+                                if (b0 == 0x55 && b1 == 0x8B && b2 == 0xEC) 
+                                    possible_start = true;
+                                if (b0 == 0x55 && b1 == 0x89 && b2 == 0xE5)
+                                    possible_start = true;
+                                
+                                // Stack allocation: sub esp, imm (83 EC xx, 81 EC xx xx xx xx)
+                                if (b0 == 0x83 && b1 == 0xEC) 
+                                    possible_start = true;
+                                if (b0 == 0x81 && b1 == 0xEC)
+                                    possible_start = true;
+                                
+                                // Push multiple registers: push edi/esi/ebx (57, 56, 53)
+                                if (b0 >= 0x50 && b0 <= 0x57)
+                                    possible_start = true;
+                                
+                                // Leaf functions: mov eax, imm (B8 xx xx xx xx)
+                                if (b0 >= 0xB8 && b0 <= 0xBF)
+                                    possible_start = true;
+                                
+                                // Simple return: xor eax, eax (31 C0 or 33 C0)
+                                if ((b0 == 0x31 || b0 == 0x33) && b1 == 0xC0)
+                                    possible_start = true;
+                                
+                                // __cdecl with stack check: mov eax, [esp+4] (8B 44 24 04)
+                                if (b0 == 0x8B && b1 == 0x44 && b2 == 0x24)
                                     possible_start = true;
                             }
                             
                             if (possible_start) {
                                 size_t len = std::min((size_t)64, bin_bytes.size() - i);
-                                uint64_t hash = FidHasher::calculate_full_hash(&bin_bytes[i], len);
-                                auto names = fid_db.lookup_by_hash(hash);
+                                uint64_t full_hash = FidHasher::calculate_full_hash(&bin_bytes[i], len);
+                                uint64_t specific_hash = FidHasher::calculate_specific_hash(&bin_bytes[i], len);
+                                
+                                // Use combined hash matching (more accurate)
+                                auto names = fid_db.lookup_by_hashes(full_hash, specific_hash);
+                                
                                 if (!names.empty()) {
                                     uint64_t addr = image_base + i;
                                     std::string name = names[0];
-                                    if (state.iat_symbols.find(addr) == state.iat_symbols.end()) {
+                                    
+                                    // Skip if already identified or common symbol
+                                    if (state.iat_symbols.find(addr) == state.iat_symbols.end() && 
+                                        !fid_db.is_common_symbol(name)) {
                                         state.iat_symbols[addr] = name;
                                         matches_found++;
+                                        
+                                        if (matches_found <= 5) {
+                                            std::cerr << "[FID] Matched @ 0x" << std::hex << addr 
+                                                     << " -> " << name << std::dec << std::endl;
+                                        }
                                     }
                                 }
                             }
@@ -506,8 +577,10 @@ std::string DecompilationPipeline::handle_decompile(
         
         // Step 4b-2: Reverse Type Propagation
         StepTimer timer_rev("Step 4b-2: Reverse Propagation");
-        bool reverse_changed = TypeEnhancer::propagate_reverse_types(fd, arch->types);
-        if (reverse_changed) {
+        // Use TypePropagator with struct registry
+        fission::analysis::TypePropagator type_propagator(arch, &global_struct_registry);
+        bool struct_changed = type_propagator.propagate_struct_types(fd);
+        if (struct_changed) {
             std::cerr << "[fission_decomp] Step 4b-2: Reverse propagation applied! Re-running..." 
                      << std::endl;
             fd->clear();
@@ -537,7 +610,7 @@ std::string DecompilationPipeline::handle_decompile(
     // Inject inferred struct definitions
     if (!inferred_struct_defs.empty()) {
         c_code = inferred_struct_defs + "\n" + c_code;
-        c_code = TypeEnhancer::apply_struct_types(c_code, fd, captured_structs);
+        c_code = fission::analysis::TypePropagator::apply_struct_types(c_code, fd, captured_structs);
     }
     
     c_code = post_process_iat_calls(c_code, state.iat_symbols);

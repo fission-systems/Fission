@@ -223,6 +223,30 @@ bool FidDatabase::parse_libraries_table(std::ifstream& file, uint64_t offset, ui
     return true;
 }
 
+bool FidDatabase::load_common_symbols(const std::string& filter_path) {
+    std::ifstream file(filter_path);
+    if (!file.is_open()) {
+        std::cerr << "[FidDatabase] Warning: Could not load common symbols filter: " << filter_path << std::endl;
+        return false;
+    }
+    
+    std::string line;
+    size_t count = 0;
+    while (std::getline(file, line)) {
+        // Trim whitespace
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        
+        if (!line.empty() && line[0] != '#') {
+            common_symbols.insert(line);
+            count++;
+        }
+    }
+    
+    std::cerr << "[FidDatabase] Loaded " << count << " common symbols from " << filter_path << std::endl;
+    return true;
+}
+
 bool FidDatabase::load(const std::string& path) {
     filepath = path;
     loaded = false;
@@ -239,6 +263,25 @@ bool FidDatabase::load(const std::string& path) {
     file.seekg(0);
     
     std::cerr << "[FidDatabase] Loading " << path << " (" << file_size << " bytes)" << std::endl;
+    
+    // Try to load corresponding common symbols filter
+    std::string filter_path;
+    if (path.find("_x64.fidbf") != std::string::npos) {
+        // Try both win64 and gcc_x64 filters
+        std::string base_dir = path.substr(0, path.find_last_of("/\\"));
+        filter_path = base_dir + "/common_symbols_win64.txt";
+        if (!load_common_symbols(filter_path)) {
+            filter_path = base_dir + "/common_symbols_gcc_x64.txt";
+            load_common_symbols(filter_path);
+        }
+    } else if (path.find("_x86.fidbf") != std::string::npos) {
+        std::string base_dir = path.substr(0, path.find_last_of("/\\"));
+        filter_path = base_dir + "/common_symbols_win32.txt";
+        if (!load_common_symbols(filter_path)) {
+            filter_path = base_dir + "/common_symbols_gcc_x86.txt";
+            load_common_symbols(filter_path);
+        }
+    }
     
     if (!parse_header(file)) {
         return false;
@@ -342,13 +385,43 @@ std::vector<std::string> FidDatabase::lookup_by_hash(uint64_t full_hash) const {
     
     auto range = hash_index.equal_range(full_hash);
     for (auto it = range.first; it != range.second; ++it) {
-        size_t idx = it->second;
-        if (idx < functions.size() && !functions[idx].name.empty()) {
-            results.push_back(functions[idx].name);
+        const FidFunctionRecord& func = functions[it->second];
+        if (!func.name.empty()) {
+            // Filter out common symbols (too generic to be useful)
+            if (common_symbols.find(func.name) == common_symbols.end()) {
+                results.push_back(func.name);
+            }
         }
     }
     
     return results;
+}
+
+std::vector<std::string> FidDatabase::lookup_by_hashes(uint64_t full_hash, uint64_t specific_hash) const {
+    std::vector<std::string> results;
+    
+    auto range = hash_index.equal_range(full_hash);
+    for (auto it = range.first; it != range.second; ++it) {
+        const FidFunctionRecord& func = functions[it->second];
+        
+        // Match specific hash if available
+        if (func.specific_hash_size > 0 && func.specific_hash != specific_hash) {
+            continue; // Specific hash mismatch
+        }
+        
+        if (!func.name.empty()) {
+            // Filter out common symbols
+            if (common_symbols.find(func.name) == common_symbols.end()) {
+                results.push_back(func.name);
+            }
+        }
+    }
+    
+    return results;
+}
+
+bool FidDatabase::is_common_symbol(const std::string& name) const {
+    return common_symbols.find(name) != common_symbols.end();
 }
 
 // Lookup function by name pattern (for debugging/alternative matching)
@@ -431,6 +504,21 @@ uint64_t FidHasher::calculate_full_hash(const uint8_t* bytes, size_t size) {
     uint64_t hashvalue = FNV_64_OFFSET_BASIS;
     for (size_t i = 0; i < masked.size(); ++i) {
         hashvalue ^= (masked[i] & 0xff);
+        hashvalue *= FNV_64_PRIME;
+    }
+    
+    return hashvalue;
+}
+
+uint64_t FidHasher::calculate_specific_hash(const uint8_t* bytes, size_t size) {
+    // Specific hash uses first 5 bytes (or less if size < 5)
+    // This provides additional discrimination without full function analysis
+    size_t hash_size = std::min(size, (size_t)5);
+    
+    // No masking for specific hash - use raw bytes
+    uint64_t hashvalue = FNV_64_OFFSET_BASIS;
+    for (size_t i = 0; i < hash_size; ++i) {
+        hashvalue ^= (bytes[i] & 0xff);
         hashvalue *= FNV_64_PRIME;
     }
     

@@ -117,6 +117,28 @@ impl PeLoader {
             }
         }
 
+        // Parse COFF Symbol Table (if present)
+        let file_header = &pe_file.nt_headers.file_header;
+        if file_header.pointer_to_symbol_table != 0 && file_header.number_of_symbols > 0 {
+            if let Ok(coff_functions) = loader.parse_coff_symbols(
+                file_header.pointer_to_symbol_table,
+                file_header.number_of_symbols,
+                image_base,
+            ) {
+                // Merge COFF symbols with existing functions, preferring COFF names over generated ones
+                for coff_func in coff_functions {
+                    if let Some(existing) = functions_info.iter_mut().find(|f| f.address == coff_func.address) {
+                        // Replace generated name with real COFF symbol name
+                        if existing.name.starts_with("FUN_0x") || existing.name.starts_with("sub_") {
+                            existing.name = coff_func.name;
+                        }
+                    } else {
+                        functions_info.push(coff_func);
+                    }
+                }
+            }
+        }
+
         // Add entry point if not exists
         if entry_point != 0 && !functions_info.iter().any(|f| f.address == entry_point) {
             functions_info.push(crate::analysis::loader::types::FunctionInfo {
@@ -457,6 +479,151 @@ impl<'a> PeLoaderImpl<'a> {
             });
         }
 
+        Ok(functions)
+    }
+
+    fn parse_coff_symbols(
+        &self,
+        symbol_table_offset: u32,
+        symbol_count: u32,
+        image_base: u64,
+    ) -> Result<Vec<crate::analysis::loader::types::FunctionInfo>> {
+        let mut functions = Vec::new();
+        
+        // COFF Symbol Table starts at file offset
+        let symbols_offset = symbol_table_offset as u64;
+        let symbols_end = symbols_offset + (symbol_count as u64 * 18); // 18 bytes per symbol
+        
+        if symbols_end > self.data.len() as u64 {
+            return Ok(functions);
+        }
+        
+        // String table starts immediately after symbol table
+        let string_table_offset = symbols_end;
+        
+        // Read string table size (first 4 bytes)
+        let string_table_size = if string_table_offset + 4 <= self.data.len() as u64 {
+            u32::from_le_bytes([
+                self.data[string_table_offset as usize],
+                self.data[(string_table_offset + 1) as usize],
+                self.data[(string_table_offset + 2) as usize],
+                self.data[(string_table_offset + 3) as usize],
+            ])
+        } else {
+            0
+        };
+        
+        let mut cursor = Cursor::new(self.data);
+        cursor.set_position(symbols_offset);
+        
+        let mut total_processed = 0;
+        let mut skipped_class = 0;
+        let mut skipped_type = 0;
+        let mut skipped_section = 0;
+        
+        let mut i = 0;
+        while i < symbol_count {
+            let symbol_pos = cursor.position();
+            
+            let symbol = match CoffSymbol::read_le(&mut cursor) {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+            
+            // Remember aux count before processing
+            let aux_count = symbol.number_of_aux_symbols;
+            
+            i += 1; // Count this symbol
+            
+            total_processed += 1;
+            
+            // Only process external symbols (C_EXT = 2) and static symbols (C_STAT = 3) with function type
+            if symbol.storage_class != storage_class::C_EXT && 
+               symbol.storage_class != storage_class::C_STAT {
+                skipped_class += 1;
+                // Skip aux symbols for this symbol too
+                if aux_count > 0 {
+                    cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
+                    i += aux_count as u32;
+                }
+                continue;
+            }
+            
+            // Check if it's a function (DT_FCN in high byte of type)
+            let is_function = (symbol.symbol_type >> 4) == symbol_type::DT_FCN;
+            if !is_function {
+                skipped_type += 1;
+                // Skip aux symbols for this symbol too
+                if aux_count > 0 {
+                    cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
+                    i += aux_count as u32;
+                }
+                continue;
+            }
+            
+            // Get symbol name
+            let name = match &symbol.name {
+                SymbolName::ShortName(n) => n.clone(),
+                SymbolName::LongName(offset) => {
+                    let str_offset = string_table_offset + *offset as u64;
+                    if str_offset < self.data.len() as u64 {
+                        self.read_string_at(str_offset)
+                    } else {
+                        continue;
+                    }
+                }
+            };
+            
+            if name.is_empty() {
+                // Skip aux symbols
+                if aux_count > 0 {
+                    cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
+                    i += aux_count as u32;
+                }
+                continue;
+            }
+            
+            // Section number is 1-based, 0 = undefined, -1 = absolute, -2 = debug
+            if symbol.section_number <= 0 {
+                skipped_section += 1;
+                // Skip aux symbols
+                if aux_count > 0 {
+                    cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
+                    i += aux_count as u32;
+                }
+                continue;
+            }
+            
+            // Find section to calculate actual address
+            let section_idx = (symbol.section_number - 1) as usize;
+            if section_idx >= self.sections.len() {
+                skipped_section += 1;
+                // Skip aux symbols
+                if aux_count > 0 {
+                    cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
+                    i += aux_count as u32;
+                }
+                continue;
+            }
+            
+            let section = &self.sections[section_idx];
+            let func_addr = section.virtual_address + symbol.value as u64;
+            
+            functions.push(crate::analysis::loader::types::FunctionInfo {
+                name,
+                address: func_addr,
+                size: 0, // COFF symbols don't provide size
+                is_export: false,
+                is_import: false,
+            });
+            
+            // Skip auxiliary symbols AFTER processing this symbol
+            if aux_count > 0 {
+                cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
+                i += aux_count as u32; // Skip aux symbols in counter
+            }
+        }
+        
         Ok(functions)
     }
 }

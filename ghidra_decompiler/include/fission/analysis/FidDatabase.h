@@ -2,6 +2,7 @@
 #define __FID_DATABASE_H__
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -51,11 +52,17 @@ private:
     // Hash lookup index (full_hash -> function records)
     std::multimap<uint64_t, size_t> hash_index;
     
+    // Common symbols filter (loaded from common_symbols_*.txt)
+    std::set<std::string> common_symbols;
+    
     // Parse the packed DB4 format
     bool parse_header(std::ifstream& file);
     bool parse_strings_table(std::ifstream& file, uint64_t offset, uint64_t count);
     bool parse_functions_table(std::ifstream& file, uint64_t offset, uint64_t count);
     bool parse_libraries_table(std::ifstream& file, uint64_t offset, uint64_t count);
+    
+    // Load common symbols filter
+    bool load_common_symbols(const std::string& filter_path);
 
 public:
     FidDatabase();
@@ -70,9 +77,16 @@ public:
     /// Get total function count
     size_t get_function_count() const { return functions.size(); }
 
-    /// Lookup function by full hash
+    /// Lookup function by full hash (filtered by common symbols)
     /// \return vector of matching function names
     std::vector<std::string> lookup_by_hash(uint64_t full_hash) const;
+    
+    /// Lookup function by full hash + specific hash (more accurate)
+    /// \return vector of matching function names
+    std::vector<std::string> lookup_by_hashes(uint64_t full_hash, uint64_t specific_hash) const;
+    
+    /// Check if a symbol is in the common symbols filter
+    bool is_common_symbol(const std::string& name) const;
     
     /// Lookup function by name pattern (contains check)
     std::string lookup_name_contains(const std::string& pattern) const;
@@ -91,6 +105,10 @@ class FidHasher {
 public:
     /// Calculate full hash from masked instruction bytes
     static uint64_t calculate_full_hash(const uint8_t* bytes, size_t size);
+    
+    /// Calculate specific hash (first 5 bytes for additional matching)
+    /// Ghidra uses this to reduce false positives
+    static uint64_t calculate_specific_hash(const uint8_t* bytes, size_t size);
 };
 
 } // namespace analysis
