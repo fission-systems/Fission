@@ -9,6 +9,7 @@
 mod rules;
 mod dead_code;
 mod def_use;
+mod cse;
 
 #[cfg(test)]
 mod tests;
@@ -19,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 pub use rules::OptimizationRules;
 pub use dead_code::DeadCodeEliminator;
 pub use def_use::DefUseTracker;
+pub use cse::CommonSubexpressionEliminator;
 
 /// Configuration for Pcode optimization
 #[derive(Debug, Clone)]
@@ -27,6 +29,7 @@ pub struct PcodeOptimizerConfig {
     pub enable_identity_removal: bool,
     pub enable_algebraic_simplification: bool,
     pub enable_dead_code_elimination: bool,
+    pub enable_cse: bool,
 }
 
 impl Default for PcodeOptimizerConfig {
@@ -36,6 +39,7 @@ impl Default for PcodeOptimizerConfig {
             enable_identity_removal: true,
             enable_algebraic_simplification: true,
             enable_dead_code_elimination: true,
+            enable_cse: true,
         }
     }
 }
@@ -47,6 +51,7 @@ pub struct PcodeOptimizer {
     rules: OptimizationRules,
     dead_code_eliminator: DeadCodeEliminator,
     def_use_tracker: DefUseTracker,
+    cse: CommonSubexpressionEliminator,
 }
 
 impl PcodeOptimizer {
@@ -57,6 +62,7 @@ impl PcodeOptimizer {
             rules: OptimizationRules::new(),
             def_use_tracker: DefUseTracker::new(),
             dead_code_eliminator: DeadCodeEliminator::new(),
+            cse: CommonSubexpressionEliminator::new(),
         }
     }
     
@@ -76,12 +82,19 @@ impl PcodeOptimizer {
                 self.optimize_arithmetic(func);
             }
             
-            // Pass 2: Identity operation removal
+            // Pass 2: Common Subexpression Elimination (CSE)
+            if self.config.enable_cse {
+                if self.cse.eliminate(func) {
+                    self.modified = true;
+                }
+            }
+            
+            // Pass 3: Identity operation removal
             if self.config.enable_identity_removal {
                 self.remove_identity_ops(func);
             }
             
-            // Pass 3: Dead code elimination
+            // Pass 4: Dead code elimination
             if self.config.enable_dead_code_elimination {
                 self.dead_code_eliminator.eliminate(func, &mut self.modified);
             }
@@ -97,14 +110,23 @@ impl PcodeOptimizer {
         total_changes
     }
     
-    /// Optimize arithmetic operations_with_tracker(op, &self.def_use_tracker
+    /// Optimize arithmetic operations
     fn optimize_arithmetic(&mut self, func: &mut PcodeFunction) {
-        for block in &mut func.blocks {
-            for op in &mut block.ops {
-                if let Some(optimized) = self.rules.try_optimize(op) {
-                    *op = optimized;
-                    self.modified = true;
+        let mut modifications = Vec::new();
+        
+        for (block_idx, block) in func.blocks.iter().enumerate() {
+            for (op_idx, op) in block.ops.iter().enumerate() {
+                // Use try_optimize_with_tracker which includes all rules
+                if let Some(optimized) = self.rules.try_optimize_with_tracker(op, &self.def_use_tracker, func) {
+                    modifications.push((block_idx, op_idx, optimized));
                 }
+            }
+        }
+        
+        if !modifications.is_empty() {
+            self.modified = true;
+            for (block_idx, op_idx, new_op) in modifications {
+                func.blocks[block_idx].ops[op_idx] = new_op;
             }
         }
     }

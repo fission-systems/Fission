@@ -7,8 +7,8 @@
 /// - Comparison operations (EQUAL, LESS, etc.)
 /// - Constant folding for all operation types
 
-use crate::analysis::pcode::{PcodeOp, PcodeOpcode, Varnode};
-use super::def_use::DefUseTracker;
+use crate::analysis::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use super::def_use::{DefUseTracker, OpRef};
 
 /// Container for all optimization rules
 pub struct OptimizationRules {
@@ -21,7 +21,7 @@ impl OptimizationRules {
     }
     
     /// Try to optimize with def-use tracking (Phase 2 rules)
-    pub fn try_optimize_with_tracker(&self, op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
+    pub fn try_optimize_with_tracker(&self, op: &PcodeOp, tracker: &DefUseTracker, func: &PcodeFunction) -> Option<PcodeOp> {
         // Try advanced rules first (they're more specific)
         if let Some(result) = self.try_shift_bitops(op, tracker) {
             return Some(result);
@@ -29,9 +29,22 @@ impl OptimizationRules {
         if let Some(result) = self.try_and_mask(op, tracker) {
             return Some(result);
         }
+        if let Some(result) = self.try_ptr_arith(op, tracker, func) {
+            return Some(result);
+        }
+        if let Some(result) = self.try_pull_sub_indirect(op, tracker, func) {
+            return Some(result);
+        }
+        if let Some(result) = self.try_indirect_collapse(op, tracker, func) {
+            return Some(result);
+        }
         
         // Fall back to basic rules
         self.try_optimize(op)
+    }
+    
+    fn get_op<'a>(&self, func: &'a PcodeFunction, op_ref: OpRef) -> Option<&'a PcodeOp> {
+        func.blocks.get(op_ref.block_idx)?.ops.get(op_ref.op_idx)
     }
     
     /// Try to optimize a single Pcode operation (Phase 1 rules)
@@ -702,6 +715,130 @@ impl OptimizationRules {
             return Some(self.make_copy(op, &op.inputs[1]));
         }
         
+        None
+    }
+
+    /// RulePtrArith: Optimize pointer arithmetic
+    /// (A + c1) + c2 => A + (c1 + c2)
+    fn try_ptr_arith(&self, op: &PcodeOp, tracker: &DefUseTracker, func: &PcodeFunction) -> Option<PcodeOp> {
+        if op.opcode != PcodeOpcode::IntAdd || op.inputs.len() != 2 {
+            return None;
+        }
+
+        // Check if one input is constant
+        let (const_idx, var_idx) = if op.inputs[1].is_constant {
+            (1, 0)
+        } else if op.inputs[0].is_constant {
+            (0, 1)
+        } else {
+            return None;
+        };
+
+        let c2 = op.inputs[const_idx].constant_val;
+        let var_input = &op.inputs[var_idx];
+
+        // Find definition of var_input
+        if let Some(def_ref) = tracker.get_def(var_input) {
+            if let Some(def_op) = self.get_op(func, def_ref) {
+                if def_op.opcode == PcodeOpcode::IntAdd && def_op.inputs.len() == 2 {
+                    // Check if def_op has a constant input
+                    if let Some(c1_idx) = def_op.inputs.iter().position(|v| v.is_constant) {
+                        let c1 = def_op.inputs[c1_idx].constant_val;
+                        let base_idx = 1 - c1_idx;
+                        let base = &def_op.inputs[base_idx];
+
+                        // New constant: c1 + c2
+                        let new_c = c1.wrapping_add(c2);
+                        
+                        let mut new_inputs = Vec::new();
+                        new_inputs.push(base.clone());
+                        new_inputs.push(Varnode::constant(new_c, op.inputs[const_idx].size));
+                        
+                        return Some(PcodeOp {
+                            seq_num: op.seq_num,
+                            opcode: PcodeOpcode::IntAdd,
+                            address: op.address,
+                            output: op.output.clone(),
+                            inputs: new_inputs,
+                        });
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// RulePullSubIndirect: Optimize (ptr + off) - ptr => off
+    fn try_pull_sub_indirect(&self, op: &PcodeOp, tracker: &DefUseTracker, func: &PcodeFunction) -> Option<PcodeOp> {
+        if op.opcode != PcodeOpcode::IntSub || op.inputs.len() != 2 {
+            return None;
+        }
+
+        let ptr_plus_off = &op.inputs[0];
+        let ptr = &op.inputs[1];
+
+        // Check if ptr_plus_off is defined by ADD
+        if let Some(def_ref) = tracker.get_def(ptr_plus_off) {
+            if let Some(def_op) = self.get_op(func, def_ref) {
+                if def_op.opcode == PcodeOpcode::IntAdd && def_op.inputs.len() == 2 {
+                    // Check if one of the inputs matches ptr
+                    if def_op.inputs[0] == *ptr {
+                        // (ptr + off) - ptr => off
+                        return Some(self.make_copy(op, &def_op.inputs[1]));
+                    } else if def_op.inputs[1] == *ptr {
+                        // (off + ptr) - ptr => off
+                        return Some(self.make_copy(op, &def_op.inputs[0]));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// RuleIndirectCollapse: Simplify indirect calculations
+    /// PTRSUB(PTRSUB(base, c1), c2) => PTRSUB(base, c1+c2)
+    fn try_indirect_collapse(&self, op: &PcodeOp, tracker: &DefUseTracker, func: &PcodeFunction) -> Option<PcodeOp> {
+        if op.opcode != PcodeOpcode::PtrSub || op.inputs.len() != 2 {
+            return None;
+        }
+
+        // PTRSUB(base, offset)
+        let base = &op.inputs[0];
+        let offset = &op.inputs[1];
+
+        if !offset.is_constant {
+            return None;
+        }
+        let c2 = offset.constant_val;
+
+        if let Some(def_ref) = tracker.get_def(base) {
+            if let Some(def_op) = self.get_op(func, def_ref) {
+                if def_op.opcode == PcodeOpcode::PtrSub && def_op.inputs.len() == 2 {
+                    let inner_base = &def_op.inputs[0];
+                    let inner_offset = &def_op.inputs[1];
+
+                    if inner_offset.is_constant {
+                        let c1 = inner_offset.constant_val;
+                        let new_c = c1.wrapping_add(c2);
+
+                        let mut new_inputs = Vec::new();
+                        new_inputs.push(inner_base.clone());
+                        new_inputs.push(Varnode::constant(new_c, offset.size));
+
+                        return Some(PcodeOp {
+                            seq_num: op.seq_num,
+                            opcode: PcodeOpcode::PtrSub,
+                            address: op.address,
+                            output: op.output.clone(),
+                            inputs: new_inputs,
+                        });
+                    }
+                }
+            }
+        }
+
         None
     }
 }

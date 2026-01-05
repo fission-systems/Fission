@@ -6,6 +6,16 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Pcode IR Optimizer Phase 3 (New)
+- **Common Subexpression Elimination (CSE)**: Implemented hash-based local CSE to remove redundant computations
+- **RulePtrArith**: Pointer arithmetic optimization (associativity)
+  - Example: `(base + 10) + 20 => base + 30`
+- **RulePullSubIndirect**: Complex address calculation simplification
+  - Example: `(ptr + off) - ptr => off`
+- **RuleIndirectCollapse**: Indirect calculation simplification
+  - Example: `PTRSUB(PTRSUB(base, 10), 20) => PTRSUB(base, 30)`
+- **Test Coverage**: Added 4 new test cases covering CSE and new rules (100% passing)
+
 ### Pcode IR Optimizer Phase 2 (Commit: 3cdad8d)
 - **Def-Use Tracking Infrastructure**: Implemented comprehensive def-use chain tracking with VarnodeId and DefUseInfo (370 lines)
 - **NZMask Analysis**: Added non-zero mask computation for value range tracking and intelligent optimization

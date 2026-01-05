@@ -102,6 +102,7 @@ TODO: Add screenshot when available
 | **100+ API Mappings** | Coverage for 9 DLLs (kernel32, user32, ntdll, advapi32, ws2_32, winhttp, wininet, shell32, bcrypt) |
 | **Dynamic Flag Resolution** | Automatically detects OR combinations (e.g., `0x3000` → `MEM_COMMIT \| MEM_RESERVE`) |
 | **GDT Type Loading** | 5,700+ structures and 6,500+ typedefs from Ghidra data |
+| **Advanced Pcode Optimization** | Def-Use chains, CSE, Dead Code Elimination, and pointer arithmetic simplification |
 
 ### Advanced Type Analysis
 
