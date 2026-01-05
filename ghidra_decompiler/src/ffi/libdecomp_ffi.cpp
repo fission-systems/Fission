@@ -114,6 +114,28 @@ extern "C" DECOMP_API char* decomp_function(DecompContext* ctx, uint64_t addr) {
     }
 }
 
+extern "C" DECOMP_API char* decomp_function_pcode(DecompContext* ctx, uint64_t addr) {
+    if (!ctx) return nullptr;
+    
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    
+    try {
+        std::string result = run_decompilation_pcode(ctx, addr);
+        
+        char* output = static_cast<char*>(malloc(result.size() + 1));
+        if (output) {
+            std::memcpy(output, result.c_str(), result.size() + 1);
+        }
+        return output;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Error: ") + e.what();
+        return nullptr;
+    } catch (...) {
+        ctx->last_error = "Unknown decompilation error";
+        return nullptr;
+    }
+}
+
 extern "C" DECOMP_API const char* decomp_get_last_error(DecompContext* ctx) {
     if (!ctx) return "Invalid context";
     return ctx->last_error.c_str();

@@ -5,6 +5,7 @@
 
 pub mod optimizer;
 pub mod ffi;
+pub mod graph;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -270,6 +271,8 @@ pub struct PcodeOp {
     pub address: u64,        // Original instruction address
     pub output: Option<Varnode>,
     pub inputs: Vec<Varnode>,
+    #[serde(default)]
+    pub asm_mnemonic: Option<String>, // Assembly instruction mnemonic
 }
 
 /// Basic block of Pcode operations
@@ -308,6 +311,8 @@ impl PcodeFunction {
             addr: String,
             output: Option<JsonVarnode>,
             inputs: Vec<JsonVarnode>,
+            #[serde(default)]
+            asm: Option<String>,
         }
         
         #[derive(Deserialize)]
@@ -346,6 +351,7 @@ impl PcodeFunction {
                     address,
                     output,
                     inputs,
+                    asm_mnemonic: jo.asm,
                 }
             }).collect();
             

@@ -69,6 +69,7 @@ extern "C" {
         is_writable: c_int,
     ) -> DecompError;
     fn decomp_function(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
+    fn decomp_function_pcode(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
     fn decomp_free_string(s: *mut c_char);
     fn decomp_get_last_error(ctx: *mut DecompContext) -> *const c_char;
     fn decomp_set_gdt(ctx: *mut DecompContext, gdt_path: *const c_char) -> DecompError;
@@ -264,6 +265,26 @@ impl DecompilerNative {
         self.check_valid()?;
         
         let result_ptr = unsafe { decomp_function(self.ctx, addr) };
+
+        if result_ptr.is_null() {
+            return Err(FissionError::decompiler(self.get_last_error()));
+        }
+
+        let result = unsafe {
+            let cstr = CStr::from_ptr(result_ptr);
+            let string = cstr.to_string_lossy().into_owned();
+            decomp_free_string(result_ptr);
+            string
+        };
+
+        Ok(result)
+    }
+
+    /// Get Pcode JSON for a function at the given address
+    pub fn get_pcode(&self, addr: u64) -> Result<String> {
+        self.check_valid()?;
+        
+        let result_ptr = unsafe { decomp_function_pcode(self.ctx, addr) };
 
         if result_ptr.is_null() {
             return Err(FissionError::decompiler(self.get_last_error()));
