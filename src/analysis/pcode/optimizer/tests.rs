@@ -308,7 +308,7 @@ fn test_shift_bitops_left_zero() {
     tracker.build(&func);
     
     let rules = OptimizationRules::new();
-    let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker);
+    let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker, &func);
     
     assert!(result.is_some());
     let optimized = result.unwrap();
@@ -353,7 +353,7 @@ fn test_shift_bitops_right_zero() {
     tracker.build(&func);
     
     let rules = OptimizationRules::new();
-    let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker);
+    let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker, &func);
     
     assert!(result.is_some());
     let optimized = result.unwrap();
@@ -398,7 +398,7 @@ fn test_and_mask_always_zero() {
     tracker.build(&func);
     
     let rules = OptimizationRules::new();
-    let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker);
+    let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker, &func);
     
     assert!(result.is_some());
     let optimized = result.unwrap();
@@ -443,11 +443,196 @@ fn test_and_mask_noop() {
     tracker.build(&func);
     
     let rules = OptimizationRules::new();
-    let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker);
+    let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker, &func);
     
     assert!(result.is_some());
     let optimized = result.unwrap();
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(!optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].offset, 0x100); // Should copy V
+}
+// ===== Tests for CSE and New Rules =====
+
+#[test]
+fn test_cse_basic() {
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_dead_code_elimination: false,
+        ..PcodeOptimizerConfig::default()
+    });
+    
+    let vn_a = Varnode { space_id: 2, offset: 0x10, size: 4, is_constant: false, constant_val: 0 };
+    let vn_b = Varnode { space_id: 2, offset: 0x20, size: 4, is_constant: false, constant_val: 0 };
+    let vn_x = Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 };
+    let vn_y = Varnode { space_id: 1, offset: 0x104, size: 4, is_constant: false, constant_val: 0 };
+    
+    let op1 = PcodeOp {
+        seq_num: 0,
+        opcode: PcodeOpcode::IntAdd,
+        address: 0x1000,
+        output: Some(vn_x.clone()),
+        inputs: vec![vn_a.clone(), vn_b.clone()],
+    };
+    
+    let op2 = PcodeOp {
+        seq_num: 1,
+        opcode: PcodeOpcode::IntAdd,
+        address: 0x1004,
+        output: Some(vn_y.clone()),
+        inputs: vec![vn_a.clone(), vn_b.clone()],
+    };
+    
+    let mut func = PcodeFunction {
+        blocks: vec![crate::analysis::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            ops: vec![op1, op2],
+        }],
+    };
+    
+    optimizer.optimize(&mut func);
+    
+    let ops = &func.blocks[0].ops;
+    assert_eq!(ops[0].opcode, PcodeOpcode::IntAdd);
+    assert_eq!(ops[1].opcode, PcodeOpcode::Copy);
+    assert_eq!(ops[1].inputs[0], vn_x);
+}
+
+#[test]
+fn test_ptr_arith() {
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_dead_code_elimination: false,
+        ..PcodeOptimizerConfig::default()
+    });
+    
+    let vn_base = Varnode { space_id: 2, offset: 0x10, size: 4, is_constant: false, constant_val: 0 };
+    let vn_x = Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 };
+    let vn_y = Varnode { space_id: 1, offset: 0x104, size: 4, is_constant: false, constant_val: 0 };
+    
+    // x = base + 10
+    let op1 = PcodeOp {
+        seq_num: 0,
+        opcode: PcodeOpcode::IntAdd,
+        address: 0x1000,
+        output: Some(vn_x.clone()),
+        inputs: vec![vn_base.clone(), Varnode::constant(10, 4)],
+    };
+    
+    // y = x + 20
+    let op2 = PcodeOp {
+        seq_num: 1,
+        opcode: PcodeOpcode::IntAdd,
+        address: 0x1004,
+        output: Some(vn_y.clone()),
+        inputs: vec![vn_x.clone(), Varnode::constant(20, 4)],
+    };
+    
+    let mut func = PcodeFunction {
+        blocks: vec![crate::analysis::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            ops: vec![op1, op2],
+        }],
+    };
+    
+    optimizer.optimize(&mut func);
+    
+    let ops = &func.blocks[0].ops;
+    // op2 should become base + 30
+    assert_eq!(ops[1].opcode, PcodeOpcode::IntAdd);
+    assert_eq!(ops[1].inputs[0], vn_base);
+    assert!(ops[1].inputs[1].is_constant);
+    assert_eq!(ops[1].inputs[1].constant_val, 30);
+}
+
+#[test]
+fn test_pull_sub_indirect() {
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_dead_code_elimination: false,
+        ..PcodeOptimizerConfig::default()
+    });
+    
+    let vn_ptr = Varnode { space_id: 2, offset: 0x10, size: 4, is_constant: false, constant_val: 0 };
+    let vn_x = Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 };
+    let vn_y = Varnode { space_id: 1, offset: 0x104, size: 4, is_constant: false, constant_val: 0 };
+    
+    // x = ptr + 10
+    let op1 = PcodeOp {
+        seq_num: 0,
+        opcode: PcodeOpcode::IntAdd,
+        address: 0x1000,
+        output: Some(vn_x.clone()),
+        inputs: vec![vn_ptr.clone(), Varnode::constant(10, 4)],
+    };
+    
+    // y = x - ptr
+    let op2 = PcodeOp {
+        seq_num: 1,
+        opcode: PcodeOpcode::IntSub,
+        address: 0x1004,
+        output: Some(vn_y.clone()),
+        inputs: vec![vn_x.clone(), vn_ptr.clone()],
+    };
+    
+    let mut func = PcodeFunction {
+        blocks: vec![crate::analysis::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            ops: vec![op1, op2],
+        }],
+    };
+    
+    optimizer.optimize(&mut func);
+    
+    let ops = &func.blocks[0].ops;
+    // op2 should become COPY 10
+    assert_eq!(ops[1].opcode, PcodeOpcode::Copy);
+    assert!(ops[1].inputs[0].is_constant);
+    assert_eq!(ops[1].inputs[0].constant_val, 10);
+}
+
+#[test]
+fn test_indirect_collapse() {
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_dead_code_elimination: false,
+        ..PcodeOptimizerConfig::default()
+    });
+    
+    let vn_base = Varnode { space_id: 2, offset: 0x10, size: 4, is_constant: false, constant_val: 0 };
+    let vn_x = Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 };
+    let vn_y = Varnode { space_id: 1, offset: 0x104, size: 4, is_constant: false, constant_val: 0 };
+    
+    // x = PTRSUB(base, 10)
+    let op1 = PcodeOp {
+        seq_num: 0,
+        opcode: PcodeOpcode::PtrSub,
+        address: 0x1000,
+        output: Some(vn_x.clone()),
+        inputs: vec![vn_base.clone(), Varnode::constant(10, 4)],
+    };
+    
+    // y = PTRSUB(x, 20)
+    let op2 = PcodeOp {
+        seq_num: 1,
+        opcode: PcodeOpcode::PtrSub,
+        address: 0x1004,
+        output: Some(vn_y.clone()),
+        inputs: vec![vn_x.clone(), Varnode::constant(20, 4)],
+    };
+    
+    let mut func = PcodeFunction {
+        blocks: vec![crate::analysis::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            ops: vec![op1, op2],
+        }],
+    };
+    
+    optimizer.optimize(&mut func);
+    
+    let ops = &func.blocks[0].ops;
+    // op2 should become PTRSUB(base, 30)
+    assert_eq!(ops[1].opcode, PcodeOpcode::PtrSub);
+    assert_eq!(ops[1].inputs[0], vn_base);
+    assert!(ops[1].inputs[1].is_constant);
+    assert_eq!(ops[1].inputs[1].constant_val, 30);
 }
