@@ -13,6 +13,8 @@ mod cse;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_dead_bit;
 
 use super::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::collections::{HashMap, HashSet};

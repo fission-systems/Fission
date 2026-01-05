@@ -7,6 +7,8 @@ mod binary_info;
 mod disasm;
 #[cfg(feature = "native_decomp")]
 mod decompile;
+#[cfg(feature = "native_decomp")]
+pub mod graph;
 mod functions;
 mod strings;
 
@@ -107,6 +109,21 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
     if let Some(addr) = cli.disasm {
         return disassemble(&binary, &binary_data, addr, cli.count, cli.json);
+    }
+
+    // Handle Pcode Graph Generation
+    if let Some(addr) = cli.graph {
+        #[cfg(feature = "native_decomp")]
+        {
+            return graph::generate_pcode_graph(&binary, addr, cli.output.as_ref(), cli.verbose);
+        }
+
+        #[cfg(not(feature = "native_decomp"))]
+        {
+            eprintln!("Error: Graph generation requires native_decomp feature");
+            eprintln!("Run with: cargo run --bin fission_cli --features native_decomp -- ...");
+            std::process::exit(1);
+        }
     }
 
     // Handle decompilation

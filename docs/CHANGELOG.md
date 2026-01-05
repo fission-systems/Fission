@@ -6,7 +6,36 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
-### Pcode IR Optimizer Phase 3 (New)
+### Pcode Graph Visualization System (2026-01-05)
+- **CLI Graph Command**: Added `--graph` option to generate Pcode control flow graphs
+  - Generates DOT format graphs with automatic PNG rendering (via Graphviz)
+  - Supports custom output file paths with `-o` option
+  - Example: `fission_cli binary.exe --graph 0x401000 -o my_graph.dot`
+- **Assembly Integration**: Each Pcode operation now displays its original assembly instruction
+  - Implemented `SimpleAssemblyEmit` class in C++ backend
+  - Extracts mnemonic and operands via Ghidra's `printAssembly` API
+  - Format: `[0x401000] MOV EAX, [RBP-0x10]` displayed above each Pcode op
+- **Color-Coded Nodes**: Operations grouped by type for better readability
+  - Control Flow (Branch, Call, Return): Light Red (#ffcccc)
+  - Memory Access (Load, Store): Light Green (#ccffcc)
+  - Data Movement (Copy, Cast): White (#ffffff)
+  - Arithmetic/Logic: Light Blue (#ccccff)
+- **C++ Backend Enhancements**:
+  - Added `run_decompilation_pcode()` function to extract raw Pcode as JSON
+  - Serializes basic blocks with operations, varnodes, and assembly info
+  - Fixed runtime errors with proper `Funcdata` initialization (`fd->clear()` + `fd->followFlow()`)
+- **Rust FFI Integration**:
+  - Added `get_pcode()` method to `RecommendedDecompiler`
+  - Extended `PcodeOp` struct with `asm_mnemonic` field
+  - Updated Pcode optimizer rules to preserve assembly information (7 fix locations)
+- **Memory Management Fixes**:
+  - Fixed "Could not find op at target address" error by adding section registration
+  - All binary sections (`.text`, `.data`, etc.) now properly registered with decompiler
+  - `SectionAwareLoadImage` correctly maps virtual addresses to file offsets
+- **Interactive Mode Support**: Graph generation available in both oneshot and interactive CLI modes
+- **Data Flow Analysis**: Optional def-use chain visualization with dotted blue edges
+
+### Pcode IR Optimizer Phase 3
 - **Common Subexpression Elimination (CSE)**: Implemented hash-based local CSE to remove redundant computations
 - **RulePtrArith**: Pointer arithmetic optimization (associativity)
   - Example: `(base + 10) + 20 => base + 30`

@@ -155,6 +155,7 @@ pub fn run_cli() -> Result<()> {
                         handlers::cmd_disasm(&mut state, address, count)
                     }
                     Command::Decompile { address } => handlers::cmd_decompile(&state, address),
+                    Command::Graph { address } => handlers::cmd_graph(&state, address),
                     Command::Strings => handlers::cmd_strings(&state),
                     Command::Sections => handlers::cmd_sections(&state),
                     Command::Analyze => handlers::cmd_analyze(&mut state),

@@ -31,6 +31,14 @@ void ensure_architecture(DecompContext* ctx);
 std::string run_decompilation(DecompContext* ctx, uint64_t addr);
 
 /**
+ * Run decompilation and return Pcode as JSON
+ * @param ctx Decompiler context
+ * @param addr Function address
+ * @return Pcode JSON string
+ */
+std::string run_decompilation_pcode(DecompContext* ctx, uint64_t addr);
+
+/**
  * Set GDT (Ghidra Data Type) path
  * @param ctx Decompiler context
  * @param gdt_path Path to GDT file

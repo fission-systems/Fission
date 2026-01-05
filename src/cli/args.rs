@@ -56,6 +56,10 @@ pub struct OneShotArgs {
     #[arg(short = 'd', long, alias = "asm", value_parser = parse_hex_address)]
     pub disasm: Option<u64>,
 
+    /// Generate Pcode DOT graph for function at address
+    #[arg(short = 'g', long, alias = "graph", value_parser = parse_hex_address)]
+    pub graph: Option<u64>,
+
     /// Number of instructions to disassemble
     #[arg(short = 'n', long, default_value = "20")]
     pub count: usize,

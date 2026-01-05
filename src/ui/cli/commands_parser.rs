@@ -10,6 +10,7 @@ pub enum Command {
     Functions,
     Disasm { address: Option<u64>, count: Option<usize> },
     Decompile { address: Option<u64> },
+    Graph { address: Option<u64> },
     Strings,
     Sections,
     Analyze,
@@ -46,6 +47,10 @@ pub fn parse_command(input: &str) -> Command {
         "decompile" | "dec" => {
             let address = parts.get(1).and_then(|s| parse_addr(s).ok());
             Command::Decompile { address }
+        }
+        "graph" | "g" => {
+            let address = parts.get(1).and_then(|s| parse_addr(s).ok());
+            Command::Graph { address }
         }
         "strings" | "str" => Command::Strings,
         "sections" | "sects" | "sec" => Command::Sections,
