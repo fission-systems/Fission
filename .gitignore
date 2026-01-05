@@ -49,4 +49,12 @@ memory_loadimage.cc
 
 # Submodule build directories
 ghidra_decompiler/build/
+
+# Ghidra installation directory
+ghidra_11.*/
+ghidra_12.*/
+ghidra/
+
+# PyGhidra cache
+.ghidra/
 ghidra_decompiler/fission_decomp

@@ -8,6 +8,7 @@ pub const MH_CIGAM_64: u32 = 0xCFFAEDFE;
 
 pub const LC_SEGMENT: u32 = 0x1;
 pub const LC_SYMTAB: u32 = 0x2;
+pub const LC_DYSYMTAB: u32 = 0xB;
 pub const LC_SEGMENT_64: u32 = 0x19;
 
 #[derive(BinRead, Debug, Clone)]
@@ -114,6 +115,30 @@ pub struct SymtabCommand {
     pub nsyms: u32,
     pub stroff: u32,
     pub strsize: u32,
+}
+
+#[derive(BinRead, Debug, Clone)]
+pub struct DysymtabCommand {
+    pub cmd: u32,
+    pub cmdsize: u32,
+    pub ilocalsym: u32,
+    pub nlocalsym: u32,
+    pub iextdefsym: u32,
+    pub nextdefsym: u32,
+    pub iundefsym: u32,
+    pub nundefsym: u32,
+    pub tocoff: u32,
+    pub ntoc: u32,
+    pub modtaboff: u32,
+    pub nmodtab: u32,
+    pub extrefsymoff: u32,
+    pub nextrefsyms: u32,
+    pub indirectsymoff: u32,
+    pub nindirectsyms: u32,
+    pub extreloff: u32,
+    pub nextrel: u32,
+    pub locreloff: u32,
+    pub nlocrel: u32,
 }
 
 #[derive(BinRead, Debug, Clone)]
