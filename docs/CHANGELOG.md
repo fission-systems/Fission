@@ -6,6 +6,54 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Decompiler Comparison & Mach-O Improvements (2026-01-05)
+
+**Critical Fixes:**
+- **ARM64 Architecture Recognition** - Fixed Mach-O parser misidentifying ARM64 binaries as x86_64
+  - CPU type detection now properly handles `0x100000C` (ARM64) and `0x1000007` (x86_64)
+  - Architecture display updated to show "ARM64 (64-bit)" or "x86_64 (64-bit)" correctly
+  - Warning messages for unknown CPU types
+  - Location: `src/analysis/loader/macho/mod.rs`, `src/cli/oneshot/binary_info.rs`
+
+- **External Function Symbol Resolution** - Implemented Mach-O dynamic symbol parsing
+  - Added `LC_DYSYMTAB` load command parsing with `DysymtabCommand` structure
+  - Parse indirect symbol table to resolve `__stubs` section entries
+  - Parse GOT (`__got`) section for indirect function pointers
+  - External functions now display as `_printf()`, `_malloc()`, `_free()` instead of `gp_0xXXXXXXXX`
+  - IAT symbols increased from 0 to 8+ per binary (stubs + GOT entries)
+  - Location: `src/analysis/loader/macho/schema.rs`, `src/analysis/loader/macho/mod.rs`
+
+**Testing & Validation:**
+- **PyGhidra Integration** - Created automated comparison framework
+  - `scripts/pyghidra_decompile.py`: Python wrapper for Ghidra decompilation
+  - `scripts/compare_decompilers.sh`: Side-by-side comparison script with assembly listing
+  - Supports PE, ELF, and Mach-O formats
+  - Displays Ghidra assembly + decompiled code, Fission disassembly + decompiled code
+  - PyGhidra 2.2.0 compatibility with Ghidra 11.4.2
+
+- **Comparison Test Suite** - New test binaries for systematic evaluation
+  - `test/comparison_test.c`: Multi-feature C test program
+    - Simple arithmetic (add, multiply)
+    - External function calls (printf, malloc, free)
+    - Struct operations (init, print, create, destroy)
+    - Control flow (if-else chains)
+    - Loops (for iteration)
+  - Built with MinGW x86-64 for Windows PE format
+  - Documentation: `test/README_COMPARISON.md`
+  - Detailed analysis: `docs/DECOMPILER_COMPARISON.md`
+
+**Known Issues Identified:**
+- ⚠️ COFF symbol table not parsed (PE function names show as `FUN_0xXXXXXXXX`)
+- ⚠️ Calling convention not implemented (parameters show as `unaff_RCX`, `unaff_RDX`)
+- ⚠️ Complex functions show "Unreachable block" false positives
+- ⚠️ PIC/GOT indirect calls treated as indirect jumps
+- ⚠️ Type inference needs improvement (struct pointers, complex types)
+
+**Performance:**
+- Simple functions (add, multiply): Near-identical to Ghidra
+- Complex functions (malloc/free chains): Logic correct but names/types need work
+- External function recognition: 100% success rate on tested binaries
+
 ### Pcode Graph Visualization System (2026-01-05)
 - **CLI Graph Command**: Added `--graph` option to generate Pcode control flow graphs
   - Generates DOT format graphs with automatic PNG rendering (via Graphviz)

@@ -28,14 +28,33 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
         writeln!(stdout, "\x1b[1;36m╠══════════════════════════════════════════════════════════╣\x1b[0m")?;
         writeln!(stdout, "║ Path:       {:<46} ║", truncate(&binary.path, 46))?;
         writeln!(stdout, "║ Format:     {:<46} ║", &binary.format)?;
-        writeln!(
-            stdout,
-            "║ Arch:       {:<46} ║",
+        
+        // Determine architecture display string from arch_spec
+        let arch_display = if binary.arch_spec.starts_with("AARCH64") {
+            if binary.is_64bit {
+                "ARM64 (64-bit)"
+            } else {
+                "ARM (32-bit)"
+            }
+        } else if binary.arch_spec.starts_with("x86") {
             if binary.is_64bit {
                 "x86_64 (64-bit)"
             } else {
                 "x86 (32-bit)"
             }
+        } else {
+            // Generic fallback based on is_64bit flag
+            if binary.is_64bit {
+                "64-bit"
+            } else {
+                "32-bit"
+            }
+        };
+        
+        writeln!(
+            stdout,
+            "║ Arch:       {:<46} ║",
+            arch_display
         )?;
         writeln!(
             stdout,

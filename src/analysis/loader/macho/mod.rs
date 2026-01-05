@@ -76,18 +76,26 @@ impl MachoLoader {
 
         let is_64bit = true;
         let cputype = header.cputype;
+        
         let arch_spec = match cputype {
-            0x1000007 | 0x7 => "x86:LE:64:default", // x86_64
-            0x100000C | 0xC => "AARCH64:LE:64:v8A", // ARM64
-            _ => "x86:LE:64:default",
+            0x1000007 | 0x7 => "x86:LE:64:default", // x86_64 (CPU_TYPE_X86_64)
+            0x100000C | 0xC => "AARCH64:LE:64:v8A", // ARM64 (CPU_TYPE_ARM64)
+            _ => {
+                eprintln!("[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86_64", cputype, cputype);
+                "x86:LE:64:default"
+            }
         };
 
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
         let entry_point = 0; // Mach-O entry is usually in LC_MAIN or LC_UNIXTHREAD, tricky to parse fully for POC
+        
+        // Store symbol table info for later use
+        let mut symtab_info: Option<SymtabCommand> = None;
+        let mut dysymtab_info: Option<DysymtabCommand> = None;
 
-        // Iterate Commands
+        // First pass: collect segment/section info and load commands
         for _ in 0..header.ncmds {
             let cmd_start = reader.position();
             let cmd_header = LoadCommand::read_options(&mut reader, endian, ()).unwrap();
@@ -124,9 +132,13 @@ impl MachoLoader {
                 continue;
             } else if cmd_header.cmd == LC_SYMTAB {
                 let symtab = SymtabCommand::read_options(&mut reader, endian, ()).unwrap();
+                symtab_info = Some(symtab.clone());
 
                 // Access Symbols (random access)
                 Self::parse_symbols_64(&data, &symtab, endian, &mut functions_info);
+            } else if cmd_header.cmd == LC_DYSYMTAB {
+                let dysymtab = DysymtabCommand::read_options(&mut reader, endian, ()).unwrap();
+                dysymtab_info = Some(dysymtab);
             }
 
             // Skip command
@@ -138,6 +150,19 @@ impl MachoLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
+        
+        // Parse dynamic symbols to get external function imports
+        let mut iat_symbols = std::collections::HashMap::new();
+        if let (Some(symtab), Some(dysymtab)) = (symtab_info, dysymtab_info) {
+            Self::parse_dynamic_symbols_64(
+                &data,
+                &symtab,
+                &dysymtab,
+                &sections_info,
+                endian,
+                &mut iat_symbols,
+            );
+        }
 
         LoadedBinaryBuilder::new(path, data)
             .format("Mach-O 64 (binrw)")
@@ -147,6 +172,7 @@ impl MachoLoader {
             .is_64bit(is_64bit)
             .add_sections(sections_info)
             .add_functions(functions_info)
+            .add_iat_symbols(iat_symbols)
             .build()
     }
 
@@ -158,9 +184,12 @@ impl MachoLoader {
         let is_64bit = false;
         let cputype = header.cputype;
         let arch_spec = match cputype {
-            0x7 => "x86:LE:32:default", // x86
-            0xC => "ARM:LE:32:v7",      // ARM
-            _ => "x86:LE:32:default",
+            0x7 => "x86:LE:32:default",      // x86 (CPU_TYPE_X86)
+            0xC => "ARM:LE:32:v7",           // ARM (CPU_TYPE_ARM)
+            _ => {
+                eprintln!("[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86", cputype, cputype);
+                "x86:LE:32:default"
+            }
         };
 
         // Logic similar to 64...
@@ -227,5 +256,97 @@ impl MachoLoader {
                 break;
             }
         }
+    }
+    
+    fn parse_dynamic_symbols_64(
+        data: &[u8],
+        symtab: &SymtabCommand,
+        dysymtab: &DysymtabCommand,
+        sections: &[SectionInfo],
+        endian: binrw::Endian,
+        iat_symbols: &mut std::collections::HashMap<u64, String>,
+    ) {
+        // Find __stubs and __got sections
+        let stubs_section = sections.iter().find(|s| s.name == "__stubs");
+        let got_section = sections.iter().find(|s| s.name == "__got");
+        
+        if dysymtab.nindirectsyms == 0 {
+            return;
+        }
+        
+        let mut reader = Cursor::new(data);
+        let indirect_off = dysymtab.indirectsymoff as u64;
+        
+        if indirect_off as usize + (dysymtab.nindirectsyms as usize * 4) > data.len() {
+            return;
+        }
+        
+        // Parse __stubs section
+        if let Some(stubs) = stubs_section {
+            let stub_size = 6; // Standard stub size on x86_64: jmp *offset(%rip) = 6 bytes
+            let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
+            
+            for i in 0..num_stubs {
+                let stub_addr = stubs.virtual_address + (i * stub_size);
+                
+                // Read indirect symbol table entry
+                reader.set_position(indirect_off + (i * 4));
+                if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
+                    if sym_idx < symtab.nsyms {
+                        let name = Self::get_symbol_name(data, symtab, sym_idx, endian);
+                        if !name.is_empty() {
+                            iat_symbols.insert(stub_addr, name);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Parse __got section
+        if let Some(got) = got_section {
+            let entry_size = 8; // GOT entry is 8 bytes on 64-bit
+            let num_entries = (got.virtual_size / entry_size).min(dysymtab.nindirectsyms as u64);
+            
+            // GOT entries come after stubs in indirect symbol table
+            let stubs_count = if let Some(stubs) = stubs_section {
+                (stubs.virtual_size / 6) as u32
+            } else {
+                0
+            };
+            
+            for i in 0..num_entries {
+                let got_addr = got.virtual_address + (i * entry_size);
+                
+                // Read indirect symbol table entry (offset by stubs count)
+                reader.set_position(indirect_off + ((stubs_count as u64 + i) * 4));
+                if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
+                    if sym_idx < symtab.nsyms {
+                        let name = Self::get_symbol_name(data, symtab, sym_idx, endian);
+                        if !name.is_empty() {
+                            iat_symbols.insert(got_addr, name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    fn get_symbol_name(
+        data: &[u8],
+        symtab: &SymtabCommand,
+        sym_idx: u32,
+        endian: binrw::Endian,
+    ) -> String {
+        let sym_off = symtab.symoff as u64 + (sym_idx as u64 * 16); // Nlist64 is 16 bytes
+        let mut reader = Cursor::new(data);
+        reader.set_position(sym_off);
+        
+        if let Ok(nlist) = Nlist64::read_options(&mut reader, endian, ()) {
+            let str_off = symtab.stroff as usize + nlist.n_strx as usize;
+            if str_off < data.len() {
+                return extract_cstring(data, str_off);
+            }
+        }
+        String::new()
     }
 }
