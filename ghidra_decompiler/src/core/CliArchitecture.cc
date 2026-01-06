@@ -1,4 +1,6 @@
 #include "fission/core/CliArchitecture.h"
+#include "fission/core/ScopeFission.h"
+#include "database.hh"
 #include "flow.hh"
 
 namespace fission {
@@ -12,6 +14,14 @@ CliArchitecture::CliArchitecture(const std::string& sleigh_id, ghidra::LoadImage
 
 void CliArchitecture::buildLoader(ghidra::DocumentStorage& store) {
     loader = custom_loader;
+}
+
+ghidra::Scope* CliArchitecture::buildDatabase(ghidra::DocumentStorage& store) {
+    (void)store;
+    symboltab = new ghidra::Database(this, true);
+    ghidra::Scope* global_scope = new ScopeFission(this, symbol_provider);
+    symboltab->attachScope(global_scope, nullptr);
+    return global_scope;
 }
 
 void CliArchitecture::injectIatSymbols(const std::map<uint64_t, std::string>& symbols) {
@@ -46,6 +56,10 @@ void CliArchitecture::injectIatSymbols(const std::map<uint64_t, std::string>& sy
         }
         std::cerr << std::endl;
     }
+}
+
+void CliArchitecture::setSymbolProvider(const SymbolProvider* provider) {
+    symbol_provider = provider;
 }
 
 void configure_arch(CliArchitecture* arch) {

@@ -69,6 +69,8 @@ pub struct LoadedBinary {
     pub format: String,
     /// IAT address to symbol name mapping for decompiler output
     pub iat_symbols: std::collections::HashMap<u64, String>,
+    /// Global data symbol mapping (address -> name) for decompiler output
+    pub global_symbols: std::collections::HashMap<u64, String>,
     /// Index of functions by address for O(1) lookup
     pub function_addr_index: std::collections::HashMap<u64, usize>,
     /// Index of functions by name for O(1) lookup
@@ -94,6 +96,7 @@ pub struct LoadedBinaryBuilder {
     dotnet_runtime_version: Option<String>,
     format: String,
     iat_symbols: std::collections::HashMap<u64, String>,
+    global_symbols: std::collections::HashMap<u64, String>,
 }
 
 impl LoadedBinaryBuilder {
@@ -111,6 +114,7 @@ impl LoadedBinaryBuilder {
             dotnet_runtime_version: None,
             format: "unknown".to_string(),
             iat_symbols: std::collections::HashMap::new(),
+            global_symbols: std::collections::HashMap::new(),
         }
     }
 
@@ -179,6 +183,16 @@ impl LoadedBinaryBuilder {
         self
     }
 
+    pub fn add_global_symbol(mut self, va: u64, name: String) -> Self {
+        self.global_symbols.insert(va, name);
+        self
+    }
+
+    pub fn add_global_symbols(mut self, symbols: std::collections::HashMap<u64, String>) -> Self {
+        self.global_symbols.extend(symbols);
+        self
+    }
+
     pub fn build(self) -> Result<LoadedBinary> {
         // Sort functions by address during build for efficient sorted access
         let mut functions = self.functions;
@@ -197,6 +211,7 @@ impl LoadedBinaryBuilder {
             dotnet_runtime_version: self.dotnet_runtime_version,
             format: self.format,
             iat_symbols: self.iat_symbols,
+            global_symbols: self.global_symbols,
             function_addr_index: std::collections::HashMap::new(),
             function_name_index: std::collections::HashMap::new(),
             functions_sorted: true,

@@ -131,6 +131,8 @@ pub fn process_messages(
                     binary.data.clone(),
                     binary.image_base,
                     combined_symbols,
+                    binary.global_symbols.clone(),
+                    binary.functions.clone(),
                     gdt_json_path_opt,
                     binary.sections.clone(),
                 );

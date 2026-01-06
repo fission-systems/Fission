@@ -94,6 +94,7 @@ mod tests {
         assert!(binary.is_64bit);
         assert_eq!(binary.functions.len(), 1);
         assert_eq!(binary.sections.len(), 1);
+        assert!(binary.global_symbols.is_empty());
 
         let func = binary.find_function("main").unwrap();
         assert_eq!(func.address, 0x1000);

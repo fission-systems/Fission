@@ -40,6 +40,12 @@ std::string replace_xunknown_types(const std::string& code);
 // Clean up SEH boilerplate (FS_OFFSET, iRam/pcRam naming)
 std::string cleanup_seh_boilerplate(const std::string& code);
 
+// Apply global data symbol names (g_/gp_ -> actual symbol names)
+std::string apply_global_symbols(
+    const std::string& code,
+    const std::map<uint64_t, std::string>& global_symbols
+);
+
 // Improve internal function names (func_0x → sub_)
 std::string improve_internal_function_names(const std::string& code);
 

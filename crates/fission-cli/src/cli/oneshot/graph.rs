@@ -93,6 +93,8 @@ pub fn generate_pcode_graph(
     {
         let _silencer = OutputSilencer::new_if(!verbose);
         decomp.add_symbols(&binary.iat_symbols);
+        decomp.add_global_symbols(&binary.global_symbols);
+        decomp.set_symbol_provider(&binary.functions, &binary.global_symbols, &binary.sections);
         for func in &binary.functions {
             if func.address != 0 && !func.name.is_empty() {
                 let _ = decomp.add_function(func.address, Some(&func.name));

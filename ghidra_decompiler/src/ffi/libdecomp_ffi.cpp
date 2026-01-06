@@ -9,6 +9,7 @@
 #include "fission/ffi/DecompContext.h"
 #include "fission/ffi/MemoryManager.h"
 #include "fission/ffi/SymbolManager.h"
+#include "fission/ffi/SymbolProviderManager.h"
 #include "fission/ffi/FidManager.h"
 #include "fission/ffi/DecompilerCore.h"
 
@@ -56,6 +57,25 @@ extern "C" DECOMP_API void decomp_add_symbol(
 
 extern "C" DECOMP_API void decomp_clear_symbols(DecompContext* ctx) {
     clear_symbols(ctx);
+}
+
+extern "C" DECOMP_API void decomp_add_global_symbol(
+    DecompContext* ctx,
+    uint64_t addr,
+    const char* name
+) {
+    add_global_symbol(ctx, addr, name);
+}
+
+extern "C" DECOMP_API void decomp_clear_global_symbols(DecompContext* ctx) {
+    clear_global_symbols(ctx);
+}
+
+extern "C" DECOMP_API void decomp_set_symbol_provider(
+    DecompContext* ctx,
+    const DecompSymbolProvider* provider
+) {
+    set_symbol_provider(ctx, provider);
 }
 
 extern "C" DECOMP_API DecompError decomp_add_function(

@@ -16,6 +16,7 @@ use crate::analysis::decomp::ffi::DecompilerNative;
 compile_error!("GUI requires native_decomp feature. Build with: cargo build --features native_decomp");
 
 use crate::analysis::loader::types::SectionInfo;
+use crate::analysis::loader::FunctionInfo;
 use crate::ui::gui::messages::AsyncMessage;
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashMap;
@@ -45,6 +46,10 @@ pub struct DecompileRequest {
     pub image_base: u64,
     /// IAT symbols to inject into decompiler (address -> name)
     pub iat_symbols: HashMap<u64, String>,
+    /// Global data symbols to improve global name cleanup
+    pub global_symbols: HashMap<u64, String>,
+    /// Known function symbols for on-demand lookups
+    pub functions: Vec<FunctionInfo>,
     /// GDT types JSON path for Windows structure definitions
     pub gdt_json_path: Option<String>,
     /// Binary sections for memory mapping
@@ -63,6 +68,8 @@ impl DecompileRequest {
             is_binary_load: false,
             image_base: 0,
             iat_symbols: HashMap::new(),
+            global_symbols: HashMap::new(),
+            functions: Vec::new(),
             gdt_json_path: None,
             sections: Vec::new(),
         }
@@ -72,6 +79,8 @@ impl DecompileRequest {
         bytes: Vec<u8>,
         image_base: u64,
         iat_symbols: HashMap<u64, String>,
+        global_symbols: HashMap<u64, String>,
+        functions: Vec<FunctionInfo>,
         gdt_json_path: Option<String>,
         sections: Vec<SectionInfo>,
     ) -> Self {
@@ -84,6 +93,8 @@ impl DecompileRequest {
             is_binary_load: true,
             image_base,
             iat_symbols,
+            global_symbols,
+            functions,
             gdt_json_path,
             sections,
         }
@@ -100,6 +111,8 @@ impl DecompileRequest {
             is_binary_load: false,
             image_base: 0,
             iat_symbols: HashMap::new(),
+            global_symbols: HashMap::new(),
+            functions: Vec::new(),
             gdt_json_path: None,
             sections: Vec::new(),
         }
@@ -240,6 +253,12 @@ fn worker_loop(
                     }
 
                     native.add_symbols(&request.iat_symbols);
+                    native.add_global_symbols(&request.global_symbols);
+                    native.set_symbol_provider(
+                        &request.functions,
+                        &request.global_symbols,
+                        &request.sections,
+                    );
                     if let Some(ref gdt) = request.gdt_json_path {
                         let _ = native.set_gdt(gdt);
                     }

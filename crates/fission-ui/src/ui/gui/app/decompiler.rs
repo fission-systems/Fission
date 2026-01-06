@@ -147,6 +147,8 @@ pub fn decompile_function(
         is_binary_load: false,
         image_base: 0,
         iat_symbols: std::collections::HashMap::new(),
+        global_symbols: std::collections::HashMap::new(),
+        functions: Vec::new(),
         gdt_json_path: None,
         sections: Vec::new(),
     };

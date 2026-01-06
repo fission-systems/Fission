@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "fission/ffi/SymbolProviderFfi.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -113,6 +114,38 @@ DECOMP_API void decomp_add_symbol(
  * @param ctx Decompiler context
  */
 DECOMP_API void decomp_clear_symbols(DecompContext* ctx);
+
+/**
+ * Add a global data symbol at the given address.
+ * Used for refptr/pg renames and data symbol cleanup.
+ *
+ * @param ctx Decompiler context
+ * @param addr Address of the symbol
+ * @param name Symbol name (will be copied internally)
+ */
+DECOMP_API void decomp_add_global_symbol(
+    DecompContext* ctx,
+    uint64_t addr,
+    const char* name
+);
+
+/**
+ * Clear all global data symbols from the context.
+ *
+ * @param ctx Decompiler context
+ */
+DECOMP_API void decomp_clear_global_symbols(DecompContext* ctx);
+
+/**
+ * Set a symbol provider callback for on-demand symbol queries.
+ *
+ * @param ctx Decompiler context
+ * @param provider Pointer to provider callbacks (NULL to disable)
+ */
+DECOMP_API void decomp_set_symbol_provider(
+    DecompContext* ctx,
+    const DecompSymbolProvider* provider
+);
 
 /**
  * Declare a function at the given address.

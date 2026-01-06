@@ -164,6 +164,12 @@ impl App {
                         return;
                     }
                     decomp.add_symbols(&self.binary.iat_symbols);
+                    decomp.add_global_symbols(&self.binary.global_symbols);
+                    decomp.set_symbol_provider(
+                        &self.binary.functions,
+                        &self.binary.global_symbols,
+                        &self.binary.sections,
+                    );
                     self.decompiler = Some(decomp);
                 }
                 Err(e) => {

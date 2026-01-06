@@ -12,6 +12,10 @@ All notable changes to the Fission project (November 2025 - January 2026).
 - **GDT prototype enforcement (FFI path)**: IAT prototypes are now applied during FFI decompilation
 - **One-shot CLI polish**: `--strings [min_len]` support, no trailing help after `--decomp`, quieter native logs by default
 - **Comparison tooling stability (macOS)**: `compare_decompilers_v2.sh` switched to Python timeout and preserves `DYLD_LIBRARY_PATH`
+- **On-demand symbol provider**: Added Scope-backed symbol query pipeline (functions/data) for richer global name resolution
+- **Symbol range estimation**: Data/function sizes are inferred from section boundaries to improve address-range lookups
+- **Readonly propagation**: Section permissions are registered into the property map for better constant folding
+- **Crash fix**: CLI decompiler now initializes the Database before querying global scope
 
 ### COFF Symbol Table Implementation (2026-01-05)
 

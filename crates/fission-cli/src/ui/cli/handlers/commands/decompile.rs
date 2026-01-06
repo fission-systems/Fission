@@ -111,6 +111,8 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
         {
             let _silencer = OutputSilencer::new_if(suppress_native_logs);
             native.add_symbols(&binary.iat_symbols);
+            native.add_global_symbols(&binary.global_symbols);
+            native.set_symbol_provider(&binary.functions, &binary.global_symbols, &binary.sections);
         }
         println!("{} Decompiling...", "[*]".blue());
 

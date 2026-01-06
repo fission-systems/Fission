@@ -20,6 +20,44 @@ pub struct DecompContext {
     _private: [u8; 0],
 }
 
+#[repr(C)]
+struct DecompSymbolInfo {
+    address: u64,
+    size: u32,
+    flags: u32,
+    name: *const c_char,
+    name_len: u32,
+}
+
+type DecompFindSymbolFn = extern "C" fn(
+    userdata: *mut std::ffi::c_void,
+    address: u64,
+    size: u32,
+    require_start: c_int,
+    out: *mut DecompSymbolInfo,
+) -> c_int;
+
+type DecompFindFunctionFn = extern "C" fn(
+    userdata: *mut std::ffi::c_void,
+    address: u64,
+    out: *mut DecompSymbolInfo,
+) -> c_int;
+
+#[repr(C)]
+struct DecompSymbolProvider {
+    userdata: *mut std::ffi::c_void,
+    find_symbol: Option<DecompFindSymbolFn>,
+    find_function: Option<DecompFindFunctionFn>,
+    drop: Option<extern "C" fn(*mut std::ffi::c_void)>,
+}
+
+const SYMBOL_FLAG_FUNCTION: u32 = 1 << 0;
+const SYMBOL_FLAG_DATA: u32 = 1 << 1;
+const SYMBOL_FLAG_EXTERNAL: u32 = 1 << 2;
+const SYMBOL_FLAG_READONLY: u32 = 1 << 3;
+#[allow(dead_code)]
+const SYMBOL_FLAG_VOLATILE: u32 = 1 << 4;
+
 /// Error codes from libdecomp
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +95,9 @@ unsafe extern "C" {
     ) -> DecompError;
     fn decomp_add_symbol(ctx: *mut DecompContext, addr: u64, name: *const c_char);
     fn decomp_clear_symbols(ctx: *mut DecompContext);
+    fn decomp_add_global_symbol(ctx: *mut DecompContext, addr: u64, name: *const c_char);
+    fn decomp_clear_global_symbols(ctx: *mut DecompContext);
+    fn decomp_set_symbol_provider(ctx: *mut DecompContext, provider: *const DecompSymbolProvider);
     fn decomp_add_function(ctx: *mut DecompContext, addr: u64, name: *const c_char) -> DecompError;
     fn decomp_add_memory_block(
         ctx: *mut DecompContext,
@@ -101,6 +142,9 @@ pub struct DecompilerNative {
     sla_dir: String,
     // Track if context is valid to prevent use-after-free
     is_valid: bool,
+    pointer_size: Option<u32>,
+    symbol_provider_state: Option<Box<SymbolProviderState>>,
+    symbol_provider_callbacks: Option<DecompSymbolProvider>,
 }
 
 #[cfg(feature = "native_decomp")]
@@ -128,6 +172,9 @@ impl DecompilerNative {
             ctx,
             sla_dir: sla_dir.to_string(),
             is_valid: true,
+            pointer_size: None,
+            symbol_provider_state: None,
+            symbol_provider_callbacks: None,
         })
     }
     
@@ -160,6 +207,7 @@ impl DecompilerNative {
         };
 
         if result.is_ok() {
+            self.pointer_size = Some(if is_64bit { 8 } else { 4 });
             Ok(())
         } else {
             Err(FissionError::decompiler(self.get_last_error()))
@@ -186,9 +234,68 @@ impl DecompilerNative {
         }
     }
 
+    /// Add a global data symbol at the given address
+    pub fn add_global_symbol(&mut self, addr: u64, name: &str) {
+        if self.check_valid().is_err() || name.is_empty() {
+            return;
+        }
+        if let Ok(name_cstr) = CString::new(name) {
+            unsafe { decomp_add_global_symbol(self.ctx, addr, name_cstr.as_ptr()) };
+        }
+    }
+
+    /// Add multiple global data symbols
+    pub fn add_global_symbols(&mut self, symbols: &HashMap<u64, String>) {
+        if self.check_valid().is_err() {
+            return;
+        }
+        for (addr, name) in symbols {
+            self.add_global_symbol(*addr, name);
+        }
+    }
+
+    /// Set a symbol provider for on-demand symbol queries
+    pub fn set_symbol_provider(
+        &mut self,
+        functions: &[crate::analysis::loader::FunctionInfo],
+        data_symbols: &HashMap<u64, String>,
+        sections: &[crate::analysis::loader::SectionInfo],
+    ) {
+        if self.check_valid().is_err() {
+            return;
+        }
+
+        let state = Box::new(SymbolProviderState::new(
+            functions,
+            data_symbols,
+            sections,
+            self.pointer_size,
+        ));
+        let userdata = state.as_ref() as *const _ as *mut std::ffi::c_void;
+
+        let provider = DecompSymbolProvider {
+            userdata,
+            find_symbol: Some(symbol_provider_find_symbol),
+            find_function: Some(symbol_provider_find_function),
+            drop: None,
+        };
+
+        unsafe {
+            decomp_set_symbol_provider(self.ctx, &provider);
+        }
+
+        self.symbol_provider_state = Some(state);
+        self.symbol_provider_callbacks = Some(provider);
+    }
+
     /// Clear all symbols
     pub fn clear_symbols(&mut self) {
         unsafe { decomp_clear_symbols(self.ctx) };
+    }
+
+    /// Clear all global data symbols
+    pub fn clear_global_symbols(&mut self) {
+        unsafe { decomp_clear_global_symbols(self.ctx) };
     }
 
     /// Declare a function at the given address
@@ -386,6 +493,361 @@ impl DecompilerNative {
 
         unsafe { CStr::from_ptr(err_ptr).to_string_lossy().into_owned() }
     }
+}
+
+#[cfg(feature = "native_decomp")]
+struct SymbolProviderEntry {
+    name: CString,
+    size: u32,
+    flags: u32,
+}
+
+#[cfg(feature = "native_decomp")]
+struct SymbolProviderRange {
+    start: u64,
+    end: u64,
+    entry_addr: u64,
+}
+
+#[cfg(feature = "native_decomp")]
+struct SymbolProviderState {
+    functions: HashMap<u64, SymbolProviderEntry>,
+    data: HashMap<u64, SymbolProviderEntry>,
+    function_ranges: Vec<SymbolProviderRange>,
+    data_ranges: Vec<SymbolProviderRange>,
+}
+
+#[cfg(feature = "native_decomp")]
+impl SymbolProviderState {
+    fn new(
+        functions: &[crate::analysis::loader::FunctionInfo],
+        data_symbols: &HashMap<u64, String>,
+        sections: &[crate::analysis::loader::SectionInfo],
+        pointer_size: Option<u32>,
+    ) -> Self {
+        let mut function_map = HashMap::new();
+        let mut function_ranges = Vec::new();
+        let mut function_addrs: Vec<u64> = functions
+            .iter()
+            .filter_map(|func| {
+                if func.address == 0 {
+                    None
+                } else {
+                    Some(func.address)
+                }
+            })
+            .collect();
+        function_addrs.sort_unstable();
+        function_addrs.dedup();
+
+        let mut function_sizes = HashMap::new();
+        for (idx, addr) in function_addrs.iter().enumerate() {
+            let next_addr = function_addrs.get(idx + 1).copied();
+            let section = match find_executable_section_for_address(*addr, sections) {
+                Some(section) => section,
+                None => continue,
+            };
+            let (_, end) = match section_range(section) {
+                Some(range) => range,
+                None => continue,
+            };
+            if let Some(next) = next_addr {
+                if next > *addr && next < end {
+                    let size = next - *addr;
+                    if size > 0 && size <= u32::MAX as u64 {
+                        function_sizes.insert(*addr, size as u32);
+                    }
+                }
+            }
+        }
+        for func in functions {
+            if func.address == 0 || func.name.is_empty() {
+                continue;
+            }
+            if let Ok(name) = CString::new(func.name.as_str()) {
+                let mut size = func.size.min(u32::MAX as u64) as u32;
+                if size == 0 {
+                    if let Some(estimated) = function_sizes.get(&func.address) {
+                        size = *estimated;
+                    }
+                }
+                let mut flags = SYMBOL_FLAG_FUNCTION;
+                if func.is_import {
+                    flags |= SYMBOL_FLAG_EXTERNAL;
+                }
+                function_map.insert(
+                    func.address,
+                    SymbolProviderEntry {
+                        name,
+                        size,
+                        flags,
+                    },
+                );
+
+                if size > 0 {
+                    if let Some(range) = build_range(func.address, size as u64) {
+                        function_ranges.push(range);
+                    }
+                }
+            }
+        }
+
+        let mut data_map = HashMap::new();
+        let mut data_ranges = Vec::new();
+        let mut data_addrs: Vec<u64> = data_symbols.keys().copied().collect();
+        data_addrs.sort_unstable();
+        let mut data_sizes = HashMap::new();
+        for (idx, addr) in data_addrs.iter().enumerate() {
+            let next_addr = data_addrs.get(idx + 1).copied();
+            let mut size = estimate_data_size(*addr, next_addr, sections).unwrap_or(1);
+            if size == 0 {
+                size = 1;
+            }
+            data_sizes.insert(*addr, size);
+        }
+        for (addr, name) in data_symbols {
+            if *addr == 0 || name.is_empty() {
+                continue;
+            }
+            if let Ok(name_cstr) = CString::new(name.as_str()) {
+                let mut flags = data_flags_for_address(*addr, sections);
+                let lower = name.to_ascii_lowercase();
+                let is_import = lower.starts_with("__imp_") || lower.starts_with("__imp__");
+                if is_import {
+                    flags |= SYMBOL_FLAG_EXTERNAL;
+                }
+                let mut size = data_sizes.get(addr).copied().unwrap_or(1);
+                if let Some(ptr_size) = pointer_size {
+                    if is_import && ptr_size > 0 {
+                        size = ptr_size;
+                    }
+                }
+                data_map.insert(
+                    *addr,
+                    SymbolProviderEntry {
+                        name: name_cstr,
+                        size,
+                        flags,
+                    },
+                );
+
+                if let Some(range) = build_range(*addr, size as u64) {
+                    data_ranges.push(range);
+                }
+            }
+        }
+
+        function_ranges.sort_by_key(|range| range.start);
+        data_ranges.sort_by_key(|range| range.start);
+
+        Self {
+            functions: function_map,
+            data: data_map,
+            function_ranges,
+            data_ranges,
+        }
+    }
+}
+
+#[cfg(feature = "native_decomp")]
+fn data_flags_for_address(
+    addr: u64,
+    sections: &[crate::analysis::loader::SectionInfo],
+) -> u32 {
+    if let Some(section) = find_section_for_address(addr, sections) {
+        let mut flags = SYMBOL_FLAG_DATA;
+        if !section.is_writable {
+            flags |= SYMBOL_FLAG_READONLY;
+        }
+        return flags;
+    }
+
+    SYMBOL_FLAG_DATA
+}
+
+#[cfg(feature = "native_decomp")]
+fn estimate_data_size(
+    addr: u64,
+    next_addr: Option<u64>,
+    sections: &[crate::analysis::loader::SectionInfo],
+) -> Option<u32> {
+    let section = find_section_for_address(addr, sections)?;
+    let (_, end) = section_range(section)?;
+    if let Some(next) = next_addr {
+        if next > addr && next < end {
+            let delta = next - addr;
+            if delta > 0 && delta <= u32::MAX as u64 {
+                return Some(delta as u32);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "native_decomp")]
+fn find_section_for_address<'a>(
+    addr: u64,
+    sections: &'a [crate::analysis::loader::SectionInfo],
+) -> Option<&'a crate::analysis::loader::SectionInfo> {
+    for section in sections {
+        if let Some((start, end)) = section_range(section) {
+            if addr >= start && addr < end {
+                return Some(section);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "native_decomp")]
+fn find_executable_section_for_address<'a>(
+    addr: u64,
+    sections: &'a [crate::analysis::loader::SectionInfo],
+) -> Option<&'a crate::analysis::loader::SectionInfo> {
+    for section in sections {
+        if !section.is_executable {
+            continue;
+        }
+        if let Some((start, end)) = section_range(section) {
+            if addr >= start && addr < end {
+                return Some(section);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "native_decomp")]
+fn section_range(section: &crate::analysis::loader::SectionInfo) -> Option<(u64, u64)> {
+    let size = if section.virtual_size > 0 {
+        section.virtual_size
+    } else {
+        section.file_size
+    };
+    if size == 0 {
+        return None;
+    }
+    let start = section.virtual_address;
+    let end = start.saturating_add(size);
+    if end <= start {
+        return None;
+    }
+    Some((start, end))
+}
+
+#[cfg(feature = "native_decomp")]
+fn build_range(start: u64, size: u64) -> Option<SymbolProviderRange> {
+    if size == 0 {
+        return None;
+    }
+
+    let mut end = start.saturating_add(size);
+    if end <= start {
+        end = start.saturating_add(1);
+    }
+
+    Some(SymbolProviderRange {
+        start,
+        end,
+        entry_addr: start,
+    })
+}
+
+#[cfg(feature = "native_decomp")]
+fn find_range_entry(ranges: &[SymbolProviderRange], address: u64) -> Option<u64> {
+    if ranges.is_empty() {
+        return None;
+    }
+
+    let idx = ranges.partition_point(|range| range.start <= address);
+    if idx == 0 {
+        return None;
+    }
+
+    let range = &ranges[idx - 1];
+    if address < range.end {
+        Some(range.entry_addr)
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "native_decomp")]
+extern "C" fn symbol_provider_find_symbol(
+    userdata: *mut std::ffi::c_void,
+    address: u64,
+    _size: u32,
+    _require_start: c_int,
+    out: *mut DecompSymbolInfo,
+) -> c_int {
+    if userdata.is_null() || out.is_null() {
+        return 0;
+    }
+
+    let state = unsafe { &*(userdata as *const SymbolProviderState) };
+    let entry = match state.data.get(&address) {
+        Some(entry) => entry,
+        None => {
+            if _require_start == 0 {
+                if let Some(start) = find_range_entry(&state.data_ranges, address) {
+                    match state.data.get(&start) {
+                        Some(entry) => entry,
+                        None => return 0,
+                    }
+                } else {
+                    return 0;
+                }
+            } else {
+                return 0;
+            }
+        }
+    };
+
+    unsafe {
+        (*out).address = address;
+        (*out).size = entry.size;
+        (*out).flags = entry.flags;
+        (*out).name = entry.name.as_ptr();
+        (*out).name_len = entry.name.as_bytes().len().min(u32::MAX as usize) as u32;
+    }
+
+    1
+}
+
+#[cfg(feature = "native_decomp")]
+extern "C" fn symbol_provider_find_function(
+    userdata: *mut std::ffi::c_void,
+    address: u64,
+    out: *mut DecompSymbolInfo,
+) -> c_int {
+    if userdata.is_null() || out.is_null() {
+        return 0;
+    }
+
+    let state = unsafe { &*(userdata as *const SymbolProviderState) };
+    let entry = match state.functions.get(&address) {
+        Some(entry) => entry,
+        None => {
+            if let Some(start) = find_range_entry(&state.function_ranges, address) {
+                match state.functions.get(&start) {
+                    Some(entry) => entry,
+                    None => return 0,
+                }
+            } else {
+                return 0;
+            }
+        }
+    };
+
+    unsafe {
+        (*out).address = address;
+        (*out).size = entry.size;
+        (*out).flags = entry.flags;
+        (*out).name = entry.name.as_ptr();
+        (*out).name_len = entry.name.as_bytes().len().min(u32::MAX as usize) as u32;
+    }
+
+    1
 }
 
 #[cfg(feature = "native_decomp")]
