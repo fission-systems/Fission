@@ -6,9 +6,11 @@
 #include "fission/core/CliArchitecture.h"
 #include "fission/core/ArchPolicy.h"
 #include "fission/types/TypeManager.h"
+#include "fission/types/PrototypeEnforcer.h"
 #include "fission/types/GdtBinaryParser.h"
 #include "fission/types/GuidParser.h"
 #include "fission/analysis/FidDatabase.h"
+#include "fission/analysis/CallingConvDetector.h"
 #include "fission/processing/PostProcessors.h"
 #include "fission/processing/StringScanner.h"
 #include "fission/utils/file_utils.h"
@@ -279,6 +281,25 @@ std::string fission::ffi::run_decompilation(DecompContext* ctx, uint64_t addr) {
         std::cerr << "[DecompilerCore] ERROR: Unknown exception in followFlow" << std::endl;
     }
     
+    // ========================================================================
+    // Calling Convention Application (Binary Format-based)
+    // ========================================================================
+    // For Windows PE binaries, force MS x64 calling convention
+    // For Unix/Mac binaries (Mach-O, ELF), it will use System V ABI by default
+    try {
+        if (ctx->is_64bit) {
+            // Assume Windows PE for now - can be extended with binary format detection
+            ProtoModel* model = ctx->arch->getModel("__fastcall");  // MS x64
+            if (model) {
+                FuncProto& proto = fd->getFuncProto();
+                proto.setModel(model);
+                std::cerr << "[DecompilerCore] Applied MS x64 calling convention (__fastcall)" << std::endl;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[DecompilerCore] ERROR applying calling convention: " << e.what() << std::endl;
+    }
+    
     // Check action group
     ghidra::Action* current_action = ctx->arch->allacts.getCurrent();
     if (!current_action) {
@@ -288,6 +309,12 @@ std::string fission::ffi::run_decompilation(DecompContext* ctx, uint64_t addr) {
     // CRITICAL: Reset action state for this function AFTER clear and followFlow
     std::cerr << "[DecompilerCore] Resetting action state..." << std::endl;
     current_action->reset(*fd);
+
+    // Enforce GDT-based prototypes for IAT symbols before decompilation.
+    if (!ctx->symbols.empty()) {
+        fission::types::PrototypeEnforcer proto_enforcer;
+        proto_enforcer.enforce_iat_prototypes(ctx->arch.get(), ctx->symbols);
+    }
     
     std::cerr << "[DecompilerCore] Performing decompilation..." << std::endl;
     

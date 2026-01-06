@@ -58,3 +58,14 @@ ghidra/
 # PyGhidra cache
 .ghidra/
 ghidra_decompiler/fission_decomp
+scripts/result/
+
+# Local virtual env
+.venv/
+
+# Ghidra build outputs and temp projects
+ghidra-Ghidra_11.4.2_build/
+test/*_ghidra/
+
+# Backup artifacts
+*.backup

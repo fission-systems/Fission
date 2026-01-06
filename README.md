@@ -152,7 +152,7 @@ TODO: Add screenshot when available
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Rust | 1.75+ | Install via [rustup](https://rustup.rs/) |
+| Rust | 1.85+ | Install via [rustup](https://rustup.rs/) |
 | CMake | 3.16+ | For building Ghidra decompiler |
 | C++ Compiler | See below | Platform-specific |
 | vcpkg | Latest | Windows only, for ZLIB |

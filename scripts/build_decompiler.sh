@@ -20,8 +20,11 @@ if ! command -v make &> /dev/null && ! command -v ninja &> /dev/null; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Directory setup
-DECOMPILER_DIR="ghidra_decompiler"
+DECOMPILER_DIR="$REPO_ROOT/ghidra_decompiler"
 BUILD_DIR="${DECOMPILER_DIR}/build"
 
 if [ ! -d "$DECOMPILER_DIR" ]; then

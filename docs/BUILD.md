@@ -26,7 +26,7 @@ Complete guide for building Fission from source on Windows, Linux, and macOS.
 
 | Component | Version | Purpose |
 |-----------|---------|---------|
-| Rust | 1.75+ | Core language |
+| Rust | 1.85+ | Core language |
 | CMake | 3.16+ | Building Ghidra decompiler |
 | C++ Compiler | C++17 | Decompiler components |
 | zlib | Latest | Compression library |
@@ -498,7 +498,7 @@ export DYLD_LIBRARY_PATH=$(pwd)/ghidra_decompiler/build:$DYLD_LIBRARY_PATH
 rustup update stable
 
 # Check version
-rustc --version  # Should be 1.75+
+rustc --version  # Should be 1.85+
 ```
 
 ### Out of Memory During Build

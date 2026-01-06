@@ -1,0 +1,2 @@
+[env]
+DYLD_LIBRARY_PATH = "/Users/sjkim1127/Fission/ghidra_decompiler/build"

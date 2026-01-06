@@ -160,7 +160,7 @@ cd my_fission_plugin
 [package]
 name = "my_fission_plugin"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib"]  # Important: Create dynamic library
