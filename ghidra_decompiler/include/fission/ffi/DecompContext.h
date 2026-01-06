@@ -23,9 +23,11 @@ namespace ghidra {
 
 // Include actual headers for std::unique_ptr members
 #include "fission/core/CliArchitecture.h"
+#include "fission/core/SymbolProvider.h"
 #include "fission/loader/SectionAwareLoadImage.h"
 #include "fission/analysis/FidDatabase.h"
 #include "fission/analysis/FunctionMatcher.h"
+#include "fission/ffi/SymbolProviderFfi.h"
 
 namespace fission {
 namespace ffi {
@@ -62,12 +64,16 @@ struct DecompContext {
     
     // Symbol table
     std::map<uint64_t, std::string> symbols;
+    std::map<uint64_t, std::string> global_symbols;
     
     // Memory blocks (sections)
     std::vector<MemoryBlockInfo> memory_blocks;
     
     // Architecture (lazy-initialized)
     std::unique_ptr<fission::core::CliArchitecture> arch;
+    std::unique_ptr<fission::core::SymbolProvider> symbol_provider;
+    DecompSymbolProvider symbol_provider_callbacks;
+    bool symbol_provider_enabled = false;
     
     // Error stream for architecture
     std::ostringstream err_stream;

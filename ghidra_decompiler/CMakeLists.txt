@@ -75,6 +75,8 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/analysis/TypeSharing.cc
     ${FISSION_MODULES_DIR}/analysis/GlobalDataAnalyzer.cc
     ${FISSION_MODULES_DIR}/analysis/VTableAnalyzer.cc
+    ${FISSION_MODULES_DIR}/core/ScopeFission.cc
+    ${FISSION_MODULES_DIR}/core/SymbolProvider.cc
     ${FISSION_MODULES_DIR}/core/CliArchitecture.cc
     ${FISSION_MODULES_DIR}/core/DecompilerContext.cc
     ${FISSION_MODULES_DIR}/processing/Constants.cc
@@ -104,6 +106,7 @@ set(FFI_SOURCES
     ${FISSION_MODULES_DIR}/ffi/DecompContext.cpp
     ${FISSION_MODULES_DIR}/ffi/MemoryManager.cpp
     ${FISSION_MODULES_DIR}/ffi/SymbolManager.cpp
+    ${FISSION_MODULES_DIR}/ffi/SymbolProviderManager.cpp
     ${FISSION_MODULES_DIR}/ffi/FidManager.cpp
     ${FISSION_MODULES_DIR}/ffi/DecompilerCore.cpp
     ${FISSION_MODULES_DIR}/ffi/libdecomp_ffi.cpp

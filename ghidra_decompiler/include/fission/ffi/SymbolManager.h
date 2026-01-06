@@ -29,6 +29,20 @@ void add_symbol(DecompContext* ctx, uint64_t addr, const char* name);
 void clear_symbols(DecompContext* ctx);
 
 /**
+ * Add a global data symbol to the context
+ * @param ctx Decompiler context
+ * @param addr Symbol address
+ * @param name Symbol name
+ */
+void add_global_symbol(DecompContext* ctx, uint64_t addr, const char* name);
+
+/**
+ * Clear all global data symbols from the context
+ * @param ctx Decompiler context
+ */
+void clear_global_symbols(DecompContext* ctx);
+
+/**
  * Add a function declaration
  * @param ctx Decompiler context
  * @param addr Function address

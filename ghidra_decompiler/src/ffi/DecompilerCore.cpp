@@ -5,6 +5,7 @@
 #include "fission/ffi/DecompilerCore.h"
 #include "fission/core/CliArchitecture.h"
 #include "fission/core/ArchPolicy.h"
+#include "fission/core/SymbolProvider.h"
 #include "fission/types/TypeManager.h"
 #include "fission/types/PrototypeEnforcer.h"
 #include "fission/types/GdtBinaryParser.h"
@@ -15,6 +16,8 @@
 #include "fission/processing/StringScanner.h"
 #include "fission/utils/file_utils.h"
 #include "libdecomp.hh"
+#include "address.hh"
+#include "varnode.hh"
 
 #include <iostream>
 #include <regex>
@@ -103,6 +106,21 @@ void fission::ffi::ensure_architecture(DecompContext* ctx) {
         ctx->memory_image.get(),
         &ctx->err_stream
     );
+
+    if (!ctx->symbol_provider) {
+        if (ctx->symbol_provider_enabled) {
+            ctx->symbol_provider = std::make_unique<fission::core::CallbackSymbolProvider>(
+                &ctx->symbol_provider_callbacks
+            );
+        } else {
+            ctx->symbol_provider = std::make_unique<fission::core::MapSymbolProvider>(
+                &ctx->symbols,
+                &ctx->global_symbols
+            );
+        }
+    }
+
+    ctx->arch->setSymbolProvider(ctx->symbol_provider.get());
     
     // CRITICAL: Initialize Sleigh engine and register print languages
     ghidra::DocumentStorage store;
@@ -164,6 +182,36 @@ void fission::ffi::ensure_architecture(DecompContext* ctx) {
     
     // Register memory blocks (sections) if any
     if (!ctx->memory_blocks.empty()) {
+        if (ctx->arch->symboltab) {
+            ghidra::AddrSpace* data_space = ctx->arch->getDefaultDataSpace();
+            if (data_space) {
+                for (const auto& block : ctx->memory_blocks) {
+                    uint64_t size = block.va_size > 0 ? block.va_size : block.file_size;
+                    if (size == 0) {
+                        continue;
+                    }
+
+                    ghidra::uintb start = block.va_addr;
+                    ghidra::uintb last = start + static_cast<ghidra::uintb>(size - 1);
+                    if (last < start) {
+                        last = start;
+                    }
+
+                    uint4 flags = 0;
+                    if (!block.is_writable) {
+                        flags |= ghidra::Varnode::readonly;
+                    }
+
+                    if (flags != 0) {
+                        ctx->arch->symboltab->setPropertyRange(
+                            flags,
+                            ghidra::Range(data_space, start, last)
+                        );
+                    }
+                }
+            }
+        }
+
         std::cerr << "[DecompilerCore] Registering " << ctx->memory_blocks.size() << " memory blocks" << std::endl;
         
         // SectionAwareLoadImage handles the VA-to-file-offset mapping
@@ -389,6 +437,11 @@ std::string fission::ffi::run_decompilation(DecompContext* ctx, uint64_t addr) {
     
     // Step 8: SEH boilerplate cleanup
     result = cleanup_seh_boilerplate(result);
+
+    // Step 8.5: Apply global data symbol names (g_/gp_)
+    if (!ctx->global_symbols.empty()) {
+        result = apply_global_symbols(result, ctx->global_symbols);
+    }
     
     // Step 9: Internal function naming improvement
     result = improve_internal_function_names(result);

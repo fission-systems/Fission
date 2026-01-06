@@ -24,6 +24,20 @@ void fission::ffi::clear_symbols(DecompContext* ctx) {
     ctx->symbols.clear();
 }
 
+void fission::ffi::add_global_symbol(DecompContext* ctx, uint64_t addr, const char* name) {
+    if (!ctx || !name) return;
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    ctx->global_symbols[addr] = name;
+}
+
+void fission::ffi::clear_global_symbols(DecompContext* ctx) {
+    if (!ctx) return;
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    ctx->global_symbols.clear();
+}
+
 DecompError fission::ffi::add_function(DecompContext* ctx, uint64_t addr, const char* name) {
     if (!ctx) return DECOMP_ERR_INVALID_CONTEXT;
     

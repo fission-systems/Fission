@@ -43,6 +43,8 @@ pub(super) fn run_decompilation(
 
     // Add IAT symbols
     decomp.add_symbols(&binary.iat_symbols);
+    decomp.add_global_symbols(&binary.global_symbols);
+    decomp.set_symbol_provider(&binary.functions, &binary.global_symbols, &binary.sections);
 
     // Add memory blocks (sections) to improve analysis
     if cli.verbose {

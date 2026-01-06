@@ -771,6 +771,72 @@ std::string cleanup_seh_boilerplate(const std::string& code) {
 }
 
 // ============================================================================
+// Global Symbol Replacement
+// ============================================================================
+
+std::string apply_global_symbols(const std::string& code, const std::map<uint64_t, std::string>& global_symbols) {
+    if (global_symbols.empty()) return code;
+
+    std::string result;
+    result.reserve(code.size());
+
+    size_t i = 0;
+    while (i < code.size()) {
+        size_t prefix_len = 0;
+        if (code.compare(i, 3, "gp_") == 0) {
+            prefix_len = 3;
+        } else if (code.compare(i, 2, "g_") == 0) {
+            prefix_len = 2;
+        }
+
+        if (prefix_len > 0) {
+            if (i > 0) {
+                unsigned char prev = static_cast<unsigned char>(code[i - 1]);
+                if (std::isalnum(prev) || code[i - 1] == '_') {
+                    result.push_back(code[i]);
+                    i++;
+                    continue;
+                }
+            }
+
+            size_t addr_start = i + prefix_len;
+            size_t addr_end = addr_start;
+            while (addr_end < code.size() && std::isxdigit(static_cast<unsigned char>(code[addr_end]))) {
+                addr_end++;
+            }
+
+            if (addr_end > addr_start) {
+                if (addr_end < code.size()) {
+                    unsigned char next = static_cast<unsigned char>(code[addr_end]);
+                    if (std::isalnum(next) || code[addr_end] == '_') {
+                        result.push_back(code[i]);
+                        i++;
+                        continue;
+                    }
+                }
+
+                try {
+                    uint64_t addr = std::stoull(code.substr(addr_start, addr_end - addr_start), nullptr, 16);
+                    auto it = global_symbols.find(addr);
+                    if (it != global_symbols.end()) {
+                        result.append(it->second);
+                        i = addr_end;
+                        continue;
+                    }
+                } catch (...) {
+                    // Ignore parse errors and fall through.
+                }
+            }
+        }
+
+        result.push_back(code[i]);
+        i++;
+    }
+
+    return result;
+}
+
+// ============================================================================
 // Internal Function Naming (FID Integration)
 // ============================================================================
 // Replaces func_0xXXXXXXXX with more readable internal function names

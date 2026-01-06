@@ -27,9 +27,13 @@ DecompContext::DecompContext(const char* sla)
     : sla_dir(sla ? sla : "")
 {
     matcher = std::make_unique<FunctionMatcher>();
+    symbol_provider_callbacks = DecompSymbolProvider{};
 }
 
 DecompContext::~DecompContext() {
+    if (symbol_provider_enabled && symbol_provider_callbacks.drop) {
+        symbol_provider_callbacks.drop(symbol_provider_callbacks.userdata);
+    }
     // WORKAROUND: Release the architecture pointer instead of destroying it
     // Ghidra's Architecture destructor can crash after decompilation due to
     // internal state corruption. This is a minor memory leak but prevents crash.
