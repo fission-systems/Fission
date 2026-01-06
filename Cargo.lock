@@ -1711,7 +1711,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
 
 [[package]]
-name = "fission"
+name = "fission-analysis"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1720,15 +1720,11 @@ dependencies = [
  "bytecheck",
  "bytes",
  "cc",
- "clap",
  "colored",
  "criterion",
  "crossbeam-channel",
- "crossterm 0.28.1",
  "dirs",
- "eframe",
- "egui",
- "egui_extras",
+ "fission-core",
  "flate2",
  "hex",
  "iced-x86",
@@ -1741,10 +1737,7 @@ dependencies = [
  "once_cell",
  "proptest",
  "pyo3",
- "ratatui",
- "reedline",
  "regex",
- "rfd",
  "rkyv",
  "serde",
  "serde_json",
@@ -1755,6 +1748,64 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows 0.54.0",
+]
+
+[[package]]
+name = "fission-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "colored",
+ "crossterm 0.28.1",
+ "eframe",
+ "egui",
+ "fission-analysis",
+ "fission-core",
+ "fission-ui",
+ "iced-x86",
+ "libc",
+ "ratatui",
+ "reedline",
+ "serde_json",
+]
+
+[[package]]
+name = "fission-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "fission-ffi"
+version = "0.1.0"
+dependencies = [
+ "fission-analysis",
+]
+
+[[package]]
+name = "fission-ui"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "eframe",
+ "egui",
+ "egui_extras",
+ "fission-analysis",
+ "fission-core",
+ "lru",
+ "regex",
+ "rfd",
+ "sysinfo",
+ "tokio",
 ]
 
 [[package]]

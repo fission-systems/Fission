@@ -3,6 +3,7 @@
 #include "op.hh"
 #include "varnode.hh"
 #include "architecture.hh"
+#include "translate.hh"
 #include <iostream>
 #include <algorithm>
 
@@ -31,36 +32,62 @@ bool CallingConvDetector::check_ms_x64(Funcdata* fd) {
     if (!is_64bit) return false;
     
     // Check if RCX/RDX/R8/R9 are used as input parameters
-    int arg_reg_count = 0;
+    std::set<std::string> regs_used;
+    const Translate* trans = arch->translate;
+    
+    int total_ops = 0;
+    int input_varnodes = 0;
     
     list<PcodeOp*>::const_iterator iter;
     for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
         PcodeOp* op = *iter;
         if (!op) continue;
+        total_ops++;
         
         // Look for reads of argument registers early in function
         for (int i = 0; i < op->numInput(); ++i) {
             Varnode* vn = op->getIn(i);
             if (!vn || !vn->isInput()) continue;
+            input_varnodes++;
             
             AddrSpace* sp = vn->getSpace();
             if (!sp || sp->getName() != "register") continue;
             
-            // Check if it's an MS x64 arg register
-            // This is a simplified check - in practice would use register mappings
-            if (vn->getOffset() == 0x10) arg_reg_count++; // RCX
-            if (vn->getOffset() == 0x18) arg_reg_count++; // RDX
+            // Get register name from translator
+            std::string reg_name = trans->getRegisterName(sp, vn->getOffset(), vn->getSize());
+            
+            std::cerr << "  Found input register: " << reg_name 
+                      << " (offset=0x" << std::hex << vn->getOffset() 
+                      << ", size=" << std::dec << vn->getSize() << ")" << std::endl;
+            
+            // Check if it's an MS x64 arg register (RCX, RDX, R8, R9)
+            if (reg_name == "RCX" || reg_name == "RDX" || 
+                reg_name == "R8" || reg_name == "R9") {
+                regs_used.insert(reg_name);
+                std::cerr << "    -> MS x64 arg register!" << std::endl;
+            }
+        }
+        
+        // Early exit if we found enough evidence
+        if (regs_used.size() >= 2) {
+            std::cerr << "[CallingConvDetector] MS x64 detected (" << regs_used.size() << " arg regs)" << std::endl;
+            return true;
         }
     }
     
-    return arg_reg_count >= 2;
+    std::cerr << "[CallingConvDetector] MS x64 check: total_ops=" << total_ops 
+              << ", input_varnodes=" << input_varnodes 
+              << ", arg_regs=" << regs_used.size() << std::endl;
+    
+    return regs_used.size() >= 2;
 }
 
 bool CallingConvDetector::check_sysv_x64(Funcdata* fd) {
     if (!is_64bit) return false;
     
-    // Similar to MS x64 but check for RDI/RSI usage
-    int arg_reg_count = 0;
+    // Check for RDI/RSI usage (SYSV first two args)
+    std::set<std::string> regs_used;
+    const Translate* trans = arch->translate;
     
     list<PcodeOp*>::const_iterator iter;
     for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
@@ -74,13 +101,22 @@ bool CallingConvDetector::check_sysv_x64(Funcdata* fd) {
             AddrSpace* sp = vn->getSpace();
             if (!sp || sp->getName() != "register") continue;
             
-            // Check for RDI/RSI (SYSV first two args)
-            if (vn->getOffset() == 0x38) arg_reg_count++; // RDI
-            if (vn->getOffset() == 0x30) arg_reg_count++; // RSI
+            // Get register name from translator
+            std::string reg_name = trans->getRegisterName(sp, vn->getOffset(), vn->getSize());
+            
+            // Check for SYSV x64 arg registers (RDI, RSI, RDX, RCX, R8, R9)
+            if (reg_name == "RDI" || reg_name == "RSI" || 
+                reg_name == "RDX" || reg_name == "RCX" ||
+                reg_name == "R8" || reg_name == "R9") {
+                regs_used.insert(reg_name);
+            }
         }
+        
+        // Early exit if we found enough evidence
+        if (regs_used.size() >= 2) return true;
     }
     
-    return arg_reg_count >= 2;
+    return regs_used.size() >= 2;
 }
 
 bool CallingConvDetector::check_stdcall(Funcdata* fd) {
@@ -160,9 +196,16 @@ bool CallingConvDetector::check_thiscall(Funcdata* fd) {
 CallingConvDetector::ConvType CallingConvDetector::detect(Funcdata* fd) {
     if (!fd) return CONV_UNKNOWN;
     
+    std::cerr << "[CallingConvDetector] Detecting convention for function at 0x" 
+              << std::hex << fd->getAddress().getOffset() << std::dec 
+              << ", is_64bit=" << is_64bit << std::endl;
+    
     if (is_64bit) {
         // 64-bit: check MS x64 first (Windows), then SYSV (Linux/Mac)
+        std::cerr << "[CallingConvDetector] Checking MS x64..." << std::endl;
         if (check_ms_x64(fd)) return CONV_MS_X64;
+        
+        std::cerr << "[CallingConvDetector] Checking SYSV x64..." << std::endl;
         if (check_sysv_x64(fd)) return CONV_SYSV_X64;
     } else {
         // 32-bit: check in order of specificity
@@ -172,6 +215,7 @@ CallingConvDetector::ConvType CallingConvDetector::detect(Funcdata* fd) {
         return CONV_CDECL; // Default for 32-bit
     }
     
+    std::cerr << "[CallingConvDetector] No convention detected" << std::endl;
     return CONV_UNKNOWN;
 }
 
@@ -194,8 +238,44 @@ void CallingConvDetector::apply(Funcdata* fd, ConvType type) {
               << " for function at 0x" << std::hex 
               << fd->getAddress().getOffset() << std::dec << std::endl;
     
-    // Note: Actually applying the calling convention requires modifying
-    // the FuncProto, which is done through Architecture/ProtoModel
+    // Get the appropriate ProtoModel from architecture
+    ProtoModel* model = nullptr;
+    
+    switch (type) {
+        case CONV_MS_X64:
+            // Windows x64 uses "__fastcall"
+            model = arch->getModel("__fastcall");
+            break;
+        case CONV_SYSV_X64:
+            // Linux/Mac x64 uses "__stdcall" (System V ABI)
+            model = arch->getModel("__stdcall");
+            break;
+        case CONV_CDECL:
+            model = arch->getModel("__cdecl");
+            break;
+        case CONV_STDCALL:
+            model = arch->getModel("__stdcall");
+            break;
+        case CONV_FASTCALL:
+            model = arch->getModel("__fastcall");
+            break;
+        case CONV_THISCALL:
+            model = arch->getModel("__thiscall");
+            break;
+        default:
+            break;
+    }
+    
+    if (model) {
+        FuncProto& proto = fd->getFuncProto();
+        proto.setModel(model);
+        std::cerr << "[CallingConvDetector] Applied " << model->getName() 
+                  << " to function at 0x" << std::hex 
+                  << fd->getAddress().getOffset() << std::dec << std::endl;
+    } else {
+        std::cerr << "[CallingConvDetector] WARNING: Could not find ProtoModel for " 
+                  << conv_name(type) << std::endl;
+    }
 }
 
 } // namespace analysis

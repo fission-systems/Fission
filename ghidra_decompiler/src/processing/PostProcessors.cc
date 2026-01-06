@@ -115,8 +115,8 @@ std::string inline_strings(const std::string& code, const std::map<uint64_t, std
             }
         }
         
-        // Create replacement with inline comment: 0x140004000 /* "string" */
-        std::string replacement = std::string(pattern) + " /* " + content + " */";
+        // Replace address with the literal for readability.
+        std::string replacement = content;
         
         for (const auto& pat : patterns) {
             size_t pos = 0;
@@ -676,6 +676,42 @@ std::string cleanup_seh_boilerplate(const std::string& code) {
             pos++;
         }
     }
+
+    // Replace uRamXXXXXXXX with g_XXXXXXXX
+    pos = 0;
+    while ((pos = result.find("uRam", pos)) != std::string::npos) {
+        if (pos + 4 < result.size() && isxdigit(result[pos + 4])) {
+            size_t addr_start = pos + 4;
+            size_t addr_end = addr_start;
+            while (addr_end < result.size() && isxdigit(result[addr_end])) {
+                addr_end++;
+            }
+            std::string addr = result.substr(addr_start, addr_end - addr_start);
+            std::string replacement = "g_" + addr;
+            result.replace(pos, addr_end - pos, replacement);
+            pos += replacement.length();
+        } else {
+            pos++;
+        }
+    }
+
+    // Replace xRamXXXXXXXX with g_XXXXXXXX
+    pos = 0;
+    while ((pos = result.find("xRam", pos)) != std::string::npos) {
+        if (pos + 4 < result.size() && isxdigit(result[pos + 4])) {
+            size_t addr_start = pos + 4;
+            size_t addr_end = addr_start;
+            while (addr_end < result.size() && isxdigit(result[addr_end])) {
+                addr_end++;
+            }
+            std::string addr = result.substr(addr_start, addr_end - addr_start);
+            std::string replacement = "g_" + addr;
+            result.replace(pos, addr_end - pos, replacement);
+            pos += replacement.length();
+        } else {
+            pos++;
+        }
+    }
     
     // Replace pcRamXXXXXXXX with gp_XXXXXXXX (pointer)
     pos = 0;
@@ -694,7 +730,43 @@ std::string cleanup_seh_boilerplate(const std::string& code) {
             pos++;
         }
     }
-    
+
+    // Normalize pg_XXXXXXXX (global pointer) to g_XXXXXXXX
+    pos = 0;
+    while ((pos = result.find("pg_", pos)) != std::string::npos) {
+        size_t addr_start = pos + 3;
+        size_t addr_end = addr_start;
+        while (addr_end < result.size() && isxdigit(result[addr_end])) {
+            addr_end++;
+        }
+        if (addr_end > addr_start) {
+            std::string addr = result.substr(addr_start, addr_end - addr_start);
+            std::string replacement = "g_" + addr;
+            result.replace(pos, addr_end - pos, replacement);
+            pos += replacement.length();
+        } else {
+            pos++;
+        }
+    }
+
+    // Normalize pxRamXXXXXXXX (pointer) to gp_XXXXXXXX
+    pos = 0;
+    while ((pos = result.find("pxRam", pos)) != std::string::npos) {
+        size_t addr_start = pos + 5;
+        size_t addr_end = addr_start;
+        while (addr_end < result.size() && isxdigit(result[addr_end])) {
+            addr_end++;
+        }
+        if (addr_end > addr_start) {
+            std::string addr = result.substr(addr_start, addr_end - addr_start);
+            std::string replacement = "gp_" + addr;
+            result.replace(pos, addr_end - pos, replacement);
+            pos += replacement.length();
+        } else {
+            pos++;
+        }
+    }
+
     return result;
 }
 

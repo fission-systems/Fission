@@ -106,7 +106,7 @@ Contributions are made through pull requests. See [Pull Request Process](#pull-r
 ### Prerequisites
 
 ```bash
-# Install Rust 1.75+
+# Install Rust 1.85+
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Install development tools

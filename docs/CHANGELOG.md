@@ -6,6 +6,13 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Decompiler Output & Tooling Improvements (2026-01-06)
+- **String literal inlining**: Decompiler now replaces string addresses with actual literals for readability
+- **Global symbol normalization**: `pg_`/`uRam`/`xRam`/`pxRam` renamed to `g_`/`gp_` for cleaner output
+- **GDT prototype enforcement (FFI path)**: IAT prototypes are now applied during FFI decompilation
+- **One-shot CLI polish**: `--strings [min_len]` support, no trailing help after `--decomp`, quieter native logs by default
+- **Comparison tooling stability (macOS)**: `compare_decompilers_v2.sh` switched to Python timeout and preserves `DYLD_LIBRARY_PATH`
+
 ### COFF Symbol Table Implementation (2026-01-05)
 
 **Critical Achievement:**

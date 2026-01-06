@@ -17,6 +17,7 @@ One-shot mode is designed for automation, CI/CD pipelines, and quick single-purp
 
 ```bash
 fission --cli <binary_path> <analysis_flag> [options]
+fission --cli <binary_path> <address> [--asm] [--count N]
 ```
 
 The `--cli` flag is **required** to enter CLI mode. Additional flags determine whether to enter REPL or execute one-shot analysis.
@@ -95,25 +96,19 @@ Section Information
 
 ---
 
-### `--strings`
+### `--strings [min_len]`
 Extract printable ASCII and Unicode strings.
 
 **Characteristics**:
-- Minimum string length: 4 characters
+- Minimum string length: 4 characters (default)
+- Optional argument to set minimum length
 - Shows address offset and string content
 - Useful for finding hardcoded paths, error messages, URLs
 
 **Example**:
 ```bash
 $ fission --cli binary.exe --strings
-
-Strings (3796 found, min length: 4)
-  0000004D  !This program cannot be run in DOS mode.
-  00000088  vOYi
-  00000188  .text
-  000001AF  `.data
-  000001D8  .rdata
-  ...
+$ fission --cli binary.exe --strings 8
 ```
 
 **Filtering output**:
@@ -154,27 +149,16 @@ References to 0x140001234:
 
 ---
 
-### `--count`
-Display summary statistics.
+### `--count <N>`
+Set the number of instructions for disassembly output.
 
-**Output includes**:
-- Number of functions (total, internal, imports, exports)
-- Number of strings found
-- Number of sections
-- Number of imports
+**Use with**:
+- `--asm` + `<address>` (one-shot disassembly)
 
 **Example**:
 ```bash
-$ fission --cli binary.exe --count
-
-Binary Statistics
-  Functions: 114
-  Strings: 3796
-  Sections: 18
-  Imports: 87
+$ fission --cli binary.exe 0x140001450 --asm --count 100
 ```
-
-**Note**: In earlier versions, `--count` required a parameter for instruction count. Current implementation shows binary statistics.
 
 ---
 
@@ -232,7 +216,7 @@ fission --cli suspicious.exe --sections
 fission --cli suspicious.exe --strings | grep -E "(http|C:\\|\.dll)"
 
 # 4. Get function count (low count = packed/obfuscated)
-fission --cli suspicious.exe --count
+fission --cli suspicious.exe --info
 ```
 
 ---
@@ -418,7 +402,7 @@ fission --cli malware.exe --info
 
 # 2. Check for packing (unusual sections, low function count)
 fission --cli malware.exe --sections
-fission --cli malware.exe --count
+fission --cli malware.exe --info
 
 # 3. Extract IOCs
 fission --cli malware.exe --strings | grep -E "(http|ftp|\.com|\.exe)"

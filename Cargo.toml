@@ -1,127 +1,15 @@
-[package]
-name = "fission"
-version = "0.1.0"
-edition = "2021"
-authors = ["Fission Dev Team"]
-description = "Next-Gen Dynamic Instrumentation Platform"
-license = "MIT"
-repository = "https://github.com/sjkim1127/Fission"
-default-run = "fission"
-keywords = ["binary-analysis", "decompiler", "disassembler", "reverse-engineering", "debugging"]
-categories = ["development-tools", "command-line-utilities"]
+[workspace]
+resolver = "2"
+members = [
+    "crates/fission-core",
+    "crates/fission-analysis",
+    "crates/fission-ui",
+    "crates/fission-cli",
+    "crates/fission-ffi",
+]
 
-[lib]
-name = "fission"
-path = "src/lib.rs"
-
-[[bin]]
-name = "fission"
-path = "src/main.rs"
-
-[[bin]]
-name = "fission_tui"
-path = "src/bin/fission_tui.rs"
-required-features = ["tui"]
-
-[[bin]]
-name = "fission_cli"
-path = "src/bin/fission_cli.rs"
-required-features = ["cli"]
-
-[[bin]]
-name = "ffi_test"
-path = "src/bin/ffi_test.rs"
-
-# Release optimizations
 [profile.release]
 opt-level = 3
 lto = true
 strip = true
 codegen-units = 1
-
-[features]
-default = ["gui", "cli", "native_decomp"]
-gui = ["dep:eframe", "dep:egui", "dep:rfd", "dep:egui_extras"]
-cli = ["dep:reedline", "dep:clap"]
-tui = ["dep:ratatui", "dep:crossterm", "dep:clap"]
-python = ["dep:pyo3"]
-native_decomp = []
-
-[dependencies]
-# 1. GUI & Rendering
-eframe = { version = "0.29", optional = true }
-egui = { version = "0.29", optional = true }
-rfd = { version = "0.15", optional = true }
-egui_extras = { version = "0.29", features = ["all_loaders"], optional = true }
-once_cell = "1.19"
-libloading = "0.8"
-
-# 2. CLI & Input
-reedline = { version = "0.30", optional = true }
-clap = { version = "4.5", features = ["derive"], optional = true }
-
-# 2b. TUI
-ratatui = { version = "0.29", optional = true }
-crossterm = { version = "0.28", optional = true }
-
-# 3. Binary Parsing & Disassembly
-
-object = "0.32"
-iced-x86 = { version = "1.21", features = ["std"] }  # Fast x86/x64 disassembler
-
-# 4. Scripting
-pyo3 = { version = "0.24", features = ["auto-initialize"], optional = true }
-
-# 6. Async & Utilities
-bytes = "1.5"
-tokio = { version = "1.36", features = ["full", "rt-multi-thread"] }
-anyhow = "1.0"
-thiserror = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-log = "0.4"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-crossbeam-channel = "0.5"
-rkyv = { version = "0.7", features = ["validation"] }
-bytecheck = "0.6"
-# env_logger = "0.11"
-hex = "0.4"
-base64 = "0.22"
-colored = "2.1"
-regex = "1.10"  # For efficient pattern matching
-lru = "0.12"    # LRU cache for decompilation results
-toml = "0.8"
-dirs = "5.0"
-flate2 = "1.1.5"
-sysinfo = "0.37.2"
-binrw = "0.15.0"
-
-# System & Debugging
-[target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.54", features = [
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_Threading",
-    "Win32_System_Memory",
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Kernel",
-] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.28", features = ["ptrace", "process"] }
-
-
-[build-dependencies]
-cc = "1.0"
-
-[dev-dependencies]
-proptest = "1.4"
-insta = { version = "1.34", features = ["yaml"] } # json/yaml support for snapshots
-criterion = "0.5"
-
-[[bench]]
-name = "benchmark"
-harness = false
-
