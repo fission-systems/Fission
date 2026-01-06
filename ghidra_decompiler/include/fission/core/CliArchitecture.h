@@ -28,6 +28,7 @@ public:
     void injectIatSymbols(const std::map<uint64_t, std::string>& symbols);
 
     void setSymbolProvider(const SymbolProvider* provider);
+    void refreshReadOnly();
 };
 
 // Helper to configure architecture with advanced options

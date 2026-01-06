@@ -10,11 +10,13 @@ All notable changes to the Fission project (November 2025 - January 2026).
 - **String literal inlining**: Decompiler now replaces string addresses with actual literals for readability
 - **Global symbol normalization**: `pg_`/`uRam`/`xRam`/`pxRam` renamed to `g_`/`gp_` for cleaner output
 - **GDT prototype enforcement (FFI path)**: IAT prototypes are now applied during FFI decompilation
+- **Entrypoint prototypes**: Built-in `main`/`wmain`/`__main` signatures applied to match Ghidra output
 - **One-shot CLI polish**: `--strings [min_len]` support, no trailing help after `--decomp`, quieter native logs by default
 - **Comparison tooling stability (macOS)**: `compare_decompilers_v2.sh` switched to Python timeout and preserves `DYLD_LIBRARY_PATH`
 - **On-demand symbol provider**: Added Scope-backed symbol query pipeline (functions/data) for richer global name resolution
 - **Symbol range estimation**: Data/function sizes are inferred from section boundaries to improve address-range lookups
-- **Readonly propagation**: Section permissions are registered into the property map for better constant folding
+- **Readonly propagation**: Section permissions now drive loader readonly ranges and property map entries for better constant folding
+- **Pointer-return inference**: Detect allocator-return flows and apply `void*` returns without locking input types
 - **Crash fix**: CLI decompiler now initializes the Database before querying global scope
 
 ### COFF Symbol Table Implementation (2026-01-05)
