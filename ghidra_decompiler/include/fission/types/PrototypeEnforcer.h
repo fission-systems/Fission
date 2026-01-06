@@ -31,6 +31,11 @@ private:
         ghidra::TypeCode* func_type,
         ghidra::PrototypePieces& out_pieces
     );
+    bool build_builtin_prototype(
+        ghidra::Architecture* arch,
+        const std::string& func_name,
+        ghidra::PrototypePieces& out_pieces
+    );
 
 public:
     PrototypeEnforcer();

@@ -3,6 +3,7 @@
  */
 
 #include "fission/ffi/DecompilerCore.h"
+#include "fission/loader/SectionAwareLoadImage.h"
 #include "fission/core/CliArchitecture.h"
 #include "fission/core/ArchPolicy.h"
 #include "fission/core/SymbolProvider.h"
@@ -17,11 +18,14 @@
 #include "fission/utils/file_utils.h"
 #include "libdecomp.hh"
 #include "address.hh"
+#include "funcdata.hh"
+#include "op.hh"
 #include "varnode.hh"
 
 #include <iostream>
 #include <regex>
 #include <set>
+#include <cctype>
 
 using namespace fission::ffi;
 using namespace fission::core;
@@ -37,6 +41,295 @@ static bool g_guid_map_loaded = false;
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+static std::string normalize_symbol_name(const std::string& name) {
+    std::string norm = name;
+    while (!norm.empty() && norm[0] == '_') {
+        norm.erase(norm.begin());
+    }
+    for (char& ch : norm) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return norm;
+}
+
+static bool is_allocator_name(const std::string& name) {
+    std::string norm = normalize_symbol_name(name);
+    return norm == "malloc" || norm == "calloc" || norm == "realloc";
+}
+
+static bool is_address_in_executable(const fission::ffi::DecompContext* ctx, uint64_t addr) {
+    for (const auto& block : ctx->memory_blocks) {
+        if (!block.is_executable) {
+            continue;
+        }
+        uint64_t size = block.va_size > 0 ? block.va_size : block.file_size;
+        if (size == 0) {
+            continue;
+        }
+        uint64_t start = block.va_addr;
+        uint64_t end = start + size;
+        if (addr >= start && addr < end) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool same_high_var(ghidra::Varnode* lhs, ghidra::Varnode* rhs) {
+    if (!lhs || !rhs) {
+        return false;
+    }
+    ghidra::HighVariable* high_lhs = lhs->getHigh();
+    ghidra::HighVariable* high_rhs = rhs->getHigh();
+    if (high_lhs && high_rhs) {
+        return high_lhs == high_rhs;
+    }
+    return lhs == rhs;
+}
+
+static bool flows_from_allocator(
+    ghidra::Varnode* vn,
+    const std::vector<ghidra::Varnode*>& alloc_returns,
+    int depth
+) {
+    if (!vn || depth > 6) {
+        return false;
+    }
+    for (auto* alloc : alloc_returns) {
+        if (same_high_var(vn, alloc)) {
+            return true;
+        }
+    }
+    if (!vn->isWritten()) {
+        return false;
+    }
+    ghidra::PcodeOp* def = vn->getDef();
+    if (!def || def->isDead()) {
+        return false;
+    }
+    switch (def->code()) {
+        case ghidra::CPUI_COPY:
+        case ghidra::CPUI_CAST:
+        case ghidra::CPUI_PTRSUB:
+        case ghidra::CPUI_PTRADD:
+        case ghidra::CPUI_INT_ZEXT:
+        case ghidra::CPUI_INT_SEXT:
+            for (int slot = 0; slot < def->numInput(); ++slot) {
+                if (flows_from_allocator(def->getIn(slot), alloc_returns, depth + 1)) {
+                    return true;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+    return false;
+}
+
+static bool returns_allocator_result(
+    ghidra::Funcdata* fd,
+    const std::map<uint64_t, std::string>& symbols,
+    ghidra::Architecture* arch
+) {
+    if (!fd) {
+        return false;
+    }
+
+    std::vector<ghidra::Varnode*> alloc_returns;
+    for (auto iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
+        ghidra::PcodeOp* op = *iter;
+        if (!op || (op->code() != ghidra::CPUI_CALL && op->code() != ghidra::CPUI_CALLIND)) {
+            continue;
+        }
+        std::string target_name;
+        uint64_t target_addr = 0;
+        if (ghidra::FuncCallSpecs* fc = fd->getCallSpecs(op)) {
+            target_name = fc->getName();
+            target_addr = fc->getEntryAddress().getOffset();
+        }
+        if (target_name.empty()) {
+            ghidra::Varnode* target = op->getIn(0);
+            if (target && target->isConstant()) {
+                target_addr = target->getOffset();
+            }
+        }
+        if (!target_name.empty()) {
+            // keep name
+        } else if (target_addr != 0) {
+            auto name_it = symbols.find(target_addr);
+            if (name_it != symbols.end()) {
+                target_name = name_it->second;
+            } else if (arch && arch->symboltab) {
+                ghidra::Scope* scope = arch->symboltab->getGlobalScope();
+                if (scope) {
+                    ghidra::Funcdata* target_fd =
+                        scope->findFunction(ghidra::Address(arch->getDefaultCodeSpace(), target_addr));
+                    if (target_fd) {
+                        target_name = target_fd->getName();
+                    }
+                }
+            }
+        }
+        if (target_name.empty() || !is_allocator_name(target_name)) {
+            continue;
+        }
+        ghidra::Varnode* out = op->getOut();
+        if (out) {
+            alloc_returns.push_back(out);
+        }
+    }
+
+    if (alloc_returns.empty()) {
+        return false;
+    }
+
+    for (auto iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
+        ghidra::PcodeOp* op = *iter;
+        if (!op || op->code() != ghidra::CPUI_RETURN) {
+            continue;
+        }
+        for (int slot = 0; slot < op->numInput(); ++slot) {
+            ghidra::Varnode* ret = op->getIn(slot);
+            if (flows_from_allocator(ret, alloc_returns, 0)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static bool apply_pointer_return_prototype(ghidra::Architecture* arch, ghidra::Funcdata* fd) {
+    if (!arch || !fd) {
+        return false;
+    }
+    ghidra::FuncProto& proto = fd->getFuncProto();
+    if (proto.isOutputLocked()) {
+        return false;
+    }
+    ghidra::Datatype* outtype = proto.getOutputType();
+    if (outtype && outtype->getMetatype() == ghidra::TYPE_PTR) {
+        return false;
+    }
+
+    ghidra::TypeFactory* factory = arch->types;
+    if (!factory) {
+        return false;
+    }
+
+    ghidra::Datatype* void_type = factory->getTypeVoid();
+    if (!void_type) {
+        return false;
+    }
+    int4 ptr_size = factory->getSizeOfPointer();
+    ghidra::Datatype* void_ptr = factory->getTypePointer(ptr_size, void_type, 0);
+    if (!void_ptr) {
+        return false;
+    }
+
+    ghidra::PrototypePieces pieces;
+    proto.getPieces(pieces);
+    pieces.outtype = void_ptr;
+    proto.setPieces(pieces);
+    proto.setInputLock(false);
+    return true;
+}
+
+static bool infer_callee_pointer_returns(
+    fission::ffi::DecompContext* ctx,
+    ghidra::Funcdata* caller_fd,
+    ghidra::Action* action
+) {
+    if (!ctx || !caller_fd || !action || !ctx->arch) {
+        return false;
+    }
+
+    std::set<uint64_t> callee_addrs;
+    for (auto iter = caller_fd->beginOpAlive(); iter != caller_fd->endOpAlive(); ++iter) {
+        ghidra::PcodeOp* op = *iter;
+        if (!op || (op->code() != ghidra::CPUI_CALL && op->code() != ghidra::CPUI_CALLIND)) {
+            continue;
+        }
+        uint64_t target_addr = 0;
+        if (ghidra::FuncCallSpecs* fc = caller_fd->getCallSpecs(op)) {
+            target_addr = fc->getEntryAddress().getOffset();
+        }
+        if (target_addr == 0) {
+            ghidra::Varnode* target = op->getIn(0);
+            if (target && target->isConstant()) {
+                target_addr = target->getOffset();
+            }
+        }
+        if (target_addr == 0) {
+            continue;
+        }
+        if (!is_address_in_executable(ctx, target_addr)) {
+            continue;
+        }
+        callee_addrs.insert(target_addr);
+    }
+
+    if (callee_addrs.empty()) {
+        return false;
+    }
+
+    bool updated = false;
+    ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
+    if (!global_scope) {
+        return false;
+    }
+
+    for (uint64_t addr : callee_addrs) {
+        ghidra::Address func_addr(ctx->arch->getDefaultCodeSpace(), addr);
+        ghidra::Funcdata* callee = global_scope->findFunction(func_addr);
+        if (!callee) {
+            ghidra::FunctionSymbol* sym = global_scope->addFunction(func_addr, "sub_" + std::to_string(addr));
+            if (!sym) {
+                continue;
+            }
+            callee = sym->getFunction();
+        }
+        if (!callee) {
+            continue;
+        }
+
+        if (callee->isProcStarted() || callee->getFuncProto().isInline()) {
+            continue;
+        }
+
+        auto sym_it = ctx->symbols.find(addr);
+        if (sym_it != ctx->symbols.end() && is_allocator_name(sym_it->second)) {
+            continue;
+        }
+
+        callee->clear();
+        bool flow_ok = true;
+        try {
+            ghidra::Address start(func_addr);
+            ghidra::Address end = start + 0x1000;
+            callee->followFlow(start, end);
+        } catch (const ghidra::LowlevelError&) {
+            flow_ok = false;
+        } catch (...) {
+            flow_ok = false;
+        }
+        if (!flow_ok) {
+            continue;
+        }
+
+        action->reset(*callee);
+        action->perform(*callee);
+
+        if (returns_allocator_result(callee, ctx->symbols, ctx->arch.get())) {
+            if (apply_pointer_return_prototype(ctx->arch.get(), callee)) {
+                updated = true;
+            }
+        }
+    }
+
+    return updated;
+}
 
 static void load_gdt_for_arch(ghidra::Architecture* arch, bool is_64bit) {
     std::string suffix = is_64bit ? "_64.gdt" : "_32.gdt";
@@ -125,6 +418,16 @@ void fission::ffi::ensure_architecture(DecompContext* ctx) {
     // CRITICAL: Initialize Sleigh engine and register print languages
     ghidra::DocumentStorage store;
     ctx->arch->init(store);
+
+    bool readonly_props_set = false;
+    if (ctx->memory_image) {
+        ghidra::AddrSpace* data_space = ctx->arch->getDefaultDataSpace();
+        if (data_space) {
+            ctx->memory_image->setDefaultSpace(data_space);
+            ctx->arch->refreshReadOnly();
+            readonly_props_set = true;
+        }
+    }
     
     // Configure advanced options (infer_pointers, analyze_loops, etc.)
     configure_arch(ctx->arch.get());
@@ -182,7 +485,7 @@ void fission::ffi::ensure_architecture(DecompContext* ctx) {
     
     // Register memory blocks (sections) if any
     if (!ctx->memory_blocks.empty()) {
-        if (ctx->arch->symboltab) {
+        if (!readonly_props_set && ctx->arch->symboltab) {
             ghidra::AddrSpace* data_space = ctx->arch->getDefaultDataSpace();
             if (data_space) {
                 for (const auto& block : ctx->memory_blocks) {
@@ -353,21 +656,67 @@ std::string fission::ffi::run_decompilation(DecompContext* ctx, uint64_t addr) {
     if (!current_action) {
         throw std::runtime_error("No current action group");
     }
-    
-    // CRITICAL: Reset action state for this function AFTER clear and followFlow
-    std::cerr << "[DecompilerCore] Resetting action state..." << std::endl;
-    current_action->reset(*fd);
 
-    // Enforce GDT-based prototypes for IAT symbols before decompilation.
+    // Enforce GDT-based and built-in prototypes before action reset.
     if (!ctx->symbols.empty()) {
         fission::types::PrototypeEnforcer proto_enforcer;
         proto_enforcer.enforce_iat_prototypes(ctx->arch.get(), ctx->symbols);
     }
+
+    // CRITICAL: Reset action state for this function AFTER prototypes are applied
+    std::cerr << "[DecompilerCore] Resetting action state..." << std::endl;
+    current_action->reset(*fd);
     
     std::cerr << "[DecompilerCore] Performing decompilation..." << std::endl;
     
     // Perform decompilation
-    current_action->perform(*fd);
+    try {
+        current_action->perform(*fd);
+    } catch (const ghidra::LowlevelError& e) {
+        throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+    } catch (const std::exception& e) {
+        throw;
+    } catch (...) {
+        throw std::runtime_error("Unknown error during decompilation");
+    }
+
+    bool updated_self = false;
+    try {
+        if (returns_allocator_result(fd, ctx->symbols, ctx->arch.get())) {
+            updated_self = apply_pointer_return_prototype(ctx->arch.get(), fd);
+        }
+    } catch (const ghidra::LowlevelError& e) {
+        std::cerr << "[DecompilerCore] Pointer inference failed (self): " << e.explain << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "[DecompilerCore] Pointer inference failed (self): " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "[DecompilerCore] Pointer inference failed (self): unknown error" << std::endl;
+    }
+
+    bool updated_callee = false;
+    try {
+        updated_callee = infer_callee_pointer_returns(ctx, fd, current_action);
+    } catch (const ghidra::LowlevelError& e) {
+        std::cerr << "[DecompilerCore] Pointer inference failed (callee): " << e.explain << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "[DecompilerCore] Pointer inference failed (callee): " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "[DecompilerCore] Pointer inference failed (callee): unknown error" << std::endl;
+    }
+    if (updated_self || updated_callee) {
+        std::cerr << "[DecompilerCore] Updated callee prototypes, re-running..." << std::endl;
+        fd->clear();
+        current_action->reset(*fd);
+        try {
+            current_action->perform(*fd);
+        } catch (const ghidra::LowlevelError& e) {
+            throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+        } catch (const std::exception& e) {
+            throw;
+        } catch (...) {
+            throw std::runtime_error("Unknown error during decompilation");
+        }
+    }
     
     std::cerr << "[DecompilerCore] Generating output..." << std::endl;
     

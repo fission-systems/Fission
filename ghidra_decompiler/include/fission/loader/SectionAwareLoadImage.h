@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
+#include <string>
 
 namespace fission {
 namespace loader {
@@ -16,9 +17,25 @@ struct SectionMapping {
     uint64_t virtual_size;     // Size in virtual memory
     uint64_t file_offset;      // Offset in file
     uint64_t file_size;        // Size in file
+    bool is_executable;
+    bool is_writable;
+    std::string name;
     
-    SectionMapping(uint64_t vaddr, uint64_t vsize, uint64_t foff, uint64_t fsize)
-        : virtual_addr(vaddr), virtual_size(vsize), file_offset(foff), file_size(fsize) {}
+    SectionMapping(
+        uint64_t vaddr,
+        uint64_t vsize,
+        uint64_t foff,
+        uint64_t fsize,
+        bool executable,
+        bool writable,
+        std::string section_name
+    ) : virtual_addr(vaddr),
+        virtual_size(vsize),
+        file_offset(foff),
+        file_size(fsize),
+        is_executable(executable),
+        is_writable(writable),
+        name(std::move(section_name)) {}
 };
 
 /**
@@ -28,13 +45,34 @@ struct SectionMapping {
 class SectionAwareLoadImage : public ghidra::LoadImage {
     std::vector<uint8_t> file_data_;
     std::vector<SectionMapping> sections_;
+    ghidra::AddrSpace* default_space_ = nullptr;
     
 public:
     SectionAwareLoadImage(const std::vector<uint8_t>& file_data)
         : ghidra::LoadImage("section-aware"), file_data_(file_data) {}
     
-    void addSection(uint64_t va, uint64_t vsize, uint64_t file_offset, uint64_t file_size) {
-        sections_.emplace_back(va, vsize, file_offset, file_size);
+    void addSection(
+        uint64_t va,
+        uint64_t vsize,
+        uint64_t file_offset,
+        uint64_t file_size,
+        bool is_executable,
+        bool is_writable,
+        std::string name
+    ) {
+        sections_.emplace_back(
+            va,
+            vsize,
+            file_offset,
+            file_size,
+            is_executable,
+            is_writable,
+            std::move(name)
+        );
+    }
+
+    void setDefaultSpace(ghidra::AddrSpace* space) {
+        default_space_ = space;
     }
     
     virtual void loadFill(ghidra::uint1* ptr, ghidra::int4 size, const ghidra::Address& addr) override {
@@ -73,6 +111,28 @@ public:
         }
     }
     
+    virtual void getReadonly(ghidra::RangeList &list) const override {
+        if (!default_space_) {
+            return;
+        }
+
+        for (const auto& section : sections_) {
+            if (section.is_writable) {
+                continue;
+            }
+            uint64_t size = section.virtual_size > 0 ? section.virtual_size : section.file_size;
+            if (size == 0) {
+                continue;
+            }
+            uint64_t start = section.virtual_addr;
+            uint64_t stop = start + size - 1;
+            if (stop < start) {
+                stop = start;
+            }
+            list.insertRange(default_space_, start, stop);
+        }
+    }
+
     virtual std::string getArchType(void) const override { return "section-aware"; }
     virtual void adjustVma(long adjust) override {}
 };

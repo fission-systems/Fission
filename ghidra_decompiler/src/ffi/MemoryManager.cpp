@@ -72,7 +72,15 @@ DecompError fission::ffi::add_memory_block(
         
         // Add section mapping to the memory image
         if (ctx->memory_image) {
-            ctx->memory_image->addSection(va_addr, va_size, file_offset, file_size);
+            ctx->memory_image->addSection(
+                va_addr,
+                va_size,
+                file_offset,
+                file_size,
+                is_executable,
+                is_writable,
+                block.name
+            );
         }
         
         std::cerr << "[MemoryManager] Registered memory block: " << name 

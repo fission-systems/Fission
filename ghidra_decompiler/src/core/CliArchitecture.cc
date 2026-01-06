@@ -62,6 +62,10 @@ void CliArchitecture::setSymbolProvider(const SymbolProvider* provider) {
     symbol_provider = provider;
 }
 
+void CliArchitecture::refreshReadOnly() {
+    fillinReadOnlyFromLoader();
+}
+
 void configure_arch(CliArchitecture* arch) {
     arch->max_instructions = 500000; // Increased for Jump Table analysis (Phase 6)
     arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
