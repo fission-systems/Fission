@@ -67,7 +67,10 @@ public:
     
     /// \brief Get detected clusters
     const std::vector<StackCluster>& get_clusters() const { return clusters; }
-    
+
+    /// \brief Build a map of stack base offsets to struct types
+    std::map<int64_t, ghidra::TypeStruct*> build_struct_map(ghidra::TypeFactory* tf);
+
     /// \brief Apply detected structures to type factory
     void apply_structures(ghidra::TypeFactory* tf);
     

@@ -6,6 +6,11 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Decompiler Structure Recovery (2026-01-07)
+- **Global/stack struct pipeline**: Global and stack structure inference now feeds symbols into the decompiler and triggers a re-run to apply recovered types
+- **Stack access detection**: Added stack varnode scanning plus PTR/ADD/SUB offset resolution with signed offsets for more reliable frame clustering
+- **StructureAnalyzer offsets**: Pointer/offset analysis now uses signed offsets and deeper base resolution to avoid bogus struct layouts
+
 ### Decompiler Output & Tooling Improvements (2026-01-06)
 - **String literal inlining**: Decompiler now replaces string addresses with actual literals for readability
 - **Global symbol normalization**: `pg_`/`uRam`/`xRam`/`pxRam` renamed to `g_`/`gp_` for cleaner output

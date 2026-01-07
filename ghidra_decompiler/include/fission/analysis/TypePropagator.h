@@ -52,7 +52,10 @@ private:
     
     /// Propagate type across operation edge (Ghidra style)
     bool propagate_type_edge(ghidra::PcodeOp* op, int inslot, int outslot);
-    
+
+    /// Seed temporary types using local type inference (Ghidra style)
+    void build_local_types(ghidra::Funcdata* fd);
+
     /// Apply inferred types to high-level representation
     void apply_inferred_types(ghidra::Funcdata* fd);
     

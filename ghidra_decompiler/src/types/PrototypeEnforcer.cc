@@ -46,6 +46,90 @@ static std::string to_lower_copy(const std::string& name) {
     return lower;
 }
 
+static bool build_varargs_prototype(
+    Architecture* arch,
+    const std::string& func_name,
+    const std::string& canonical,
+    PrototypePieces& out_pieces
+) {
+    if (!arch || canonical.empty()) {
+        return false;
+    }
+
+    TypeFactory* factory = arch->types;
+    if (!factory) {
+        return false;
+    }
+
+    int4 ptr_size = factory->getSizeOfPointer();
+    Datatype* int_type = factory->getBase(factory->getSizeOfInt(), TYPE_INT);
+    Datatype* char_type = factory->getTypeChar(factory->getSizeOfChar());
+    Datatype* wchar_type = factory->getBase(2, TYPE_UINT);
+    Datatype* void_type = factory->getTypeVoid();
+    if (!int_type || !char_type || !wchar_type || !void_type || ptr_size <= 0) {
+        return false;
+    }
+
+    Datatype* char_ptr = factory->getTypePointer(ptr_size, char_type, 0);
+    Datatype* wchar_ptr = factory->getTypePointer(ptr_size, wchar_type, 0);
+    Datatype* void_ptr = factory->getTypePointer(ptr_size, void_type, 0);
+    Datatype* size_type = factory->getBase(ptr_size, TYPE_UINT);
+    if (!char_ptr || !wchar_ptr || !void_ptr || !size_type) {
+        return false;
+    }
+
+    ProtoModel* model = arch->getModel("__cdecl");
+    if (!model) {
+        model = arch->getModel("__fastcall");
+    }
+
+    auto set_common = [&](const std::vector<Datatype*>& types,
+                          const std::vector<std::string>& names,
+                          int4 first_vararg) {
+        out_pieces.model = model;
+        out_pieces.name = func_name;
+        out_pieces.outtype = int_type;
+        out_pieces.intypes = types;
+        out_pieces.innames = names;
+        out_pieces.firstVarArgSlot = first_vararg;
+    };
+
+    bool wide = false;
+    std::string name = canonical;
+
+    if (name == "printf" || name == "scanf" || name == "wprintf" || name == "wscanf") {
+        wide = (name[0] == 'w');
+        Datatype* format_ptr = wide ? wchar_ptr : char_ptr;
+        set_common({format_ptr}, {"format"}, 1);
+        return true;
+    }
+
+    if (name == "fprintf" || name == "fscanf" || name == "fwprintf" || name == "fwscanf") {
+        wide = (name[0] == 'f' && name[1] == 'w');
+        Datatype* format_ptr = wide ? wchar_ptr : char_ptr;
+        set_common({void_ptr, format_ptr}, {"stream", "format"}, 2);
+        return true;
+    }
+
+    if (name == "sprintf" || name == "sscanf" || name == "swprintf" || name == "swscanf") {
+        wide = (name[0] == 's' && name[1] == 'w');
+        Datatype* text_ptr = wide ? wchar_ptr : char_ptr;
+        Datatype* format_ptr = wide ? wchar_ptr : char_ptr;
+        set_common({text_ptr, format_ptr}, {"buffer", "format"}, 2);
+        return true;
+    }
+
+    if (name == "snprintf" || name == "snwprintf") {
+        wide = (name == "snwprintf");
+        Datatype* text_ptr = wide ? wchar_ptr : char_ptr;
+        Datatype* format_ptr = wide ? wchar_ptr : char_ptr;
+        set_common({text_ptr, size_type, format_ptr}, {"buffer", "size", "format"}, 3);
+        return true;
+    }
+
+    return false;
+}
+
 bool PrototypeEnforcer::build_prototype_pieces(
     Architecture* arch,
     const std::string& func_name,
@@ -96,6 +180,11 @@ bool PrototypeEnforcer::build_builtin_prototype(
         out_pieces.firstVarArgSlot = -1;
         return true;
     }
+
+    if (build_varargs_prototype(arch, func_name, canonical, out_pieces)) {
+        return true;
+    }
+
     if (canonical != "main" && canonical != "wmain") {
         return false;
     }

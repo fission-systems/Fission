@@ -7,15 +7,83 @@
 #include "varnode.hh"
 #include "type.hh"
 #include "op.hh"
+#include "address.hh"
 
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <limits>
 
 namespace fission {
 namespace types {
 
 using namespace fission::core;
+
+static uint64_t make_base_key(const ghidra::Varnode* vn) {
+    if (!vn) return 0;
+    if (vn->isInput()) {
+        return vn->getOffset();
+    }
+    uint64_t space = static_cast<uint64_t>(vn->getSpace()->getIndex()) & 0x7f;
+    uint64_t offset = vn->getOffset() & 0x00FFFFFFFFFFFFFFULL;
+    return 0x8000000000000000ULL | (space << 56) | offset;
+}
+
+static ghidra::Varnode* resolve_base_pointer(ghidra::Varnode* vn, int max_depth = 6) {
+    if (!vn || max_depth <= 0) {
+        return vn;
+    }
+    if (!vn->isWritten()) {
+        return vn;
+    }
+    ghidra::PcodeOp* def = vn->getDef();
+    if (!def) {
+        return vn;
+    }
+    switch (def->code()) {
+        case ghidra::CPUI_COPY:
+        case ghidra::CPUI_CAST:
+        case ghidra::CPUI_INT_ZEXT:
+        case ghidra::CPUI_INT_SEXT:
+            return resolve_base_pointer(def->getIn(0), max_depth - 1);
+        case ghidra::CPUI_PTRSUB:
+        case ghidra::CPUI_PTRADD:
+        case ghidra::CPUI_INT_ADD:
+            return resolve_base_pointer(def->getIn(0), max_depth - 1);
+        case ghidra::CPUI_MULTIEQUAL:
+        case ghidra::CPUI_INDIRECT: {
+            ghidra::Varnode* candidate = nullptr;
+            for (int slot = 0; slot < def->numInput(); ++slot) {
+                ghidra::Varnode* in = def->getIn(slot);
+                if (!in) continue;
+                ghidra::Varnode* resolved = resolve_base_pointer(in, max_depth - 1);
+                if (!resolved) continue;
+                if (!candidate) {
+                    candidate = resolved;
+                } else if (candidate != resolved) {
+                    return vn;
+                }
+            }
+            return candidate ? candidate : vn;
+        }
+        default:
+            return vn;
+    }
+}
+
+static bool get_signed_offset(ghidra::Varnode* vn, int64_t& out) {
+    if (!vn || !vn->isConstant()) {
+        return false;
+    }
+    int size = vn->getSize();
+    if (size <= 0) {
+        return false;
+    }
+    int bits = (size * 8) - 1;
+    ghidra::intb raw = static_cast<ghidra::intb>(vn->getOffset());
+    out = static_cast<int64_t>(ghidra::sign_extend(raw, bits));
+    return true;
+}
 
 StructureAnalyzer::StructureAnalyzer() {}
 StructureAnalyzer::~StructureAnalyzer() {}
@@ -50,6 +118,7 @@ bool StructureAnalyzer::analyze_function_structures(ghidra::Funcdata* fd) {
 void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
     auto iter = fd->beginOpAll();
     auto end = fd->endOpAll();
+    int ptr_size = fd->getArch()->types->getSizeOfPointer();
 
     for (; iter != end; ++iter) {
         ghidra::PcodeOp* op = iter->second;
@@ -57,15 +126,26 @@ void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
 
         ghidra::OpCode opcode = op->code();
         ghidra::Varnode* base = nullptr;
-        uint64_t offset = 0;
+        int64_t offset = 0;
         bool found = false;
 
-        if (opcode == ghidra::CPUI_PTRSUB) {
+        if (opcode == ghidra::CPUI_LOAD) {
+            // LOAD(space, ptr) -> direct dereference
+            base = op->getIn(1);
+            offset = 0;
+            found = true;
+        }
+        else if (opcode == ghidra::CPUI_STORE) {
+            // STORE(space, ptr, value) -> direct dereference
+            base = op->getIn(1);
+            offset = 0;
+            found = true;
+        }
+        else if (opcode == ghidra::CPUI_PTRSUB) {
             // PTRSUB(base, offset)
             base = op->getIn(0);
             ghidra::Varnode* off_vn = op->getIn(1);
-            if (off_vn && off_vn->isConstant()) {
-                offset = off_vn->getOffset();
+            if (get_signed_offset(off_vn, offset)) {
                 found = true;
             }
         } 
@@ -73,12 +153,10 @@ void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
             // INT_ADD(base, const) or INT_ADD(const, base)
             ghidra::Varnode* vn0 = op->getIn(0);
             ghidra::Varnode* vn1 = op->getIn(1);
-            if (vn0->isConstant()) {
-                offset = vn0->getOffset();
+            if (get_signed_offset(vn0, offset)) {
                 base = vn1;
                 found = true;
-            } else if (vn1->isConstant()) {
-                offset = vn1->getOffset();
+            } else if (get_signed_offset(vn1, offset)) {
                 base = vn0;
                 found = true;
             }
@@ -89,22 +167,55 @@ void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
             base = op->getIn(0);
             ghidra::Varnode* idx_vn = op->getIn(1);
             ghidra::Varnode* size_vn = op->getIn(2);
-            
-            if (idx_vn && idx_vn->isConstant() && size_vn && size_vn->isConstant()) {
-                uint64_t idx = idx_vn->getOffset();
-                uint64_t elem_size = size_vn->getOffset();
+
+            int64_t idx = 0;
+            int64_t elem_size = 0;
+            if (get_signed_offset(idx_vn, idx) && get_signed_offset(size_vn, elem_size)) {
                 offset = idx * elem_size;
                 found = true;
             }
         }
 
-        if (found && base && base->isInput()) {
-            unsigned long long base_storage = base->getOffset();
+        if (found && base) {
+            if (offset < 0 || offset > std::numeric_limits<int>::max()) {
+                continue;
+            }
+            base = resolve_base_pointer(base);
+            if (!base) continue;
+            if (base->isConstant()) continue;
+            if (base->getSize() != ptr_size) continue;
+
+            unsigned long long base_storage = make_base_key(base);
             
             // Determine size of access by checking descendants (LOAD/STORE)
             int access_size = 1; // Default
             bool is_float = false;
             bool is_pointer = false;
+
+            if (opcode == ghidra::CPUI_LOAD) {
+                ghidra::Varnode* load_out = op->getOut();
+                if (load_out) {
+                    access_size = std::max(access_size, (int)load_out->getSize());
+                    if (TypeResolver::is_used_as_float(load_out)) {
+                        is_float = true;
+                    }
+                    if (TypeResolver::is_pointer_access(load_out, ptr_size)) {
+                        is_pointer = true;
+                    }
+                }
+            } else if (opcode == ghidra::CPUI_STORE) {
+                ghidra::Varnode* val = op->getIn(2);
+                if (val) {
+                    access_size = std::max(access_size, (int)val->getSize());
+                    ghidra::PcodeOp* def_op = val->getDef();
+                    if (def_op && TypeResolver::is_float_operation(def_op)) {
+                        is_float = true;
+                    }
+                    if (TypeResolver::is_pointer_access(val, ptr_size)) {
+                        is_pointer = true;
+                    }
+                }
+            }
             
             ghidra::Varnode* out_vn = op->getOut();
             if (out_vn) {
@@ -182,7 +293,13 @@ bool StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory,
         }
 
         std::stringstream ss;
-        ss << "f_" << std::hex << func_entry << "_arg_" << base_addr;
+        if (base_addr & 0x8000000000000000ULL) {
+            uint64_t space = (base_addr >> 56) & 0x7f;
+            uint64_t offset = base_addr & 0x00FFFFFFFFFFFFFFULL;
+            ss << "f_" << std::hex << func_entry << "_local_" << space << "_" << offset;
+        } else {
+            ss << "f_" << std::hex << func_entry << "_arg_" << base_addr;
+        }
         std::string struct_name = ss.str();
 
         // Reuse if exists
@@ -250,25 +367,26 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
 
     for (; iter != end; ++iter) {
         ghidra::Varnode* vn = *iter;
-        if (vn->isInput()) {
-            unsigned long long storage = vn->getOffset();
-            if (inferred_structs.count(storage)) {
-                ghidra::TypeStruct* st = inferred_structs[storage];
-                if (!st) continue;
-                
-                ghidra::TypePointer* ptr_type = ArchPolicy::getPointerType(factory, st, fd->getArch());
-                if (!ptr_type) {
-                    std::cerr << "[StructureAnalyzer] ERROR: Failed to create pointer type for " 
-                              << st->getName() << std::endl;
-                    continue;
-                }
+        if (!vn || vn->isAnnotation() || vn->isConstant()) continue;
+        if (vn->getSize() != ptr_size) continue;
 
-                // Aggressively update type AND lock it
-                vn->updateType(ptr_type, true, true);
-                
-                std::cerr << "[StructureAnalyzer] Applied " << st->getName() << "* "
-                          << "to Input @" << std::hex << storage << std::dec << std::endl;
+        unsigned long long storage = make_base_key(vn);
+        if (inferred_structs.count(storage)) {
+            ghidra::TypeStruct* st = inferred_structs[storage];
+            if (!st) continue;
+            
+            ghidra::TypePointer* ptr_type = ArchPolicy::getPointerType(factory, st, fd->getArch());
+            if (!ptr_type) {
+                std::cerr << "[StructureAnalyzer] ERROR: Failed to create pointer type for " 
+                          << st->getName() << std::endl;
+                continue;
             }
+
+            // Aggressively update type AND lock it
+            vn->updateType(ptr_type, true, true);
+            
+            std::cerr << "[StructureAnalyzer] Applied " << st->getName() << "* "
+                      << "to Varnode @" << std::hex << storage << std::dec << std::endl;
         }
     }
 }
@@ -317,4 +435,3 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
 
 } // namespace types
 } // namespace fission
-

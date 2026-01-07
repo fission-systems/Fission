@@ -1,4 +1,6 @@
 #include "fission/analysis/TypePropagator.h"
+#include "fission/core/ArchPolicy.h"
+#include "database.hh"
 #include "funcdata.hh"
 #include "op.hh"
 #include "varnode.hh"
@@ -177,6 +179,11 @@ void TypePropagator::propagate_backwards(Varnode* vn, Datatype* type) {
             inferred_types[vid] = type;
         }
     }
+
+    if (type->getMetatype() != TYPE_UNKNOWN &&
+        (type->getSize() == 0 || type->getSize() == vn->getSize())) {
+        vn->setTempType(type);
+    }
     
     // Follow definition backwards
     PcodeOp* def = vn->getDef();
@@ -271,129 +278,74 @@ void TypePropagator::propagate_backwards(Varnode* vn, Datatype* type) {
 bool TypePropagator::propagate_type_edge(PcodeOp* op, int inslot, int outslot) {
     if (!op) return false;
     
-    Varnode* vn_in = nullptr;
-    Varnode* vn_out = nullptr;
-    Datatype* type_in = nullptr;
-    Datatype* type_out = nullptr;
-    
-    // Get input/output varnodes
-    if (inslot >= 0 && inslot < op->numInput()) {
-        vn_in = op->getIn(inslot);
-        if (vn_in) type_in = vn_in->getTempType();
+    Varnode* invn = (inslot == -1) ? op->getOut() : op->getIn(inslot);
+    if (!invn) return false;
+
+    Datatype* alttype = invn->getTempType();
+    if (!alttype) return false;
+
+    if (alttype->needsResolution()) {
+        alttype = alttype->resolveInFlow(op, inslot);
     }
-    
-    if (outslot == -1) {
-        vn_out = op->getOut();
-        if (vn_out) type_out = vn_out->getTempType();
-    } else if (outslot >= 0 && outslot < op->numInput()) {
-        vn_out = op->getIn(outslot);
-        if (vn_out) type_out = vn_out->getTempType();
+    if (inslot == outslot) return false;
+
+    Varnode* outvn = nullptr;
+    if (outslot < 0) {
+        outvn = op->getOut();
+    } else {
+        outvn = op->getIn(outslot);
+        if (outvn && outvn->isAnnotation()) return false;
     }
-    
-    if (!vn_in || !vn_out || !type_in) return false;
-    
-    OpCode opc = op->code();
-    bool changed = false;
-    
-    switch (opc) {
-        case CPUI_COPY:
-            // Direct type propagation
-            if (outslot == -1 && vn_out && type_out != type_in) {
-                vn_out->setTempType(type_in);
-                changed = true;
-            }
-            break;
-            
-        case CPUI_CAST:
-            // Cast may change type but preserve semantic meaning
-            if (outslot == -1 && vn_out) {
-                if (vn_out->getSize() == vn_in->getSize() && type_out != type_in) {
-                    vn_out->setTempType(type_in);
-                    changed = true;
-                }
-            }
-            break;
-            
-        case CPUI_LOAD:
-            // Dereference pointer
-            if (inslot == 1 && type_in->getMetatype() == TYPE_PTR) {
-                TypePointer* ptr_type = (TypePointer*)type_in;
-                Datatype* pointed_to = ptr_type->getPtrTo();
-                if (vn_out && pointed_to && type_out != pointed_to) {
-                    vn_out->setTempType(pointed_to);
-                    changed = true;
-                }
-            }
-            break;
-            
-        case CPUI_STORE:
-            // Store to memory - propagate type to stored value
-            if (inslot == 1 && type_in->getMetatype() == TYPE_PTR && outslot == 2) {
-                TypePointer* ptr_type = (TypePointer*)type_in;
-                Datatype* pointed_to = ptr_type->getPtrTo();
-                if (vn_out && pointed_to && type_out != pointed_to) {
-                    vn_out->setTempType(pointed_to);
-                    changed = true;
-                }
-            }
-            break;
-            
-        case CPUI_MULTIEQUAL:
-            // PHI node - propagate most specific type
-            if (outslot == -1 && vn_out) {
-                Datatype* best_type = type_in;
-                for (int i = 0; i < op->numInput(); ++i) {
-                    Varnode* input = op->getIn(i);
-                    if (!input) continue;
-                    Datatype* input_type = input->getTempType();
-                    if (input_type && input_type->getSize() > best_type->getSize()) {
-                        best_type = input_type;
-                    }
-                }
-                if (type_out != best_type) {
-                    vn_out->setTempType(best_type);
-                    changed = true;
-                }
-            }
-            break;
-            
-        case CPUI_PTRSUB:
-        case CPUI_PTRADD:
-            // Pointer arithmetic preserves pointer type
-            if (inslot == 0 && outslot == -1 && vn_out) {
-                if (type_in->getMetatype() == TYPE_PTR && type_out != type_in) {
-                    vn_out->setTempType(type_in);
-                    changed = true;
-                }
-            }
-            break;
-            
-        default:
-            break;
+    if (!outvn) return false;
+    if (outvn->isTypeLock()) return false;
+    if (outslot >= 0 && outvn->stopsUpPropagation()) return false;
+
+    if (alttype->getMetatype() == TYPE_BOOL && outvn->getNZMask() > 1) {
+        return false;
     }
-    
-    return changed;
+
+    Datatype* newtype = op->getOpcode()->propagateType(alttype, op, invn, outvn, inslot, outslot);
+    if (!newtype) return false;
+
+    if (0 > newtype->typeOrder(*outvn->getTempType())) {
+        outvn->setTempType(newtype);
+        return !outvn->isMark();
+    }
+    return false;
 }
 
 void TypePropagator::apply_inferred_types(Funcdata* fd) {
+    int applied = 0;
     // Apply types to high-level varnodes
     VarnodeLocSet::const_iterator iter;
     for (iter = fd->beginLoc(); iter != fd->endLoc(); ++iter) {
         Varnode* vn = *iter;
         if (!vn) continue;
-        
+
+        Datatype* temp_type = vn->getTempType();
+        if (temp_type && temp_type->getMetatype() != TYPE_UNKNOWN &&
+            (temp_type->getSize() == 0 || temp_type->getSize() == vn->getSize())) {
+            if (vn->updateType(temp_type)) {
+                applied++;
+                continue;
+            }
+        }
+
         uint64_t vid = get_varnode_id(vn);
         auto it = inferred_types.find(vid);
         if (it != inferred_types.end() && it->second) {
-            // Try to update the high-level variable type
-            HighVariable* high = vn->getHigh();
-            if (high) {
-                // Note: Direct type update on HighVariable is complex
-                // For now, we just track the inference
-                std::cerr << "[TypePropagator] Inferred type for varnode: " 
-                          << it->second->getName() << std::endl;
+            Datatype* inferred = it->second;
+            if (inferred->getMetatype() != TYPE_UNKNOWN &&
+                (inferred->getSize() == 0 || inferred->getSize() == vn->getSize())) {
+                if (vn->updateType(inferred)) {
+                    applied++;
+                }
             }
         }
+    }
+
+    if (applied > 0) {
+        std::cerr << "[TypePropagator] Applied " << applied << " inferred types" << std::endl;
     }
 }
 
@@ -459,6 +411,51 @@ void TypePropagator::propagate_one_type(Varnode* vn) {
     }
 }
 
+void TypePropagator::build_local_types(Funcdata* fd) {
+    if (!fd) return;
+
+    VarnodeLocSet::const_iterator iter;
+    for (iter = fd->beginLoc(); iter != fd->endLoc(); ++iter) {
+        Varnode* vn = *iter;
+        if (!vn) continue;
+        if (vn->isAnnotation()) continue;
+        if (!vn->isWritten() && vn->hasNoDescend()) continue;
+
+        bool needs_block = false;
+        Datatype* ct = nullptr;
+
+        try {
+            SymbolEntry* entry = vn->getSymbolEntry();
+            if (entry != nullptr && !vn->isTypeLock() && entry->getSymbol()->isTypeLocked()) {
+                TypeFactory* typegrp = fd->getArch()->types;
+                int4 cur_off = (vn->getAddr().getOffset() - entry->getAddr().getOffset()) + entry->getOffset();
+                ct = typegrp->getExactPiece(entry->getSymbol()->getType(), cur_off, vn->getSize());
+                if (ct == nullptr || ct->getMetatype() == TYPE_UNKNOWN) {
+                    ct = vn->getLocalType(needs_block);
+                }
+            } else {
+                ct = vn->getLocalType(needs_block);
+            }
+        } catch (...) {
+            continue;
+        }
+
+        if (!ct) continue;
+        if (needs_block) {
+            vn->setStopUpPropagation();
+        }
+        vn->setTempType(ct);
+
+        uint64_t vid = get_varnode_id(vn);
+        auto it = inferred_types.find(vid);
+        if (it != inferred_types.end() && it->second) {
+            if (0 > it->second->typeOrder(*vn->getTempType())) {
+                vn->setTempType(it->second);
+            }
+        }
+    }
+}
+
 int TypePropagator::propagate(Funcdata* fd) {
     if (!fd) return 0;
     
@@ -474,6 +471,8 @@ int TypePropagator::propagate(Funcdata* fd) {
             count++;
         }
     }
+
+    build_local_types(fd);
     
     // Phase 2: Edge-based propagation for all varnodes with types
     VarnodeLocSet::const_iterator vn_iter;
@@ -518,6 +517,7 @@ bool TypePropagator::propagate_struct_types(Funcdata* fd) {
     bool changed = false;
     TypeFactory* tf = arch->types;
     if (!tf) return false;
+    int ptr_size = fission::core::ArchPolicy::getPointerSize(arch);
     
     // Scan all CALL operations
     list<PcodeOp*>::const_iterator iter;
@@ -545,7 +545,7 @@ bool TypePropagator::propagate_struct_types(Funcdata* fd) {
                     Datatype* type = tf->findByName(struct_name);
                     if (type) {
                         // Create pointer to struct
-                        Datatype* ptr_type = tf->getTypePointer(8, type, 0);
+                        Datatype* ptr_type = tf->getTypePointer(ptr_size, type, ptr_size);
                         
                         Varnode* arg = op->getIn(i);
                         if (arg) {

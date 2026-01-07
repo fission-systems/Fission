@@ -4,6 +4,7 @@
 #include "varnode.hh"
 #include "type.hh"
 #include "architecture.hh"
+#include "address.hh"
 #include <iostream>
 #include <algorithm>
 #include <sstream>
@@ -16,11 +17,155 @@ using namespace ghidra;
 StackFrameAnalyzer::StackFrameAnalyzer(Architecture* a) : arch(a) {}
 StackFrameAnalyzer::~StackFrameAnalyzer() {}
 
+static bool get_signed_offset(ghidra::Varnode* vn, int64_t& out) {
+    if (!vn || !vn->isConstant()) {
+        return false;
+    }
+    int size = vn->getSize();
+    if (size <= 0) {
+        return false;
+    }
+    int bits = (size * 8) - 1;
+    ghidra::intb raw = static_cast<ghidra::intb>(vn->getOffset());
+    out = static_cast<int64_t>(ghidra::sign_extend(raw, bits));
+    return true;
+}
+
+static bool is_stack_base(ghidra::Varnode* vn, ghidra::AddrSpace* stack_space) {
+    if (!vn || !stack_space) return false;
+    if (vn->getSpace() == stack_space) return true;
+    if (vn->isInput() && vn->getSpace()->getName() == "register") return true;
+    return false;
+}
+
+static int64_t normalize_stack_offset(ghidra::AddrSpace* stack_space, uint64_t offset) {
+    if (!stack_space) {
+        return static_cast<int64_t>(offset);
+    }
+    int bytes = stack_space->getAddrSize();
+    if (bytes <= 0) {
+        return static_cast<int64_t>(offset);
+    }
+    int bits = (bytes * 8) - 1;
+    ghidra::intb raw = static_cast<ghidra::intb>(offset);
+    return static_cast<int64_t>(ghidra::sign_extend(raw, bits));
+}
+
+static bool resolve_stack_offset(
+    ghidra::Varnode* vn,
+    ghidra::AddrSpace* stack_space,
+    int64_t& offset,
+    int depth = 6
+) {
+    if (!vn || depth <= 0) {
+        return false;
+    }
+    if (is_stack_base(vn, stack_space)) {
+        if (vn->getSpace() == stack_space) {
+            offset += static_cast<int64_t>(vn->getOffset());
+        }
+        return true;
+    }
+    if (!vn->isWritten()) {
+        return false;
+    }
+    ghidra::PcodeOp* def = vn->getDef();
+    if (!def) {
+        return false;
+    }
+
+    switch (def->code()) {
+        case ghidra::CPUI_COPY:
+        case ghidra::CPUI_CAST:
+        case ghidra::CPUI_INT_ZEXT:
+        case ghidra::CPUI_INT_SEXT:
+            return resolve_stack_offset(def->getIn(0), stack_space, offset, depth - 1);
+        case ghidra::CPUI_PTRSUB: {
+            ghidra::Varnode* base = def->getIn(0);
+            int64_t off = 0;
+            if (!get_signed_offset(def->getIn(1), off)) {
+                return false;
+            }
+            offset += off;
+            return resolve_stack_offset(base, stack_space, offset, depth - 1);
+        }
+        case ghidra::CPUI_PTRADD: {
+            ghidra::Varnode* base = def->getIn(0);
+            int64_t idx = 0;
+            int64_t elem = 0;
+            if (!get_signed_offset(def->getIn(1), idx)) {
+                return false;
+            }
+            if (!get_signed_offset(def->getIn(2), elem)) {
+                return false;
+            }
+            offset += idx * elem;
+            return resolve_stack_offset(base, stack_space, offset, depth - 1);
+        }
+        case ghidra::CPUI_INT_ADD: {
+            int64_t off = 0;
+            ghidra::Varnode* lhs = def->getIn(0);
+            ghidra::Varnode* rhs = def->getIn(1);
+            if (get_signed_offset(lhs, off)) {
+                offset += off;
+                return resolve_stack_offset(rhs, stack_space, offset, depth - 1);
+            }
+            if (get_signed_offset(rhs, off)) {
+                offset += off;
+                return resolve_stack_offset(lhs, stack_space, offset, depth - 1);
+            }
+            return false;
+        }
+        case ghidra::CPUI_INT_SUB: {
+            int64_t off = 0;
+            ghidra::Varnode* lhs = def->getIn(0);
+            ghidra::Varnode* rhs = def->getIn(1);
+            if (get_signed_offset(rhs, off)) {
+                offset -= off;
+                return resolve_stack_offset(lhs, stack_space, offset, depth - 1);
+            }
+            return false;
+        }
+        case ghidra::CPUI_MULTIEQUAL:
+        case ghidra::CPUI_INDIRECT: {
+            for (int slot = 0; slot < def->numInput(); ++slot) {
+                int64_t candidate = offset;
+                if (resolve_stack_offset(def->getIn(slot), stack_space, candidate, depth - 1)) {
+                    offset = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+        default:
+            return false;
+    }
+}
+
 void StackFrameAnalyzer::collect_stack_accesses(Funcdata* fd) {
     if (!fd) return;
     
     AddrSpace* stack_space = arch->getStackSpace();
     if (!stack_space) return;
+
+    // First pass: collect stack varnodes already mapped to stack space
+    for (auto iter = fd->beginLoc(); iter != fd->endLoc(); ++iter) {
+        Varnode* vn = *iter;
+        if (!vn || vn->isAnnotation() || vn->isConstant()) {
+            continue;
+        }
+        if (vn->getSpace() != stack_space) {
+            continue;
+        }
+        int64_t offset = normalize_stack_offset(stack_space, vn->getOffset());
+        int size = vn->getSize();
+        if (size <= 0) {
+            continue;
+        }
+        auto& entry = stack_accesses[offset];
+        entry.first = std::max(entry.first, size);
+        entry.second++;
+    }
     
     list<PcodeOp*>::const_iterator iter;
     for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
@@ -31,35 +176,20 @@ void StackFrameAnalyzer::collect_stack_accesses(Funcdata* fd) {
         if (opc != CPUI_LOAD && opc != CPUI_STORE) continue;
         
         // Check if accessing stack
-        Varnode* addr_vn = (opc == CPUI_LOAD) ? op->getIn(1) : op->getIn(1);
+        Varnode* addr_vn = op->getIn(1);
         if (!addr_vn) continue;
         
-        // Look for stack-relative accesses
-        PcodeOp* def_op = addr_vn->getDef();
-        if (!def_op) continue;
-        
-        // Common pattern: INT_ADD(stack_pointer, offset)
-        if (def_op->code() == CPUI_INT_ADD) {
-            Varnode* base = def_op->getIn(0);
-            Varnode* offset_vn = def_op->getIn(1);
-            
-            if (!base || !offset_vn) continue;
-            
-            // Check if base is stack pointer
-            if (base->getSpace() == stack_space || 
-                (base->isInput() && base->getSpace()->getName() == "register")) {
-                
-                if (offset_vn->isConstant()) {
-                    int64_t offset = (int64_t)offset_vn->getOffset();
-                    int size = (opc == CPUI_LOAD) ? op->getOut()->getSize() : op->getIn(2)->getSize();
-                    
-                    // Track access
-                    auto& entry = stack_accesses[offset];
-                    entry.first = std::max(entry.first, size);
-                    entry.second++;
-                }
-            }
+        int64_t offset = 0;
+        if (!resolve_stack_offset(addr_vn, stack_space, offset)) {
+            continue;
         }
+
+        int size = (opc == CPUI_LOAD) ? op->getOut()->getSize() : op->getIn(2)->getSize();
+        
+        // Track access
+        auto& entry = stack_accesses[offset];
+        entry.first = std::max(entry.first, size);
+        entry.second++;
     }
 }
 
@@ -125,7 +255,12 @@ TypeStruct* StackFrameAnalyzer::create_struct_for_cluster(TypeFactory* tf, const
     
     // Check if already exists
     Datatype* existing = tf->findByName(cluster.inferred_name);
-    if (existing) return nullptr;
+    if (existing) {
+        if (existing->getMetatype() == TYPE_STRUCT) {
+            return (TypeStruct*)existing;
+        }
+        return nullptr;
+    }
     
     // Create new structure
     TypeStruct* ts = tf->getTypeStruct(cluster.inferred_name);
@@ -149,6 +284,26 @@ TypeStruct* StackFrameAnalyzer::create_struct_for_cluster(TypeFactory* tf, const
     return ts;
 }
 
+std::map<int64_t, TypeStruct*> StackFrameAnalyzer::build_struct_map(TypeFactory* tf) {
+    std::map<int64_t, TypeStruct*> result;
+    if (!tf) return result;
+
+    for (const auto& cluster : clusters) {
+        TypeStruct* ts = create_struct_for_cluster(tf, cluster);
+        if (!ts) {
+            Datatype* existing = tf->findByName(cluster.inferred_name);
+            if (existing && existing->getMetatype() == TYPE_STRUCT) {
+                ts = (TypeStruct*)existing;
+            }
+        }
+        if (ts) {
+            result[cluster.base_offset] = ts;
+        }
+    }
+
+    return result;
+}
+
 int StackFrameAnalyzer::analyze(Funcdata* fd) {
     clear();
     
@@ -165,8 +320,13 @@ int StackFrameAnalyzer::analyze(Funcdata* fd) {
 
 void StackFrameAnalyzer::apply_structures(TypeFactory* tf) {
     for (const auto& cluster : clusters) {
+        bool existed = false;
+        if (tf) {
+            Datatype* existing = tf->findByName(cluster.inferred_name);
+            existed = (existing != nullptr);
+        }
         TypeStruct* ts = create_struct_for_cluster(tf, cluster);
-        if (ts) {
+        if (ts && !existed) {
             std::cerr << "[StackFrameAnalyzer] Created " << cluster.inferred_name 
                       << " with " << cluster.members.size() << " fields" << std::endl;
         }
