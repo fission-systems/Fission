@@ -11,7 +11,7 @@ pub(super) fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Resu
     let mut start_offset = 0;
 
     for (i, &byte) in data.iter().enumerate() {
-        if byte >= 0x20 && byte < 0x7f {
+        if (0x20..0x7f).contains(&byte) {
             if current_bytes.is_empty() {
                 start_offset = i;
             }

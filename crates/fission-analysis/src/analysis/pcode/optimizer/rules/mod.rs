@@ -1,11 +1,11 @@
-/// Optimization rules for Pcode operations
-/// 
-/// This module contains the core optimization logic, organized by operation type:
-/// - Arithmetic operations (ADD, SUB, MULT, DIV, etc.)
-/// - Bitwise operations (XOR, AND, OR, shifts)
-/// - Boolean operations (AND, OR, XOR, NEGATE)
-/// - Comparison operations (EQUAL, LESS, etc.)
-/// - Constant folding for all operation types
+//! Optimization rules for Pcode operations
+//!
+//! This module contains the core optimization logic, organized by operation type:
+//! - Arithmetic operations (ADD, SUB, MULT, DIV, etc.)
+//! - Bitwise operations (XOR, AND, OR, shifts)
+//! - Boolean operations (AND, OR, XOR, NEGATE)
+//! - Comparison operations (EQUAL, LESS, etc.)
+//! - Constant folding for all operation types
 
 use crate::analysis::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use super::def_use::{DefUseTracker, OpRef};
@@ -760,9 +760,10 @@ impl OptimizationRules {
                         // New constant: c1 + c2
                         let new_c = c1.wrapping_add(c2);
                         
-                        let mut new_inputs = Vec::new();
-                        new_inputs.push(base.clone());
-                        new_inputs.push(Varnode::constant(new_c, op.inputs[const_idx].size));
+                        let new_inputs = vec![
+                            base.clone(),
+                            Varnode::constant(new_c, op.inputs[const_idx].size),
+                        ];
                         
                         return Some(PcodeOp {
                             seq_num: op.seq_num,
@@ -834,9 +835,10 @@ impl OptimizationRules {
                         let c1 = inner_offset.constant_val;
                         let new_c = c1.wrapping_add(c2);
 
-                        let mut new_inputs = Vec::new();
-                        new_inputs.push(inner_base.clone());
-                        new_inputs.push(Varnode::constant(new_c, offset.size));
+                        let new_inputs = vec![
+                            inner_base.clone(),
+                            Varnode::constant(new_c, offset.size),
+                        ];
 
                         return Some(PcodeOp {
                             seq_num: op.seq_num,

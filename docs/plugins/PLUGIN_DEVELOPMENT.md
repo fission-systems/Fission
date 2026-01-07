@@ -738,8 +738,8 @@ python = "my_plugin.py"
 
 ## Related Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
-- [CLI_ONE_SHOT_MODE.md](CLI_ONE_SHOT_MODE.md) - CLI usage
+- [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) - System architecture
+- [CLI_ONE_SHOT_MODE.md](../cli/CLI_ONE_SHOT_MODE.md) - CLI usage
 
 ---
 

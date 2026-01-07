@@ -84,10 +84,10 @@ fn render_tabs(ui: &mut egui::Ui, state: &mut AppState) {
                 state.ui.active_tab_index = None;
             } else if state.ui.active_tab_index == Some(i) {
                 state.ui.active_tab_index = Some(i.saturating_sub(1));
-            } else if let Some(idx) = state.ui.active_tab_index {
-                if idx > i {
-                    state.ui.active_tab_index = Some(idx - 1);
-                }
+            } else if let Some(idx) = state.ui.active_tab_index
+                && idx > i
+            {
+                state.ui.active_tab_index = Some(idx - 1);
             }
         }
     });

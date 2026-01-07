@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 pub static CONFIG: LazyLock<Config> = LazyLock::new(Config::default);
 
 /// Fission configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Config {
     /// Decompiler settings
     pub decompiler: DecompilerConfig,
@@ -77,17 +77,6 @@ pub struct UiConfig {
     pub max_log_entries: usize,
     /// Hex view rows per page
     pub hex_rows_per_page: usize,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            decompiler: DecompilerConfig::default(),
-            analysis: AnalysisConfig::default(),
-            debug: DebugConfig::default(),
-            ui: UiConfig::default(),
-        }
-    }
 }
 
 impl Default for DecompilerConfig {

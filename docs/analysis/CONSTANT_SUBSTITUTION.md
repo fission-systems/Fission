@@ -713,9 +713,9 @@ RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\MyApp", 0, KEY_READ, &hKey);
 
 ## Related Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
-- [PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md) - Extend with plugins
-- [BUILD.md](BUILD.md) - Build instructions
+- [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) - System architecture
+- [PLUGIN_DEVELOPMENT.md](../plugins/PLUGIN_DEVELOPMENT.md) - Extend with plugins
+- [BUILD.md](../build/BUILD.md) - Build instructions
 
 ---
 

@@ -19,7 +19,7 @@ class CliArchitecture : public ghidra::SleighArchitecture {
 
 public:
     CliArchitecture(const std::string& sleigh_id, ghidra::LoadImage* ldr, std::ostream* err);
-    virtual ~CliArchitecture() = default;
+    ~CliArchitecture() override = default;
 
     virtual void buildLoader(ghidra::DocumentStorage& store) override;
     virtual ghidra::Scope* buildDatabase(ghidra::DocumentStorage& store) override;

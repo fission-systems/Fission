@@ -6,6 +6,13 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Documentation & Tooling Refresh (2026-01-07)
+- **Docs reorganization**: Moved docs into category folders (architecture/build/cli/gui/decompiler/analysis/plugins) and updated cross-links
+- **Script layout cleanup**: Added category folders under `scripts/` with compatibility wrappers at the root
+- **Benchmark timing metrics**: `compare_decompilers_v2.py` now records per-tool timing plus batch summary (`summary.json` + HTML)
+- **Cppcheck helper**: Added `scripts/lint/cppcheck.sh` for C++ checks (our code only)
+- **README updates**: Added documentation index and implementation verification notes
+
 ### Decompiler Structure Recovery (2026-01-07)
 - **Global/stack struct pipeline**: Global and stack structure inference now feeds symbols into the decompiler and triggers a re-run to apply recovered types
 - **Stack access detection**: Added stack varnode scanning plus PTR/ADD/SUB offset resolution with signed offsets for more reliable frame clustering
@@ -103,7 +110,7 @@ All notable changes to the Fission project (November 2025 - January 2026).
     - Loops (for iteration)
   - Built with MinGW x86-64 for Windows PE format
   - Documentation: `test/README_COMPARISON.md`
-  - Detailed analysis: `docs/DECOMPILER_COMPARISON.md`
+  - Detailed analysis: `docs/decompiler/DECOMPILER_COMPARISON.md`
 
 **Known Issues Identified:**
 - ⚠️ COFF symbol table not parsed (PE function names show as `FUN_0xXXXXXXXX`)

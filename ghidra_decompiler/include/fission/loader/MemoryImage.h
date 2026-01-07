@@ -37,16 +37,16 @@ public:
     
     virtual void loadFill(uint1* ptr, int4 size, const Address& addr) override {
         uint64_t offset = addr.getOffset();
-        uint64_t max = base_addr_ + data_.size();
+        const uint64_t max_offset = base_addr_ + data_.size();
         
         // Optimized bulk copy
-        if (offset >= base_addr_ && offset + size <= max) {
+        if (offset >= base_addr_ && offset + size <= max_offset) {
             std::memcpy(ptr, data_.data() + (offset - base_addr_), size);
         } else {
             // Fallback for boundary crossing
             for(int4 i = 0; i < size; ++i) {
                 uint64_t cur = offset + i;
-                if (cur >= base_addr_ && cur < max) {
+                if (cur >= base_addr_ && cur < max_offset) {
                     ptr[i] = static_cast<uint1>(data_[cur - base_addr_]);
                 } else {
                     ptr[i] = 0;

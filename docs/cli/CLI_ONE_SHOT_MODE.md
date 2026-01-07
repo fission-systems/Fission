@@ -374,7 +374,7 @@ if args.new_flag {
 
 ## Related Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Overall system architecture
+- [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) - Overall system architecture
 - [test/README.md](../test/README.md) - Test cases and validation
 
 ---

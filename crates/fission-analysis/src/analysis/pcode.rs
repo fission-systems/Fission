@@ -1,7 +1,7 @@
-/// Pcode (P-Code) intermediate representation from Ghidra
-/// 
-/// This module provides Rust structures for Ghidra's Pcode IR,
-/// enabling direct optimization at the Pcode level before C generation.
+//! Pcode (P-Code) intermediate representation from Ghidra
+//!
+//! This module provides Rust structures for Ghidra's Pcode IR,
+//! enabling direct optimization at the Pcode level before C generation.
 
 pub mod optimizer;
 pub mod ffi;
@@ -103,7 +103,7 @@ pub enum PcodeOpcode {
 
 impl PcodeOpcode {
     /// Parse opcode from string (from JSON)
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "COPY" => Self::Copy,
             "LOAD" => Self::Load,
@@ -212,6 +212,14 @@ impl PcodeOpcode {
             Self::IntSLessEqual => Some(Self::IntSLess),
             _ => None,
         }
+    }
+}
+
+impl std::str::FromStr for PcodeOpcode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::parse(s))
     }
 }
 
@@ -329,7 +337,7 @@ impl PcodeFunction {
             let start_address = parse_hex_addr(&jb.start_addr);
             let ops = jb.ops.into_iter().map(|jo| {
                 let address = parse_hex_addr(&jo.addr);
-                let opcode = PcodeOpcode::from_str(&jo.opcode);
+                let opcode = PcodeOpcode::parse(&jo.opcode);
                 let output = jo.output.map(|jv| Varnode {
                     space_id: jv.space,
                     offset: parse_hex_addr(&jv.offset),
@@ -386,10 +394,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_opcode_from_str() {
-        assert_eq!(PcodeOpcode::from_str("INT_ADD"), PcodeOpcode::IntAdd);
-        assert_eq!(PcodeOpcode::from_str("INT_XOR"), PcodeOpcode::IntXor);
-        assert_eq!(PcodeOpcode::from_str("COPY"), PcodeOpcode::Copy);
+    fn test_opcode_parse() {
+        assert_eq!(PcodeOpcode::parse("INT_ADD"), PcodeOpcode::IntAdd);
+        assert_eq!(PcodeOpcode::parse("INT_XOR"), PcodeOpcode::IntXor);
+        assert_eq!(PcodeOpcode::parse("COPY"), PcodeOpcode::Copy);
     }
 
     #[test]

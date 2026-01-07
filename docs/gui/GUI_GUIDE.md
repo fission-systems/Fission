@@ -729,9 +729,9 @@ sudo apt install libgtk-3-dev
 
 ## Related Documentation
 
-- [CLI_ONE_SHOT_MODE.md](CLI_ONE_SHOT_MODE.md) - CLI usage
-- [BUILD.md](BUILD.md) - Build instructions
-- [PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md) - Extend GUI with plugins
+- [CLI_ONE_SHOT_MODE.md](../cli/CLI_ONE_SHOT_MODE.md) - CLI usage
+- [BUILD.md](../build/BUILD.md) - Build instructions
+- [PLUGIN_DEVELOPMENT.md](../plugins/PLUGIN_DEVELOPMENT.md) - Extend GUI with plugins
 
 ---
 

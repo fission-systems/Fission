@@ -1,10 +1,10 @@
-/// Pcode optimizer - applies optimization rules directly to Pcode IR
-/// 
-/// This is more accurate than string-based C code optimization because:
-/// 1. No parsing ambiguity
-/// 2. Full type information preserved
-/// 3. Can optimize before high-level C constructs are generated
-/// 4. Matches Ghidra's own optimization framework
+//! Pcode optimizer - applies optimization rules directly to Pcode IR
+//!
+//! This is more accurate than string-based C code optimization because:
+//! 1. No parsing ambiguity
+//! 2. Full type information preserved
+//! 3. Can optimize before high-level C constructs are generated
+//! 4. Matches Ghidra's own optimization framework
 
 mod rules;
 mod dead_code;

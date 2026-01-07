@@ -1,9 +1,9 @@
-/// Def-use chain tracking and analysis for Pcode optimization
-/// 
-/// This module provides infrastructure for:
-/// - Tracking which operations define and use each varnode
-/// - Computing non-zero masks (NZMask) for values
-/// - Enabling advanced optimizations like CSE
+//! Def-use chain tracking and analysis for Pcode optimization
+//!
+//! This module provides infrastructure for:
+//! - Tracking which operations define and use each varnode
+//! - Computing non-zero masks (NZMask) for values
+//! - Enabling advanced optimizations like CSE
 
 use crate::analysis::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::collections::HashMap;

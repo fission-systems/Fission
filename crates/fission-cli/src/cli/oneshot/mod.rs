@@ -39,11 +39,11 @@ fn run() -> io::Result<()> {
     let cli = OneShotArgs::parse();
 
     // Capture BrokenPipe errors gracefully
-    if let Err(e) = execute_command(&cli) {
-        if e.kind() != io::ErrorKind::BrokenPipe {
-            eprintln!("Error: {}", e);
-            std::process::exit(1);
-        }
+    if let Err(e) = execute_command(&cli)
+        && e.kind() != io::ErrorKind::BrokenPipe
+    {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
     }
     Ok(())
 }
@@ -134,7 +134,7 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
     if cli.address.is_some() || cli.all {
         #[cfg(feature = "native_decomp")]
         {
-            run_decompilation(&cli, &binary, &binary_data)?;
+            run_decompilation(cli, &binary, &binary_data)?;
             return Ok(());
         }
 

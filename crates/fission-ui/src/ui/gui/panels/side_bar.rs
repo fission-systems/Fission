@@ -94,7 +94,7 @@ fn render_debug_sidebar(ui: &mut egui::Ui, state: &AppState) {
                     .small(),
             );
         } else {
-            for (addr, _bp) in &state.debug.debug_state.breakpoints {
+            for addr in state.debug.debug_state.breakpoints.keys() {
                 ui.label(
                     egui::RichText::new(format!("0x{:016x}", addr))
                         .small()

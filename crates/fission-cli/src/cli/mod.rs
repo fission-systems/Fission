@@ -16,7 +16,7 @@ pub mod tui;
 mod args;
 
 pub use args::{parse_hex_address, OneShotArgs};
-pub use interactive::run_cli_with_args;
+pub use interactive::{run_cli_with_args, CliRunArgs};
 pub use oneshot::run_oneshot;
 
 #[cfg(feature = "tui")]

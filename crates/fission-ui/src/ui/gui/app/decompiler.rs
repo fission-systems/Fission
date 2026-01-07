@@ -76,10 +76,10 @@ pub fn decompile_function(
         for section in &binary.sections {
             if section.is_executable
                 && address >= section.virtual_address
-                && address < section.virtual_address + section.virtual_size as u64
+                && address < section.virtual_address + section.virtual_size
             {
                 let max_size =
-                    (section.virtual_address + section.virtual_size as u64 - address) as usize;
+                    (section.virtual_address + section.virtual_size - address) as usize;
                 func_size = func_size.min(max_size);
                 break;
             }
@@ -168,18 +168,18 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
         c_code.clone()
     };
 
-    if let Some(func) = &state.analysis.selected_function {
-        if func.address == address {
-            // LruCache.put() automatically evicts oldest entry when at capacity
-            state.analysis.decompile_cache.put(
-                address,
-                CachedDecompile {
-                    c_code: processed_code.clone(),
-                    asm_instructions: state.analysis.asm_instructions.clone(),
-                    timestamp: Instant::now(),
-                },
-            );
-        }
+    if let Some(func) = &state.analysis.selected_function
+        && func.address == address
+    {
+        // LruCache.put() automatically evicts oldest entry when at capacity
+        state.analysis.decompile_cache.put(
+            address,
+            CachedDecompile {
+                c_code: processed_code.clone(),
+                asm_instructions: state.analysis.asm_instructions.clone(),
+                timestamp: Instant::now(),
+            },
+        );
     }
     state.analysis.decompiled_code = processed_code;
     state.analysis.decompiling = false;
@@ -203,10 +203,10 @@ fn apply_iat_symbols(code: &str, iat_symbols: &std::collections::HashMap<u64, St
     // Single pass replacement for both patterns
     let result = COMBINED_RE.replace_all(code, |caps: &regex::Captures| {
         let addr_str = &caps[1];
-        if let Ok(addr) = u64::from_str_radix(addr_str, 16) {
-            if let Some(name) = iat_symbols.get(&addr) {
-                return name.clone();
-            }
+        if let Ok(addr) = u64::from_str_radix(addr_str, 16)
+            && let Some(name) = iat_symbols.get(&addr)
+        {
+            return name.clone();
         }
         caps[0].to_string()
     });

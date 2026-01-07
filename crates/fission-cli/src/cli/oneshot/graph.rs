@@ -112,7 +112,7 @@ pub fn generate_pcode_graph(
             Ok(json) => json,
             Err(e) => {
                 eprintln!("Error: Failed to get Pcode: {}", e);
-                return Err(io::Error::new(io::ErrorKind::Other, e.to_string()));
+                return Err(io::Error::other(e.to_string()));
             }
         }
     };
@@ -183,10 +183,11 @@ pub fn generate_pcode_graph(
                 println!("[✓] Graph rendered to: {}", png_path.display());
                 // Optionally open the file?
                 // Command::new("open").arg(&png_path).spawn().ok(); 
-            } else {
-                if verbose {
-                    eprintln!("Warning: 'dot' command failed: {}", String::from_utf8_lossy(&output.stderr));
-                }
+            } else if verbose {
+                eprintln!(
+                    "Warning: 'dot' command failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
         },
         Err(e) => {

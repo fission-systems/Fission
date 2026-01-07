@@ -159,8 +159,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.add_space(4.0);
 
                     // Attach button (only when not attached)
-                    if !is_attached {
-                        if ui
+                    if !is_attached
+                        && ui
                             .add(
                                 egui::Button::new(
                                     egui::RichText::new("🔗 Attach").color(catppuccin::GREEN),
@@ -168,10 +168,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                                 .fill(catppuccin::SURFACE1),
                             )
                             .clicked()
-                        {
-                            state.ui.show_attach_dialog = true;
-                            state.debug.process_list = crate::debug::enumerate_processes();
-                        }
+                    {
+                        state.ui.show_attach_dialog = true;
+                        state.debug.process_list = crate::debug::enumerate_processes();
                     }
 
                     // TitanEngine Actions (Dynamic Mode)
@@ -337,7 +336,7 @@ fn render_breakpoints_column(
                         .hint_text("address..."),
                 );
 
-                if ui
+                if (ui
                     .add(
                         egui::Button::new(
                             egui::RichText::new("+").color(catppuccin::GREEN).strong(),
@@ -345,15 +344,14 @@ fn render_breakpoints_column(
                         .min_size(egui::vec2(24.0, 20.0)),
                     )
                     .clicked()
-                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                {
-                    if let Ok(addr) = u64::from_str_radix(
+                    || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
+                    && let Ok(addr) = u64::from_str_radix(
                         state.debug.breakpoint_input.trim_start_matches("0x"),
                         16,
-                    ) {
-                        state.debug.pending_bp_action = Some(DebugBpAction::Add(addr));
-                        state.debug.breakpoint_input.clear();
-                    }
+                    )
+                {
+                    state.debug.pending_bp_action = Some(DebugBpAction::Add(addr));
+                    state.debug.breakpoint_input.clear();
                 }
             });
 
@@ -516,13 +514,12 @@ fn render_memory_section(ui: &mut egui::Ui, state: &mut AppState) {
         if ui
             .button(egui::RichText::new("Read").color(catppuccin::BLUE))
             .clicked()
-        {
-            if let (Ok(addr), Ok(len)) = (
+            && let (Ok(addr), Ok(len)) = (
                 u64::from_str_radix(state.debug.mem_addr_input.trim_start_matches("0x"), 16),
                 state.debug.mem_len_input.parse::<usize>(),
-            ) {
-                state.debug.pending_mem_read = Some((addr, len));
-            }
+            )
+        {
+            state.debug.pending_mem_read = Some((addr, len));
         }
     });
 

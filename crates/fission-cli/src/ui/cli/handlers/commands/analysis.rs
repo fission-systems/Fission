@@ -131,7 +131,7 @@ pub fn cmd_strings(state: &CliState, min_len: usize) {
     let mut start_offset = 0usize;
 
     for (i, &byte) in binary.data.iter().enumerate() {
-        if byte >= 0x20 && byte <= 0x7E {
+        if (0x20..=0x7E).contains(&byte) {
             if current_bytes.is_empty() {
                 start_offset = i;
             }

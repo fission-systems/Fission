@@ -148,6 +148,14 @@ DECOMP_API void decomp_set_symbol_provider(
 );
 
 /**
+ * Reset the symbol provider to the default map-backed provider.
+ * This does not clear existing symbol/global symbol maps.
+ *
+ * @param ctx Decompiler context
+ */
+DECOMP_API void decomp_reset_symbol_provider(DecompContext* ctx);
+
+/**
  * Declare a function at the given address.
  * This helps Ghidra recognize function boundaries and improves
  * decompilation quality by pre-defining known function locations.

@@ -8,6 +8,7 @@ namespace fission {
 namespace ffi {
 
 void set_symbol_provider(DecompContext* ctx, const DecompSymbolProvider* provider);
+void reset_symbol_provider(DecompContext* ctx);
 
 } // namespace ffi
 } // namespace fission
