@@ -353,7 +353,7 @@ impl HexView {
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let text_style = egui::TextStyle::Monospace;
         let row_height = ui.text_style_height(&text_style);
-        let num_rows = (self.data.len() + self.bytes_per_line - 1) / self.bytes_per_line;
+        let num_rows = self.data.len().div_ceil(self.bytes_per_line);
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])

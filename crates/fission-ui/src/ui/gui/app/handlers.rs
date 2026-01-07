@@ -200,11 +200,9 @@ pub fn process_messages(
                             state.ui.progress = None;
                         }
                     }
-                    crate::app::events::FissionEvent::SelectionChanged { address } => {
-                        if let Some(addr) = address {
-                            state.log(format!("[Selection] 0x{:08X}", addr));
-                            state.ui.selected_xref_addr = Some(addr);
-                        }
+                    crate::app::events::FissionEvent::SelectionChanged { address: Some(addr) } => {
+                        state.log(format!("[Selection] 0x{:08X}", addr));
+                        state.ui.selected_xref_addr = Some(addr);
                     }
                     _ => {} // Ignore others for now (or handle specifically)
                 }

@@ -51,6 +51,8 @@ struct DecompSymbolProvider {
     drop: Option<extern "C" fn(*mut std::ffi::c_void)>,
 }
 
+unsafe impl Send for DecompSymbolProvider {}
+
 const SYMBOL_FLAG_FUNCTION: u32 = 1 << 0;
 const SYMBOL_FLAG_DATA: u32 = 1 << 1;
 const SYMBOL_FLAG_EXTERNAL: u32 = 1 << 2;
@@ -271,7 +273,9 @@ impl DecompilerNative {
             sections,
             self.pointer_size,
         ));
-        let userdata = state.as_ref() as *const _ as *mut std::ffi::c_void;
+        let userdata = std::ptr::from_ref(state.as_ref())
+            .cast::<std::ffi::c_void>()
+            .cast_mut();
 
         let provider = DecompSymbolProvider {
             userdata,
@@ -281,7 +285,7 @@ impl DecompilerNative {
         };
 
         unsafe {
-            decomp_set_symbol_provider(self.ctx, &provider);
+            decomp_set_symbol_provider(self.ctx, std::ptr::from_ref(&provider));
         }
 
         self.symbol_provider_state = Some(state);
@@ -554,8 +558,10 @@ impl SymbolProviderState {
             if let Some(next) = next_addr {
                 if next > *addr && next < end {
                     let size = next - *addr;
-                    if size > 0 && size <= u32::MAX as u64 {
-                        function_sizes.insert(*addr, size as u32);
+                    if let Ok(size_u32) = u32::try_from(size) {
+                        if size_u32 > 0 {
+                            function_sizes.insert(*addr, size_u32);
+                        }
                     }
                 }
             }
@@ -676,8 +682,10 @@ fn estimate_data_size(
     if let Some(next) = next_addr {
         if next > addr && next < end {
             let delta = next - addr;
-            if delta > 0 && delta <= u32::MAX as u64 {
-                return Some(delta as u32);
+            if let Ok(delta_u32) = u32::try_from(delta) {
+                if delta_u32 > 0 {
+                    return Some(delta_u32);
+                }
             }
         }
     }
@@ -777,7 +785,7 @@ extern "C" fn symbol_provider_find_symbol(
     userdata: *mut std::ffi::c_void,
     address: u64,
     _size: u32,
-    _require_start: c_int,
+    require_start: c_int,
     out: *mut DecompSymbolInfo,
 ) -> c_int {
     if userdata.is_null() || out.is_null() {
@@ -788,7 +796,7 @@ extern "C" fn symbol_provider_find_symbol(
     let entry = match state.data.get(&address) {
         Some(entry) => entry,
         None => {
-            if _require_start == 0 {
+            if require_start == 0 {
                 if let Some(start) = find_range_entry(&state.data_ranges, address) {
                     match state.data.get(&start) {
                         Some(entry) => entry,

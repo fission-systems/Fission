@@ -80,7 +80,7 @@ impl TitanLoader {
                 size_of_headers
             ));
         } else {
-            return Err(FissionError::loader(&format!(
+            return Err(FissionError::loader(format!(
                 "Invalid header size: {} (file: {}, mapped: {})",
                 size_of_headers, data.len(), mapped_data.len()
             )));
@@ -196,14 +196,14 @@ impl TitanLoader {
 
         // Validate bounds
         if file_offset + raw_size > file_data.len() {
-            return Err(FissionError::loader(&format!(
+            return Err(FissionError::loader(format!(
                 "Section {} extends beyond file (offset: 0x{:x}, size: 0x{:x})",
                 section.name, file_offset, raw_size
             )));
         }
 
         if va_offset + raw_size > mapped_data.len() {
-            return Err(FissionError::loader(&format!(
+            return Err(FissionError::loader(format!(
                 "Section {} exceeds allocated memory (VA: 0x{:x}, size: 0x{:x})",
                 section.name, section.virtual_address, raw_size
             )));

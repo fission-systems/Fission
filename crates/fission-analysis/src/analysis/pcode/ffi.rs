@@ -1,6 +1,6 @@
-/// FFI bridge for Pcode optimization
-/// 
-/// Exposes Rust Pcode optimizer to C++ decompiler via C ABI
+//! FFI bridge for Pcode optimization
+//!
+//! Exposes Rust Pcode optimizer to C++ decompiler via C ABI
 
 use crate::analysis::pcode::{PcodeFunction, PcodeOptimizer, PcodeOptimizerConfig};
 use std::ffi::{CStr, CString};

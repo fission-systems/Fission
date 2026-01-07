@@ -203,7 +203,7 @@ pub(super) fn disassemble_function(
                 "name": &func.name,
                 "address": format!("0x{:x}", func_start),
                 "size": if needs_boundary_detection {
-                    format!("unknown (stopped at RET)")
+                    "unknown (stopped at RET)".to_string()
                 } else {
                     func_size.to_string()
                 },

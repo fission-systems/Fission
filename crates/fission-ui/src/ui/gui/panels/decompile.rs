@@ -42,13 +42,12 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
 
         // Copy button on the right
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if !state.analysis.decompiled_code.is_empty() {
-                if ui
+            if !state.analysis.decompiled_code.is_empty()
+                && ui
                     .small_button(egui::RichText::new("📋 Copy").color(catppuccin::TEAL))
                     .clicked()
-                {
-                    ui.output_mut(|o| o.copied_text = state.analysis.decompiled_code.clone());
-                }
+            {
+                ui.output_mut(|o| o.copied_text = state.analysis.decompiled_code.clone());
             }
         });
     });

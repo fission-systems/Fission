@@ -97,7 +97,7 @@ struct DecompContext {
      * Constructor
      * @param sla Sleigh language directory path
      */
-    DecompContext(const char* sla);
+    explicit DecompContext(const char* sla);
     
     /**
      * Destructor - handles cleanup with Ghidra workaround

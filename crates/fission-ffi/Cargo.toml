@@ -6,6 +6,9 @@ authors = ["Fission Dev Team"]
 description = "FFI exports for Fission"
 license = "MIT"
 repository = "https://github.com/sjkim1127/Fission"
+readme = "../../README.md"
+keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]
+categories = ["development-tools::debugging"]
 
 [lib]
 name = "fission_ffi"

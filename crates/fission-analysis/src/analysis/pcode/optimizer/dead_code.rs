@@ -1,7 +1,7 @@
-/// Dead code elimination for Pcode operations
-/// 
-/// Removes operations whose outputs are never used, except for operations
-/// with side effects (stores, calls, returns, branches).
+//! Dead code elimination for Pcode operations
+//!
+//! Removes operations whose outputs are never used, except for operations
+//! with side effects (stores, calls, returns, branches).
 
 use crate::analysis::pcode::{PcodeFunction, PcodeOpcode, Varnode};
 use std::collections::HashSet;

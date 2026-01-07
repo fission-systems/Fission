@@ -20,7 +20,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     // Check if binary is loaded and get data length
     let (data_len, total_rows) = if let Some(ref binary) = state.analysis.loaded_binary {
         let len = binary.data.len() as u64;
-        let rows = (len / 16) + if len % 16 != 0 { 1 } else { 0 };
+        let rows = (len / 16) + if len.is_multiple_of(16) { 0 } else { 1 };
         (len, rows)
     } else {
         empty_state(ui, "No binary loaded", None);
@@ -39,19 +39,17 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             )
             .lost_focus()
             && ui.input(|i| i.key_pressed(egui::Key::Enter))
+            && let Ok(new_offset) = u64::from_str_radix(&offset_str, 16)
         {
-            if let Ok(new_offset) = u64::from_str_radix(&offset_str, 16) {
-                state.analysis.hex_offset = (new_offset / 16) * 16;
-                state.analysis.hex_offset =
-                    state.analysis.hex_offset.min(data_len.saturating_sub(16));
-                // Note: To scroll to this offset programmatically with TableBuilder requires scroll_to_row
-                // which might need specific egui context handling or scroll area wrapping.
-                // For now, updating the state is a start, but the table needs to read it.
-                // This hybrid approach (native scroll + jump) needs care.
-                // Simplified: We just update the display logic below to respect scroll OR jump?
-                // Actually, native scroll means 'scroll' is the truth.
-                // 'Jump' needs to force scroll.
-            }
+            state.analysis.hex_offset = (new_offset / 16) * 16;
+            state.analysis.hex_offset = state.analysis.hex_offset.min(data_len.saturating_sub(16));
+            // Note: To scroll to this offset programmatically with TableBuilder requires scroll_to_row
+            // which might need specific egui context handling or scroll area wrapping.
+            // For now, updating the state is a start, but the table needs to read it.
+            // This hybrid approach (native scroll + jump) needs care.
+            // Simplified: We just update the display logic below to respect scroll OR jump?
+            // Actually, native scroll means 'scroll' is the truth.
+            // 'Jump' needs to force scroll.
         }
 
         ui.separator();
@@ -87,25 +85,25 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         );
 
         // Patch button
-        if ui.button("Apply").clicked() {
-            if let Ok(offset) = u64::from_str_radix(
+        if ui.button("Apply").clicked()
+            && let Ok(offset) = u64::from_str_radix(
                 state
                     .analysis
                     .patch_offset_input
                     .trim()
                     .trim_start_matches("0x"),
                 16,
-            ) {
-                let bytes: Vec<u8> = state
-                    .analysis
-                    .patch_bytes_input
-                    .split_whitespace()
-                    .filter_map(|s| u8::from_str_radix(s, 16).ok())
-                    .collect();
+            )
+        {
+            let bytes: Vec<u8> = state
+                .analysis
+                .patch_bytes_input
+                .split_whitespace()
+                .filter_map(|s| u8::from_str_radix(s, 16).ok())
+                .collect();
 
-                if !bytes.is_empty() {
-                    patch_action = PatchAction::ApplyBytes { offset, bytes };
-                }
+            if !bytes.is_empty() {
+                patch_action = PatchAction::ApplyBytes { offset, bytes };
             }
         }
 

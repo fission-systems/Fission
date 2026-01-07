@@ -52,7 +52,7 @@ fn save_script_file(state: &mut AppState) {
         .script
         .script_path
         .as_ref()
-        .map(|p| std::path::PathBuf::from(p))
+        .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("script.py"));
 
     if let Some(path) = rfd::FileDialog::new()

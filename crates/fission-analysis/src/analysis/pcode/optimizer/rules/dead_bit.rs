@@ -6,10 +6,7 @@ use crate::analysis::pcode::optimizer::def_use::DefUseTracker;
 /// Removes bitwise operations that do not affect the consumed bits of the output.
 /// Returns Some(new_op) if optimization is applied.
 pub fn try_dead_bit_elimination(op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
-    if op.output.is_none() {
-        return None;
-    }
-    let out = op.output.as_ref().unwrap();
+    let out = op.output.as_ref()?;
     let consume_mask = tracker.get_consume_mask(out);
     
     // If output is completely unused, let DCE handle it.

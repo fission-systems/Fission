@@ -95,11 +95,7 @@ fn render_plugin_list(
         egui::ScrollArea::vertical()
             .max_height(200.0)
             .show(ui, |ui| {
-                let plugins: Vec<_> = manager
-                    .list_plugins()
-                    .into_iter()
-                    .map(|p| p.clone())
-                    .collect();
+                let plugins: Vec<_> = manager.list_plugins().into_iter().cloned().collect();
 
                 if plugins.is_empty() {
                     ui.label(
@@ -217,10 +213,8 @@ fn render_plugin_details(
                         if ui.button("Disable").clicked() {
                             let _ = manager.disable_plugin(&plugin_id_clone);
                         }
-                    } else {
-                        if ui.button("Enable").clicked() {
-                            let _ = manager.enable_plugin(&plugin_id_clone);
-                        }
+                    } else if ui.button("Enable").clicked() {
+                        let _ = manager.enable_plugin(&plugin_id_clone);
                     }
 
                     if ui

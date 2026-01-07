@@ -1,7 +1,7 @@
-/// Graphviz DOT exporter for Pcode
-/// 
-/// Generates a DOT graph representation of the Pcode function,
-/// including control flow and data flow information.
+//! Graphviz DOT exporter for Pcode
+//!
+//! Generates a DOT graph representation of the Pcode function,
+//! including control flow and data flow information.
 
 use super::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use crate::analysis::pcode::optimizer::DefUseTracker;

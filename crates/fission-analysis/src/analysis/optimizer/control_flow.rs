@@ -54,7 +54,7 @@ fn normalize_condition(expr: Expr) -> Expr {
         operand,
     } = &expr
     {
-        if let Some(inverted) = try_invert_comparison(&**operand) {
+        if let Some(inverted) = try_invert_comparison(operand) {
             return inverted;
         }
     }

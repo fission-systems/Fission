@@ -61,14 +61,13 @@ pub(super) fn run_decompilation(
                 &section.name,
                 section.virtual_address,
                 section.virtual_size,
-                section.file_offset as u64,
-                section.file_size as u64,
+                section.file_offset,
+                section.file_size,
                 section.is_executable,
                 section.is_writable,
-            ) {
-                if cli.verbose {
-                    eprintln!("[!] Failed to register section {}: {}", section.name, e);
-                }
+            ) && cli.verbose
+            {
+                eprintln!("[!] Failed to register section {}: {}", section.name, e);
             }
         }
     }
@@ -84,15 +83,15 @@ pub(super) fn run_decompilation(
     {
         let _silencer = OutputSilencer::new_if(!cli.verbose);
         for func in &binary.functions {
-            if func.address != 0 && !func.name.is_empty() {
-                if let Err(e) = decomp.add_function(func.address, Some(&func.name)) {
-                    if cli.verbose {
-                        eprintln!(
-                            "[!] Failed to register function at 0x{:x}: {}",
-                            func.address, e
-                        );
-                    }
-                }
+            if func.address != 0
+                && !func.name.is_empty()
+                && let Err(e) = decomp.add_function(func.address, Some(&func.name))
+                && cli.verbose
+            {
+                eprintln!(
+                    "[!] Failed to register function at 0x{:x}: {}",
+                    func.address, e
+                );
             }
         }
     }
@@ -198,16 +197,12 @@ pub(super) fn run_decompilation(
                         "code": code
                     }));
                 } else {
-                    all_output.push_str(&format!(
-                        "// ============================================\n"
-                    ));
+                    all_output.push_str("// ============================================\n");
                     all_output.push_str(&format!(
                         "// Function: {} @ 0x{:x}\n",
                         func.name, func.address
                     ));
-                    all_output.push_str(&format!(
-                        "// ============================================\n\n"
-                    ));
+                    all_output.push_str("// ============================================\n\n");
                     all_output.push_str(&code);
                     all_output.push_str("\n\n");
                 }

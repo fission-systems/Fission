@@ -257,7 +257,7 @@ pub fn load_jetbrains_mono(ctx: &egui::Context) {
         if let Ok(font_data) = std::fs::read(path) {
             fonts.font_data.insert(
                 "JetBrainsMono".to_owned(),
-                egui::FontData::from_owned(font_data).into(),
+                egui::FontData::from_owned(font_data),
             );
 
             // Put JetBrainsMono first in monospace priority

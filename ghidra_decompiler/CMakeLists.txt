@@ -6,6 +6,9 @@ project(fission_native CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Enable CTest support
+enable_testing()
+
 # Platform settings
 if(MSVC)
     add_compile_options(/W0 /EHsc /bigobj)
@@ -75,6 +78,8 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/analysis/TypeSharing.cc
     ${FISSION_MODULES_DIR}/analysis/GlobalDataAnalyzer.cc
     ${FISSION_MODULES_DIR}/analysis/VTableAnalyzer.cc
+    ${FISSION_MODULES_DIR}/core/ContextServices.cc
+    ${FISSION_MODULES_DIR}/core/ArchInit.cc
     ${FISSION_MODULES_DIR}/core/ScopeFission.cc
     ${FISSION_MODULES_DIR}/core/SymbolProvider.cc
     ${FISSION_MODULES_DIR}/core/CliArchitecture.cc
@@ -87,6 +92,9 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/loader/BinaryDetector.cc
     # New modular decompiler components
     ${FISSION_MODULES_DIR}/decompiler/PostProcessor.cc
+    ${FISSION_MODULES_DIR}/decompiler/PostProcessPipeline.cpp
+    ${FISSION_MODULES_DIR}/decompiler/AnalysisPipeline.cpp
+    ${FISSION_MODULES_DIR}/decompiler/DecompilationCore.cpp
     ${FISSION_MODULES_DIR}/decompiler/DecompilationPipeline.cc
     ${FISSION_MODULES_DIR}/decompiler/ServerMode.cc
     ${FISSION_MODULES_DIR}/decompiler/PcodeExtractor.cc
@@ -141,6 +149,31 @@ target_link_libraries(fission_decomp
 target_link_libraries(decomp 
     PRIVATE 
     ZLIB::ZLIB
+)
+
+# ContextServices unit test (minimal executable)
+add_executable(fission_context_services_test
+    tests/ContextServicesTest.cpp
+)
+
+target_include_directories(fission_context_services_test PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${GHIDRA_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(fission_context_services_test
+    PRIVATE
+    decomp
+)
+
+target_compile_definitions(fission_context_services_test PRIVATE
+    FISSION_SLA_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+add_test(NAME context_services COMMAND fission_context_services_test)
+set_tests_properties(context_services PROPERTIES
+    ENVIRONMENT "DYLD_LIBRARY_PATH=${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 message(STATUS "Ghidra Decompiler CLI Configured")

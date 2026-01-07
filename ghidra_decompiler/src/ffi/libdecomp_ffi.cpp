@@ -78,6 +78,10 @@ extern "C" DECOMP_API void decomp_set_symbol_provider(
     set_symbol_provider(ctx, provider);
 }
 
+extern "C" DECOMP_API void decomp_reset_symbol_provider(DecompContext* ctx) {
+    reset_symbol_provider(ctx);
+}
+
 extern "C" DECOMP_API DecompError decomp_add_function(
     DecompContext* ctx,
     uint64_t addr,

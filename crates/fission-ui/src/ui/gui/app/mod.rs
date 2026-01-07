@@ -360,7 +360,6 @@ impl FissionApp {
         // Skip if no binary is loaded
         if self.state.analysis.loaded_binary.is_none() {
             self.state.log("[!] Cannot open function: No binary loaded".to_string());
-            return;
         }
         
         analysis_ops::open_function_tabs(
@@ -449,36 +448,36 @@ impl FissionApp {
                     }
                 }
             }
-            return;
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(dbg) = self.debugger.as_mut() {
-                // Update registers if suspended
-                if self.state.debug.debug_state.status
-                    == crate::debug::types::DebugStatus::Suspended
-                {
-                    if let Some(tid) = self.state.debug.debug_state.last_thread_id.or(self
-                        .state
-                        .debug
-                        .debug_state
-                        .main_thread_id)
+        } else {
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(dbg) = self.debugger.as_mut() {
+                    // Update registers if suspended
+                    if self.state.debug.debug_state.status
+                        == crate::debug::types::DebugStatus::Suspended
                     {
-                        if let Ok(regs) = dbg.fetch_registers(tid) {
-                            self.state.debug.debug_state.registers = Some(regs);
+                        if let Some(tid) = self.state.debug.debug_state.last_thread_id.or(self
+                            .state
+                            .debug
+                            .debug_state
+                            .main_thread_id)
+                        {
+                            if let Ok(regs) = dbg.fetch_registers(tid) {
+                                self.state.debug.debug_state.registers = Some(regs);
+                            }
                         }
                     }
-                }
 
-                // Handle pending memory read
-                if let Some((addr, len)) = self.state.debug.pending_mem_read.take() {
-                    match dbg.read_memory(addr, len) {
-                        Ok(data) => {
-                            self.state.debug.mem_dump = format_hexdump(addr, &data);
-                        }
-                        Err(e) => {
-                            self.state.debug.mem_dump = format!("Error reading memory: {}", e);
+                    // Handle pending memory read
+                    if let Some((addr, len)) = self.state.debug.pending_mem_read.take() {
+                        match dbg.read_memory(addr, len) {
+                            Ok(data) => {
+                                self.state.debug.mem_dump = format_hexdump(addr, &data);
+                            }
+                            Err(e) => {
+                                self.state.debug.mem_dump =
+                                    format!("Error reading memory: {}", e);
+                            }
                         }
                     }
                 }

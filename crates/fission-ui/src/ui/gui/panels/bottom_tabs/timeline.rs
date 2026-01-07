@@ -25,13 +25,12 @@ pub fn render(ui: &mut egui::Ui, timeline: &mut Timeline) {
             {
                 timeline.stop_recording();
             }
-        } else if !is_replay {
-            if ui
+        } else if !is_replay
+            && ui
                 .button(egui::RichText::new("⏺ Record").color(catppuccin::PEACH))
                 .clicked()
-            {
-                timeline.start_recording();
-            }
+        {
+            timeline.start_recording();
         }
 
         // Replay mode controls
@@ -42,10 +41,8 @@ pub fn render(ui: &mut egui::Ui, timeline: &mut Timeline) {
                 if ui.button("▶ Replay Mode").clicked() {
                     timeline.enter_replay_mode();
                 }
-            } else {
-                if ui.button("✕ Exit Replay").clicked() {
-                    timeline.exit_replay_mode();
-                }
+            } else if ui.button("✕ Exit Replay").clicked() {
+                timeline.exit_replay_mode();
             }
         }
 

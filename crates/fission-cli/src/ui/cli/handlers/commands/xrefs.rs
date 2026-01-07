@@ -46,16 +46,15 @@ pub fn cmd_xrefs(state: &CliState, addr: u64) {
                 // Simple heuristic: show functions in reasonable range
                 let distance = func.address.abs_diff(addr);
                 
-                if distance < 0x100000 && func.address != addr {
-                    if call_count < 10 {  // Limit to first 10
-                        println!(
-                            "  {} 0x{:08x}  {}",
-                            if distance < 0x1000 { "▸".green() } else { "·".dimmed() },
-                            func.address,
-                            func.name.as_str().dimmed()
-                        );
-                        call_count += 1;
-                    }
+                if distance < 0x100000 && func.address != addr && call_count < 10 {
+                    // Limit to first 10
+                    println!(
+                        "  {} 0x{:08x}  {}",
+                        if distance < 0x1000 { "▸".green() } else { "·".dimmed() },
+                        func.address,
+                        func.name.as_str().dimmed()
+                    );
+                    call_count += 1;
                 }
             }
             

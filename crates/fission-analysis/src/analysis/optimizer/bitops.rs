@@ -72,12 +72,12 @@ fn try_simplify_and(left: &Expr, right: &Expr) -> Option<Expr> {
     }
 
     // x & 0 → 0
-    if let Expr::Const(0) = *right {
+    if *right == Expr::Const(0) {
         return Some(Expr::Const(0));
     }
 
     // x & -1 (all bits set) → x
-    if let Expr::Const(-1) = *right {
+    if *right == Expr::Const(-1) {
         return Some((*left).clone());
     }
 
@@ -117,12 +117,12 @@ fn try_simplify_or(left: &Expr, right: &Expr) -> Option<Expr> {
     }
 
     // x | 0 → x
-    if let Expr::Const(0) = *right {
+    if *right == Expr::Const(0) {
         return Some((*left).clone());
     }
 
     // x | -1 → -1
-    if let Expr::Const(-1) = *right {
+    if *right == Expr::Const(-1) {
         return Some(Expr::Const(-1));
     }
 
@@ -148,7 +148,7 @@ fn try_simplify_or(left: &Expr, right: &Expr) -> Option<Expr> {
 /// RuleBxor2NotEqual: (x ^ y) == 0 → x == y
 fn try_simplify_xor(left: &Expr, right: &Expr) -> Option<Expr> {
     // x ^ 0 → x
-    if let Expr::Const(0) = *right {
+    if *right == Expr::Const(0) {
         return Some((*left).clone());
     }
 
@@ -170,7 +170,7 @@ fn try_simplify_comparison(op: BinOpKind, left: &Expr, right: &Expr) -> Option<E
             right: xor_right,
         } = left
         {
-            if let Expr::Const(0) = *right {
+            if *right == Expr::Const(0) {
                 return Some(Expr::BinOp {
                     op: BinOpKind::Eq,
                     left: xor_left.clone(),
@@ -188,7 +188,7 @@ fn try_simplify_comparison(op: BinOpKind, left: &Expr, right: &Expr) -> Option<E
             right: xor_right,
         } = left
         {
-            if let Expr::Const(0) = *right {
+            if *right == Expr::Const(0) {
                 return Some(Expr::BinOp {
                     op: BinOpKind::Ne,
                     left: xor_left.clone(),

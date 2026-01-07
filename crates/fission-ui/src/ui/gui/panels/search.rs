@@ -132,7 +132,7 @@ fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
             for (i, &nb) in needle_bytes.iter().enumerate() {
                 let hb = haystack_bytes[start + i];
                 // ASCII case-insensitive comparison
-                if hb.to_ascii_lowercase() != nb.to_ascii_lowercase() {
+                if !hb.eq_ignore_ascii_case(&nb) {
                     continue 'outer;
                 }
             }

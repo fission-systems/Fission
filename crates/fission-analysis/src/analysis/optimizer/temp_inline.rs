@@ -7,20 +7,24 @@
 
 use super::{Expr, Stmt};
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 /// Inline temporary variables that are only used once
-pub fn inline_temps(stmts: Vec<Stmt>, var_usage: &HashMap<String, usize>) -> Vec<Stmt> {
+pub fn inline_temps<S: BuildHasher>(
+    stmts: Vec<Stmt>,
+    var_usage: &HashMap<String, usize, S>,
+) -> Vec<Stmt> {
     let mut inliner = TempInliner::new(var_usage);
     inliner.process(stmts)
 }
 
-struct TempInliner<'a> {
-    var_usage: &'a HashMap<String, usize>,
+struct TempInliner<'a, S: BuildHasher> {
+    var_usage: &'a HashMap<String, usize, S>,
     var_defs: HashMap<String, Expr>,
 }
 
-impl<'a> TempInliner<'a> {
-    fn new(var_usage: &'a HashMap<String, usize>) -> Self {
+impl<'a, S: BuildHasher> TempInliner<'a, S> {
+    fn new(var_usage: &'a HashMap<String, usize, S>) -> Self {
         Self {
             var_usage,
             var_defs: HashMap::new(),

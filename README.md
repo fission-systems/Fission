@@ -34,6 +34,7 @@ TODO: Add screenshot when available
 - [Comparison with Other Tools](#comparison-with-other-tools)
 - [Project Structure](#project-structure)
 - [Development Status](#development-status)
+- [Implementation Notes](#implementation-notes)
 - [Roadmap](#roadmap)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
@@ -925,6 +926,16 @@ Fission/
 
 ---
 
+## Implementation Notes
+
+The following items are either not fully implemented yet or need explicit verification:
+
+- **Multi-process decompiler pool**: The README mentions a pool, but the current implementation uses in-process FFI; the pool is deprecated.
+- **macOS debugging**: Attach/breakpoints/memory access are stubbed and require entitlements; only process listing is functional.
+- **TTD replay**: Timeline/recording exists, but full deterministic replay across platforms is not yet verified (see Advanced TTD in progress).
+
+---
+
 ## Roadmap
 
 ### Ultimate Goal: Project Restoration
@@ -1253,9 +1264,16 @@ Special thanks to all contributors and the reverse engineering community for the
 
 ## Documentation
 
-For detailed information about Fission's architecture and design:
+For detailed information about Fission:
 
-- **[Architecture Guide](docs/ARCHITECTURE.md)** - Comprehensive overview of Fission's module structure, design principles, and analysis pipeline
+- **[Architecture Guide](docs/architecture/ARCHITECTURE.md)** - Module structure, design principles, analysis pipeline
+- **[Build Guide](docs/build/BUILD.md)** - Build instructions and dependencies
+- **[GUI Guide](docs/gui/GUI_GUIDE.md)** - UI usage and workflows
+- **[CLI One-shot Mode](docs/cli/CLI_ONE_SHOT_MODE.md)** - CLI usage for batch/oneshot analysis
+- **[Decompiler Comparison](docs/decompiler/DECOMPILER_COMPARISON.md)** - Ghidra vs Fission comparison workflow
+- **[Plugin Development](docs/plugins/PLUGIN_DEVELOPMENT.md)** - Extend Fission with plugins
+- **[Constant Substitution](docs/analysis/CONSTANT_SUBSTITUTION.md)** - Analysis details
+- **[GCC FID Implementation](docs/analysis/GCC_FID_IMPLEMENTATION.md)** - Function ID implementation notes
 
 ---
 

@@ -15,6 +15,19 @@ pub mod commands_parser;
 use handlers::CliState;
 pub use commands_parser::{parse_command, Command};
 
+/// Arguments for one-shot CLI execution.
+pub struct CliRunArgs {
+    pub target_path: String,
+    pub address: Option<String>,
+    pub show_asm: bool,
+    pub list_functions: bool,
+    pub show_sections: bool,
+    pub strings_min_len: Option<usize>,
+    pub show_info: bool,
+    pub instruction_count: usize,
+    pub show_xrefs: Option<String>,
+}
+
 /// Parse address from string (supports 0x prefix and decimal)
 pub fn parse_address(addr_str: &str) -> Result<u64> {
     if let Some(hex) = addr_str.strip_prefix("0x") {
@@ -35,18 +48,20 @@ fn print_section_header(title: &str) {
 }
 
 /// Run CLI with command-line arguments (for direct decompilation)
-pub fn run_cli_with_args(
-    target_path: String,
-    address: Option<String>,
-    show_asm: bool,
-    list_functions: bool,
-    show_sections: bool,
-    strings_min_len: Option<usize>,
-    show_info: bool,
-    instruction_count: usize,
-    show_xrefs: Option<String>,
-) -> Result<()> {
+pub fn run_cli_with_args(args: CliRunArgs) -> Result<()> {
     print_banner();
+
+    let CliRunArgs {
+        target_path,
+        address,
+        show_asm,
+        list_functions,
+        show_sections,
+        strings_min_len,
+        show_info,
+        instruction_count,
+        show_xrefs,
+    } = args;
 
     let mut state = CliState::default();
     let target = PathBuf::from(target_path);

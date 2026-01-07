@@ -123,17 +123,17 @@ fn main() -> fission_core::Result<()> {
             ));
         };
         
-        cli::interactive::run_cli_with_args(
+        cli::interactive::run_cli_with_args(cli::interactive::CliRunArgs {
             target_path,
-            args.address,
-            args.asm,
-            args.list,
-            args.sections,
-            args.strings,
-            args.info,
-            args.count,
-            args.xrefs,
-        )
+            address: args.address,
+            show_asm: args.asm,
+            list_functions: args.list,
+            show_sections: args.sections,
+            strings_min_len: args.strings,
+            show_info: args.info,
+            instruction_count: args.count,
+            show_xrefs: args.xrefs,
+        })
         .map_err(|e| fission_core::errors::FissionError::Other(e.to_string()))?;
     } else {
         // GUI mode: Run GUI in main thread

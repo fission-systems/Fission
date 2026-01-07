@@ -1,7 +1,7 @@
-/// Integration module for applying optimizer to decompiler output
-/// 
-/// This module provides utilities to parse decompiled C code into AST,
-/// apply optimizations, and regenerate improved C code.
+//! Integration module for applying optimizer to decompiler output
+//!
+//! This module provides utilities to parse decompiled C code into AST,
+//! apply optimizations, and regenerate improved C code.
 
 use super::{Optimizer, OptimizerConfig, Expr, Stmt, BinOpKind, UnaryOpKind};
 
@@ -35,7 +35,6 @@ pub fn parse_c_to_ast(c_code: &str) -> Vec<Stmt> {
             if let Some(stmt) = try_parse_if(line) {
                 stmts.push(stmt);
             }
-            continue;
         }
         
         // Parse return statements
@@ -43,7 +42,6 @@ pub fn parse_c_to_ast(c_code: &str) -> Vec<Stmt> {
             if let Some(stmt) = try_parse_return(line) {
                 stmts.push(stmt);
             }
-            continue;
         }
     }
     
@@ -131,18 +129,25 @@ pub fn parse_expr(s: &str) -> Expr {
     }
     
     // Parse unary operations
-    if s.starts_with('!') {
+    if let Some(stripped) = s.strip_prefix('!') {
         return Expr::UnaryOp {
             op: UnaryOpKind::Not,
-            operand: Box::new(parse_expr(&s[1..])),
+            operand: Box::new(parse_expr(stripped)),
         };
     }
     
-    if s.starts_with('-') && s.len() > 1 && !s[1..].chars().next().unwrap().is_numeric() {
-        return Expr::UnaryOp {
-            op: UnaryOpKind::Neg,
-            operand: Box::new(parse_expr(&s[1..])),
-        };
+    if let Some(stripped) = s.strip_prefix('-') {
+        let is_number = stripped
+            .chars()
+            .next()
+            .map(|c| c.is_numeric())
+            .unwrap_or(false);
+        if !stripped.is_empty() && !is_number {
+            return Expr::UnaryOp {
+                op: UnaryOpKind::Neg,
+                operand: Box::new(parse_expr(stripped)),
+            };
+        }
     }
     
     // Parse literals

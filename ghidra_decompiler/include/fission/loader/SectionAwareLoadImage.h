@@ -48,7 +48,7 @@ class SectionAwareLoadImage : public ghidra::LoadImage {
     ghidra::AddrSpace* default_space_ = nullptr;
     
 public:
-    SectionAwareLoadImage(const std::vector<uint8_t>& file_data)
+    explicit SectionAwareLoadImage(const std::vector<uint8_t>& file_data)
         : ghidra::LoadImage("section-aware"), file_data_(file_data) {}
     
     void addSection(
@@ -94,15 +94,14 @@ public:
                 // Calculate file offset for this overlap
                 uint64_t section_offset = overlap_start - section.virtual_addr;
                 uint64_t file_off = section.file_offset + section_offset;
-                uint64_t overlap_size = overlap_end - overlap_start;
-                
                 // Only copy if within file bounds
                 if (section_offset < section.file_size) {
+                    uint64_t overlap_size = overlap_end - overlap_start;
                     uint64_t available = std::min(overlap_size, section.file_size - section_offset);
                     
                     // Copy from file
-                    uint64_t dest_offset = overlap_start - va;
                     if (file_off + available <= file_data_.size()) {
+                        uint64_t dest_offset = overlap_start - va;
                         std::memcpy(ptr + dest_offset, file_data_.data() + file_off, available);
                     }
                 }

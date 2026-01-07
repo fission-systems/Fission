@@ -43,7 +43,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> ScriptAction {
                     .small(),
             );
         });
-        return ScriptAction::None;
+        ScriptAction::None
     }
 
     #[cfg(not(target_os = "macos"))]

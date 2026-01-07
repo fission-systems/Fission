@@ -783,8 +783,8 @@ dumpbin /dependents target\release\fission.exe
 ## Related Documentation
 
 - [README.md](../README.md) - Project overview
-- [PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md) - Plugin development
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
+- [PLUGIN_DEVELOPMENT.md](../plugins/PLUGIN_DEVELOPMENT.md) - Plugin development
+- [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) - System architecture
 
 ---
 
