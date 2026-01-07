@@ -86,6 +86,9 @@ struct DecompContext {
     // FID Support - Multiple databases for better matching
     std::vector<std::unique_ptr<fission::analysis::FidDatabase>> fid_databases;
     std::unique_ptr<fission::analysis::FunctionMatcher> matcher;
+
+    // Struct type propagation across call sites
+    std::map<uint64_t, std::map<int, std::string>> struct_registry;
     
     // Thread safety
     std::mutex mutex;

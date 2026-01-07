@@ -47,6 +47,18 @@ void TypeManager::load_types_from_gdt(TypeFactory* types, const GdtBinaryParser*
 }
 
 void TypeManager::register_windows_types(TypeFactory* types, int ptr_size) {
+    auto rename_core_type = [&](int size, type_metatype meta, const char* name) {
+        if (!types) return;
+        if (types->findByName(name)) return;
+        Datatype* base = types->getBase(size, meta);
+        if (!base) return;
+        if (base->getName() == name) return;
+        types->setName(base, name);
+    };
+
+    rename_core_type(8, TYPE_INT, "longlong");
+    rename_core_type(8, TYPE_UINT, "ulonglong");
+
     // Pointers
     Datatype* void_t = types->getTypeVoid();
     Datatype* void_ptr = types->getTypePointer(ptr_size, void_t, 1);

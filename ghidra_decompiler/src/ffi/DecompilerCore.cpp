@@ -13,6 +13,10 @@
 #include "fission/types/GuidParser.h"
 #include "fission/analysis/FidDatabase.h"
 #include "fission/analysis/CallingConvDetector.h"
+#include "fission/analysis/TypePropagator.h"
+#include "fission/analysis/GlobalDataAnalyzer.h"
+#include "fission/analysis/StackFrameAnalyzer.h"
+#include "fission/types/StructureAnalyzer.h"
 #include "fission/processing/PostProcessors.h"
 #include "fission/processing/StringScanner.h"
 #include "fission/utils/file_utils.h"
@@ -37,6 +41,7 @@ using namespace fission::utils;
 // Global GUID map (loaded once)
 static std::map<std::string, std::string> g_guid_map;
 static bool g_guid_map_loaded = false;
+static constexpr size_t MAX_FUNCTION_SIZE = 10000;
 
 // ============================================================================
 // Helper Functions
@@ -74,6 +79,52 @@ static bool is_address_in_executable(const fission::ffi::DecompContext* ctx, uin
         }
     }
     return false;
+}
+
+static bool get_data_section_range(
+    const fission::ffi::DecompContext* ctx,
+    uint64_t& out_start,
+    uint64_t& out_end
+) {
+    bool found = false;
+    uint64_t start = 0;
+    uint64_t end = 0;
+
+    if (!ctx) {
+        return false;
+    }
+
+    for (const auto& block : ctx->memory_blocks) {
+        if (block.is_executable) {
+            continue;
+        }
+        uint64_t size = block.va_size > 0 ? block.va_size : block.file_size;
+        if (size == 0) {
+            continue;
+        }
+        uint64_t block_start = block.va_addr;
+        uint64_t block_end = block_start + size;
+        if (!found) {
+            start = block_start;
+            end = block_end;
+            found = true;
+        } else {
+            if (block_start < start) {
+                start = block_start;
+            }
+            if (block_end > end) {
+                end = block_end;
+            }
+        }
+    }
+
+    if (!found) {
+        return false;
+    }
+
+    out_start = start;
+    out_end = end;
+    return true;
 }
 
 static bool same_high_var(ghidra::Varnode* lhs, ghidra::Varnode* rhs) {
@@ -717,6 +768,184 @@ std::string fission::ffi::run_decompilation(DecompContext* ctx, uint64_t addr) {
             throw std::runtime_error("Unknown error during decompilation");
         }
     }
+
+    // ========================================================================
+    // Structure Recovery + Reverse Type Propagation (Ghidra-inspired)
+    // ========================================================================
+    std::string inferred_struct_defs;
+    std::map<unsigned long long, ghidra::TypeStruct*> captured_structs;
+
+    size_t func_size = fd->getSize();
+    if (func_size < MAX_FUNCTION_SIZE) {
+        fission::types::StructureAnalyzer struct_analyzer;
+        bool structs_found = struct_analyzer.analyze_function_structures(fd);
+
+        if (structs_found) {
+            std::cerr << "[DecompilerCore] Inferred structures, re-running..." << std::endl;
+            inferred_struct_defs = struct_analyzer.generate_struct_definitions();
+            captured_structs = struct_analyzer.get_inferred_structs();
+
+            fd->clear();
+            current_action->reset(*fd);
+            try {
+                current_action->perform(*fd);
+            } catch (const ghidra::LowlevelError& e) {
+                throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+            } catch (const std::exception& e) {
+                throw;
+            } catch (...) {
+                throw std::runtime_error("Unknown error during decompilation");
+            }
+
+            const ghidra::FuncProto& proto = fd->getFuncProto();
+            int num = proto.numParams();
+            for (int i = 0; i < num; ++i) {
+                ghidra::ProtoParameter* param = proto.getParam(i);
+                if (!param) continue;
+                uint64_t off = param->getAddress().getOffset();
+                if (captured_structs.count(off)) {
+                    std::string sname = captured_structs[off]->getName();
+                    ctx->struct_registry[fd->getAddress().getOffset()][i] = sname;
+                }
+            }
+        }
+    } else {
+        std::cerr << "[DecompilerCore] Skipping structure recovery (function too large: "
+                  << func_size << " bytes)" << std::endl;
+    }
+
+    // ========================================================================
+    // Global Data + Stack Frame Structure Recovery
+    // ========================================================================
+    bool rerun_for_struct_symbols = false;
+    if (func_size < MAX_FUNCTION_SIZE) {
+        // Global data structures (const/global memory)
+        {
+            fission::analysis::GlobalDataAnalyzer global_analyzer;
+            uint64_t data_start = 0;
+            uint64_t data_end = 0;
+            if (get_data_section_range(ctx, data_start, data_end)) {
+                global_analyzer.set_data_section(data_start, data_end);
+            }
+            global_analyzer.analyze_function(fd);
+            global_analyzer.infer_structures();
+            int created = global_analyzer.create_types(ctx->arch->types, ctx->arch->types->getSizeOfPointer());
+            if (created > 0) {
+                std::cerr << "[DecompilerCore] Global data structures created: "
+                          << created << std::endl;
+            }
+
+            ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
+            ghidra::AddrSpace* data_space = ctx->arch->getDefaultDataSpace();
+            if (global_scope && data_space) {
+                for (const auto& gs : global_analyzer.get_structures()) {
+                    if (gs.name.empty()) {
+                        continue;
+                    }
+                    ghidra::Datatype* dt = ctx->arch->types->findByName(gs.name);
+                    if (!dt || dt->getMetatype() != ghidra::TYPE_STRUCT) {
+                        continue;
+                    }
+                    ghidra::Address addr(data_space, gs.address);
+                    if (ghidra::SymbolEntry* entry = global_scope->findAddr(addr, fd->getAddress())) {
+                        ghidra::Symbol* sym = entry->getSymbol();
+                        if (sym) {
+                            try {
+                                global_scope->retypeSymbol(sym, dt);
+                                global_scope->setAttribute(sym, ghidra::Varnode::typelock);
+                                rerun_for_struct_symbols = true;
+                            } catch (const ghidra::RecovError&) {
+                                // ignore retype failures
+                            }
+                        }
+                        continue;
+                    }
+                    if (global_scope->addSymbol(gs.name, dt, addr, fd->getAddress())) {
+                        rerun_for_struct_symbols = true;
+                    }
+                }
+            }
+        }
+
+        // Stack frame structures
+        {
+            fission::analysis::StackFrameAnalyzer stack_analyzer(ctx->arch.get());
+            int detected = stack_analyzer.analyze(fd);
+            if (detected > 0) {
+                auto stack_structs = stack_analyzer.build_struct_map(ctx->arch->types);
+                if (!stack_structs.empty()) {
+                    ghidra::ScopeLocal* local_scope = fd->getScopeLocal();
+                    ghidra::AddrSpace* stack_space = ctx->arch->getStackSpace();
+                    if (local_scope && stack_space) {
+                        for (const auto& entry : stack_structs) {
+                            int64_t base_offset = entry.first;
+                            ghidra::TypeStruct* ts = entry.second;
+                            if (!ts) {
+                                continue;
+                            }
+                            ghidra::Address addr(
+                                stack_space,
+                                static_cast<uint64_t>(base_offset)
+                            );
+                            if (ghidra::SymbolEntry* sym_entry = local_scope->findAddr(addr, fd->getAddress())) {
+                                ghidra::Symbol* sym = sym_entry->getSymbol();
+                                if (sym) {
+                                    try {
+                                        local_scope->retypeSymbol(sym, ts);
+                                        local_scope->setAttribute(sym, ghidra::Varnode::typelock);
+                                        rerun_for_struct_symbols = true;
+                                    } catch (const ghidra::RecovError&) {
+                                        // ignore retype failures
+                                    }
+                                }
+                                continue;
+                            }
+                            if (local_scope->addSymbol(ts->getName(), ts, addr, fd->getAddress())) {
+                                rerun_for_struct_symbols = true;
+                            }
+                        }
+                    }
+                }
+
+                std::cerr << "[DecompilerCore] Stack frame structures created: "
+                          << detected << std::endl;
+            }
+        }
+    }
+
+    if (rerun_for_struct_symbols) {
+        std::cerr << "[DecompilerCore] Struct symbols applied, re-running..." << std::endl;
+        fd->clear();
+        current_action->reset(*fd);
+        try {
+            current_action->perform(*fd);
+        } catch (const ghidra::LowlevelError& e) {
+            throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+        } catch (const std::exception& e) {
+            throw;
+        } catch (...) {
+            throw std::runtime_error("Unknown error during decompilation");
+        }
+    }
+
+    fission::analysis::TypePropagator type_propagator(ctx->arch.get(), &ctx->struct_registry);
+    bool struct_changed = type_propagator.propagate_struct_types(fd);
+    if (struct_changed) {
+        std::cerr << "[DecompilerCore] Struct types propagated, re-running..." << std::endl;
+        fd->clear();
+        current_action->reset(*fd);
+        try {
+            current_action->perform(*fd);
+        } catch (const ghidra::LowlevelError& e) {
+            throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+        } catch (const std::exception& e) {
+            throw;
+        } catch (...) {
+            throw std::runtime_error("Unknown error during decompilation");
+        }
+    }
+
+    type_propagator.propagate(fd);
     
     std::cerr << "[DecompilerCore] Generating output..." << std::endl;
     
@@ -733,6 +962,13 @@ std::string fission::ffi::run_decompilation(DecompContext* ctx, uint64_t addr) {
     std::string result = ss.str();
     
     std::cerr << "[DecompilerCore] Raw output: " << result.size() << " bytes, post-processing..." << std::endl;
+
+    if (!inferred_struct_defs.empty()) {
+        std::string with_structs = fission::analysis::TypePropagator::apply_struct_types(result, fd, captured_structs);
+        if (with_structs != result) {
+            result = inferred_struct_defs + "\n" + with_structs;
+        }
+    }
     
     // ========================================================================
     // Full Post-Processing Chain
