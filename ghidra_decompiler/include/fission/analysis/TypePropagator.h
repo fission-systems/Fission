@@ -38,6 +38,9 @@ private:
     // Struct registry: function address -> (param index -> struct name)
     std::map<uint64_t, std::map<int, std::string>>* struct_registry;
     
+    // Iteration counter for type propagation (Ghidra uses max 7)
+    int local_count;
+    
     /// Get varnode unique ID for tracking
     uint64_t get_varnode_id(ghidra::Varnode* vn);
     
@@ -61,8 +64,22 @@ private:
     
     /// Propagate one varnode's type across the function (Ghidra style)
     void propagate_one_type(ghidra::Varnode* vn);
-
+    
+    /// Detect pointer usage in stack variables and apply pointer types
+    void infer_stack_pointer_types(ghidra::Funcdata* fd);
+    
+    /// Write back temporary types to permanent fields (Ghidra style)
+    bool write_back(ghidra::Funcdata* fd);
+    
 public:
+    /// Propagate call return types using FuncCallSpecs
+    void propagate_call_return_types(ghidra::Funcdata* fd);
+    
+    /// Propagate inferred types to update structure definitions
+    bool propagate_struct_types(ghidra::Funcdata* fd);
+
+    /// Maximum iterations for type propagation (from Ghidra)
+    static const int MAX_TYPE_ITERATIONS = 7;
     TypePropagator(ghidra::Architecture* arch);
     TypePropagator(ghidra::Architecture* arch, 
                    std::map<uint64_t, std::map<int, std::string>>* registry);
@@ -79,7 +96,7 @@ public:
     
     /// \brief Apply struct types from global registry
     /// Returns true if any types were changed
-    bool propagate_struct_types(ghidra::Funcdata* fd);
+    /// (duplicate declaration removed)
     
     // Static utility functions (formerly in TypeEnhancer)
     

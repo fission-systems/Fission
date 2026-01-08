@@ -1,4 +1,5 @@
 #include "fission/analysis/StackFrameAnalyzer.h"
+#include "fission/types/TypeResolver.h"
 #include "funcdata.hh"
 #include "op.hh"
 #include "varnode.hh"
@@ -165,6 +166,33 @@ void StackFrameAnalyzer::collect_stack_accesses(Funcdata* fd) {
         auto& entry = stack_accesses[offset];
         entry.first = std::max(entry.first, size);
         entry.second++;
+
+        // Check if this stack varnode holds a pointer return
+        // This handles variables that are already mapped to stack space (no longer LOAD/STORE)
+        if (size == arch->types->getSizeOfPointer() && vn->isWritten()) {
+            Varnode* current = vn;
+            int depth = 0;
+            while (current && current->isWritten() && depth < 5) {
+                PcodeOp* def = current->getDef();
+                if (!def) break;
+                
+                OpCode def_opc = def->code();
+                if (def_opc == CPUI_CALL || def_opc == CPUI_CALLIND) {
+                    pointer_fields.insert(offset);
+                    std::cerr << "[StackFrameAnalyzer] Found pointer stack var at offset " 
+                              << offset << " from CALL" << std::endl;
+                    break;
+                }
+                
+                if (def_opc == CPUI_CAST || def_opc == CPUI_COPY || 
+                    def_opc == CPUI_INT_ZEXT || def_opc == CPUI_INT_SEXT) {
+                    current = def->getIn(0);
+                    depth++;
+                } else {
+                    break;
+                }
+            }
+        }
     }
     
     list<PcodeOp*>::const_iterator iter;
@@ -190,6 +218,59 @@ void StackFrameAnalyzer::collect_stack_accesses(Funcdata* fd) {
         auto& entry = stack_accesses[offset];
         entry.first = std::max(entry.first, size);
         entry.second++;
+        
+        // Check if the loaded value is used as a pointer
+        if (opc == CPUI_LOAD) {
+            Varnode* load_out = op->getOut();
+            if (load_out && fission::types::TypeResolver::is_pointer_access(
+                    load_out, arch->types->getSizeOfPointer())) {
+                pointer_fields.insert(offset);
+            }
+        }
+        
+        if (opc == CPUI_STORE) {
+            Varnode* val = op->getIn(2);
+            if (val) {
+                std::cerr << "[StackFrameAnalyzer] STORE at " << offset 
+                          << " Size: " << val->getSize() 
+                          << " Written: " << val->isWritten() << std::endl;
+                if (val->isWritten()) {
+                    PcodeOp* d = val->getDef();
+                    if (d) std::cerr << "  Def: " << (int)d->code() << std::endl;
+                }
+            }
+            if (val && val->getSize() == arch->types->getSizeOfPointer()) {
+                // Check if value comes from a function call (likely pointer return)
+                // Trace back through CASTs, COPYs, etc.
+                Varnode* current = val;
+                int depth = 0;
+                while (current && current->isWritten() && depth < 5) {
+                    PcodeOp* def = current->getDef();
+                    if (!def) break;
+                    
+                    OpCode def_opc = def->code();
+                    if (def_opc == CPUI_CALL || def_opc == CPUI_CALLIND) {
+                        pointer_fields.insert(offset);
+                        std::cerr << "[StackFrameAnalyzer] Found pointer store at offset " 
+                                  << offset << " from CALL (depth " << depth << ")" << std::endl;
+                        break;
+                    }
+                    
+                    if (def_opc == CPUI_CAST || def_opc == CPUI_COPY || 
+                        def_opc == CPUI_INT_ZEXT || def_opc == CPUI_INT_SEXT) {
+                        current = def->getIn(0);
+                        depth++;
+                    } else {
+                        break;
+                    }
+                }
+                // Also check if value is used as pointer elsewhere
+                if (fission::types::TypeResolver::is_pointer_access(
+                        val, arch->types->getSizeOfPointer())) {
+                    pointer_fields.insert(offset);
+                }
+            }
+        }
     }
 }
 
@@ -222,6 +303,7 @@ void StackFrameAnalyzer::cluster_accesses() {
             m.size = size;
             m.name = "field_" + std::to_string(m.offset);
             m.type = nullptr;
+            m.is_pointer = (pointer_fields.count(off) > 0);
             current.members.push_back(m);
             current.size = (off - current.base_offset) + size;
         } else {
@@ -239,6 +321,7 @@ void StackFrameAnalyzer::cluster_accesses() {
             m.size = size;
             m.name = "field_0";
             m.type = nullptr;
+            m.is_pointer = (pointer_fields.count(off) > 0);
             current.members.push_back(m);
         }
     }
@@ -267,11 +350,18 @@ TypeStruct* StackFrameAnalyzer::create_struct_for_cluster(TypeFactory* tf, const
     
     // Build fields
     std::vector<TypeField> fields;
+    int ptr_size = tf->getSizeOfPointer();
     for (const auto& m : cluster.members) {
         Datatype* field_type = m.type;
         if (!field_type) {
-            // Default to unsigned of appropriate size
-            field_type = tf->getBase(m.size, TYPE_UINT);
+            if (m.is_pointer && m.size == ptr_size) {
+                // Create void* for pointer fields
+                Datatype* void_type = tf->getTypeVoid();
+                field_type = tf->getTypePointer(ptr_size, void_type, ptr_size);
+            } else {
+                // Default to unsigned of appropriate size
+                field_type = tf->getBase(m.size, TYPE_UINT);
+            }
         }
         fields.push_back(TypeField(0, m.offset, m.name, field_type));
     }
@@ -313,7 +403,8 @@ int StackFrameAnalyzer::analyze(Funcdata* fd) {
     cluster_accesses();
     
     std::cerr << "[StackFrameAnalyzer] Found " << stack_accesses.size() 
-              << " stack accesses, " << clusters.size() << " structures" << std::endl;
+              << " stack accesses, " << clusters.size() << " structures, "
+              << pointer_fields.size() << " pointer fields" << std::endl;
     
     return clusters.size();
 }
@@ -335,6 +426,7 @@ void StackFrameAnalyzer::apply_structures(TypeFactory* tf) {
 
 void StackFrameAnalyzer::clear() {
     stack_accesses.clear();
+    pointer_fields.clear();
     clusters.clear();
 }
 

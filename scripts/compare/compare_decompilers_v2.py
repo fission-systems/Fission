@@ -240,11 +240,11 @@ def compare_single(binary: Path, address: str, output_json: Path, timeout: int) 
     fission_decomp_cmd = fission_cmd + [str(binary), "--decomp", address]
 
     ghidra_full, ghidra_sec = run_command(ghidra_cmd, project_root, env, timeout)
-    fission_asm, fission_asm_sec = run_command(fission_asm_cmd, project_root, env, timeout)
+    fission_asm_raw, fission_asm_sec = run_command(fission_asm_cmd, project_root, env, timeout)
     fission_decomp_raw, fission_decomp_sec = run_command(fission_decomp_cmd, project_root, env, timeout)
 
     ghidra_full = strip_ansi(ghidra_full)
-    fission_asm = strip_fission_noise(strip_ansi(fission_asm))
+    fission_asm = strip_fission_noise(strip_ansi(fission_asm_raw))
     fission_decomp_raw = strip_ansi(fission_decomp_raw)
 
     ghidra_asm, ghidra_decomp = extract_ghidra_parts(ghidra_full)
@@ -293,6 +293,26 @@ def compare_single(binary: Path, address: str, output_json: Path, timeout: int) 
     write_text(base_path.with_name(base_path.name + "_ghidra_decomp.txt"), ghidra_decomp)
     write_text(base_path.with_name(base_path.name + "_fission_asm.txt"), fission_asm)
     write_text(base_path.with_name(base_path.name + "_fission_decomp.txt"), fission_decomp)
+
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    log_lines = [
+        f"timestamp: {timestamp}",
+        "",
+        "command: " + " ".join(ghidra_cmd),
+        "---- ghidra output ----",
+        ghidra_full,
+        "",
+        "command: " + " ".join(fission_asm_cmd),
+        "---- fission asm output ----",
+        strip_ansi(fission_asm_raw),
+        "",
+        "command: " + " ".join(fission_decomp_cmd),
+        "---- fission decomp output ----",
+        fission_decomp_raw,
+        "",
+        f"timing: ghidra={ghidra_sec:.3f}s fission_asm={fission_asm_sec:.3f}s fission_decomp={fission_decomp_sec:.3f}s",
+    ]
+    write_text(base_path.with_name(base_path.name + "_run.log"), "\n".join(log_lines))
 
     return result
 

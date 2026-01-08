@@ -15,6 +15,7 @@ struct ArchInitOptions {
     bool inject_symbols = true;
     bool register_functions = true;
     bool apply_memory_blocks = true;
+    bool register_data_symbols = true;  // FISSION IMPROVEMENT: Scan and register data section symbols
 };
 
 void initialize_architecture(fission::ffi::DecompContext* ctx);
