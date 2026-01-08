@@ -69,3 +69,4 @@ test/*_ghidra/
 
 # Backup artifacts
 *.backup
+*.cache/

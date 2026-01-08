@@ -12,7 +12,7 @@ pub(super) fn run_decompilation(
 ) -> io::Result<()> {
     // Initialize decompiler
     let sla_dir = std::env::current_dir()
-        .unwrap()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to get current directory: {}", e)))?
         .join("ghidra_decompiler")
         .to_string_lossy()
         .into_owned();
@@ -168,12 +168,12 @@ pub(super) fn run_decompilation(
     };
 
     if functions.is_empty() && cli.address.is_some() {
+        let addr = cli.address.expect("address should be Some");
         eprintln!(
             "Warning: No function found at address 0x{:x}",
-            cli.address.unwrap()
+            addr
         );
         // Try to decompile anyway
-        let addr = cli.address.unwrap();
         decompile_and_output(cli, &decomp, addr, &format!("sub_{:x}", addr))?;
         return Ok(());
     }
@@ -226,7 +226,8 @@ pub(super) fn run_decompilation(
 
     // Output results
     let final_output = if cli.json {
-        serde_json::to_string_pretty(&json_results).unwrap()
+        serde_json::to_string_pretty(&json_results)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?
     } else {
         all_output
     };
@@ -255,16 +256,13 @@ pub(super) fn decompile_and_output(
         Ok(code) => {
             let mut stdout = io::stdout().lock();
             if cli.json {
-                writeln!(
-                    stdout,
-                    "{}",
-                    serde_json::to_string_pretty(&serde_json::json!({
-                        "address": format!("0x{:x}", addr),
-                        "name": name,
-                        "code": code
-                    }))
-                    .unwrap()
-                )?;
+                let json_output = serde_json::to_string_pretty(&serde_json::json!({
+                    "address": format!("0x{:x}", addr),
+                    "name": name,
+                    "code": code
+                }))
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?;
+                writeln!(stdout, "{}", json_output)?;
             } else {
                 writeln!(stdout, "// Function: {} @ 0x{:x}\n", name, addr)?;
                 writeln!(stdout, "{}", code)?;

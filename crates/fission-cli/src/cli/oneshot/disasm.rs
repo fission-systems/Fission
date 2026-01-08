@@ -75,11 +75,9 @@ pub(super) fn disassemble(
                 })
             })
             .collect();
-        writeln!(
-            stdout,
-            "{}",
-            serde_json::to_string_pretty(&instr_json).unwrap()
-        )?;
+        let json_output = serde_json::to_string_pretty(&instr_json)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?;
+        writeln!(stdout, "{}", json_output)?;
     } else {
         writeln!(stdout, "Disassembly at 0x{:x}:", addr)?;
         writeln!(
@@ -106,14 +104,13 @@ pub(super) fn disassemble_function(
     let mut stdout = io::stdout().lock();
 
     // Find the function at this address
-    let function = binary.function_at(addr);
-    
-    if function.is_none() {
-        eprintln!("Error: No function found at address 0x{:x}", addr);
-        std::process::exit(1);
-    }
-    
-    let func = function.unwrap();
+    let func = match binary.function_at(addr) {
+        Some(f) => f,
+        None => {
+            eprintln!("Error: No function found at address 0x{:x}", addr);
+            std::process::exit(1);
+        }
+    };
     let func_start = func.address;
     let mut func_size = func.size;
     
@@ -219,11 +216,9 @@ pub(super) fn disassemble_function(
                 })
                 .collect::<Vec<_>>(),
         });
-        writeln!(
-            stdout,
-            "{}",
-            serde_json::to_string_pretty(&result).unwrap()
-        )?;
+        let json_output = serde_json::to_string_pretty(&result)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?;
+        writeln!(stdout, "{}", json_output)?;
     } else {
         if needs_boundary_detection {
             writeln!(stdout, "Function: {} at 0x{:x} (size: auto-detected)", 

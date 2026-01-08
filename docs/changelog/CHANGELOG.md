@@ -6,6 +6,68 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Code Refactoring - Phase 1 (2026-01-08)
+
+**Error Handling Improvements:**
+
+- **Removed `.unwrap()` calls** in CLI modules for safer error handling
+  - `oneshot/decompile.rs`: Replaced 5 `.unwrap()` calls with proper error propagation
+    - `std::env::current_dir()` → `.map_err()` with context
+    - Duplicate address unwraps → consolidated with `expect()`
+    - JSON serialization → `.map_err()` with descriptive errors
+  - `oneshot/disasm.rs`: Replaced 3 `.unwrap()` calls
+    - `function.unwrap()` → explicit `match` pattern with error handling
+    - JSON serialization → `.map_err()` with error context
+  - Impact: Eliminated 8 potential panic points in CLI execution paths
+  - Location: `crates/fission-cli/src/cli/oneshot/`
+
+**Architecture Improvements:**
+
+- **Handlers Module Refactoring** - Decomposed monolithic message/command processing
+  - Split `handlers.rs` (421 lines) into modular structure:
+    - `handlers/mod.rs` (100 lines) - Routing layer
+    - `handlers/message_handlers.rs` (235 lines) - 10 message handlers
+    - `handlers/command_handlers.rs` (193 lines) - 10 command handlers
+  - **Code reduction**: 76% reduction in routing layer complexity
+  - **Function decomposition**:
+    - `process_messages`: 235 lines → 46 lines (80% reduction)
+    - `process_command`: 168 lines → 30 lines (82% reduction)
+  - **Maintainability gains**:
+    - Each handler is now independently testable
+    - Clear separation of concerns (routing vs. business logic)
+    - Easier to add new message/command types
+  - Location: `crates/fission-ui/src/ui/gui/app/handlers/`
+
+**Message Handlers (10 total):**
+
+- `handle_binary_loaded()` - Binary load success processing
+- `handle_binary_load_error()` - Binary load failure handling
+- `handle_decompile_result()` - Decompilation result caching
+- `handle_decompile_error()` - Decompilation error reporting
+- `handle_file_selected()` - File selection processing
+- `handle_debug_event_wrapper()` - Debug event routing
+- `handle_fission_event()` - Internal event handling (logs, progress, selection)
+- `handle_save_snapshot()` - Snapshot persistence
+- `handle_load_snapshot()` - Snapshot restoration
+
+**Command Handlers (10 total):**
+
+- `handle_help()` - Help text display
+- `handle_list_functions()` - Function listing
+- `handle_clear()` - Console clearing
+- `handle_exit()` - Application exit
+- `handle_undo()` / `handle_redo()` - Command history
+- `handle_plugin_load()` / `handle_plugin_list()` - Plugin management
+- `handle_patch()` / `handle_rename()` - Binary modification
+- `handle_load()` - Binary loading
+- `handle_unknown()` - Unknown command handling
+
+**Testing:**
+
+- ✅ All changes compiled successfully
+- ✅ `cargo check` passed for affected crates
+- ✅ Full project build completed without errors
+
 ### Documentation & Tooling Refresh (2026-01-07)
 - **Docs reorganization**: Moved docs into category folders (architecture/build/cli/gui/decompiler/analysis/plugins) and updated cross-links
 - **Script layout cleanup**: Added category folders under `scripts/` with compatibility wrappers at the root
