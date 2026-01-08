@@ -6,6 +6,96 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Comprehensive Test Suite for Complex Patterns (2026-01-08)
+
+**🧪 New Test Infrastructure: Complex Decompilation Test Cases**
+
+Created a comprehensive test suite to validate Fission's decompilation quality across complex patterns and edge cases:
+
+**Test Categories:**
+
+**1. Control Flow (제어 흐름)**
+- `nested_loops.c`: Double/triple nested loops, labeled break (goto), while-in-for patterns
+  - Functions: `find_pair()`, `print_3d_matrix()`, `find_in_matrix()`, `complex_iteration()`
+  - Tests: break/continue handling, goto statement recovery, nested loop optimization
+  - Difficulty: ⭐⭐⭐
+
+- `switch_case.c`: Complex switch-case patterns
+  - Functions: `get_day_type()`, `calculate_score()`, `process_command()`, `parse_simple_command()`
+  - Tests: Fall-through cases, nested switches, hexadecimal case values
+  - Difficulty: ⭐⭐
+
+- `recursion.c`: Recursive function patterns
+  - Functions: `factorial()`, `fibonacci()`, `is_even()`/`is_odd()`, `ackermann()`, `sum_tree()`
+  - Tests: Simple recursion, multiple recursive calls, mutual recursion, tree traversal
+  - Difficulty: ⭐⭐⭐⭐
+
+**2. Data Structures (데이터 구조)**
+- `complex_structs.c`: Advanced structure patterns
+  - Nested structures (`Point3D`, `Line3D`, `Player`)
+  - Structures with unions (`Variant` with `ValueType` enum)
+  - Structures with function pointers (`DynamicArray` with `CompareFunc`)
+  - Doubly-linked lists (`ListNode`)
+  - Complex nested records (`ComplexRecord` with metadata)
+  - Difficulty: ⭐⭐⭐⭐
+
+**3. Pointers (포인터)**
+- `function_pointers.c`: Function pointer patterns
+  - Typedef'd function pointers (`BinaryOp`, `FilterFunc`, `EventCallback`)
+  - Function pointer arrays and selection
+  - Callback patterns and event systems
+  - Functions returning function pointers
+  - Function pointer to function pointer (`CompareFuncGetter`)
+  - Difficulty: ⭐⭐⭐⭐⭐
+
+**4. C++ Features (C++ 기능)**
+- `virtual_functions.cpp`: Virtual functions and polymorphism
+  - Pure virtual functions and abstract classes (`Shape`)
+  - Virtual destructors and method overriding
+  - Multiple inheritance (`Document : Printable, Serializable`)
+  - Virtual function calls in constructors/destructors
+  - Member function pointers (`Calculator::Operation`)
+  - Difficulty: ⭐⭐⭐⭐⭐
+
+**Build Statistics:**
+- **6 test executables** compiled with MinGW x86_64
+- **456 total functions** across all tests
+- **Size range**: 143 KB - 296 KB
+- **Build system**: Automated build scripts with colored output
+
+**Infrastructure:**
+- `build_all_tests.sh`: Automated build script for all test cases
+- `extract_functions.sh`: Extracts function addresses using objdump
+- `run_tests.sh`: Test execution framework (Wine support)
+- `README_TESTS.md`: Comprehensive test documentation
+- `test_summary.md`: Quick reference guide
+
+**Files Created:**
+```
+test/
+├── control_flow/          (3 C files)
+├── data_structures/       (1 C file)
+├── pointers/              (1 C file)
+├── cpp_features/          (1 C++ file)
+├── bin_x64/               (6 executables)
+├── addresses/             (6 address files)
+└── *.sh, *.md            (documentation & scripts)
+```
+
+**Expected Use Cases:**
+1. **Regression Testing**: Ensure decompiler improvements don't break existing functionality
+2. **Edge Case Discovery**: Identify limitations and improvement areas
+3. **Benchmarking**: Measure similarity against Ghidra on complex patterns
+4. **Feature Validation**: Verify handling of advanced C/C++ features
+
+**Next Steps:**
+- Run comparison benchmarks on all test cases
+- Analyze similarity scores by category
+- Document edge cases and limitations
+- Prioritize improvements based on test results
+
+---
+
 ### Decompiler Quality Improvements - Ghidra Parity Achieved (2026-01-08)
 
 **🎉 Critical Achievement: 97.86% Similarity with Ghidra**
