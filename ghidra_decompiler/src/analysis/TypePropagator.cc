@@ -1,4 +1,6 @@
 #include "fission/analysis/TypePropagator.h"
+#include "fission/analysis/StackFrameAnalyzer.h"
+#include "fission/types/TypeResolver.h"
 #include "fission/core/ArchPolicy.h"
 #include "database.hh"
 #include "funcdata.hh"
@@ -14,10 +16,143 @@ namespace analysis {
 
 using namespace ghidra;
 
-TypePropagator::TypePropagator(Architecture* a) : arch(a), struct_registry(nullptr) {}
+namespace {
+
+bool is_pointer_type(Datatype* type) {
+    return type && type->getMetatype() == TYPE_PTR;
+}
+
+bool get_signed_offset(ghidra::Varnode* vn, int64_t& out) {
+    if (!vn || !vn->isConstant()) {
+        return false;
+    }
+    int size = vn->getSize();
+    if (size <= 0) {
+        return false;
+    }
+    int bits = (size * 8) - 1;
+    ghidra::intb raw = static_cast<ghidra::intb>(vn->getOffset());
+    out = static_cast<int64_t>(ghidra::sign_extend(raw, bits));
+    return true;
+}
+
+bool is_stack_base(ghidra::Varnode* vn, ghidra::AddrSpace* stack_space) {
+    if (!vn || !stack_space) return false;
+    if (vn->getSpace() == stack_space) return true;
+    if (vn->isInput() && vn->getSpace()->getName() == "register") return true;
+    return false;
+}
+
+int64_t normalize_stack_offset(ghidra::AddrSpace* stack_space, uint64_t offset) {
+    if (!stack_space) {
+        return static_cast<int64_t>(offset);
+    }
+    int bytes = stack_space->getAddrSize();
+    if (bytes <= 0) {
+        return static_cast<int64_t>(offset);
+    }
+    int bits = (bytes * 8) - 1;
+    ghidra::intb raw = static_cast<ghidra::intb>(offset);
+    return static_cast<int64_t>(ghidra::sign_extend(raw, bits));
+}
+
+bool resolve_stack_offset(
+    ghidra::Varnode* vn,
+    ghidra::AddrSpace* stack_space,
+    int64_t& offset,
+    int depth = 6
+) {
+    if (!vn || depth <= 0) {
+        return false;
+    }
+    if (is_stack_base(vn, stack_space)) {
+        if (vn->getSpace() == stack_space) {
+            offset += static_cast<int64_t>(vn->getOffset());
+        }
+        return true;
+    }
+    if (!vn->isWritten()) {
+        return false;
+    }
+    ghidra::PcodeOp* def = vn->getDef();
+    if (!def) {
+        return false;
+    }
+
+    switch (def->code()) {
+        case ghidra::CPUI_COPY:
+        case ghidra::CPUI_CAST:
+        case ghidra::CPUI_INT_ZEXT:
+        case ghidra::CPUI_INT_SEXT:
+            return resolve_stack_offset(def->getIn(0), stack_space, offset, depth - 1);
+        case ghidra::CPUI_PTRSUB: {
+            ghidra::Varnode* base = def->getIn(0);
+            int64_t off = 0;
+            if (!get_signed_offset(def->getIn(1), off)) {
+                return false;
+            }
+            offset += off;
+            return resolve_stack_offset(base, stack_space, offset, depth - 1);
+        }
+        case ghidra::CPUI_PTRADD: {
+            ghidra::Varnode* base = def->getIn(0);
+            int64_t idx = 0;
+            int64_t elem = 0;
+            if (!get_signed_offset(def->getIn(1), idx)) {
+                return false;
+            }
+            if (!get_signed_offset(def->getIn(2), elem)) {
+                return false;
+            }
+            offset += idx * elem;
+            return resolve_stack_offset(base, stack_space, offset, depth - 1);
+        }
+        case ghidra::CPUI_INT_ADD: {
+            int64_t off = 0;
+            ghidra::Varnode* lhs = def->getIn(0);
+            ghidra::Varnode* rhs = def->getIn(1);
+            if (get_signed_offset(lhs, off)) {
+                offset += off;
+                return resolve_stack_offset(rhs, stack_space, offset, depth - 1);
+            }
+            if (get_signed_offset(rhs, off)) {
+                offset += off;
+                return resolve_stack_offset(lhs, stack_space, offset, depth - 1);
+            }
+            return false;
+        }
+        case ghidra::CPUI_INT_SUB: {
+            int64_t off = 0;
+            ghidra::Varnode* lhs = def->getIn(0);
+            ghidra::Varnode* rhs = def->getIn(1);
+            if (get_signed_offset(rhs, off)) {
+                offset -= off;
+                return resolve_stack_offset(lhs, stack_space, offset, depth - 1);
+            }
+            return false;
+        }
+        case ghidra::CPUI_MULTIEQUAL:
+        case ghidra::CPUI_INDIRECT: {
+            for (int slot = 0; slot < def->numInput(); ++slot) {
+                int64_t candidate = offset;
+                if (resolve_stack_offset(def->getIn(slot), stack_space, candidate, depth - 1)) {
+                    offset = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+        default:
+            return false;
+    }
+}
+
+} // namespace
+
+TypePropagator::TypePropagator(Architecture* a) : arch(a), struct_registry(nullptr), local_count(0) {}
 
 TypePropagator::TypePropagator(Architecture* a, std::map<uint64_t, std::map<int, std::string>>* registry) 
-    : arch(a), struct_registry(registry) {}
+    : arch(a), struct_registry(registry), local_count(0) {}
 
 TypePropagator::~TypePropagator() {}
 
@@ -458,11 +593,26 @@ void TypePropagator::build_local_types(Funcdata* fd) {
 
 int TypePropagator::propagate(Funcdata* fd) {
     if (!fd) return 0;
-    
-    clear();
+
+    // Prevent infinite loops (Ghidra uses max 7 iterations)
+    if (local_count >= MAX_TYPE_ITERATIONS) {
+        if (local_count == MAX_TYPE_ITERATIONS) {
+            std::cerr << "[TypePropagator] Type propagation not settling after "
+                      << MAX_TYPE_ITERATIONS << " iterations" << std::endl;
+            local_count++;
+        }
+        return 0;
+    }
+
     int count = 0;
-    
-    // Phase 1: Find all CALL operations
+
+    // Phase 1: Build local types from PcodeOp context (Ghidra style)
+    build_local_types(fd);
+
+    // Phase 2: Propagate call return types using FuncCallSpecs
+    propagate_call_return_types(fd);
+
+    // Phase 3: Find all CALL operations and propagate from them
     list<PcodeOp*>::const_iterator iter;
     for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
         PcodeOp* op = *iter;
@@ -472,30 +622,32 @@ int TypePropagator::propagate(Funcdata* fd) {
         }
     }
 
-    build_local_types(fd);
-    
-    // Phase 2: Edge-based propagation for all varnodes with types
+    // Phase 4: Edge-based propagation for all varnodes (Ghidra style)
     VarnodeLocSet::const_iterator vn_iter;
     for (vn_iter = fd->beginLoc(); vn_iter != fd->endLoc(); ++vn_iter) {
         Varnode* vn = *vn_iter;
         if (vn->isAnnotation()) continue;
         if (!vn->isWritten() && vn->hasNoDescend()) continue;
-        
-        // Check if this varnode has an inferred type
-        uint64_t vid = get_varnode_id(vn);
-        if (inferred_types.find(vid) != inferred_types.end()) {
-            propagate_one_type(vn);
-        }
+        propagate_one_type(vn);
     }
-    
-    // Phase 3: Apply inferred types
+
+    // Phase 5: Infer pointer types for stack variables
+    infer_stack_pointer_types(fd);
+
+    // Phase 6: Write back and check for changes (Ghidra style)
+    bool changed = write_back(fd);
+
+    // Phase 7: Apply inferred types
     if (!inferred_types.empty()) {
         apply_inferred_types(fd);
     }
-    
-    std::cerr << "[TypePropagator] Analyzed " << count << " calls, inferred " 
-              << inferred_types.size() << " types" << std::endl;
-    
+
+    // Recurse if types changed (iterative propagation)
+    if (changed) {
+        local_count++;
+        return propagate(fd);
+    }
+
     return inferred_types.size();
 }
 
@@ -509,60 +661,325 @@ Datatype* TypePropagator::get_type(Varnode* vn) {
 void TypePropagator::clear() {
     inferred_types.clear();
     processed.clear();
+    local_count = 0;
+}
+
+void TypePropagator::infer_stack_pointer_types(Funcdata* fd) {
+    if (!fd) return;
+    
+    TypeFactory* tf = arch->types;
+    if (!tf) return;
+    
+    int ptr_size = fission::core::ArchPolicy::getPointerSize(arch);
+    int pointer_types_applied = 0;
+    
+    // Iterate through all varnodes looking for pointer-sized stack variables
+    VarnodeLocSet::const_iterator iter;
+    for (iter = fd->beginLoc(); iter != fd->endLoc(); ++iter) {
+        Varnode* vn = *iter;
+        if (!vn) continue;
+        if (vn->isAnnotation()) continue;
+        if (vn->isTypeLock()) continue;  // Skip if type is already locked
+        if (vn->isConstant()) continue;  // Skip constants
+        
+        // Only check pointer-sized varnodes
+        if ((int)vn->getSize() != ptr_size) continue;
+        
+        // Conservative pointer detection: only check LOAD/STORE dereferencing
+        bool is_dereferenced = false;
+        
+        auto desc_iter = vn->beginDescend();
+        auto desc_end = vn->endDescend();
+        
+        for (; desc_iter != desc_end; ++desc_iter) {
+            PcodeOp* use_op = *desc_iter;
+            if (!use_op) continue;
+            
+            OpCode code = use_op->code();
+            
+            // LOAD(space, ptr) - ptr is input(1), value is dereferenced
+            if (code == CPUI_LOAD && use_op->getIn(1) == vn) {
+                is_dereferenced = true;
+                break;
+            }
+            
+            // STORE(space, ptr, val) - ptr is input(1), value is dereferenced
+            if (code == CPUI_STORE && use_op->getIn(1) == vn) {
+                is_dereferenced = true;
+                break;
+            }
+            
+            // PTRSUB/PTRADD operations indicate pointer arithmetic
+            if (code == CPUI_PTRSUB || code == CPUI_PTRADD) {
+                if (use_op->getIn(0) == vn) {
+                    is_dereferenced = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!is_dereferenced) continue;
+        
+        // Get current type
+        Datatype* current_type = vn->getType();
+        if (current_type && current_type->getMetatype() == TYPE_PTR) continue;  // Already a pointer
+        
+        // Check if it's an integer type that should be a pointer
+        if (current_type) {
+            type_metatype meta = current_type->getMetatype();
+            if (meta != TYPE_INT && meta != TYPE_UINT && meta != TYPE_UNKNOWN) continue;
+        }
+        
+        // Create void* type
+        Datatype* void_type = tf->getTypeVoid();
+        Datatype* void_ptr = tf->getTypePointer(ptr_size, void_type, ptr_size);
+        
+        if (void_ptr) {
+            // Store inferred type
+            uint64_t vid = get_varnode_id(vn);
+            inferred_types[vid] = void_ptr;
+            
+            // Also set temp type for propagation
+            vn->setTempType(void_ptr);
+            pointer_types_applied++;
+        }
+    }
+    
+    if (pointer_types_applied > 0) {
+        std::cerr << "[TypePropagator] Inferred " << pointer_types_applied 
+                  << " pointer types from usage analysis" << std::endl;
+    }
 }
 
 bool TypePropagator::propagate_struct_types(Funcdata* fd) {
-    if (!fd || !struct_registry || struct_registry->empty()) return false;
-    
+    if (!fd || !arch || !arch->types) return false;
+
     bool changed = false;
     TypeFactory* tf = arch->types;
     if (!tf) return false;
     int ptr_size = fission::core::ArchPolicy::getPointerSize(arch);
-    
-    // Scan all CALL operations
-    list<PcodeOp*>::const_iterator iter;
-    for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
-        PcodeOp* op = *iter;
-        if (!op || op->code() != CPUI_CALL) continue;
-        
-        Varnode* target = op->getIn(0);
-        if (!target || !target->isConstant()) continue;
-        
-        uint64_t callee_addr = target->getOffset();
-        
-        // Check if this function has registered struct parameters
-        if (struct_registry->count(callee_addr)) {
-            const auto& params_map = struct_registry->at(callee_addr);
-            
-            // Apply struct types to each argument
-            int num_inputs = op->numInput();
-            for (int i = 1; i < num_inputs; ++i) {
-                int param_index = i - 1;
-                if (params_map.count(param_index)) {
-                    std::string struct_name = params_map.at(param_index);
-                    
-                    // Find struct type by name
-                    Datatype* type = tf->findByName(struct_name);
-                    if (type) {
-                        // Create pointer to struct
-                        Datatype* ptr_type = tf->getTypePointer(ptr_size, type, ptr_size);
-                        
-                        Varnode* arg = op->getIn(i);
-                        if (arg) {
-                            // Force update with type lock
-                            arg->updateType(ptr_type, true, true);
-                            changed = true;
-                            
-                            std::cerr << "[TypePropagator] Applied " << struct_name 
-                                      << "* to arg " << i << " of call to 0x" 
-                                      << std::hex << callee_addr << std::dec << std::endl;
+
+    // Seed call return types early so stack struct updates can see pointer returns.
+    propagate_call_return_types(fd);
+
+    if (struct_registry && !struct_registry->empty()) {
+        // Scan all CALL operations (struct_registry -> call args)
+        list<PcodeOp*>::const_iterator iter;
+        for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
+            PcodeOp* op = *iter;
+            if (!op || op->code() != CPUI_CALL) continue;
+
+            Varnode* target = op->getIn(0);
+            if (!target || !target->isConstant()) continue;
+
+            uint64_t callee_addr = target->getOffset();
+
+            // Check if this function has registered struct parameters
+            if (struct_registry->count(callee_addr)) {
+                const auto& params_map = struct_registry->at(callee_addr);
+
+                // Apply struct types to each argument
+                int num_inputs = op->numInput();
+                for (int i = 1; i < num_inputs; ++i) {
+                    int param_index = i - 1;
+                    if (params_map.count(param_index)) {
+                        std::string struct_name = params_map.at(param_index);
+
+                        // Find struct type by name
+                        Datatype* type = tf->findByName(struct_name);
+                        if (type) {
+                            // Create pointer to struct
+                            Datatype* ptr_type = tf->getTypePointer(ptr_size, type, ptr_size);
+
+                            Varnode* arg = op->getIn(i);
+                            if (arg) {
+                                // Force update with type lock
+                                arg->updateType(ptr_type, true, true);
+                                changed = true;
+
+                                std::cerr << "[TypePropagator] Applied " << struct_name
+                                          << "* to arg " << i << " of call to 0x"
+                                          << std::hex << callee_addr << std::dec << std::endl;
+                            }
                         }
                     }
                 }
             }
         }
     }
-    
+
+    // Stack struct field updates based on inferred pointer origins.
+    AddrSpace* stack_space = arch->getStackSpace();
+    if (!stack_space) return changed;
+
+    auto value_is_pointer = [&](Varnode* vn, const PcodeOp* read_op, int depth, auto&& self_ref) -> bool {
+        if (!vn || depth <= 0) return false;
+
+        auto type_label = [](Datatype* type) -> std::string {
+            return type ? type->getName() : "null";
+        };
+
+        Datatype* inferred = get_type(vn);
+        Datatype* temp_type = vn->getTempType();
+        Datatype* base_type = vn->getType();
+        Datatype* high_read = nullptr;
+        Datatype* high_def = nullptr;
+
+        // Safely access high variable types with exception handling
+        // getHigh() may return non-null but the high variable may not be fully initialized
+        try {
+            if (vn->getHigh()) {
+                if (read_op) {
+                    int slot = read_op->getSlot(vn);
+                    if (slot >= 0 && slot < read_op->numInput()) {
+                        high_read = vn->getHighTypeReadFacing(read_op);
+                    }
+                }
+                if (vn->isWritten()) {
+                    high_def = vn->getHighTypeDefFacing();
+                }
+            }
+        } catch (const LowlevelError&) {
+            // High variable not fully initialized, skip high type checks
+            high_read = nullptr;
+            high_def = nullptr;
+        } catch (...) {
+            high_read = nullptr;
+            high_def = nullptr;
+        }
+
+        if (read_op && read_op->code() == CPUI_STORE) {
+            std::cerr << "[TypePropagator] STORE value types: temp=" << type_label(temp_type)
+                      << " base=" << type_label(base_type)
+                      << " inferred=" << type_label(inferred)
+                      << " high_read=" << type_label(high_read)
+                      << " high_def=" << type_label(high_def)
+                      << " size=" << vn->getSize() << std::endl;
+        }
+
+        if (is_pointer_type(inferred) || is_pointer_type(temp_type) || is_pointer_type(base_type) ||
+            is_pointer_type(high_read) || is_pointer_type(high_def)) {
+            if (read_op && read_op->code() == CPUI_STORE) {
+                std::cerr << "[TypePropagator] STORE value pointer hit (direct)" << std::endl;
+            }
+            return true;
+        }
+
+        if (!vn->isWritten()) return false;
+        PcodeOp* def = vn->getDef();
+        if (!def) return false;
+
+        OpCode opc = def->code();
+        if (opc == CPUI_CALL || opc == CPUI_CALLIND) {
+            FuncCallSpecs* fc = fd->getCallSpecs(def);
+            Datatype* ret = fc ? fc->getOutputType() : nullptr;
+            bool is_ptr = is_pointer_type(ret);
+            std::cerr << "[TypePropagator] CALL value types: ret=" << type_label(ret)
+                      << " ptr=" << (is_ptr ? "yes" : "no") << std::endl;
+            return is_ptr;
+        }
+
+        switch (opc) {
+            case CPUI_COPY:
+            case CPUI_CAST:
+            case CPUI_INT_ZEXT:
+            case CPUI_INT_SEXT:
+            case CPUI_SUBPIECE:
+                return self_ref(def->getIn(0), def, depth - 1, self_ref);
+            case CPUI_MULTIEQUAL:
+            case CPUI_INDIRECT: {
+                for (int slot = 0; slot < def->numInput(); ++slot) {
+                    if (self_ref(def->getIn(slot), def, depth - 1, self_ref)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            default:
+                return false;
+        }
+    };
+
+    std::set<int64_t> pointer_offsets;
+
+    // STORE-based pointer detection (covers casted values)
+    for (auto iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
+        PcodeOp* op = *iter;
+        if (!op || op->code() != CPUI_STORE) continue;
+
+        Varnode* addr_vn = op->getIn(1);
+        int64_t offset = 0;
+        if (!resolve_stack_offset(addr_vn, stack_space, offset)) {
+            continue;
+        }
+
+        Varnode* val = op->getIn(2);
+        if (val && value_is_pointer(val, op, 6, value_is_pointer)) {
+            pointer_offsets.insert(offset);
+        }
+    }
+
+    // Varnode-based pointer detection (already mapped to stack space)
+    for (auto iter = fd->beginLoc(); iter != fd->endLoc(); ++iter) {
+        Varnode* vn = *iter;
+        if (!vn || vn->isAnnotation() || vn->isConstant()) continue;
+        if (vn->getSpace() != stack_space) continue;
+
+        int64_t offset = normalize_stack_offset(stack_space, vn->getOffset());
+        if (value_is_pointer(vn, nullptr, 6, value_is_pointer)) {
+            pointer_offsets.insert(offset);
+        }
+    }
+
+    if (pointer_offsets.empty()) return changed;
+
+    StackFrameAnalyzer stack_analyzer(arch);
+    int detected = stack_analyzer.analyze(fd);
+    if (detected <= 0) return changed;
+
+    Datatype* void_type = tf->getTypeVoid();
+    Datatype* void_ptr = tf->getTypePointer(ptr_size, void_type, ptr_size);
+    if (!void_ptr) return changed;
+
+    for (const auto& cluster : stack_analyzer.get_clusters()) {
+        Datatype* existing = tf->findByName(cluster.inferred_name);
+        if (!existing || existing->getMetatype() != TYPE_STRUCT) {
+            continue;
+        }
+
+        TypeStruct* ts = static_cast<TypeStruct*>(existing);
+        int struct_size = ts->getSize();
+        bool struct_changed = false;
+        std::vector<TypeField> fields;
+
+        for (auto it = ts->beginField(); it != ts->endField(); ++it) {
+            Datatype* field_type = it->type;
+            int64_t abs_off = cluster.base_offset + it->offset;
+            bool should_pointer = pointer_offsets.count(abs_off) > 0;
+
+            if (should_pointer && (!field_type || !is_pointer_type(field_type))) {
+                int field_size = field_type ? field_type->getSize() : 0;
+                if (field_size == ptr_size) {
+                    field_type = void_ptr;
+                    struct_changed = true;
+                }
+            }
+
+            fields.push_back(TypeField(0, it->offset, it->name, field_type));
+        }
+
+        if (struct_changed) {
+            // Only try to set fields if the structure supports modification
+            // Ghidra's TypeFactory only allows setFields on incomplete structures
+            try {
+                tf->setFields(fields, ts, struct_size, 0, 0);
+                changed = true;
+            } catch (const LowlevelError&) {
+                // Structure is already complete, cannot modify fields - this is not fatal
+            }
+        }
+    }
+
     return changed;
 }
 
@@ -638,6 +1055,163 @@ std::string TypePropagator::get_fid_filename(bool is_64bit, const std::string& c
         fid_filename = "vs2012" + suffix;
     
     return fid_filename;
+}
+
+bool TypePropagator::write_back(Funcdata* fd) {
+    if (!fd) return false;
+    
+    bool change = false;
+    VarnodeLocSet::const_iterator iter;
+    
+    for (iter = fd->beginLoc(); iter != fd->endLoc(); ++iter) {
+        Varnode* vn = *iter;
+        if (vn->isAnnotation()) continue;
+        if (!vn->isWritten() && vn->hasNoDescend()) continue;
+        
+        Datatype* ct = vn->getTempType();
+        if (!ct) continue;
+        
+        // Compare with current type and update if temp type is better
+        Datatype* current = vn->getType();
+        if (current == ct) continue;
+        
+        // Check type ordering (Ghidra's typeOrder)
+        // 0 means same, < 0 means ct is more specific
+        if (ct != current) {
+            // Update varnode type
+            if (vn->updateType(ct)) {
+                change = true;
+            }
+        }
+    }
+    
+    return change;
+}
+
+void TypePropagator::propagate_call_return_types(Funcdata* fd) {
+    if (!fd) return;
+    
+    TypeFactory* tf = arch->types;
+    if (!tf) return;
+    
+    int ptr_size = fission::core::ArchPolicy::getPointerSize(arch);
+    int types_set = 0;
+    
+    // Scan all CALL and CALLIND operations
+    list<PcodeOp*>::const_iterator iter;
+    for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
+        PcodeOp* op = *iter;
+        if (!op) continue;
+        
+        OpCode opc = op->code();
+        if (opc != CPUI_CALL && opc != CPUI_CALLIND) continue;
+        
+        Varnode* output = op->getOut();
+        if (!output) continue;
+        
+        // Get FuncCallSpecs for this call
+        FuncCallSpecs* fc = fd->getCallSpecs(op);
+        if (!fc) continue;
+        
+        // Check if output type is already locked with a valid pointer type
+        std::string func_name_dbg = fc->getName();
+        bool should_apply_heuristic = true;
+        
+        if (fc->isOutputLocked()) {
+            Datatype* retType = fc->getOutputType();
+            std::cerr << "[TypePropagator] " << func_name_dbg << " output locked, type=" 
+                      << (retType ? retType->getName() : "null") 
+                      << ", meta=" << (retType ? (int)retType->getMetatype() : -1) << std::endl;
+            // Only skip heuristic if already a pointer type
+            if (retType && retType->getMetatype() == TYPE_PTR) {
+                output->setTempType(retType);
+                uint64_t vid = get_varnode_id(output);
+                inferred_types[vid] = retType;
+                types_set++;
+                should_apply_heuristic = false;  // Already has pointer type
+            }
+        }
+        
+        // Apply heuristic if no valid type was found
+        if (!should_apply_heuristic) {
+            std::cerr << "Skipping heuristic for " << func_name_dbg << " (already valid)" << std::endl;
+            continue;
+        }
+        
+        std::cerr << "Proceeding to heuristic for " << func_name_dbg << std::endl;
+        
+        // For non-locked prototypes, check if called function returns pointer
+        // (heuristic: functions named *alloc*, *create*, *new*, etc.)
+        std::cerr << "[TypePropagator] Checking " << func_name_dbg 
+                  << ", output_size=" << output->getSize() 
+                  << ", ptr_size=" << ptr_size << std::endl;
+        if (output->getSize() == ptr_size) {
+            std::string func_name = fc->getName();
+            
+            // Normalize to lowercase for matching
+            std::string lower_name;
+            for (char c : func_name) {
+                lower_name += std::tolower(c);
+            }
+            
+            // Check for allocator-like names
+            bool is_allocator = false;
+            if (lower_name.find("malloc") != std::string::npos ||
+                lower_name.find("calloc") != std::string::npos ||
+                lower_name.find("realloc") != std::string::npos ||
+                lower_name.find("alloc") != std::string::npos ||
+                lower_name.find("create") != std::string::npos ||
+                lower_name.find("new") != std::string::npos ||
+                lower_name.find("open") != std::string::npos) {
+                is_allocator = true;
+                std::cerr << "[TypePropagator] Matched allocator-like function: " 
+                          << func_name << std::endl;
+            }
+            
+            if (is_allocator) {
+                // Create void* type
+                Datatype* void_type = tf->getTypeVoid();
+                Datatype* void_ptr = tf->getTypePointer(ptr_size, void_type, ptr_size);
+                
+                if (void_ptr) {
+                    // Set temp type on varnode
+                    output->setTempType(void_ptr);
+                    uint64_t vid = get_varnode_id(output);
+                    inferred_types[vid] = void_ptr;
+                    
+                    // IMPORTANT: Lock the return type in FuncCallSpecs
+                    // This ensures the type persists across rerun_action
+                    try {
+                        // Get output parameter and lock its type
+                        ProtoParameter* outparam = fc->getOutput();
+                        if (outparam && !outparam->isTypeLocked()) {
+                            // Create ParameterPieces for the output
+                            ParameterPieces piece;
+                            piece.type = void_ptr;
+                            piece.addr = outparam->getAddress();
+                            piece.flags = 0;
+                            
+                            fc->setOutput(piece);
+                            fc->setOutputLock(true);
+                            
+                            std::cerr << "[TypePropagator] Locked return type to void* for: " 
+                                      << func_name << std::endl;
+                        }
+                    } catch (...) {
+                        // FuncCallSpecs may not support direct modification
+                        // Fall back to just setting temp type
+                    }
+                    
+                    types_set++;
+                }
+            }
+        }
+    }
+    
+    if (types_set > 0) {
+        std::cerr << "[TypePropagator] Set " << types_set 
+                  << " return types from FuncCallSpecs" << std::endl;
+    }
 }
 
 } // namespace analysis

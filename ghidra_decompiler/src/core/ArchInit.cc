@@ -15,6 +15,13 @@
 #include <algorithm>
 #include <iostream>
 
+// Forward declaration for data symbol registration
+namespace fission {
+namespace core {
+    void registerDataSectionSymbols(fission::ffi::DecompContext* ctx);
+}
+}
+
 namespace fission {
 namespace core {
 
@@ -256,6 +263,12 @@ void initialize_architecture(DecompContext* ctx, const ArchInitOptions& options)
             apply_memory_block_readonly(ctx);
         }
         log_memory_blocks(ctx);
+    }
+
+    // FISSION IMPROVEMENT: Register data section symbols (floating-point constants, etc.)
+    // This enables proper type propagation through memory loads
+    if (options.register_data_symbols && !ctx->binary_data.empty()) {
+        registerDataSectionSymbols(ctx);
     }
 
     std::cerr << "[DecompilerCore] Architecture initialized: " << sleigh_id << std::endl;

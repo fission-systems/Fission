@@ -35,6 +35,7 @@ std::string recover_unicode_strings(const std::string& code);
 std::string replace_interlocked_patterns(const std::string& code);
 
 // Replace xunknown/undefined types with standard Windows types  
+std::string standardize_variable_names(const std::string& code);
 std::string replace_xunknown_types(const std::string& code);
 
 // Clean up SEH boilerplate (FS_OFFSET, iRam/pcRam naming)

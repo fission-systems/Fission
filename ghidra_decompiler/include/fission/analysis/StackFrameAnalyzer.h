@@ -4,6 +4,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <set>
 
 namespace ghidra {
     class Funcdata;
@@ -27,6 +28,7 @@ struct StackCluster {
         int size;                   ///< Size of access
         std::string name;           ///< Variable name if known
         ghidra::Datatype* type;     ///< Inferred type
+        bool is_pointer;            ///< Whether this field is used as pointer
     };
     std::vector<Member> members;
 };
@@ -40,6 +42,9 @@ private:
     
     // Stack access tracking: offset -> (size, count)
     std::map<int64_t, std::pair<int, int>> stack_accesses;
+    
+    // Offsets that are used as pointers
+    std::set<int64_t> pointer_fields;
     
     // Detected clusters
     std::vector<StackCluster> clusters;

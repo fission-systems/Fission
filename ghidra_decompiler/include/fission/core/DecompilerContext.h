@@ -37,6 +37,15 @@ public:
     // FID-resolved function names (address -> name)
     std::map<uint64_t, std::string> fid_function_names;
     
+    // FISSION IMPROVEMENT: Cached data section symbols (address -> (name, type_size, type_meta))
+    struct DataSymbolInfo {
+        std::string name;
+        int size;          // 4 for float, 8 for double
+        int type_meta;     // TYPE_FLOAT, etc.
+    };
+    std::map<uint64_t, DataSymbolInfo> data_section_symbols;
+    bool data_symbols_scanned = false;
+    
     DecompilerContext();
     ~DecompilerContext();
     

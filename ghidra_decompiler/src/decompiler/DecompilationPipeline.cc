@@ -9,6 +9,7 @@
 #include "fission/loader/BinaryDetector.h"
 #include "fission/loader/PeHeader.h"
 #include "fission/loader/SymbolLoader.h"
+#include "fission/loaders/DataSectionScanner.h"
 #include "fission/types/RttiAnalyzer.h"
 #include "fission/types/StructureAnalyzer.h"
 #include "fission/types/PatternLoader.h"
@@ -23,6 +24,8 @@
 #include "fission/analysis/GlobalDataAnalyzer.h"
 #include "fission/analysis/EmulationAnalyzer.h"
 #include "libdecomp.hh"
+#include "database.hh"
+#include "type.hh"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -330,6 +333,173 @@ std::string DecompilationPipeline::handle_load_bin(
         // Phase 9: Setup Architecture
         std::cerr << "[fission_decomp] Debug: Creating Loader and Arch..." << std::endl;
         state.setup_architecture(true, bin_bytes, image_base, compiler_id);
+        
+        // FISSION IMPROVEMENT: Phase 9.5: Scan data sections for floating-point constants
+        std::cerr << "[fission_decomp] Debug: Scanning data sections for constants..." << std::endl;
+        
+        // Simple PE section parsing (inline)
+        struct SimplePeSection {
+            std::string name;
+            uint64_t va_addr;
+            uint32_t file_offset;
+            uint32_t file_size;
+        };
+        
+        std::vector<SimplePeSection> data_sections;
+        
+        if (is_pe && bin_bytes.size() > 0x200) {
+            // Quick PE section extraction
+            // DOS header check
+            if (bin_bytes[0] == 'M' && bin_bytes[1] == 'Z') {
+                uint32_t pe_offset = *reinterpret_cast<const uint32_t*>(&bin_bytes[0x3C]);
+                if (pe_offset + 0x200 < bin_bytes.size()) {
+                    // PE header check
+                    if (bin_bytes[pe_offset] == 'P' && bin_bytes[pe_offset+1] == 'E') {
+                        // Number of sections
+                        uint16_t num_sections = *reinterpret_cast<const uint16_t*>(&bin_bytes[pe_offset + 6]);
+                        uint16_t optional_header_size = *reinterpret_cast<const uint16_t*>(&bin_bytes[pe_offset + 20]);
+                        
+                        // Section table starts after optional header
+                        uint32_t section_table_offset = pe_offset + 24 + optional_header_size;
+                        
+                        std::cerr << "[fission_decomp] PE has " << num_sections << " sections" << std::endl;
+                        
+                        for (int i = 0; i < num_sections && i < 64; i++) {
+                            uint32_t section_offset = section_table_offset + i * 40;
+                            if (section_offset + 40 > bin_bytes.size()) break;
+                            
+                            // Section name (8 bytes)
+                            char name_buf[9] = {0};
+                            memcpy(name_buf, &bin_bytes[section_offset], 8);
+                            std::string section_name(name_buf);
+                            
+                            // Read section header fields
+                            uint32_t virtual_size = *reinterpret_cast<const uint32_t*>(&bin_bytes[section_offset + 8]);
+                            uint32_t virtual_addr = *reinterpret_cast<const uint32_t*>(&bin_bytes[section_offset + 12]);
+                            uint32_t raw_size = *reinterpret_cast<const uint32_t*>(&bin_bytes[section_offset + 16]);
+                            uint32_t raw_offset = *reinterpret_cast<const uint32_t*>(&bin_bytes[section_offset + 20]);
+                            
+                            // Check if it's a data section
+                            if (section_name.find(".rdata") != std::string::npos ||
+                                section_name.find(".data") != std::string::npos) {
+                                SimplePeSection sec;
+                                sec.name = section_name;
+                                sec.va_addr = image_base + virtual_addr;
+                                sec.file_offset = raw_offset;
+                                sec.file_size = raw_size;
+                                data_sections.push_back(sec);
+                                
+                                std::cerr << "[fission_decomp] Found data section: " << section_name 
+                                          << " VA=0x" << std::hex << sec.va_addr 
+                                          << " offset=0x" << raw_offset 
+                                          << " size=" << std::dec << raw_size << std::endl;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        fission::loaders::DataSectionScanner data_scanner;
+        int total_data_symbols = 0;
+        
+        for (const auto& section : data_sections) {
+            std::cerr << "[fission_decomp] Scanning section: " << section.name 
+                      << " at 0x" << std::hex << section.va_addr 
+                      << " size=" << std::dec << section.file_size << std::endl;
+            
+            // Check if we have the data
+            size_t start_idx = section.file_offset;
+            size_t end_idx = start_idx + section.file_size;
+            
+            if (end_idx > bin_bytes.size()) {
+                std::cerr << "[fission_decomp] Warning: section extends beyond binary data" << std::endl;
+                continue;
+            }
+            
+            // Get pointer to section data
+            const uint8_t* section_data = bin_bytes.data() + start_idx;
+            
+            // Scan for symbols
+            std::vector<fission::loaders::DataSymbol> symbols = data_scanner.scanDataSection(
+                section_data,
+                section.va_addr,
+                section.file_size
+            );
+            
+            // Register each symbol in global scope
+            ghidra::Scope* global_scope = state.arch_64bit->symboltab->getGlobalScope();
+            ghidra::TypeFactory* types = state.arch_64bit->types;
+            ghidra::AddrSpace* ram_space = state.arch_64bit->getDefaultDataSpace();
+            
+            if (!global_scope || !types || !ram_space) {
+                std::cerr << "[fission_decomp] Warning: Missing required components for symbol registration" << std::endl;
+                continue;
+            }
+            
+            for (const auto& sym : symbols) {
+                // Cache the symbol info
+                core::DecompilerContext::DataSymbolInfo info;
+                info.name = sym.name;
+                info.size = sym.size;
+                info.type_meta = sym.type_meta;
+                state.data_section_symbols[sym.address] = info;
+                
+                try {
+                    // Get or create appropriate type
+                    ghidra::Datatype* dt = nullptr;
+                    if (sym.type_meta == 9) {  // TYPE_FLOAT
+                        if (sym.size == 8) {
+                            dt = types->getBase(8, ghidra::TYPE_FLOAT);  // double
+                        } else if (sym.size == 4) {
+                            dt = types->getBase(4, ghidra::TYPE_FLOAT);  // float
+                        }
+                    }
+                    
+                    if (!dt) {
+                        std::cerr << "[fission_decomp] Could not create type for symbol at 0x" 
+                                  << std::hex << sym.address << std::endl;
+                        continue;
+                    }
+                    
+                    // Create address
+                    ghidra::Address addr(ram_space, sym.address);
+                    
+                    // Check if symbol already exists
+                    ghidra::SymbolEntry* existing = global_scope->queryContainer(addr, 1, ghidra::Address());
+                    if (existing != nullptr) {
+                        continue;
+                    }
+                    
+                    // Add new symbol
+                    ghidra::SymbolEntry* entry = global_scope->addSymbol(
+                        sym.name,
+                        dt,
+                        addr,
+                        ghidra::Address()  // use point
+                    );
+                    
+                    if (entry) {
+                        total_data_symbols++;
+                        std::cerr << "[fission_decomp] Registered data symbol: " << sym.name 
+                                  << " at 0x" << std::hex << sym.address 
+                                  << " type=" << dt->getName() << std::endl;
+                    }
+                    
+                } catch (const std::exception& e) {
+                    std::cerr << "[fission_decomp] Exception while registering symbol at 0x" 
+                              << std::hex << sym.address << ": " << e.what() << std::endl;
+                } catch (...) {
+                    std::cerr << "[fission_decomp] Unknown exception while registering symbol at 0x" 
+                              << std::hex << sym.address << std::endl;
+                }
+            }
+        }
+        
+        state.data_symbols_scanned = true;
+        std::cerr << "[fission_decomp] Registered " << total_data_symbols 
+                  << " data section symbols (cached for future use)" << std::endl;
+        
     } else {
         state.loader_64bit->updateData(bin_bytes, image_base);
         state.arch_64bit->symboltab->getGlobalScope()->clear();
@@ -510,6 +680,53 @@ std::string DecompilationPipeline::handle_decompile(
     ghidra::Scope* global_scope = arch->symboltab->getGlobalScope();
     global_scope->clear();
     
+    // FISSION IMPROVEMENT: Re-register cached data section symbols after clear
+    if (state.data_symbols_scanned && !state.data_section_symbols.empty()) {
+        std::cerr << "[fission_decomp] Re-registering " << state.data_section_symbols.size() 
+                  << " cached data section symbols..." << std::endl;
+        
+        ghidra::TypeFactory* types = arch->types;
+        ghidra::AddrSpace* ram_space = arch->getDefaultDataSpace();
+        int registered = 0;
+        
+        for (const auto& pair : state.data_section_symbols) {
+            uint64_t addr_val = pair.first;
+            const auto& info = pair.second;
+            
+            try {
+                // Get or create appropriate type
+                ghidra::Datatype* dt = nullptr;
+                if (info.type_meta == 9) {  // TYPE_FLOAT
+                    if (info.size == 8) {
+                        dt = types->getBase(8, ghidra::TYPE_FLOAT);  // double
+                    } else if (info.size == 4) {
+                        dt = types->getBase(4, ghidra::TYPE_FLOAT);  // float
+                    }
+                }
+                
+                if (!dt) continue;
+                
+                // Create address and add symbol
+                ghidra::Address addr(ram_space, addr_val);
+                ghidra::SymbolEntry* entry = global_scope->addSymbol(
+                    info.name,
+                    dt,
+                    addr,
+                    ghidra::Address()
+                );
+                
+                if (entry) {
+                    registered++;
+                }
+            } catch (...) {
+                // Silently ignore errors during re-registration
+            }
+        }
+        
+        std::cerr << "[fission_decomp] Re-registered " << registered 
+                  << " data section symbols" << std::endl;
+    }
+    
     std::cerr << "[fission_decomp] Step 2: Adding function at 0x" 
               << std::hex << address << std::dec << std::endl;
     
@@ -579,9 +796,21 @@ std::string DecompilationPipeline::handle_decompile(
         StepTimer timer_rev("Step 4b-2: Reverse Propagation");
         // Use TypePropagator with struct registry
         fission::analysis::TypePropagator type_propagator(arch, &global_struct_registry);
+        type_propagator.clear();
         bool struct_changed = type_propagator.propagate_struct_types(fd);
         if (struct_changed) {
-            std::cerr << "[fission_decomp] Step 4b-2: Reverse propagation applied! Re-running..." 
+            std::cerr << "[fission_decomp] Step 4b-2: Reverse propagation applied! Re-running..."
+                     << std::endl;
+            fd->clear();
+            arch->allacts.getCurrent()->reset(*fd);
+            arch->allacts.getCurrent()->perform(*fd);
+            type_propagator.clear();
+        }
+
+        int types_inferred = type_propagator.propagate(fd);
+        bool struct_changed_after = type_propagator.propagate_struct_types(fd);
+        if (types_inferred > 0 || struct_changed_after) {
+            std::cerr << "[fission_decomp] Step 4b-2: Type propagation complete, re-running..."
                      << std::endl;
             fd->clear();
             arch->allacts.getCurrent()->reset(*fd);

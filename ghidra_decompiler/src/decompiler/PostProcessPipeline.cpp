@@ -141,7 +141,12 @@ std::string run_post_processing(
         result = replace_interlocked_patterns(result);
     }
 
+    // Step 6.5: Variable naming standardization (Ghidra standard)
+    // Converts xStackX_38 -> local_38 for better Ghidra compatibility
+    result = standardize_variable_names(result);
+
     // Step 7: xunknown/undefined type replacement
+    // NOTE: Now disabled for Ghidra standard compatibility
     if (options.xunknown_types) {
         result = replace_xunknown_types(result);
     }

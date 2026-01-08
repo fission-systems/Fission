@@ -509,99 +509,53 @@ std::string replace_interlocked_patterns(const std::string& code) {
 }
 
 // ============================================================================
-// xunknown Type Replacement
+// Variable Naming Standardization (Ghidra Standard)
 // ============================================================================
-// Replaces Ghidra's internal xunknownN types with standard Windows types
+// Converts Ghidra's internal variable names to standard Ghidra output format
+// Examples: uStack_38 -> local_38, pvStack_18 -> local_18, xStack_30 -> local_30
+
+std::string standardize_variable_names(const std::string& code) {
+    std::string result = code;
+    
+    // Pattern 1: [type_prefix]StackX_[offset] -> local_[offset]
+    // Examples: uStackX_38, pvStackX_18, xStackX_30
+    std::regex stack_x_regex(R"(\b([a-z]+)?Stack([XY])_([0-9a-f]+)\b)", std::regex::icase);
+    result = std::regex_replace(result, stack_x_regex, "local_$3");
+    
+    // Pattern 2: [type_prefix]Stack_[offset] -> local_[offset] (without X/Y)
+    // Examples: uStack_38, pvStack_18, xStack_30
+    std::regex stack_regex(R"(\b([a-z]+)?Stack_([0-9a-f]+)\b)", std::regex::icase);
+    result = std::regex_replace(result, stack_regex, "local_$2");
+    
+    return result;
+}
+
+// ============================================================================
+// Type Name Standardization (Ghidra Standard)
+// ============================================================================
+// Converts Ghidra's internal type names to standard Ghidra output format
+// Examples: xunknown4 -> undefined4, uint4 -> uint, int4 -> int
 
 std::string replace_xunknown_types(const std::string& code) {
     std::string result = code;
     
-    // xunknown1 -> BYTE
-    size_t pos = 0;
-    while ((pos = result.find("xunknown1", pos)) != std::string::npos) {
-        result.replace(pos, 9, "BYTE");
-        pos += 4;
-    }
+    // xunknownN -> undefinedN
+    std::regex xunknown_regex(R"(\bxunknown([1248])\b)");
+    result = std::regex_replace(result, xunknown_regex, "undefined$1");
     
-    // xunknown2 -> WORD
-    pos = 0;
-    while ((pos = result.find("xunknown2", pos)) != std::string::npos) {
-        result.replace(pos, 9, "WORD");
-        pos += 4;
-    }
+    // uint4 -> uint, int4 -> int (remove size suffix for standard types)
+    std::regex uint4_regex(R"(\buint4\b)");
+    result = std::regex_replace(result, uint4_regex, "uint");
     
-    // xunknown4 -> DWORD
-    pos = 0;
-    while ((pos = result.find("xunknown4", pos)) != std::string::npos) {
-        result.replace(pos, 9, "DWORD");
-        pos += 5;
-    }
+    std::regex int4_regex(R"(\bint4\b)");
+    result = std::regex_replace(result, int4_regex, "int");
     
-    // xunknown8 -> QWORD
-    pos = 0;
-    while ((pos = result.find("xunknown8", pos)) != std::string::npos) {
-        result.replace(pos, 9, "QWORD");
-        pos += 5;
-    }
+    // uint8 -> ulonglong, int8 -> longlong
+    std::regex uint8_regex(R"(\buint8\b)");
+    result = std::regex_replace(result, uint8_regex, "ulonglong");
     
-    // undefined1 -> BYTE
-    pos = 0;
-    while ((pos = result.find("undefined1", pos)) != std::string::npos) {
-        result.replace(pos, 10, "BYTE");
-        pos += 4;
-    }
-    
-    // undefined2 -> WORD
-    pos = 0;
-    while ((pos = result.find("undefined2", pos)) != std::string::npos) {
-        result.replace(pos, 10, "WORD");
-        pos += 4;
-    }
-    
-    // undefined4 -> DWORD
-    pos = 0;
-    while ((pos = result.find("undefined4", pos)) != std::string::npos) {
-        result.replace(pos, 10, "DWORD");
-        pos += 5;
-    }
-    
-    // undefined8 -> QWORD
-    pos = 0;
-    while ((pos = result.find("undefined8", pos)) != std::string::npos) {
-        result.replace(pos, 10, "QWORD");
-        pos += 5;
-    }
-    
-    // int4 -> int (for cleaner output)
-    pos = 0;
-    while ((pos = result.find("int4", pos)) != std::string::npos) {
-        // Make sure we're not matching part of a larger identifier
-        if (pos > 0 && isalnum(result[pos-1])) {
-            pos++;
-            continue;
-        }
-        if (pos + 4 < result.size() && isalnum(result[pos+4])) {
-            pos++;
-            continue;
-        }
-        result.replace(pos, 4, "int");
-        pos += 3;
-    }
-    
-    // uint4 -> UINT
-    pos = 0;
-    while ((pos = result.find("uint4", pos)) != std::string::npos) {
-        if (pos > 0 && isalnum(result[pos-1])) {
-            pos++;
-            continue;
-        }
-        if (pos + 5 < result.size() && isalnum(result[pos+5])) {
-            pos++;
-            continue;
-        }
-        result.replace(pos, 5, "UINT");
-        pos += 4;
-    }
+    std::regex int8_regex(R"(\bint8\b)");
+    result = std::regex_replace(result, int8_regex, "longlong");
     
     return result;
 }

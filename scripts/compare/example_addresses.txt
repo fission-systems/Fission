@@ -3,6 +3,6 @@
 # Lines starting with # are ignored
 
 0x140001450 add
-0x140001470 multiply
-0x140001010 main
-0x140001490 print_message
+0x140001464 multiply
+0x140001680 main
+0x140001477 print_message

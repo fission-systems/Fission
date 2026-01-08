@@ -629,6 +629,25 @@ void Funcdata::transferVarnodeProperties(Varnode *vn,Varnode *newVn,int4 lsbOffs
 bool Funcdata::fillinReadOnly(Varnode *vn)
 
 {
+  // FISSION IMPROVEMENT: Don't replace varnodes that have associated symbols
+  // This preserves data section symbol references (like DAT_1400040c8) instead of
+  // inlining their constant values (like 0x4048feb851eb851f for 49.99)
+  if (vn->getSymbolEntry() != (SymbolEntry *)0) {
+    return false;  // Keep the symbol reference
+  }
+  
+  // FISSION IMPROVEMENT: Check if the address itself has a data section symbol
+  // If the varnode corresponds to a memory location with a symbol, don't inline it
+  const Address &addr = vn->getAddr();
+  Scope *globalScope = glb->symboltab->getGlobalScope();
+  if (globalScope != (Scope *)0) {
+    SymbolEntry *entry = globalScope->queryContainer(addr, 1, Address());
+    if (entry != (SymbolEntry *)0) {
+      // This address has a data symbol, don't inline the value
+      return false;
+    }
+  }
+  
   if (vn->isWritten()) {	// Can't replace output with constant
     PcodeOp *defop = vn->getDef();
     if (defop->isMarker())

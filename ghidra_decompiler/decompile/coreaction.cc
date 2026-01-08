@@ -18,6 +18,7 @@
 #include "double.hh"
 #include "subflow.hh"
 #include "constseq.hh"
+#include <iostream>
 
 namespace ghidra {
 
@@ -1130,6 +1131,13 @@ SymbolEntry *ActionConstantPtr::isPointer(AddrSpace *spc,Varnode *vn,PcodeOp *op
     case CPUI_STORE:
       if (slot != 2)
 	return (SymbolEntry *)0;
+      break;
+    case CPUI_LOAD:
+      // FISSION IMPROVEMENT: Allow LOAD operations to resolve constant addresses to data section symbols
+      // This enables floating-point constants like 49.99 to be displayed as DAT_1400040c8 instead of 0x4048feb851eb851f
+      if (slot != 1)  // Only process the address input (slot 1), not the space constant (slot 0)
+	return (SymbolEntry *)0;
+      needexacthit = false;  // Allow partial matches for data symbols
       break;
     default:
       return (SymbolEntry *)0;

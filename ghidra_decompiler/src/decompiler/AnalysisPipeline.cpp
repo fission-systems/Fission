@@ -501,7 +501,18 @@ AnalysisArtifacts run_analysis_passes(
             }
         }
 
+        // Pre-analysis: Propagate call return types (detect pointers from allocators)
+        // We do this BEFORE StackFrameAnalyzer so it knows about pointer returns
+        {
+            TypePropagator initial_propagator(ctx->arch.get(), &ctx->struct_registry);
+            initial_propagator.propagate_call_return_types(fd);
+        }
+
         // Stack frame structures
+        // DISABLED: Using Ghidra's default local variable mechanism instead
+        // This allows individual stack variables (e.g., local_c, local_10) 
+        // instead of grouping them into stack structures (e.g., sStack_38.field_44)
+        /*
         {
             StackFrameAnalyzer stack_analyzer(ctx->arch.get());
             int detected = stack_analyzer.analyze(fd);
@@ -545,6 +556,9 @@ AnalysisArtifacts run_analysis_passes(
                           << detected << std::endl;
             }
         }
+        */
+        
+        std::cerr << "[DecompilerCore] Using Ghidra's default stack variable handling" << std::endl;
     }
 
     if (rerun_for_struct_symbols) {
@@ -553,13 +567,28 @@ AnalysisArtifacts run_analysis_passes(
     }
 
     TypePropagator type_propagator(ctx->arch.get(), &ctx->struct_registry);
+    type_propagator.clear();  
+    
     bool struct_changed = type_propagator.propagate_struct_types(fd);
     if (struct_changed) {
         std::cerr << "[DecompilerCore] Struct types propagated, re-running..." << std::endl;
         rerun_action(fd, action);
+        type_propagator.clear();
     }
 
-    type_propagator.propagate(fd);
+    int types_inferred = type_propagator.propagate(fd);
+
+    bool struct_changed_after = type_propagator.propagate_struct_types(fd);
+    if (types_inferred > 0 || struct_changed_after) {
+        if (struct_changed_after) {
+            std::cerr << "[DecompilerCore] Struct types updated after type propagation, re-running..."
+                      << std::endl;
+        } else {
+            std::cerr << "[DecompilerCore] Type propagation complete (" << types_inferred
+                      << " types), re-running for output..." << std::endl;
+        }
+        rerun_action(fd, action);
+    }
 
     return artifacts;
 }
