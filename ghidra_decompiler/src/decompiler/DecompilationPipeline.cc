@@ -194,9 +194,9 @@ std::string DecompilationPipeline::handle_load_bin(
         
         if (!fid_filename.empty()) {
             std::vector<std::string> fid_paths = {
-                "../../ghidra/funtionID/" + fid_filename,
-                "../ghidra/funtionID/" + fid_filename,
-                "./ghidra/funtionID/" + fid_filename
+                "../../utils/ghidra/funtionID/" + fid_filename,
+                "../utils/ghidra/funtionID/" + fid_filename,
+                "./utils/ghidra/funtionID/" + fid_filename
             };
             
             for (const auto& fid_path : fid_paths) {
@@ -526,12 +526,12 @@ std::string DecompilationPipeline::handle_load_bin(
     // Phase 12: Load FID databases
     {
         std::vector<std::string> fid_candidates = {
-            "./ghidra/funtionID/vs2019_x86.fidbf",
-            "./ghidra/funtionID/vs2017_x86.fidbf",
-            "./ghidra/funtionID/vs2015_x86.fidbf",
-            "./ghidra/funtionID/vs2012_x86.fidbf",
-            "../ghidra/funtionID/vs2019_x86.fidbf",
-            "../../ghidra/funtionID/vs2019_x86.fidbf"
+            "./utils/ghidra/funtionID/vs2019_x86.fidbf",
+            "./utils/ghidra/funtionID/vs2017_x86.fidbf",
+            "./utils/ghidra/funtionID/vs2015_x86.fidbf",
+            "./utils/ghidra/funtionID/vs2012_x86.fidbf",
+            "../utils/ghidra/funtionID/vs2019_x86.fidbf",
+            "../../utils/ghidra/funtionID/vs2019_x86.fidbf"
         };
         
         static FidDatabase fid_db;
@@ -556,11 +556,11 @@ std::string DecompilationPipeline::handle_load_bin(
         static std::vector<FidDatabase> all_fid_dbs;
         if (all_fid_dbs.empty()) {
             std::vector<std::string> all_fidbf = {
-                "./ghidra/funtionID/vs2019_x86.fidbf",
-                "./ghidra/funtionID/vs2017_x86.fidbf",
-                "./ghidra/funtionID/vs2015_x86.fidbf",
-                "./ghidra/funtionID/vs2012_x86.fidbf",
-                "./ghidra/funtionID/vsOlder_x86.fidbf"
+                "./utils/ghidra/funtionID/vs2019_x86.fidbf",
+                "./utils/ghidra/funtionID/vs2017_x86.fidbf",
+                "./utils/ghidra/funtionID/vs2015_x86.fidbf",
+                "./utils/ghidra/funtionID/vs2012_x86.fidbf",
+                "./utils/ghidra/funtionID/vsOlder_x86.fidbf"
             };
             for (const auto& path : all_fidbf) {
                 if (file_exists(path)) {
@@ -602,9 +602,9 @@ std::string DecompilationPipeline::handle_load_bin(
         
         // Load common symbols
         std::vector<std::string> symbol_files = {
-            "./ghidra/funtionID/common_symbols_win32.txt",
-            "./ghidra/funtionID/common_symbols_win64.txt",
-            "../ghidra/funtionID/common_symbols_win32.txt"
+            "./utils/ghidra/funtionID/common_symbols_win32.txt",
+            "./utils/ghidra/funtionID/common_symbols_win64.txt",
+            "../utils/ghidra/funtionID/common_symbols_win32.txt"
         };
         
         for (const auto& path : symbol_files) {
@@ -849,12 +849,12 @@ std::string DecompilationPipeline::handle_decompile(
     // Step 6d: GUID substitution
     if (state.guid_map.empty()) {
         std::vector<std::string> guid_files = {
-            "../../ghidra/typeinfo/win32/msvcrt/guids.txt",
-            "../ghidra/typeinfo/win32/msvcrt/guids.txt",
-            "./ghidra/typeinfo/win32/msvcrt/guids.txt",
-            "../../ghidra/typeinfo/win32/msvcrt/iids.txt",
-            "../ghidra/typeinfo/win32/msvcrt/iids.txt",
-            "./ghidra/typeinfo/win32/msvcrt/iids.txt"
+            "../../utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
+            "../utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
+            "./utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
+            "../../utils/ghidra/typeinfo/win32/msvcrt/iids.txt",
+            "../utils/ghidra/typeinfo/win32/msvcrt/iids.txt",
+            "./utils/ghidra/typeinfo/win32/msvcrt/iids.txt"
         };
         
         for (const auto& path : guid_files) {

@@ -18,9 +18,9 @@ using namespace fission::utils;
 static void load_gdt_for_arch(ghidra::Architecture* arch, bool is_64bit) {
     std::string suffix = is_64bit ? "_64.gdt" : "_32.gdt";
     std::vector<std::string> candidates = {
-        "../../ghidra/typeinfo/win32/windows_vs12" + suffix,
-        "../ghidra/typeinfo/win32/windows_vs12" + suffix,
-        "./ghidra/typeinfo/win32/windows_vs12" + suffix
+        "../../utils/ghidra/typeinfo/win32/windows_vs12" + suffix,
+        "../utils/ghidra/typeinfo/win32/windows_vs12" + suffix,
+        "./utils/ghidra/typeinfo/win32/windows_vs12" + suffix
     };
     
     for (const auto& path : candidates) {

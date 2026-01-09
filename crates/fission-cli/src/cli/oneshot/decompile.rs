@@ -107,16 +107,16 @@ pub(super) fn run_decompilation(
     // Prioritize: GCC/MinGW for Linux/MinGW binaries, MSVC for Windows native
     let fid_paths = vec![
         // GCC/MinGW databases (for cross-compiled and native GCC binaries)
-        format!("ghidra/funtionID/gcc13{}", target_suffix),
-        format!("ghidra/funtionID/gcc12{}", target_suffix),
-        format!("ghidra/funtionID/gcc11{}", target_suffix),
-        format!("ghidra/funtionID/mingw{}", target_suffix),
+        format!("utils/ghidra/funtionID/gcc13{}", target_suffix),
+        format!("utils/ghidra/funtionID/gcc12{}", target_suffix),
+        format!("utils/ghidra/funtionID/gcc11{}", target_suffix),
+        format!("utils/ghidra/funtionID/mingw{}", target_suffix),
         // MSVC databases (for native Windows binaries)
-        format!("ghidra/funtionID/vs2019{}", target_suffix),
-        format!("ghidra/funtionID/vs2017{}", target_suffix),
-        format!("ghidra/funtionID/vs2015{}", target_suffix),
-        format!("ghidra/funtionID/vs2012{}", target_suffix),
-        format!("ghidra/funtionID/vsOlder{}", target_suffix),
+        format!("utils/ghidra/funtionID/vs2019{}", target_suffix),
+        format!("utils/ghidra/funtionID/vs2017{}", target_suffix),
+        format!("utils/ghidra/funtionID/vs2015{}", target_suffix),
+        format!("utils/ghidra/funtionID/vs2012{}", target_suffix),
+        format!("utils/ghidra/funtionID/vsOlder{}", target_suffix),
     ];
 
     // Load all available FID databases for better matching coverage
