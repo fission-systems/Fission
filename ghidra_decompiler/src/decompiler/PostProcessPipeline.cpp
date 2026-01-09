@@ -30,14 +30,14 @@ static std::map<std::string, std::string> load_guid_maps() {
     std::map<std::string, std::string> guid_map;
 
     std::vector<std::string> guid_files = {
-        "../../ghidra/typeinfo/win32/msvcrt/guids.txt",
-        "../ghidra/typeinfo/win32/msvcrt/guids.txt",
-        "./ghidra/typeinfo/win32/msvcrt/guids.txt",
-        "ghidra/typeinfo/win32/msvcrt/guids.txt",
-        "../../ghidra/typeinfo/win32/msvcrt/iids.txt",
-        "../ghidra/typeinfo/win32/msvcrt/iids.txt",
-        "./ghidra/typeinfo/win32/msvcrt/iids.txt",
-        "ghidra/typeinfo/win32/msvcrt/iids.txt"
+        "../../utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
+        "../utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
+        "./utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
+        "utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
+        "../../utils/ghidra/typeinfo/win32/msvcrt/iids.txt",
+        "../utils/ghidra/typeinfo/win32/msvcrt/iids.txt",
+        "./utils/ghidra/typeinfo/win32/msvcrt/iids.txt",
+        "utils/ghidra/typeinfo/win32/msvcrt/iids.txt"
     };
 
     for (const auto& path : guid_files) {
