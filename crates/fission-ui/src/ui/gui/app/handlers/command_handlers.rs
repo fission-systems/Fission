@@ -2,8 +2,8 @@
 
 use crossbeam_channel::Sender;
 
-use crate::ui::gui::messages::AsyncMessage;
-use crate::ui::gui::state::AppState;
+use crate::ui::gui::core::messages::AsyncMessage;
+use crate::ui::gui::core::state::AppState;
 
 /// Handle 'help' or '?' command
 pub fn handle_help(state: &mut AppState) {
@@ -137,7 +137,7 @@ pub fn handle_patch(state: &mut AppState, cmd: &str) {
             }
 
             if valid {
-                let command = Box::new(crate::ui::gui::commands::PatchBytesCommand {
+                let command = Box::new(crate::ui::gui::core::commands::PatchBytesCommand {
                     address: addr,
                     old_bytes: Vec::new(),
                     new_bytes: bytes,
@@ -166,7 +166,7 @@ pub fn handle_rename(state: &mut AppState, cmd: &str) {
     match u64::from_str_radix(addr_str, 16) {
         Ok(addr) => {
             let new_name = parts[2].to_string();
-            let command = Box::new(crate::ui::gui::commands::RenameFunctionCommand {
+            let command = Box::new(crate::ui::gui::core::commands::RenameFunctionCommand {
                 address: addr,
                 old_name: String::new(), // Will be filled by execute
                 new_name,

@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002a90",
+    "timestamp": "2026-01-09T00:56:11.598054Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 8,
+        "chars": 228,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 325,
+        "functions": 3,
+        "branches": 0
+      }
+    },
+    "similarity": 80.0
+  },
+  "timings": {
+    "ghidra_sec": 2.628,
+    "fission_asm_sec": 0.021,
+    "fission_decomp_sec": 3.314
+  },
+  "ghidra_assembly": "0x140002A90      JMP      qword ptr [0x140008398]",
+  "ghidra_decompilation": "void __acrt_iob_func(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002a90. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  __acrt_iob_func();\n  return;\n}",
+  "fission_assembly": "Function: __acrt_iob_func at 0x140002a90 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002a90  ff 25 02 59 00 00         jmp qword ptr [140008398h]\n  0x000140002a96  90                        nop\n  0x000140002a97  90                        nop\nTotal instructions: 3",
+  "fission_decompilation": "// ============================================\n// Function: __acrt_iob_func @ 0x140002a90\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nvoid __acrt_iob_func(void)\n\n{\n  (*_api-ms-win-crt-stdio-l1-1-0.dll!__acrt_iob_func)();\n  return;\n}"
+}

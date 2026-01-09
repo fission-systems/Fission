@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x0001400028e0",
+    "timestamp": "2026-01-09T00:55:17.932200Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 10,
+        "chars": 234,
+        "functions": 3,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 14,
+        "chars": 364,
+        "functions": 4,
+        "branches": 0
+      }
+    },
+    "similarity": 26.67
+  },
+  "timings": {
+    "ghidra_sec": 2.515,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.304
+  },
+  "ghidra_assembly": "0x1400028E0      PUSH     RDI\n  0x1400028E1      PUSH     RSI\n  0x1400028E2      PUSH     RBX\n  0x1400028E3      SUB      RSP, 0x30\n  0x1400028E7      MOV      RBX, RCX\n  0x1400028EA      MOV      RSI, RDX\n  0x1400028ED      MOV      RDI, R8\n  0x1400028F0      CALL     0x1400029d0\n  0x1400028F5      XOR      R9D, R9D\n  0x1400028F8      MOV      R8, RSI\n  0x1400028FB      MOV      RDX, RBX\n  0x1400028FE      MOV      RCX, qword ptr [RAX]\n  0x140002901      MOV      qword ptr [RSP + 0x20], RDI\n  0x140002906      CALL     0x140002aa8\n  0x14000290B      ADD      RSP, 0x30\n  0x14000290F      POP      RBX\n  0x140002910      POP      RSI\n  0x140002911      POP      RDI\n  0x140002912      RET",
+  "ghidra_decompilation": "int __cdecl vfprintf(FILE *_File,char *_Format,va_list _ArgList)\n\n{\n  int iVar1;\n  ulonglong *puVar2;\n  \n  puVar2 = __local_stdio_printf_options();\n  iVar1 = __stdio_common_vfprintf(*puVar2,_File,_Format,0,_ArgList);\n  return iVar1;\n}",
+  "fission_assembly": "Function: vfprintf at 0x1400028e0 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x0001400028e0  57                        push rdi\n  0x0001400028e1  56                        push rsi\n  0x0001400028e2  53                        push rbx\n  0x0001400028e3  48 83 ec 30               sub rsp,30h\n  0x0001400028e7  48 89 cb                  mov rbx,rcx\n  0x0001400028ea  48 89 d6                  mov rsi,rdx\n  0x0001400028ed  4c 89 c7                  mov rdi,r8\n  0x0001400028f0  e8 db 00 00 00            call 00000001400029D0h\n  0x0001400028f5  45 31 c9                  xor r9d,r9d\n  0x0001400028f8  49 89 f0                  mov r8,rsi\n  0x0001400028fb  48 89 da                  mov rdx,rbx\n  0x0001400028fe  48 8b 08                  mov rcx,[rax]\n  0x000140002901  48 89 7c 24 20            mov [rsp+20h],rdi\n  0x000140002906  e8 9d 01 00 00            call 0000000140002AA8h\n  0x00014000290b  48 83 c4 30               add rsp,30h\n  0x00014000290f  5b                        pop rbx\n  0x000140002910  5e                        pop rsi\n  0x000140002911  5f                        pop rdi\n  0x000140002912  c3                        ret\nTotal instructions: 19",
+  "fission_decompilation": "// ============================================\n// Function: vfprintf @ 0x1400028e0\n// ============================================\n\n\nvoid vfprintf(undefined8 param_1,undefined8 param_2,undefined8 param_3)\n\n{\n  undefined8 *pxVar1;\n  \n  pxVar1 = (undefined8 *)__local_stdio_printf_options();\n  __stdio_common_vfprintf(*pxVar1,param_1,param_2,0,param_3);\n  return;\n}"
+}

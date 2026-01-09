@@ -1,0 +1,8 @@
+Function: __setusermatherr at 0x140002b40 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002b40  ff 25 b2 57 00 00         jmp qword ptr [1400082F8h]
+  0x000140002b46  90                        nop
+  0x000140002b47  90                        nop
+  0x000140002b48  0f 1f 84 00 00 00 00 00   nop [rax+rax]
+Total instructions: 4

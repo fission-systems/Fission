@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002b78",
+    "timestamp": "2026-01-09T00:58:44.150637Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 10,
+        "chars": 268,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 297,
+        "functions": 3,
+        "branches": 0
+      }
+    },
+    "similarity": 36.36
+  },
+  "timings": {
+    "ghidra_sec": 2.751,
+    "fission_asm_sec": 0.025,
+    "fission_decomp_sec": 3.456
+  },
+  "ghidra_assembly": "0x140002B78      JMP      qword ptr [0x1400082d8]",
+  "ghidra_decompilation": "void * __cdecl malloc(size_t _Size)\n\n{\n  void *pvVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002b78. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  pvVar1 = malloc(_Size);\n  return pvVar1;\n}",
+  "fission_assembly": "Function: malloc at 0x140002b78 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002b78  ff 25 5a 57 00 00         jmp qword ptr [1400082D8h]\n  0x000140002b7e  90                        nop\n  0x000140002b7f  90                        nop\nTotal instructions: 3",
+  "fission_decompilation": "// ============================================\n// Function: malloc @ 0x140002b78\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nvoid malloc(void)\n\n{\n  (*_api-ms-win-crt-heap-l1-1-0.dll!malloc)();\n  return;\n}"
+}

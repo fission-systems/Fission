@@ -1,0 +1,7 @@
+Function: puts at 0x140002ab8 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002ab8  ff 25 02 59 00 00         jmp qword ptr [1400083C0h]
+  0x000140002abe  90                        nop
+  0x000140002abf  90                        nop
+Total instructions: 3

@@ -2,6 +2,7 @@
 
 use colored::Colorize;
 use crate::ui::cli::handlers::CliState;
+use fission_analysis::analysis::xrefs::{XrefDatabase, XrefType};
 
 pub fn cmd_xrefs(state: &CliState, addr: u64) {
     match &state.binary {
@@ -38,30 +39,71 @@ pub fn cmd_xrefs(state: &CliState, addr: u64) {
                 println!();
             }
             
-            // Show potential callers (functions that might call near this address)
-            println!("{}", "Potential Callers:".yellow());
-            let mut call_count = 0;
+            // Build xref database
+            println!("{}", "Building cross-reference database...".dimmed());
+            let xref_db = XrefDatabase::build_from_binary(binary);
+            let total_xrefs = xref_db.total_refs();
+            println!("{} {}", "Total cross-references:".dimmed(), total_xrefs.to_string().cyan());
+            println!();
             
-            for func in &binary.functions {
-                // Simple heuristic: show functions in reasonable range
-                let distance = func.address.abs_diff(addr);
-                
-                if distance < 0x100000 && func.address != addr && call_count < 10 {
-                    // Limit to first 10
+            // Get references TO this address (callers)
+            let refs_to = xref_db.get_refs_to(addr);
+            if !refs_to.is_empty() {
+                println!("{} {} {}", "References TO".yellow(), format!("0x{:x}", addr).cyan(), format!("({} found)", refs_to.len()).dimmed());
+                for xref in refs_to {
+                    let type_str = match xref.xref_type {
+                        XrefType::Call => "CALL".green(),
+                        XrefType::Jump => "JUMP".yellow(),
+                        XrefType::Data => "DATA".blue(),
+                    };
+                    
+                    // Find function name for the caller
+                    let caller_name = binary.functions.iter()
+                        .find(|f| xref.from_addr >= f.address && xref.from_addr < f.address + f.size)
+                        .map(|f| f.name.as_str())
+                        .unwrap_or("unknown");
+                    
                     println!(
-                        "  {} 0x{:08x}  {}",
-                        if distance < 0x1000 { "▸".green() } else { "·".dimmed() },
-                        func.address,
-                        func.name.as_str().dimmed()
+                        "  {} 0x{:08x} → 0x{:08x}  {}",
+                        type_str,
+                        xref.from_addr,
+                        xref.to_addr,
+                        caller_name.dimmed()
                     );
-                    call_count += 1;
                 }
+                println!();
+            } else {
+                println!("{}", "No references TO this address found".dimmed());
+                println!();
             }
             
-            if call_count == 0 {
-                println!("  {}", "No nearby functions found".dimmed());
-            } else if call_count == 10 {
-                println!("  {}", "... (showing first 10)".dimmed());
+            // Get references FROM this address (callees)
+            let refs_from = xref_db.get_refs_from(addr);
+            if !refs_from.is_empty() {
+                println!("{} {} {}", "References FROM".yellow(), format!("0x{:x}", addr).cyan(), format!("({} found)", refs_from.len()).dimmed());
+                for xref in refs_from {
+                    let type_str = match xref.xref_type {
+                        XrefType::Call => "CALL".green(),
+                        XrefType::Jump => "JUMP".yellow(),
+                        XrefType::Data => "DATA".blue(),
+                    };
+                    
+                    // Find function name for the callee
+                    let callee_name = binary.functions.iter()
+                        .find(|f| xref.to_addr >= f.address && xref.to_addr < f.address + f.size)
+                        .map(|f| f.name.as_str())
+                        .unwrap_or("unknown");
+                    
+                    println!(
+                        "  {} 0x{:08x} → 0x{:08x}  {}",
+                        type_str,
+                        xref.from_addr,
+                        xref.to_addr,
+                        callee_name.dimmed()
+                    );
+                }
+            } else {
+                println!("{}", "No references FROM this address found".dimmed());
             }
         }
         None => {

@@ -1,0 +1,13 @@
+// ============================================
+// Function: putchar @ 0x140002ab0
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void putchar(void)
+
+{
+  (*_api-ms-win-crt-stdio-l1-1-0.dll!putchar)();
+  return;
+}

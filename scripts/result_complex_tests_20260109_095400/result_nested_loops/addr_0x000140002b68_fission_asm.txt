@@ -1,0 +1,7 @@
+Function: calloc at 0x140002b68 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002b68  ff 25 5a 57 00 00         jmp qword ptr [1400082C8h]
+  0x000140002b6e  90                        nop
+  0x000140002b6f  90                        nop
+Total instructions: 3

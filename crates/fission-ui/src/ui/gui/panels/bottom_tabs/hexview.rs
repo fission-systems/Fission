@@ -1,9 +1,9 @@
 //! Hex View tab panel - Binary hex dump viewer with patching support.
 
 use crate::analysis::patch::QuickPatch;
-use crate::ui::gui::state::AppState;
+use crate::ui::gui::core::state::AppState;
 use crate::ui::gui::theme::{catppuccin, code};
-use crate::ui::gui::widgets::empty_state;
+use crate::ui::gui::components::widgets::empty_state;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 

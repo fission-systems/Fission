@@ -11,7 +11,7 @@ mod script;
 mod strings;
 mod timeline;
 
-use crate::ui::gui::state::{AppState, BottomTab};
+use crate::ui::gui::core::state::{AppState, BottomTab};
 use crate::ui::gui::theme::catppuccin;
 use eframe::egui;
 

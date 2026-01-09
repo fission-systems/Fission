@@ -1,9 +1,9 @@
 //! Strings tab panel - Extract and display strings from binary.
 
 use crate::core::config::CONFIG;
-use crate::ui::gui::state::{AppState, ExtractedString, StringEncoding};
+use crate::ui::gui::core::state::{AppState, ExtractedString, StringEncoding};
 use crate::ui::gui::theme::{catppuccin, code};
-use crate::ui::gui::widgets::empty_state;
+use crate::ui::gui::components::widgets::empty_state;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 

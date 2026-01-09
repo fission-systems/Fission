@@ -1,0 +1,13 @@
+// ============================================
+// Function: __stdio_common_vfprintf @ 0x140002aa8
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void __stdio_common_vfprintf(void)
+
+{
+  (*_api-ms-win-crt-stdio-l1-1-0.dll!__stdio_common_vfprintf)();
+  return;
+}

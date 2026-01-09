@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002b80",
+    "timestamp": "2026-01-09T00:58:50.235909Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 8,
+        "chars": 222,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 322,
+        "functions": 3,
+        "branches": 0
+      }
+    },
+    "similarity": 80.0
+  },
+  "timings": {
+    "ghidra_sec": 2.677,
+    "fission_asm_sec": 0.026,
+    "fission_decomp_sec": 3.381
+  },
+  "ghidra_assembly": "0x140002B80      JMP      qword ptr [0x1400082b0]",
+  "ghidra_decompilation": "void __p__environ(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002b80. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  __p__environ();\n  return;\n}",
+  "fission_assembly": "Function: __p__environ at 0x140002b80 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002b80  ff 25 2a 57 00 00         jmp qword ptr [1400082B0h]\n  0x000140002b86  90                        nop\n  0x000140002b87  90                        nop\n  0x000140002b88  0f 1f 84 00 00 00 00 00   nop [rax+rax]\n  0x000140002b90  ff 25 0a 57 00 00         jmp qword ptr [1400082A0h]\n  0x000140002b96  90                        nop\n  0x000140002b97  90                        nop\n  0x000140002b98  ff 25 fa 56 00 00         jmp qword ptr [140008298h]\n  0x000140002b9e  90                        nop\n  0x000140002b9f  90                        nop\n  0x000140002ba0  ff 25 ea 56 00 00         jmp qword ptr [140008290h]\n  0x000140002ba6  90                        nop\n  0x000140002ba7  90                        nop\n  0x000140002ba8  ff 25 da 56 00 00         jmp qword ptr [140008288h]\n  0x000140002bae  90                        nop\n  0x000140002baf  90                        nop\n  0x000140002bb0  ff 25 ca 56 00 00         jmp qword ptr [140008280h]\n  0x000140002bb6  90                        nop\n  0x000140002bb7  90                        nop\n  0x000140002bb8  ff 25 ba 56 00 00         jmp qword ptr [140008278h]\n  0x000140002bbe  90                        nop\n  0x000140002bbf  90                        nop\n  0x000140002bc0  ff 25 aa 56 00 00         jmp qword ptr [140008270h]\n  0x000140002bc6  90                        nop\n  0x000140002bc7  90                        nop\n  0x000140002bc8  ff 25 9a 56 00 00         jmp qword ptr [140008268h]\n  0x000140002bce  90                        nop\n  0x000140002bcf  90                        nop\n  0x000140002bd0  ff 25 8a 56 00 00         jmp qword ptr [140008260h]\n  0x000140002bd6  90                        nop\n  0x000140002bd7  90                        nop\n  0x000140002bd8  ff 25 7a 56 00 00         jmp qword ptr [140008258h]\n  0x000140002bde  90                        nop\n  0x000140002bdf  90                        nop\nTotal instructions: 34",
+  "fission_decompilation": "// ============================================\n// Function: __p__environ @ 0x140002b80\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nvoid __p__environ(void)\n\n{\n  (*_api-ms-win-crt-environment-l1-1-0.dll!__p__environ)();\n  return;\n}"
+}

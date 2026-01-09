@@ -70,3 +70,4 @@ test/*_ghidra/
 # Backup artifacts
 *.backup
 *.cache/
+ghidra_decompiler/.cache/

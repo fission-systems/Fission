@@ -68,6 +68,9 @@ private:
     /// Detect pointer usage in stack variables and apply pointer types
     void infer_stack_pointer_types(ghidra::Funcdata* fd);
     
+    /// Detect pointer usage in function parameters and apply pointer types
+    void infer_parameter_pointer_types(ghidra::Funcdata* fd);
+    
     /// Write back temporary types to permanent fields (Ghidra style)
     bool write_back(ghidra::Funcdata* fd);
     

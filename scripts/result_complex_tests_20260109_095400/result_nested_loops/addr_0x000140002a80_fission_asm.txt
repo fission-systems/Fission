@@ -1,0 +1,7 @@
+Function: strlen at 0x140002a80 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002a80  ff 25 4a 59 00 00         jmp qword ptr [1400083D0h]
+  0x000140002a86  90                        nop
+  0x000140002a87  90                        nop
+Total instructions: 3

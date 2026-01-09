@@ -1,0 +1,13 @@
+// ============================================
+// Function: _initialize_narrow_environment @ 0x140002af0
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void _initialize_narrow_environment(void)
+
+{
+  (*_api-ms-win-crt-runtime-l1-1-0.dll!_initialize_narrow_environment)();
+  return;
+}

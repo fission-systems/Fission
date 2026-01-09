@@ -1,0 +1,7 @@
+Function: KERNEL32.dll!DeleteCriticalSection at 0x140008258 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140008258  e8 83 00 00 00            call 00000001400082E0h
+  0x00014000825d  00 00                     add [rax],al
+  0x00014000825f  00                        (bad)
+Total instructions: 3

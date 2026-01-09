@@ -101,7 +101,9 @@ impl XrefDatabase {
             let start = section.file_offset as usize;
             let end = start + section.file_size as usize;
             if let Some(code) = binary.data.get(start..end) {
-                db.analyze_code(code, section.virtual_address + image_base);
+                // section.virtual_address is already the loaded address (includes image_base)
+                let base_addr = section.virtual_address;
+                db.analyze_code(code, base_addr);
             }
         }
 

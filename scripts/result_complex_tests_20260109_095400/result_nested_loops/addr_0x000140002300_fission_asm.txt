@@ -1,0 +1,11 @@
+Function: ___w64_mingwthr_remove_key_dtor at 0x140002300 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002300  48 83 ec 28               sub rsp,28h
+  0x000140002304  8b 05 de 4d 00 00         mov eax,[1400070E8h]
+  0x00014000230a  85 c0                     test eax,eax
+  0x00014000230c  75 0a                     jne short 0000000140002318h
+  0x00014000230e  31 c0                     xor eax,eax
+  0x000140002310  48 83 c4 28               add rsp,28h
+  0x000140002314  c3                        ret
+Total instructions: 7

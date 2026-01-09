@@ -1,0 +1,13 @@
+// ============================================
+// Function: __p___argv @ 0x140002ac8
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void __p___argv(void)
+
+{
+  (*_api-ms-win-crt-runtime-l1-1-0.dll!__p___argv)();
+  return;
+}

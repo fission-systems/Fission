@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x0001400029f0",
+    "timestamp": "2026-01-09T00:55:47.512572Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 10,
+        "chars": 238,
+        "functions": 7,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 33,
+        "chars": 909,
+        "functions": 19,
+        "branches": 0
+      }
+    },
+    "similarity": 13.33
+  },
+  "timings": {
+    "ghidra_sec": 2.554,
+    "fission_asm_sec": 0.021,
+    "fission_decomp_sec": 3.336
+  },
+  "ghidra_assembly": "0x1400029F0      PUSH     RBX\n  0x1400029F1      SUB      RSP, 0x20\n  0x1400029F5      MOV      EBX, ECX\n  0x1400029F7      MOV      ECX, 0x2\n  0x1400029FC      CALL     0x140002a90\n  0x140002A01      MOV      R8D, EBX\n  0x140002A04      LEA      RDX, [0x140004390]\n  0x140002A0B      MOV      RCX, RAX\n  0x140002A0E      CALL     0x140002980\n  0x140002A13      MOV      ECX, 0xff\n  0x140002A18      CALL     0x140002ae8",
+  "ghidra_decompilation": "void __cdecl _amsg_exit(int param_1)\n\n{\n  FILE *_File;\n  \n  _File = (FILE *)__acrt_iob_func(2);\n  fprintf(_File,\"runtime error %d\\n\",(ulonglong)(uint)param_1);\n                    /* WARNING: Subroutine does not return */\n  _exit(0xff);\n}",
+  "fission_assembly": "Function: _amsg_exit at 0x1400029f0 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x0001400029f0  53                        push rbx\n  0x0001400029f1  48 83 ec 20               sub rsp,20h\n  0x0001400029f5  89 cb                     mov ebx,ecx\n  0x0001400029f7  b9 02 00 00 00            mov ecx,2\n  0x0001400029fc  e8 8f 00 00 00            call 0000000140002A90h\n  0x000140002a01  41 89 d8                  mov r8d,ebx\n  0x000140002a04  48 8d 15 85 19 00 00      lea rdx,[140004390h]\n  0x000140002a0b  48 89 c1                  mov rcx,rax\n  0x000140002a0e  e8 6d ff ff ff            call 0000000140002980h\n  0x000140002a13  b9 ff 00 00 00            mov ecx,0FFh\n  0x000140002a18  e8 cb 00 00 00            call 0000000140002AE8h\n  0x000140002a1d  90                        nop\n  0x000140002a1e  90                        nop\n  0x000140002a1f  90                        nop\nTotal instructions: 14",
+  "fission_decompilation": "// ============================================\n// Function: _amsg_exit @ 0x1400029f0\n// ============================================\n\n\nundefined8 _amsg_exit(uint param_1,undefined8 param_2,undefined8 param_3,int param_4)\n\n{\n  void *stream;\n  undefined4 *pxVar1;\n  undefined8 *pxVar2;\n  undefined4 *pxVar3;\n  char *pcVar4;\n  undefined8 *pxVar5;\n  undefined4 *unaff_retaddr;\n  \n  stream = (void *)__acrt_iob_func(2);\n  pxVar5 = (undefined8 *)(ulonglong)param_1;\n  pcVar4 = \"runtime error %d\\n\";\n  fprintf(stream,\"runtime error %d\\n\");\n  pxVar3 = 1.25986739689518e-321;\n  _exit();\n  _initialize_narrow_environment();\n  _configure_narrow_argv(2 - (uint)(param_4 == 0));\n  pxVar1 = (undefined4 *)__p___argc();\n  *pxVar3 = *pxVar1;\n  pxVar2 = (undefined8 *)__p___argv();\n  *(undefined8 *)pcVar4 = *pxVar2;\n  pxVar2 = (undefined8 *)__p__environ();\n  *pxVar5 = *pxVar2;\n  _set_new_mode(*unaff_retaddr);\n  return 0;\n}"
+}

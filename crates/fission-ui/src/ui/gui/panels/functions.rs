@@ -1,8 +1,8 @@
 //! Functions panel - displays list of functions from loaded binary with virtual scrolling.
 
-use super::super::state::AppState;
+use super::super::core::state::AppState;
 use super::super::theme::catppuccin;
-use super::super::widgets::empty_state_with_spacing;
+use super::super::components::widgets::empty_state_with_spacing;
 use crate::analysis::loader::FunctionInfo;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};

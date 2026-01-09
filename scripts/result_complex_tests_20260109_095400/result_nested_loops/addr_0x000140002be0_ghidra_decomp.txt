@@ -1,0 +1,6 @@
+void _text(void)
+
+{
+  atexit(__gcc_deregister_frame);
+  return;
+}

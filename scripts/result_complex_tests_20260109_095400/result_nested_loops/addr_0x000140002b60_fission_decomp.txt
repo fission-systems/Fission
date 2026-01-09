@@ -1,0 +1,13 @@
+// ============================================
+// Function: _set_new_mode @ 0x140002b60
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void _set_new_mode(void)
+
+{
+  (*_api-ms-win-crt-heap-l1-1-0.dll!_set_new_mode)();
+  return;
+}

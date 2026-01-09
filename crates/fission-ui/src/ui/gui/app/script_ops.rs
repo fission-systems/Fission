@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::ui::gui::panels::bottom_tabs::ScriptAction;
-use crate::ui::gui::state::AppState;
+use crate::ui::gui::core::state::AppState;
 
 pub fn handle_action(
     state: &mut AppState,

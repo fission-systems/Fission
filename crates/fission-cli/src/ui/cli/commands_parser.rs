@@ -15,6 +15,7 @@ pub enum Command {
     Sections,
     Analyze,
     Xrefs { address: u64 },
+    StringXrefs { search_term: String, min_length: usize },
     Help,
     Clear,
     Exit,
@@ -64,6 +65,19 @@ pub fn parse_command(input: &str) -> Command {
                 }
             } else {
                 Command::Unknown("xrefs requires an address".to_string())
+            }
+        }
+        "string-xrefs" | "strxrefs" | "sx" => {
+            if let Some(search_term) = parts.get(1) {
+                let min_length = parts.get(2)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(4);
+                Command::StringXrefs {
+                    search_term: search_term.to_string(),
+                    min_length,
+                }
+            } else {
+                Command::Unknown("string-xrefs requires a search term".to_string())
             }
         }
         "help" | "h" | "?" => Command::Help,

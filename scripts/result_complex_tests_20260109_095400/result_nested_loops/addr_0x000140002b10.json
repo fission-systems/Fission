@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002b10",
+    "timestamp": "2026-01-09T00:57:42.884802Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 11,
+        "chars": 383,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 372,
+        "functions": 3,
+        "branches": 0
+      }
+    },
+    "similarity": 33.33
+  },
+  "timings": {
+    "ghidra_sec": 2.775,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.435
+  },
+  "ghidra_assembly": "0x140002B10      JMP      qword ptr [0x140008370]",
+  "ghidra_decompilation": "_invalid_parameter_handler __cdecl\n_set_invalid_parameter_handler(_invalid_parameter_handler _Handler)\n\n{\n  _invalid_parameter_handler p_Var1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002b10. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  p_Var1 = _set_invalid_parameter_handler(_Handler);\n  return p_Var1;\n}",
+  "fission_assembly": "Function: _set_invalid_parameter_handler at 0x140002b10 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002b10  ff 25 5a 58 00 00         jmp qword ptr [140008370h]\n  0x000140002b16  90                        nop\n  0x000140002b17  90                        nop\nTotal instructions: 3",
+  "fission_decompilation": "// ============================================\n// Function: _set_invalid_parameter_handler @ 0x140002b10\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nvoid _set_invalid_parameter_handler(void)\n\n{\n  (*_api-ms-win-crt-runtime-l1-1-0.dll!_set_invalid_parameter_handler)();\n  return;\n}"
+}

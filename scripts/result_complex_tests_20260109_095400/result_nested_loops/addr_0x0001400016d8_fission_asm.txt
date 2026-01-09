@@ -1,0 +1,52 @@
+Function: main at 0x1400016d8 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x0001400016d8  55                        push rbp
+  0x0001400016d9  48 89 e5                  mov rbp,rsp
+  0x0001400016dc  48 83 c4 80               add rsp,0FFFFFFFFFFFFFF80h
+  0x0001400016e0  e8 cb 01 00 00            call 00000001400018B0h
+  0x0001400016e5  48 8d 05 53 29 00 00      lea rax,[14000403Fh]
+  0x0001400016ec  48 89 c1                  mov rcx,rax
+  0x0001400016ef  e8 c4 13 00 00            call 0000000140002AB8h
+  0x0001400016f4  c7 45 e0 01 00 00 00      mov dword ptr [rbp-20h],1
+  0x0001400016fb  c7 45 e4 04 00 00 00      mov dword ptr [rbp-1Ch],4
+  0x000140001702  c7 45 e8 07 00 00 00      mov dword ptr [rbp-18h],7
+  0x000140001709  c7 45 ec 02 00 00 00      mov dword ptr [rbp-14h],2
+  0x000140001710  c7 45 f0 09 00 00 00      mov dword ptr [rbp-10h],9
+  0x000140001717  c7 45 f4 05 00 00 00      mov dword ptr [rbp-0Ch],5
+  0x00014000171e  48 8d 45 e0               lea rax,[rbp-20h]
+  0x000140001722  41 b8 0b 00 00 00         mov r8d,0Bh
+  0x000140001728  ba 06 00 00 00            mov edx,6
+  0x00014000172d  48 89 c1                  mov rcx,rax
+  0x000140001730  e8 1b fd ff ff            call 0000000140001450h
+  0x000140001735  41 b8 04 00 00 00         mov r8d,4
+  0x00014000173b  ba 03 00 00 00            mov edx,3
+  0x000140001740  b9 02 00 00 00            mov ecx,2
+  0x000140001745  e8 dc fd ff ff            call 0000000140001526h
+  0x00014000174a  c7 45 a0 01 00 00 00      mov dword ptr [rbp-60h],1
+  0x000140001751  c7 45 a4 02 00 00 00      mov dword ptr [rbp-5Ch],2
+  0x000140001758  c7 45 a8 03 00 00 00      mov dword ptr [rbp-58h],3
+  0x00014000175f  c7 45 ac 04 00 00 00      mov dword ptr [rbp-54h],4
+  0x000140001766  c7 45 b0 05 00 00 00      mov dword ptr [rbp-50h],5
+  0x00014000176d  c7 45 b4 06 00 00 00      mov dword ptr [rbp-4Ch],6
+  0x000140001774  c7 45 b8 07 00 00 00      mov dword ptr [rbp-48h],7
+  0x00014000177b  c7 45 bc 08 00 00 00      mov dword ptr [rbp-44h],8
+  0x000140001782  c7 45 c0 09 00 00 00      mov dword ptr [rbp-40h],9
+  0x000140001789  c7 45 c4 0a 00 00 00      mov dword ptr [rbp-3Ch],0Ah
+  0x000140001790  c7 45 c8 0b 00 00 00      mov dword ptr [rbp-38h],0Bh
+  0x000140001797  c7 45 cc 0c 00 00 00      mov dword ptr [rbp-34h],0Ch
+  0x00014000179e  c7 45 d0 0d 00 00 00      mov dword ptr [rbp-30h],0Dh
+  0x0001400017a5  c7 45 d4 0e 00 00 00      mov dword ptr [rbp-2Ch],0Eh
+  0x0001400017ac  c7 45 d8 0f 00 00 00      mov dword ptr [rbp-28h],0Fh
+  0x0001400017b3  48 8d 45 a0               lea rax,[rbp-60h]
+  0x0001400017b7  41 b8 08 00 00 00         mov r8d,8
+  0x0001400017bd  ba 03 00 00 00            mov edx,3
+  0x0001400017c2  48 89 c1                  mov rcx,rax
+  0x0001400017c5  e8 10 fe ff ff            call 00000001400015DAh
+  0x0001400017ca  b9 05 00 00 00            mov ecx,5
+  0x0001400017cf  e8 a4 fe ff ff            call 0000000140001678h
+  0x0001400017d4  b8 00 00 00 00            mov eax,0
+  0x0001400017d9  48 83 ec 80               sub rsp,0FFFFFFFFFFFFFF80h
+  0x0001400017dd  5d                        pop rbp
+  0x0001400017de  c3                        ret
+Total instructions: 48

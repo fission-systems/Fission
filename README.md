@@ -291,8 +291,11 @@ cargo build --release --no-default-features --features gui
 # With Python scripting support
 cargo build --release --features python
 
+# With terminal UI
+cargo build --release --features "tui,native_decomp"
+
 # All features
-cargo build --release --features "gui cli python"
+cargo build --release --features "gui cli python tui native_decomp"
 ```
 
 ---
@@ -332,6 +335,16 @@ cargo run --release -- --cli <binary_path>
 
 # With increased verbosity
 cargo run --release -- --cli binary.exe -vvv
+```
+
+### TUI Mode (Terminal UI)
+
+```bash
+# Build and launch the terminal UI
+cargo run --release --bin fission_tui --features "tui,native_decomp" -- <binary_path>
+
+# Example
+cargo run --release --bin fission_tui --features "tui,native_decomp" -- test/comparison_test_x64.exe
 ```
 
 ---

@@ -1,6 +1,6 @@
 //! Script tab panel - Python script editor and execution.
 
-use crate::ui::gui::state::AppState;
+use crate::ui::gui::core::state::AppState;
 use crate::ui::gui::theme::catppuccin;
 use eframe::egui;
 

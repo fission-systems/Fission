@@ -1,0 +1,7 @@
+Function: memcpy at 0x140002b38 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002b38  ff 25 d2 57 00 00         jmp qword ptr [140008310h]
+  0x000140002b3e  90                        nop
+  0x000140002b3f  90                        nop
+Total instructions: 3

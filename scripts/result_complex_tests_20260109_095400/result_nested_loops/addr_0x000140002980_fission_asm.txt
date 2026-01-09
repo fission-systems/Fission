@@ -1,0 +1,26 @@
+Function: fprintf at 0x140002980 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002980  57                        push rdi
+  0x000140002981  56                        push rsi
+  0x000140002982  53                        push rbx
+  0x000140002983  48 83 ec 40               sub rsp,40h
+  0x000140002987  48 8d 7c 24 70            lea rdi,[rsp+70h]
+  0x00014000298c  48 89 cb                  mov rbx,rcx
+  0x00014000298f  48 89 d6                  mov rsi,rdx
+  0x000140002992  4c 89 44 24 70            mov [rsp+70h],r8
+  0x000140002997  4c 89 4c 24 78            mov [rsp+78h],r9
+  0x00014000299c  48 89 7c 24 38            mov [rsp+38h],rdi
+  0x0001400029a1  e8 2a 00 00 00            call 00000001400029D0h
+  0x0001400029a6  45 31 c9                  xor r9d,r9d
+  0x0001400029a9  49 89 f0                  mov r8,rsi
+  0x0001400029ac  48 89 da                  mov rdx,rbx
+  0x0001400029af  48 8b 08                  mov rcx,[rax]
+  0x0001400029b2  48 89 7c 24 20            mov [rsp+20h],rdi
+  0x0001400029b7  e8 ec 00 00 00            call 0000000140002AA8h
+  0x0001400029bc  48 83 c4 40               add rsp,40h
+  0x0001400029c0  5b                        pop rbx
+  0x0001400029c1  5e                        pop rsi
+  0x0001400029c2  5f                        pop rdi
+  0x0001400029c3  c3                        ret
+Total instructions: 22

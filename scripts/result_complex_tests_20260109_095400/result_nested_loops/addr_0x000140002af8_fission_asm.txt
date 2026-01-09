@@ -1,0 +1,7 @@
+Function: _initterm at 0x140002af8 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002af8  ff 25 5a 58 00 00         jmp qword ptr [140008358h]
+  0x000140002afe  90                        nop
+  0x000140002aff  90                        nop
+Total instructions: 3

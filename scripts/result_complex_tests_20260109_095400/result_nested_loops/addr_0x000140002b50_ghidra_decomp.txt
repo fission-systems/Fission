@@ -1,0 +1,10 @@
+int __cdecl _configthreadlocale(int _Flag)
+
+{
+  int iVar1;
+  
+                    /* WARNING: Could not recover jumptable at 0x000140002b50. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  iVar1 = _configthreadlocale(_Flag);
+  return iVar1;
+}

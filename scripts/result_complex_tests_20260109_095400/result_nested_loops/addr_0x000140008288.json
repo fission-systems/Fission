@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140008288",
+    "timestamp": "2026-01-09T00:59:37.067768Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 5,
+        "chars": 176,
+        "functions": 1,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 1,
+        "chars": 130,
+        "functions": 1,
+        "branches": 1
+      }
+    },
+    "similarity": 0.0
+  },
+  "timings": {
+    "ghidra_sec": 2.469,
+    "fission_asm_sec": 0.023,
+    "fission_decomp_sec": 3.256
+  },
+  "ghidra_assembly": "Assembly not available",
+  "ghidra_decompilation": "=== Ghidra Decompilation (PyGhidra) ===\nBinary: /Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe\nAddress: 0x140008288\n\nError: No function found at address 0x140008288",
+  "fission_assembly": "Function: KERNEL32.dll!Sleep at 0x140008288 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140008288  7a 84                     jp short 000000014000820Eh\n  0x00014000828a  00 00                     add [rax],al\n  0x00014000828c  00 00                     add [rax],al\n  0x00014000828e  00 00                     add [rax],al\nTotal instructions: 4",
+  "fission_decompilation": "// Error decompiling KERNEL32.dll!Sleep (0x140008288): Decompiler error: Error: Ghidra LowlevelError: Function loaded for inlining"
+}

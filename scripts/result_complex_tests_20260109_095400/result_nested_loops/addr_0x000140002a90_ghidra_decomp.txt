@@ -1,0 +1,8 @@
+void __acrt_iob_func(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x000140002a90. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  __acrt_iob_func();
+  return;
+}

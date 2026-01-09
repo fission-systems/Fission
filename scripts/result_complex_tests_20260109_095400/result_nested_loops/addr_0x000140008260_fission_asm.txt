@@ -1,0 +1,6 @@
+Function: KERNEL32.dll!EnterCriticalSection at 0x140008260 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140008260  00 84 00 00 00 00 00      add [rax+rax],al
+  0x000140008267  00                        (bad)
+Total instructions: 2

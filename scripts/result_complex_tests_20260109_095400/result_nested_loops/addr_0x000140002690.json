@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002690",
+    "timestamp": "2026-01-09T00:55:06.117357Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 28,
+        "chars": 905,
+        "functions": 34,
+        "branches": 4
+      },
+      "fission": {
+        "lines": 31,
+        "chars": 965,
+        "functions": 34,
+        "branches": 4
+      }
+    },
+    "similarity": 29.79
+  },
+  "timings": {
+    "ghidra_sec": 2.644,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.289
+  },
+  "ghidra_assembly": "0x140002690      MOV      R8, qword ptr [0x1400043e0]\n  0x140002697      XOR      EAX, EAX\n  0x140002699      CMP      word ptr [R8], 0x5a4d\n  0x14000269F      JNZ      0x1400026b0\n  0x1400026A1      MOVSXD   RDX, dword ptr [R8 + 0x3c]\n  0x1400026A5      ADD      RDX, R8\n  0x1400026A8      CMP      dword ptr [RDX], 0x4550\n  0x1400026AE      JZ       0x1400026b8\n  0x1400026B0      RET      \n  0x1400026B8      CMP      word ptr [RDX + 0x18], 0x20b\n  0x1400026BE      JNZ      0x1400026b0\n  0x1400026C0      MOVZX    R8D, word ptr [RDX + 0x6]\n  0x1400026C5      TEST     R8W, R8W\n  0x1400026C9      JZ       0x1400026b0\n  0x1400026CB      MOVZX    EAX, word ptr [RDX + 0x14]\n  0x1400026CF      LEA      RAX, [RDX + RAX*0x1 + 0x18]\n  0x1400026D4      LEA      EDX, [R8 + -0x1]\n  0x1400026D8      LEA      RDX, [RDX + RDX*0x4]\n  0x1400026DC      LEA      RDX, [RAX + RDX*0x8 + 0x28]\n  0x1400026E1      NOP      dword ptr [RAX]\n  0x1400026E5      NOP      dword ptr CS:[RAX + RAX*0x1]\n  0x1400026F0      TEST     byte ptr [RAX + 0x27], 0x20\n  0x1400026F4      JZ       0x1400026ff\n  0x1400026F6      TEST     RCX, RCX\n  0x1400026F9      JZ       0x1400026b0\n  0x1400026FB      SUB      RCX, 0x1\n  0x1400026FF      ADD      RAX, 0x28\n  0x140002703      CMP      RDX, RAX\n  0x140002706      JNZ      0x1400026f0\n  0x140002708      XOR      EAX, EAX\n  0x14000270A      RET",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nPIMAGE_SECTION_HEADER _FindPESectionExec(size_t eNo)\n\n{\n  PIMAGE_SECTION_HEADER p_Var1;\n  PIMAGE_SECTION_HEADER p_Var2;\n  int *piVar3;\n  \n  if ((((*(short *)_refptr___ImageBase == 0x5a4d) &&\n       (piVar3 = (int *)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)),\n       *piVar3 == 0x4550)) && ((short)piVar3[6] == 0x20b)) &&\n     (*(ushort *)((longlong)piVar3 + 6) != 0)) {\n    p_Var2 = (PIMAGE_SECTION_HEADER)((longlong)piVar3 + (ulonglong)*(ushort *)(piVar3 + 5) + 0x18);\n    p_Var1 = p_Var2 + (ulonglong)(*(ushort *)((longlong)piVar3 + 6) - 1) + 1;\n    do {\n      if ((p_Var2->Characteristics & 0x20000000) != 0) {\n        if (eNo == 0) {\n          return p_Var2;\n        }\n        eNo = eNo - 1;\n      }\n      p_Var2 = p_Var2 + 1;\n    } while (p_Var1 != p_Var2);\n    return (PIMAGE_SECTION_HEADER)0x0;\n  }\n  return (PIMAGE_SECTION_HEADER)0x0;\n}",
+  "fission_assembly": "Function: _FindPESectionExec at 0x140002690 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002690  4c 8b 05 49 1d 00 00      mov r8,[1400043E0h]\n  0x000140002697  31 c0                     xor eax,eax\n  0x000140002699  66 41 81 38 4d 5a         cmp word ptr [r8],5A4Dh\n  0x00014000269f  75 0f                     jne short 00000001400026B0h\n  0x0001400026a1  49 63 50 3c               movsxd rdx,[r8+3Ch]\n  0x0001400026a5  4c 01 c2                  add rdx,r8\n  0x0001400026a8  81 3a 50 45 00 00         cmp dword ptr [rdx],4550h\n  0x0001400026ae  74 08                     je short 00000001400026B8h\n  0x0001400026b0  c3                        ret\nTotal instructions: 9",
+  "fission_decompilation": "// ============================================\n// Function: _FindPESectionExec @ 0x140002690\n// ============================================\n\n\nlonglong _FindPESectionExec(longlong param_1)\n\n{\n  longlong lVar1;\n  longlong lVar2;\n  int *piVar3;\n  \n  if ((((*_refptr___CTOR_LIST__._8_8_ == 0x5a4d) &&\n       (piVar3 = (int *)((longlong)*(int *)(_refptr___CTOR_LIST__._8_8_ + 0x1e) +\n                         (longlong)_refptr___CTOR_LIST__._8_8_), *piVar3 == 0x4550)) &&\n      ((int2)piVar3[6] == 0x20b)) && (*(uint2 *)((longlong)piVar3 + 6) != 0)) {\n    lVar2 = (longlong)piVar3 + (ulonglong)*(uint2 *)(piVar3 + 5) + 0x18;\n    lVar1 = lVar2 + 0x28;\n    do {\n      if ((*(uint1 *)(lVar2 + 0x27) & 0x20) != 0) {\n        if (param_1 == 0) {\n          return lVar2;\n        }\n        param_1 = param_1 + -1;\n      }\n      lVar2 = lVar2 + 0x28;\n    } while (lVar1 + (ulonglong)((uint)*(uint2 *)((longlong)piVar3 + 6) - 1) * 0x28 != lVar2);\n    return 0;\n  }\n  return 0;\n}"
+}

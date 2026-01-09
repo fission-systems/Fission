@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140008260",
+    "timestamp": "2026-01-09T00:59:07.773979Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 5,
+        "chars": 176,
+        "functions": 1,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 40,
+        "chars": 1924,
+        "functions": 73,
+        "branches": 0
+      }
+    },
+    "similarity": 0.0
+  },
+  "timings": {
+    "ghidra_sec": 2.366,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.404
+  },
+  "ghidra_assembly": "Assembly not available",
+  "ghidra_decompilation": "=== Ghidra Decompilation (PyGhidra) ===\nBinary: /Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe\nAddress: 0x140008260\n\nError: No function found at address 0x140008260",
+  "fission_assembly": "Function: KERNEL32.dll!EnterCriticalSection at 0x140008260 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140008260  00 84 00 00 00 00 00      add [rax+rax],al\n  0x000140008267  00                        (bad)\nTotal instructions: 2",
+  "fission_decompilation": "// ============================================\n// Function: KERNEL32.dll!EnterCriticalSection @ 0x140008260\n// ============================================\n\n\n/* WARNING: Control flow encountered bad instruction data */\n\nvoid KERNEL32.dll!EnterCriticalSection(undefined8 param_1,longlong param_2)\n\n{\n  char *pcVar1;\n  char in_AL;\n  unkbyte7 in_RAX;\n  char unaff_BL;\n  char unaff_BH;\n  \n  pcVar1 = (char *)(CONCAT71(in_RAX,in_AL) + CONCAT71(in_RAX,in_AL));\n  *pcVar1 = *pcVar1 + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + unaff_BL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) =\n       *(char *)CONCAT71(in_RAX,in_AL) + (char)((ulonglong)param_1 >> 8);\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  (&stack0x00000000)[CONCAT71(in_RAX,in_AL) * 4] =\n       (&stack0x00000000)[CONCAT71(in_RAX,in_AL) * 4] + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  (&stack0x00000000)[CONCAT71(in_RAX,in_AL) * 4] =\n       (&stack0x00000000)[CONCAT71(in_RAX,in_AL) * 4] + unaff_BL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)(param_2 + -0x7c) = *(char *)(param_2 + -0x7c) + unaff_BH;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n                    /* WARNING: Bad instruction - Truncating control flow here */\n  halt_baddata();\n}"
+}

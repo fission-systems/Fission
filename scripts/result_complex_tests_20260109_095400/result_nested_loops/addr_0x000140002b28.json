@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002b28",
+    "timestamp": "2026-01-09T00:58:01.228481Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 10,
+        "chars": 302,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 300,
+        "functions": 3,
+        "branches": 0
+      }
+    },
+    "similarity": 60.0
+  },
+  "timings": {
+    "ghidra_sec": 2.737,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.386
+  },
+  "ghidra_assembly": "0x140002B28      JMP      qword ptr [0x140008388]",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention -- yet parameter storage is locked */\n\nvoid signal(int param_1)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002b28. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  signal(param_1);\n  return;\n}",
+  "fission_assembly": "Function: signal at 0x140002b28 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002b28  ff 25 5a 58 00 00         jmp qword ptr [140008388h]\n  0x000140002b2e  90                        nop\n  0x000140002b2f  90                        nop\n  0x000140002b30  ff 25 d2 57 00 00         jmp qword ptr [140008308h]\n  0x000140002b36  90                        nop\n  0x000140002b37  90                        nop\nTotal instructions: 6",
+  "fission_decompilation": "// ============================================\n// Function: signal @ 0x140002b28\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nvoid signal(void)\n\n{\n  (*_api-ms-win-crt-runtime-l1-1-0.dll!signal)();\n  return;\n}"
+}

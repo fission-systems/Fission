@@ -26,6 +26,8 @@ pub struct CliRunArgs {
     pub show_info: bool,
     pub instruction_count: usize,
     pub show_xrefs: Option<String>,
+    pub string_xrefs: Option<String>,
+    pub string_min_len: usize,
 }
 
 /// Parse address from string (supports 0x prefix and decimal)
@@ -61,6 +63,8 @@ pub fn run_cli_with_args(args: CliRunArgs) -> Result<()> {
         show_info,
         instruction_count,
         show_xrefs,
+        string_xrefs,
+        string_min_len,
     } = args;
 
     let mut state = CliState::default();
@@ -109,6 +113,12 @@ pub fn run_cli_with_args(args: CliRunArgs) -> Result<()> {
             let address = parse_address(addr_str)?;
             print_section_header(&format!("Cross-References for: 0x{:x}", address));
             handlers::cmd_xrefs(&state, address);
+            return Ok(());
+        }
+
+        if let Some(ref search_term) = string_xrefs {
+            print_section_header(&format!("String Cross-References: \"{}\"", search_term));
+            handlers::cmd_string_xrefs(&state, search_term, string_min_len);
             return Ok(());
         }
 
@@ -175,6 +185,9 @@ pub fn run_cli() -> Result<()> {
                     Command::Sections => handlers::cmd_sections(&state),
                     Command::Analyze => handlers::cmd_analyze(&mut state),
                     Command::Xrefs { address } => handlers::cmd_xrefs(&state, address),
+                    Command::StringXrefs { search_term, min_length } => {
+                        handlers::cmd_string_xrefs(&state, &search_term, min_length)
+                    }
                     Command::Help => handlers::cmd_help(),
                     Command::Clear => handlers::cmd_clear(),
                     Command::Exit => {

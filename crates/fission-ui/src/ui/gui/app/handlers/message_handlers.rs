@@ -4,8 +4,8 @@ use crossbeam_channel::Sender;
 use std::sync::Arc;
 
 use crate::analysis::loader::LoadedBinary;
-use crate::ui::gui::messages::AsyncMessage;
-use crate::ui::gui::state::AppState;
+use crate::ui::gui::core::messages::AsyncMessage;
+use crate::ui::gui::core::state::AppState;
 
 use super::super::decomp_worker;
 
@@ -226,5 +226,55 @@ pub fn handle_load_snapshot(state: &mut AppState, tx: Sender<AsyncMessage>, path
         Err(e) => {
             state.log(format!("[!] Error loading snapshot: {}", e));
         }
+    }
+}
+
+/// Handle folder selection
+pub fn handle_folder_selected(state: &mut AppState, tx: Sender<AsyncMessage>, path: String) {
+    super::super::file_ops::load_folder(state, tx, &path);
+}
+
+/// Handle project loaded from folder
+pub fn handle_project_loaded(
+    state: &mut AppState,
+    path: String,
+    binaries: Vec<Arc<LoadedBinary>>,
+    decomp_tx: &Sender<decomp_worker::DecompileRequest>,
+) {
+    if binaries.is_empty() {
+        state.log(format!("[!] No binaries found in folder: {}", path));
+        return;
+    }
+
+    state.log(format!(
+        "[✓] Project loaded: {} ({} binaries)",
+        path,
+        binaries.len()
+    ));
+
+    // Store project info
+    state.analysis.project_folder = Some(path);
+    state.analysis.project_binaries = binaries.clone();
+    state.analysis.selected_binary_index = Some(0);
+
+    // List all binaries
+    state.log("[*] Project binaries:".to_string());
+    for (idx, binary) in binaries.iter().enumerate() {
+        let file_name = std::path::Path::new(&binary.path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&binary.path);
+        state.log(format!(
+            "    [{}] {} ({} functions)",
+            idx,
+            file_name,
+            binary.functions.len()
+        ));
+    }
+
+    // Load the first binary by default
+    if let Some(first_binary) = binaries.first() {
+        state.log(format!("[*] Loading first binary..."));
+        handle_binary_loaded(state, first_binary.clone(), decomp_tx);
     }
 }

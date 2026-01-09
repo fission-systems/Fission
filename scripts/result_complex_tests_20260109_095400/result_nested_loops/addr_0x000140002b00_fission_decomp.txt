@@ -1,0 +1,13 @@
+// ============================================
+// Function: _initterm_e @ 0x140002b00
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void _initterm_e(void)
+
+{
+  (*_api-ms-win-crt-runtime-l1-1-0.dll!_initterm_e)();
+  return;
+}
