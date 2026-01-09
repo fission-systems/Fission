@@ -1,7 +1,7 @@
 //! Editor area panel - Tabbed interface for assembly, decompiled code, etc.
 
 use super::{assembly, decompile};
-use crate::ui::gui::state::{AppState, EditorTab};
+use crate::ui::gui::core::state::{AppState, EditorTab};
 use crate::ui::gui::theme::catppuccin;
 use eframe::egui;
 

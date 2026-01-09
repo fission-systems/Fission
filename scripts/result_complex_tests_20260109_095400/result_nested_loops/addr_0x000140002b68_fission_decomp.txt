@@ -1,0 +1,13 @@
+// ============================================
+// Function: calloc @ 0x140002b68
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void calloc(void)
+
+{
+  (*_api-ms-win-crt-heap-l1-1-0.dll!calloc)();
+  return;
+}

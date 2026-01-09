@@ -1,0 +1,26 @@
+/* WARNING: Unknown calling convention */
+
+int find_in_matrix(int (*matrix) [5],int rows,int target)
+
+{
+  longlong in_RCX;
+  int in_EDX;
+  uint in_R8D;
+  int j;
+  int i;
+  int found;
+  
+  i = 0;
+  do {
+    if (in_EDX <= i) {
+      return 0;
+    }
+    for (j = 0; j < 5; j = j + 1) {
+      if (in_R8D == *(uint *)((longlong)i * 0x14 + in_RCX + (longlong)j * 4)) {
+        printf("Found %d at [%d][%d]\n",(ulonglong)in_R8D,(ulonglong)(uint)i,(ulonglong)(uint)j);
+        return 1;
+      }
+    }
+    i = i + 1;
+  } while( true );
+}

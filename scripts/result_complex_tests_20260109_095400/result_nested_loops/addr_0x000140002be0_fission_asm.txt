@@ -1,0 +1,16 @@
+Function: register_frame_ctor at 0x140002be0 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002be0  e9 4b e8 ff ff            jmp 0000000140001430h
+  0x000140002be5  90                        nop
+  0x000140002be6  90                        nop
+  0x000140002be7  90                        nop
+  0x000140002be8  90                        nop
+  0x000140002be9  90                        nop
+  0x000140002bea  90                        nop
+  0x000140002beb  90                        nop
+  0x000140002bec  90                        nop
+  0x000140002bed  90                        nop
+  0x000140002bee  90                        nop
+  0x000140002bef  90                        nop
+Total instructions: 12

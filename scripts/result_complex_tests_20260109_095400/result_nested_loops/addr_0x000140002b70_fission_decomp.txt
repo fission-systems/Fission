@@ -1,0 +1,13 @@
+// ============================================
+// Function: free @ 0x140002b70
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void free(void)
+
+{
+  (*_api-ms-win-crt-heap-l1-1-0.dll!free)();
+  return;
+}

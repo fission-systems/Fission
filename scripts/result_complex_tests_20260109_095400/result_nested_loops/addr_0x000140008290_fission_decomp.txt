@@ -1,0 +1,13 @@
+// ============================================
+// Function: KERNEL32.dll!TlsGetValue @ 0x140008290
+// ============================================
+
+
+/* WARNING: Control flow encountered bad instruction data */
+
+void KERNEL32.dll!TlsGetValue(void)
+
+{
+                    /* WARNING: Bad instruction - Truncating control flow here */
+  halt_baddata();
+}

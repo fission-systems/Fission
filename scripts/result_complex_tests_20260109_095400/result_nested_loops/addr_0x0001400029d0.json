@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x0001400029d0",
+    "timestamp": "2026-01-09T00:55:35.692604Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 7,
+        "chars": 113,
+        "functions": 1,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 10,
+        "chars": 227,
+        "functions": 1,
+        "branches": 0
+      }
+    },
+    "similarity": 50.0
+  },
+  "timings": {
+    "ghidra_sec": 2.56,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.293
+  },
+  "ghidra_assembly": "0x1400029D0      LEA      RAX, [0x140003050]\n  0x1400029D7      RET",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nulonglong * __local_stdio_printf_options(void)\n\n{\n  return &options;\n}",
+  "fission_assembly": "Function: __local_stdio_printf_options at 0x1400029d0 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x0001400029d0  48 8d 05 79 06 00 00      lea rax,[140003050h]\n  0x0001400029d7  c3                        ret\nTotal instructions: 2",
+  "fission_decompilation": "// ============================================\n// Function: __local_stdio_printf_options @ 0x1400029d0\n// ============================================\n\n\nfloat4 * __local_stdio_printf_options(void)\n\n{\n  return &DAT_140003050;\n}"
+}

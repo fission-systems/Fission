@@ -12,6 +12,8 @@ pub mod patch;
 pub mod pcode;
 pub mod signatures;
 pub mod xrefs;
+pub mod strings;
+pub mod string_xrefs;
 
 pub use detector::{detect, Confidence, Detection, DetectionResult, DetectionType};
 pub use dotnet::{

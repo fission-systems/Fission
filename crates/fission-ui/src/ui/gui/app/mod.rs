@@ -21,12 +21,12 @@ use crate::analysis::loader::FunctionInfo;
 #[cfg(target_os = "windows")]
 use crate::debug::PlatformDebugger;
 
-use super::menu::{self, MenuAction};
-use super::messages::AsyncMessage;
+use super::components::{menu, MenuAction};
+use super::components::status_bar;
+use super::core::{AsyncMessage, AppState};
+use super::core::state::DebugAction;
 use super::panels::bottom_tabs::{ConsoleAction, ScriptAction};
 use super::panels::{activity_bar, bottom_tabs, editor, side_bar};
-use super::state::{AppState, DebugAction};
-use super::status_bar;
 use crate::app::modules::ModuleManager;
 use crate::plugin::module::PluginModule;
 use crate::plugin::PluginManager;
@@ -166,7 +166,7 @@ impl eframe::App for FissionApp {
 
             // Handle tab switching if mode changed
             if self.last_dynamic_mode != dynamic_mode {
-                use crate::ui::gui::state::BottomTab;
+                use crate::ui::gui::core::state::BottomTab;
                 let invalid = match self.state.ui.bottom_tab {
                     BottomTab::Debug | BottomTab::Timeline => !dynamic_mode,
                     BottomTab::Strings | BottomTab::Imports => dynamic_mode,
@@ -265,6 +265,28 @@ impl eframe::App for FissionApp {
                         .unwrap_or_else(|| format!("sub_{:x}", addr));
                     self.state.analysis.rename_dialog = Some((addr, current_name));
                 }
+                side_bar::SideBarAction::SwitchBinary(binary) => {
+                    // Log the switch
+                    let file_name = std::path::Path::new(&binary.path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&binary.path);
+                    
+                    self.state.log(format!("[*] Switching to binary: {}", file_name));
+                    
+                    // Clear current state
+                    self.state.analysis.decompile_cache.clear();
+                    self.state.analysis.selected_function = None;
+                    self.state.ui.open_tabs.clear();
+                    self.state.ui.active_tab_index = None;
+                    
+                    // Reinitialize decompiler context with new binary
+                    handlers::message_handlers::handle_binary_loaded(
+                        &mut self.state,
+                        binary,
+                        &self.decomp_request_tx,
+                    );
+                }
             }
         }
 
@@ -312,6 +334,10 @@ impl eframe::App for FissionApp {
                 &self.latest_request_id,
             );
         }
+
+        // Render string xrefs window
+        use super::panels::string_xrefs;
+        string_xrefs::render(ctx, &mut self.state);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -327,6 +353,7 @@ impl FissionApp {
     fn handle_menu_action(&mut self, action: MenuAction) {
         match action {
             MenuAction::OpenFile => file_ops::open_file_dialog(self.tx.clone()),
+            MenuAction::OpenFolder => file_ops::open_folder_dialog(self.tx.clone()),
             MenuAction::SaveSnapshot => file_ops::save_snapshot_dialog(self.tx.clone()),
             MenuAction::LoadSnapshot => file_ops::load_snapshot_dialog(self.tx.clone()),
             MenuAction::AttachToProcess => {
@@ -350,6 +377,19 @@ impl FissionApp {
             }
             MenuAction::ShowXrefs => {
                 self.state.ui.show_xrefs_window = true;
+            }
+            MenuAction::ShowStringXrefs => {
+                self.state.ui.show_string_xrefs_window = true;
+            }
+            MenuAction::BatchDecompile => {
+                analysis_ops::batch_decompile_project(
+                    &mut self.state,
+                    &self.decomp_request_tx,
+                    &self.latest_request_id,
+                );
+            }
+            MenuAction::ExportResults => {
+                file_ops::export_results_dialog(self.tx.clone());
             }
             MenuAction::Exit => std::process::exit(0),
             MenuAction::None => {}

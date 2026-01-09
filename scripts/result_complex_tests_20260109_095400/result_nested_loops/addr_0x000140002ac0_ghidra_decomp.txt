@@ -1,0 +1,8 @@
+void __p___argc(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x000140002ac0. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  __p___argc();
+  return;
+}

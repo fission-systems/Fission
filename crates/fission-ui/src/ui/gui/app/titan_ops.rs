@@ -1,4 +1,4 @@
-use crate::ui::gui::state::{AppState, DebugAction};
+use crate::ui::gui::core::state::{AppState, DebugAction};
 
 #[cfg(target_os = "windows")]
 pub fn handle_debug_action(state: &mut AppState, action: DebugAction) -> bool {

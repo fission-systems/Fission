@@ -1,6 +1,6 @@
 //! Activity Bar widget - Vertical bar on the left with activity icons.
 
-use crate::ui::gui::state::{Activity, AppState};
+use crate::ui::gui::core::state::{Activity, AppState};
 use eframe::egui;
 
 /// Render the vertical activity bar on the far left.

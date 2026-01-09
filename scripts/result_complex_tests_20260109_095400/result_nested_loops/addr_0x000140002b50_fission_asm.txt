@@ -1,0 +1,8 @@
+Function: _configthreadlocale at 0x140002b50 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002b50  ff 25 92 57 00 00         jmp qword ptr [1400082E8h]
+  0x000140002b56  90                        nop
+  0x000140002b57  90                        nop
+  0x000140002b58  0f 1f 84 00 00 00 00 00   nop [rax+rax]
+Total instructions: 4

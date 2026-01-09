@@ -65,6 +65,29 @@ pub fn cmd_help() {
     );
     println!();
     println!(
+        "  {} {}  Show cross-references for address",
+        "xrefs".cyan(),
+        "<addr>".dimmed()
+    );
+    println!(
+        "  {} {}  Find string cross-references",
+        "string-xrefs".cyan(),
+        "<term> [min_len]".dimmed()
+    );
+    println!(
+        "                        {}",
+        "Use /regex/ for regex search".dimmed()
+    );
+    println!(
+        "                        {}",
+        "Use \"exact\" for exact match".dimmed()
+    );
+    println!(
+        "                        {}",
+        "Or just term for partial match".dimmed()
+    );
+    println!();
+    println!(
         "{}",
         "Address formats: 0x1234, 1234 (hex if >4 digits)".dimmed()
     );

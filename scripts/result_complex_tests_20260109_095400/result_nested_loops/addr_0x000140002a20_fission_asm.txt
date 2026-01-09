@@ -1,0 +1,37 @@
+Function: __getmainargs at 0x140002a20 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002a20  55                        push rbp
+  0x000140002a21  57                        push rdi
+  0x000140002a22  56                        push rsi
+  0x000140002a23  53                        push rbx
+  0x000140002a24  48 83 ec 28               sub rsp,28h
+  0x000140002a28  44 89 cd                  mov ebp,r9d
+  0x000140002a2b  48 89 d6                  mov rsi,rdx
+  0x000140002a2e  4c 89 c3                  mov rbx,r8
+  0x000140002a31  48 89 cf                  mov rdi,rcx
+  0x000140002a34  e8 b7 00 00 00            call 0000000140002AF0h
+  0x000140002a39  83 fd 01                  cmp ebp,1
+  0x000140002a3c  b9 01 00 00 00            mov ecx,1
+  0x000140002a41  83 d9 ff                  sbb ecx,0FFFFFFFFh
+  0x000140002a44  e8 8f 00 00 00            call 0000000140002AD8h
+  0x000140002a49  e8 72 00 00 00            call 0000000140002AC0h
+  0x000140002a4e  8b 00                     mov eax,[rax]
+  0x000140002a50  89 07                     mov [rdi],eax
+  0x000140002a52  e8 71 00 00 00            call 0000000140002AC8h
+  0x000140002a57  48 8b 00                  mov rax,[rax]
+  0x000140002a5a  48 89 06                  mov [rsi],rax
+  0x000140002a5d  e8 1e 01 00 00            call 0000000140002B80h
+  0x000140002a62  48 8b 00                  mov rax,[rax]
+  0x000140002a65  48 89 03                  mov [rbx],rax
+  0x000140002a68  48 8b 44 24 70            mov rax,[rsp+70h]
+  0x000140002a6d  8b 08                     mov ecx,[rax]
+  0x000140002a6f  e8 ec 00 00 00            call 0000000140002B60h
+  0x000140002a74  31 c0                     xor eax,eax
+  0x000140002a76  48 83 c4 28               add rsp,28h
+  0x000140002a7a  5b                        pop rbx
+  0x000140002a7b  5e                        pop rsi
+  0x000140002a7c  5f                        pop rdi
+  0x000140002a7d  5d                        pop rbp
+  0x000140002a7e  c3                        ret
+Total instructions: 33

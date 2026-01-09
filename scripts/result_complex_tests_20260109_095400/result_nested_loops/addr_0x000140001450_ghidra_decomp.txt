@@ -1,0 +1,27 @@
+/* WARNING: Unknown calling convention */
+
+int find_pair(int *arr,int size,int target)
+
+{
+  longlong in_RCX;
+  int in_EDX;
+  uint in_R8D;
+  int j;
+  int i;
+  
+  i = 0;
+  do {
+    j = i;
+    if (in_EDX <= i) {
+      return 0;
+    }
+    while (j = j + 1, j < in_EDX) {
+      if (in_R8D == *(int *)(in_RCX + (longlong)j * 4) + *(int *)(in_RCX + (longlong)i * 4)) {
+        printf("Found pair: %d + %d = %d\n",(ulonglong)*(uint *)(in_RCX + (longlong)i * 4),
+               (ulonglong)*(uint *)(in_RCX + (longlong)j * 4),(ulonglong)in_R8D);
+        return 1;
+      }
+    }
+    i = i + 1;
+  } while( true );
+}

@@ -1,0 +1,10 @@
+Function: signal at 0x140002b28 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002b28  ff 25 5a 58 00 00         jmp qword ptr [140008388h]
+  0x000140002b2e  90                        nop
+  0x000140002b2f  90                        nop
+  0x000140002b30  ff 25 d2 57 00 00         jmp qword ptr [140008308h]
+  0x000140002b36  90                        nop
+  0x000140002b37  90                        nop
+Total instructions: 6

@@ -1,0 +1,13 @@
+// ============================================
+// Function: _cexit @ 0x140002ad0
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void _cexit(void)
+
+{
+  (*_api-ms-win-crt-runtime-l1-1-0.dll!_cexit)();
+  return;
+}

@@ -1,0 +1,28 @@
+/* WARNING: Unknown calling convention */
+
+PIMAGE_SECTION_HEADER _FindPESectionExec(size_t eNo)
+
+{
+  PIMAGE_SECTION_HEADER p_Var1;
+  PIMAGE_SECTION_HEADER p_Var2;
+  int *piVar3;
+  
+  if ((((*(short *)_refptr___ImageBase == 0x5a4d) &&
+       (piVar3 = (int *)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)),
+       *piVar3 == 0x4550)) && ((short)piVar3[6] == 0x20b)) &&
+     (*(ushort *)((longlong)piVar3 + 6) != 0)) {
+    p_Var2 = (PIMAGE_SECTION_HEADER)((longlong)piVar3 + (ulonglong)*(ushort *)(piVar3 + 5) + 0x18);
+    p_Var1 = p_Var2 + (ulonglong)(*(ushort *)((longlong)piVar3 + 6) - 1) + 1;
+    do {
+      if ((p_Var2->Characteristics & 0x20000000) != 0) {
+        if (eNo == 0) {
+          return p_Var2;
+        }
+        eNo = eNo - 1;
+      }
+      p_Var2 = p_Var2 + 1;
+    } while (p_Var1 != p_Var2);
+    return (PIMAGE_SECTION_HEADER)0x0;
+  }
+  return (PIMAGE_SECTION_HEADER)0x0;
+}

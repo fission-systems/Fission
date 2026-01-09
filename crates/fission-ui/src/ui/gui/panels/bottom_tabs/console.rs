@@ -1,6 +1,6 @@
 //! Console tab panel - Command input and log output.
 
-use crate::ui::gui::state::AppState;
+use crate::ui::gui::core::state::AppState;
 use crate::ui::gui::theme::catppuccin;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};

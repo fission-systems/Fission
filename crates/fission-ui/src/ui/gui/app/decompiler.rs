@@ -9,7 +9,7 @@ use super::decomp_worker::DecompileRequest;
 use crate::analysis::disasm::DisasmEngine;
 use crate::analysis::loader::FunctionInfo;
 use crate::core::config::CONFIG;
-use crate::ui::gui::state::{AppState, CachedDecompile};
+use crate::ui::gui::core::state::{AppState, CachedDecompile};
 
 /// Decompile a function (sends request to worker thread)
 pub fn decompile_function(

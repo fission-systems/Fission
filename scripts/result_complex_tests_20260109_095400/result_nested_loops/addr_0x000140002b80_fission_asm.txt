@@ -1,0 +1,38 @@
+Function: __p__environ at 0x140002b80 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002b80  ff 25 2a 57 00 00         jmp qword ptr [1400082B0h]
+  0x000140002b86  90                        nop
+  0x000140002b87  90                        nop
+  0x000140002b88  0f 1f 84 00 00 00 00 00   nop [rax+rax]
+  0x000140002b90  ff 25 0a 57 00 00         jmp qword ptr [1400082A0h]
+  0x000140002b96  90                        nop
+  0x000140002b97  90                        nop
+  0x000140002b98  ff 25 fa 56 00 00         jmp qword ptr [140008298h]
+  0x000140002b9e  90                        nop
+  0x000140002b9f  90                        nop
+  0x000140002ba0  ff 25 ea 56 00 00         jmp qword ptr [140008290h]
+  0x000140002ba6  90                        nop
+  0x000140002ba7  90                        nop
+  0x000140002ba8  ff 25 da 56 00 00         jmp qword ptr [140008288h]
+  0x000140002bae  90                        nop
+  0x000140002baf  90                        nop
+  0x000140002bb0  ff 25 ca 56 00 00         jmp qword ptr [140008280h]
+  0x000140002bb6  90                        nop
+  0x000140002bb7  90                        nop
+  0x000140002bb8  ff 25 ba 56 00 00         jmp qword ptr [140008278h]
+  0x000140002bbe  90                        nop
+  0x000140002bbf  90                        nop
+  0x000140002bc0  ff 25 aa 56 00 00         jmp qword ptr [140008270h]
+  0x000140002bc6  90                        nop
+  0x000140002bc7  90                        nop
+  0x000140002bc8  ff 25 9a 56 00 00         jmp qword ptr [140008268h]
+  0x000140002bce  90                        nop
+  0x000140002bcf  90                        nop
+  0x000140002bd0  ff 25 8a 56 00 00         jmp qword ptr [140008260h]
+  0x000140002bd6  90                        nop
+  0x000140002bd7  90                        nop
+  0x000140002bd8  ff 25 7a 56 00 00         jmp qword ptr [140008258h]
+  0x000140002bde  90                        nop
+  0x000140002bdf  90                        nop
+Total instructions: 34

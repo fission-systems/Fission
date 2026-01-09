@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002b38",
+    "timestamp": "2026-01-09T00:58:07.304445Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 10,
+        "chars": 300,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 300,
+        "functions": 3,
+        "branches": 0
+      }
+    },
+    "similarity": 36.36
+  },
+  "timings": {
+    "ghidra_sec": 2.655,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.398
+  },
+  "ghidra_assembly": "0x140002B38      JMP      qword ptr [0x140008310]",
+  "ghidra_decompilation": "void * __cdecl memcpy(void *_Dst,void *_Src,size_t _Size)\n\n{\n  void *pvVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002b38. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  pvVar1 = memcpy(_Dst,_Src,_Size);\n  return pvVar1;\n}",
+  "fission_assembly": "Function: memcpy at 0x140002b38 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002b38  ff 25 d2 57 00 00         jmp qword ptr [140008310h]\n  0x000140002b3e  90                        nop\n  0x000140002b3f  90                        nop\nTotal instructions: 3",
+  "fission_decompilation": "// ============================================\n// Function: memcpy @ 0x140002b38\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nvoid memcpy(void)\n\n{\n  (*_api-ms-win-crt-private-l1-1-0.dll!memcpy)();\n  return;\n}"
+}

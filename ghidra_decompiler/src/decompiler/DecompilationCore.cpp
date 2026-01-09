@@ -104,6 +104,18 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Failed to get function data");
     }
     
+    // Check if function is marked as inline - these cannot be decompiled directly
+    if (fd->getFuncProto().isInline()) {
+        std::cerr << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec << " is marked as inline" << std::endl;
+        throw std::runtime_error("Cannot decompile inline function - function is marked for inlining");
+    }
+    
+    // Check if function is already being decompiled (recursive call)
+    if (fd->isProcStarted()) {
+        std::cerr << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec << " is already being processed" << std::endl;
+        throw std::runtime_error("Function is already being decompiled (recursive decompilation detected)");
+    }
+    
     // Clear only this function's data for fresh analysis
     fd->clear();
     

@@ -1,0 +1,13 @@
+// ============================================
+// Function: malloc @ 0x140002b78
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void malloc(void)
+
+{
+  (*_api-ms-win-crt-heap-l1-1-0.dll!malloc)();
+  return;
+}

@@ -1,0 +1,59 @@
+// ============================================
+// Function: main @ 0x1400016d8
+// ============================================
+
+
+int __cdecl main(int _Argc,char **_Argv,char **_Env)
+
+{
+  undefined4 local_68;
+  undefined4 local_64;
+  undefined4 local_60;
+  undefined4 local_5c;
+  undefined4 local_58;
+  undefined4 local_54;
+  undefined4 local_50;
+  undefined4 local_4c;
+  undefined4 local_48;
+  undefined4 local_44;
+  undefined4 local_40;
+  undefined4 local_3c;
+  undefined4 local_38;
+  undefined4 local_34;
+  undefined4 local_30;
+  undefined4 local_28;
+  undefined4 local_24;
+  undefined4 local_20;
+  undefined4 local_1c;
+  undefined4 local_18;
+  undefined4 local_14;
+  
+  __main();
+  puts("=== Nested Loops Test ===\n");
+  local_28 = 1;
+  local_24 = 4;
+  local_20 = 7;
+  local_1c = 2;
+  local_18 = 9;
+  local_14 = 5;
+  find_pair(&local_28,6,0xb);
+  print_3d_matrix(2,3,4);
+  local_68 = 1;
+  local_64 = 2;
+  local_60 = 3;
+  local_5c = 4;
+  local_58 = 5;
+  local_54 = 6;
+  local_50 = 7;
+  local_4c = 8;
+  local_48 = 9;
+  local_44 = 10;
+  local_40 = 0xb;
+  local_3c = 0xc;
+  local_38 = 0xd;
+  local_34 = 0xe;
+  local_30 = 0xf;
+  find_in_matrix(&local_68,3,8);
+  complex_iteration(5);
+  return 0;
+}

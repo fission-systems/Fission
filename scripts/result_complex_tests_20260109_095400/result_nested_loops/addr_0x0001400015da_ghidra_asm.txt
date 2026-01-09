@@ -1,0 +1,47 @@
+0x1400015DA      PUSH     RBP
+  0x1400015DB      MOV      RBP, RSP
+  0x1400015DE      SUB      RSP, 0x30
+  0x1400015E2      MOV      qword ptr [RBP + 0x10], RCX
+  0x1400015E6      MOV      dword ptr [RBP + 0x18], EDX
+  0x1400015E9      MOV      dword ptr [RBP + 0x20], R8D
+  0x1400015ED      MOV      dword ptr [RBP + -0x4], 0x0
+  0x1400015F4      MOV      dword ptr [RBP + -0x8], 0x0
+  0x1400015FB      JMP      0x140001666
+  0x1400015FD      MOV      dword ptr [RBP + -0xc], 0x0
+  0x140001604      JMP      0x14000165c
+  0x140001606      MOV      EAX, dword ptr [RBP + -0x8]
+  0x140001609      MOVSXD   RDX, EAX
+  0x14000160C      MOV      RAX, RDX
+  0x14000160F      SHL      RAX, 0x2
+  0x140001613      ADD      RAX, RDX
+  0x140001616      SHL      RAX, 0x2
+  0x14000161A      MOV      RDX, RAX
+  0x14000161D      MOV      RAX, qword ptr [RBP + 0x10]
+  0x140001621      ADD      RDX, RAX
+  0x140001624      MOV      EAX, dword ptr [RBP + -0xc]
+  0x140001627      CDQE     
+  0x140001629      MOV      EAX, dword ptr [RDX + RAX*0x4]
+  0x14000162C      CMP      dword ptr [RBP + 0x20], EAX
+  0x14000162F      JNZ      0x140001658
+  0x140001631      MOV      R8D, dword ptr [RBP + -0xc]
+  0x140001635      MOV      EDX, dword ptr [RBP + -0x8]
+  0x140001638      MOV      EAX, dword ptr [RBP + 0x20]
+  0x14000163B      LEA      RCX, [0x140004029]
+  0x140001642      MOV      R9D, R8D
+  0x140001645      MOV      R8D, EDX
+  0x140001648      MOV      EDX, EAX
+  0x14000164A      CALL     0x140002920
+  0x14000164F      MOV      dword ptr [RBP + -0x4], 0x1
+  0x140001656      JMP      0x14000166f
+  0x140001658      ADD      dword ptr [RBP + -0xc], 0x1
+  0x14000165C      CMP      dword ptr [RBP + -0xc], 0x4
+  0x140001660      JLE      0x140001606
+  0x140001662      ADD      dword ptr [RBP + -0x8], 0x1
+  0x140001666      MOV      EAX, dword ptr [RBP + -0x8]
+  0x140001669      CMP      EAX, dword ptr [RBP + 0x18]
+  0x14000166C      JL       0x1400015fd
+  0x14000166E      NOP      
+  0x14000166F      MOV      EAX, dword ptr [RBP + -0x4]
+  0x140001672      ADD      RSP, 0x30
+  0x140001676      POP      RBP
+  0x140001677      RET

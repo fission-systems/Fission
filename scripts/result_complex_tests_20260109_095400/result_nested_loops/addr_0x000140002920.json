@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002920",
+    "timestamp": "2026-01-09T00:55:23.839819Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 22,
+        "chars": 482,
+        "functions": 4,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 26,
+        "chars": 594,
+        "functions": 5,
+        "branches": 2
+      }
+    },
+    "similarity": 25.64
+  },
+  "timings": {
+    "ghidra_sec": 2.571,
+    "fission_asm_sec": 0.023,
+    "fission_decomp_sec": 3.313
+  },
+  "ghidra_assembly": "0x140002920      PUSH     RDI\n  0x140002921      PUSH     RSI\n  0x140002922      PUSH     RBX\n  0x140002923      SUB      RSP, 0x40\n  0x140002927      MOV      RBX, RCX\n  0x14000292A      LEA      RSI, [RSP + 0x68]\n  0x14000292F      MOV      ECX, 0x1\n  0x140002934      MOV      qword ptr [RSP + 0x68], RDX\n  0x140002939      MOV      qword ptr [RSP + 0x70], R8\n  0x14000293E      MOV      qword ptr [RSP + 0x78], R9\n  0x140002943      MOV      qword ptr [RSP + 0x38], RSI\n  0x140002948      CALL     0x140002a90\n  0x14000294D      MOV      RDI, RAX\n  0x140002950      CALL     0x1400029d0\n  0x140002955      XOR      R9D, R9D\n  0x140002958      MOV      R8, RBX\n  0x14000295B      MOV      RDX, RDI\n  0x14000295E      MOV      RCX, qword ptr [RAX]\n  0x140002961      MOV      qword ptr [RSP + 0x20], RSI\n  0x140002966      CALL     0x140002aa8\n  0x14000296B      ADD      RSP, 0x40\n  0x14000296F      POP      RBX\n  0x140002970      POP      RSI\n  0x140002971      POP      RDI\n  0x140002972      RET",
+  "ghidra_decompilation": "int __cdecl printf(char *_Format,...)\n\n{\n  int iVar1;\n  undefined8 uVar2;\n  ulonglong *puVar3;\n  undefined8 in_RDX;\n  undefined8 in_R8;\n  undefined8 in_R9;\n  undefined8 local_res10;\n  undefined8 local_res18;\n  undefined8 local_res20;\n  char *ap;\n  \n  local_res10 = in_RDX;\n  local_res18 = in_R8;\n  local_res20 = in_R9;\n  uVar2 = __acrt_iob_func(1);\n  puVar3 = __local_stdio_printf_options();\n  iVar1 = __stdio_common_vfprintf(*puVar3,uVar2,_Format,0,&local_res10);\n  return iVar1;\n}",
+  "fission_assembly": "Function: printf at 0x140002920 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002920  57                        push rdi\n  0x000140002921  56                        push rsi\n  0x000140002922  53                        push rbx\n  0x000140002923  48 83 ec 40               sub rsp,40h\n  0x000140002927  48 89 cb                  mov rbx,rcx\n  0x00014000292a  48 8d 74 24 68            lea rsi,[rsp+68h]\n  0x00014000292f  b9 01 00 00 00            mov ecx,1\n  0x000140002934  48 89 54 24 68            mov [rsp+68h],rdx\n  0x000140002939  4c 89 44 24 70            mov [rsp+70h],r8\n  0x00014000293e  4c 89 4c 24 78            mov [rsp+78h],r9\n  0x000140002943  48 89 74 24 38            mov [rsp+38h],rsi\n  0x000140002948  e8 43 01 00 00            call 0000000140002A90h\n  0x00014000294d  48 89 c7                  mov rdi,rax\n  0x000140002950  e8 7b 00 00 00            call 00000001400029D0h\n  0x000140002955  45 31 c9                  xor r9d,r9d\n  0x000140002958  49 89 d8                  mov r8,rbx\n  0x00014000295b  48 89 fa                  mov rdx,rdi\n  0x00014000295e  48 8b 08                  mov rcx,[rax]\n  0x000140002961  48 89 74 24 20            mov [rsp+20h],rsi\n  0x000140002966  e8 3d 01 00 00            call 0000000140002AA8h\n  0x00014000296b  48 83 c4 40               add rsp,40h\n  0x00014000296f  5b                        pop rbx\n  0x000140002970  5e                        pop rsi\n  0x000140002971  5f                        pop rdi\n  0x000140002972  c3                        ret\nTotal instructions: 25",
+  "fission_decompilation": "// ============================================\n// Function: printf @ 0x140002920\n// ============================================\n\n\nint __cdecl printf(char *format,...)\n\n{\n  undefined8 xVar1;\n  undefined8 *pxVar2;\n  int iVar3;\n  undefined8 in_RDX;\n  undefined8 in_R8;\n  undefined8 in_R9;\n  undefined8 local_10;\n  undefined8 local_18;\n  undefined8 local_20;\n  \n  local_10 = in_RDX;\n  local_18 = in_R8;\n  local_20 = in_R9;\n  xVar1 = __acrt_iob_func(1);\n  pxVar2 = (undefined8 *)__local_stdio_printf_options();\n  iVar3 = __stdio_common_vfprintf(*pxVar2,xVar1,format,0,&local_10);\n  return iVar3;\n}"
+}

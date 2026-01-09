@@ -1,0 +1,7 @@
+Function: strncmp at 0x140002a88 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002a88  ff 25 4a 59 00 00         jmp qword ptr [1400083D8h]
+  0x000140002a8e  90                        nop
+  0x000140002a8f  90                        nop
+Total instructions: 3

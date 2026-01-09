@@ -69,6 +69,14 @@ struct Args {
     #[arg(long)]
     xrefs: Option<String>,
 
+    /// Find string cross-references (search term)
+    #[arg(long = "string-xrefs", value_name = "SEARCH")]
+    string_xrefs: Option<String>,
+
+    /// Minimum string length for string-xrefs (default: 4)
+    #[arg(long = "string-min-len", default_value = "4")]
+    string_min_len: usize,
+
     /// Verbosity level (-v, -vv, -vvv)
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -99,7 +107,8 @@ fn main() -> fission_core::Result<()> {
             || args.sections
             || args.strings.is_some()
             || args.info
-            || args.xrefs.is_some();
+            || args.xrefs.is_some()
+            || args.string_xrefs.is_some();
 
         if is_one_shot && args.verbose == 0 {
             // Safe: we only set a process-local env var before spawning threads.
@@ -133,6 +142,8 @@ fn main() -> fission_core::Result<()> {
             show_info: args.info,
             instruction_count: args.count,
             show_xrefs: args.xrefs,
+            string_xrefs: args.string_xrefs,
+            string_min_len: args.string_min_len,
         })
         .map_err(|e| fission_core::errors::FissionError::Other(e.to_string()))?;
     } else {

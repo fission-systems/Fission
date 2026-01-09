@@ -17,7 +17,7 @@ compile_error!("GUI requires native_decomp feature. Build with: cargo build --fe
 
 use crate::analysis::loader::types::SectionInfo;
 use crate::analysis::loader::FunctionInfo;
-use crate::ui::gui::messages::AsyncMessage;
+use crate::ui::gui::core::messages::AsyncMessage;
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashMap;
 use std::sync::{
@@ -308,9 +308,64 @@ fn worker_loop(
                         "[decomp-worker-{}] Decompile failed for 0x{:x}: {}",
                         worker_id, request.address, e
                     ));
+                    
+                    // Provide more helpful error messages based on error type
+                    let error_message = e.to_string();
+                    let formatted_error = if error_message.contains("inline function") {
+                        format!(
+                            "// Cannot decompile function at 0x{:x}\n\
+                             // Reason: This function is marked for inlining\n\
+                             //\n\
+                             // Inline functions are typically:\n\
+                             // - Compiler-generated stubs\n\
+                             // - Very small helper functions\n\
+                             // - Functions that have been optimized away\n\
+                             //\n\
+                             // This is a known limitation of Ghidra's decompiler.",
+                            request.address
+                        )
+                    } else if error_message.contains("recursive decompilation") {
+                        format!(
+                            "// Cannot decompile function at 0x{:x}\n\
+                             // Reason: Function is already being decompiled\n\
+                             //\n\
+                             // This usually indicates:\n\
+                             // - Circular function references\n\
+                             // - Decompiler is still processing this function\n\
+                             //\n\
+                             // Try decompiling a different function first.",
+                            request.address
+                        )
+                    } else if error_message.contains("No binary loaded") {
+                        format!(
+                            "// No binary loaded\n\
+                             //\n\
+                             // Please:\n\
+                             // 1. Use File → Open to load a binary\n\
+                             // 2. Wait for initialization to complete\n\
+                             // 3. Try decompiling again"
+                        )
+                    } else {
+                        format!(
+                            "// Decompilation failed at 0x{:x}\n\
+                             // Error: {}\n\
+                             //\n\
+                             // Possible causes:\n\
+                             // - Invalid function address\n\
+                             // - Corrupted or obfuscated code\n\
+                             // - Unsupported code pattern\n\
+                             //\n\
+                             // Try:\n\
+                             // 1. Verify the function address is correct\n\
+                             // 2. Check if this is actually executable code\n\
+                             // 3. Try disassembly view for more details",
+                            request.address, error_message
+                        )
+                    };
+                    
                     let _ = result_tx.send(AsyncMessage::DecompileResult {
                         address: request.address,
-                        c_code: format!("// Decompile failed: {}\n// Load a binary first", e),
+                        c_code: formatted_error,
                     });
                 }
             }

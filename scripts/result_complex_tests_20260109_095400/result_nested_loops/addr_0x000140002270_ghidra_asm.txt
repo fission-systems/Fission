@@ -1,0 +1,31 @@
+0x140002270      SUB      RSP, 0x38
+  0x140002274      MOV      EAX, dword ptr [0x1400070e8]
+  0x14000227A      MOV      R9D, ECX
+  0x14000227D      TEST     EAX, EAX
+  0x14000227F      JNZ      0x140002290
+  0x140002281      XOR      EAX, EAX
+  0x140002283      ADD      RSP, 0x38
+  0x140002287      RET      
+  0x140002290      MOV      qword ptr [RSP + 0x48], RDX
+  0x140002295      MOV      ECX, 0x1
+  0x14000229A      MOV      EDX, 0x18
+  0x14000229F      MOV      dword ptr [RSP + 0x40], R9D
+  0x1400022A4      CALL     0x140002b68
+  0x1400022A9      TEST     RAX, RAX
+  0x1400022AC      JZ       0x1400022f7
+  0x1400022AE      MOV      R9D, dword ptr [RSP + 0x40]
+  0x1400022B3      MOV      R8, qword ptr [RSP + 0x48]
+  0x1400022B8      MOV      qword ptr [RSP + 0x28], RAX
+  0x1400022BD      LEA      RCX, [0x140007100]
+  0x1400022C4      MOV      dword ptr [RAX], R9D
+  0x1400022C7      MOV      qword ptr [RAX + 0x8], R8
+  0x1400022CB      CALL     qword ptr [0x140008260]
+  0x1400022D1      MOV      RDX, qword ptr [0x1400070e0]
+  0x1400022D8      MOV      RAX, qword ptr [RSP + 0x28]
+  0x1400022DD      LEA      RCX, [0x140007100]
+  0x1400022E4      MOV      qword ptr [RAX + 0x10], RDX
+  0x1400022E8      MOV      qword ptr [0x1400070e0], RAX
+  0x1400022EF      CALL     qword ptr [0x140008278]
+  0x1400022F5      JMP      0x140002281
+  0x1400022F7      MOV      EAX, 0xffffffff
+  0x1400022FC      JMP      0x140002283

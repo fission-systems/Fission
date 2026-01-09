@@ -634,6 +634,9 @@ int TypePropagator::propagate(Funcdata* fd) {
     // Phase 5: Infer pointer types for stack variables
     infer_stack_pointer_types(fd);
 
+    // Phase 5b: Infer pointer types for function parameters
+    infer_parameter_pointer_types(fd);
+
     // Phase 6: Write back and check for changes (Ghidra style)
     bool changed = write_back(fd);
 
@@ -748,6 +751,175 @@ void TypePropagator::infer_stack_pointer_types(Funcdata* fd) {
     if (pointer_types_applied > 0) {
         std::cerr << "[TypePropagator] Inferred " << pointer_types_applied 
                   << " pointer types from usage analysis" << std::endl;
+    }
+}
+
+void TypePropagator::infer_parameter_pointer_types(Funcdata* fd) {
+    if (!fd) return;
+    
+    TypeFactory* tf = arch->types;
+    if (!tf) return;
+    
+    int ptr_size = fission::core::ArchPolicy::getPointerSize(arch);
+    int pointer_params_applied = 0;
+    
+    // Get function prototype
+    FuncProto& proto = fd->getFuncProto();
+    int num_params = proto.numParams();
+    
+    std::cerr << "[TypePropagator] Analyzing " << num_params << " parameters for pointer inference" << std::endl;
+    
+    // Check each parameter
+    for (int i = 0; i < num_params; ++i) {
+        ProtoParameter* param = proto.getParam(i);
+        if (!param) continue;
+        
+        // Skip if type is already locked
+        if (param->isTypeLocked()) continue;
+        
+        Datatype* current_type = param->getType();
+        
+        // Skip if already a pointer
+        if (current_type && current_type->getMetatype() == TYPE_PTR) continue;
+        
+        // Get the address of the parameter storage
+        Address param_addr = param->getAddress();
+        
+        // Find all varnodes at this address
+        VarnodeDefSet::const_iterator iter;
+        bool is_dereferenced = false;
+        Datatype* inferred_element_type = nullptr;
+        
+        for (iter = fd->beginDef(); iter != fd->endDef(); ++iter) {
+            Varnode* vn = *iter;
+            if (!vn) continue;
+            
+            // Check if this varnode corresponds to the parameter
+            if (vn->getAddr() != param_addr) continue;
+            if ((int)vn->getSize() != ptr_size) continue;
+            
+            // Check descendants (usages)
+            auto desc_iter = vn->beginDescend();
+            auto desc_end = vn->endDescend();
+            
+            for (; desc_iter != desc_end; ++desc_iter) {
+                PcodeOp* use_op = *desc_iter;
+                if (!use_op) continue;
+                
+                OpCode code = use_op->code();
+                
+                // LOAD(space, ptr) - ptr is input(1), value is dereferenced
+                if (code == CPUI_LOAD && use_op->getIn(1) == vn) {
+                    is_dereferenced = true;
+                    
+                    // Try to infer element type from the LOAD result
+                    Varnode* loaded = use_op->getOut();
+                    if (loaded) {
+                        int element_size = loaded->getSize();
+                        Datatype* elem_type = nullptr;
+                        
+                        // Infer element type based on size
+                        if (element_size == 1) {
+                            elem_type = tf->getBase(1, TYPE_INT);  // char
+                        } else if (element_size == 2) {
+                            elem_type = tf->getBase(2, TYPE_INT);  // short
+                        } else if (element_size == 4) {
+                            elem_type = tf->getBase(4, TYPE_INT);  // int
+                        } else if (element_size == 8) {
+                            elem_type = tf->getBase(8, TYPE_INT);  // long long
+                        }
+                        
+                        if (elem_type && !inferred_element_type) {
+                            inferred_element_type = elem_type;
+                        }
+                    }
+                    break;
+                }
+                
+                // STORE(space, ptr, val) - ptr is input(1), value is dereferenced
+                if (code == CPUI_STORE && use_op->getIn(1) == vn) {
+                    is_dereferenced = true;
+                    
+                    // Try to infer element type from the STORE value
+                    Varnode* stored = use_op->getIn(2);
+                    if (stored) {
+                        int element_size = stored->getSize();
+                        Datatype* elem_type = nullptr;
+                        
+                        if (element_size == 1) {
+                            elem_type = tf->getBase(1, TYPE_INT);
+                        } else if (element_size == 2) {
+                            elem_type = tf->getBase(2, TYPE_INT);
+                        } else if (element_size == 4) {
+                            elem_type = tf->getBase(4, TYPE_INT);
+                        } else if (element_size == 8) {
+                            elem_type = tf->getBase(8, TYPE_INT);
+                        }
+                        
+                        if (elem_type && !inferred_element_type) {
+                            inferred_element_type = elem_type;
+                        }
+                    }
+                    break;
+                }
+                
+                // PTRSUB/PTRADD operations indicate pointer arithmetic
+                if (code == CPUI_PTRSUB || code == CPUI_PTRADD) {
+                    if (use_op->getIn(0) == vn) {
+                        is_dereferenced = true;
+                        break;
+                    }
+                }
+                
+                // INT_ADD with constant offset (array access pattern: param_1 + i * 4)
+                if (code == CPUI_INT_ADD) {
+                    is_dereferenced = true;
+                    break;
+                }
+            }
+            
+            if (is_dereferenced) break;
+        }
+        
+        // If parameter is dereferenced, store the inferred type for later application
+        if (is_dereferenced) {
+            Datatype* element_type = inferred_element_type;
+            
+            // If we couldn't infer element type, use void
+            if (!element_type) {
+                element_type = tf->getTypeVoid();
+            }
+            
+            Datatype* ptr_type = tf->getTypePointer(ptr_size, element_type, ptr_size);
+            
+            if (ptr_type) {
+                // Store the inferred type for this parameter
+                // We'll apply it through the normal type propagation mechanism
+                // by finding the corresponding varnodes and setting their temp types
+                
+                for (iter = fd->beginDef(); iter != fd->endDef(); ++iter) {
+                    Varnode* vn = *iter;
+                    if (!vn) continue;
+                    
+                    if (vn->getAddr() == param_addr && (int)vn->getSize() == ptr_size) {
+                        vn->setTempType(ptr_type);
+                        uint64_t vid = get_varnode_id(vn);
+                        inferred_types[vid] = ptr_type;
+                        pointer_params_applied++;
+                        
+                        std::cerr << "[TypePropagator] Parameter " << i << " inferred as " 
+                                  << ptr_type->getName() << " (was " 
+                                  << (current_type ? current_type->getName() : "unknown") << ")" << std::endl;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (pointer_params_applied > 0) {
+        std::cerr << "[TypePropagator] Inferred " << pointer_params_applied 
+                  << " parameter pointer types from usage analysis" << std::endl;
     }
 }
 

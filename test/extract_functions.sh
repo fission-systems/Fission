@@ -18,8 +18,20 @@ extract_addresses() {
     
     echo -e "${YELLOW}Processing:${NC} $exe"
     
+    # Get ImageBase from PE header
+    local imagebase=$(x86_64-w64-mingw32-objdump -x "$BIN_DIR/$exe" | \
+        grep -i "^ImageBase" | awk '{print $2}')
+    
+    if [ -z "$imagebase" ]; then
+        echo -e "${RED}  Error: Could not find ImageBase${NC}"
+        return 1
+    fi
+    
+    echo "  ImageBase: 0x$imagebase"
+    
     # Use objdump to get symbol table
     # Look for functions (ty   20) in .text section (sec  1)
+    # Add ImageBase to RVA to get absolute address
     x86_64-w64-mingw32-objdump -t "$BIN_DIR/$exe" | \
         grep "(ty   20)" | \
         grep "(sec  1)" | \
@@ -33,7 +45,14 @@ extract_addresses() {
         grep -v "__tlregdtor" | \
         grep -v "_matherr" | \
         grep -v "atexit" | \
-        awk '{print $8}' > "$output"
+        awk -v base="$imagebase" '{
+            rva = $8
+            # Use Python for hex arithmetic
+            cmd = sprintf("python3 -c \"print(\\\"0x%%016x\\\" %% (0x%s + 0x%s))\"", base, rva)
+            cmd | getline result
+            close(cmd)
+            print result
+        }' > "$output"
     
     echo "  Extracted $(wc -l < "$output") functions to $output"
 }

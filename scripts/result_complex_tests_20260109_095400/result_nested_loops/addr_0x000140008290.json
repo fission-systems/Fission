@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140008290",
+    "timestamp": "2026-01-09T00:59:42.883604Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 5,
+        "chars": 176,
+        "functions": 1,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 352,
+        "functions": 2,
+        "branches": 0
+      }
+    },
+    "similarity": 0.0
+  },
+  "timings": {
+    "ghidra_sec": 2.358,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.435
+  },
+  "ghidra_assembly": "Assembly not available",
+  "ghidra_decompilation": "=== Ghidra Decompilation (PyGhidra) ===\nBinary: /Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe\nAddress: 0x140008290\n\nError: No function found at address 0x140008290",
+  "fission_assembly": "Function: KERNEL32.dll!TlsGetValue at 0x140008290 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140008290  82 84                     (bad)\n  0x000140008292  00 00                     add [rax],al\n  0x000140008294  00 00                     add [rax],al\n  0x000140008296  00 00                     add [rax],al\nTotal instructions: 4",
+  "fission_decompilation": "// ============================================\n// Function: KERNEL32.dll!TlsGetValue @ 0x140008290\n// ============================================\n\n\n/* WARNING: Control flow encountered bad instruction data */\n\nvoid KERNEL32.dll!TlsGetValue(void)\n\n{\n                    /* WARNING: Bad instruction - Truncating control flow here */\n  halt_baddata();\n}"
+}

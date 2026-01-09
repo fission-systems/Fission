@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002ab0",
+    "timestamp": "2026-01-09T00:56:35.591191Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 10,
+        "chars": 255,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 301,
+        "functions": 3,
+        "branches": 0
+      }
+    },
+    "similarity": 36.36
+  },
+  "timings": {
+    "ghidra_sec": 2.608,
+    "fission_asm_sec": 0.022,
+    "fission_decomp_sec": 3.36
+  },
+  "ghidra_assembly": "0x140002AB0      JMP      qword ptr [0x1400083b8]",
+  "ghidra_decompilation": "int __cdecl putchar(int _Ch)\n\n{\n  int iVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002ab0. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  iVar1 = putchar(_Ch);\n  return iVar1;\n}",
+  "fission_assembly": "Function: putchar at 0x140002ab0 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002ab0  ff 25 02 59 00 00         jmp qword ptr [1400083B8h]\n  0x000140002ab6  90                        nop\n  0x000140002ab7  90                        nop\nTotal instructions: 3",
+  "fission_decompilation": "// ============================================\n// Function: putchar @ 0x140002ab0\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nvoid putchar(void)\n\n{\n  (*_api-ms-win-crt-stdio-l1-1-0.dll!putchar)();\n  return;\n}"
+}

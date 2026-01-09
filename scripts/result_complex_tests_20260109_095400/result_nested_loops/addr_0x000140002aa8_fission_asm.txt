@@ -1,0 +1,7 @@
+Function: __stdio_common_vfprintf at 0x140002aa8 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002aa8  ff 25 02 59 00 00         jmp qword ptr [1400083B0h]
+  0x000140002aae  90                        nop
+  0x000140002aaf  90                        nop
+Total instructions: 3

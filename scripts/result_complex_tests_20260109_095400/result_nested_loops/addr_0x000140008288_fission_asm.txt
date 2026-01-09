@@ -1,0 +1,8 @@
+Function: KERNEL32.dll!Sleep at 0x140008288 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140008288  7a 84                     jp short 000000014000820Eh
+  0x00014000828a  00 00                     add [rax],al
+  0x00014000828c  00 00                     add [rax],al
+  0x00014000828e  00 00                     add [rax],al
+Total instructions: 4

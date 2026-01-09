@@ -6,6 +6,102 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Error Handling & Code Organization Improvements (2026-01-09)
+
+**🐛 Bug Fix: Inline Function Decompilation Error**
+
+Fixed the confusing "Ghidra LowlevelError: Function loaded for inlining" error that appeared when attempting to decompile inline functions.
+
+**Problem:**
+- Error message: `Decompile failed: Decompiler error: Error: Ghidra LowlevelError: Function loaded for inlining`
+- Message was misleading (showed "Load a binary first" even when binary was loaded)
+- Users couldn't understand why decompilation failed
+
+**Root Cause:**
+- Ghidra internally marks certain functions as "inline" (compiler stubs, small helper functions)
+- These functions are optimization targets, not decompilation targets
+- No validation was performed before attempting decompilation
+
+**Solution:**
+1. **C++ Decompiler (DecompilationCore.cpp):**
+   - Added `fd->getFuncProto().isInline()` check before decompilation
+   - Added `fd->isProcStarted()` check to prevent recursive decompilation
+   - Throws clear error messages for each failure case
+
+2. **Rust Worker (decomp_worker.rs):**
+   - Enhanced error message system with structured feedback
+   - Provides context-specific guidance:
+     - Inline function: Explains what inline functions are and why they can't be decompiled
+     - Recursive decompilation: Warns about circular references
+     - Binary not loaded: Step-by-step loading instructions
+     - General errors: Lists possible causes and troubleshooting steps
+
+**Impact:**
+- Clear, actionable error messages for users
+- Better understanding of decompilation limitations
+- Improved debugging experience
+
+**Files Modified:**
+- `ghidra_decompiler/src/decompiler/DecompilationCore.cpp`
+- `crates/fission-ui/src/ui/gui/app/decomp_worker.rs`
+
+---
+
+**📁 Code Refactoring: GUI Module Reorganization**
+
+Restructured the GUI module structure for better maintainability, clarity, and scalability.
+
+**Previous Structure:**
+```
+gui/
+├── app/               (app logic)
+├── panels/            (UI panels)
+├── commands.rs        (scattered files)
+├── messages.rs
+├── state.rs
+├── menu.rs
+├── status_bar.rs
+├── widgets.rs
+└── theme.rs
+```
+
+**New Structure:**
+```
+gui/
+├── app/               📦 Application logic
+├── panels/            🖼️  UI panels
+├── core/              ⚙️  State management
+│   ├── state.rs       (AppState, AnalysisState, UIState)
+│   ├── messages.rs    (AsyncMessage)
+│   └── commands.rs    (Command, CommandManager)
+├── components/        🧩 Reusable UI components
+│   ├── menu.rs        (MenuBar, MenuAction)
+│   ├── status_bar.rs  (StatusBar)
+│   └── widgets.rs     (Common widgets)
+└── theme/             🎨 Theme system
+    └── mod.rs
+```
+
+**Benefits:**
+- ✅ **Clear Separation of Concerns**: State management (core/), UI rendering (panels/, components/), business logic (app/)
+- ✅ **Improved Scalability**: Easy to add new panels, features, or widgets
+- ✅ **Better Code Navigation**: Intuitive folder structure in IDE
+- ✅ **Enhanced Maintainability**: Related code grouped together, meaningful import paths
+
+**Changes:**
+1. Created 3 new category folders: `core/`, `components/`, `theme/`
+2. Moved 7 files into appropriate categories
+3. Updated all module definitions and re-exports
+4. Fixed 150+ import paths across the codebase
+5. Verified build success
+
+**Files Modified:**
+- Created: `core/mod.rs`, `components/mod.rs`, `theme/mod.rs`
+- Updated: `gui/mod.rs`, `app/mod.rs`, and all panel files
+- Moved: All state, message, command, UI component files
+
+---
+
 ### Comprehensive Test Suite for Complex Patterns (2026-01-08)
 
 **🧪 New Test Infrastructure: Complex Decompilation Test Cases**

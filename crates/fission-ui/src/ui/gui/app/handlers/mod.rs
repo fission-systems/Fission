@@ -2,11 +2,11 @@
 
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::ui::gui::messages::AsyncMessage;
-use crate::ui::gui::state::AppState;
+use crate::ui::gui::core::messages::AsyncMessage;
+use crate::ui::gui::core::state::AppState;
 
 mod command_handlers;
-mod message_handlers;
+pub mod message_handlers;
 
 /// Process pending async messages from background threads
 pub fn process_messages(
@@ -37,6 +37,15 @@ pub fn process_messages(
             }
             AsyncMessage::FileSelected(None) => {
                 // User cancelled
+            }
+            AsyncMessage::FolderSelected(Some(path)) => {
+                message_handlers::handle_folder_selected(state, tx.clone(), path);
+            }
+            AsyncMessage::FolderSelected(None) => {
+                // User cancelled
+            }
+            AsyncMessage::ProjectLoaded { path, binaries } => {
+                message_handlers::handle_project_loaded(state, path, binaries, decomp_tx);
             }
             AsyncMessage::DebugEvent(evt) => {
                 message_handlers::handle_debug_event_wrapper(state, evt);

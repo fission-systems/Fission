@@ -1,6 +1,6 @@
 //! Debug operations - Process attach/detach, debug actions, breakpoints.
 
-use crate::ui::gui::state::{AppState, DebugAction, DebugBpAction};
+use crate::ui::gui::core::state::{AppState, DebugAction, DebugBpAction};
 use eframe::egui;
 
 #[cfg(target_os = "windows")]

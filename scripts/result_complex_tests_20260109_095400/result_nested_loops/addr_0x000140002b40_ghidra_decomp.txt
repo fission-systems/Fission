@@ -1,0 +1,8 @@
+void __setusermatherr(void)
+
+{
+                    /* WARNING: Could not recover jumptable at 0x000140002b40. Too many branches */
+                    /* WARNING: Treating indirect jump as call */
+  __setusermatherr();
+  return;
+}

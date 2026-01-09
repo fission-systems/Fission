@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140001678",
+    "timestamp": "2026-01-09T00:54:24.560440Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 17,
+        "chars": 264,
+        "functions": 7,
+        "branches": 2
+      },
+      "fission": {
+        "lines": 19,
+        "chars": 458,
+        "functions": 9,
+        "branches": 2
+      }
+    },
+    "similarity": 48.0
+  },
+  "timings": {
+    "ghidra_sec": 2.655,
+    "fission_asm_sec": 0.021,
+    "fission_decomp_sec": 3.335
+  },
+  "ghidra_assembly": "0x140001678      PUSH     RBP\n  0x140001679      MOV      RBP, RSP\n  0x14000167C      SUB      RSP, 0x30\n  0x140001680      MOV      dword ptr [RBP + 0x10], ECX\n  0x140001683      MOV      dword ptr [RBP + -0x4], 0x0\n  0x14000168A      JMP      0x1400016c8\n  0x14000168C      MOV      EAX, dword ptr [RBP + -0x4]\n  0x14000168F      MOV      dword ptr [RBP + -0x8], EAX\n  0x140001692      JMP      0x1400016b4\n  0x140001694      MOV      EAX, dword ptr [RBP + -0x8]\n  0x140001697      LEA      RCX, [0x140004025]\n  0x14000169E      MOV      EDX, EAX\n  0x1400016A0      CALL     0x140002920\n  0x1400016A5      MOV      EAX, dword ptr [RBP + -0x8]\n  0x1400016A8      MOV      EDX, EAX\n  0x1400016AA      SHR      EDX, 0x1f\n  0x1400016AD      ADD      EAX, EDX\n  0x1400016AF      SAR      EAX, 0x1\n  0x1400016B1      MOV      dword ptr [RBP + -0x8], EAX\n  0x1400016B4      CMP      dword ptr [RBP + -0x8], 0x0\n  0x1400016B8      JG       0x140001694\n  0x1400016BA      MOV      ECX, 0xa\n  0x1400016BF      CALL     0x140002ab0\n  0x1400016C4      ADD      dword ptr [RBP + -0x4], 0x1\n  0x1400016C8      MOV      EAX, dword ptr [RBP + -0x4]\n  0x1400016CB      CMP      EAX, dword ptr [RBP + 0x10]\n  0x1400016CE      JL       0x14000168c\n  0x1400016D0      NOP      \n  0x1400016D1      NOP      \n  0x1400016D2      ADD      RSP, 0x30\n  0x1400016D6      POP      RBP\n  0x1400016D7      RET",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nvoid complex_iteration(int n)\n\n{\n  int in_ECX;\n  int j;\n  int i;\n  \n  for (i = 0; i < in_ECX; i = i + 1) {\n    for (j = i; 0 < j; j = j / 2) {\n      printf(\"%d \",(ulonglong)(uint)j);\n    }\n    putchar(10);\n  }\n  return;\n}",
+  "fission_assembly": "Function: complex_iteration at 0x140001678 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140001678  55                        push rbp\n  0x000140001679  48 89 e5                  mov rbp,rsp\n  0x00014000167c  48 83 ec 30               sub rsp,30h\n  0x000140001680  89 4d 10                  mov [rbp+10h],ecx\n  0x000140001683  c7 45 fc 00 00 00 00      mov dword ptr [rbp-4],0\n  0x00014000168a  eb 3c                     jmp short 00000001400016C8h\n  0x00014000168c  8b 45 fc                  mov eax,[rbp-4]\n  0x00014000168f  89 45 f8                  mov [rbp-8],eax\n  0x000140001692  eb 20                     jmp short 00000001400016B4h\n  0x000140001694  8b 45 f8                  mov eax,[rbp-8]\n  0x000140001697  48 8d 0d 87 29 00 00      lea rcx,[140004025h]\n  0x00014000169e  89 c2                     mov edx,eax\n  0x0001400016a0  e8 7b 12 00 00            call 0000000140002920h\n  0x0001400016a5  8b 45 f8                  mov eax,[rbp-8]\n  0x0001400016a8  89 c2                     mov edx,eax\n  0x0001400016aa  c1 ea 1f                  shr edx,1Fh\n  0x0001400016ad  01 d0                     add eax,edx\n  0x0001400016af  d1 f8                     sar eax,1\n  0x0001400016b1  89 45 f8                  mov [rbp-8],eax\n  0x0001400016b4  83 7d f8 00               cmp dword ptr [rbp-8],0\n  0x0001400016b8  7f da                     jg short 0000000140001694h\n  0x0001400016ba  b9 0a 00 00 00            mov ecx,0Ah\n  0x0001400016bf  e8 ec 13 00 00            call 0000000140002AB0h\n  0x0001400016c4  83 45 fc 01               add dword ptr [rbp-4],1\n  0x0001400016c8  8b 45 fc                  mov eax,[rbp-4]\n  0x0001400016cb  3b 45 10                  cmp eax,[rbp+10h]\n  0x0001400016ce  7c bc                     jl short 000000014000168Ch\n  0x0001400016d0  90                        nop\n  0x0001400016d1  90                        nop\n  0x0001400016d2  48 83 c4 30               add rsp,30h\n  0x0001400016d6  5d                        pop rbp\n  0x0001400016d7  c3                        ret\nTotal instructions: 32",
+  "fission_decompilation": "// ============================================\n// Function: complex_iteration @ 0x140001678\n// ============================================\n\n\nvoid complex_iteration(int param_1)\n\n{\n  undefined4 local_10;\n  undefined4 local_c;\n  \n  for (local_c = 0; (int)local_c < param_1; local_c = local_c + 1) {\n    for (local_10 = local_c; 0 < (int)local_10; local_10 = (int)local_10 / 2) {\n      printf(\"%d \",(ulonglong)local_10);\n    }\n    putchar(10);\n  }\n  return;\n}"
+}

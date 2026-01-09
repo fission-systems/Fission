@@ -1,8 +1,8 @@
 //! Debug tab panel - Debugger controls, events, breakpoints, and registers.
 
-use crate::ui::gui::state::{AppState, DebugAction, DebugBpAction};
+use crate::ui::gui::core::state::{AppState, DebugAction, DebugBpAction};
 use crate::ui::gui::theme::{catppuccin, code};
-use crate::ui::gui::widgets::empty_state;
+use crate::ui::gui::components::widgets::empty_state;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 

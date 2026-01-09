@@ -1,0 +1,29 @@
+// ============================================
+// Function: find_pair @ 0x140001450
+// ============================================
+
+
+undefined8 find_pair(longlong param_1,int param_2,uint param_3)
+
+{
+  int local_10;
+  int local_c;
+  
+  local_c = 0;
+  do {
+    local_10 = local_c;
+    if (param_2 <= local_c) {
+      return 0;
+    }
+    while (local_10 = local_10 + 1, local_10 < param_2) {
+      if (param_3 ==
+          *(int *)(param_1 + (longlong)local_10 * 4) + *(int *)(param_1 + (longlong)local_c * 4)
+         ) {
+        printf("Found pair: %d + %d = %d\n",(ulonglong)*(uint *)(param_1 + (longlong)local_c * 4),
+               (ulonglong)*(uint *)(param_1 + (longlong)local_10 * 4),(ulonglong)param_3);
+        return 1;
+      }
+    }
+    local_c = local_c + 1;
+  } while( true );
+}

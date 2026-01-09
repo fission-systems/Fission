@@ -1,0 +1,25 @@
+0x140002920      PUSH     RDI
+  0x140002921      PUSH     RSI
+  0x140002922      PUSH     RBX
+  0x140002923      SUB      RSP, 0x40
+  0x140002927      MOV      RBX, RCX
+  0x14000292A      LEA      RSI, [RSP + 0x68]
+  0x14000292F      MOV      ECX, 0x1
+  0x140002934      MOV      qword ptr [RSP + 0x68], RDX
+  0x140002939      MOV      qword ptr [RSP + 0x70], R8
+  0x14000293E      MOV      qword ptr [RSP + 0x78], R9
+  0x140002943      MOV      qword ptr [RSP + 0x38], RSI
+  0x140002948      CALL     0x140002a90
+  0x14000294D      MOV      RDI, RAX
+  0x140002950      CALL     0x1400029d0
+  0x140002955      XOR      R9D, R9D
+  0x140002958      MOV      R8, RBX
+  0x14000295B      MOV      RDX, RDI
+  0x14000295E      MOV      RCX, qword ptr [RAX]
+  0x140002961      MOV      qword ptr [RSP + 0x20], RSI
+  0x140002966      CALL     0x140002aa8
+  0x14000296B      ADD      RSP, 0x40
+  0x14000296F      POP      RBX
+  0x140002970      POP      RSI
+  0x140002971      POP      RDI
+  0x140002972      RET

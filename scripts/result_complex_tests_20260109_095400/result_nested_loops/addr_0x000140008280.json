@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140008280",
+    "timestamp": "2026-01-09T00:59:31.319387Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 5,
+        "chars": 176,
+        "functions": 1,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 23,
+        "chars": 923,
+        "functions": 26,
+        "branches": 0
+      }
+    },
+    "similarity": 0.0
+  },
+  "timings": {
+    "ghidra_sec": 2.389,
+    "fission_asm_sec": 0.024,
+    "fission_decomp_sec": 3.402
+  },
+  "ghidra_assembly": "Assembly not available",
+  "ghidra_decompilation": "=== Ghidra Decompilation (PyGhidra) ===\nBinary: /Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe\nAddress: 0x140008280\n\nError: No function found at address 0x140008280",
+  "fission_assembly": "Function: KERNEL32.dll!SetUnhandledExceptionFilter at 0x140008280 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140008280  5c                        pop rsp\n  0x000140008281  84 00                     test [rax],al\n  0x000140008283  00 00                     add [rax],al\n  0x000140008285  00 00                     add [rax],al\n  0x000140008287  00                        (bad)\nTotal instructions: 5",
+  "fission_decompilation": "// ============================================\n// Function: KERNEL32.dll!SetUnhandledExceptionFilter @ 0x140008280\n// ============================================\n\n\n/* WARNING: Control flow encountered bad instruction data */\n\nvoid KERNEL32.dll!SetUnhandledExceptionFilter(undefined8 param_1,longlong param_2)\n\n{\n  char in_AL;\n  unkbyte7 in_RAX;\n  char unaff_BH;\n  \n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)(param_2 + -0x7c) = *(char *)(param_2 + -0x7c) + unaff_BH;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n  *(char *)CONCAT71(in_RAX,in_AL) = *(char *)CONCAT71(in_RAX,in_AL) + in_AL;\n                    /* WARNING: Bad instruction - Truncating control flow here */\n  halt_baddata();\n}"
+}

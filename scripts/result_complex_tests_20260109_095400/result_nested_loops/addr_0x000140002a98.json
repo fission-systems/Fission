@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe",
+    "address": "0x000140002a98",
+    "timestamp": "2026-01-09T00:56:17.569941Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 8,
+        "chars": 222,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 316,
+        "functions": 3,
+        "branches": 0
+      }
+    },
+    "similarity": 80.0
+  },
+  "timings": {
+    "ghidra_sec": 2.628,
+    "fission_asm_sec": 0.021,
+    "fission_decomp_sec": 3.322
+  },
+  "ghidra_assembly": "0x140002A98      JMP      qword ptr [0x1400083a0]",
+  "ghidra_decompilation": "void __p__commode(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002a98. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  __p__commode();\n  return;\n}",
+  "fission_assembly": "Function: __p__commode at 0x140002a98 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002a98  ff 25 02 59 00 00         jmp qword ptr [1400083A0h]\n  0x000140002a9e  90                        nop\n  0x000140002a9f  90                        nop\nTotal instructions: 3",
+  "fission_decompilation": "// ============================================\n// Function: __p__commode @ 0x140002a98\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nvoid __p__commode(void)\n\n{\n  (*_api-ms-win-crt-stdio-l1-1-0.dll!__p__commode)();\n  return;\n}"
+}
