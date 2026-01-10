@@ -31,6 +31,6 @@ lru = "0.12"
 sysinfo = "0.37.2"
 
 [features]
-default = []
+default = ["native_decomp"]
 native_decomp = ["fission-analysis/native_decomp", "dep:fission-ffi"]
 python = ["fission-analysis/python"]
