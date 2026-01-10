@@ -6,6 +6,44 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Functions Panel Search & Category Filter (2026-01-10)
+
+**🔍 New Feature: Enhanced Function List Navigation**
+
+Added real-time search and category filtering to the Functions panel for improved navigation in large binaries.
+
+**Features:**
+
+- **Search Filter**: Case-insensitive search by function name or hex address
+- **Category Toggles**: Filter by Import (⬇), Export (⬆), or Internal (◆) functions
+- **Live Count**: Shows "Showing X of Y" when filters are active
+- **Virtual Scrolling**: Existing TableBuilder optimization maintained for all filtered views
+
+**User Interface:**
+
+```
+┌─────────────────────────┐
+│ Functions    (12345) 🔍 │
+│ ┌─────────────────────┐ │
+│ │🔎 Filter...         │ │
+│ └─────────────────────┘ │
+│ [⬇ Imp] [⬆ Exp] [◆ Int]│
+│ ─────────────────────── │
+│ Showing 234 of 12345    │
+│ ◆ main                  │
+│ ◆ sub_401000            │
+│ ⬇ printf                │
+│ ...                     │
+└─────────────────────────┘
+```
+
+**Files Modified:**
+
+- `crates/fission-ui/src/ui/gui/panels/functions.rs`: Search bar, category toggles, filtering logic
+- `crates/fission-ui/src/ui/gui/core/viewmodels.rs`: Added `show_imports`, `show_exports`, `show_internals` to `FunctionsViewModel`
+
+---
+
 ### LoadedBinary Cloning Performance Optimization (2026-01-10)
 
 **⚡ Performance: Copy-on-Write Binary Data**

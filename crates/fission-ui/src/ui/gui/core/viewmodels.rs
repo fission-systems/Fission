@@ -12,10 +12,10 @@
 pub struct HexViewModel {
     /// Current hex offset for viewing
     pub current_offset: u64,
-    
+
     /// Patch offset input (hex string like "0x1000")
     pub patch_offset_input: String,
-    
+
     /// Patch bytes input (hex string like "90 90 90")
     pub patch_bytes_input: String,
 }
@@ -25,7 +25,7 @@ pub struct HexViewModel {
 pub struct StringsViewModel {
     /// Filter text for strings view
     pub filter: String,
-    
+
     /// Minimum string length to display
     pub min_length: usize,
 }
@@ -39,14 +39,35 @@ impl StringsViewModel {
     }
 }
 
-/// ViewModel for Functions panel - holds rename dialog state
+/// ViewModel for Functions panel - holds rename dialog state and filters
 #[derive(Default)]
 pub struct FunctionsViewModel {
     /// Rename dialog state: (address, current_input)
     pub rename_dialog: Option<(u64, String)>,
-    
-    /// Function filter text
+
+    /// Function name filter text (case-insensitive search)
     pub filter: String,
+
+    /// Show import functions
+    pub show_imports: bool,
+
+    /// Show export functions
+    pub show_exports: bool,
+
+    /// Show internal (non-import, non-export) functions
+    pub show_internals: bool,
+}
+
+impl FunctionsViewModel {
+    pub fn new() -> Self {
+        Self {
+            rename_dialog: None,
+            filter: String::new(),
+            show_imports: true,
+            show_exports: true,
+            show_internals: true,
+        }
+    }
 }
 
 /// ViewModel for String Xrefs panel
@@ -54,7 +75,7 @@ pub struct FunctionsViewModel {
 pub struct StringXrefsViewModel {
     /// Search term for string xrefs
     pub search_term: String,
-    
+
     /// Minimum string length for analysis
     pub min_length: usize,
 }
@@ -77,13 +98,13 @@ impl StringXrefsViewModel {
 pub struct DebugViewModel {
     /// Breakpoint address input (hex string)
     pub breakpoint_input: String,
-    
+
     /// Memory view address input (hex string)
     pub mem_addr_input: String,
-    
+
     /// Memory view length input (decimal)
     pub mem_len_input: String,
-    
+
     /// Process filter for attach dialog
     pub process_filter: String,
 }
@@ -108,10 +129,10 @@ impl DebugViewModel {
 pub struct SearchViewModel {
     /// Search query text
     pub query: String,
-    
+
     /// Search type (string, pattern, etc.)
     pub search_type: SearchType,
-    
+
     /// Case sensitive search
     pub case_sensitive: bool,
 }
