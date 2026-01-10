@@ -4,6 +4,8 @@
 //! Executes a single command and exits (non-interactive).
 
 mod binary_info;
+#[cfg(feature = "native_decomp")]
+mod cfg;
 mod disasm;
 #[cfg(feature = "native_decomp")]
 mod decompile;
@@ -13,6 +15,8 @@ mod functions;
 mod strings;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
+#[cfg(feature = "native_decomp")]
+use cfg::{analyze_cfg, CfgOutputFormat};
 #[cfg(feature = "native_decomp")]
 use decompile::run_decompilation;
 use disasm::{disassemble, disassemble_function};
@@ -130,6 +134,33 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
         }
     }
 
+    // Handle CFG Analysis
+    if let Some(addr) = cli.cfg_address {
+        #[cfg(feature = "native_decomp")]
+        {
+            let format = match cli.cfg_format.as_str() {
+                "dot" => CfgOutputFormat::Dot,
+                "ascii" => CfgOutputFormat::Ascii,
+                "json" => CfgOutputFormat::Json,
+                _ => {
+                    if cli.json {
+                        CfgOutputFormat::Json
+                    } else {
+                        CfgOutputFormat::Summary
+                    }
+                }
+            };
+            return analyze_cfg(&binary, addr, format, cli.output.as_ref(), cli.verbose);
+        }
+
+        #[cfg(not(feature = "native_decomp"))]
+        {
+            eprintln!("Error: CFG analysis requires native_decomp feature");
+            eprintln!("Run with: cargo run --bin fission_cli --features native_decomp -- ...");
+            std::process::exit(1);
+        }
+    }
+
     // Handle decompilation
     if cli.address.is_some() || cli.all {
         #[cfg(feature = "native_decomp")]
@@ -169,6 +200,8 @@ fn print_help() {
     println!("  \x1b[1m-d\x1b[0m, --asm <ADDR>    Disassemble at address (alias: --disasm)");
     println!("  \x1b[1m-n\x1b[0m, --count <N>     Number of instructions (default: 20)");
     println!("      --strings [MIN]  Extract strings (min length: 4)");
+    println!("      --cfg <ADDR>     Analyze CFG (Control Flow Graph)");
+    println!("      --cfg-format <F> CFG format: summary, dot, ascii, json");
     println!();
     println!("\x1b[1;35m⚙️  Decompilation:\x1b[0m");
     println!("  \x1b[1m-a\x1b[0m, --decomp <ADDR> Decompile function (alias: --address)");
@@ -185,5 +218,7 @@ fn print_help() {
     println!("  fission app.exe --asm 0x140001000     \x1b[90m# Disassemble\x1b[0m");
     println!("  fission app.exe --decomp 0x140001000  \x1b[90m# Decompile\x1b[0m");
     println!("  fission app.exe --decomp-all -o out/  \x1b[90m# Decompile all\x1b[0m");
+    println!("  fission app.exe --cfg 0x140001000     \x1b[90m# CFG analysis\x1b[0m");
+    println!("  fission app.exe --cfg 0x140001000 --cfg-format dot -o out.dot \x1b[90m# CFG graph\x1b[0m");
     println!();
 }

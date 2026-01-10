@@ -213,6 +213,33 @@ impl PcodeOpcode {
             _ => None,
         }
     }
+
+    /// Check if this is a control flow operation
+    pub fn is_control_flow(&self) -> bool {
+        matches!(
+            self,
+            Self::Branch | Self::CBranch | Self::BranchInd |
+            Self::Call | Self::CallInd | Self::CallOther | Self::Return
+        )
+    }
+
+    /// Check if this is a branch operation (not including calls)
+    pub fn is_branch(&self) -> bool {
+        matches!(
+            self,
+            Self::Branch | Self::CBranch | Self::BranchInd
+        )
+    }
+
+    /// Check if this is a call operation
+    pub fn is_call(&self) -> bool {
+        matches!(self, Self::Call | Self::CallInd | Self::CallOther)
+    }
+
+    /// Check if this is a return operation
+    pub fn is_return(&self) -> bool {
+        matches!(self, Self::Return)
+    }
 }
 
 impl std::str::FromStr for PcodeOpcode {

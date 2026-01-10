@@ -83,6 +83,8 @@ TODO: Add screenshot when available
 | **Cross-Platform Binaries** | Windows (PE), Linux (ELF), and macOS (Mach-O) support |
 | **Cross-Reference Analysis** | Automatic code and data cross-reference detection |
 | **String Extraction** | ASCII and Unicode string detection with context |
+| **CFG Analysis** | Control flow graph generation with dominator tree, loop detection, and cyclomatic complexity |
+| **Graph Visualization** | Export CFG to Graphviz DOT format with loop highlighting and metrics |
 
 ### Dynamic Analysis
 
@@ -140,6 +142,7 @@ TODO: Add screenshot when available
 ## Screenshots
 
 > Screenshots coming soon. The GUI features a VS Code-inspired layout with:
+>
 > - Left sidebar with function explorer and search
 > - Center editor with tabbed Assembly and Decompiled C views
 > - Bottom panel with Console, Debug, Hex View, and Timeline tabs
@@ -362,6 +365,7 @@ cargo run --release --bin fission_tui --features "tui,native_decomp" -- test/com
 #### 2. Function Explorer
 
 The left sidebar shows all discovered functions:
+
 - **Imports**: Functions imported from external libraries
 - **Exports**: Functions exported by the binary
 - **Internal**: Functions discovered through analysis
@@ -413,6 +417,7 @@ The left sidebar shows all discovered functions:
 | `quit` | `exit`, `q` | `quit` | Exit the program |
 
 **Direct Analysis Flags** (skip REPL, run once and exit):
+
 - `--info` - Display binary information and exit
 - `--sections` - Show section table and exit
 - `--strings` - Extract strings and exit
@@ -420,6 +425,7 @@ The left sidebar shows all discovered functions:
 - `--count` - Show counts of functions, strings, sections, and imports
 
 **Address Formats Supported:**
+
 - Hexadecimal: `0x1000`, `0x140001000`
 - Decimal: `4096`, `5368713216`
 - Without prefix: `1000` (interpreted as hex if valid)
@@ -478,6 +484,31 @@ int sub_140001234(void) {
     HANDLE hFile;
     hFile = CreateFileA("config.txt", GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
     ...
+}
+
+# CFG Analysis
+$ fission --cli binary.exe --cfg 0x140001000
+=== CFG Analysis Summary ===
+Basic Blocks: 15
+Edges: 20
+Entry Block: 0
+Exit Blocks: [14]
+
+=== Metrics ===
+Cyclomatic Complexity: 6 (Moderate)
+Max Nesting Depth: 2
+Number of Loops: 1
+
+$ fission --cli binary.exe --cfg 0x140001000 --cfg-format dot -o function.dot
+[✓] CFG analysis saved to: function.dot
+[✓] Graph rendered to: function.png
+
+$ fission --cli binary.exe --cfg 0x140001000 --cfg-format json
+{
+  "function_address": "0x140001000",
+  "block_count": 15,
+  "cyclomatic_complexity": 6,
+  "loops": [ ... ]
 }
 ```
 
@@ -759,6 +790,7 @@ for s in binary.strings():
 ### Optimization Tips
 
 1. **Use Pool Mode for Large Binaries**
+
    ```toml
    [decompiler]
    mode = "pool"
@@ -766,12 +798,14 @@ for s in binary.strings():
    ```
 
 2. **Increase Cache Size for Repeated Analysis**
+
    ```toml
    [analysis]
    cache_size = 500  # More cache entries
    ```
 
 3. **Enable Prefetching for Sequential Navigation**
+
    ```toml
    [decompiler]
    enable_prefetch = true
@@ -779,6 +813,7 @@ for s in binary.strings():
    ```
 
 4. **Reduce Memory Usage**
+
    ```toml
    [decompiler]
    mode = "single"  # Single process mode

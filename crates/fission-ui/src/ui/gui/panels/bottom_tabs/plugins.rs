@@ -2,8 +2,8 @@
 //!
 //! Displays loaded plugins, allows loading new plugins, and shows plugin status.
 
-use crate::plugin::api::PluginType;
 use crate::plugin::PluginManager;
+use crate::plugin::api::PluginType;
 use crate::ui::gui::theme::catppuccin;
 use eframe::egui;
 
@@ -19,6 +19,9 @@ pub struct PluginPanelState {
 }
 
 /// Render the plugin management panel
+/// Note: This panel is currently only accessible via the left sidebar (Extensions activity),
+/// not the bottom tabs, so these functions appear unused but may be used in the future.
+#[allow(dead_code)]
 pub fn render(ui: &mut egui::Ui, manager: &mut PluginManager, state: &mut PluginPanelState) {
     ui.horizontal(|ui| {
         ui.heading(egui::RichText::new("🔌 Plugins").color(catppuccin::MAUVE));

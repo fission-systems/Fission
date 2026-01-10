@@ -59,6 +59,67 @@ pub fn process_messages(
             AsyncMessage::LoadSnapshot(path) => {
                 message_handlers::handle_load_snapshot(state, tx.clone(), path);
             }
+            AsyncMessage::CfgAnalysisRequest { address } => {
+                // Send CFG request to worker
+                let request = super::decomp_worker::DecompileRequest::cfg_analysis(address);
+                let _ = decomp_tx.send(request);
+                state.log(format!("[*] CFG analysis started for 0x{:x}", address));
+            }
+            AsyncMessage::CfgAnalysisResult {
+                address,
+                block_count,
+                edge_count,
+                cyclomatic_complexity,
+                max_nesting_depth,
+                loops,
+                blocks,
+                dot_content,
+            } => {
+                use crate::ui::gui::panels::bottom_tabs::cfg::{
+                    BlockDisplayInfo, CfgAnalysisResult, LoopDisplayInfo,
+                };
+
+                let loops_display: Vec<LoopDisplayInfo> = loops
+                    .into_iter()
+                    .map(|l| LoopDisplayInfo {
+                        header: l.header,
+                        kind: l.kind,
+                        body: l.body,
+                    })
+                    .collect();
+
+                let blocks_display: Vec<BlockDisplayInfo> = blocks
+                    .into_iter()
+                    .map(|b| BlockDisplayInfo {
+                        index: b.index,
+                        address: b.address,
+                        is_entry: b.is_entry,
+                        is_exit: b.is_exit,
+                        successors: b.successors,
+                    })
+                    .collect();
+
+                state.analysis.cfg_analysis = Some(CfgAnalysisResult {
+                    block_count,
+                    edge_count,
+                    cyclomatic_complexity,
+                    max_nesting_depth,
+                    loops: loops_display,
+                    blocks: blocks_display,
+                    dot_content,
+                });
+
+                state.log(format!(
+                    "[✓] CFG analysis complete for 0x{:x}: {} blocks, {} edges, complexity: {}",
+                    address, block_count, edge_count, cyclomatic_complexity
+                ));
+            }
+            AsyncMessage::CfgAnalysisError { address, error } => {
+                state.log(format!(
+                    "[!] CFG analysis failed for 0x{:x}: {}",
+                    address, error
+                ));
+            }
         }
     }
 

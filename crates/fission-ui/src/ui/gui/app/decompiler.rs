@@ -1,8 +1,8 @@
 //! Decompiler operations - Function decompilation using native FFI.
 
 use crossbeam_channel::Sender;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use super::decomp_worker::DecompileRequest;
@@ -45,14 +45,16 @@ pub fn decompile_function(
     // CRITICAL: Check if binary is loaded AND decompiler context is ready
     if state.analysis.loaded_binary.is_none() {
         state.log("[!] No binary loaded".to_string());
-        state.analysis.decompiled_code = "// No binary loaded\n// Use File → Open to load a binary".to_string();
+        state.analysis.decompiled_code =
+            "// No binary loaded\n// Use File → Open to load a binary".to_string();
         return;
     }
-    
+
     // Extra safety: Check decompiler context is loaded (prevents race conditions)
     if !state.analysis.decompiler_context_loaded {
         state.log("[!] Decompiler context not ready".to_string());
-        state.analysis.decompiled_code = "// Decompiler initializing...\n// Please wait a moment and try again".to_string();
+        state.analysis.decompiled_code =
+            "// Decompiler initializing...\n// Please wait a moment and try again".to_string();
         return;
     }
 
@@ -78,8 +80,7 @@ pub fn decompile_function(
                 && address >= section.virtual_address
                 && address < section.virtual_address + section.virtual_size
             {
-                let max_size =
-                    (section.virtual_address + section.virtual_size - address) as usize;
+                let max_size = (section.virtual_address + section.virtual_size - address) as usize;
                 func_size = func_size.min(max_size);
                 break;
             }
@@ -151,6 +152,7 @@ pub fn decompile_function(
         functions: Vec::new(),
         gdt_json_path: None,
         sections: Vec::new(),
+        is_cfg_request: false,
     };
 
     if let Err(e) = decomp_tx.send(request) {

@@ -6,6 +6,11 @@ use ratatui::widgets::ListState;
 #[cfg(feature = "native_decomp")]
 use crate::analysis::decomp::ffi::DecompilerNative;
 
+#[cfg(feature = "native_decomp")]
+use crate::analysis::cfg::{CfgAnalysis, CfgVisualizer, DotOptions};
+#[cfg(feature = "native_decomp")]
+use crate::analysis::pcode::PcodeFunction;
+
 /// TUI Application state
 pub struct App {
     /// Loaded binary
@@ -27,6 +32,8 @@ pub struct App {
     scroll: u16,
     /// Should quit flag
     should_quit: bool,
+    /// CFG analysis summary for selected function
+    cfg_summary: Option<String>,
 }
 
 impl App {
@@ -51,9 +58,10 @@ impl App {
             decompiled_code: "// Select a function and press Enter to decompile".to_string(),
             #[cfg(feature = "native_decomp")]
             decompiler: None,
-            status: "Ready. ↑/↓:Navigate  Enter:Decompile  q:Quit".to_string(),
+            status: "Ready. ↑/↓:Navigate  Enter:Decompile  c:CFG  q:Quit".to_string(),
             scroll: 0,
             should_quit: false,
+            cfg_summary: None,
         }
     }
 
@@ -204,6 +212,126 @@ impl App {
     pub fn decompile_selected(&mut self) {
         self.decompiled_code =
             "// Decompilation requires native_decomp feature\n// Run with: cargo run --bin fission_tui --features \"tui,native_decomp\"".to_string();
+        self.status = "native_decomp feature required".to_string();
+    }
+
+    // CFG Getters
+    pub fn cfg_summary(&self) -> Option<&str> {
+        self.cfg_summary.as_deref()
+    }
+
+    // CFG Analysis
+    #[cfg(feature = "native_decomp")]
+    pub fn analyze_cfg_selected(&mut self) {
+        let func = match self.selected_function() {
+            Some(f) => f.clone(),
+            None => return,
+        };
+
+        self.status = format!("Analyzing CFG for {} @ 0x{:x}...", func.name, func.address);
+
+        // Initialize decompiler if needed
+        if self.decompiler.is_none() {
+            let sla_dir = std::env::current_dir()
+                .unwrap()
+                .join("ghidra_decompiler")
+                .to_string_lossy()
+                .into_owned();
+
+            match DecompilerNative::new(&sla_dir) {
+                Ok(mut decomp) => {
+                    if let Err(e) = decomp.load_binary(
+                        &self.binary_data,
+                        self.binary.image_base,
+                        self.binary.is_64bit,
+                    ) {
+                        self.cfg_summary = Some(format!("Error loading binary: {}", e));
+                        self.status = "Error loading binary".to_string();
+                        return;
+                    }
+                    decomp.add_symbols(&self.binary.iat_symbols);
+                    decomp.add_global_symbols(&self.binary.global_symbols);
+                    decomp.set_symbol_provider(
+                        &self.binary.functions,
+                        &self.binary.global_symbols,
+                        &self.binary.sections,
+                    );
+                    self.decompiler = Some(decomp);
+                }
+                Err(e) => {
+                    self.cfg_summary = Some(format!("Error creating decompiler: {}", e));
+                    self.status = "Error creating decompiler".to_string();
+                    return;
+                }
+            }
+        }
+
+        // Get Pcode and analyze CFG
+        if let Some(ref decomp) = self.decompiler {
+            match decomp.get_pcode(func.address) {
+                Ok(pcode_json) => {
+                    match PcodeFunction::from_json(&pcode_json) {
+                        Ok(pcode_func) => {
+                            match CfgAnalysis::from_pcode(&pcode_func) {
+                                Ok(analysis) => {
+                                    // Build summary string
+                                    let mut summary = String::new();
+                                    summary.push_str(&format!("=== CFG Analysis: {} ===\n\n", func.name));
+                                    summary.push_str(&format!("Blocks: {}\n", analysis.cfg.block_count()));
+                                    summary.push_str(&format!("Edges: {}\n", analysis.cfg.edge_count()));
+                                    summary.push_str(&format!("Cyclomatic Complexity: {}\n", analysis.metrics.cyclomatic_complexity));
+                                    summary.push_str(&format!("Max Nesting Depth: {}\n", analysis.metrics.max_nesting_depth));
+                                    summary.push_str(&format!("Loops: {}\n\n", analysis.loops.len()));
+
+                                    if !analysis.loops.is_empty() {
+                                        summary.push_str("Loop Details:\n");
+                                        for (i, l) in analysis.loops.iter().enumerate() {
+                                            summary.push_str(&format!("  Loop {}: Header=BB{}, Kind={:?}, Body={:?}\n",
+                                                i, l.header, l.kind, l.body.iter().collect::<Vec<_>>()));
+                                        }
+                                        summary.push_str("\n");
+                                    }
+
+                                    summary.push_str("Blocks:\n");
+                                    for block in &analysis.cfg.blocks {
+                                        let marker = if block.is_entry { " [ENTRY]" } else if block.is_exit { " [EXIT]" } else { "" };
+                                        summary.push_str(&format!("  BB{} @ 0x{:x}{}\n", block.index, block.start_address, marker));
+                                    }
+
+                                    self.cfg_summary = Some(summary);
+                                    self.scroll = 0;
+                                    self.status = format!(
+                                        "CFG: {} blocks, {} edges, complexity: {}",
+                                        analysis.cfg.block_count(),
+                                        analysis.cfg.edge_count(),
+                                        analysis.metrics.cyclomatic_complexity
+                                    );
+                                }
+                                Err(e) => {
+                                    self.cfg_summary = Some(format!("CFG analysis error: {}", e));
+                                    self.status = format!("CFG error: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.cfg_summary = Some(format!("Pcode parse error: {}", e));
+                            self.status = format!("Pcode error: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.cfg_summary = Some(format!("Error getting Pcode: {}", e));
+                    self.status = format!("Pcode error: {}", e);
+                }
+            }
+        }
+    }
+
+    #[cfg(not(feature = "native_decomp"))]
+    pub fn analyze_cfg_selected(&mut self) {
+        self.cfg_summary = Some(
+            "CFG analysis requires native_decomp feature\nRun with: cargo run --bin fission_tui --features \"tui,native_decomp\"".to_string()
+        );
         self.status = "native_decomp feature required".to_string();
     }
 }

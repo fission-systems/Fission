@@ -1,12 +1,15 @@
-//! Bottom tabbed panel - Console, Hex View, Strings, Imports, Debug, Script, Timeline, Plugins tabs.
+//! Bottom tabbed panel - Console, Hex View, Strings, Imports, Debug, Script, Timeline, Plugins, CFG tabs.
 //!
 //! This module organizes the bottom panel into separate sub-modules for each tab.
 
+pub mod cfg;
 mod console;
 mod debug;
 mod hexview;
 mod imports;
-pub mod plugins;
+// Plugin management is now only in the left sidebar (Activity::Plugins)
+// Keep this module for PluginPanelState export
+pub(crate) mod plugins;
 mod script;
 mod strings;
 mod timeline;
@@ -16,13 +19,18 @@ use crate::ui::gui::theme::catppuccin;
 use eframe::egui;
 
 // Re-export actions for external use
+pub use cfg::CfgAction;
 pub use console::ConsoleAction;
 pub use script::ScriptAction;
 
 /// Render the bottom tabbed panel.
-pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, ScriptAction) {
+pub fn render(
+    ctx: &egui::Context,
+    state: &mut AppState,
+) -> (ConsoleAction, ScriptAction, CfgAction) {
     let mut console_action = ConsoleAction::None;
     let mut script_action = ScriptAction::None;
+    let mut cfg_action = CfgAction::None;
 
     egui::TopBottomPanel::bottom("bottom_panel")
         .resizable(true)
@@ -40,17 +48,19 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                     (BottomTab::HexView, "Hex View", catppuccin::PEACH),
                     (BottomTab::Strings, "Strings", catppuccin::GREEN),
                     (BottomTab::Imports, "Imports", catppuccin::MAUVE),
+                    (BottomTab::Cfg, "CFG", catppuccin::FLAMINGO),
                     (BottomTab::Debug, "Debug", catppuccin::RED),
                     (BottomTab::Script, "Script", catppuccin::YELLOW),
                     (BottomTab::Timeline, "Timeline", catppuccin::TEAL),
-                    (BottomTab::Plugins, "Plugins", catppuccin::PINK),
                 ];
 
                 for (tab, label, accent) in tabs {
                     // Filter tabs based on mode
                     let visible = match tab {
                         BottomTab::Debug | BottomTab::Timeline => state.ui.dynamic_mode,
-                        BottomTab::Strings | BottomTab::Imports => !state.ui.dynamic_mode,
+                        BottomTab::Strings | BottomTab::Imports | BottomTab::Cfg => {
+                            !state.ui.dynamic_mode
+                        }
                         _ => true,
                     };
 
@@ -82,8 +92,9 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
 
             // Tab content - allocate remaining space to prevent collapse
             let content_rect = ui.available_rect_before_wrap();
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(content_rect), |ui| {
-                match state.ui.bottom_tab {
+            ui.allocate_new_ui(
+                egui::UiBuilder::new().max_rect(content_rect),
+                |ui| match state.ui.bottom_tab {
                     BottomTab::Console => {
                         console_action = console::render(ui, state);
                     }
@@ -96,6 +107,9 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                     BottomTab::Imports => {
                         imports::render(ui, state);
                     }
+                    BottomTab::Cfg => {
+                        cfg_action = cfg::render(ui, state);
+                    }
                     BottomTab::Debug => {
                         debug::render(ui, state);
                     }
@@ -105,23 +119,9 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> (ConsoleAction, Scri
                     BottomTab::Timeline => {
                         timeline::render(ui, &mut state.debug.timeline);
                     }
-                    BottomTab::Plugins => {
-                        // Access plugin_manager directly from ctx
-                        // Use a separate scope to ensure proper drop order
-                        let pm_arc = state.ctx.plugin_manager.clone();
-                        let result = pm_arc.write();
-                        match result {
-                            Ok(mut mgr) => {
-                                plugins::render(ui, &mut mgr, &mut state.plugin_panel_state);
-                            }
-                            Err(_) => {
-                                ui.label("Failed to access Plugin Manager");
-                            }
-                        };
-                    }
-                }
-            });
+                },
+            );
         });
 
-    (console_action, script_action)
+    (console_action, script_action, cfg_action)
 }

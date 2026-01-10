@@ -22,6 +22,34 @@ using namespace fission::analysis;
 
 static constexpr size_t MAX_FUNCTION_SIZE = 10000;
 
+// Helper function to escape strings for JSON output
+static std::string json_escape(const std::string& input) {
+    std::string output;
+    output.reserve(input.size() + 10);
+    for (char c : input) {
+        switch (c) {
+            case '\"': output += "\\\""; break;
+            case '\\': output += "\\\\"; break;
+            case '\b': output += "\\b"; break;
+            case '\f': output += "\\f"; break;
+            case '\n': output += "\\n"; break;
+            case '\r': output += "\\r"; break;
+            case '\t': output += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    // Control characters - output as \uXXXX
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                    output += buf;
+                } else {
+                    output += c;
+                }
+                break;
+        }
+    }
+    return output;
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -307,9 +335,9 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
                 first_op = false;
                 
                 json << "{";
-                json << "\"seq\": " << op->getSeqNum().getTime() << ",";
-                json << "\"opcode\": \"" << op->getOpcode()->getName() << "\",";
-                json << "\"addr\": \"0x" << std::hex << op->getAddr().getOffset() << "\",";
+                json << "\"seq\": " << std::dec << op->getSeqNum().getTime() << ",";
+                json << "\"opcode\": \"" << json_escape(op->getOpcode()->getName()) << "\",";
+                json << "\"addr\": \"0x" << std::hex << op->getAddr().getOffset() << std::dec << "\",";
                 
                 // Try to get assembly mnemonic
                 try {
@@ -320,9 +348,9 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
                     std::string body = asm_emit.getBody();
                     if (!mnemonic.empty()) {
                         if (!body.empty()) {
-                            json << "\"asm\": \"" << mnemonic << " " << body << "\",";
+                            json << "\"asm\": \"" << json_escape(mnemonic) << " " << json_escape(body) << "\",";
                         } else {
-                            json << "\"asm\": \"" << mnemonic << "\",";
+                            json << "\"asm\": \"" << json_escape(mnemonic) << "\",";
                         }
                     } else {
                         json << "\"asm\": null,";
