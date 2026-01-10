@@ -1,6 +1,6 @@
+use crate::prelude::*;
 use fission_loader::loader::pe::PeLoader;
 use fission_loader::loader::types::LoadedBinary;
-use crate::prelude::*;
 
 /// OS Loader Simulator - Maps binaries as they would appear in process memory.
 ///
@@ -42,16 +42,11 @@ impl TitanLoader {
     /// # Returns
     /// `LoadedBinary` with `.data` containing memory-mapped layout
     pub fn load(&self, data: &[u8], path: &str) -> Result<LoadedBinary> {
-        crate::core::logging::info(&format!(
-            "[TitanLoader] Simulating OS loader for {}",
-            path
-        ));
+        crate::core::logging::info(&format!("[TitanLoader] Simulating OS loader for {}", path));
 
         // Validate PE magic
         if !data.starts_with(b"MZ") {
-            return Err(FissionError::loader(
-                "Not a PE file (missing MZ signature)",
-            ));
+            return Err(FissionError::loader("Not a PE file (missing MZ signature)"));
         }
 
         // Step 1: Parse PE file using PeLoader (static analysis)
@@ -72,9 +67,12 @@ impl TitanLoader {
 
         // Step 4: Copy PE headers (DOS header, NT headers, section table)
         let size_of_headers = Self::get_size_of_headers(data, &loaded_bin);
-        if size_of_headers > 0 && size_of_headers <= data.len() && size_of_headers <= mapped_data.len() {
+        if size_of_headers > 0
+            && size_of_headers <= data.len()
+            && size_of_headers <= mapped_data.len()
+        {
             mapped_data[0..size_of_headers].copy_from_slice(&data[0..size_of_headers]);
-            
+
             crate::core::logging::debug(&format!(
                 "[TitanLoader] Copied {} bytes of PE headers",
                 size_of_headers
@@ -82,7 +80,9 @@ impl TitanLoader {
         } else {
             return Err(FissionError::loader(format!(
                 "Invalid header size: {} (file: {}, mapped: {})",
-                size_of_headers, data.len(), mapped_data.len()
+                size_of_headers,
+                data.len(),
+                mapped_data.len()
             )));
         }
 
@@ -92,7 +92,7 @@ impl TitanLoader {
         }
 
         // Step 6: Replace file data with mapped memory
-        loaded_bin.data = mapped_data;
+        loaded_bin.data = std::sync::Arc::new(mapped_data);
         loaded_bin.rebuild_function_indices();
 
         crate::core::logging::info(&format!(
@@ -109,9 +109,8 @@ impl TitanLoader {
 
         for section in &binary.sections {
             // Section end = VA + max(VirtualSize, RawSize)
-            let section_end = section.virtual_address 
-                + section.virtual_size.max(section.file_size);
-            
+            let section_end = section.virtual_address + section.virtual_size.max(section.file_size);
+
             if section_end > max_va {
                 max_va = section_end;
             }
@@ -126,55 +125,57 @@ impl TitanLoader {
     fn get_size_of_headers(data: &[u8], binary: &LoadedBinary) -> usize {
         // Try to get actual SizeOfHeaders from PE
         // If that fails, use first section's file offset as approximation
-        
+
         if data.len() < 0x80 {
             return 0; // Too small for valid PE
         }
-        
+
         // Read e_lfanew (offset to NT headers) at 0x3C
-        let e_lfanew = u32::from_le_bytes([
-            data[0x3C], data[0x3D], data[0x3E], data[0x3F]
-        ]) as usize;
-        
+        let e_lfanew =
+            u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
+
         // Validate NT header offset
         if e_lfanew < 0x40 || e_lfanew + 0x100 > data.len() {
             // Fall back to first section offset
-            return binary.sections
+            return binary
+                .sections
                 .iter()
                 .map(|s| s.file_offset as usize)
                 .min()
                 .unwrap_or(0x400)
                 .min(data.len());
         }
-        
+
         // Read SizeOfHeaders from Optional Header
         // NT headers: Signature(4) + FileHeader(20) + OptionalHeader
         // SizeOfHeaders is at offset 60 in OptionalHeader (both PE32 and PE32+)
         let optional_header_offset = e_lfanew + 4 + 20;
-        
+
         if optional_header_offset + 64 > data.len() {
             // Fall back
-            return binary.sections
+            return binary
+                .sections
                 .iter()
                 .map(|s| s.file_offset as usize)
                 .min()
                 .unwrap_or(0x400)
                 .min(data.len());
         }
-        
+
         let size_of_headers = u32::from_le_bytes([
             data[optional_header_offset + 60],
             data[optional_header_offset + 61],
             data[optional_header_offset + 62],
             data[optional_header_offset + 63],
         ]) as usize;
-        
+
         // Validate
         if size_of_headers > 0 && size_of_headers <= data.len() {
             size_of_headers
         } else {
             // Fall back to first section offset
-            binary.sections
+            binary
+                .sections
                 .iter()
                 .map(|s| s.file_offset as usize)
                 .min()

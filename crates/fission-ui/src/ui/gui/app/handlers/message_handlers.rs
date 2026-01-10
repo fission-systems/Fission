@@ -3,9 +3,9 @@
 use crossbeam_channel::Sender;
 use std::sync::Arc;
 
-use fission_loader::loader::LoadedBinary;
 use crate::ui::gui::core::messages::AsyncMessage;
 use crate::ui::gui::core::state::AppState;
+use fission_loader::loader::LoadedBinary;
 
 use super::super::decomp_worker;
 
@@ -116,7 +116,7 @@ pub fn handle_binary_loaded(
     ));
 
     let request = decomp_worker::DecompileRequest::load_binary(
-        binary.data.clone(),
+        (*binary.data).clone(),
         binary.image_base,
         combined_symbols,
         binary.global_symbols.clone(),
@@ -150,7 +150,10 @@ pub fn handle_decompile_result(state: &mut AppState, address: u64, c_code: Strin
 
 /// Handle decompilation error
 pub fn handle_decompile_error(state: &mut AppState, address: u64, error: String) {
-    state.analysis.domain.decompiled_code = format!("// Decompilation failed\n// Error: {}\n\n// Possible causes:\n// - Function may not exist at this address\n// - fission_decomp CLI may not be built\n// - Try running: cd ghidra_decompiler/build && cmake .. && make", error);
+    state.analysis.domain.decompiled_code = format!(
+        "// Decompilation failed\n// Error: {}\n\n// Possible causes:\n// - Function may not exist at this address\n// - fission_decomp CLI may not be built\n// - Try running: cd ghidra_decompiler/build && cmake .. && make",
+        error
+    );
     state.analysis.domain.decompiling = false;
     state.log(format!("[✗] Decompile error (0x{:x}): {}", address, error));
     state.log("    → Check if ghidra_decompiler/build/fission_decomp exists".to_string());
@@ -195,7 +198,9 @@ pub fn handle_fission_event(state: &mut AppState, evt: crate::app::events::Fissi
                 state.ui.progress = None;
             }
         }
-        crate::app::events::FissionEvent::SelectionChanged { address: Some(addr) } => {
+        crate::app::events::FissionEvent::SelectionChanged {
+            address: Some(addr),
+        } => {
             state.log(format!("[Selection] 0x{:08X}", addr));
             state.ui.selected_xref_addr = Some(addr);
         }

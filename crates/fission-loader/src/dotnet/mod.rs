@@ -45,7 +45,7 @@ pub fn parse_dotnet_metadata(binary: &LoadedBinary) -> Result<DotNetMetadata> {
     use binrw::BinRead;
     use std::io::Cursor;
 
-    let mut cursor = Cursor::new(&binary.data);
+    let mut cursor = Cursor::new(binary.data.as_slice());
     let pe_file = PeFile::read_le(&mut cursor)
         .map_err(|e| FissionError::analysis(format!("Parsing PE headers: {}", e)))?;
 

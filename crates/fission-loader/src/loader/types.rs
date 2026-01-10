@@ -2,6 +2,56 @@ use crate::prelude::*;
 use bytecheck::CheckBytes;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::path::Path;
+use std::sync::Arc;
+
+// ============================================================================
+// rkyv Wrapper for Arc<Vec<u8>>
+// ============================================================================
+
+/// Custom rkyv wrapper for `Arc<Vec<u8>>` that serializes as `Vec<u8>`.
+///
+/// This enables efficient cloning of LoadedBinary while maintaining
+/// compatibility with rkyv serialization (e.g., for snapshots).
+pub struct ArcVecWrapper;
+
+impl rkyv::with::ArchiveWith<Arc<Vec<u8>>> for ArcVecWrapper {
+    type Archived = rkyv::vec::ArchivedVec<u8>;
+    type Resolver = rkyv::vec::VecResolver;
+
+    #[inline]
+    unsafe fn resolve_with(
+        field: &Arc<Vec<u8>>,
+        pos: usize,
+        resolver: Self::Resolver,
+        out: *mut Self::Archived,
+    ) {
+        rkyv::vec::ArchivedVec::resolve_from_slice(field.as_slice(), pos, resolver, out);
+    }
+}
+
+impl<S: rkyv::ser::Serializer + rkyv::ser::ScratchSpace + ?Sized>
+    rkyv::with::SerializeWith<Arc<Vec<u8>>, S> for ArcVecWrapper
+{
+    fn serialize_with(
+        field: &Arc<Vec<u8>>,
+        serializer: &mut S,
+    ) -> std::result::Result<Self::Resolver, S::Error> {
+        rkyv::vec::ArchivedVec::serialize_from_slice(field.as_slice(), serializer)
+    }
+}
+
+impl<D: rkyv::Fallible + ?Sized>
+    rkyv::with::DeserializeWith<rkyv::vec::ArchivedVec<u8>, Arc<Vec<u8>>, D> for ArcVecWrapper
+{
+    fn deserialize_with(
+        field: &rkyv::vec::ArchivedVec<u8>,
+        deserializer: &mut D,
+    ) -> std::result::Result<Arc<Vec<u8>>, D::Error> {
+        // ArchivedVec<u8> can be converted to a slice directly, then to Vec
+        let vec: Vec<u8> = field.as_slice().to_vec();
+        Ok(Arc::new(vec))
+    }
+}
 
 /// Information about a function found in the binary
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
@@ -42,13 +92,19 @@ pub struct SectionInfo {
 }
 
 /// Parsed binary information
+///
+/// Note: The `data` field uses `Arc<Vec<u8>>` for efficient cloning.
+/// When cloning a LoadedBinary, only metadata is copied while the raw bytes
+/// are shared via reference counting. This enables cheap "copy-on-write"
+/// semantics: patching operations will only clone the data when necessary.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 #[archive(check_bytes)]
 pub struct LoadedBinary {
     /// Original file path
     pub path: String,
-    /// Raw bytes of the file
-    pub data: Vec<u8>,
+    /// Raw bytes of the file (Arc for cheap clone, COW via Arc::make_mut)
+    #[with(ArcVecWrapper)]
+    pub data: Arc<Vec<u8>>,
     /// Detected architecture (e.g., "x86:LE:64:default")
     pub arch_spec: String,
     /// Entry point address
@@ -200,7 +256,7 @@ impl LoadedBinaryBuilder {
 
         let mut binary = LoadedBinary {
             path: self.path,
-            data: self.data,
+            data: Arc::new(self.data),
             arch_spec: self.arch_spec,
             entry_point: self.entry_point,
             image_base: self.image_base,
@@ -450,7 +506,7 @@ impl LoadedBinary {
         // Temporarily disabled - DisasmEngine is in fission-pcode crate
         // Need to decide architecture: should loader depend on pcode? Or vice versa?
         return;
-        
+
         /* Original implementation:
         use std::collections::HashSet;
 
@@ -556,6 +612,9 @@ impl LoadedBinary {
 
     /// Patch bytes at a file offset
     /// Returns the original bytes that were replaced
+    ///
+    /// Uses Copy-on-Write semantics: if this is the only reference to the data,
+    /// the patch is applied in-place. Otherwise, the data is cloned first.
     pub fn patch_bytes(&mut self, offset: u64, new_bytes: &[u8]) -> Option<Vec<u8>> {
         let offset = offset as usize;
         let end = offset + new_bytes.len();
@@ -564,11 +623,13 @@ impl LoadedBinary {
             return None;
         }
 
-        // Save original bytes
+        // Save original bytes (before COW clone)
         let original = self.data[offset..end].to_vec();
 
-        // Apply patch
-        self.data[offset..end].copy_from_slice(new_bytes);
+        // Apply patch using Copy-on-Write
+        // Arc::make_mut clones only if there are other references
+        let data = Arc::make_mut(&mut self.data);
+        data[offset..end].copy_from_slice(new_bytes);
 
         Some(original)
     }
@@ -594,7 +655,7 @@ impl LoadedBinary {
 
     /// Save the (potentially patched) binary to a file
     pub fn save_as<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        std::fs::write(path, &self.data)?;
+        std::fs::write(path, self.data.as_ref())?;
         Ok(())
     }
 
@@ -602,7 +663,7 @@ impl LoadedBinary {
     // Apply a quick patch at a file offset
     // pub fn apply_quick_patch(&mut self, offset: u64, patch_type: QuickPatch) -> Option<Vec<u8>>
     //
-    // Apply a quick patch at a virtual address  
+    // Apply a quick patch at a virtual address
     // pub fn apply_quick_patch_va(&mut self, va: u64, patch_type: QuickPatch) -> Option<Vec<u8>>
 }
 
