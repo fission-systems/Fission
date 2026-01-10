@@ -137,6 +137,37 @@ DECOMP_API void decomp_add_global_symbol(
 DECOMP_API void decomp_clear_global_symbols(DecompContext* ctx);
 
 /**
+ * Add multiple symbols in a single FFI call (batch optimization).
+ * This reduces FFI overhead when adding many symbols at once.
+ *
+ * @param ctx Decompiler context
+ * @param addrs Array of symbol addresses
+ * @param names Array of symbol names (each will be copied internally)
+ * @param count Number of symbols to add
+ */
+DECOMP_API void decomp_add_symbols_batch(
+    DecompContext* ctx,
+    const uint64_t* addrs,
+    const char* const* names,
+    size_t count
+);
+
+/**
+ * Add multiple global data symbols in a single FFI call (batch optimization).
+ *
+ * @param ctx Decompiler context
+ * @param addrs Array of symbol addresses
+ * @param names Array of symbol names (each will be copied internally)
+ * @param count Number of symbols to add
+ */
+DECOMP_API void decomp_add_global_symbols_batch(
+    DecompContext* ctx,
+    const uint64_t* addrs,
+    const char* const* names,
+    size_t count
+);
+
+/**
  * Set a symbol provider callback for on-demand symbol queries.
  *
  * @param ctx Decompiler context

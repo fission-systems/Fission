@@ -121,6 +121,20 @@ unsafe extern "C" {
     fn decomp_set_feature(ctx: *mut DecompContext, feature: *const c_char, enabled: c_int);
     fn decomp_load_fid_db(ctx: *mut DecompContext, db_path: *const c_char) -> DecompError;
     fn decomp_get_fid_match(ctx: *mut DecompContext, addr: u64, len: usize) -> *mut c_char;
+
+    // Batch symbol registration (reduced FFI overhead)
+    fn decomp_add_symbols_batch(
+        ctx: *mut DecompContext,
+        addrs: *const u64,
+        names: *const *const c_char,
+        count: usize,
+    );
+    fn decomp_add_global_symbols_batch(
+        ctx: *mut DecompContext,
+        addrs: *const u64,
+        names: *const *const c_char,
+        count: usize,
+    );
 }
 
 // ============================================================================
@@ -161,9 +175,10 @@ impl DecompilerNative {
         if sla_dir.is_empty() {
             return Err(FissionError::decompiler("SLA directory cannot be empty"));
         }
-        
-        let sla_cstr = CString::new(sla_dir)
-            .map_err(|_| FissionError::decompiler("Invalid SLA directory path (contains null byte)"))?;
+
+        let sla_cstr = CString::new(sla_dir).map_err(|_| {
+            FissionError::decompiler("Invalid SLA directory path (contains null byte)")
+        })?;
 
         let ctx = unsafe { decomp_create(sla_cstr.as_ptr()) };
         if ctx.is_null() {
@@ -181,14 +196,18 @@ impl DecompilerNative {
             symbol_provider_callbacks: None,
         })
     }
-    
+
     /// Check if the decompiler context is still valid
     fn check_valid(&self) -> Result<()> {
         if !self.is_valid {
-            return Err(FissionError::decompiler("Decompiler context has been invalidated"));
+            return Err(FissionError::decompiler(
+                "Decompiler context has been invalidated",
+            ));
         }
         if self.ctx.is_null() {
-            return Err(FissionError::decompiler("Decompiler context pointer is null"));
+            return Err(FissionError::decompiler(
+                "Decompiler context pointer is null",
+            ));
         }
         Ok(())
     }
@@ -196,7 +215,7 @@ impl DecompilerNative {
     /// Load a binary into the decompiler context
     pub fn load_binary(&mut self, data: &[u8], base_addr: u64, is_64bit: bool) -> Result<()> {
         self.check_valid()?;
-        
+
         if data.is_empty() {
             return Err(FissionError::decompiler("Cannot load empty binary"));
         }
@@ -228,13 +247,37 @@ impl DecompilerNative {
         }
     }
 
-    /// Add multiple symbols from IAT or symbol table
+    /// Add multiple symbols from IAT or symbol table (batch optimized)
+    ///
+    /// This uses a single FFI call to register all symbols at once,
+    /// significantly reducing FFI overhead for large symbol tables.
     pub fn add_symbols(&mut self, symbols: &HashMap<u64, String>) {
-        if self.check_valid().is_err() {
+        if self.check_valid().is_err() || symbols.is_empty() {
             return;
         }
+
+        // Prepare batch arrays
+        let mut addrs: Vec<u64> = Vec::with_capacity(symbols.len());
+        let mut names_cstr: Vec<CString> = Vec::with_capacity(symbols.len());
+
         for (addr, name) in symbols {
-            self.add_symbol(*addr, name);
+            if !name.is_empty() {
+                if let Ok(cstr) = CString::new(name.as_str()) {
+                    addrs.push(*addr);
+                    names_cstr.push(cstr);
+                }
+            }
+        }
+
+        if addrs.is_empty() {
+            return;
+        }
+
+        // Create pointer array for FFI
+        let name_ptrs: Vec<*const c_char> = names_cstr.iter().map(|s| s.as_ptr()).collect();
+
+        unsafe {
+            decomp_add_symbols_batch(self.ctx, addrs.as_ptr(), name_ptrs.as_ptr(), addrs.len());
         }
     }
 
@@ -248,13 +291,42 @@ impl DecompilerNative {
         }
     }
 
-    /// Add multiple global data symbols
+    /// Add multiple global data symbols (batch optimized)
+    ///
+    /// This uses a single FFI call to register all symbols at once,
+    /// significantly reducing FFI overhead for large symbol tables.
     pub fn add_global_symbols(&mut self, symbols: &HashMap<u64, String>) {
-        if self.check_valid().is_err() {
+        if self.check_valid().is_err() || symbols.is_empty() {
             return;
         }
+
+        // Prepare batch arrays
+        let mut addrs: Vec<u64> = Vec::with_capacity(symbols.len());
+        let mut names_cstr: Vec<CString> = Vec::with_capacity(symbols.len());
+
         for (addr, name) in symbols {
-            self.add_global_symbol(*addr, name);
+            if !name.is_empty() {
+                if let Ok(cstr) = CString::new(name.as_str()) {
+                    addrs.push(*addr);
+                    names_cstr.push(cstr);
+                }
+            }
+        }
+
+        if addrs.is_empty() {
+            return;
+        }
+
+        // Create pointer array for FFI
+        let name_ptrs: Vec<*const c_char> = names_cstr.iter().map(|s| s.as_ptr()).collect();
+
+        unsafe {
+            decomp_add_global_symbols_batch(
+                self.ctx,
+                addrs.as_ptr(),
+                name_ptrs.as_ptr(),
+                addrs.len(),
+            );
         }
     }
 
@@ -305,21 +377,25 @@ impl DecompilerNative {
     }
 
     /// Declare a function at the given address
-    /// 
+    ///
     /// This helps Ghidra recognize function boundaries and improves
     /// decompilation quality. Should be called after load_binary()
     /// with all known function addresses.
     pub fn add_function(&mut self, addr: u64, name: Option<&str>) -> Result<()> {
         self.check_valid()?;
-        
+
         let name_cstr = if let Some(n) = name {
-            Some(CString::new(n)
-                .map_err(|_| FissionError::decompiler("Invalid function name (contains null byte)"))?)
+            Some(CString::new(n).map_err(|_| {
+                FissionError::decompiler("Invalid function name (contains null byte)")
+            })?)
         } else {
             None
         };
 
-        let name_ptr = name_cstr.as_ref().map(|c| c.as_ptr()).unwrap_or(ptr::null());
+        let name_ptr = name_cstr
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(ptr::null());
 
         let result = unsafe { decomp_add_function(self.ctx, addr, name_ptr) };
 
@@ -331,7 +407,7 @@ impl DecompilerNative {
     }
 
     /// Add a memory block (section) to help Ghidra understand memory layout
-    /// 
+    ///
     /// This distinguishes between code and data sections, improving
     /// analysis accuracy. Should be called after load_binary().
     pub fn add_memory_block(
@@ -345,11 +421,11 @@ impl DecompilerNative {
         is_writable: bool,
     ) -> Result<()> {
         self.check_valid()?;
-        
+
         if name.is_empty() {
             return Err(FissionError::decompiler("Section name cannot be empty"));
         }
-        
+
         let name_cstr = CString::new(name)
             .map_err(|_| FissionError::decompiler("Invalid section name (contains null byte)"))?;
 
@@ -376,7 +452,7 @@ impl DecompilerNative {
     /// Decompile a function at the given address
     pub fn decompile(&self, addr: u64) -> Result<String> {
         self.check_valid()?;
-        
+
         let result_ptr = unsafe { decomp_function(self.ctx, addr) };
 
         if result_ptr.is_null() {
@@ -396,7 +472,7 @@ impl DecompilerNative {
     /// Get Pcode JSON for a function at the given address
     pub fn get_pcode(&self, addr: u64) -> Result<String> {
         self.check_valid()?;
-        
+
         let result_ptr = unsafe { decomp_function_pcode(self.ctx, addr) };
 
         if result_ptr.is_null() {
@@ -416,13 +492,13 @@ impl DecompilerNative {
     /// Set GDT (Ghidra Data Type) file for type information
     pub fn set_gdt(&mut self, gdt_path: &str) -> Result<()> {
         self.check_valid()?;
-        
+
         if gdt_path.is_empty() {
             return Err(FissionError::decompiler("GDT path cannot be empty"));
         }
-        
-        let path_cstr =
-            CString::new(gdt_path).map_err(|_| FissionError::decompiler("Invalid GDT path (contains null byte)"))?;
+
+        let path_cstr = CString::new(gdt_path)
+            .map_err(|_| FissionError::decompiler("Invalid GDT path (contains null byte)"))?;
 
         let result = unsafe { decomp_set_gdt(self.ctx, path_cstr.as_ptr()) };
 
@@ -448,13 +524,16 @@ impl DecompilerNative {
     /// Load FID (Function ID) database for library function recognition
     pub fn load_fid_database(&mut self, db_path: &str) -> Result<()> {
         self.check_valid()?;
-        
+
         if db_path.is_empty() {
-            return Err(FissionError::decompiler("FID database path cannot be empty"));
+            return Err(FissionError::decompiler(
+                "FID database path cannot be empty",
+            ));
         }
-        
-        let path_cstr = CString::new(db_path)
-            .map_err(|_| FissionError::decompiler("Invalid FID database path (contains null byte)"))?;
+
+        let path_cstr = CString::new(db_path).map_err(|_| {
+            FissionError::decompiler("Invalid FID database path (contains null byte)")
+        })?;
 
         let result = unsafe { decomp_load_fid_db(self.ctx, path_cstr.as_ptr()) };
 
@@ -583,14 +662,7 @@ impl SymbolProviderState {
                 if func.is_import {
                     flags |= SYMBOL_FLAG_EXTERNAL;
                 }
-                function_map.insert(
-                    func.address,
-                    SymbolProviderEntry {
-                        name,
-                        size,
-                        flags,
-                    },
-                );
+                function_map.insert(func.address, SymbolProviderEntry { name, size, flags });
 
                 if size > 0 {
                     if let Some(range) = build_range(func.address, size as u64) {
@@ -658,10 +730,7 @@ impl SymbolProviderState {
 }
 
 #[cfg(feature = "native_decomp")]
-fn data_flags_for_address(
-    addr: u64,
-    sections: &[fission_loader::loader::SectionInfo],
-) -> u32 {
+fn data_flags_for_address(addr: u64, sections: &[fission_loader::loader::SectionInfo]) -> u32 {
     if let Some(section) = find_section_for_address(addr, sections) {
         let mut flags = SYMBOL_FLAG_DATA;
         if !section.is_writable {
@@ -865,7 +934,7 @@ impl Drop for DecompilerNative {
     fn drop(&mut self) {
         // Invalidate context first to prevent use-after-free
         self.is_valid = false;
-        
+
         if !self.ctx.is_null() {
             unsafe { decomp_destroy(self.ctx) };
             self.ctx = ptr::null_mut();
