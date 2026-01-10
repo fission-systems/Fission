@@ -6,6 +6,36 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Decompiler Error Handling & Recovery (2026-01-10)
+
+**🛡️ Robustness: Improved FFI Error Recovery**
+
+Enhanced native decompiler error handling with user-friendly messages and configurable paths.
+
+**Improvements:**
+
+- **Environment Variable Support**:
+  - `FISSION_SLA_DIR` environment variable for custom SLA directory path
+  - Fallback search: current dir → parent dir → error with suggestion
+- **UI Error Messages**:
+  - Errors now surfaced to UI via `AsyncMessage::DecompilerContextError`
+  - Actionable suggestions provided (e.g., "Set FISSION_SLA_DIR...")
+- **Detailed Logging**: Step-by-step progress logging for debugging
+- **Recovery Support**: `decompiler_context_loaded` flag reset on error for retry
+
+**New Message Types:**
+
+- `DecompilerContextError { error, suggestion }` - FFI initialization failures
+- `WorkerHeartbeat { worker_id, is_alive }` - Worker health monitoring (infrastructure)
+
+**SLA Directory Resolution Order:**
+
+1. `FISSION_SLA_DIR` environment variable
+2. `./ghidra_decompiler/languages` (relative to current dir)
+3. `../ghidra_decompiler/languages` (workspace root)
+
+---
+
 ### Functions Panel Search & Category Filter (2026-01-10)
 
 **🔍 New Feature: Enhanced Function List Navigation**

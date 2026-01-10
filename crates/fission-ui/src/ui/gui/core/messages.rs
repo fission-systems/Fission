@@ -61,6 +61,16 @@ pub enum AsyncMessage {
 
     /// CFG analysis failed
     CfgAnalysisError { address: u64, error: String },
+
+    /// Decompiler context initialization failed (FFI error, SLA not found, etc.)
+    DecompilerContextError {
+        error: String,
+        /// Suggested fix (e.g., "Set FISSION_SLA_DIR environment variable")
+        suggestion: Option<String>,
+    },
+
+    /// Worker thread health check (sent periodically)
+    WorkerHeartbeat { worker_id: usize, is_alive: bool },
 }
 
 /// Loop data for CFG result transfer
