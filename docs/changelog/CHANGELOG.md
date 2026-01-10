@@ -6,6 +6,30 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### Default Native Decompiler Feature (2026-01-10)
+
+**🔧 DX: Simplified Build Command**
+
+Set `native_decomp` as the default feature for easier development workflow.
+
+**Before:**
+
+```bash
+cargo run --features native_decomp
+```
+
+**After:**
+
+```bash
+cargo run  # native_decomp is now enabled by default
+```
+
+**Changes:**
+
+- `fission-ui/Cargo.toml`: `default = ["native_decomp"]`
+
+---
+
 ### Batch FFI Symbol Registration (2026-01-10)
 
 **⚡ Performance: Reduced FFI Call Overhead**
