@@ -8,26 +8,25 @@
 //! - `events.rs` - Event handling
 
 mod app;
-mod ui;
 mod events;
+mod ui;
 
 use std::io::{self, stdout};
 use std::time::Duration;
 
 use clap::Parser;
 use crossterm::{
-    event,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    ExecutableCommand,
+    ExecutableCommand, event,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
-use crate::analysis::loader::LoadedBinary;
 use super::args::TuiArgs;
+use fission_loader::loader::LoadedBinary;
 
 pub use app::App;
-pub use ui::render_ui;
 pub use events::handle_events;
+pub use ui::render_ui;
 
 /// Entry point for TUI mode
 pub fn run_tui() -> io::Result<()> {

@@ -10,7 +10,7 @@ use std::sync::RwLock;
 use thiserror::Error;
 
 use super::types::{PyBinaryInfo, PyFunctionInfo, PySection};
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 
 /// Shared state accessible from Python scripts
 #[derive(Default)]

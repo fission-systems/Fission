@@ -22,7 +22,7 @@ pub use loops::{Loop, LoopAnalyzer, LoopKind};
 pub use metrics::{CfgMetrics, ComplexityAnalyzer};
 pub use visualization::{CfgVisualizer, DotOptions};
 
-use crate::analysis::pcode::{PcodeFunction, PcodeBasicBlock, PcodeOp, PcodeOpcode};
+use fission_pcode::{PcodeFunction, PcodeBasicBlock, PcodeOp, PcodeOpcode};
 
 /// Error types for CFG analysis
 #[derive(Debug, Clone)]

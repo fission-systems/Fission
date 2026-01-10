@@ -1,5 +1,5 @@
 use super::BinaryParser;
-use crate::analysis::loader::types::LoadedBinary;
+use fission_loader::loader::types::LoadedBinary;
 use crate::prelude::*;
 
 /// Dynamic Parser intended for handling memory dumps, running processes,

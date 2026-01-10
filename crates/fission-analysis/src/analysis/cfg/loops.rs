@@ -309,7 +309,7 @@ mod tests {
 
     fn create_while_loop_cfg() -> (ControlFlowGraph, DominatorTree) {
         let mut cfg = ControlFlowGraph::new();
-        use crate::analysis::pcode::{PcodeOp, PcodeOpcode, Varnode};
+        use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
         // Block 0: entry, jumps to header
         let mut b0 = BasicBlock::new(0, 0x1000);

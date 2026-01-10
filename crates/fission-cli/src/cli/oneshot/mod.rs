@@ -6,26 +6,26 @@
 mod binary_info;
 #[cfg(feature = "native_decomp")]
 mod cfg;
-mod disasm;
 #[cfg(feature = "native_decomp")]
 mod decompile;
+mod disasm;
+mod functions;
 #[cfg(feature = "native_decomp")]
 pub mod graph;
-mod functions;
 mod strings;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
 #[cfg(feature = "native_decomp")]
-use cfg::{analyze_cfg, CfgOutputFormat};
+use cfg::{CfgOutputFormat, analyze_cfg};
 #[cfg(feature = "native_decomp")]
 use decompile::run_decompilation;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use strings::print_strings;
 
-use crate::analysis::loader::LoadedBinary;
 use crate::cli::args::OneShotArgs;
 use clap::Parser;
+use fission_loader::loader::LoadedBinary;
 use std::fs;
 use std::io;
 
@@ -184,7 +184,9 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
 fn print_help() {
     println!("\x1b[1;36m╔══════════════════════════════════════════════════════════╗\x1b[0m");
-    println!("\x1b[1;36m║\x1b[0m  \x1b[1;35m🔬 Fission\x1b[0m - Next-Gen Binary Analysis          \x1b[1;36m║\x1b[0m");
+    println!(
+        "\x1b[1;36m║\x1b[0m  \x1b[1;35m🔬 Fission\x1b[0m - Next-Gen Binary Analysis          \x1b[1;36m║\x1b[0m"
+    );
     println!("\x1b[1;36m╚══════════════════════════════════════════════════════════╝\x1b[0m");
     println!();
     println!("\x1b[1;33mUsage:\x1b[0m fission <binary> [OPTIONS]");
@@ -219,6 +221,8 @@ fn print_help() {
     println!("  fission app.exe --decomp 0x140001000  \x1b[90m# Decompile\x1b[0m");
     println!("  fission app.exe --decomp-all -o out/  \x1b[90m# Decompile all\x1b[0m");
     println!("  fission app.exe --cfg 0x140001000     \x1b[90m# CFG analysis\x1b[0m");
-    println!("  fission app.exe --cfg 0x140001000 --cfg-format dot -o out.dot \x1b[90m# CFG graph\x1b[0m");
+    println!(
+        "  fission app.exe --cfg 0x140001000 --cfg-format dot -o out.dot \x1b[90m# CFG graph\x1b[0m"
+    );
     println!();
 }

@@ -16,7 +16,7 @@ pub fn handle_help(state: &mut AppState) {
 
 /// Handle 'funcs' or 'functions' command
 pub fn handle_list_functions(state: &mut AppState) {
-    if let Some(ref binary) = state.analysis.loaded_binary {
+    if let Some(ref binary) = state.analysis.domain.loaded_binary {
         let funcs: Vec<_> = binary
             .functions
             .iter()

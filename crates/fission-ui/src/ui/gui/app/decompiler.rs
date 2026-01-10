@@ -7,9 +7,10 @@ use std::time::Instant;
 
 use super::decomp_worker::DecompileRequest;
 use crate::analysis::disasm::DisasmEngine;
-use crate::analysis::loader::FunctionInfo;
 use crate::core::config::CONFIG;
-use crate::ui::gui::core::state::{AppState, CachedDecompile};
+use crate::ui::gui::core::domain::CachedDecompile;
+use crate::ui::gui::core::state::AppState;
+use fission_loader::loader::FunctionInfo;
 
 /// Decompile a function (sends request to worker thread)
 pub fn decompile_function(
@@ -24,7 +25,7 @@ pub fn decompile_function(
             "[!] {} is an import function (no code to decompile)",
             func.name
         ));
-        state.analysis.decompiled_code = format!(
+        state.analysis.domain.decompiled_code = format!(
             "// {} is an imported function\n// Address: 0x{:x}\n// No code available - this is a stub pointing to external library",
             func.name, func.address
         );
@@ -33,36 +34,36 @@ pub fn decompile_function(
 
     // Check cache first (LruCache.get() updates access order)
     let address = func.address;
-    if let Some(cached) = state.analysis.decompile_cache.get(&address) {
+    if let Some(cached) = state.analysis.domain.decompile_cache.get(&address) {
         let c_code = cached.c_code.clone();
         let asm = cached.asm_instructions.clone();
         state.log(format!("[*] Using cached result for 0x{:x}", address));
-        state.analysis.decompiled_code = c_code;
-        state.analysis.asm_instructions = asm;
+        state.analysis.domain.decompiled_code = c_code;
+        state.analysis.domain.asm_instructions = asm;
         return;
     }
 
     // CRITICAL: Check if binary is loaded AND decompiler context is ready
-    if state.analysis.loaded_binary.is_none() {
+    if state.analysis.domain.loaded_binary.as_ref().is_none() {
         state.log("[!] No binary loaded".to_string());
-        state.analysis.decompiled_code =
+        state.analysis.domain.decompiled_code =
             "// No binary loaded\n// Use File → Open to load a binary".to_string();
         return;
     }
 
     // Extra safety: Check decompiler context is loaded (prevents race conditions)
-    if !state.analysis.decompiler_context_loaded {
+    if !state.analysis.domain.decompiler_context_loaded {
         state.log("[!] Decompiler context not ready".to_string());
-        state.analysis.decompiled_code =
+        state.analysis.domain.decompiled_code =
             "// Decompiler initializing...\n// Please wait a moment and try again".to_string();
         return;
     }
 
     let (bytes, is_64bit) = {
-        let binary = match state.analysis.loaded_binary.as_ref() {
+        let binary = match state.analysis.domain.loaded_binary.as_ref() {
             Some(b) => b,
             None => {
-                state.analysis.decompiled_code = "// Error: No binary loaded".to_string();
+                state.analysis.domain.decompiled_code = "// Error: No binary loaded".to_string();
                 return;
             }
         };
@@ -105,21 +106,21 @@ pub fn decompile_function(
     match DisasmEngine::new(is_64bit) {
         Ok(engine) => match engine.disassemble(&bytes, address) {
             Ok(insns) => {
-                state.analysis.asm_instructions = insns;
+                state.analysis.domain.asm_instructions = insns;
             }
             Err(e) => {
                 state.log(format!("[!] Disassembly error: {}", e));
-                state.analysis.asm_instructions.clear();
+                state.analysis.domain.asm_instructions.clear();
             }
         },
         Err(e) => {
             state.log(format!("[!] Failed to initialize disassembler: {}", e));
-            state.analysis.asm_instructions.clear();
+            state.analysis.domain.asm_instructions.clear();
         }
     }
 
-    state.analysis.decompiling = true;
-    state.analysis.decompiled_code = format!("// Decompiling 0x{:x}...", address);
+    state.analysis.domain.decompiling = true;
+    state.analysis.domain.decompiled_code = format!("// Decompiling 0x{:x}...", address);
     state.log(format!(
         "[*] Decompiling 0x{:x} ({} bytes)",
         address,
@@ -133,10 +134,10 @@ pub fn decompile_function(
     // Send request to worker thread (non-blocking)
     // Send request to worker thread (non-blocking)
     // Optimization: If decompiler context is loaded, send empty bytes to use persistent memory
-    let request_bytes = if state.analysis.decompiler_context_loaded {
+    let request_bytes = if state.analysis.domain.decompiler_context_loaded {
         Vec::new()
     } else {
-        bytes
+        bytes.to_vec()
     };
 
     let request = DecompileRequest {
@@ -157,34 +158,34 @@ pub fn decompile_function(
 
     if let Err(e) = decomp_tx.send(request) {
         state.log(format!("[!] Failed to send decompile request: {}", e));
-        state.analysis.decompiling = false;
+        state.analysis.domain.decompiling = false;
     }
 }
 
 /// Store decompile result in cache
 pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String) {
     // Apply IAT symbol replacement if binary is loaded
-    let processed_code = if let Some(ref binary) = state.analysis.loaded_binary {
+    let processed_code = if let Some(ref binary) = state.analysis.domain.loaded_binary {
         apply_iat_symbols(&c_code, &binary.iat_symbols)
     } else {
         c_code.clone()
     };
 
-    if let Some(func) = &state.analysis.selected_function
+    if let Some(func) = &state.analysis.domain.selected_function
         && func.address == address
     {
         // LruCache.put() automatically evicts oldest entry when at capacity
-        state.analysis.decompile_cache.put(
+        state.analysis.domain.decompile_cache.put(
             address,
             CachedDecompile {
                 c_code: processed_code.clone(),
-                asm_instructions: state.analysis.asm_instructions.clone(),
+                asm_instructions: state.analysis.domain.asm_instructions.clone(),
                 timestamp: Instant::now(),
             },
         );
     }
-    state.analysis.decompiled_code = processed_code;
-    state.analysis.decompiling = false;
+    state.analysis.domain.decompiled_code = processed_code;
+    state.analysis.domain.decompiling = false;
 }
 
 /// Replace pcRamXXXXXXXX and func_0xXXXXXXXX patterns with actual IAT symbol names

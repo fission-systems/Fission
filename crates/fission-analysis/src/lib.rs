@@ -204,6 +204,5 @@ pub use fission_core as core;
 // Re-export core utilities at crate level for convenience
 pub use fission_core::{config, constants, errors, logging, prelude as core_prelude, settings};
 
-// Ensure FFI functions are compiled and exported
-// These are used by the C++ decompiler bridge
-pub use crate::analysis::pcode::ffi::*;
+// NOTE: FFI functions are now exclusively exported through fission-ffi crate
+// to maintain clear separation of concerns. Do not re-export FFI here.

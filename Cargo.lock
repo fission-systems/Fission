@@ -1725,6 +1725,10 @@ dependencies = [
  "crossbeam-channel",
  "dirs",
  "fission-core",
+ "fission-ffi",
+ "fission-loader",
+ "fission-pcode",
+ "fission-signatures",
  "flate2",
  "hex",
  "iced-x86",
@@ -1761,6 +1765,8 @@ dependencies = [
  "egui",
  "fission-analysis",
  "fission-core",
+ "fission-ffi",
+ "fission-loader",
  "fission-ui",
  "iced-x86",
  "libc",
@@ -1789,7 +1795,69 @@ dependencies = [
 name = "fission-ffi"
 version = "0.1.0"
 dependencies = [
- "fission-analysis",
+ "fission-core",
+ "fission-loader",
+ "fission-pcode",
+ "libloading",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fission-loader"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "binrw",
+ "bytecheck",
+ "bytes",
+ "fission-core",
+ "hex",
+ "log",
+ "object",
+ "once_cell",
+ "regex",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "fission-pcode"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytecheck",
+ "criterion",
+ "fission-core",
+ "fission-loader",
+ "iced-x86",
+ "log",
+ "lru",
+ "once_cell",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "fission-signatures"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "criterion",
+ "fission-core",
+ "log",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1802,6 +1870,8 @@ dependencies = [
  "egui_extras",
  "fission-analysis",
  "fission-core",
+ "fission-ffi",
+ "fission-loader",
  "lru",
  "regex",
  "rfd",

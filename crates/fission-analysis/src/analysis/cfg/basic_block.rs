@@ -4,7 +4,7 @@
 //! - Single entry point (only the first instruction can be jumped to)
 //! - Single exit point (only the last instruction can cause a branch)
 
-use crate::analysis::pcode::{PcodeOp, PcodeOpcode};
+use fission_pcode::{PcodeOp, PcodeOpcode};
 
 /// Represents a basic block in the CFG
 #[derive(Debug, Clone)]

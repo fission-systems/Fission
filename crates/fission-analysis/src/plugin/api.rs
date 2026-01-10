@@ -1,6 +1,6 @@
 //! Plugin API - Interface exposed to plugins for interacting with Fission.
 
-use crate::analysis::loader::{FunctionInfo, LoadedBinary};
+use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::sync::Arc;
 
 /// Information about a loaded binary (safe to send to plugins)

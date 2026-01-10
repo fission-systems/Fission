@@ -39,7 +39,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> XrefAction {
                 ui.label(egui::RichText::new("Address:").color(catppuccin::SUBTEXT0));
 
                 // If we have a selected function, use its address
-                if let Some(ref func) = state.analysis.selected_function {
+                if let Some(ref func) = state.analysis.domain.selected_function {
                     let addr = func.address;
                     ui.label(
                         egui::RichText::new(format!("0x{:08X}", addr))
@@ -69,7 +69,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> XrefAction {
             ui.separator();
 
             // Check if we have xref database
-            if state.analysis.xref_db.is_none() {
+            if state.analysis.domain.xref_db.is_none() {
                 empty_state(
                     ui,
                     "No cross-references available",
@@ -78,7 +78,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> XrefAction {
                 return;
             }
 
-            let xref_db = state.analysis.xref_db.as_ref().unwrap();
+            let xref_db = state.analysis.domain.xref_db.as_ref().unwrap();
 
             if let Some(addr) = state.ui.selected_xref_addr {
                 // Two columns: REFS TO and REFS FROM

@@ -10,7 +10,7 @@ use egui_extras::{Column, TableBuilder};
 pub fn render(ui: &mut egui::Ui, state: &AppState) {
     // Dynamic Mode: Show Reconstructed Imports
     if state.ui.dynamic_mode {
-        let imports = &state.analysis.reconstructed_imports;
+        let imports = &state.analysis.domain.reconstructed_imports;
 
         ui.horizontal(|ui| {
             ui.label(
@@ -77,7 +77,7 @@ pub fn render(ui: &mut egui::Ui, state: &AppState) {
         return;
     }
 
-    let Some(ref binary) = state.analysis.loaded_binary else {
+    let Some(ref binary) = state.analysis.domain.loaded_binary else {
         empty_state(ui, "Load a binary to view imports", None);
         return;
     };

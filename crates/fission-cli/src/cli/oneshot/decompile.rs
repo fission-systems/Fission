@@ -1,7 +1,7 @@
-use crate::analysis::decomp::ffi::DecompilerNative;
-use crate::analysis::loader::{FunctionInfo, LoadedBinary};
 use crate::cli::args::OneShotArgs;
 use crate::cli::output::OutputSilencer;
+use fission_ffi::DecompilerNative;
+use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::fs;
 use std::io::{self, Write};
 
@@ -12,7 +12,12 @@ pub(super) fn run_decompilation(
 ) -> io::Result<()> {
     // Initialize decompiler
     let sla_dir = std::env::current_dir()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to get current directory: {}", e)))?
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to get current directory: {}", e),
+            )
+        })?
         .join("ghidra_decompiler")
         .to_string_lossy()
         .into_owned();
@@ -102,7 +107,7 @@ pub(super) fn run_decompilation(
     } else {
         "_x86.fidbf"
     };
-    
+
     // Build comprehensive FID database list
     // Prioritize: GCC/MinGW for Linux/MinGW binaries, MSVC for Windows native
     let fid_paths = vec![
@@ -169,10 +174,7 @@ pub(super) fn run_decompilation(
 
     if functions.is_empty() && cli.address.is_some() {
         let addr = cli.address.expect("address should be Some");
-        eprintln!(
-            "Warning: No function found at address 0x{:x}",
-            addr
-        );
+        eprintln!("Warning: No function found at address 0x{:x}", addr);
         // Try to decompile anyway
         decompile_and_output(cli, &decomp, addr, &format!("sub_{:x}", addr))?;
         return Ok(());
@@ -226,8 +228,12 @@ pub(super) fn run_decompilation(
 
     // Output results
     let final_output = if cli.json {
-        serde_json::to_string_pretty(&json_results)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?
+        serde_json::to_string_pretty(&json_results).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e),
+            )
+        })?
     } else {
         all_output
     };
@@ -261,7 +267,12 @@ pub(super) fn decompile_and_output(
                     "name": name,
                     "code": code
                 }))
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?;
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("JSON serialization failed: {}", e),
+                    )
+                })?;
                 writeln!(stdout, "{}", json_output)?;
             } else {
                 writeln!(stdout, "// Function: {} @ 0x{:x}\n", name, addr)?;

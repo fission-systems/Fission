@@ -4,7 +4,7 @@ use crossbeam_channel::Sender;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 use crate::ui::gui::core::messages::AsyncMessage;
 use crate::ui::gui::core::state::AppState;
 
@@ -39,9 +39,9 @@ pub fn load_binary(state: &mut AppState, tx: Sender<AsyncMessage>, path: &str) {
     let path = path.to_string();
 
     // Clear cache on new binary load
-    state.analysis.decompile_cache.clear();
+    state.analysis.domain.decompile_cache.clear();
     // Save path
-    state.analysis.last_binary_path = Some(path.clone());
+    state.analysis.domain.last_binary_path = Some(path.clone());
 
     state.log(format!("[*] Loading {}...", path));
 

@@ -1,10 +1,10 @@
 //! Application state and logic
 
-use crate::analysis::loader::{FunctionInfo, LoadedBinary};
+use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use ratatui::widgets::ListState;
 
 #[cfg(feature = "native_decomp")]
-use crate::analysis::decomp::ffi::DecompilerNative;
+use fission_ffi::DecompilerNative;
 
 #[cfg(feature = "native_decomp")]
 use crate::analysis::cfg::{CfgAnalysis, CfgVisualizer, DotOptions};
@@ -276,26 +276,56 @@ impl App {
                                 Ok(analysis) => {
                                     // Build summary string
                                     let mut summary = String::new();
-                                    summary.push_str(&format!("=== CFG Analysis: {} ===\n\n", func.name));
-                                    summary.push_str(&format!("Blocks: {}\n", analysis.cfg.block_count()));
-                                    summary.push_str(&format!("Edges: {}\n", analysis.cfg.edge_count()));
-                                    summary.push_str(&format!("Cyclomatic Complexity: {}\n", analysis.metrics.cyclomatic_complexity));
-                                    summary.push_str(&format!("Max Nesting Depth: {}\n", analysis.metrics.max_nesting_depth));
-                                    summary.push_str(&format!("Loops: {}\n\n", analysis.loops.len()));
+                                    summary.push_str(&format!(
+                                        "=== CFG Analysis: {} ===\n\n",
+                                        func.name
+                                    ));
+                                    summary.push_str(&format!(
+                                        "Blocks: {}\n",
+                                        analysis.cfg.block_count()
+                                    ));
+                                    summary.push_str(&format!(
+                                        "Edges: {}\n",
+                                        analysis.cfg.edge_count()
+                                    ));
+                                    summary.push_str(&format!(
+                                        "Cyclomatic Complexity: {}\n",
+                                        analysis.metrics.cyclomatic_complexity
+                                    ));
+                                    summary.push_str(&format!(
+                                        "Max Nesting Depth: {}\n",
+                                        analysis.metrics.max_nesting_depth
+                                    ));
+                                    summary
+                                        .push_str(&format!("Loops: {}\n\n", analysis.loops.len()));
 
                                     if !analysis.loops.is_empty() {
                                         summary.push_str("Loop Details:\n");
                                         for (i, l) in analysis.loops.iter().enumerate() {
-                                            summary.push_str(&format!("  Loop {}: Header=BB{}, Kind={:?}, Body={:?}\n",
-                                                i, l.header, l.kind, l.body.iter().collect::<Vec<_>>()));
+                                            summary.push_str(&format!(
+                                                "  Loop {}: Header=BB{}, Kind={:?}, Body={:?}\n",
+                                                i,
+                                                l.header,
+                                                l.kind,
+                                                l.body.iter().collect::<Vec<_>>()
+                                            ));
                                         }
                                         summary.push_str("\n");
                                     }
 
                                     summary.push_str("Blocks:\n");
                                     for block in &analysis.cfg.blocks {
-                                        let marker = if block.is_entry { " [ENTRY]" } else if block.is_exit { " [EXIT]" } else { "" };
-                                        summary.push_str(&format!("  BB{} @ 0x{:x}{}\n", block.index, block.start_address, marker));
+                                        let marker = if block.is_entry {
+                                            " [ENTRY]"
+                                        } else if block.is_exit {
+                                            " [EXIT]"
+                                        } else {
+                                            ""
+                                        };
+                                        summary.push_str(&format!(
+                                            "  BB{} @ 0x{:x}{}\n",
+                                            block.index, block.start_address, marker
+                                        ));
                                     }
 
                                     self.cfg_summary = Some(summary);

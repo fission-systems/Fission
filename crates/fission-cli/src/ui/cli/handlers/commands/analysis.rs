@@ -1,15 +1,19 @@
 //! Analysis commands - Functions, sections, strings, analyze
 
-use colored::Colorize;
-use std::sync::Arc;
 use crate::ui::cli::handlers::CliState;
+use colored::Colorize;
+use fission_loader::loader::LoadedBinary;
+use std::sync::Arc;
 
 /// List all discovered functions
 pub fn cmd_functions(state: &CliState) {
-    let binary = match &state.binary {
-        Some(b) => b,
+    let binary: &LoadedBinary = match &state.binary {
+        Some(b) => b.as_ref(),
         None => {
-            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+            println!(
+                "{} No binary loaded. Use 'load <path>' first.",
+                "[!]".yellow()
+            );
             return;
         }
     };
@@ -69,7 +73,10 @@ pub fn cmd_sections(state: &CliState) {
     let binary = match &state.binary {
         Some(b) => b,
         None => {
-            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+            println!(
+                "{} No binary loaded. Use 'load <path>' first.",
+                "[!]".yellow()
+            );
             return;
         }
     };
@@ -115,7 +122,10 @@ pub fn cmd_strings(state: &CliState, min_len: usize) {
     let binary = match &state.binary {
         Some(b) => b,
         None => {
-            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+            println!(
+                "{} No binary loaded. Use 'load <path>' first.",
+                "[!]".yellow()
+            );
             return;
         }
     };
@@ -210,7 +220,10 @@ pub fn cmd_analyze(state: &mut CliState) {
             );
         }
         None => {
-            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+            println!(
+                "{} No binary loaded. Use 'load <path>' first.",
+                "[!]".yellow()
+            );
         }
     }
 }

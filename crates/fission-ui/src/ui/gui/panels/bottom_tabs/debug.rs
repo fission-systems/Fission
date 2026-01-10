@@ -1,8 +1,8 @@
 //! Debug tab panel - Debugger controls, events, breakpoints, and registers.
 
+use crate::ui::gui::components::widgets::empty_state;
 use crate::ui::gui::core::state::{AppState, DebugAction, DebugBpAction};
 use crate::ui::gui::theme::{catppuccin, code};
-use crate::ui::gui::components::widgets::empty_state;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 
@@ -39,22 +39,22 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.add_space(8.0);
 
                 // Status badge
-                let (status_icon, status_text, status_color) = match state.debug.debug_state.status
-                {
-                    crate::debug::types::DebugStatus::Running => {
-                        ("▶", "Running", catppuccin::GREEN)
-                    }
-                    crate::debug::types::DebugStatus::Suspended => {
-                        ("⏸", "Suspended", catppuccin::YELLOW)
-                    }
-                    crate::debug::types::DebugStatus::Terminated => {
-                        ("⏹", "Terminated", catppuccin::RED)
-                    }
-                    crate::debug::types::DebugStatus::Attaching => {
-                        ("🔗", "Attaching", catppuccin::BLUE)
-                    }
-                    _ => ("○", "Detached", catppuccin::OVERLAY0),
-                };
+                let (status_icon, status_text, status_color) =
+                    match state.debug.domain.debug_state.status {
+                        crate::debug::types::DebugStatus::Running => {
+                            ("▶", "Running", catppuccin::GREEN)
+                        }
+                        crate::debug::types::DebugStatus::Suspended => {
+                            ("⏸", "Suspended", catppuccin::YELLOW)
+                        }
+                        crate::debug::types::DebugStatus::Terminated => {
+                            ("⏹", "Terminated", catppuccin::RED)
+                        }
+                        crate::debug::types::DebugStatus::Attaching => {
+                            ("🔗", "Attaching", catppuccin::BLUE)
+                        }
+                        _ => ("○", "Detached", catppuccin::OVERLAY0),
+                    };
 
                 egui::Frame::none()
                     .fill(status_color.linear_multiply(0.2))
@@ -69,7 +69,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     });
 
                 // PID if attached
-                if let Some(pid) = state.debug.debug_state.attached_pid {
+                if let Some(pid) = state.debug.domain.debug_state.attached_pid {
                     ui.add_space(4.0);
                     ui.label(
                         egui::RichText::new(format!("PID: {}", pid))
@@ -79,7 +79,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                 }
 
                 // Last event (truncated)
-                if let Some(ev) = &state.debug.debug_state.last_event {
+                if let Some(ev) = &state.debug.domain.debug_state.last_event {
                     ui.add_space(8.0);
                     let display = if ev.len() > 40 {
                         format!("{}...", &ev[..40])
@@ -96,8 +96,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
 
                 // Right-aligned control buttons
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let is_attached = state.debug.debug_state.attached_pid.is_some();
-                    let is_suspended = state.debug.debug_state.status
+                    let is_attached = state.debug.domain.debug_state.attached_pid.is_some();
+                    let is_suspended = state.debug.domain.debug_state.status
                         == crate::debug::types::DebugStatus::Suspended;
 
                     // Detach button (only when attached)
@@ -170,7 +170,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                             .clicked()
                     {
                         state.ui.show_attach_dialog = true;
-                        state.debug.process_list = crate::debug::enumerate_processes();
+                        state.debug.domain.process_list = crate::debug::enumerate_processes();
                     }
 
                     // TitanEngine Actions (Dynamic Mode)
@@ -311,7 +311,7 @@ fn render_breakpoints_column(
                     ui.label(
                         egui::RichText::new(format!(
                             "{}",
-                            state.debug.debug_state.breakpoints.len()
+                            state.debug.domain.debug_state.breakpoints.len()
                         ))
                         .color(catppuccin::OVERLAY0)
                         .small(),
@@ -329,7 +329,7 @@ fn render_breakpoints_column(
                         .monospace(),
                 );
                 let response = ui.add(
-                    egui::TextEdit::singleline(&mut state.debug.breakpoint_input)
+                    egui::TextEdit::singleline(&mut state.viewmodels.debug.breakpoint_input)
                         .id(egui::Id::new("bp_addr_input"))
                         .desired_width(ui.available_width() - 30.0)
                         .font(egui::TextStyle::Monospace)
@@ -346,12 +346,16 @@ fn render_breakpoints_column(
                     .clicked()
                     || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))))
                     && let Ok(addr) = u64::from_str_radix(
-                        state.debug.breakpoint_input.trim_start_matches("0x"),
+                        state
+                            .viewmodels
+                            .debug
+                            .breakpoint_input
+                            .trim_start_matches("0x"),
                         16,
                     )
                 {
                     state.debug.pending_bp_action = Some(DebugBpAction::Add(addr));
-                    state.debug.breakpoint_input.clear();
+                    state.viewmodels.debug.breakpoint_input.clear();
                 }
             });
 
@@ -368,7 +372,8 @@ fn render_breakpoints_column(
                     .min_scrolled_height(0.0)
                     .max_scroll_height(content_height - 60.0)
                     .body(|body| {
-                        let bps: Vec<_> = state.debug.debug_state.breakpoints.iter().collect();
+                        let bps: Vec<_> =
+                            state.debug.domain.debug_state.breakpoints.iter().collect();
                         body.rows(20.0, bps.len(), |mut row| {
                             let (addr, bp) = bps[row.index()];
 
@@ -402,7 +407,7 @@ fn render_breakpoints_column(
                     });
             });
 
-            if state.debug.debug_state.breakpoints.is_empty() {
+            if state.debug.domain.debug_state.breakpoints.is_empty() {
                 empty_state(ui, "No breakpoints set", None);
             }
         });
@@ -429,7 +434,7 @@ fn render_registers_column(
 
             ui.separator();
 
-            if let Some(regs) = &state.debug.debug_state.registers {
+            if let Some(regs) = &state.debug.domain.debug_state.registers {
                 egui::ScrollArea::vertical()
                     .id_salt("registers_scroll")
                     .max_height(content_height - 30.0)
@@ -500,7 +505,7 @@ fn render_memory_section(ui: &mut egui::Ui, state: &mut AppState) {
                 .small(),
         );
         ui.add(
-            egui::TextEdit::singleline(&mut state.debug.mem_addr_input)
+            egui::TextEdit::singleline(&mut state.viewmodels.debug.mem_addr_input)
                 .desired_width(120.0)
                 .font(egui::TextStyle::Monospace),
         );
@@ -509,25 +514,35 @@ fn render_memory_section(ui: &mut egui::Ui, state: &mut AppState) {
                 .color(catppuccin::SUBTEXT0)
                 .small(),
         );
-        ui.add(egui::TextEdit::singleline(&mut state.debug.mem_len_input).desired_width(60.0));
+        ui.add(
+            egui::TextEdit::singleline(&mut state.viewmodels.debug.mem_len_input)
+                .desired_width(60.0),
+        );
 
         if ui
             .button(egui::RichText::new("Read").color(catppuccin::BLUE))
             .clicked()
             && let (Ok(addr), Ok(len)) = (
-                u64::from_str_radix(state.debug.mem_addr_input.trim_start_matches("0x"), 16),
-                state.debug.mem_len_input.parse::<usize>(),
+                u64::from_str_radix(
+                    state
+                        .viewmodels
+                        .debug
+                        .mem_addr_input
+                        .trim_start_matches("0x"),
+                    16,
+                ),
+                state.viewmodels.debug.mem_len_input.parse::<usize>(),
             )
         {
             state.debug.pending_mem_read = Some((addr, len));
         }
     });
 
-    if !state.debug.mem_dump.is_empty() {
+    if !state.debug.domain.mem_dump.is_empty() {
         egui::ScrollArea::vertical()
             .max_height(100.0)
             .show(ui, |ui| {
-                ui.monospace(&state.debug.mem_dump);
+                ui.monospace(&state.debug.domain.mem_dump);
             });
     }
 }

@@ -1,5 +1,5 @@
 use super::BinaryParser;
-use crate::analysis::loader::types::{
+use fission_loader::loader::types::{
     FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
 };
 use crate::prelude::*;
@@ -14,20 +14,20 @@ impl StaticParser {
     /// Parse PE (Windows executable)
     fn parse_pe(data: Vec<u8>, path: String) -> Result<LoadedBinary> {
         // Use the new binrw PE Loader as the primary parser
-        use crate::analysis::loader::pe::PeLoader;
+        use fission_loader::loader::pe::PeLoader;
 
         PeLoader::parse(data, path)
     }
 
     /// Parse ELF (Linux executable)
     fn parse_elf(data: Vec<u8>, path: String) -> Result<LoadedBinary> {
-        use crate::analysis::loader::elf::ElfLoader;
+        use fission_loader::loader::elf::ElfLoader;
         ElfLoader::parse(data, path)
     }
 
     /// Parse Mach-O (macOS executable)
     fn parse_macho(data: Vec<u8>, path: String) -> Result<LoadedBinary> {
-        use crate::analysis::loader::macho::MachoLoader;
+        use fission_loader::loader::macho::MachoLoader;
         MachoLoader::parse(data, path)
     }
 }

@@ -1,14 +1,18 @@
 //! Decompilation command
 
-use colored::Colorize;
 use crate::cli::output::OutputSilencer;
 use crate::ui::cli::handlers::CliState;
+use colored::Colorize;
+use fission_loader::loader::LoadedBinary;
 
 pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
-    let binary = match &state.binary {
-        Some(b) => b,
+    let binary: &LoadedBinary = match &state.binary {
+        Some(b) => b.as_ref(),
         None => {
-            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+            println!(
+                "{} No binary loaded. Use 'load <path>' first.",
+                "[!]".yellow()
+            );
             return;
         }
     };
@@ -16,7 +20,10 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
     let addr = match addr {
         Some(a) => a,
         None => {
-            println!("{} Please specify an address: decompile <address>", "[!]".yellow());
+            println!(
+                "{} Please specify an address: decompile <address>",
+                "[!]".yellow()
+            );
             return;
         }
     };
@@ -39,7 +46,7 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
     // Try to use the FFI decompiler
     #[cfg(feature = "native_decomp")]
     {
-        use crate::analysis::decomp::ffi::DecompilerNative;
+        use fission_ffi::DecompilerNative;
 
         println!("{} Initializing native decompiler...", "[*]".blue());
 
@@ -56,8 +63,10 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
             }
         };
 
-        let suppress_native_logs =
-            std::env::var("FISSION_SUPPRESS_NATIVE_LOGS").ok().as_deref() == Some("1");
+        let suppress_native_logs = std::env::var("FISSION_SUPPRESS_NATIVE_LOGS")
+            .ok()
+            .as_deref()
+            == Some("1");
 
         let mut native = {
             let _silencer = OutputSilencer::new_if(suppress_native_logs);
@@ -84,7 +93,11 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
         }
 
         // Register all sections for proper VA-to-file-offset mapping
-        println!("{} Registering {} sections...", "[*]".blue(), binary.sections.len());
+        println!(
+            "{} Registering {} sections...",
+            "[*]".blue(),
+            binary.sections.len()
+        );
         {
             let _silencer = OutputSilencer::new_if(suppress_native_logs);
             for section in &binary.sections {

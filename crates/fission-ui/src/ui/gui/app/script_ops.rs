@@ -107,7 +107,7 @@ fn execute_python_script(
     }
 
     // Sync loaded binary to Python bridge
-    python_bridge.set_binary(state.analysis.loaded_binary.clone());
+    python_bridge.set_binary(state.analysis.domain.loaded_binary().as_ref().clone());
 
     // Execute the script
     match python_bridge.run(code) {

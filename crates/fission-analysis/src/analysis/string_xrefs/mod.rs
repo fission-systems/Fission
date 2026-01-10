@@ -4,7 +4,7 @@
 
 use super::strings::{ExtractedString, StringType};
 use super::xrefs::{Xref, XrefDatabase, XrefType};
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 use std::collections::HashMap;
 
 /// A string with its cross-references

@@ -3,17 +3,27 @@ name = "fission-ffi"
 version = "0.1.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
-description = "FFI exports for Fission"
+description = "FFI exports for Fission - C/C++ interop layer"
 license = "MIT"
 repository = "https://github.com/sjkim1127/Fission"
 readme = "../../README.md"
-keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]
-categories = ["development-tools::debugging"]
+keywords = ["fission", "ffi", "c-bindings", "decompiler"]
+categories = ["development-tools::ffi"]
 
 [lib]
 name = "fission_ffi"
 path = "src/lib.rs"
 test = false
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-fission-analysis = { path = "../fission-analysis" }
+fission-core = { path = "../fission-core" }
+fission-pcode = { path = "../fission-pcode" }
+fission-loader = { path = "../fission-loader" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+libloading = "0.8"
+
+[features]
+default = []
+native_decomp = []

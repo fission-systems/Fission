@@ -1,11 +1,11 @@
 //! Functions panel - displays list of functions from loaded binary with virtual scrolling.
 
+use super::super::components::widgets::empty_state_with_spacing;
 use super::super::core::state::AppState;
 use super::super::theme::catppuccin;
-use super::super::components::widgets::empty_state_with_spacing;
-use crate::analysis::loader::FunctionInfo;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
+use fission_loader::loader::FunctionInfo;
 
 /// Action returned from functions panel
 pub enum FunctionAction {
@@ -43,7 +43,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) -> Option<FunctionActi
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             ui.heading(egui::RichText::new("Functions").color(catppuccin::LAVENDER));
-            if let Some(ref binary) = state.analysis.loaded_binary {
+            if let Some(ref binary) = state.analysis.domain.loaded_binary {
                 ui.label(
                     egui::RichText::new(format!("({})", binary.functions.len()))
                         .color(catppuccin::SUBTEXT0)
@@ -62,7 +62,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) -> Option<FunctionActi
         });
         ui.separator();
 
-        if let Some(ref binary) = state.analysis.loaded_binary {
+        if let Some(ref binary) = state.analysis.domain.loaded_binary {
             let available_height = ui.available_height();
             let row_height = 22.0;
             let total_rows = binary.functions.len();
@@ -98,6 +98,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) -> Option<FunctionActi
 
                             let is_selected = state
                                 .analysis
+                                .domain
                                 .selected_function
                                 .as_ref()
                                 .map(|f| f.address == func.address)

@@ -1,13 +1,17 @@
 //! Disassembly command
 
-use colored::Colorize;
 use crate::ui::cli::handlers::CliState;
+use colored::Colorize;
+use std::sync::Arc;
 
 pub fn cmd_disasm(state: &mut CliState, addr: Option<u64>, count: Option<usize>) {
-    let binary = match &state.binary {
+    let binary: Arc<fission_loader::loader::LoadedBinary> = match &state.binary {
         Some(b) => b.clone(),
         None => {
-            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+            println!(
+                "{} No binary loaded. Use 'load <path>' first.",
+                "[!]".yellow()
+            );
             return;
         }
     };
@@ -15,7 +19,10 @@ pub fn cmd_disasm(state: &mut CliState, addr: Option<u64>, count: Option<usize>)
     let addr = match addr {
         Some(a) => a,
         None => {
-            println!("{} Please specify an address: disasm <address> [count]", "[!]".yellow());
+            println!(
+                "{} Please specify an address: disasm <address> [count]",
+                "[!]".yellow()
+            );
             return;
         }
     };
@@ -24,8 +31,8 @@ pub fn cmd_disasm(state: &mut CliState, addr: Option<u64>, count: Option<usize>)
 
     // Get bytes at address
     let max_bytes = count * 15; // max instruction size is ~15 bytes
-    let bytes = match binary.get_bytes(addr, max_bytes) {
-        Some(b) => b,
+    let bytes: Vec<u8> = match binary.get_bytes(addr, max_bytes) {
+        Some(b) => b.to_vec(),
         None => {
             println!("{} Cannot read memory at 0x{:X}", "[!]".red(), addr);
             return;

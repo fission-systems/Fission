@@ -24,14 +24,14 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
     ui.horizontal(|ui| {
         ui.heading(egui::RichText::new("Decompiled").color(catppuccin::LAVENDER));
 
-        if state.analysis.decompiling {
+        if state.analysis.domain.decompiling {
             ui.spinner();
             ui.label(
                 egui::RichText::new("Processing...")
                     .color(catppuccin::YELLOW)
                     .small(),
             );
-        } else if let Some(ref func) = state.analysis.selected_function {
+        } else if let Some(ref func) = state.analysis.domain.selected_function {
             ui.separator();
             ui.label(
                 egui::RichText::new(&func.name)
@@ -42,18 +42,18 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
 
         // Copy button on the right
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if !state.analysis.decompiled_code.is_empty()
+            if !state.analysis.domain.decompiled_code.is_empty()
                 && ui
                     .small_button(egui::RichText::new("📋 Copy").color(catppuccin::TEAL))
                     .clicked()
             {
-                ui.output_mut(|o| o.copied_text = state.analysis.decompiled_code.clone());
+                ui.output_mut(|o| o.copied_text = state.analysis.domain.decompiled_code.clone());
             }
         });
     });
     ui.separator();
 
-    if state.analysis.decompiled_code.is_empty() && !state.analysis.decompiling {
+    if state.analysis.domain.decompiled_code.is_empty() && !state.analysis.domain.decompiling {
         empty_state_with_spacing(
             ui,
             "No decompilation available",
@@ -68,7 +68,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             // Render code with basic syntax highlighting
-            render_highlighted_code(ui, &state.analysis.decompiled_code);
+            render_highlighted_code(ui, &state.analysis.domain.decompiled_code);
         });
 }
 

@@ -7,6 +7,8 @@
 //!
 //! - `FissionContext`: Core application context (event bus, plugins) - shared with non-GUI code
 //! - `AppState`: GUI-specific state that wraps the context and adds UI-related fields
+//! - `Domain Models`: Pure business logic data (domain.rs)
+//! - `ViewModels`: UI-specific transient state (viewmodels.rs)
 
 use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
@@ -15,10 +17,18 @@ use std::time::Instant;
 use lru::LruCache;
 
 use crate::analysis::disasm::DisassembledInstruction;
-use crate::analysis::loader::{FunctionInfo, LoadedBinary};
 use crate::app::context::FissionContext;
 use crate::core::config::CONFIG;
 use fission_core::settings::SettingsState;
+use fission_loader::loader::{FunctionInfo, LoadedBinary};
+
+// Import domain models and viewmodels (declared in mod.rs)
+use super::domain::{AnalysisDomain, CachedDecompile, DebugDomain};
+use super::viewmodels::ViewModelContainer;
+
+// Re-export for convenience
+pub use super::domain;
+pub use super::viewmodels;
 
 // ============================================================================
 // Sub-state structures
@@ -95,94 +105,80 @@ fn get_git_branch() -> String {
 }
 
 /// Analysis-related state (binary, functions, decompilation)
+///
+/// **REFACTORED**: Pure domain data only. UI input fields moved to ViewModels.
 pub struct AnalysisState {
-    /// Currently loaded binary (if any)
-    pub loaded_binary: Option<std::sync::Arc<LoadedBinary>>,
-    /// Alias for loaded_binary (for compatibility)
-    pub binary: Option<std::sync::Arc<LoadedBinary>>,
-    /// Selected function (for decompilation view)
-    pub selected_function: Option<FunctionInfo>,
-    /// Current decompiled C code
-    pub decompiled_code: String,
-    /// Current assembly instructions
-    pub asm_instructions: Vec<DisassembledInstruction>,
-    /// Is the decompiler currently analyzing?
-    pub decompiling: bool,
-    /// Has the binary been loaded into the decompiler's persistent context?
-    pub decompiler_context_loaded: bool,
-    /// Cache of decompiled functions (LRU)
-    pub decompile_cache: LruCache<u64, CachedDecompile>,
-    /// Last loaded binary path (for recovery reload)
-    pub last_binary_path: Option<String>,
-    /// Extracted strings from binary
-    pub extracted_strings: Vec<ExtractedString>,
-    /// Filter for strings view
-    pub strings_filter: String,
-    /// Current offset in hex view
-    pub hex_offset: u64,
-    /// Patch offset input (hex string)
-    pub patch_offset_input: String,
-    /// Patch bytes input (hex string like "90 90 90")
-    pub patch_bytes_input: String,
-    /// Detection results (packer/compiler/language)
-    pub detection_result: Option<crate::analysis::detector::DetectionResult>,
-    /// Cross-references database
-    pub xref_db: Option<crate::analysis::xrefs::XrefDatabase>,
-    /// User-defined function names (address -> custom name)
-    pub user_function_names: std::collections::HashMap<u64, String>,
-    /// Rename dialog state: (address, current_input)
-    pub rename_dialog: Option<(u64, String)>,
-    /// Reconstructed imports (Dynamic Mode)
-    pub reconstructed_imports: Vec<crate::unpacker::importer::ImportEntry>,
-    /// String xref search term
-    pub string_xref_search: String,
-    /// String xref minimum length
-    pub string_xref_min_len: usize,
-    /// String xref analysis results
-    pub string_xref_results: Option<fission_analysis::analysis::string_xrefs::StringXrefAnalysis>,
+    /// Domain data (business logic)
+    pub domain: AnalysisDomain,
+    // Legacy compatibility fields (deprecated - use domain directly)
+    // These will be removed in a future version
+}
 
-    // Project-related state (multi-binary workspace)
-    /// Current project folder path (if loaded from folder)
-    pub project_folder: Option<String>,
-    /// All binaries loaded in the project
-    pub project_binaries: Vec<std::sync::Arc<LoadedBinary>>,
-    /// Currently selected binary index in project
-    pub selected_binary_index: Option<usize>,
+impl AnalysisState {
+    /// Get loaded binary (convenience accessor for backward compatibility)
+    #[inline]
+    pub fn loaded_binary(&self) -> &Option<Arc<LoadedBinary>> {
+        &self.domain.loaded_binary
+    }
 
-    // CFG Analysis state
-    /// Current CFG analysis result
-    pub cfg_analysis: Option<crate::ui::gui::panels::bottom_tabs::cfg::CfgAnalysisResult>,
+    /// Get loaded binary (mutable, for backward compatibility)
+    #[inline]
+    pub fn loaded_binary_mut(&mut self) -> &mut Option<Arc<LoadedBinary>> {
+        &mut self.domain.loaded_binary
+    }
+
+    /// Get extracted strings (convenience accessor)
+    #[inline]
+    pub fn extracted_strings(&self) -> &Vec<ExtractedString> {
+        &self.domain.extracted_strings
+    }
+
+    /// Get extracted strings (mutable)
+    #[inline]
+    pub fn extracted_strings_mut(&mut self) -> &mut Vec<ExtractedString> {
+        &mut self.domain.extracted_strings
+    }
+
+    /// Get user function names (convenience accessor)
+    #[inline]
+    pub fn user_function_names(&self) -> &std::collections::HashMap<u64, String> {
+        &self.domain.user_function_names
+    }
+
+    /// Get user function names (mutable)
+    #[inline]
+    pub fn user_function_names_mut(&mut self) -> &mut std::collections::HashMap<u64, String> {
+        &mut self.domain.user_function_names
+    }
 }
 
 /// Debug-related state (debugger, breakpoints, memory)
 /// Debug-related state (debugger, breakpoints, memory)
+///
+/// **REFACTORED**: Pure domain data only. UI input fields moved to ViewModels.
 pub struct DebugStateUI {
-    /// Is debugger running?
-    pub is_debugging: bool,
-    /// Debugger state
-    pub debug_state: crate::debug::types::DebugState,
-    /// Cached process list for dialog
-    pub process_list: Vec<crate::debug::types::ProcessInfo>,
+    /// Domain data (business logic)
+    pub domain: DebugDomain,
+
+    // Pending actions from UI (still need to be here for immediate processing)
     /// Pending debug control action from UI
     pub pending_debug_action: Option<DebugAction>,
     /// Pending breakpoint action from UI
     pub pending_bp_action: Option<DebugBpAction>,
-    /// Temporary input for breakpoint address
-    pub breakpoint_input: String,
     /// Pending memory read action
     pub pending_mem_read: Option<(u64, usize)>,
-    /// Memory view address input (hex)
-    pub mem_addr_input: String,
-    /// Memory view length input (decimal)
-    pub mem_len_input: String,
-    /// Last memory dump text
-    pub mem_dump: String,
-    /// Time Travel Debugging timeline
-    pub timeline: crate::debug::ttd::Timeline,
-    /// Process filter for attach dialog
-    pub process_filter: String,
-    /// TitanEngine instance (Clean Room)
-    pub titan_engine: Option<Arc<RwLock<crate::unpacker::engine::TitanEngine>>>,
+}
+
+impl DebugStateUI {
+    /// Get debug state (convenience accessor)
+    pub fn debug_state(&self) -> &crate::debug::types::DebugState {
+        &self.domain.debug_state
+    }
+
+    /// Get debug state (mutable)
+    pub fn debug_state_mut(&mut self) -> &mut crate::debug::types::DebugState {
+        &mut self.domain.debug_state
+    }
 }
 
 /// Script-related state (Python scripting)
@@ -192,35 +188,16 @@ pub struct ScriptState {
     /// Script execution output
     pub script_output: Vec<String>,
     /// Is script currently executing?
-    pub script_running: bool,
-    /// Current script file path (for save/load)
+    pub is_executing: bool,
+    /// Path of the currently loaded script file
     pub script_path: Option<String>,
 }
 
-// SettingsState and ThemeMode are provided by fission-core.
-
 // ============================================================================
-// Cached decompile result
+// Main Application State
 // ============================================================================
 
-/// Cached decompile result for performance optimization
-#[derive(Clone)]
-pub struct CachedDecompile {
-    pub c_code: String,
-    pub asm_instructions: Vec<DisassembledInstruction>,
-    #[allow(dead_code)]
-    pub timestamp: Instant,
-}
-
-// ============================================================================
-// Main AppState (composed of sub-states)
-// ============================================================================
-
-/// Main application state container
-///
-/// This struct holds all shared state that panels need to read/modify.
-/// Organized into domain-specific sub-states for better maintainability.
-///
+/// Main GUI application state.
 /// ## Design Notes
 ///
 /// - `ctx`: Core application context (shared with non-GUI components)
@@ -258,6 +235,13 @@ pub struct AppState {
     pub script: ScriptState,
     /// Settings state
     pub settings: SettingsState,
+
+    // =========================================================================
+    // ViewModels (UI-specific transient state)
+    // =========================================================================
+    /// ViewModels for all panels (input fields, filters, dialogs)
+    /// This replaces the scattered UI state that was previously in domain models
+    pub viewmodels: ViewModelContainer,
 
     // =========================================================================
     // UI-Specific Components
@@ -337,23 +321,11 @@ pub enum DebugBpAction {
     Remove(u64),
 }
 
-/// Extracted string from binary
-#[derive(Clone)]
-pub struct ExtractedString {
-    /// Offset in binary
-    pub offset: u64,
-    /// String value
-    pub value: String,
-    /// String encoding type
-    pub encoding: StringEncoding,
-}
+/// Extracted string from binary (re-exported from domain)
+pub use domain::ExtractedString;
 
-/// String encoding type
-#[derive(Clone, Copy, PartialEq)]
-pub enum StringEncoding {
-    Ascii,
-    Utf16Le,
-}
+/// String encoding type (re-exported from domain)
+pub use domain::StringEncoding;
 
 /// Bottom panel tab selection
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -375,37 +347,8 @@ pub enum BottomTab {
 
 impl Default for AnalysisState {
     fn default() -> Self {
-        // Use configured cache size or default to 100
-        let cache_size = NonZeroUsize::new(CONFIG.analysis.decompile_cache_size)
-            .unwrap_or_else(|| NonZeroUsize::new(100).expect("100 is non-zero"));
-
         Self {
-            loaded_binary: None,
-            binary: None,
-            selected_function: None,
-            decompiled_code: "// Select a function to decompile".into(),
-            asm_instructions: Vec::new(),
-            decompiling: false,
-            decompiler_context_loaded: false,
-            decompile_cache: LruCache::new(cache_size),
-            last_binary_path: None,
-            extracted_strings: Vec::new(),
-            strings_filter: String::new(),
-            hex_offset: 0,
-            patch_offset_input: String::new(),
-            patch_bytes_input: String::new(),
-            detection_result: None,
-            xref_db: None,
-            user_function_names: std::collections::HashMap::new(),
-            rename_dialog: None,
-            reconstructed_imports: Vec::new(),
-            string_xref_search: String::new(),
-            string_xref_min_len: 4,
-            string_xref_results: None,
-            project_folder: None,
-            project_binaries: Vec::new(),
-            selected_binary_index: None,
-            cfg_analysis: None,
+            domain: AnalysisDomain::default(),
         }
     }
 }
@@ -413,21 +356,10 @@ impl Default for AnalysisState {
 impl Default for DebugStateUI {
     fn default() -> Self {
         Self {
-            is_debugging: false,
-            debug_state: crate::debug::types::DebugState::default(),
-            process_list: Vec::new(),
+            domain: DebugDomain::default(),
             pending_debug_action: None,
             pending_bp_action: None,
-            breakpoint_input: String::new(),
             pending_mem_read: None,
-            mem_addr_input: String::new(),
-            mem_len_input: "64".to_string(),
-            mem_dump: String::new(),
-            timeline: crate::debug::ttd::Timeline::default(),
-            process_filter: String::new(),
-            titan_engine: Some(Arc::new(RwLock::new(
-                crate::unpacker::engine::TitanEngine::new(),
-            ))),
         }
     }
 }
@@ -437,7 +369,7 @@ impl Default for ScriptState {
         Self {
             script_code: "# Fission Python Script\n# Use 'api' to access the Fission API\n\nbinary = api.get_binary()\nif binary:\n    api.log(f\"Loaded: {binary.name}\")\n    api.log(f\"Functions: {len(api.get_functions())}\")\nelse:\n    api.log(\"No binary loaded\")\n".into(),
             script_output: Vec::new(),
-            script_running: false,
+            is_executing: false,
             script_path: None,
         }
     }
@@ -465,6 +397,7 @@ impl Default for AppState {
             debug: DebugStateUI::default(),
             script: ScriptState::default(),
             settings: crate::core::config_store::load(),
+            viewmodels: ViewModelContainer::new(),
             plugin_panel_state: Default::default(),
             command_manager: crate::ui::gui::core::commands::CommandManager::default(),
         }

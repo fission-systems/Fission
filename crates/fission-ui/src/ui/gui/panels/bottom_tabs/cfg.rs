@@ -21,10 +21,11 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> CfgAction {
     // Extract function info to avoid borrow issues
     let func_info = state
         .analysis
+        .domain
         .selected_function
         .as_ref()
         .map(|f| (f.name.clone(), f.address));
-    let has_cfg = state.analysis.cfg_analysis.is_some();
+    let has_cfg = state.analysis.domain.cfg_analysis.is_some();
     let mut request_analysis = false;
     let mut request_export = false;
 
@@ -76,7 +77,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> CfgAction {
     ui.separator();
 
     // Check if we have CFG analysis data
-    if let Some(ref cfg_result) = state.analysis.cfg_analysis {
+    if let Some(ref cfg_result) = state.analysis.domain.cfg_analysis {
         render_cfg_content(ui, cfg_result);
     } else {
         empty_state_with_spacing(
@@ -205,7 +206,7 @@ fn render_cfg_content(ui: &mut egui::Ui, cfg: &CfgAnalysisResult) {
 
 /// Export CFG to DOT file
 fn export_cfg_dot(state: &mut AppState) {
-    if let Some(ref cfg_result) = state.analysis.cfg_analysis {
+    if let Some(ref cfg_result) = state.analysis.domain.cfg_analysis {
         // Generate DOT content
         let dot_content = &cfg_result.dot_content;
 
@@ -214,6 +215,7 @@ fn export_cfg_dot(state: &mut AppState) {
             "cfg_{:x}.dot",
             state
                 .analysis
+                .domain
                 .selected_function
                 .as_ref()
                 .map(|f| f.address)

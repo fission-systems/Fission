@@ -2,11 +2,11 @@
 //!
 //! Generates DOT graph for a function's Pcode.
 
-use crate::analysis::loader::LoadedBinary;
+use crate::analysis::pcode::PcodeFunction;
 use crate::analysis::pcode::graph::PcodeGraph;
 use crate::analysis::pcode::optimizer::{DefUseTracker, PcodeOptimizer, PcodeOptimizerConfig};
-use crate::analysis::pcode::PcodeFunction;
 use crate::cli::output::OutputSilencer;
+use fission_loader::loader::LoadedBinary;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -36,7 +36,7 @@ pub fn generate_pcode_graph(
 
     let mut decomp = {
         let _silencer = OutputSilencer::new_if(!verbose);
-        match crate::analysis::decomp::ffi::DecompilerNative::new(&sla_dir) {
+        match fission_ffi::DecompilerNative::new(&sla_dir) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Error: Failed to create decompiler: {}", e);
@@ -53,7 +53,7 @@ pub fn generate_pcode_graph(
     // For now, let's read it again from path.
     // Wait, LoadedBinary has `path`? No, it has `name`.
     // Let's assume we can read from `binary.name` if it's a path.
-    
+
     let binary_path = PathBuf::from(&binary.path);
     let binary_data = match fs::read(&binary_path) {
         Ok(data) => data,
@@ -70,7 +70,7 @@ pub fn generate_pcode_graph(
             std::process::exit(1);
         }
     }
-    
+
     // Add memory blocks (sections)
     {
         let _silencer = OutputSilencer::new_if(!verbose);
@@ -88,7 +88,7 @@ pub fn generate_pcode_graph(
             }
         }
     }
-    
+
     // Add symbols/functions (simplified setup)
     {
         let _silencer = OutputSilencer::new_if(!verbose);
@@ -116,7 +116,7 @@ pub fn generate_pcode_graph(
             }
         }
     };
-    
+
     // 2. Parse Pcode
     let mut func = match PcodeFunction::from_json(&pcode_json) {
         Ok(f) => f,
@@ -125,7 +125,7 @@ pub fn generate_pcode_graph(
             return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()));
         }
     };
-    
+
     // 3. Optimize (Optional but recommended for clean graph)
     if verbose {
         eprintln!("[*] Optimizing Pcode...");
@@ -133,20 +133,20 @@ pub fn generate_pcode_graph(
     let config = PcodeOptimizerConfig::default();
     let mut optimizer = PcodeOptimizer::new(config);
     optimizer.optimize(&mut func);
-    
+
     // 4. Analyze Data Flow (Def-Use)
     if verbose {
         eprintln!("[*] Analyzing data flow...");
     }
     let mut tracker = DefUseTracker::new();
     tracker.build(&func);
-    
+
     // 5. Generate DOT
     if verbose {
         eprintln!("[*] Generating DOT graph...");
     }
     let dot_content = PcodeGraph::to_dot(&func, Some(&tracker));
-    
+
     // 6. Output and Render
     let dot_path = if let Some(path) = output_path {
         path.clone()
@@ -156,11 +156,11 @@ pub fn generate_pcode_graph(
 
     let mut file = fs::File::create(&dot_path)?;
     file.write_all(dot_content.as_bytes())?;
-    
+
     if verbose {
         eprintln!("[✓] DOT graph written to: {}", dot_path.display());
     } else if output_path.is_none() {
-        // If user didn't specify output, print to stdout as well? 
+        // If user didn't specify output, print to stdout as well?
         // No, let's prefer file output for graph command as it's usually large.
         println!("[*] DOT graph saved to: {}", dot_path.display());
     }
@@ -182,20 +182,23 @@ pub fn generate_pcode_graph(
             if output.status.success() {
                 println!("[✓] Graph rendered to: {}", png_path.display());
                 // Optionally open the file?
-                // Command::new("open").arg(&png_path).spawn().ok(); 
+                // Command::new("open").arg(&png_path).spawn().ok();
             } else if verbose {
                 eprintln!(
                     "Warning: 'dot' command failed: {}",
                     String::from_utf8_lossy(&output.stderr)
                 );
             }
-        },
+        }
         Err(e) => {
             if verbose {
-                eprintln!("Warning: Could not run 'dot' command (is Graphviz installed?): {}", e);
+                eprintln!(
+                    "Warning: Could not run 'dot' command (is Graphviz installed?): {}",
+                    e
+                );
             }
         }
     }
-    
+
     Ok(())
 }

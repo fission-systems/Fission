@@ -1,9 +1,9 @@
 //! Hex View tab panel - Binary hex dump viewer with patching support.
 
 use crate::analysis::patch::QuickPatch;
+use crate::ui::gui::components::widgets::empty_state;
 use crate::ui::gui::core::state::AppState;
 use crate::ui::gui::theme::{catppuccin, code};
-use crate::ui::gui::components::widgets::empty_state;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 
@@ -18,7 +18,7 @@ enum PatchAction {
 /// Render hex view tab content with virtual scrolling
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     // Check if binary is loaded and get data length
-    let (data_len, total_rows) = if let Some(ref binary) = state.analysis.loaded_binary {
+    let (data_len, total_rows) = if let Some(ref binary) = state.analysis.domain.loaded_binary {
         let len = binary.data.len() as u64;
         let rows = (len / 16) + if len.is_multiple_of(16) { 0 } else { 1 };
         (len, rows)
@@ -30,7 +30,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     // Navigation Controls
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Go to Offset:").color(catppuccin::SUBTEXT0));
-        let mut offset_str = format!("{:08X}", state.analysis.hex_offset);
+        let mut offset_str = format!("{:08X}", state.analysis.domain.hex_offset);
         if ui
             .add(
                 egui::TextEdit::singleline(&mut offset_str)
@@ -41,8 +41,12 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             && ui.input(|i| i.key_pressed(egui::Key::Enter))
             && let Ok(new_offset) = u64::from_str_radix(&offset_str, 16)
         {
-            state.analysis.hex_offset = (new_offset / 16) * 16;
-            state.analysis.hex_offset = state.analysis.hex_offset.min(data_len.saturating_sub(16));
+            state.analysis.domain.hex_offset = (new_offset as usize / 16) * 16;
+            state.analysis.domain.hex_offset = state
+                .analysis
+                .domain
+                .hex_offset
+                .min((data_len.saturating_sub(16)) as usize);
             // Note: To scroll to this offset programmatically with TableBuilder requires scroll_to_row
             // which might need specific egui context handling or scroll area wrapping.
             // For now, updating the state is a start, but the table needs to read it.
@@ -69,7 +73,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         // Patch offset input
         ui.label("@");
         ui.add(
-            egui::TextEdit::singleline(&mut state.analysis.patch_offset_input)
+            egui::TextEdit::singleline(&mut state.viewmodels.hex.patch_offset_input)
                 .desired_width(70.0)
                 .hint_text("offset")
                 .font(egui::TextStyle::Monospace),
@@ -78,7 +82,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         // Patch bytes input
         ui.label("→");
         ui.add(
-            egui::TextEdit::singleline(&mut state.analysis.patch_bytes_input)
+            egui::TextEdit::singleline(&mut state.viewmodels.hex.patch_bytes_input)
                 .desired_width(100.0)
                 .hint_text("90 90 90")
                 .font(egui::TextStyle::Monospace),
@@ -88,7 +92,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         if ui.button("Apply").clicked()
             && let Ok(offset) = u64::from_str_radix(
                 state
-                    .analysis
+                    .viewmodels
+                    .hex
                     .patch_offset_input
                     .trim()
                     .trim_start_matches("0x"),
@@ -96,7 +101,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             )
         {
             let bytes: Vec<u8> = state
-                .analysis
+                .viewmodels
+                .hex
                 .patch_bytes_input
                 .split_whitespace()
                 .filter_map(|s| u8::from_str_radix(s, 16).ok())
@@ -116,7 +122,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             .show_ui(ui, |ui| {
                 let offset_result = u64::from_str_radix(
                     state
-                        .analysis
+                        .viewmodels
+                        .hex
                         .patch_offset_input
                         .trim()
                         .trim_start_matches("0x"),
@@ -177,7 +184,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     // Apply patch action - use Arc::make_mut for mutable access
     match patch_action {
         PatchAction::ApplyBytes { offset, bytes } => {
-            if let Some(ref mut binary_arc) = state.analysis.loaded_binary {
+            if let Some(ref mut binary_arc) = state.analysis.domain.loaded_binary {
                 let binary = std::sync::Arc::make_mut(binary_arc);
                 if binary.patch_bytes(offset, &bytes).is_some() {
                     state.log(format!(
@@ -185,16 +192,17 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                         bytes.len(),
                         offset
                     ));
-                    state.analysis.patch_bytes_input.clear();
+                    state.viewmodels.hex.patch_bytes_input.clear();
                 } else {
                     state.log(format!("❌ Patch failed: invalid offset 0x{:X}", offset));
                 }
             }
         }
         PatchAction::QuickPatch { offset, patch_type } => {
-            if let Some(ref mut binary_arc) = state.analysis.loaded_binary {
+            if let Some(ref mut binary_arc) = state.analysis.domain.loaded_binary {
                 let binary = std::sync::Arc::make_mut(binary_arc);
-                if binary.apply_quick_patch(offset, patch_type).is_some() {
+                let bytes = patch_type.bytes();
+                if binary.patch_bytes(offset, &bytes).is_some() {
                     state.log(format!(
                         "✅ Applied {} at 0x{:X}",
                         patch_type.description(),
@@ -204,7 +212,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
         PatchAction::SaveAs => {
-            if let Some(ref binary) = state.analysis.loaded_binary {
+            if let Some(ref binary) = state.analysis.domain.loaded_binary {
                 let original_path = std::path::Path::new(&binary.path);
                 let stem = original_path
                     .file_stem()
@@ -235,7 +243,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     let row_height = 18.0;
 
     // Get binary data reference for table
-    let Some(ref binary) = state.analysis.loaded_binary else {
+    let Some(ref binary) = state.analysis.domain.loaded_binary else {
         return;
     };
 
@@ -252,11 +260,11 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
 
     // Handle programatic scroll jump if offset changed significantly
     // (This is a simplified approach; proper scroll control requires egui::ScrollArea::from_id_source handling)
-    if state.analysis.hex_offset > 0 {
-        let row = (state.analysis.hex_offset / 16) as usize;
+    if state.analysis.domain.hex_offset > 0 {
+        let row = (state.analysis.domain.hex_offset / 16) as usize;
         builder = builder.scroll_to_row(row, Some(egui::Align::Center));
         // Reset so we don't lock scrolling
-        state.analysis.hex_offset = 0;
+        state.analysis.domain.hex_offset = 0;
     }
 
     builder

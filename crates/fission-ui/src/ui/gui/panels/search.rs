@@ -15,7 +15,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
 
     // Search Box
     let response = ui.add(
-        egui::TextEdit::singleline(&mut state.analysis.strings_filter) // Reusing filter field for now or add new one
+        egui::TextEdit::singleline(&mut state.viewmodels.search.query) // Reusing filter field for now or add new one
             .hint_text("Search functions, strings... (Ctrl+F)")
             .desired_width(f32::INFINITY),
     );
@@ -28,7 +28,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
     ui.separator();
     ui.add_space(8.0);
 
-    let query = state.analysis.strings_filter.to_lowercase();
+    let query = state.viewmodels.search.query.to_lowercase();
     if query.is_empty() {
         empty_state(ui, "Type to search...", None);
         return None;
@@ -36,7 +36,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         // 1. Search Functions
-        if let Some(binary) = &state.analysis.loaded_binary {
+        if let Some(binary) = &state.analysis.domain.loaded_binary {
             let mut func_matches = 0;
             ui.heading(egui::RichText::new("Functions").size(12.0).strong());
 
@@ -78,7 +78,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
 
         let mut string_matches = 0;
         ui.heading(egui::RichText::new("Strings").size(12.0).strong());
-        for s in &state.analysis.extracted_strings {
+        for s in &state.analysis.domain.extracted_strings {
             // Use case-insensitive substring check
             if contains_case_insensitive(&s.value, &query) {
                 string_matches += 1;
@@ -96,7 +96,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
                     // For now, let's abuse SelectFunction or add Navigate Action
                     // Since SideBarAction only has SelectFunction, we might need to expand it or map it.
                     // Mapping to a dummy function for navigation:
-                    let dummy = crate::analysis::loader::FunctionInfo {
+                    let dummy = fission_loader::loader::FunctionInfo {
                         address: s.offset,
                         name: format!("String_{:x}", s.offset),
                         size: 0,
