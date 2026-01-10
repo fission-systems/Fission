@@ -140,7 +140,7 @@ pub struct AnalysisState {
     pub string_xref_min_len: usize,
     /// String xref analysis results
     pub string_xref_results: Option<fission_analysis::analysis::string_xrefs::StringXrefAnalysis>,
-    
+
     // Project-related state (multi-binary workspace)
     /// Current project folder path (if loaded from folder)
     pub project_folder: Option<String>,
@@ -148,6 +148,10 @@ pub struct AnalysisState {
     pub project_binaries: Vec<std::sync::Arc<LoadedBinary>>,
     /// Currently selected binary index in project
     pub selected_binary_index: Option<usize>,
+
+    // CFG Analysis state
+    /// Current CFG analysis result
+    pub cfg_analysis: Option<crate::ui::gui::panels::bottom_tabs::cfg::CfgAnalysisResult>,
 }
 
 /// Debug-related state (debugger, breakpoints, memory)
@@ -359,10 +363,10 @@ pub enum BottomTab {
     HexView,
     Strings,
     Imports,
+    Cfg,
     Debug,
     Script,
     Timeline,
-    Plugins,
 }
 
 // ============================================================================
@@ -401,6 +405,7 @@ impl Default for AnalysisState {
             project_folder: None,
             project_binaries: Vec::new(),
             selected_binary_index: None,
+            cfg_analysis: None,
         }
     }
 }

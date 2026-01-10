@@ -40,4 +40,40 @@ pub enum AsyncMessage {
         path: String,
         binaries: Vec<Arc<LoadedBinary>>,
     },
+
+    /// CFG analysis request
+    CfgAnalysisRequest { address: u64 },
+
+    /// CFG analysis completed successfully
+    CfgAnalysisResult {
+        address: u64,
+        block_count: usize,
+        edge_count: usize,
+        cyclomatic_complexity: usize,
+        max_nesting_depth: usize,
+        loops: Vec<CfgLoopData>,
+        blocks: Vec<CfgBlockData>,
+        dot_content: String,
+    },
+
+    /// CFG analysis failed
+    CfgAnalysisError { address: u64, error: String },
+}
+
+/// Loop data for CFG result transfer
+#[derive(Debug, Clone)]
+pub struct CfgLoopData {
+    pub header: usize,
+    pub kind: String,
+    pub body: Vec<usize>,
+}
+
+/// Block data for CFG result transfer
+#[derive(Debug, Clone)]
+pub struct CfgBlockData {
+    pub index: usize,
+    pub address: String,
+    pub is_entry: bool,
+    pub is_exit: bool,
+    pub successors: Vec<usize>,
 }

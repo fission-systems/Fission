@@ -12,7 +12,7 @@ pub mod handlers;
 pub mod script_ops;
 pub mod titan_ops;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use eframe::egui;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -21,15 +21,15 @@ use crate::analysis::loader::FunctionInfo;
 #[cfg(target_os = "windows")]
 use crate::debug::PlatformDebugger;
 
-use super::components::{menu, MenuAction};
 use super::components::status_bar;
-use super::core::{AsyncMessage, AppState};
+use super::components::{MenuAction, menu};
 use super::core::state::DebugAction;
+use super::core::{AppState, AsyncMessage};
 use super::panels::bottom_tabs::{ConsoleAction, ScriptAction};
 use super::panels::{activity_bar, bottom_tabs, editor, side_bar};
 use crate::app::modules::ModuleManager;
-use crate::plugin::module::PluginModule;
 use crate::plugin::PluginManager;
+use crate::plugin::module::PluginModule;
 
 use std::sync::LazyLock;
 use tokio::runtime::Runtime;
@@ -271,15 +271,16 @@ impl eframe::App for FissionApp {
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or(&binary.path);
-                    
-                    self.state.log(format!("[*] Switching to binary: {}", file_name));
-                    
+
+                    self.state
+                        .log(format!("[*] Switching to binary: {}", file_name));
+
                     // Clear current state
                     self.state.analysis.decompile_cache.clear();
                     self.state.analysis.selected_function = None;
                     self.state.ui.open_tabs.clear();
                     self.state.ui.active_tab_index = None;
-                    
+
                     // Reinitialize decompiler context with new binary
                     handlers::message_handlers::handle_binary_loaded(
                         &mut self.state,
@@ -292,12 +293,24 @@ impl eframe::App for FissionApp {
 
         // 3. Bottom Panel (Terminal/Output style)
         if self.state.ui.panel_visible {
-            let (console_action, script_action) = bottom_tabs::render(ctx, &mut self.state);
+            let (console_action, script_action, cfg_action) =
+                bottom_tabs::render(ctx, &mut self.state);
             match console_action {
                 ConsoleAction::Command(cmd) => {
                     handlers::process_command(&mut self.state, self.tx.clone(), &cmd);
                 }
                 ConsoleAction::None => {}
+            }
+
+            // Handle CFG analysis requests
+            use super::panels::bottom_tabs::CfgAction;
+            match cfg_action {
+                CfgAction::Analyze(addr) => {
+                    let _ = self
+                        .tx
+                        .send(AsyncMessage::CfgAnalysisRequest { address: addr });
+                }
+                CfgAction::None => {}
             }
 
             #[cfg(feature = "python")]
@@ -399,9 +412,10 @@ impl FissionApp {
     fn open_function_tabs(&mut self, func: &FunctionInfo) {
         // Skip if no binary is loaded
         if self.state.analysis.loaded_binary.is_none() {
-            self.state.log("[!] Cannot open function: No binary loaded".to_string());
+            self.state
+                .log("[!] Cannot open function: No binary loaded".to_string());
         }
-        
+
         analysis_ops::open_function_tabs(
             &mut self.state,
             func,
@@ -515,8 +529,7 @@ impl FissionApp {
                                 self.state.debug.mem_dump = format_hexdump(addr, &data);
                             }
                             Err(e) => {
-                                self.state.debug.mem_dump =
-                                    format!("Error reading memory: {}", e);
+                                self.state.debug.mem_dump = format!("Error reading memory: {}", e);
                             }
                         }
                     }

@@ -13,18 +13,19 @@
 use crate::analysis::decomp::ffi::DecompilerNative;
 
 #[cfg(not(feature = "native_decomp"))]
-compile_error!("GUI requires native_decomp feature. Build with: cargo build --features native_decomp");
+compile_error!(
+    "GUI requires native_decomp feature. Build with: cargo build --features native_decomp"
+);
 
-use crate::analysis::loader::types::SectionInfo;
 use crate::analysis::loader::FunctionInfo;
+use crate::analysis::loader::types::SectionInfo;
 use crate::ui::gui::core::messages::AsyncMessage;
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
 };
-
 
 /// Request to decompile a function
 pub struct DecompileRequest {
@@ -54,6 +55,8 @@ pub struct DecompileRequest {
     pub gdt_json_path: Option<String>,
     /// Binary sections for memory mapping
     pub sections: Vec<SectionInfo>,
+    /// Is this a CFG analysis request
+    pub is_cfg_request: bool,
 }
 
 impl DecompileRequest {
@@ -72,6 +75,26 @@ impl DecompileRequest {
             functions: Vec::new(),
             gdt_json_path: None,
             sections: Vec::new(),
+            is_cfg_request: false,
+        }
+    }
+
+    /// Create a CFG analysis request
+    pub fn cfg_analysis(address: u64) -> Self {
+        Self {
+            request_id: 0,
+            bytes: Vec::new(),
+            address,
+            is_64bit: false,
+            is_prefetch: false,
+            is_binary_load: false,
+            image_base: 0,
+            iat_symbols: HashMap::new(),
+            global_symbols: HashMap::new(),
+            functions: Vec::new(),
+            gdt_json_path: None,
+            sections: Vec::new(),
+            is_cfg_request: true,
         }
     }
 
@@ -97,6 +120,7 @@ impl DecompileRequest {
             functions,
             gdt_json_path,
             sections,
+            is_cfg_request: false,
         }
     }
 
@@ -115,6 +139,7 @@ impl DecompileRequest {
             functions: Vec::new(),
             gdt_json_path: None,
             sections: Vec::new(),
+            is_cfg_request: false,
         }
     }
 }
@@ -137,7 +162,9 @@ pub fn spawn_worker(
     let num_workers = 1; // Single worker for FFI to avoid Ghidra thread-safety issues
 
     // Log which backend will be used
-    crate::core::logging::info("[decomp-worker] Native FFI backend (single worker for thread safety)");
+    crate::core::logging::info(
+        "[decomp-worker] Native FFI backend (single worker for thread safety)",
+    );
 
     // Spawn worker thread
     for i in 0..num_workers {
@@ -149,13 +176,7 @@ pub fn spawn_worker(
         std::thread::Builder::new()
             .name(format!("decomp-worker-{}", i))
             .spawn(move || {
-                worker_loop(
-                    i,
-                    request_rx,
-                    result_tx,
-                    native_decomp,
-                    latest_request_id,
-                );
+                worker_loop(i, request_rx, result_tx, native_decomp, latest_request_id);
             })
             .expect("Failed to spawn decompiler worker thread");
     }
@@ -207,9 +228,7 @@ fn worker_loop(
 
                 match DecompilerNative::new(&sla_dir) {
                     Ok(native) => {
-                        crate::core::logging::info(
-                            "[decomp-worker] Native decompiler initialized",
-                        );
+                        crate::core::logging::info("[decomp-worker] Native decompiler initialized");
                         *native_guard = Some(native);
                     }
                     Err(e) => {
@@ -227,8 +246,7 @@ fn worker_loop(
                 // Detect 64-bit from PE header or assume true
                 let is_64bit = detect_is_64bit(&request.bytes);
 
-                if let Err(e) = native.load_binary(&request.bytes, request.image_base, is_64bit)
-                {
+                if let Err(e) = native.load_binary(&request.bytes, request.image_base, is_64bit) {
                     crate::core::logging::error(&format!(
                         "[decomp-worker] Native load failed: {}",
                         e
@@ -264,6 +282,120 @@ fn worker_loop(
                     }
                     crate::core::logging::info("[decomp-worker] Binary loaded via native FFI");
                 }
+            }
+            continue;
+        }
+
+        // Handle CFG Analysis Request
+        if request.is_cfg_request {
+            let native_guard = match native_decomp.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+
+            if let Some(ref native) = *native_guard {
+                crate::core::logging::info(&format!(
+                    "[decomp-worker-{}] Processing CFG request for 0x{:x}",
+                    worker_id, request.address
+                ));
+
+                match native.get_pcode(request.address) {
+                    Ok(pcode_json) => {
+                        match fission_analysis::analysis::pcode::PcodeFunction::from_json(
+                            &pcode_json,
+                        ) {
+                            Ok(func) => {
+                                match fission_analysis::analysis::cfg::CfgAnalysis::from_pcode(
+                                    &func,
+                                ) {
+                                    Ok(analysis) => {
+                                        use crate::ui::gui::core::messages::{
+                                            CfgBlockData, CfgLoopData,
+                                        };
+                                        use fission_analysis::analysis::cfg::{
+                                            CfgVisualizer, DotOptions,
+                                        };
+
+                                        let loops: Vec<CfgLoopData> = analysis
+                                            .loops
+                                            .iter()
+                                            .map(|l| CfgLoopData {
+                                                header: l.header,
+                                                kind: format!("{:?}", l.kind),
+                                                body: l.body.iter().copied().collect(),
+                                            })
+                                            .collect();
+
+                                        let blocks: Vec<CfgBlockData> = analysis
+                                            .cfg
+                                            .blocks
+                                            .iter()
+                                            .map(|b| CfgBlockData {
+                                                index: b.index,
+                                                address: format!("0x{:x}", b.start_address),
+                                                is_entry: b.is_entry,
+                                                is_exit: b.is_exit,
+                                                successors: b
+                                                    .successors
+                                                    .iter()
+                                                    .map(|e| e.target)
+                                                    .collect(),
+                                            })
+                                            .collect();
+
+                                        let dot_options = DotOptions::default();
+                                        let dot_content = CfgVisualizer::to_dot(
+                                            &analysis.cfg,
+                                            &analysis.loops,
+                                            &dot_options,
+                                        );
+
+                                        let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
+                                            address: request.address,
+                                            block_count: analysis.cfg.block_count(),
+                                            edge_count: analysis.cfg.edge_count(),
+                                            cyclomatic_complexity: analysis
+                                                .metrics
+                                                .cyclomatic_complexity,
+                                            max_nesting_depth: analysis.metrics.max_nesting_depth,
+                                            loops,
+                                            blocks,
+                                            dot_content,
+                                        });
+
+                                        crate::core::logging::info(&format!(
+                                            "[decomp-worker-{}] CFG analysis complete for 0x{:x}",
+                                            worker_id, request.address
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        let _ = result_tx.send(AsyncMessage::CfgAnalysisError {
+                                            address: request.address,
+                                            error: format!("CFG build failed: {}", e),
+                                        });
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = result_tx.send(AsyncMessage::CfgAnalysisError {
+                                    address: request.address,
+                                    error: format!("Pcode parse failed: {}", e),
+                                });
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = result_tx.send(AsyncMessage::CfgAnalysisError {
+                            address: request.address,
+                            error: format!("Failed to get Pcode: {}", e),
+                        });
+                    }
+                }
+            } else {
+                let _ = result_tx.send(AsyncMessage::CfgAnalysisError {
+                    address: request.address,
+                    error: "Decompiler not initialized".to_string(),
+                });
             }
             continue;
         }
@@ -308,7 +440,7 @@ fn worker_loop(
                         "[decomp-worker-{}] Decompile failed for 0x{:x}: {}",
                         worker_id, request.address, e
                     ));
-                    
+
                     // Provide more helpful error messages based on error type
                     let error_message = e.to_string();
                     let formatted_error = if error_message.contains("inline function") {
@@ -362,7 +494,7 @@ fn worker_loop(
                             request.address, error_message
                         )
                     };
-                    
+
                     let _ = result_tx.send(AsyncMessage::DecompileResult {
                         address: request.address,
                         c_code: formatted_error,

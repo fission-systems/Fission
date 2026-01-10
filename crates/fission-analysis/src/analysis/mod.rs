@@ -1,7 +1,8 @@
 //! Analysis Module - Binary analysis engines
 //!
-//! Contains decompilation, disassembly, binary loading, patching, detection, and xrefs.
+//! Contains decompilation, disassembly, binary loading, patching, detection, CFG analysis, and xrefs.
 
+pub mod cfg;
 pub mod decomp;
 pub mod detector;
 pub mod disasm;
@@ -15,6 +16,11 @@ pub mod xrefs;
 pub mod strings;
 pub mod string_xrefs;
 
+pub use cfg::{
+    BasicBlock, BlockEdge, CfgAnalysis, CfgBuilder, CfgError, CfgMetrics, CfgResult,
+    CfgVisualizer, ComplexityAnalyzer, ControlFlowGraph, DominatorTree, DotOptions,
+    EdgeKind, Loop, LoopAnalyzer, LoopKind,
+};
 pub use detector::{detect, Confidence, Detection, DetectionResult, DetectionType};
 pub use dotnet::{
     disassemble_method_rva, parse_dotnet_metadata, DotNetError, DotNetMetadata, DotNetMethod,

@@ -64,6 +64,14 @@ pub struct OneShotArgs {
     #[arg(short = 'g', long, alias = "graph", value_parser = parse_hex_address)]
     pub graph: Option<u64>,
 
+    /// Analyze CFG (Control Flow Graph) for function at address
+    #[arg(long, alias = "cfg", value_parser = parse_hex_address)]
+    pub cfg_address: Option<u64>,
+
+    /// CFG output format: summary, dot, ascii (default: summary)
+    #[arg(long, default_value = "summary")]
+    pub cfg_format: String,
+
     /// Number of instructions to disassemble
     #[arg(short = 'n', long, default_value = "20")]
     pub count: usize,
