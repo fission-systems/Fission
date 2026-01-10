@@ -6,6 +6,40 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### LoadedBinary Cloning Performance Optimization (2026-01-10)
+
+**⚡ Performance: Copy-on-Write Binary Data**
+
+Optimized `LoadedBinary` to use `Arc<Vec<u8>>` for the raw binary data, enabling cheap cloning for operations that don't modify the data.
+
+**Problem:**
+
+- Previous implementation: `LoadedBinary.data: Vec<u8>` required full data copy on every clone
+- Renaming a function or any undo/redo operation cloned the entire binary (potentially 100MB+)
+- Memory usage spiked with each command execution
+
+**Solution:**
+
+- Changed `data` field from `Vec<u8>` to `Arc<Vec<u8>>`
+- Implemented custom rkyv wrapper (`ArcVecWrapper`) for serialization compatibility
+- Updated `patch_bytes()` method to use `Arc::make_mut()` for Copy-on-Write semantics
+
+**Benefits:**
+
+- **Cloning metadata-only operations**: Near-instant (reference count increment only)
+- **Memory efficiency**: Binary data shared across undo history, not duplicated
+- **Patching**: Only clones when there are multiple references (true COW)
+
+**Files Modified:**
+
+- `crates/fission-loader/src/loader/types.rs`: Core struct change + rkyv wrapper
+- `crates/fission-loader/src/dotnet/mod.rs`: Updated Cursor creation
+- `crates/fission-analysis/src/unpacker/loader.rs`: Arc wrapping for mapped data
+- `crates/fission-ui/src/ui/gui/core/commands.rs`: Use COW-enabled patch methods
+- `crates/fission-ui/src/ui/gui/app/handlers/message_handlers.rs`: Dereference for Vec
+
+---
+
 ### GUI Architecture & Native Decompiler Stabilization (2026-01-10)
 
 **🔧 Architecture Refactoring & Stability**

@@ -222,10 +222,10 @@ impl Command for PatchBytesCommand {
                 binary.data[offset as usize..offset as usize + self.new_bytes.len()].to_vec();
         }
 
-        // Apply patch
-        for (i, b) in self.new_bytes.iter().enumerate() {
-            binary.data[offset as usize + i] = *b;
-        }
+        // Apply patch using COW-enabled method
+        binary
+            .patch_bytes(offset, &self.new_bytes)
+            .ok_or_else(|| "Patch failed".to_string())?;
 
         update_binary(state, binary);
         state.log(format!(
@@ -243,10 +243,10 @@ impl Command for PatchBytesCommand {
 
         let offset = va_to_file_offset(&binary.sections, self.address)?;
 
-        // Revert patch
-        for (i, b) in self.old_bytes.iter().enumerate() {
-            binary.data[offset as usize + i] = *b;
-        }
+        // Revert patch using COW-enabled method
+        binary
+            .patch_bytes(offset, &self.old_bytes)
+            .ok_or_else(|| "Revert patch failed".to_string())?;
 
         update_binary(state, binary);
         state.log(format!("Reverted patch at 0x{:x}", self.address));
@@ -296,13 +296,7 @@ mod tests {
 
         // Verify rename
         {
-            let binary = state
-                .analysis
-                .domain
-                .loaded_binary()
-                .as_ref()
-                .as_ref()
-                .unwrap();
+            let binary = state.analysis.domain.loaded_binary.as_ref().unwrap();
             let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "renamed_func");
         }
@@ -312,13 +306,7 @@ mod tests {
 
         // Verify revert
         {
-            let binary = state
-                .analysis
-                .domain
-                .loaded_binary()
-                .as_ref()
-                .as_ref()
-                .unwrap();
+            let binary = state.analysis.domain.loaded_binary.as_ref().unwrap();
             let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "func1");
         }
@@ -328,13 +316,7 @@ mod tests {
 
         // Verify re-rename
         {
-            let binary = state
-                .analysis
-                .domain
-                .loaded_binary()
-                .as_ref()
-                .as_ref()
-                .unwrap();
+            let binary = state.analysis.domain.loaded_binary.as_ref().unwrap();
             let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "renamed_func");
         }
