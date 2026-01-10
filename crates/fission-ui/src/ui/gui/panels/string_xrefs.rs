@@ -4,7 +4,7 @@ use eframe::egui;
 use fission_analysis::analysis::string_xrefs::{StringWithXrefs, StringXrefAnalysis};
 use fission_analysis::analysis::strings::StringType;
 
-use crate::ui::gui::core::state::{AnalysisState, AppState};
+use crate::ui::gui::core::state::AppState;
 
 /// Render the string xrefs panel as a window
 pub fn render(ctx: &egui::Context, state: &mut AppState) {

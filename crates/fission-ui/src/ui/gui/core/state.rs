@@ -10,20 +10,15 @@
 //! - `Domain Models`: Pure business logic data (domain.rs)
 //! - `ViewModels`: UI-specific transient state (viewmodels.rs)
 
-use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
-use std::time::Instant;
 
-use lru::LruCache;
 
-use crate::analysis::disasm::DisassembledInstruction;
 use crate::app::context::FissionContext;
-use crate::core::config::CONFIG;
 use fission_core::settings::SettingsState;
-use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use fission_loader::loader::LoadedBinary;
 
 // Import domain models and viewmodels (declared in mod.rs)
-use super::domain::{AnalysisDomain, CachedDecompile, DebugDomain};
+use super::domain::{AnalysisDomain, DebugDomain};
 use super::viewmodels::ViewModelContainer;
 
 // Re-export for convenience
