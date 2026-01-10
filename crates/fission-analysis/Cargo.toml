@@ -11,12 +11,16 @@ keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]
 categories = ["development-tools::debugging"]
 
 [features]
-default = ["native_decomp"]
+default = []
 python = ["dep:pyo3"]
-native_decomp = []
+native_decomp = ["dep:fission-ffi", "fission-ffi/native_decomp"]
 
 [dependencies]
 fission-core = { path = "../fission-core" }
+fission-loader = { path = "../fission-loader" }
+fission-pcode = { path = "../fission-pcode" }
+fission-signatures = { path = "../fission-signatures" }
+fission-ffi = { path = "../fission-ffi", optional = true }
 object = "0.32"
 iced-x86 = { version = "1.21", features = ["std"] }
 bytes = "1.5"

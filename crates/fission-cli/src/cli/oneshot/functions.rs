@@ -1,4 +1,4 @@
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 use std::io::{self, Write};
 
 pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Result<()> {

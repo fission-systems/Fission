@@ -3,7 +3,7 @@
 use crossbeam_channel::Sender;
 use std::sync::Arc;
 
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 use crate::ui::gui::core::messages::AsyncMessage;
 use crate::ui::gui::core::state::AppState;
 
@@ -28,7 +28,7 @@ pub fn handle_binary_loaded(
     state.log(format!("    {} functions found", binary.functions.len()));
 
     // Run detection (DiE-style)
-    let detection = crate::analysis::detector::detect(&binary);
+    let detection = fission_loader::detector::detect(&binary);
     if !detection.detections.is_empty() {
         state.log("[*] Detection results:".to_string());
         for d in &detection.detections {
@@ -52,16 +52,16 @@ pub fn handle_binary_loaded(
                 }
             ));
         }
-        state.analysis.detection_result = Some(detection);
+        state.analysis.domain.detection_result = Some(detection);
     }
 
     // Build cross-references database
     let xref_db = crate::analysis::xrefs::XrefDatabase::build_from_binary(&binary);
     let xref_count = xref_db.total_refs();
     state.log(format!("[*] 🔗 Built {} cross-references", xref_count));
-    state.analysis.xref_db = Some(xref_db);
+    state.analysis.domain.xref_db = Some(xref_db);
 
-    state.analysis.loaded_binary = Some(binary.clone());
+    state.analysis.domain.loaded_binary = Some(binary.clone());
 
     // Run CRT signature matching on known functions
     let sig_db = crate::analysis::signatures::SignatureDatabase::new();
@@ -129,10 +129,10 @@ pub fn handle_binary_loaded(
             "[!] Failed to trigger decompiler binary load: {}",
             e
         ));
-        state.analysis.decompiler_context_loaded = false;
+        state.analysis.domain.decompiler_context_loaded = false;
     } else {
         state.log("[*] Initializing decompiler persistent context...");
-        state.analysis.decompiler_context_loaded = true;
+        state.analysis.domain.decompiler_context_loaded = true;
     }
 }
 
@@ -150,8 +150,8 @@ pub fn handle_decompile_result(state: &mut AppState, address: u64, c_code: Strin
 
 /// Handle decompilation error
 pub fn handle_decompile_error(state: &mut AppState, address: u64, error: String) {
-    state.analysis.decompiled_code = format!("// Decompilation failed\n// Error: {}\n\n// Possible causes:\n// - Function may not exist at this address\n// - fission_decomp CLI may not be built\n// - Try running: cd ghidra_decompiler/build && cmake .. && make", error);
-    state.analysis.decompiling = false;
+    state.analysis.domain.decompiled_code = format!("// Decompilation failed\n// Error: {}\n\n// Possible causes:\n// - Function may not exist at this address\n// - fission_decomp CLI may not be built\n// - Try running: cd ghidra_decompiler/build && cmake .. && make", error);
+    state.analysis.domain.decompiling = false;
     state.log(format!("[✗] Decompile error (0x{:x}): {}", address, error));
     state.log("    → Check if ghidra_decompiler/build/fission_decomp exists".to_string());
 }
@@ -205,7 +205,7 @@ pub fn handle_fission_event(state: &mut AppState, evt: crate::app::events::Fissi
 
 /// Handle snapshot save
 pub fn handle_save_snapshot(state: &mut AppState, path: String) {
-    if let Some(binary) = &state.analysis.loaded_binary {
+    if let Some(binary) = &state.analysis.domain.loaded_binary {
         if let Err(e) = crate::app::snapshot::save_snapshot(binary, std::path::Path::new(&path)) {
             state.log(format!("[!] Error saving snapshot: {}", e));
         } else {
@@ -253,9 +253,9 @@ pub fn handle_project_loaded(
     ));
 
     // Store project info
-    state.analysis.project_folder = Some(path);
-    state.analysis.project_binaries = binaries.clone();
-    state.analysis.selected_binary_index = Some(0);
+    state.analysis.domain.project_folder = Some(path);
+    state.analysis.domain.project_binaries = binaries.clone();
+    state.analysis.domain.selected_binary_index = Some(0);
 
     // List all binaries
     state.log("[*] Project binaries:".to_string());

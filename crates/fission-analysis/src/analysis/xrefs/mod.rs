@@ -80,7 +80,7 @@ impl XrefDatabase {
     }
 
     /// Build xref database from disassembled code
-    pub fn build_from_binary(binary: &crate::analysis::loader::LoadedBinary) -> Self {
+    pub fn build_from_binary(binary: &fission_loader::loader::LoadedBinary) -> Self {
         let mut db = Self::new();
 
         // Get image base for address calculation

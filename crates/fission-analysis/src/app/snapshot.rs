@@ -1,6 +1,6 @@
 //! Analysis Snapshot Serialization using Rkyv (Zero-Copy)
 
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 use crate::prelude::*;
 use rkyv::Deserialize;
 use std::fs;

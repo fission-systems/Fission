@@ -134,7 +134,7 @@ mod tests {
             fn get_binary(&self) -> Option<BinaryInfo> {
                 None
             }
-            fn get_functions(&self) -> Vec<crate::analysis::loader::FunctionInfo> {
+            fn get_functions(&self) -> Vec<fission_loader::loader::FunctionInfo> {
                 Vec::new()
             }
             fn read_binary_bytes(&self, _addr: u64, _size: usize) -> Option<Vec<u8>> {

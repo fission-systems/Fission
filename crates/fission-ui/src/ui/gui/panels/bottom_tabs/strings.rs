@@ -1,9 +1,9 @@
 //! Strings tab panel - Extract and display strings from binary.
 
 use crate::core::config::CONFIG;
+use crate::ui::gui::components::widgets::empty_state;
 use crate::ui::gui::core::state::{AppState, ExtractedString, StringEncoding};
 use crate::ui::gui::theme::{catppuccin, code};
-use crate::ui::gui::components::widgets::empty_state;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 
@@ -13,7 +13,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Filter:").color(catppuccin::SUBTEXT0));
         let response = ui.add(
-            egui::TextEdit::singleline(&mut state.analysis.strings_filter)
+            egui::TextEdit::singleline(&mut state.viewmodels.strings.filter)
                 .desired_width(200.0)
                 .hint_text("Search strings..."),
         );
@@ -31,15 +31,15 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         ui.label(
             egui::RichText::new(format!(
                 "{} strings",
-                state.analysis.extracted_strings.len()
+                state.analysis.domain.extracted_strings.len()
             ))
             .color(catppuccin::SUBTEXT0)
             .small(),
         );
     });
 
-    if state.analysis.extracted_strings.is_empty() {
-        if state.analysis.loaded_binary.is_some() {
+    if state.analysis.domain.extracted_strings.is_empty() {
+        if state.analysis.domain.loaded_binary.as_ref().is_some() {
             empty_state(ui, "Click 'Extract' to find strings", None);
         } else {
             empty_state(ui, "Load a binary first", None);
@@ -48,9 +48,10 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     }
 
     // Filter strings
-    let filter = state.analysis.strings_filter.to_lowercase();
+    let filter = state.viewmodels.strings.filter.to_lowercase();
     let filtered_strings: Vec<_> = state
         .analysis
+        .domain
         .extracted_strings
         .iter()
         .filter(|s| filter.is_empty() || s.value.to_lowercase().contains(&filter))
@@ -135,9 +136,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
 /// - Uses byte-level operations instead of char conversions where possible
 /// - Estimates result vector capacity based on binary size heuristics
 pub fn extract_strings_from_binary(state: &mut AppState) {
-    state.analysis.extracted_strings.clear();
+    state.analysis.domain.extracted_strings.clear();
 
-    let Some(ref binary) = state.analysis.loaded_binary else {
+    let Some(ref binary) = state.analysis.domain.loaded_binary else {
         return;
     };
 
@@ -148,6 +149,7 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
     let estimated_strings = data.len() / 1024;
     state
         .analysis
+        .domain
         .extracted_strings
         .reserve(estimated_strings.max(100));
 
@@ -168,11 +170,15 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
             // Use std::mem::take to avoid clone allocation
             let bytes = std::mem::take(&mut current_bytes);
             let value = unsafe { String::from_utf8_unchecked(bytes) };
-            state.analysis.extracted_strings.push(ExtractedString {
-                offset: start_offset,
-                value,
-                encoding: StringEncoding::Ascii,
-            });
+            state
+                .analysis
+                .domain
+                .extracted_strings
+                .push(ExtractedString {
+                    offset: start_offset,
+                    value,
+                    encoding: StringEncoding::Ascii,
+                });
             // Re-allocate with same capacity for next string
             current_bytes = Vec::with_capacity(256);
         } else {
@@ -183,16 +189,24 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
     // Handle any remaining string at end of data
     if current_bytes.len() >= min_len {
         let value = unsafe { String::from_utf8_unchecked(current_bytes) };
-        state.analysis.extracted_strings.push(ExtractedString {
-            offset: start_offset,
-            value,
-            encoding: StringEncoding::Ascii,
-        });
+        state
+            .analysis
+            .domain
+            .extracted_strings
+            .push(ExtractedString {
+                offset: start_offset,
+                value,
+                encoding: StringEncoding::Ascii,
+            });
     }
 
-    state.analysis.extracted_strings.sort_by_key(|s| s.offset);
+    state
+        .analysis
+        .domain
+        .extracted_strings
+        .sort_by_key(|s| s.offset);
     state.log_buffer.push(format!(
         "[✓] Extracted {} strings",
-        state.analysis.extracted_strings.len()
+        state.analysis.domain.extracted_strings.len()
     ));
 }

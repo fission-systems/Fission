@@ -2,22 +2,36 @@
 //!
 //! Provides high-performance decompilation via Ghidra engine.
 //! 
-//! Modes:
-//! - **DecompilerNative (FFI)**: Direct in-process FFI to libdecomp (recommended, feature-gated)
+//! ## Architecture
 //!
-//! The FFI mode is the primary approach as it provides:
-//! - Better performance (no subprocess overhead)
-//! - FID (Function ID) database support
-//! - Lower memory footprint
-//! - Simpler error handling
+//! The decompiler uses FFI bindings provided by `fission-ffi` crate
+//! to communicate with the native Ghidra decompiler library.
+//!
+//! ```text
+//! fission-analysis/decomp (safe wrapper)
+//!         ↓
+//! fission-ffi (unsafe FFI boundary)
+//!         ↓
+//! libdecomp.so (native Ghidra)
+//! ```
+//!
+//! ## Usage
+//!
+//! Use the `fission-ffi` crate directly for decompilation:
+//! 
+//! ```rust,ignore
+//! use fission_ffi::DecompilerNative;
+//! 
+//! let decomp = DecompilerNative::new(binary)?;
+//! let result = decomp.decompile_function(addr)?;
+//! ```
+
+// NOTE: FFI bindings have been moved to fission-ffi crate
+// This module now provides high-level safe wrappers only
 
 #[cfg(feature = "native_decomp")]
-pub mod ffi;
+pub type DecompilerNative = fission_ffi::DecompilerNative;
 
-// Re-export FFI as primary interface
+/// Recommended decompiler type (re-exported from fission-ffi)
 #[cfg(feature = "native_decomp")]
-pub use ffi::DecompilerNative;
-
-/// Recommended decompiler type
-#[cfg(feature = "native_decomp")]
-pub type RecommendedDecompiler = DecompilerNative;
+pub type RecommendedDecompiler = fission_ffi::DecompilerNative;

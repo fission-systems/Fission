@@ -6,6 +6,39 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### GUI Architecture & Native Decompiler Stabilization (2026-01-10)
+
+**🔧 Architecture Refactoring & Stability**
+
+Stabilized the GUI codebase after a major refactoring of the state management system, moving from a monolithic state to a Domain/ViewModel split.
+
+**Key Improvements:**
+
+- **Thread-Safe Decompiler Integration**:
+  - Re-implemented `decomp_worker.rs` to support the native Ghidra decompiler FFI.
+  - Added synchronization for decompiler context initialization to prevent race conditions.
+  - Implemented a single-worker thread model for FFI to ensure Ghidra library thread safety.
+- **Native Decompiler FFI Support (`native_decomp`)**:
+  - Added `crates/fission-ffi/build.rs` to automatically locate and link against `libdecomp.dylib` in the workspace.
+  - Restored the on-demand symbol provider and section registration for native decompilation.
+- **CLI-GUI Unified Loader Integration**:
+  - Successfully synced `fission-cli` with the latest changes in `fission-ui` and `fission-loader`.
+  - Fixed all import path breakages caused by the `LoadedBinary` relocation.
+- **State Management Refinement**:
+  - Completed the migration to `Domain` and `ViewModel` separation.
+  - Updated all UI panels (functions, decomp, disasm, hexview) to use the new state access patterns.
+- **Code Cleanup**:
+  - Ran `cargo fix` across the workspace to remove unused imports and variables.
+  - Fixed several compilation warnings and potential unused assignment bugs.
+
+**Technical Details:**
+
+- **Native Linking**: `fission-ffi` now correctly searches `ghidra_decompiler/build/` for the decompiler library.
+- **Worker Pipeline**: `AsyncMessage::DecompilerContextLoaded` now signals the UI when the native engine is ready.
+- **Loader Sync**: Added `fission-loader` as a direct dependency to `fission-cli` for better type compatibility.
+
+---
+
 ### CFG (Control Flow Graph) Analysis Integration (2026-01-10)
 
 **🎉 New Feature: Full CFG Analysis for CLI and GUI**

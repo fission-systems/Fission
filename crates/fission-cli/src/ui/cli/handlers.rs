@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use crate::analysis::disasm::DisasmEngine;
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 
 pub mod commands;
 

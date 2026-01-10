@@ -98,7 +98,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
 
                     #[cfg(not(target_os = "macos"))]
                     {
-                        if state.debug.debug_state.attached_pid.is_some() {
+                        if state.debug.domain.debug_state().attached_pid.is_some() {
                             if ui
                                 .button(egui::RichText::new("⏹ Detach").color(catppuccin::RED))
                                 .clicked()
@@ -236,7 +236,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
 
                 ui.menu_button(egui::RichText::new("Tools").color(catppuccin::TEXT), |ui| {
                     // Project-related tools
-                    if state.analysis.project_folder.is_some() {
+                    if state.analysis.domain.project_folder.is_some() {
                         if ui
                             .button(
                                 egui::RichText::new("⚡ Batch Decompile Project")

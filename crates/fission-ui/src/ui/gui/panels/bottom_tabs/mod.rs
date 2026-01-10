@@ -117,7 +117,7 @@ pub fn render(
                         script_action = script::render(ui, state);
                     }
                     BottomTab::Timeline => {
-                        timeline::render(ui, &mut state.debug.timeline);
+                        timeline::render(ui, &mut state.debug.domain.timeline);
                     }
                 },
             );

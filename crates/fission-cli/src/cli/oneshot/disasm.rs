@@ -1,4 +1,4 @@
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 use std::io::{self, Write};
 
 pub(super) fn disassemble(
@@ -75,16 +75,16 @@ pub(super) fn disassemble(
                 })
             })
             .collect();
-        let json_output = serde_json::to_string_pretty(&instr_json)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?;
+        let json_output = serde_json::to_string_pretty(&instr_json).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e),
+            )
+        })?;
         writeln!(stdout, "{}", json_output)?;
     } else {
         writeln!(stdout, "Disassembly at 0x{:x}:", addr)?;
-        writeln!(
-            stdout,
-            "{:>18}  {:24}  Instruction",
-            "Address", "Bytes"
-        )?;
+        writeln!(stdout, "{:>18}  {:24}  Instruction", "Address", "Bytes")?;
         writeln!(stdout, "{:─<70}", "")?;
         for (ip, bytes, mnemonic) in &instructions {
             writeln!(stdout, "  0x{:012x}  {:24}  {}", ip, bytes, mnemonic)?;
@@ -113,17 +113,19 @@ pub(super) fn disassemble_function(
     };
     let func_start = func.address;
     let mut func_size = func.size;
-    
+
     // If function size is 0, we need to find the boundary by looking for RET
     // or by finding the next function
     let needs_boundary_detection = func_size == 0;
-    
+
     if needs_boundary_detection {
         // Try to find next function to estimate max size
-        let all_functions: Vec<_> = binary.functions.iter()
+        let all_functions: Vec<_> = binary
+            .functions
+            .iter()
             .filter(|f| f.address > func_start)
             .collect();
-        
+
         if let Some(next_func) = all_functions.iter().min_by_key(|f| f.address) {
             func_size = next_func.address - func_start;
         } else {
@@ -133,10 +135,9 @@ pub(super) fn disassemble_function(
     }
 
     // Find the section containing this address
-    let section = binary
-        .sections
-        .iter()
-        .find(|s| func_start >= s.virtual_address && func_start < s.virtual_address + s.virtual_size);
+    let section = binary.sections.iter().find(|s| {
+        func_start >= s.virtual_address && func_start < s.virtual_address + s.virtual_size
+    });
 
     let (bytes, base) = if let Some(sec) = section {
         // Calculate offset within section
@@ -150,7 +151,10 @@ pub(super) fn disassemble_function(
         if file_offset + len <= data.len() {
             (&data[file_offset..file_offset + len], func_start)
         } else {
-            eprintln!("Error: Function at 0x{:x} is outside file bounds", func_start);
+            eprintln!(
+                "Error: Function at 0x{:x} is outside file bounds",
+                func_start
+            );
             std::process::exit(1);
         }
     } else {
@@ -167,15 +171,15 @@ pub(super) fn disassemble_function(
 
     // Disassemble until we reach the end of the function
     let func_end = func_start + func_size;
-    
+
     while decoder.can_decode() {
         let instr = decoder.decode();
-        
+
         // Stop if we've gone past the function end
         if instr.ip() >= func_end {
             break;
         }
-        
+
         output.clear();
         formatter.format(&instr, &mut output);
 
@@ -187,7 +191,7 @@ pub(super) fn disassemble_function(
             .join(" ");
 
         instructions.push((instr.ip(), bytes_str, output.clone()));
-        
+
         // If we're detecting boundaries, stop at RET instruction
         if needs_boundary_detection && instr.mnemonic() == Mnemonic::Ret {
             break;
@@ -216,22 +220,28 @@ pub(super) fn disassemble_function(
                 })
                 .collect::<Vec<_>>(),
         });
-        let json_output = serde_json::to_string_pretty(&result)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?;
+        let json_output = serde_json::to_string_pretty(&result).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e),
+            )
+        })?;
         writeln!(stdout, "{}", json_output)?;
     } else {
         if needs_boundary_detection {
-            writeln!(stdout, "Function: {} at 0x{:x} (size: auto-detected)", 
-                     func.name, func_start)?;
+            writeln!(
+                stdout,
+                "Function: {} at 0x{:x} (size: auto-detected)",
+                func.name, func_start
+            )?;
         } else {
-            writeln!(stdout, "Function: {} at 0x{:x} (size: {} bytes)", 
-                     func.name, func_start, func_size)?;
+            writeln!(
+                stdout,
+                "Function: {} at 0x{:x} (size: {} bytes)",
+                func.name, func_start, func_size
+            )?;
         }
-        writeln!(
-            stdout,
-            "{:>18}  {:24}  Instruction",
-            "Address", "Bytes"
-        )?;
+        writeln!(stdout, "{:>18}  {:24}  Instruction", "Address", "Bytes")?;
         writeln!(stdout, "{:─<70}", "")?;
         for (ip, bytes, mnemonic) in &instructions {
             writeln!(stdout, "  0x{:012x}  {:24}  {}", ip, bytes, mnemonic)?;

@@ -9,13 +9,13 @@ pub fn handle_debug_action(state: &mut AppState, action: DebugAction) -> bool {
     let mut handled = false;
     match action {
         DebugAction::Dump => {
-            if let Some(engine_lock) = &state.debug.titan_engine {
+            if let Some(engine_lock) = &state.debug.domain.titan_engine {
                 if let Ok(engine) = engine_lock.read() {
                     // Check if we have reconstructed imports to fix
-                    if !state.analysis.reconstructed_imports.is_empty() {
+                    if !state.analysis.domain.reconstructed_imports.is_empty() {
                         state.log("[*] Dumping with IAT Fix...".to_string());
                         if let Err(e) = engine
-                            .dump_and_fix("dumped_fixed.exe", &state.analysis.reconstructed_imports)
+                            .dump_and_fix("dumped_fixed.exe", &state.analysis.domain.reconstructed_imports)
                         {
                             state.log(format!("[Error] Dump & Fix failed: {}", e));
                         } else {
@@ -38,7 +38,7 @@ pub fn handle_debug_action(state: &mut AppState, action: DebugAction) -> bool {
         DebugAction::ImportRec => {
             state.log("[*] Starting Import Reconstruction...".to_string());
 
-            if let Some(engine_lock) = &state.debug.titan_engine {
+            if let Some(engine_lock) = &state.debug.domain.titan_engine {
                 // We need write access to update modules
                 if let Ok(mut engine) = engine_lock.write() {
                     // 1. Update loaded modules
@@ -156,7 +156,7 @@ pub fn handle_debug_action(state: &mut AppState, action: DebugAction) -> bool {
                                                     "[✓] Reconstructed {} imports",
                                                     imports.len()
                                                 ));
-                                                state.analysis.reconstructed_imports = imports;
+                                                state.analysis.domain.reconstructed_imports = imports;
                                                 state.ui.bottom_tab =
                                                     crate::ui::gui::state::BottomTab::Imports;
                                             } else {
@@ -193,14 +193,14 @@ pub fn attach(state: &mut AppState, pid: u32) -> bool {
         return false;
     }
 
-    if let Some(engine_lock) = &state.debug.titan_engine {
+    if let Some(engine_lock) = &state.debug.domain.titan_engine {
         if let Ok(mut engine) = engine_lock.write() {
             if let Err(e) = engine.attach(pid) {
                 state.log(format!("[Error] TitanEngine Attach failed: {}", e));
             } else {
                 state.log(format!("[*] TitanEngine Attached to PID {}", pid));
-                state.debug.debug_state.attached_pid = Some(pid);
-                state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+                state.debug.domain.debug_state().attached_pid = Some(pid);
+                state.debug.domain.debug_state().status = crate::debug::types::DebugStatus::Suspended;
             }
         }
     }

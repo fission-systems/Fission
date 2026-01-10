@@ -3,9 +3,9 @@
 //! Generates control flow analysis for a function.
 
 use crate::analysis::cfg::{CfgAnalysis, CfgVisualizer, DotOptions};
-use crate::analysis::loader::LoadedBinary;
 use crate::analysis::pcode::PcodeFunction;
 use crate::cli::output::OutputSilencer;
+use fission_loader::loader::LoadedBinary;
 use serde::Serialize;
 use std::fs;
 use std::io::{self, Write};
@@ -75,7 +75,7 @@ pub fn analyze_cfg(
 
     let mut decomp = {
         let _silencer = OutputSilencer::new_if(!verbose);
-        match crate::analysis::decomp::ffi::DecompilerNative::new(&sla_dir) {
+        match fission_ffi::DecompilerNative::new(&sla_dir) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Error: Failed to create decompiler: {}", e);

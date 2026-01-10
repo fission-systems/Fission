@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::analysis::loader::LoadedBinary;
+use fission_loader::loader::LoadedBinary;
 use crate::debug::types::RegisterState;
 
 /// System-wide events for Fission

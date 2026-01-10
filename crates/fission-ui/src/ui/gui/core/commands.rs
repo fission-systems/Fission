@@ -1,6 +1,6 @@
-use crate::analysis::loader::{LoadedBinary, SectionInfo};
 use crate::app::events::FissionEvent;
 use crate::ui::gui::core::state::AppState;
+use fission_loader::loader::{LoadedBinary, SectionInfo};
 use std::sync::Arc;
 
 /// Trait for all undoable commands
@@ -23,7 +23,7 @@ pub trait Command: Send + Sync {
 fn get_binary(state: &AppState) -> Result<&Arc<LoadedBinary>, String> {
     state
         .analysis
-        .loaded_binary
+        .loaded_binary()
         .as_ref()
         .ok_or_else(|| "No binary loaded".to_string())
 }
@@ -40,7 +40,7 @@ fn va_to_file_offset(sections: &[SectionInfo], address: u64) -> Result<u64, Stri
 /// Update the loaded binary in state and publish the event.
 fn update_binary(state: &mut AppState, binary: LoadedBinary) {
     let new_arc = Arc::new(binary);
-    state.analysis.loaded_binary = Some(new_arc.clone());
+    state.analysis.domain.loaded_binary = Some(new_arc.clone());
     state
         .event_bus()
         .publish(FissionEvent::BinaryLoaded(new_arc));
@@ -265,7 +265,7 @@ impl Command for PatchBytesCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::loader::{FunctionInfo, LoadedBinaryBuilder};
+    use fission_loader::loader::{FunctionInfo, LoadedBinaryBuilder};
 
     #[test]
     fn test_command_undo_redo() {
@@ -280,7 +280,7 @@ mod tests {
                 is_import: false,
             });
         let binary = builder.build().unwrap();
-        state.analysis.loaded_binary = Some(Arc::new(binary));
+        state.analysis.domain.loaded_binary = Some(Arc::new(binary));
 
         // Create CommandManager
         let mut mgr = CommandManager::new();
@@ -296,7 +296,13 @@ mod tests {
 
         // Verify rename
         {
-            let binary = state.analysis.loaded_binary.as_ref().unwrap();
+            let binary = state
+                .analysis
+                .domain
+                .loaded_binary()
+                .as_ref()
+                .as_ref()
+                .unwrap();
             let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "renamed_func");
         }
@@ -306,7 +312,13 @@ mod tests {
 
         // Verify revert
         {
-            let binary = state.analysis.loaded_binary.as_ref().unwrap();
+            let binary = state
+                .analysis
+                .domain
+                .loaded_binary()
+                .as_ref()
+                .as_ref()
+                .unwrap();
             let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "func1");
         }
@@ -316,7 +328,13 @@ mod tests {
 
         // Verify re-rename
         {
-            let binary = state.analysis.loaded_binary.as_ref().unwrap();
+            let binary = state
+                .analysis
+                .domain
+                .loaded_binary()
+                .as_ref()
+                .as_ref()
+                .unwrap();
             let func = binary.function_at_exact(0x1000).unwrap();
             assert_eq!(func.name, "renamed_func");
         }

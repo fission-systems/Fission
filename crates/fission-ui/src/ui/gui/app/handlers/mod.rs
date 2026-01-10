@@ -59,6 +59,10 @@ pub fn process_messages(
             AsyncMessage::LoadSnapshot(path) => {
                 message_handlers::handle_load_snapshot(state, tx.clone(), path);
             }
+            AsyncMessage::DecompilerContextLoaded => {
+                crate::core::logging::info("Decompiler context initialized");
+            }
+
             AsyncMessage::CfgAnalysisRequest { address } => {
                 // Send CFG request to worker
                 let request = super::decomp_worker::DecompileRequest::cfg_analysis(address);
@@ -99,7 +103,7 @@ pub fn process_messages(
                     })
                     .collect();
 
-                state.analysis.cfg_analysis = Some(CfgAnalysisResult {
+                state.analysis.domain.cfg_analysis = Some(CfgAnalysisResult {
                     block_count,
                     edge_count,
                     cyclomatic_complexity,

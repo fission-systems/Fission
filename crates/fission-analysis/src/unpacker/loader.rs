@@ -1,5 +1,5 @@
-use crate::analysis::loader::pe::PeLoader;
-use crate::analysis::loader::types::LoadedBinary;
+use fission_loader::loader::pe::PeLoader;
+use fission_loader::loader::types::LoadedBinary;
 use crate::prelude::*;
 
 /// OS Loader Simulator - Maps binaries as they would appear in process memory.
@@ -185,7 +185,7 @@ impl TitanLoader {
 
     /// Maps a single section from file to virtual memory
     fn map_section(
-        section: &crate::analysis::loader::types::SectionInfo,
+        section: &fission_loader::loader::types::SectionInfo,
         file_data: &[u8],
         mapped_data: &mut [u8],
         image_base: u64,

@@ -8,7 +8,7 @@ use std::env;
 use std::fs;
 
 #[cfg(feature = "native_decomp")]
-use fission_analysis::analysis::decomp::ffi::DecompilerNative;
+use fission_ffi::DecompilerNative;
 
 fn main() {
     #[cfg(not(feature = "native_decomp"))]

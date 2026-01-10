@@ -18,6 +18,8 @@ test = false
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-analysis = { path = "../fission-analysis" }
+fission-loader = { path = "../fission-loader" }
+fission-ffi = { path = "../fission-ffi", optional = true }
 eframe = "0.29"
 egui = "0.29"
 rfd = "0.15"
@@ -29,6 +31,6 @@ lru = "0.12"
 sysinfo = "0.37.2"
 
 [features]
-default = ["native_decomp"]
-native_decomp = ["fission-analysis/native_decomp"]
+default = []
+native_decomp = ["fission-analysis/native_decomp", "dep:fission-ffi"]
 python = ["fission-analysis/python"]

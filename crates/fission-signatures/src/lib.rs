@@ -1,0 +1,28 @@
+//! Fission Signatures - Function signature database
+//!
+//! This crate provides a database of function signatures for common libraries
+//! including Windows API, MSVC runtime, and other standard libraries.
+
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+
+pub mod win_api;
+pub mod win_constants;
+pub mod win_types;
+
+mod signature;
+mod database;
+mod msvc_sigs;
+
+pub mod prelude;
+
+// Re-export main types
+pub use signature::FunctionSignature;
+pub use database::SignatureDatabase;
+
+// Re-export lazily-initialized global databases for efficient reuse
+pub use win_api::WIN_API_DB;
+pub use win_constants::WIN_CONSTANTS_DB;

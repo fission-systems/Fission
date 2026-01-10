@@ -1,4 +1,4 @@
-use crate::analysis::loader::types::LoadedBinary;
+use fission_loader::loader::types::LoadedBinary;
 use crate::prelude::*;
 
 pub mod dynamic_parser;

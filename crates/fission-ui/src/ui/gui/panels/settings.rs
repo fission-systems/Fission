@@ -110,7 +110,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(8.0);
 
         if ui.button("Clear Cache").clicked() {
-            state.analysis.decompile_cache.clear();
+            state.analysis.domain.decompile_cache.clear();
             state.log("[*] Decompiler cache cleared");
         }
     });

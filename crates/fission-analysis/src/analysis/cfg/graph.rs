@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use super::{BasicBlock, BlockEdge, EdgeKind, CfgError, CfgResult};
-use crate::analysis::pcode::{PcodeFunction, PcodeBasicBlock, PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode::{PcodeFunction, PcodeBasicBlock, PcodeOp, PcodeOpcode, Varnode};
 
 /// Control Flow Graph representation
 #[derive(Debug, Clone)]

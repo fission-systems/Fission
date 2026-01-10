@@ -17,9 +17,9 @@ use eframe::egui;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
-use crate::analysis::loader::FunctionInfo;
 #[cfg(target_os = "windows")]
 use crate::debug::PlatformDebugger;
+use fission_loader::loader::FunctionInfo;
 
 use super::components::status_bar;
 use super::components::{MenuAction, menu};
@@ -193,13 +193,13 @@ impl eframe::App for FissionApp {
         ctx.set_pixels_per_point(self.state.settings.ui_scale);
 
         // Clear selected function if no binary is loaded (prevents egui state restoration issues)
-        if self.state.analysis.loaded_binary.is_none() {
-            if self.state.analysis.selected_function.is_some() {
-                self.state.analysis.selected_function = None;
+        if self.state.analysis.domain.loaded_binary.as_ref().is_none() {
+            if self.state.analysis.domain.selected_function.is_some() {
+                self.state.analysis.domain.selected_function = None;
             }
             // Reset decompiler context flag if no binary
-            if self.state.analysis.decompiler_context_loaded {
-                self.state.analysis.decompiler_context_loaded = false;
+            if self.state.analysis.domain.decompiler_context_loaded {
+                self.state.analysis.domain.decompiler_context_loaded = false;
             }
             // Also clear any open tabs since they're invalid without a binary
             if !self.state.ui.open_tabs.is_empty() {
@@ -259,11 +259,11 @@ impl eframe::App for FissionApp {
                     let current_name = self
                         .state
                         .analysis
-                        .user_function_names
+                        .user_function_names()
                         .get(&addr)
                         .cloned()
                         .unwrap_or_else(|| format!("sub_{:x}", addr));
-                    self.state.analysis.rename_dialog = Some((addr, current_name));
+                    self.state.viewmodels.functions.rename_dialog = Some((addr, current_name));
                 }
                 side_bar::SideBarAction::SwitchBinary(binary) => {
                     // Log the switch
@@ -276,8 +276,8 @@ impl eframe::App for FissionApp {
                         .log(format!("[*] Switching to binary: {}", file_name));
 
                     // Clear current state
-                    self.state.analysis.decompile_cache.clear();
-                    self.state.analysis.selected_function = None;
+                    self.state.analysis.domain.decompile_cache.clear();
+                    self.state.analysis.domain.selected_function = None;
                     self.state.ui.open_tabs.clear();
                     self.state.ui.active_tab_index = None;
 
@@ -371,7 +371,7 @@ impl FissionApp {
             MenuAction::LoadSnapshot => file_ops::load_snapshot_dialog(self.tx.clone()),
             MenuAction::AttachToProcess => {
                 self.state.ui.show_attach_dialog = true;
-                self.state.debug.process_list = crate::debug::enumerate_processes();
+                self.state.debug.domain.process_list = crate::debug::enumerate_processes();
             }
             MenuAction::DetachProcess => self.detach_process(),
             MenuAction::ClearConsole => {
@@ -379,8 +379,8 @@ impl FissionApp {
                 self.state.log("[*] Console cleared");
             }
             MenuAction::ClearCache => {
-                let count = self.state.analysis.decompile_cache.len();
-                self.state.analysis.decompile_cache.clear();
+                let count = self.state.analysis.domain.decompile_cache.len();
+                self.state.analysis.domain.decompile_cache.clear();
                 self.state
                     .log(format!("[*] Cleared {} cached items", count));
             }
@@ -411,7 +411,7 @@ impl FissionApp {
 
     fn open_function_tabs(&mut self, func: &FunctionInfo) {
         // Skip if no binary is loaded
-        if self.state.analysis.loaded_binary.is_none() {
+        if self.state.analysis.domain.loaded_binary.as_ref().is_none() {
             self.state
                 .log("[!] Cannot open function: No binary loaded".to_string());
         }
@@ -473,7 +473,7 @@ impl FissionApp {
         // TitanEngine Integration (Dynamic Mode)
         if self.state.ui.dynamic_mode {
             #[cfg(target_os = "windows")]
-            if let Some(engine_lock) = &self.state.debug.titan_engine {
+            if let Some(engine_lock) = &self.state.debug.domain.titan_engine {
                 if let Ok(engine) = engine_lock.read() {
                     if engine.active_process.is_some() {
                         if let Ok(ctx) = engine.get_context() {
@@ -497,7 +497,7 @@ impl FissionApp {
                                 rip: ctx.rip(),
                                 rflags: ctx.rflags(),
                             };
-                            self.state.debug.debug_state.registers = Some(regs);
+                            self.state.debug.domain.debug_state().registers = Some(regs);
                         }
                     }
                 }
@@ -507,17 +507,18 @@ impl FissionApp {
             {
                 if let Some(dbg) = self.debugger.as_mut() {
                     // Update registers if suspended
-                    if self.state.debug.debug_state.status
+                    if self.state.debug.domain.debug_state().status
                         == crate::debug::types::DebugStatus::Suspended
                     {
-                        if let Some(tid) = self.state.debug.debug_state.last_thread_id.or(self
-                            .state
-                            .debug
-                            .debug_state
-                            .main_thread_id)
+                        if let Some(tid) =
+                            self.state.debug.domain.debug_state().last_thread_id.or(self
+                                .state
+                                .debug
+                                .debug_state
+                                .main_thread_id)
                         {
                             if let Ok(regs) = dbg.fetch_registers(tid) {
-                                self.state.debug.debug_state.registers = Some(regs);
+                                self.state.debug.domain.debug_state().registers = Some(regs);
                             }
                         }
                     }
@@ -526,10 +527,11 @@ impl FissionApp {
                     if let Some((addr, len)) = self.state.debug.pending_mem_read.take() {
                         match dbg.read_memory(addr, len) {
                             Ok(data) => {
-                                self.state.debug.mem_dump = format_hexdump(addr, &data);
+                                self.state.debug.domain.mem_dump = format_hexdump(addr, &data);
                             }
                             Err(e) => {
-                                self.state.debug.mem_dump = format!("Error reading memory: {}", e);
+                                self.state.debug.domain.mem_dump =
+                                    format!("Error reading memory: {}", e);
                             }
                         }
                     }

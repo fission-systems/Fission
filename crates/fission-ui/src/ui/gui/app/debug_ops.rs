@@ -16,17 +16,17 @@ pub fn handle_debug_event(state: &mut AppState, evt: crate::debug::types::DebugE
             pid,
             main_thread_id,
         } => {
-            state.debug.debug_state.attached_pid = Some(pid);
-            state.debug.debug_state.main_thread_id = Some(main_thread_id);
-            state.debug.debug_state.last_thread_id = Some(main_thread_id);
-            state.debug.debug_state.status = crate::debug::types::DebugStatus::Running;
+            state.debug.domain.debug_state.attached_pid = Some(pid);
+            state.debug.domain.debug_state.main_thread_id = Some(main_thread_id);
+            state.debug.domain.debug_state.last_thread_id = Some(main_thread_id);
+            state.debug.domain.debug_state.status = crate::debug::types::DebugStatus::Running;
             state.log(format!(
                 "[*] Process created pid={} tid={}",
                 pid, main_thread_id
             ));
         }
         ProcessExited { exit_code } => {
-            state.debug.debug_state.status = crate::debug::types::DebugStatus::Terminated;
+            state.debug.domain.debug_state.status = crate::debug::types::DebugStatus::Terminated;
             state.log(format!("[*] Process exited code={}", exit_code));
         }
         ThreadCreated { thread_id } => {
@@ -39,27 +39,28 @@ pub fn handle_debug_event(state: &mut AppState, evt: crate::debug::types::DebugE
             state.log(format!("[*] DLL loaded {name} @0x{base_address:016x}"));
         }
         BreakpointHit { address, thread_id } => {
-            state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
-            state.debug.debug_state.last_thread_id = Some(thread_id);
-            state.debug.debug_state.last_event =
+            state.debug.domain.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+            state.debug.domain.debug_state.last_thread_id = Some(thread_id);
+            state.debug.domain.debug_state.last_event =
                 Some(format!("BP hit 0x{address:016x} tid={thread_id}"));
             state.log(
                 state
                     .debug
-                    .debug_state
+                    .debug_state()
                     .last_event
                     .clone()
                     .unwrap_or_default(),
             );
         }
         SingleStep { thread_id } => {
-            state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
-            state.debug.debug_state.last_thread_id = Some(thread_id);
-            state.debug.debug_state.last_event = Some(format!("[*] Single step tid={}", thread_id));
+            state.debug.domain.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+            state.debug.domain.debug_state.last_thread_id = Some(thread_id);
+            state.debug.domain.debug_state.last_event =
+                Some(format!("[*] Single step tid={}", thread_id));
             state.log(
                 state
                     .debug
-                    .debug_state
+                    .debug_state()
                     .last_event
                     .clone()
                     .unwrap_or_default(),
@@ -71,15 +72,15 @@ pub fn handle_debug_event(state: &mut AppState, evt: crate::debug::types::DebugE
             first_chance,
             ..
         } => {
-            state.debug.debug_state.status = crate::debug::types::DebugStatus::Suspended;
-            state.debug.debug_state.last_event = Some(format!(
+            state.debug.domain.debug_state.status = crate::debug::types::DebugStatus::Suspended;
+            state.debug.domain.debug_state.last_event = Some(format!(
                 "[!] Exception code=0x{:x} addr=0x{:016x} first_chance={}",
                 code, address, first_chance
             ));
             state.log(
                 state
                     .debug
-                    .debug_state
+                    .debug_state()
                     .last_event
                     .clone()
                     .unwrap_or_default(),
@@ -101,8 +102,8 @@ pub fn attach_to_process(
     state.log(format!("[*] Attaching to PID {}...", pid));
     match dbg.attach(pid) {
         Ok(_) => {
-            state.debug.is_debugging = true;
-            state.debug.debug_state = dbg.state().clone();
+            state.debug.domain.is_debugging = true;
+            state.debug.domain.debug_state = dbg.state().clone();
             state.log(format!("[✓] Attached to PID {}", pid));
 
             // Start event loop
@@ -113,7 +114,7 @@ pub fn attach_to_process(
             crate::debug::windows::start_event_loop(pid, tx_evt, rx_stop);
         }
         Err(e) => {
-            state.debug.is_debugging = false;
+            state.debug.domain.is_debugging = false;
             state.log(format!("[✗] Attach failed: {}", e));
         }
     }
@@ -141,8 +142,8 @@ pub fn detach_process(
 
         match dbg.detach() {
             Ok(_) => {
-                state.debug.is_debugging = false;
-                state.debug.debug_state = dbg.state().clone();
+                state.debug.domain.is_debugging = false;
+                state.debug.domain.debug_state = dbg.state().clone();
                 state.ui.show_attach_dialog = false;
                 state.log("[*] Detached from process");
                 if let Some(stop) = dbg_stop_tx.take() {
@@ -249,7 +250,7 @@ pub fn render_attach_dialog(
             // Controls bar
             ui.horizontal(|ui| {
                 if ui.button("🔄 Refresh").clicked() {
-                    state.debug.process_list = crate::debug::enumerate_processes();
+                    state.debug.domain.process_list = crate::debug::enumerate_processes();
                 }
 
                 ui.separator();
@@ -257,7 +258,7 @@ pub fn render_attach_dialog(
                 // Search filter
                 ui.label("🔍");
                 ui.add(
-                    egui::TextEdit::singleline(&mut state.debug.process_filter)
+                    egui::TextEdit::singleline(&mut state.viewmodels.debug.process_filter)
                         .desired_width(150.0)
                         .hint_text("Filter..."),
                 );
@@ -265,9 +266,12 @@ pub fn render_attach_dialog(
                 ui.separator();
 
                 ui.label(
-                    egui::RichText::new(format!("{} processes", state.debug.process_list.len()))
-                        .color(catppuccin::SUBTEXT0)
-                        .small(),
+                    egui::RichText::new(format!(
+                        "{} processes",
+                        state.debug.domain.process_list.len()
+                    ))
+                    .color(catppuccin::SUBTEXT0)
+                    .small(),
                 );
             });
 
@@ -301,9 +305,9 @@ pub fn render_attach_dialog(
                             ui.label("");
                             ui.end_row();
 
-                            let filter = state.debug.process_filter.to_lowercase();
+                            let filter = state.viewmodels.debug.process_filter.to_lowercase();
 
-                            for process in &state.debug.process_list {
+                            for process in &state.debug.domain.process_list {
                                 // Apply filter
                                 if !filter.is_empty() {
                                     let matches_name =

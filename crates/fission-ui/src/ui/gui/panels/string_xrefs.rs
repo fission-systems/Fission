@@ -4,7 +4,7 @@ use eframe::egui;
 use fission_analysis::analysis::string_xrefs::{StringWithXrefs, StringXrefAnalysis};
 use fission_analysis::analysis::strings::StringType;
 
-use crate::ui::gui::core::state::{AppState, AnalysisState};
+use crate::ui::gui::core::state::{AnalysisState, AppState};
 
 /// Render the string xrefs panel as a window
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
@@ -13,7 +13,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
     }
 
     let mut show_window = state.ui.show_string_xrefs_window;
-    
+
     egui::Window::new("String Cross-References")
         .id(egui::Id::new("string_xrefs_window"))
         .default_width(800.0)
@@ -25,37 +25,39 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
             ui.horizontal(|ui| {
                 ui.label("Search:");
                 ui.add(
-                    egui::TextEdit::singleline(&mut state.analysis.string_xref_search)
+                    egui::TextEdit::singleline(&mut state.viewmodels.string_xrefs.search_term)
                         .id(egui::Id::new("string_xref_search_input"))
-                        .desired_width(300.0)
+                        .desired_width(300.0),
                 );
-                
+
                 ui.label("Min Length:");
                 ui.add(
-                    egui::DragValue::new(&mut state.analysis.string_xref_min_len)
+                    egui::DragValue::new(&mut state.viewmodels.string_xrefs.min_length)
                         .speed(1)
-                        .range(1..=100)
+                        .range(1..=100),
                 );
-                
+
                 if ui.button("🔍 Analyze").clicked() {
-                    perform_analysis(&mut state.analysis);
+                    perform_analysis(state);
                 }
-                
+
                 if ui.button("Clear").clicked() {
-                    state.analysis.string_xref_results = None;
-                    state.analysis.string_xref_search.clear();
+                    state.analysis.domain.string_xref_results = None;
+                    state.viewmodels.string_xrefs.search_term.clear();
                 }
             });
 
             ui.separator();
 
             // Show results
-            if let Some(ref analysis) = state.analysis.string_xref_results {
+            if let Some(ref analysis) = state.analysis.domain.string_xref_results {
                 render_results(ui, state, analysis);
             } else {
                 ui.vertical_centered(|ui| {
                     ui.add_space(50.0);
-                    ui.label("Enter a search term and click Analyze to find string cross-references");
+                    ui.label(
+                        "Enter a search term and click Analyze to find string cross-references",
+                    );
                     ui.add_space(10.0);
                     ui.label("Search modes:");
                     ui.label("  • Partial match: just type the text");
@@ -64,21 +66,22 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
                 });
             }
         });
-    
+
     state.ui.show_string_xrefs_window = show_window;
 }
 
-fn perform_analysis(state: &mut AnalysisState) {
-    if let Some(ref binary) = state.binary {
-        let min_len = state.string_xref_min_len;
-        let analysis = fission_analysis::analysis::string_xrefs::analyze_string_xrefs(binary, min_len);
-        state.string_xref_results = Some(analysis);
+fn perform_analysis(state: &mut AppState) {
+    if let Some(ref binary) = state.analysis.domain.loaded_binary {
+        let min_len = state.viewmodels.string_xrefs.min_length;
+        let analysis =
+            fission_analysis::analysis::string_xrefs::analyze_string_xrefs(binary, min_len);
+        state.analysis.domain.string_xref_results = Some(analysis);
     }
 }
 
 fn render_results(ui: &mut egui::Ui, state: &AppState, analysis: &StringXrefAnalysis) {
-    let search_term = &state.analysis.string_xref_search;
-    
+    let search_term = &state.viewmodels.string_xrefs.search_term;
+
     // Get matching strings
     let results = if search_term.is_empty() {
         // Show all referenced strings
@@ -136,10 +139,10 @@ fn render_results(ui: &mut egui::Ui, state: &AppState, analysis: &StringXrefAnal
 
 fn render_string_row(ui: &mut egui::Ui, state: &AppState, result: &StringWithXrefs) {
     let string = &result.string;
-    
+
     // Address
     ui.label(format!("0x{:08x}", string.address));
-    
+
     // Type
     let type_color = match string.string_type {
         StringType::Ascii => egui::Color32::GREEN,
@@ -150,21 +153,22 @@ fn render_string_row(ui: &mut egui::Ui, state: &AppState, result: &StringWithXre
         StringType::Unicode => "UTF16",
     };
     ui.colored_label(type_color, type_str);
-    
+
     // String content (truncated)
     let display_content = if string.content.len() > 60 {
         format!("{}...", &string.content[..60])
     } else {
         string.content.clone()
     };
-    if ui.selectable_label(false, &display_content)
+    if ui
+        .selectable_label(false, &display_content)
         .on_hover_text("Click to copy to clipboard")
-        .clicked() 
+        .clicked()
     {
         // Copy to clipboard
         ui.output_mut(|o| o.copied_text = string.content.clone());
     }
-    
+
     // References count with collapsing header
     let xref_count = result.xrefs.len();
     if xref_count == 0 {
@@ -180,17 +184,22 @@ fn render_string_row(ui: &mut egui::Ui, state: &AppState, result: &StringWithXre
                         fission_analysis::analysis::xrefs::XrefType::Jump => "JUMP",
                         fission_analysis::analysis::xrefs::XrefType::Data => "DATA",
                     };
-                    
+
                     // Find function name
-                    let caller_name = if let Some(ref binary) = state.analysis.binary {
-                        binary.functions.iter()
-                            .find(|f| xref.from_addr >= f.address && xref.from_addr < f.address + f.size)
+                    let caller_name = if let Some(ref binary) = state.analysis.domain.loaded_binary
+                    {
+                        binary
+                            .functions
+                            .iter()
+                            .find(|f| {
+                                xref.from_addr >= f.address && xref.from_addr < f.address + f.size
+                            })
                             .map(|f| f.name.as_str())
                             .unwrap_or("unknown")
                     } else {
                         "unknown"
                     };
-                    
+
                     ui.horizontal(|ui| {
                         ui.label(type_str);
                         if ui.link(format!("0x{:08x}", xref.from_addr)).clicked() {
@@ -204,6 +213,6 @@ fn render_string_row(ui: &mut egui::Ui, state: &AppState, result: &StringWithXre
                 }
             });
     }
-    
+
     ui.end_row();
 }

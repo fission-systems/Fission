@@ -2,8 +2,8 @@
 //!
 //! These messages are sent from background threads to the main UI thread.
 
-use crate::analysis::loader::LoadedBinary;
 use crate::debug::types::DebugEvent;
+use fission_loader::loader::LoadedBinary;
 use std::sync::Arc;
 
 /// Message types for async operations between threads and UI
@@ -40,6 +40,9 @@ pub enum AsyncMessage {
         path: String,
         binaries: Vec<Arc<LoadedBinary>>,
     },
+
+    /// Decompiler context initialization completed
+    DecompilerContextLoaded,
 
     /// CFG analysis request
     CfgAnalysisRequest { address: u64 },

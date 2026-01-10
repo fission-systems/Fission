@@ -3,8 +3,8 @@
 use colored::Colorize;
 use std::sync::Arc;
 
-use crate::analysis::loader::LoadedBinary;
 use crate::ui::cli::handlers::CliState;
+use fission_loader::loader::LoadedBinary;
 
 pub fn cmd_load(state: &mut CliState, path: &str) {
     println!("{} Loading '{}'...", "[*]".blue(), path);
