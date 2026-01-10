@@ -71,6 +71,35 @@ extern "C" DECOMP_API void decomp_clear_global_symbols(DecompContext* ctx) {
     clear_global_symbols(ctx);
 }
 
+// Batch symbol registration for reduced FFI overhead
+extern "C" DECOMP_API void decomp_add_symbols_batch(
+    DecompContext* ctx,
+    const uint64_t* addrs,
+    const char* const* names,
+    size_t count
+) {
+    if (!ctx || !addrs || !names) return;
+    for (size_t i = 0; i < count; ++i) {
+        if (names[i]) {
+            add_symbol(ctx, addrs[i], names[i]);
+        }
+    }
+}
+
+extern "C" DECOMP_API void decomp_add_global_symbols_batch(
+    DecompContext* ctx,
+    const uint64_t* addrs,
+    const char* const* names,
+    size_t count
+) {
+    if (!ctx || !addrs || !names) return;
+    for (size_t i = 0; i < count; ++i) {
+        if (names[i]) {
+            add_global_symbol(ctx, addrs[i], names[i]);
+        }
+    }
+}
+
 extern "C" DECOMP_API void decomp_set_symbol_provider(
     DecompContext* ctx,
     const DecompSymbolProvider* provider
