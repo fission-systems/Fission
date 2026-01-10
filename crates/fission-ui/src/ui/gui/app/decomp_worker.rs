@@ -241,30 +241,57 @@ fn handle_binary_load_native(
     native_decomp: &Arc<Mutex<Option<fission_ffi::DecompilerNative>>>,
     result_tx: &Sender<AsyncMessage>,
 ) {
+    // Step 1: Resolve SLA directory path
+    let sla_dir = resolve_sla_directory();
+
+    let sla_dir = match sla_dir {
+        Ok(dir) => dir,
+        Err(e) => {
+            crate::core::logging::error(&format!("SLA directory error: {}", e));
+            let _ = result_tx.send(AsyncMessage::DecompilerContextError {
+                error: e.clone(),
+                suggestion: Some(
+                    "Set FISSION_SLA_DIR environment variable to the Ghidra languages folder, \
+                     or ensure ghidra_decompiler/languages exists in the workspace"
+                        .to_string(),
+                ),
+            });
+            return;
+        }
+    };
+
+    crate::core::logging::info(&format!("[decomp-worker] Using SLA directory: {}", sla_dir));
+
+    // Step 2: Initialize native decompiler
     let mut decomp_guard = match native_decomp.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
 
-    // Initialize native decompiler
-    let sla_dir = std::env::current_dir()
-        .unwrap()
-        .join("ghidra_decompiler")
-        .join("languages")
-        .to_string_lossy()
-        .into_owned();
-
     match fission_ffi::DecompilerNative::new(&sla_dir) {
         Ok(decomp) => {
             *decomp_guard = Some(decomp);
+            crate::core::logging::info(
+                "[decomp-worker] Native decompiler initialized successfully",
+            );
         }
         Err(e) => {
-            crate::core::logging::error(&format!("Failed to initialize native decompiler: {}", e));
+            let error_msg = format!("Failed to initialize native decompiler: {}", e);
+            crate::core::logging::error(&error_msg);
+            let _ = result_tx.send(AsyncMessage::DecompilerContextError {
+                error: error_msg,
+                suggestion: Some(
+                    "Ensure libdecomp.dylib is built and accessible. \
+                     Check ghidra_decompiler/build/libdecomp.dylib exists."
+                        .to_string(),
+                ),
+            });
+            return;
         }
     }
     drop(decomp_guard);
 
-    // Load binary
+    // Step 3: Load binary into decompiler context
     let mut decomp_guard = match native_decomp.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
@@ -272,15 +299,30 @@ fn handle_binary_load_native(
 
     if let Some(ref mut decomp) = *decomp_guard {
         let is_64bit = detect_is_64bit(&request.bytes);
+
+        crate::core::logging::info(&format!(
+            "[decomp-worker] Loading binary: {} bytes, base=0x{:x}, 64bit={}",
+            request.bytes.len(),
+            request.image_base,
+            is_64bit
+        ));
+
         if let Err(e) = decomp.load_binary(&request.bytes, request.image_base, is_64bit) {
-            crate::core::logging::error(&format!(
-                "Failed to load binary into native decompiler: {}",
-                e
-            ));
+            let error_msg = format!("Failed to load binary: {}", e);
+            crate::core::logging::error(&error_msg);
+            let _ = result_tx.send(AsyncMessage::DecompilerContextError {
+                error: error_msg,
+                suggestion: Some(
+                    "The binary format may be unsupported. \
+                     Try a different file or check if it's a valid PE/ELF/Mach-O."
+                        .to_string(),
+                ),
+            });
             return;
         }
 
-        // Register sections
+        // Step 4: Register sections
+        let section_count = request.sections.len();
         for section in &request.sections {
             let _ = decomp.add_memory_block(
                 &section.name,
@@ -292,23 +334,84 @@ fn handle_binary_load_native(
                 section.is_writable,
             );
         }
+        crate::core::logging::debug(&format!(
+            "[decomp-worker] Registered {} sections",
+            section_count
+        ));
 
+        // Step 5: Add symbols
+        let iat_count = request.iat_symbols.len();
+        let global_count = request.global_symbols.len();
         decomp.add_symbols(&request.iat_symbols);
         decomp.add_global_symbols(&request.global_symbols);
+        crate::core::logging::debug(&format!(
+            "[decomp-worker] Added {} IAT + {} global symbols",
+            iat_count, global_count
+        ));
 
-        // Add known functions
+        // Step 6: Add function entries
+        let func_count = request.functions.len();
         for func in &request.functions {
             let _ = decomp.add_function(func.address, Some(&func.name));
         }
+        crate::core::logging::debug(&format!(
+            "[decomp-worker] Added {} function entries",
+            func_count
+        ));
 
+        // Step 7: Set up symbol provider for on-demand lookups
         decomp.set_symbol_provider(
             &request.functions,
             &request.global_symbols,
             &request.sections,
         );
+
+        crate::core::logging::info("[decomp-worker] Binary loaded successfully, context ready");
     }
 
     let _ = result_tx.send(AsyncMessage::DecompilerContextLoaded);
+}
+
+/// Resolve the SLA (Sleigh Language Architecture) directory path.
+///
+/// Search order:
+/// 1. FISSION_SLA_DIR environment variable
+/// 2. ./ghidra_decompiler/languages (relative to current dir)
+/// 3. ../ghidra_decompiler/languages (workspace root)
+#[cfg(feature = "native_decomp")]
+fn resolve_sla_directory() -> Result<String, String> {
+    // Priority 1: Environment variable
+    if let Ok(env_path) = std::env::var("FISSION_SLA_DIR") {
+        let path = std::path::Path::new(&env_path);
+        if path.exists() && path.is_dir() {
+            return Ok(env_path);
+        } else {
+            return Err(format!(
+                "FISSION_SLA_DIR is set but path does not exist: {}",
+                env_path
+            ));
+        }
+    }
+
+    // Priority 2: Relative to current directory
+    if let Ok(cwd) = std::env::current_dir() {
+        let local_path = cwd.join("ghidra_decompiler").join("languages");
+        if local_path.exists() && local_path.is_dir() {
+            return Ok(local_path.to_string_lossy().into_owned());
+        }
+
+        // Priority 3: Workspace root (one level up)
+        if let Some(parent) = cwd.parent() {
+            let parent_path = parent.join("ghidra_decompiler").join("languages");
+            if parent_path.exists() && parent_path.is_dir() {
+                return Ok(parent_path.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    Err("SLA directory not found. Expected at: \
+         ./ghidra_decompiler/languages or set FISSION_SLA_DIR environment variable"
+        .to_string())
 }
 
 #[cfg(feature = "native_decomp")]

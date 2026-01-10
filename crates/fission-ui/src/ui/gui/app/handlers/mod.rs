@@ -124,6 +124,25 @@ pub fn process_messages(
                     address, error
                 ));
             }
+            AsyncMessage::DecompilerContextError { error, suggestion } => {
+                state.log(format!("[!] Decompiler Error: {}", error));
+                if let Some(fix) = suggestion {
+                    state.log(format!("[?] Suggestion: {}", fix));
+                }
+                // Mark decompiler as not loaded so user can retry
+                state.analysis.domain.decompiler_context_loaded = false;
+            }
+            AsyncMessage::WorkerHeartbeat {
+                worker_id,
+                is_alive,
+            } => {
+                if !is_alive {
+                    state.log(format!(
+                        "[!] Decompiler worker {} is not responding",
+                        worker_id
+                    ));
+                }
+            }
         }
     }
 
