@@ -21,7 +21,7 @@ pub enum FunctionAction {
 ///
 /// Returns the action if any.
 #[allow(dead_code)]
-pub fn render(ctx: &egui::Context, state: &AppState) -> Option<FunctionAction> {
+pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<FunctionAction> {
     let mut action: Option<FunctionAction> = None;
 
     egui::SidePanel::left("functions_panel")
@@ -37,10 +37,11 @@ pub fn render(ctx: &egui::Context, state: &AppState) -> Option<FunctionAction> {
 }
 
 /// Render functions list inside an existing UI.
-pub fn render_inside(ui: &mut egui::Ui, state: &AppState) -> Option<FunctionAction> {
+pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<FunctionAction> {
     let mut action: Option<FunctionAction> = None;
 
     ui.vertical(|ui| {
+        // Header with count
         ui.horizontal(|ui| {
             ui.heading(egui::RichText::new("Functions").color(catppuccin::LAVENDER));
             if let Some(ref binary) = state.analysis.domain.loaded_binary {
@@ -52,7 +53,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) -> Option<FunctionActi
 
                 // Analyze button for discovering internal functions
                 if ui
-                    .small_button("🔍 Analyze")
+                    .small_button("🔍")
                     .on_hover_text("Discover internal functions from CALL instructions")
                     .clicked()
                 {
@@ -60,12 +61,106 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) -> Option<FunctionActi
                 }
             }
         });
+
+        // Search bar
+        ui.horizontal(|ui| {
+            ui.label("🔎");
+            let filter = &mut state.viewmodels.functions.filter;
+            ui.add(
+                egui::TextEdit::singleline(filter)
+                    .hint_text("Filter...")
+                    .desired_width(ui.available_width() - 10.0),
+            );
+        });
+
+        // Category filter toggles
+        ui.horizontal(|ui| {
+            let vm = &mut state.viewmodels.functions;
+
+            // Import toggle
+            let import_text = if vm.show_imports {
+                egui::RichText::new("⬇ Imp").color(catppuccin::PEACH)
+            } else {
+                egui::RichText::new("⬇ Imp").color(catppuccin::SURFACE2)
+            };
+            if ui.selectable_label(vm.show_imports, import_text).clicked() {
+                vm.show_imports = !vm.show_imports;
+            }
+
+            // Export toggle
+            let export_text = if vm.show_exports {
+                egui::RichText::new("⬆ Exp").color(catppuccin::GREEN)
+            } else {
+                egui::RichText::new("⬆ Exp").color(catppuccin::SURFACE2)
+            };
+            if ui.selectable_label(vm.show_exports, export_text).clicked() {
+                vm.show_exports = !vm.show_exports;
+            }
+
+            // Internal toggle
+            let internal_text = if vm.show_internals {
+                egui::RichText::new("◆ Int").color(catppuccin::BLUE)
+            } else {
+                egui::RichText::new("◆ Int").color(catppuccin::SURFACE2)
+            };
+            if ui
+                .selectable_label(vm.show_internals, internal_text)
+                .clicked()
+            {
+                vm.show_internals = !vm.show_internals;
+            }
+        });
+
         ui.separator();
 
         if let Some(ref binary) = state.analysis.domain.loaded_binary {
+            // Apply filters to get visible functions
+            let filter_lower = state.viewmodels.functions.filter.to_lowercase();
+            let show_imports = state.viewmodels.functions.show_imports;
+            let show_exports = state.viewmodels.functions.show_exports;
+            let show_internals = state.viewmodels.functions.show_internals;
+
+            let filtered_functions: Vec<&FunctionInfo> = binary
+                .functions
+                .iter()
+                .filter(|func| {
+                    // Category filter
+                    let category_match = if func.is_import {
+                        show_imports
+                    } else if func.is_export {
+                        show_exports
+                    } else {
+                        show_internals
+                    };
+
+                    // Name filter (case-insensitive)
+                    let name_match = if filter_lower.is_empty() {
+                        true
+                    } else {
+                        func.name.to_lowercase().contains(&filter_lower)
+                            || format!("{:x}", func.address).contains(&filter_lower)
+                    };
+
+                    category_match && name_match
+                })
+                .collect();
+
             let available_height = ui.available_height();
             let row_height = 22.0;
-            let total_rows = binary.functions.len();
+            let total_rows = filtered_functions.len();
+
+            // Show filtered count if different from total
+            if total_rows != binary.functions.len() {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Showing {} of {}",
+                        total_rows,
+                        binary.functions.len()
+                    ))
+                    .color(catppuccin::SUBTEXT0)
+                    .small(),
+                );
+            }
 
             // Use TableBuilder for virtual scrolling
             TableBuilder::new(ui)
@@ -76,7 +171,7 @@ pub fn render_inside(ui: &mut egui::Ui, state: &AppState) -> Option<FunctionActi
                 .max_scroll_height(available_height)
                 .body(|body| {
                     body.rows(row_height, total_rows, |mut row| {
-                        let func = &binary.functions[row.index()];
+                        let func = filtered_functions[row.index()];
 
                         row.col(|ui| {
                             // Determine icon and color based on function type
