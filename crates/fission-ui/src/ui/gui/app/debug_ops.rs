@@ -178,13 +178,30 @@ pub fn handle_debug_action(
 
     match action {
         DebugAction::ReverseStep => {
-            state.debug.domain.timeline.rewind(1);
-            state.log("[*] TTD: Reverse Step");
+            if let crate::debug::ttd::timeline::SeekResult::Success(snap) =
+                state.debug.domain.timeline.rewind(1)
+            {
+                state.debug.domain.debug_state.registers = Some(snap.registers);
+                state.log("[*] TTD: Reverse Step");
+            }
             return;
         }
         DebugAction::ReverseContinue => {
-            state.debug.domain.timeline.seek_start();
-            state.log("[*] TTD: Reverse Continue (to start)");
+            if let crate::debug::ttd::timeline::SeekResult::Success(snap) =
+                state.debug.domain.timeline.seek_start()
+            {
+                state.debug.domain.debug_state.registers = Some(snap.registers);
+                state.log("[*] TTD: Reverse Continue (to start)");
+            }
+            return;
+        }
+        DebugAction::Seek(pos) => {
+            if let crate::debug::ttd::timeline::SeekResult::Success(snap) =
+                state.debug.domain.timeline.seek_to(pos)
+            {
+                state.debug.domain.debug_state.registers = Some(snap.registers);
+                state.log(format!("[*] TTD: Seek to step {}", pos));
+            }
             return;
         }
         _ => {}
@@ -210,13 +227,30 @@ pub fn handle_debug_action(
 pub fn handle_debug_action(state: &mut AppState, action: DebugAction) {
     match action {
         DebugAction::ReverseStep => {
-            state.debug.domain.timeline.rewind(1);
-            state.log("[*] TTD: Reverse Step");
+            if let crate::debug::ttd::timeline::SeekResult::Success(snap) =
+                state.debug.domain.timeline.rewind(1)
+            {
+                state.debug.domain.debug_state.registers = Some(snap.registers);
+                state.log("[*] TTD: Reverse Step");
+            }
             return;
         }
         DebugAction::ReverseContinue => {
-            state.debug.domain.timeline.seek_start();
-            state.log("[*] TTD: Reverse Continue (to start)");
+            if let crate::debug::ttd::timeline::SeekResult::Success(snap) =
+                state.debug.domain.timeline.seek_start()
+            {
+                state.debug.domain.debug_state.registers = Some(snap.registers);
+                state.log("[*] TTD: Reverse Continue (to start)");
+            }
+            return;
+        }
+        DebugAction::Seek(pos) => {
+            if let crate::debug::ttd::timeline::SeekResult::Success(snap) =
+                state.debug.domain.timeline.seek_to(pos)
+            {
+                state.debug.domain.debug_state.registers = Some(snap.registers);
+                state.log(format!("[*] TTD: Seek to step {}", pos));
+            }
             return;
         }
         _ => {}

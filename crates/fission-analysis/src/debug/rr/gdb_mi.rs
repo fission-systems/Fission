@@ -216,20 +216,34 @@ impl GdbMiParser {
             let content = self.unescape_string(content);
             (MiValue::Const(content), &s[end + 1..])
         } else if s.starts_with('{') {
-            // Tuple
-            // For now, simplified - just return empty tuple
-            if let Some(end) = self.find_matching_brace(s, '{', '}') {
-                (MiValue::Tuple(HashMap::new()), &s[end + 1..])
-            } else {
-                (MiValue::Const(String::new()), s)
-            }
+            // Tuple: {name="value",...}
+            let end = self.find_matching_brace(s, '{', '}').unwrap_or(s.len() - 1);
+            let content = &s[1..end];
+            let results = self.parse_results(content);
+            (MiValue::Tuple(results), &s[end + 1..])
         } else if s.starts_with('[') {
-            // List
-            if let Some(end) = self.find_matching_brace(s, '[', ']') {
-                (MiValue::List(Vec::new()), &s[end + 1..])
-            } else {
-                (MiValue::Const(String::new()), s)
+            // List: [value1,value2,...] or [name="value",...]
+            let end = self.find_matching_brace(s, '[', ']').unwrap_or(s.len() - 1);
+            let content = &s[1..end].trim();
+
+            let mut list = Vec::new();
+            if !content.is_empty() {
+                // Lists can contain values OR result pairs
+                if content.contains('=') && !content.starts_with('{') && !content.starts_with('"') {
+                    // It's a list of result pairs, treat as a list containing one tuple
+                    let results = self.parse_results(content);
+                    list.push(MiValue::Tuple(results));
+                } else {
+                    // List of values
+                    let mut rest = *content;
+                    while !rest.is_empty() {
+                        let (val, rem) = self.parse_value(rest);
+                        list.push(val);
+                        rest = rem.trim_start_matches(',').trim();
+                    }
+                }
             }
+            (MiValue::List(list), &s[end + 1..])
         } else {
             // Raw identifier or number
             let end = s.find([',', '}', ']']).unwrap_or(s.len());

@@ -1,13 +1,12 @@
-//! Timeline Panel - Time Travel Debugging visualization.
-//!
-//! Displays a timeline of recorded execution and provides navigation controls.
-
 use crate::debug::ttd::Timeline;
+use crate::ui::gui::core::state::DebugAction;
 use crate::ui::gui::theme::catppuccin;
 use eframe::egui;
 
 /// Render the timeline panel for Time Travel Debugging
-pub fn render(ui: &mut egui::Ui, timeline: &mut Timeline) {
+pub fn render(ui: &mut egui::Ui, timeline: &mut Timeline) -> Option<DebugAction> {
+    let mut action = None;
+
     ui.horizontal(|ui| {
         ui.heading(egui::RichText::new("⏱ Time Travel").color(catppuccin::MAUVE));
 
@@ -67,10 +66,12 @@ pub fn render(ui: &mut egui::Ui, timeline: &mut Timeline) {
     if timeline.snapshot_count() == 0 {
         render_empty(ui, timeline.is_recording());
     } else if timeline.is_replay_mode() {
-        render_replay_controls(ui, timeline);
+        action = render_replay_controls(ui, timeline);
     } else {
         render_recording_info(ui, timeline);
     }
+
+    action
 }
 
 /// Render empty state
@@ -122,7 +123,8 @@ fn render_recording_info(ui: &mut egui::Ui, timeline: &Timeline) {
 }
 
 /// Render replay mode controls
-fn render_replay_controls(ui: &mut egui::Ui, timeline: &mut Timeline) {
+fn render_replay_controls(ui: &mut egui::Ui, timeline: &mut Timeline) -> Option<DebugAction> {
+    let mut action = None;
     let (min_step, max_step) = timeline.step_range().unwrap_or((0, 0));
     let current = timeline.current_position().unwrap_or(0);
 
@@ -130,12 +132,21 @@ fn render_replay_controls(ui: &mut egui::Ui, timeline: &mut Timeline) {
     ui.horizontal(|ui| {
         // Seek to start
         if ui.button("⏮").on_hover_text("Go to start").clicked() {
-            timeline.seek_start();
+            action = Some(DebugAction::Seek(min_step));
+        }
+
+        // Reverse Continue
+        if ui.button("⟪").on_hover_text("Reverse Continue").clicked() {
+            action = Some(DebugAction::ReverseContinue);
         }
 
         // Rewind
-        if ui.button("⏪").on_hover_text("Rewind 1 step").clicked() {
-            timeline.rewind(1);
+        if ui
+            .button("⏪")
+            .on_hover_text("Rewind 1 step (Reverse Step)")
+            .clicked()
+        {
+            action = Some(DebugAction::ReverseStep);
         }
 
         // Slider
@@ -145,17 +156,22 @@ fn render_replay_controls(ui: &mut egui::Ui, timeline: &mut Timeline) {
         );
 
         if response.changed() {
-            timeline.seek_to(slider_pos as u64);
+            action = Some(DebugAction::Seek(slider_pos as u64));
         }
 
         // Forward
         if ui.button("⏩").on_hover_text("Forward 1 step").clicked() {
-            timeline.forward(1);
+            action = Some(DebugAction::Step);
+        }
+
+        // Forward Continue
+        if ui.button("⟫").on_hover_text("Continue").clicked() {
+            action = Some(DebugAction::Continue);
         }
 
         // Seek to end
         if ui.button("⏭").on_hover_text("Go to end").clicked() {
-            timeline.seek_end();
+            action = Some(DebugAction::Seek(max_step));
         }
 
         // Position indicator
@@ -221,4 +237,6 @@ fn render_replay_controls(ui: &mut egui::Ui, timeline: &mut Timeline) {
                 });
         }
     }
+
+    action
 }
