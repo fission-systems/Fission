@@ -71,3 +71,76 @@ pub trait Debugger: Send {
     /// Fetch CPU registers for a thread
     fn fetch_registers(&mut self, thread_id: u32) -> Result<RegisterState, String>;
 }
+
+// ============================================================================
+// Time Travel Debugging Trait
+// ============================================================================
+
+use super::ttd::ExecutionSnapshot;
+
+/// Time-travel debugging backend trait
+///
+/// This trait provides a unified interface for all time-travel debugging
+/// backends including:
+/// - **RR (Record and Replay)**: Linux-only, uses GDB/MI protocol
+/// - **TTD (Internal)**: Cross-platform, snapshot-based
+/// - **Windows TTD**: Windows-only (future integration with WinDbg)
+///
+/// # Example
+///
+/// ```ignore
+/// use crate::debug::TimeTravelDebugger;
+///
+/// // Record execution
+/// debugger.start_recording()?;
+/// // ... run program ...
+/// debugger.stop_recording()?;
+///
+/// // Navigate timeline
+/// debugger.seek_to(100)?;          // Go to step 100
+/// debugger.reverse_step()?;        // Step backwards
+/// debugger.reverse_continue()?;    // Run backwards to breakpoint
+/// ```
+pub trait TimeTravelDebugger: Send {
+    /// Start recording execution
+    fn start_recording(&mut self) -> Result<(), String>;
+
+    /// Stop recording execution
+    fn stop_recording(&mut self) -> Result<(), String>;
+
+    /// Check if currently recording
+    fn is_recording(&self) -> bool;
+
+    /// Check if in replay/navigation mode
+    fn is_replay_mode(&self) -> bool;
+
+    /// Seek to a specific step/position in the timeline
+    fn seek_to(&mut self, position: u64) -> Result<ExecutionSnapshot, String>;
+
+    /// Step backwards one instruction
+    fn reverse_step(&mut self) -> Result<ExecutionSnapshot, String>;
+
+    /// Continue backwards until next breakpoint
+    fn reverse_continue(&mut self) -> Result<ExecutionSnapshot, String>;
+
+    /// Step forwards one instruction (in replay mode)
+    fn forward_step(&mut self) -> Result<ExecutionSnapshot, String>;
+
+    /// Continue forwards until next breakpoint (in replay mode)
+    fn forward_continue(&mut self) -> Result<ExecutionSnapshot, String>;
+
+    /// Get current position in timeline
+    fn current_position(&self) -> Option<u64>;
+
+    /// Get current execution snapshot
+    fn current_snapshot(&self) -> Option<&ExecutionSnapshot>;
+
+    /// Get timeline range (min_step, max_step)
+    fn timeline_range(&self) -> Option<(u64, u64)>;
+
+    /// Get total number of recorded steps
+    fn step_count(&self) -> usize;
+
+    /// Clear all recorded data
+    fn clear_timeline(&mut self);
+}
