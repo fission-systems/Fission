@@ -308,6 +308,7 @@ pub enum DebugAction {
     ImportRec,
     ReverseStep,
     ReverseContinue,
+    Seek(u64),
 }
 
 /// Breakpoint actions requested from UI

@@ -14,14 +14,15 @@ Implemented a unified time-travel debugging (TTD) interface supporting both inte
 
 - **Unified API**: Created `TimeTravelDebugger` trait in `fission-analysis` to abstract different TTD backends.
 - **RR Backend Implementation**:
-  - Full GDB/MI protocol parser for communication with `rr replay`.
-  - Support for `rr record` and `rr replay` from the CLI.
-  - Interactive navigation: reverse-step, reverse-continue, and seeking.
+  - **Structured GDB/MI Parsing**: Implemented recursive parsing for nested Tuple and List values, allowing accurate extraction of register states and memory deltas.
+  - **State Synchronization**: Added real-time CPU register synchronization. The UI now updates registers automatically after every TTD action (step, continue, seek).
+  - **Process Reliability**: Refactored `RRDebugger` communication logic with a persistent `BufReader` to resolve ownership issues and improve GDB/MI message handling.
 - **GUI Timeline Enhancements**:
-  - Refactored `Timeline` component to be backend-agnostic.
+  - **Advanced Controls**: Added "Reverse Continue" (⟪) and slider-based "Seek" functionality to the timeline panel.
+  - **Refactored Architecture**: The `Timeline` component is now fully backend-agnostic and returns `DebugAction` for centralized execution.
   - Added global keyboard shortcuts for reverse execution:
     - `Shift + F7`: Reverse Single Step
-    - `Shift + F9`: Reverse Continue (Seek to Start)
+    - `Shift + F9`: Reverse Continue
 - **Linux Support**: RR integration enabled on Linux, providing deterministic replay and time-travel capabilities.
 
 **🔧 native_decomp Stability & macOS Fixes**

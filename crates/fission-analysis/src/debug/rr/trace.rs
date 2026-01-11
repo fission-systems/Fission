@@ -44,7 +44,6 @@ pub struct TraceInfo {
 /// # Linux Only
 ///
 /// RR only works on Linux. On other platforms, this will return errors.
-#[derive(Debug)]
 pub struct RRDebugger {
     /// Path to the trace directory
     trace_dir: Option<PathBuf>,
@@ -62,6 +61,19 @@ pub struct RRDebugger {
     last_registers: RegisterState,
     /// Command token counter
     token_counter: u32,
+    /// Persistent reader for GDB/MI stdout
+    gdb_reader: Option<BufReader<std::process::ChildStdout>>,
+}
+
+impl std::fmt::Debug for RRDebugger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RRDebugger")
+            .field("trace_dir", &self.trace_dir)
+            .field("state", &self.state)
+            .field("current_position", &self.current_position)
+            .field("max_position", &self.max_position)
+            .finish()
+    }
 }
 
 impl RRDebugger {
@@ -76,6 +88,7 @@ impl RRDebugger {
             max_position: 0,
             last_registers: RegisterState::default(),
             token_counter: 0,
+            gdb_reader: None,
         }
     }
 
@@ -181,12 +194,12 @@ impl RRDebugger {
             .spawn()
             .map_err(|e| format!("Failed to start rr replay: {}", e))?;
 
-        // Wait for initial prompt
+        // Send initial setup commands
+        self.gdb_reader = child.stdout.take().map(BufReader::new);
         self.gdb_process = Some(child);
         self.trace_dir = Some(trace_path);
         self.state = RRState::Replaying;
 
-        // Send initial setup commands
         self.send_command("set confirm off")?;
         self.send_command("set pagination off")?;
 
@@ -218,46 +231,113 @@ impl RRDebugger {
         self.read_until_result()
     }
 
-    /// Read responses until we get a result record
+    /// Read responses until we get a result record or a stop event
     fn read_until_result(&mut self) -> Result<Vec<MiResponse>, String> {
-        let gdb = self.gdb_process.as_mut().ok_or("No GDB process")?;
-
-        let stdout = gdb.stdout.as_mut().ok_or("No stdout")?;
-
-        let mut reader = BufReader::new(stdout);
         let mut responses = Vec::new();
+        let mut done = false;
 
-        loop {
+        while !done {
             let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => break, // EOF
-                Ok(_) => {
-                    self.mi_parser.feed(&line);
-                    let parsed = self.mi_parser.parse();
+            if let Some(reader) = self.gdb_reader.as_mut() {
+                match reader.read_line(&mut line) {
+                    Ok(0) => break, // EOF
+                    Ok(_) => {
+                        self.mi_parser.feed(&line);
+                        let parsed = self.mi_parser.parse();
 
-                    for resp in parsed {
-                        let is_result = matches!(&resp, MiResponse::Result { .. });
-                        responses.push(resp);
+                        for resp in parsed {
+                            let is_result = matches!(&resp, MiResponse::Result { .. });
+                            let is_stop = matches!(&resp, MiResponse::ExecAsync { class, .. } if class == "stopped");
 
-                        if is_result {
-                            return Ok(responses);
+                            self.process_response_state(&resp);
+                            responses.push(resp);
+
+                            if is_result || is_stop {
+                                done = true;
+                                break;
+                            }
                         }
                     }
+                    Err(e) => return Err(format!("Read error: {}", e)),
                 }
-                Err(e) => return Err(format!("Read error: {}", e)),
+            } else {
+                return Err("No GDB reader".to_string());
             }
         }
 
         Ok(responses)
     }
 
+    fn process_response_state(&mut self, resp: &MiResponse) {
+        match resp {
+            MiResponse::Result { results, .. } | MiResponse::ExecAsync { results, .. } => {
+                // Update RIP/position from 'frame' or 'when' if present
+                if let Some(MiValue::Const(when)) = results.get("when") {
+                    if let Ok(pos) = when.parse::<u64>() {
+                        self.current_position = pos;
+                    }
+                }
+
+                // If it's a register list response
+                if results.contains_key("register-values") {
+                    self.last_registers = self.parse_registers(results);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Parse register state from GDB/MI response
     fn parse_registers(
         &self,
-        _results: &std::collections::HashMap<String, MiValue>,
+        results: &std::collections::HashMap<String, MiValue>,
     ) -> RegisterState {
-        // TODO: Parse actual register values from MI response
-        RegisterState::default()
+        let mut state = RegisterState::default();
+        if let Some(MiValue::List(regs)) = results.get("register-values") {
+            for reg in regs {
+                if let MiValue::Tuple(map) = reg {
+                    let num = map.get("number").and_then(|v| {
+                        if let MiValue::Const(s) = v {
+                            s.parse::<u32>().ok()
+                        } else {
+                            None
+                        }
+                    });
+                    let val = map.get("value").and_then(|v| {
+                        if let MiValue::Const(s) = v {
+                            u64::from_str_radix(s.trim_start_matches("0x"), 16).ok()
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let (Some(n), Some(v)) = (num, val) {
+                        match n {
+                            0 => state.rax = v,
+                            1 => state.rbx = v,
+                            2 => state.rcx = v,
+                            3 => state.rdx = v,
+                            4 => state.rsi = v,
+                            5 => state.rdi = v,
+                            6 => state.rbp = v,
+                            7 => state.rsp = v,
+                            8 => state.r8 = v,
+                            9 => state.r9 = v,
+                            10 => state.r10 = v,
+                            11 => state.r11 = v,
+                            12 => state.r12 = v,
+                            13 => state.r13 = v,
+                            14 => state.r14 = v,
+                            15 => state.r15 = v,
+                            16 => state.rip = v,
+                            17 => state.rflags = v,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        state
     }
 
     /// Get current execution state
@@ -267,6 +347,7 @@ impl RRDebugger {
 
     /// Stop replay and disconnect
     pub fn disconnect(&mut self) {
+        self.gdb_reader = None;
         if let Some(mut process) = self.gdb_process.take() {
             let _ = process.kill();
             let _ = process.wait();
@@ -311,8 +392,12 @@ impl TimeTravelDebugger for RRDebugger {
         }
 
         // Use rr's "when" command to get current event, and "run <N>" to seek
+        // Note: 'run N' in rr-gdb is a custom command to jump to event N
         let cmd = format!("interpreter-exec mi \"run {}\"", position);
         let _responses = self.send_command(&cmd)?;
+
+        // Fetch registers after seek
+        let _reg_resp = self.send_command("-data-list-register-values x")?;
 
         self.current_position = position;
 
@@ -329,9 +414,8 @@ impl TimeTravelDebugger for RRDebugger {
         }
 
         let _responses = self.send_command("reverse-stepi")?;
-        self.current_position = self.current_position.saturating_sub(1);
 
-        // Fetch registers after step
+        // Fetch registers after step to ensure we have current state
         let _reg_resp = self.send_command("-data-list-register-values x")?;
 
         Ok(ExecutionSnapshot::new(
@@ -348,7 +432,9 @@ impl TimeTravelDebugger for RRDebugger {
 
         let _responses = self.send_command("reverse-continue")?;
 
-        // Position will be updated from async response
+        // Fetch registers after continue stops
+        let _reg_resp = self.send_command("-data-list-register-values x")?;
+
         Ok(ExecutionSnapshot::new(
             self.current_position,
             self.last_registers.clone(),
@@ -362,7 +448,9 @@ impl TimeTravelDebugger for RRDebugger {
         }
 
         let _responses = self.send_command("-exec-step-instruction")?;
-        self.current_position += 1;
+
+        // Fetch registers after step
+        let _reg_resp = self.send_command("-data-list-register-values x")?;
 
         Ok(ExecutionSnapshot::new(
             self.current_position,
@@ -377,6 +465,9 @@ impl TimeTravelDebugger for RRDebugger {
         }
 
         let _responses = self.send_command("-exec-continue")?;
+
+        // Fetch registers after continue
+        let _reg_resp = self.send_command("-data-list-register-values x")?;
 
         Ok(ExecutionSnapshot::new(
             self.current_position,
