@@ -194,8 +194,8 @@ pub struct CoffSymbol {
 
 #[derive(Debug, Clone)]
 pub enum SymbolName {
-    ShortName(String),      // Name stored in 8 bytes
-    LongName(u32),          // Offset into string table
+    ShortName(String), // Name stored in 8 bytes
+    LongName(u32),     // Offset into string table
 }
 
 // Parse symbol name (8 bytes): if first 4 bytes are 0, next 4 bytes are offset into string table
@@ -206,7 +206,7 @@ fn parse_symbol_name<R: binrw::io::Read + binrw::io::Seek>(
 ) -> binrw::BinResult<SymbolName> {
     let mut bytes = [0u8; 8];
     reader.read_exact(&mut bytes)?;
-    
+
     // Check if first 4 bytes are zero
     if bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 0 {
         // Long name: offset into string table
@@ -224,17 +224,17 @@ fn parse_symbol_name<R: binrw::io::Read + binrw::io::Seek>(
 #[allow(dead_code)]
 pub mod storage_class {
     pub const C_NULL: u8 = 0;
-    pub const C_EXT: u8 = 2;        // External symbol
-    pub const C_STAT: u8 = 3;       // Static symbol
-    pub const C_LABEL: u8 = 6;      // Label
-    pub const C_FCN: u8 = 101;      // Function (.bf, .ef, .lf)
+    pub const C_EXT: u8 = 2; // External symbol
+    pub const C_STAT: u8 = 3; // Static symbol
+    pub const C_LABEL: u8 = 6; // Label
+    pub const C_FCN: u8 = 101; // Function (.bf, .ef, .lf)
 }
 
 // COFF Symbol Types
 #[allow(dead_code)]
 pub mod symbol_type {
-    pub const DT_NON: u16 = 0;      // No derived type
-    pub const DT_PTR: u16 = 1;      // Pointer
-    pub const DT_FCN: u16 = 2;      // Function
-    pub const DT_ARY: u16 = 3;      // Array
+    pub const DT_NON: u16 = 0; // No derived type
+    pub const DT_PTR: u16 = 1; // Pointer
+    pub const DT_FCN: u16 = 2; // Function
+    pub const DT_ARY: u16 = 3; // Array
 }

@@ -17,12 +17,12 @@ mod visualization;
 
 pub use basic_block::{BasicBlock, BlockEdge, EdgeKind};
 pub use dominator::DominatorTree;
-pub use graph::{ControlFlowGraph, CfgBuilder};
+pub use graph::{CfgBuilder, ControlFlowGraph};
 pub use loops::{Loop, LoopAnalyzer, LoopKind};
 pub use metrics::{CfgMetrics, ComplexityAnalyzer};
 pub use visualization::{CfgVisualizer, DotOptions};
 
-use fission_pcode::{PcodeFunction, PcodeBasicBlock, PcodeOp, PcodeOpcode};
+use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode};
 
 /// Error types for CFG analysis
 #[derive(Debug, Clone)]
@@ -113,8 +113,14 @@ impl CfgAnalysis {
         report.push_str(&format!("\n"));
 
         report.push_str(&format!("=== Metrics ===\n"));
-        report.push_str(&format!("Cyclomatic Complexity: {}\n", self.metrics.cyclomatic_complexity));
-        report.push_str(&format!("Max Nesting Depth: {}\n", self.metrics.max_nesting_depth));
+        report.push_str(&format!(
+            "Cyclomatic Complexity: {}\n",
+            self.metrics.cyclomatic_complexity
+        ));
+        report.push_str(&format!(
+            "Max Nesting Depth: {}\n",
+            self.metrics.max_nesting_depth
+        ));
         report.push_str(&format!("Number of Loops: {}\n", self.loops.len()));
 
         if !self.loops.is_empty() {

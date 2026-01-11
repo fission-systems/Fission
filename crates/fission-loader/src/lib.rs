@@ -17,9 +17,9 @@ pub mod loader;
 pub mod prelude;
 
 // Re-exports
-pub use detector::{detect, Confidence, Detection, DetectionResult, DetectionType};
+pub use detector::{Confidence, Detection, DetectionResult, DetectionType, detect};
 pub use dotnet::{
-    disassemble_method_rva, parse_dotnet_metadata, DotNetError, DotNetMetadata, DotNetMethod,
-    DotNetType, ILInstruction, IlDisassembler,
+    DotNetError, DotNetMetadata, DotNetMethod, DotNetType, ILInstruction, IlDisassembler,
+    disassemble_method_rva, parse_dotnet_metadata,
 };
 pub use loader::{FunctionInfo, LoadedBinary, SectionInfo};

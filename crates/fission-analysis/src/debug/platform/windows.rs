@@ -106,9 +106,9 @@ impl PlatformMemory for WindowsMemory {
     fn query_regions(&self) -> Result<Vec<MemoryRegion>, MemoryError> {
         use windows::Win32::Foundation::HANDLE;
         use windows::Win32::System::Memory::{
-            VirtualQueryEx, MEMORY_BASIC_INFORMATION, MEM_COMMIT, PAGE_EXECUTE, PAGE_EXECUTE_READ,
+            MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_EXECUTE, PAGE_EXECUTE_READ,
             PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY, PAGE_READONLY, PAGE_READWRITE,
-            PAGE_WRITECOPY,
+            PAGE_WRITECOPY, VirtualQueryEx,
         };
 
         let handle_val = self.get_handle()?;

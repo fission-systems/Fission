@@ -96,9 +96,12 @@ fn main() -> fission_core::Result<()> {
 
     fission_core::logging::info("Fission Core Initialized");
     fission_core::logging::debug(&format!("Target: {:?}", args.target));
-    
+
     let is_cli_mode = args.headless || args.cli;
-    fission_core::logging::debug(&format!("Mode: {}", if is_cli_mode { "CLI" } else { "GUI" }));
+    fission_core::logging::debug(&format!(
+        "Mode: {}",
+        if is_cli_mode { "CLI" } else { "GUI" }
+    ));
 
     // 3. Branch based on execution mode
     if is_cli_mode {
@@ -117,10 +120,13 @@ fn main() -> fission_core::Result<()> {
 
         // CLI mode: Run REPL in main thread
         println!("╔══════════════════════════════════════════════════════════╗");
-        println!("║  🔬 Fission v{} - CLI Mode               ║", env!("CARGO_PKG_VERSION"));
+        println!(
+            "║  🔬 Fission v{} - CLI Mode               ║",
+            env!("CARGO_PKG_VERSION")
+        );
         println!("╚══════════════════════════════════════════════════════════╝");
         println!();
-        
+
         let target_path = if let Some(ref target) = args.target {
             println!("📂 Target: {}", target.display());
             println!();
@@ -128,10 +134,10 @@ fn main() -> fission_core::Result<()> {
         } else {
             eprintln!("Error: Target binary path required for CLI mode");
             return Err(fission_core::errors::FissionError::Other(
-                "No target binary specified".to_string()
+                "No target binary specified".to_string(),
             ));
         };
-        
+
         cli::interactive::run_cli_with_args(cli::interactive::CliRunArgs {
             target_path,
             address: args.address,
@@ -149,7 +155,10 @@ fn main() -> fission_core::Result<()> {
     } else {
         // GUI mode: Run GUI in main thread
         println!("╔══════════════════════════════════════════════════════════╗");
-        println!("║  🔬 Fission v{} - GUI Mode               ║", env!("CARGO_PKG_VERSION"));
+        println!(
+            "║  🔬 Fission v{} - GUI Mode               ║",
+            env!("CARGO_PKG_VERSION")
+        );
         println!("╚══════════════════════════════════════════════════════════╝");
         println!();
         println!("🚀 Launching graphical interface...");

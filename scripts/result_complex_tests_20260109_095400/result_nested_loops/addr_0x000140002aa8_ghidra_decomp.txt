@@ -1,8 +1,0 @@
-void __stdio_common_vfprintf(void)
-
-{
-                    /* WARNING: Could not recover jumptable at 0x000140002aa8. Too many branches */
-                    /* WARNING: Treating indirect jump as call */
-  __stdio_common_vfprintf();
-  return;
-}

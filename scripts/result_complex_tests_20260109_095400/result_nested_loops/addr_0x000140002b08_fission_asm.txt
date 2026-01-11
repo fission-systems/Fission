@@ -1,7 +1,0 @@
-Function: __set_app_type at 0x140002b08 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140002b08  ff 25 5a 58 00 00         jmp qword ptr [140008368h]
-  0x000140002b0e  90                        nop
-  0x000140002b0f  90                        nop
-Total instructions: 3

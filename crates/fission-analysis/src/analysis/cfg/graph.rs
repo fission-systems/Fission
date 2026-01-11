@@ -3,9 +3,9 @@
 //! Implements the CFG data structure with blocks and edges,
 //! and provides methods to build it from Pcode functions.
 
+use super::{BasicBlock, BlockEdge, CfgError, CfgResult, EdgeKind};
+use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::collections::{HashMap, HashSet, VecDeque};
-use super::{BasicBlock, BlockEdge, EdgeKind, CfgError, CfgResult};
-use fission_pcode::{PcodeFunction, PcodeBasicBlock, PcodeOp, PcodeOpcode, Varnode};
 
 /// Control Flow Graph representation
 #[derive(Debug, Clone)]
@@ -234,7 +234,8 @@ impl CfgBuilder {
         }
 
         // Find exit blocks
-        cfg.exit_blocks = cfg.blocks
+        cfg.exit_blocks = cfg
+            .blocks
             .iter()
             .enumerate()
             .filter(|(_, b)| b.is_exit)
@@ -251,7 +252,10 @@ impl CfgBuilder {
     }
 
     /// Build edges between blocks
-    fn build_edges(cfg: &mut ControlFlowGraph, addr_to_block: &HashMap<u64, usize>) -> CfgResult<()> {
+    fn build_edges(
+        cfg: &mut ControlFlowGraph,
+        addr_to_block: &HashMap<u64, usize>,
+    ) -> CfgResult<()> {
         let block_count = cfg.blocks.len();
 
         for idx in 0..block_count {
@@ -373,16 +377,20 @@ mod tests {
         // Block 0: entry
         let mut b0 = BasicBlock::new(0, 0x1000);
         b0.is_entry = true;
-        b0.successors.push(BlockEdge::new(1, EdgeKind::ConditionalTrue));
-        b0.successors.push(BlockEdge::new(2, EdgeKind::ConditionalFalse));
+        b0.successors
+            .push(BlockEdge::new(1, EdgeKind::ConditionalTrue));
+        b0.successors
+            .push(BlockEdge::new(2, EdgeKind::ConditionalFalse));
 
         // Block 1: true branch
         let mut b1 = BasicBlock::new(1, 0x1010);
-        b1.successors.push(BlockEdge::new(3, EdgeKind::Unconditional));
+        b1.successors
+            .push(BlockEdge::new(3, EdgeKind::Unconditional));
 
         // Block 2: false branch
         let mut b2 = BasicBlock::new(2, 0x1020);
-        b2.successors.push(BlockEdge::new(3, EdgeKind::Unconditional));
+        b2.successors
+            .push(BlockEdge::new(3, EdgeKind::Unconditional));
 
         // Block 3: merge/exit
         let mut b3 = BasicBlock::new(3, 0x1030);

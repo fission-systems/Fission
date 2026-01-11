@@ -633,6 +633,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2468ef7d57b3fb7e16b576e8377cdbde2320c60e1491e961d11da40fc4f02a2d"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures",
+]
+
+[[package]]
 name = "block"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1056,6 +1070,12 @@ dependencies = [
  "once_cell",
  "windows-sys 0.59.0",
 ]
+
+[[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "core-foundation"
@@ -1792,6 +1812,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-disasm"
+version = "0.1.0"
+dependencies = [
+ "iced-x86",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "fission-ffi"
 version = "0.1.0"
 dependencies = [
@@ -1809,9 +1838,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "binrw",
+ "blake3",
  "bytecheck",
  "bytes",
  "fission-core",
+ "fission-disasm",
  "hex",
  "log",
  "object",
@@ -1833,6 +1864,7 @@ dependencies = [
  "bytecheck",
  "criterion",
  "fission-core",
+ "fission-disasm",
  "fission-loader",
  "iced-x86",
  "log",

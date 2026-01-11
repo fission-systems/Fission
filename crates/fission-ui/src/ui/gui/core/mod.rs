@@ -7,13 +7,13 @@
 //! - Async message passing (AsyncMessage)
 //! - Command management (Command trait, CommandManager)
 
-pub mod state;
-pub mod domain;
-pub mod viewmodels;
-pub mod messages;
 pub mod commands;
+pub mod domain;
+pub mod messages;
+pub mod state;
+pub mod viewmodels;
 
 // Re-export commonly used types
-pub use state::{AppState, AnalysisState, UIState, Activity};
-pub use messages::AsyncMessage;
 pub use commands::{Command, CommandManager};
+pub use messages::AsyncMessage;
+pub use state::{Activity, AnalysisState, AppState, UIState};

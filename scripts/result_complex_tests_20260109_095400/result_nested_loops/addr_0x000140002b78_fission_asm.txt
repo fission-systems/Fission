@@ -1,7 +1,0 @@
-Function: malloc at 0x140002b78 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140002b78  ff 25 5a 57 00 00         jmp qword ptr [1400082D8h]
-  0x000140002b7e  90                        nop
-  0x000140002b7f  90                        nop
-Total instructions: 3

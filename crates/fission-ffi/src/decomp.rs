@@ -157,7 +157,7 @@ unsafe extern "C" {
 #[cfg(feature = "native_decomp")]
 pub struct DecompilerNative {
     ctx: *mut DecompContext,
-    sla_dir: String,
+    _sla_dir: String,
     // Track if context is valid to prevent use-after-free
     is_valid: bool,
     pointer_size: Option<u32>,
@@ -189,7 +189,7 @@ impl DecompilerNative {
 
         Ok(Self {
             ctx,
-            sla_dir: sla_dir.to_string(),
+            _sla_dir: sla_dir.to_string(),
             is_valid: true,
             pointer_size: None,
             symbol_provider_state: None,

@@ -1,7 +1,0 @@
-Function: free at 0x140002b70 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140002b70  ff 25 5a 57 00 00         jmp qword ptr [1400082D0h]
-  0x000140002b76  90                        nop
-  0x000140002b77  90                        nop
-Total instructions: 3

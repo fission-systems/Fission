@@ -12,7 +12,7 @@ pub enum PcodeOpcode {
     Copy,
     Load,
     Store,
-    
+
     // Control flow
     Branch,
     CBranch,
@@ -21,7 +21,7 @@ pub enum PcodeOpcode {
     CallInd,
     CallOther,
     Return,
-    
+
     // Integer arithmetic
     IntEqual,
     IntNotEqual,
@@ -49,13 +49,13 @@ pub enum PcodeOpcode {
     IntSDiv,
     IntRem,
     IntSRem,
-    
+
     // Boolean
     BoolNegate,
     BoolXor,
     BoolAnd,
     BoolOr,
-    
+
     // Floating point
     FloatEqual,
     FloatNotEqual,
@@ -75,7 +75,7 @@ pub enum PcodeOpcode {
     FloatCeil,
     FloatFloor,
     FloatRound,
-    
+
     // Special
     MultiEqual,
     Indirect,
@@ -90,7 +90,7 @@ pub enum PcodeOpcode {
     Insert,
     Extract,
     PopCount,
-    
+
     Unknown,
 }
 
@@ -172,35 +172,50 @@ impl PcodeOpcode {
             _ => Self::Unknown,
         }
     }
-    
+
     /// Check if this is a commutative operation (order of operands doesn't matter)
     pub fn is_commutative(&self) -> bool {
         matches!(
             self,
-            Self::IntAdd | Self::IntMult | Self::IntAnd | Self::IntOr | Self::IntXor |
-            Self::IntEqual | Self::IntNotEqual |
-            Self::BoolAnd | Self::BoolOr | Self::BoolXor |
-            Self::FloatAdd | Self::FloatMult
+            Self::IntAdd
+                | Self::IntMult
+                | Self::IntAnd
+                | Self::IntOr
+                | Self::IntXor
+                | Self::IntEqual
+                | Self::IntNotEqual
+                | Self::BoolAnd
+                | Self::BoolOr
+                | Self::BoolXor
+                | Self::FloatAdd
+                | Self::FloatMult
         )
     }
-    
+
     /// Check if this is a comparison operation
     pub fn is_comparison(&self) -> bool {
         matches!(
             self,
-            Self::IntEqual | Self::IntNotEqual | Self::IntLess | Self::IntLessEqual |
-            Self::IntSLess | Self::IntSLessEqual |
-            Self::FloatEqual | Self::FloatNotEqual | Self::FloatLess | Self::FloatLessEqual
+            Self::IntEqual
+                | Self::IntNotEqual
+                | Self::IntLess
+                | Self::IntLessEqual
+                | Self::IntSLess
+                | Self::IntSLessEqual
+                | Self::FloatEqual
+                | Self::FloatNotEqual
+                | Self::FloatLess
+                | Self::FloatLessEqual
         )
     }
-    
+
     /// Get the inverse comparison (for optimization)
     pub fn inverse_comparison(&self) -> Option<Self> {
         match self {
             Self::IntEqual => Some(Self::IntNotEqual),
             Self::IntNotEqual => Some(Self::IntEqual),
             Self::IntLess => Some(Self::IntLessEqual), // !(a < b) => a >= b
-            Self::IntLessEqual => Some(Self::IntLess),  // !(a <= b) => a > b
+            Self::IntLessEqual => Some(Self::IntLess), // !(a <= b) => a > b
             Self::IntSLess => Some(Self::IntSLessEqual),
             Self::IntSLessEqual => Some(Self::IntSLess),
             _ => None,
@@ -211,17 +226,19 @@ impl PcodeOpcode {
     pub fn is_control_flow(&self) -> bool {
         matches!(
             self,
-            Self::Branch | Self::CBranch | Self::BranchInd |
-            Self::Call | Self::CallInd | Self::CallOther | Self::Return
+            Self::Branch
+                | Self::CBranch
+                | Self::BranchInd
+                | Self::Call
+                | Self::CallInd
+                | Self::CallOther
+                | Self::Return
         )
     }
 
     /// Check if this is a branch operation (not including calls)
     pub fn is_branch(&self) -> bool {
-        matches!(
-            self,
-            Self::Branch | Self::CBranch | Self::BranchInd
-        )
+        matches!(self, Self::Branch | Self::CBranch | Self::BranchInd)
     }
 
     /// Check if this is a call operation
@@ -246,11 +263,11 @@ impl std::str::FromStr for PcodeOpcode {
 /// Varnode - represents a value in Pcode (register, memory, constant, etc.)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Varnode {
-    pub space_id: u64,       // Address space (0=const, 1=unique, 2=register, etc.)
-    pub offset: u64,         // Offset within space
-    pub size: u32,           // Size in bytes
-    pub is_constant: bool,   // Is this a constant value?
-    pub constant_val: i64,   // Constant value if is_constant
+    pub space_id: u64,     // Address space (0=const, 1=unique, 2=register, etc.)
+    pub offset: u64,       // Offset within space
+    pub size: u32,         // Size in bytes
+    pub is_constant: bool, // Is this a constant value?
+    pub constant_val: i64, // Constant value if is_constant
 }
 
 impl Varnode {
@@ -264,17 +281,17 @@ impl Varnode {
             constant_val: val,
         }
     }
-    
+
     /// Check if this is zero
     pub fn is_zero(&self) -> bool {
         self.is_constant && self.constant_val == 0
     }
-    
+
     /// Check if this is one
     pub fn is_one(&self) -> bool {
         self.is_constant && self.constant_val == 1
     }
-    
+
     /// Check if this is all bits set (e.g., 0xFF for 1 byte, 0xFFFFFFFF for 4 bytes)
     pub fn is_all_ones(&self) -> bool {
         if !self.is_constant {
@@ -294,9 +311,9 @@ impl Varnode {
 /// Pcode operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PcodeOp {
-    pub seq_num: u32,        // Sequential number in basic block
+    pub seq_num: u32, // Sequential number in basic block
     pub opcode: PcodeOpcode,
-    pub address: u64,        // Original instruction address
+    pub address: u64, // Original instruction address
     pub output: Option<Varnode>,
     pub inputs: Vec<Varnode>,
     #[serde(default)]
@@ -324,14 +341,14 @@ impl PcodeFunction {
         struct JsonRoot {
             blocks: Vec<JsonBlock>,
         }
-        
+
         #[derive(Deserialize)]
         struct JsonBlock {
             index: u32,
             start_addr: String,
             ops: Vec<JsonOp>,
         }
-        
+
         #[derive(Deserialize)]
         struct JsonOp {
             seq: u32,
@@ -342,7 +359,7 @@ impl PcodeFunction {
             #[serde(default)]
             asm: Option<String>,
         }
-        
+
         #[derive(Deserialize)]
         struct JsonVarnode {
             space: u64,
@@ -350,54 +367,66 @@ impl PcodeFunction {
             size: u32,
             const_val: Option<i64>,
         }
-        
+
         let root: JsonRoot = serde_json::from_str(json)?;
-        
-        let blocks = root.blocks.into_iter().map(|jb| {
-            let start_address = parse_hex_addr(&jb.start_addr);
-            let ops = jb.ops.into_iter().map(|jo| {
-                let address = parse_hex_addr(&jo.addr);
-                let opcode = PcodeOpcode::parse(&jo.opcode);
-                let output = jo.output.map(|jv| Varnode {
-                    space_id: jv.space,
-                    offset: parse_hex_addr(&jv.offset),
-                    size: jv.size,
-                    is_constant: jv.const_val.is_some(),
-                    constant_val: jv.const_val.unwrap_or(0),
-                });
-                let inputs = jo.inputs.into_iter().map(|jv| Varnode {
-                    space_id: jv.space,
-                    offset: parse_hex_addr(&jv.offset),
-                    size: jv.size,
-                    is_constant: jv.const_val.is_some(),
-                    constant_val: jv.const_val.unwrap_or(0),
-                }).collect();
-                
-                PcodeOp {
-                    seq_num: jo.seq,
-                    opcode,
-                    address,
-                    output,
-                    inputs,
-                    asm_mnemonic: jo.asm,
+
+        let blocks = root
+            .blocks
+            .into_iter()
+            .map(|jb| {
+                let start_address = parse_hex_addr(&jb.start_addr);
+                let ops = jb
+                    .ops
+                    .into_iter()
+                    .map(|jo| {
+                        let address = parse_hex_addr(&jo.addr);
+                        let opcode = PcodeOpcode::parse(&jo.opcode);
+                        let output = jo.output.map(|jv| Varnode {
+                            space_id: jv.space,
+                            offset: parse_hex_addr(&jv.offset),
+                            size: jv.size,
+                            is_constant: jv.const_val.is_some(),
+                            constant_val: jv.const_val.unwrap_or(0),
+                        });
+                        let inputs = jo
+                            .inputs
+                            .into_iter()
+                            .map(|jv| Varnode {
+                                space_id: jv.space,
+                                offset: parse_hex_addr(&jv.offset),
+                                size: jv.size,
+                                is_constant: jv.const_val.is_some(),
+                                constant_val: jv.const_val.unwrap_or(0),
+                            })
+                            .collect();
+
+                        PcodeOp {
+                            seq_num: jo.seq,
+                            opcode,
+                            address,
+                            output,
+                            inputs,
+                            asm_mnemonic: jo.asm,
+                        }
+                    })
+                    .collect();
+
+                PcodeBasicBlock {
+                    index: jb.index,
+                    start_address,
+                    ops,
                 }
-            }).collect();
-            
-            PcodeBasicBlock {
-                index: jb.index,
-                start_address,
-                ops,
-            }
-        }).collect();
-        
+            })
+            .collect();
+
         Ok(PcodeFunction { blocks })
     }
-    
+
     /// Get all operations across all blocks
     pub fn all_ops(&self) -> impl Iterator<Item = &PcodeOp> {
         self.blocks.iter().flat_map(|b| b.ops.iter())
     }
-    
+
     /// Get mutable access to all operations
     pub fn all_ops_mut(&mut self) -> impl Iterator<Item = &mut PcodeOp> {
         self.blocks.iter_mut().flat_map(|b| b.ops.iter_mut())
@@ -432,7 +461,7 @@ mod tests {
         let zero = Varnode::constant(0, 4);
         assert!(zero.is_zero());
         assert!(!zero.is_one());
-        
+
         let one = Varnode::constant(1, 4);
         assert!(one.is_one());
         assert!(!one.is_zero());

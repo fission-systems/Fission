@@ -11,13 +11,13 @@
 //! - `theme/` - Theme and styling system
 
 mod app;
-pub mod core;
 pub mod components;
+pub mod core;
 mod panels;
 pub mod theme;
 
 // Re-export commonly used types
 pub use app::FissionApp;
+pub use components::MenuAction;
 pub use core::{AppState, AsyncMessage, Command, CommandManager};
-pub use components::{MenuAction};
 pub use fission_core::settings::{SettingsState, ThemeMode};

@@ -3,8 +3,8 @@
 //! Implements the Lengauer-Tarjan algorithm for computing dominators.
 //! A block B dominates block A if every path from the entry to A goes through B.
 
+use super::{CfgError, CfgResult, ControlFlowGraph};
 use std::collections::{HashMap, HashSet};
-use super::{ControlFlowGraph, CfgError, CfgResult};
 
 /// Dominator Tree structure
 #[derive(Debug, Clone)]
@@ -33,7 +33,8 @@ impl DominatorTree {
         let rpo = cfg.reverse_postorder();
 
         // Map block index to RPO position for quick lookup
-        let rpo_num: HashMap<usize, usize> = rpo.iter()
+        let rpo_num: HashMap<usize, usize> = rpo
+            .iter()
             .enumerate()
             .map(|(pos, &block_idx)| (block_idx, pos))
             .collect();
@@ -70,12 +71,7 @@ impl DominatorTree {
                     // Intersect with other predecessors
                     for &pred in &preds {
                         if idom.contains_key(&pred) && pred != new_idom_val {
-                            new_idom_val = Self::intersect(
-                                &idom,
-                                &rpo_num,
-                                pred,
-                                new_idom_val,
-                            );
+                            new_idom_val = Self::intersect(&idom, &rpo_num, pred, new_idom_val);
                         }
                     }
 
@@ -259,7 +255,10 @@ impl DominatorTree {
 
     /// Get the dominance frontier of a block
     pub fn get_dominance_frontier(&self, block: usize) -> HashSet<usize> {
-        self.dominance_frontier.get(&block).cloned().unwrap_or_default()
+        self.dominance_frontier
+            .get(&block)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Get tree depth of a block

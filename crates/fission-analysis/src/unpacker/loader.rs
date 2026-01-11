@@ -92,7 +92,7 @@ impl TitanLoader {
         }
 
         // Step 6: Replace file data with mapped memory
-        loaded_bin.data = std::sync::Arc::new(mapped_data);
+        loaded_bin.data = mapped_data;
         loaded_bin.rebuild_function_indices();
 
         crate::core::logging::info(&format!(

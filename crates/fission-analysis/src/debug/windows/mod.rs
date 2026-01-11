@@ -16,13 +16,14 @@ use std::time::Duration;
 use std::ffi::c_void;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, NTSTATUS};
 use windows::Win32::System::Diagnostics::Debug::{
-    ContinueDebugEvent, DebugActiveProcess, DebugActiveProcessStop, GetThreadContext,
-    ReadProcessMemory, SetThreadContext, WaitForDebugEvent, WriteProcessMemory, CONTEXT,
-    CONTEXT_FLAGS, CREATE_PROCESS_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT, DEBUG_EVENT,
-    EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT, LOAD_DLL_DEBUG_EVENT,
+    CONTEXT, CONTEXT_FLAGS, CREATE_PROCESS_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT,
+    ContinueDebugEvent, DEBUG_EVENT, DebugActiveProcess, DebugActiveProcessStop,
+    EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT, GetThreadContext,
+    LOAD_DLL_DEBUG_EVENT, ReadProcessMemory, SetThreadContext, WaitForDebugEvent,
+    WriteProcessMemory,
 };
 use windows::Win32::System::Memory::{
-    VirtualProtectEx, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS,
+    PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtectEx,
 };
 use windows::Win32::System::Threading::{
     OpenProcess, OpenThread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,

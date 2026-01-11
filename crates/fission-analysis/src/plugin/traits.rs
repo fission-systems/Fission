@@ -2,8 +2,8 @@
 //!
 //! Defines the standard interface that all Fission plugins must implement.
 
-use crate::prelude::*;
 use crate::plugin::api::{BinaryInfo, PluginAPI};
+use crate::prelude::*;
 use std::any::Any;
 use std::sync::Arc;
 

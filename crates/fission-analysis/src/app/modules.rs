@@ -109,11 +109,7 @@ impl ModuleManager {
             }
         }
         self.manager_state = ModuleState::Initialized;
-        if all_ok {
-            Ok(())
-        } else {
-            Ok(())
-        } // Log errors but don't fail startup
+        if all_ok { Ok(()) } else { Ok(()) } // Log errors but don't fail startup
     }
 
     /// Start all initialized modules with graceful degradation

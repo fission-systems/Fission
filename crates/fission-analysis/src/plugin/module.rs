@@ -1,6 +1,6 @@
 use crate::app::modules::{FissionModule, ModuleContext};
-use crate::prelude::*;
 use crate::plugin::PluginManager;
+use crate::prelude::*;
 use std::sync::{Arc, Mutex};
 
 /// Module responsible for the Plugin System
@@ -23,7 +23,9 @@ impl FissionModule for PluginModule {
         // Register PluginManager as a service so others can use it
         ctx.register_service("PluginManager", self.manager.clone());
 
-        let mut mgr = self.manager.lock()
+        let mut mgr = self
+            .manager
+            .lock()
             .map_err(|e| FissionError::Plugin(format!("Failed to lock plugin manager: {}", e)))?;
         // Inject dependencies using set_event_bus which we added earlier
         mgr.set_event_bus(ctx.event_bus.clone());

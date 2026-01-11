@@ -27,32 +27,24 @@ pub enum StringType {
 }
 
 /// Extract all strings from binary data
-pub fn extract_strings(
-    data: &[u8],
-    base_addr: u64,
-    min_length: usize,
-) -> Vec<ExtractedString> {
+pub fn extract_strings(data: &[u8], base_addr: u64, min_length: usize) -> Vec<ExtractedString> {
     let mut strings = Vec::new();
-    
+
     // Extract ASCII strings
     strings.extend(extract_ascii_strings(data, base_addr, min_length));
-    
+
     // Extract Unicode strings
     strings.extend(extract_unicode_strings(data, base_addr, min_length));
-    
+
     strings
 }
 
 /// Extract ASCII strings from binary data
-fn extract_ascii_strings(
-    data: &[u8],
-    base_addr: u64,
-    min_length: usize,
-) -> Vec<ExtractedString> {
+fn extract_ascii_strings(data: &[u8], base_addr: u64, min_length: usize) -> Vec<ExtractedString> {
     let mut strings = Vec::new();
     let mut current_string = Vec::new();
     let mut start_offset = 0;
-    
+
     for (i, &byte) in data.iter().enumerate() {
         if is_printable_ascii(byte) {
             if current_string.is_empty() {
@@ -73,7 +65,7 @@ fn extract_ascii_strings(
             current_string.clear();
         }
     }
-    
+
     // Check last string
     if current_string.len() >= min_length {
         if let Ok(s) = String::from_utf8(current_string) {
@@ -86,28 +78,24 @@ fn extract_ascii_strings(
             });
         }
     }
-    
+
     strings
 }
 
 /// Extract UTF-16 LE Unicode strings from binary data
-fn extract_unicode_strings(
-    data: &[u8],
-    base_addr: u64,
-    min_length: usize,
-) -> Vec<ExtractedString> {
+fn extract_unicode_strings(data: &[u8], base_addr: u64, min_length: usize) -> Vec<ExtractedString> {
     let mut strings = Vec::new();
     let mut current_string = Vec::new();
     let mut start_offset = 0;
     let mut i = 0;
-    
+
     while i + 1 < data.len() {
         let low = data[i];
         let high = data[i + 1];
-        
+
         // UTF-16 LE: low byte first
         let char_val = u16::from_le_bytes([low, high]);
-        
+
         if is_printable_unicode(char_val) {
             if current_string.is_empty() {
                 start_offset = i;
@@ -126,10 +114,10 @@ fn extract_unicode_strings(
             }
             current_string.clear();
         }
-        
+
         i += 2;
     }
-    
+
     // Check last string
     if current_string.len() >= min_length {
         if let Ok(s) = String::from_utf16(&current_string) {
@@ -142,7 +130,7 @@ fn extract_unicode_strings(
             });
         }
     }
-    
+
     strings
 }
 
@@ -178,7 +166,7 @@ mod tests {
     fn test_ascii_extraction() {
         let data = b"Hello, World!\x00\x00\x00Test";
         let strings = extract_ascii_strings(data, 0x1000, 4);
-        
+
         assert_eq!(strings.len(), 2);
         assert_eq!(strings[0].content, "Hello, World!");
         assert_eq!(strings[1].content, "Test");
@@ -189,7 +177,7 @@ mod tests {
     fn test_min_length_filter() {
         let data = b"Hi\x00Test\x00LongerString";
         let strings = extract_ascii_strings(data, 0x1000, 4);
-        
+
         // "Hi" should be filtered out (< 4 chars)
         assert_eq!(strings.len(), 2);
         assert!(strings.iter().all(|s| s.content.len() >= 4));
@@ -200,7 +188,7 @@ mod tests {
         // "Test" in UTF-16 LE
         let data = b"T\x00e\x00s\x00t\x00\x00\x00";
         let strings = extract_unicode_strings(data, 0x1000, 4);
-        
+
         assert_eq!(strings.len(), 1);
         assert_eq!(strings[0].content, "Test");
         assert_eq!(strings[0].string_type, StringType::Unicode);

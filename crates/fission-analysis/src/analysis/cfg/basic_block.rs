@@ -54,27 +54,38 @@ impl BasicBlock {
 
     /// Get the terminator instruction (last instruction that affects control flow)
     pub fn terminator(&self) -> Option<&PcodeOp> {
-        self.operations.iter().rev().find(|op| op.opcode.is_control_flow())
+        self.operations
+            .iter()
+            .rev()
+            .find(|op| op.opcode.is_control_flow())
     }
 
     /// Check if block ends with a conditional branch
     pub fn has_conditional_branch(&self) -> bool {
-        self.operations.iter().any(|op| matches!(op.opcode, PcodeOpcode::CBranch))
+        self.operations
+            .iter()
+            .any(|op| matches!(op.opcode, PcodeOpcode::CBranch))
     }
 
     /// Check if block ends with an unconditional branch
     pub fn has_unconditional_branch(&self) -> bool {
-        self.operations.iter().any(|op| matches!(op.opcode, PcodeOpcode::Branch))
+        self.operations
+            .iter()
+            .any(|op| matches!(op.opcode, PcodeOpcode::Branch))
     }
 
     /// Check if block ends with a call
     pub fn has_call(&self) -> bool {
-        self.operations.iter().any(|op| matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd))
+        self.operations
+            .iter()
+            .any(|op| matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd))
     }
 
     /// Check if block ends with a return
     pub fn has_return(&self) -> bool {
-        self.operations.iter().any(|op| matches!(op.opcode, PcodeOpcode::Return))
+        self.operations
+            .iter()
+            .any(|op| matches!(op.opcode, PcodeOpcode::Return))
     }
 
     /// Get number of instructions in the block

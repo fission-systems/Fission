@@ -1,6 +1,0 @@
-Function: KERNEL32.dll!GetLastError at 0x140008268 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140008268  18 84 00 00 00 00 00      sbb [rax+rax],al
-  0x00014000826f  00                        (bad)
-Total instructions: 2

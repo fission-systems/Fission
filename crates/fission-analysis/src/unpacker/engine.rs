@@ -2,8 +2,8 @@ use super::types::*;
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::*, Win32::Foundation::*, Win32::System::Diagnostics::Debug::*,
-    Win32::System::Threading::*,
+    Win32::Foundation::*, Win32::System::Diagnostics::Debug::*, Win32::System::Threading::*,
+    core::*,
 };
 
 /// The core debugging engine, mimicking TitanEngine's DebugLoop.
@@ -101,10 +101,9 @@ impl TitanEngine {
                 let event = match debug_event.dwDebugEventCode {
                     CREATE_PROCESS_DEBUG_EVENT => {
                         let info = debug_event.u.CreateProcessInfo;
-                        let entry_point = info.lpStartAddress
-                            .map(|p| p as usize as u64)
-                            .unwrap_or(0);
-                        
+                        let entry_point =
+                            info.lpStartAddress.map(|p| p as usize as u64).unwrap_or(0);
+
                         // Update our process info if needed
                         if let Some(proc) = &mut self.active_process {
                             proc.image_base = info.lpBaseOfImage as u64;

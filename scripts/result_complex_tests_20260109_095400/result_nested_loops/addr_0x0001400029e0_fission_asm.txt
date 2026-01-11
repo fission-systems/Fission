@@ -1,7 +1,0 @@
-Function: __p___initenv at 0x1400029e0 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x0001400029e0  48 8b 05 49 1a 00 00      mov rax,[140004430h]
-  0x0001400029e7  48 8b 00                  mov rax,[rax]
-  0x0001400029ea  c3                        ret
-Total instructions: 3

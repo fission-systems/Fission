@@ -1,6 +1,4 @@
-use crate::loader::types::{
-    extract_cstring, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
-};
+use crate::loader::types::{LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring};
 use crate::prelude::*;
 use binrw::BinRead;
 use std::io::Cursor;
@@ -128,11 +126,13 @@ impl PeLoader {
             ) {
                 // Merge COFF symbols with existing functions, preferring COFF names over generated ones
                 for coff_func in coff_functions {
-                    if let Some(existing) =
-                        functions_info.iter_mut().find(|f| f.address == coff_func.address)
+                    if let Some(existing) = functions_info
+                        .iter_mut()
+                        .find(|f| f.address == coff_func.address)
                     {
                         // Replace generated name with real COFF symbol name
-                        if existing.name.starts_with("FUN_0x") || existing.name.starts_with("sub_") {
+                        if existing.name.starts_with("FUN_0x") || existing.name.starts_with("sub_")
+                        {
                             existing.name = coff_func.name;
                         }
                     } else {
@@ -174,10 +174,15 @@ impl PeLoader {
             };
 
             if exception_dir_rva.0 != 0 && exception_dir_rva.1 > 0 {
-                if let Ok(pdata_functions) = loader.parse_pdata(exception_dir_rva.0, exception_dir_rva.1, image_base) {
+                if let Ok(pdata_functions) =
+                    loader.parse_pdata(exception_dir_rva.0, exception_dir_rva.1, image_base)
+                {
                     // Merge with existing functions, avoiding duplicates
                     for pdata_func in pdata_functions {
-                        if !functions_info.iter().any(|f| f.address == pdata_func.address) {
+                        if !functions_info
+                            .iter()
+                            .any(|f| f.address == pdata_func.address)
+                        {
                             functions_info.push(pdata_func);
                         }
                     }
@@ -445,17 +450,17 @@ impl<'a> PeLoaderImpl<'a> {
         //     DWORD EndAddress;    // RVA of function end
         //     DWORD UnwindInfoAddress; // RVA of unwind info
         // }
-        
+
         let pdata_offset = match self.rva_to_file_offset(pdata_rva, image_base) {
             Some(off) => off,
             None => return Ok(functions),
         };
 
         let entry_count = (pdata_size / 12) as usize; // 12 bytes per entry
-        
+
         for i in 0..entry_count {
             let entry_offset = pdata_offset + (i * 12) as u64;
-            
+
             if entry_offset + 12 > self.data.len() as u64 {
                 break;
             }
@@ -501,18 +506,18 @@ impl<'a> PeLoaderImpl<'a> {
         image_base: u64,
     ) -> Result<Vec<crate::loader::types::FunctionInfo>> {
         let mut functions = Vec::new();
-        
+
         // COFF Symbol Table starts at file offset
         let symbols_offset = symbol_table_offset as u64;
         let symbols_end = symbols_offset + (symbol_count as u64 * 18); // 18 bytes per symbol
-        
+
         if symbols_end > self.data.len() as u64 {
             return Ok(functions);
         }
-        
+
         // String table starts immediately after symbol table
         let string_table_offset = symbols_end;
-        
+
         // Read string table size (first 4 bytes)
         let string_table_size = if string_table_offset + 4 <= self.data.len() as u64 {
             u32::from_le_bytes([
@@ -524,34 +529,35 @@ impl<'a> PeLoaderImpl<'a> {
         } else {
             0
         };
-        
+
         let mut cursor = Cursor::new(self.data);
         cursor.set_position(symbols_offset);
-        
+
         let mut total_processed = 0;
         let mut skipped_class = 0;
         let mut skipped_type = 0;
         let mut skipped_section = 0;
-        
+
         let mut i = 0;
         while i < symbol_count {
             let symbol_pos = cursor.position();
-            
+
             let symbol = match CoffSymbol::read_le(&mut cursor) {
                 Ok(s) => s,
                 Err(_) => break,
             };
-            
+
             // Remember aux count before processing
             let aux_count = symbol.number_of_aux_symbols;
-            
+
             i += 1; // Count this symbol
-            
+
             total_processed += 1;
-            
+
             // Only process external symbols (C_EXT = 2) and static symbols (C_STAT = 3) with function type
-            if symbol.storage_class != storage_class::C_EXT && 
-               symbol.storage_class != storage_class::C_STAT {
+            if symbol.storage_class != storage_class::C_EXT
+                && symbol.storage_class != storage_class::C_STAT
+            {
                 skipped_class += 1;
                 // Skip aux symbols for this symbol too
                 if aux_count > 0 {
@@ -560,7 +566,7 @@ impl<'a> PeLoaderImpl<'a> {
                 }
                 continue;
             }
-            
+
             // Check if it's a function (DT_FCN in high byte of type)
             let is_function = (symbol.symbol_type >> 4) == symbol_type::DT_FCN;
             if !is_function {
@@ -572,7 +578,7 @@ impl<'a> PeLoaderImpl<'a> {
                 }
                 continue;
             }
-            
+
             // Get symbol name
             let name = match &symbol.name {
                 SymbolName::ShortName(n) => n.clone(),
@@ -585,7 +591,7 @@ impl<'a> PeLoaderImpl<'a> {
                     }
                 }
             };
-            
+
             if name.is_empty() {
                 // Skip aux symbols
                 if aux_count > 0 {
@@ -594,7 +600,7 @@ impl<'a> PeLoaderImpl<'a> {
                 }
                 continue;
             }
-            
+
             // Section number is 1-based, 0 = undefined, -1 = absolute, -2 = debug
             if symbol.section_number <= 0 {
                 skipped_section += 1;
@@ -605,7 +611,7 @@ impl<'a> PeLoaderImpl<'a> {
                 }
                 continue;
             }
-            
+
             // Find section to calculate actual address
             let section_idx = (symbol.section_number - 1) as usize;
             if section_idx >= self.sections.len() {
@@ -617,10 +623,10 @@ impl<'a> PeLoaderImpl<'a> {
                 }
                 continue;
             }
-            
+
             let section = &self.sections[section_idx];
             let func_addr = section.virtual_address + symbol.value as u64;
-            
+
             functions.push(crate::loader::types::FunctionInfo {
                 name,
                 address: func_addr,
@@ -628,14 +634,14 @@ impl<'a> PeLoaderImpl<'a> {
                 is_export: false,
                 is_import: false,
             });
-            
+
             // Skip auxiliary symbols AFTER processing this symbol
             if aux_count > 0 {
                 cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
                 i += aux_count as u32; // Skip aux symbols in counter
             }
         }
-        
+
         Ok(functions)
     }
 
@@ -815,11 +821,11 @@ mod tests {
         // Optional Header (at 0x58)
         data[0x58] = 0x0B;
         data[0x59] = 0x01; // Magic = 0x10B (PE32)
-                           // ImageBase (at 0x58 + 28 = 0x74)
+        // ImageBase (at 0x58 + 28 = 0x74)
         data[0x74] = 0x00;
         data[0x75] = 0x00;
         data[0x76] = 0x40; // 0x400000
-                           // Data Directories (16 entries)
+        // Data Directories (16 entries)
         data[0x58 + 92] = 16; // NumberOfRvaAndSizes
 
         // Section Headers (at 0x40 + 4 + 20 + 0xE0 = 0x138)

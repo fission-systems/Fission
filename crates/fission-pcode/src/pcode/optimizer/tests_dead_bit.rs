@@ -19,7 +19,7 @@ fn test_dead_bit_elimination() {
     // Wait, if B has garbage in 0x0F00, and we do B & 0xFF00, we keep 0x0F00.
     // If consumer only wants 0xF000, then 0x0F00 doesn't matter.
     // So A = B is valid.
-    
+
     let mut func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
             index: 0,
@@ -30,9 +30,21 @@ fn test_dead_bit_elimination() {
                     seq_num: 0,
                     opcode: PcodeOpcode::IntAnd,
                     address: 0x1000,
-                    output: Some(Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 }), // A
+                    output: Some(Varnode {
+                        space_id: 1,
+                        offset: 0x100,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    }), // A
                     inputs: vec![
-                        Varnode { space_id: 1, offset: 0x200, size: 4, is_constant: false, constant_val: 0 }, // B
+                        Varnode {
+                            space_id: 1,
+                            offset: 0x200,
+                            size: 4,
+                            is_constant: false,
+                            constant_val: 0,
+                        }, // B
                         Varnode::constant(0xFF00, 4),
                     ],
                     asm_mnemonic: None,
@@ -42,9 +54,21 @@ fn test_dead_bit_elimination() {
                     seq_num: 1,
                     opcode: PcodeOpcode::IntAnd,
                     address: 0x1004,
-                    output: Some(Varnode { space_id: 1, offset: 0x300, size: 4, is_constant: false, constant_val: 0 }), // C
+                    output: Some(Varnode {
+                        space_id: 1,
+                        offset: 0x300,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    }), // C
                     inputs: vec![
-                        Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 }, // A
+                        Varnode {
+                            space_id: 1,
+                            offset: 0x100,
+                            size: 4,
+                            is_constant: false,
+                            constant_val: 0,
+                        }, // A
                         Varnode::constant(0xF000, 4),
                     ],
                     asm_mnemonic: None,
@@ -56,25 +80,35 @@ fn test_dead_bit_elimination() {
                     address: 0x1008,
                     output: None,
                     inputs: vec![
-                        Varnode { space_id: 1, offset: 0x300, size: 4, is_constant: false, constant_val: 0 }, // C
+                        Varnode {
+                            space_id: 1,
+                            offset: 0x300,
+                            size: 4,
+                            is_constant: false,
+                            constant_val: 0,
+                        }, // C
                     ],
                     asm_mnemonic: None,
                 },
             ],
         }],
     };
-    
+
     let mut config = PcodeOptimizerConfig::default();
     // Disable DCE to ensure we see the transformation of Op 0, not its removal (though it shouldn't be removed as it's used)
-    config.enable_dead_code_elimination = false; 
-    
+    config.enable_dead_code_elimination = false;
+
     let mut optimizer = PcodeOptimizer::new(config);
     optimizer.optimize(&mut func);
-    
+
     // Check Op 0. It should be converted to Copy (or removed if identity, but Copy is safer check)
     // A = B & 0xFF00 -> A = B
     let op0 = &func.blocks[0].ops[0];
-    assert_eq!(op0.opcode, PcodeOpcode::Copy, "Op 0 should be optimized to Copy");
+    assert_eq!(
+        op0.opcode,
+        PcodeOpcode::Copy,
+        "Op 0 should be optimized to Copy"
+    );
     assert_eq!(op0.inputs.len(), 1);
     assert_eq!(op0.inputs[0].offset, 0x200); // B
 }
@@ -88,7 +122,7 @@ fn test_dead_bit_elimination_or() {
     // (Mask & Consume) = 0x100 & 0xFF = 0.
     // So the OR operation is redundant for the consumed bits.
     // A = B (effectively).
-    
+
     let mut func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
             index: 0,
@@ -99,9 +133,21 @@ fn test_dead_bit_elimination_or() {
                     seq_num: 0,
                     opcode: PcodeOpcode::IntOr,
                     address: 0x1000,
-                    output: Some(Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 }), // A
+                    output: Some(Varnode {
+                        space_id: 1,
+                        offset: 0x100,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    }), // A
                     inputs: vec![
-                        Varnode { space_id: 1, offset: 0x200, size: 4, is_constant: false, constant_val: 0 }, // B
+                        Varnode {
+                            space_id: 1,
+                            offset: 0x200,
+                            size: 4,
+                            is_constant: false,
+                            constant_val: 0,
+                        }, // B
                         Varnode::constant(0x100, 4),
                     ],
                     asm_mnemonic: None,
@@ -111,9 +157,21 @@ fn test_dead_bit_elimination_or() {
                     seq_num: 1,
                     opcode: PcodeOpcode::IntAnd,
                     address: 0x1004,
-                    output: Some(Varnode { space_id: 1, offset: 0x300, size: 4, is_constant: false, constant_val: 0 }), // C
+                    output: Some(Varnode {
+                        space_id: 1,
+                        offset: 0x300,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    }), // C
                     inputs: vec![
-                        Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 }, // A
+                        Varnode {
+                            space_id: 1,
+                            offset: 0x100,
+                            size: 4,
+                            is_constant: false,
+                            constant_val: 0,
+                        }, // A
                         Varnode::constant(0xFF, 4),
                     ],
                     asm_mnemonic: None,
@@ -125,21 +183,31 @@ fn test_dead_bit_elimination_or() {
                     address: 0x1008,
                     output: None,
                     inputs: vec![
-                        Varnode { space_id: 1, offset: 0x300, size: 4, is_constant: false, constant_val: 0 }, // C
+                        Varnode {
+                            space_id: 1,
+                            offset: 0x300,
+                            size: 4,
+                            is_constant: false,
+                            constant_val: 0,
+                        }, // C
                     ],
                     asm_mnemonic: None,
                 },
             ],
         }],
     };
-    
+
     let mut config = PcodeOptimizerConfig::default();
     config.enable_dead_code_elimination = false;
-    
+
     let mut optimizer = PcodeOptimizer::new(config);
     optimizer.optimize(&mut func);
-    
+
     // Check Op 0. Should be Copy.
     let op0 = &func.blocks[0].ops[0];
-    assert_eq!(op0.opcode, PcodeOpcode::Copy, "Op 0 should be optimized to Copy");
+    assert_eq!(
+        op0.opcode,
+        PcodeOpcode::Copy,
+        "Op 0 should be optimized to Copy"
+    );
 }

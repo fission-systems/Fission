@@ -1,5 +1,5 @@
 use crate::loader::types::{
-    extract_cstring, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo,
+    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
 use binrw::BinRead;

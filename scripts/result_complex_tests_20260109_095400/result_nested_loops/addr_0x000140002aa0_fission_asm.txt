@@ -1,7 +1,0 @@
-Function: __p__fmode at 0x140002aa0 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140002aa0  ff 25 02 59 00 00         jmp qword ptr [1400083A8h]
-  0x000140002aa6  90                        nop
-  0x000140002aa7  90                        nop
-Total instructions: 3

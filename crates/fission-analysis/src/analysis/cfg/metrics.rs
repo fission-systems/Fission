@@ -72,7 +72,12 @@ impl CfgMetrics {
 impl std::fmt::Display for CfgMetrics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "CFG Metrics:")?;
-        writeln!(f, "  Cyclomatic Complexity: {} ({})", self.cyclomatic_complexity, self.complexity_rating())?;
+        writeln!(
+            f,
+            "  Cyclomatic Complexity: {} ({})",
+            self.cyclomatic_complexity,
+            self.complexity_rating()
+        )?;
         writeln!(f, "  Essential Complexity:  {}", self.essential_complexity)?;
         writeln!(f, "  Max Nesting Depth:     {}", self.max_nesting_depth)?;
         writeln!(f, "  Blocks:                {}", self.block_count)?;
@@ -81,7 +86,11 @@ impl std::fmt::Display for CfgMetrics {
         writeln!(f, "  Loops:                 {}", self.loop_count)?;
         writeln!(f, "  Exit Points:           {}", self.exit_count)?;
         if self.dead_block_count > 0 {
-            writeln!(f, "  Dead Blocks:           {} (warning!)", self.dead_block_count)?;
+            writeln!(
+                f,
+                "  Dead Blocks:           {} (warning!)",
+                self.dead_block_count
+            )?;
         }
         Ok(())
     }
@@ -143,7 +152,8 @@ impl ComplexityAnalyzer {
 
     /// Count decision points (conditional branches)
     pub fn decision_count(cfg: &ControlFlowGraph) -> usize {
-        cfg.blocks.iter()
+        cfg.blocks
+            .iter()
             .filter(|b| b.has_conditional_branch())
             .count()
     }
@@ -174,7 +184,8 @@ impl ComplexityAnalyzer {
 
     /// Calculate maximum nesting depth of loops
     pub fn max_nesting_depth(loops: &[Loop]) -> usize {
-        loops.iter()
+        loops
+            .iter()
             .map(|l| l.depth + 1) // depth is 0-indexed, so add 1
             .max()
             .unwrap_or(0)
@@ -214,10 +225,7 @@ impl ComplexityAnalyzer {
 
         // MI = 171 - 5.2 * ln(HV) - 0.23 * CC - 16.2 * ln(LOC)
         // Normalized to 0-100 scale
-        let mi = 171.0
-            - 5.2 * (hv + 1.0).ln()
-            - 0.23 * cc
-            - 16.2 * (loc as f64 + 1.0).ln();
+        let mi = 171.0 - 5.2 * (hv + 1.0).ln() - 0.23 * cc - 16.2 * (loc as f64 + 1.0).ln();
 
         // Normalize to 0-100
         (mi * 100.0 / 171.0).clamp(0.0, 100.0)
@@ -295,9 +303,37 @@ mod tests {
 
     #[test]
     fn test_complexity_rating() {
-        assert_eq!(CfgMetrics { cyclomatic_complexity: 3, ..Default::default() }.complexity_rating(), "Low");
-        assert_eq!(CfgMetrics { cyclomatic_complexity: 8, ..Default::default() }.complexity_rating(), "Moderate");
-        assert_eq!(CfgMetrics { cyclomatic_complexity: 15, ..Default::default() }.complexity_rating(), "High");
-        assert_eq!(CfgMetrics { cyclomatic_complexity: 30, ..Default::default() }.complexity_rating(), "Very High");
+        assert_eq!(
+            CfgMetrics {
+                cyclomatic_complexity: 3,
+                ..Default::default()
+            }
+            .complexity_rating(),
+            "Low"
+        );
+        assert_eq!(
+            CfgMetrics {
+                cyclomatic_complexity: 8,
+                ..Default::default()
+            }
+            .complexity_rating(),
+            "Moderate"
+        );
+        assert_eq!(
+            CfgMetrics {
+                cyclomatic_complexity: 15,
+                ..Default::default()
+            }
+            .complexity_rating(),
+            "High"
+        );
+        assert_eq!(
+            CfgMetrics {
+                cyclomatic_complexity: 30,
+                ..Default::default()
+            }
+            .complexity_rating(),
+            "Very High"
+        );
     }
 }

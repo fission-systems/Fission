@@ -3,12 +3,12 @@
 use crossbeam_channel::Sender;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+// use std::time::Instant;
 
 use super::decomp_worker::DecompileRequest;
 use crate::analysis::disasm::DisasmEngine;
 use crate::core::config::CONFIG;
-use crate::ui::gui::core::domain::CachedDecompile;
+// use crate::ui::gui::core::domain::CachedDecompile;
 use crate::ui::gui::core::state::AppState;
 use fission_loader::loader::FunctionInfo;
 
@@ -32,16 +32,8 @@ pub fn decompile_function(
         return;
     }
 
-    // Check cache first (LruCache.get() updates access order)
-    let address = func.address;
-    if let Some(cached) = state.analysis.domain.decompile_cache.get(&address) {
-        let c_code = cached.c_code.clone();
-        let asm = cached.asm_instructions.clone();
-        state.log(format!("[*] Using cached result for 0x{:x}", address));
-        state.analysis.domain.decompiled_code = c_code;
-        state.analysis.domain.asm_instructions = asm;
-        return;
-    }
+    // Persistant caching is now handled at the analysis engine level
+    // in CachingDecompiler. We no longer need to check cache here.
 
     // CRITICAL: Check if binary is loaded AND decompiler context is ready
     if state.analysis.domain.loaded_binary.as_ref().is_none() {
@@ -59,7 +51,8 @@ pub fn decompile_function(
         return;
     }
 
-    let (bytes, is_64bit) = {
+    let address = func.address;
+    let (bytes, is_64bit, binary_hash) = {
         let binary = match state.analysis.domain.loaded_binary.as_ref() {
             Some(b) => b,
             None => {
@@ -99,7 +92,7 @@ pub fn decompile_function(
                 return;
             }
         };
-        (bytes, binary.is_64bit)
+        (bytes, binary.is_64bit, binary.hash.clone())
     };
 
     // Disassemble bytes (synchronous, fast)
@@ -153,7 +146,9 @@ pub fn decompile_function(
         functions: Vec::new(),
         gdt_json_path: None,
         sections: Vec::new(),
+        binary_hash,
         is_cfg_request: false,
+        is_clear_cache: false,
     };
 
     if let Err(e) = decomp_tx.send(request) {
@@ -162,8 +157,8 @@ pub fn decompile_function(
     }
 }
 
-/// Store decompile result in cache
-pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String) {
+/// Store decompile result in UI state
+pub fn cache_decompile_result(state: &mut AppState, _address: u64, c_code: String) {
     // Apply IAT symbol replacement if binary is loaded
     let processed_code = if let Some(ref binary) = state.analysis.domain.loaded_binary {
         apply_iat_symbols(&c_code, &binary.iat_symbols)
@@ -171,19 +166,6 @@ pub fn cache_decompile_result(state: &mut AppState, address: u64, c_code: String
         c_code.clone()
     };
 
-    if let Some(func) = &state.analysis.domain.selected_function
-        && func.address == address
-    {
-        // LruCache.put() automatically evicts oldest entry when at capacity
-        state.analysis.domain.decompile_cache.put(
-            address,
-            CachedDecompile {
-                c_code: processed_code.clone(),
-                asm_instructions: state.analysis.domain.asm_instructions.clone(),
-                timestamp: Instant::now(),
-            },
-        );
-    }
     state.analysis.domain.decompiled_code = processed_code;
     state.analysis.domain.decompiling = false;
 }

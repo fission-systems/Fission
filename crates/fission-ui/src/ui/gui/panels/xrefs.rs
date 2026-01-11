@@ -3,9 +3,9 @@
 //! Displays references to and from a selected address.
 
 use crate::analysis::xrefs::XrefType;
+use crate::ui::gui::components::widgets::empty_state;
 use crate::ui::gui::core::state::AppState;
 use crate::ui::gui::theme::catppuccin;
-use crate::ui::gui::components::widgets::empty_state;
 use eframe::egui;
 
 /// Action from xrefs window

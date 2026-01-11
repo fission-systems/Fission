@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::pcode::{PcodeFunction, PcodeBasicBlock, PcodeOp, PcodeOpcode, Varnode};
     use crate::pcode::graph::PcodeGraph;
     use crate::pcode::optimizer::DefUseTracker;
+    use crate::pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
     #[test]
     fn test_dot_generation() {
@@ -16,7 +16,13 @@ mod tests {
                             seq_num: 0,
                             opcode: PcodeOpcode::Copy,
                             address: 0x1000,
-                            output: Some(Varnode { space_id: 1, offset: 0x100, size: 4, is_constant: false, constant_val: 0 }),
+                            output: Some(Varnode {
+                                space_id: 1,
+                                offset: 0x100,
+                                size: 4,
+                                is_constant: false,
+                                constant_val: 0,
+                            }),
                             inputs: vec![Varnode::constant(10, 4)],
                             asm_mnemonic: None,
                         },
@@ -33,16 +39,14 @@ mod tests {
                 PcodeBasicBlock {
                     index: 1,
                     start_address: 0x1010,
-                    ops: vec![
-                        PcodeOp {
-                            seq_num: 0,
-                            opcode: PcodeOpcode::Return,
-                            address: 0x1010,
-                            output: None,
-                            inputs: vec![],
-                            asm_mnemonic: None,
-                        },
-                    ],
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1010,
+                        output: None,
+                        inputs: vec![],
+                        asm_mnemonic: None,
+                    }],
                 },
             ],
         };
@@ -51,9 +55,9 @@ mod tests {
         tracker.build(&func);
 
         let dot = PcodeGraph::to_dot(&func, Some(&tracker));
-        
+
         println!("{}", dot);
-        
+
         assert!(dot.contains("digraph PcodeFunction"));
         assert!(dot.contains("cluster_block_0"));
         assert!(dot.contains("cluster_block_1"));

@@ -2,8 +2,8 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use fission_loader::loader::LoadedBinary;
 use crate::debug::types::RegisterState;
+use fission_loader::loader::LoadedBinary;
 
 /// System-wide events for Fission
 ///

@@ -1,13 +1,16 @@
 //! Info command - Display binary information
 
-use colored::Colorize;
 use crate::ui::cli::handlers::CliState;
+use colored::Colorize;
 
 pub fn cmd_info(state: &CliState) {
     let binary = match &state.binary {
         Some(b) => b,
         None => {
-            println!("{} No binary loaded. Use 'load <path>' first.", "[!]".yellow());
+            println!(
+                "{} No binary loaded. Use 'load <path>' first.",
+                "[!]".yellow()
+            );
             return;
         }
     };

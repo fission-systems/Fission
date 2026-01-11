@@ -2,10 +2,10 @@ use super::types::*;
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::*,
     Win32::Foundation::*,
     Win32::System::Diagnostics::Debug::*,
     Win32::System::SystemServices::*, // For IMAGE_DOS_HEADER etc.
+    core::*,
 };
 
 /// Reads the DOS Header from the target process.

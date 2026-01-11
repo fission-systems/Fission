@@ -1,5 +1,0 @@
-=== Ghidra Decompilation (PyGhidra) ===
-Binary: /Users/sjkim1127/Fission/test/bin_x64/nested_loops_x64.exe
-Address: 0x140008260
-
-Error: No function found at address 0x140008260
