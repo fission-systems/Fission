@@ -1,6 +1,0 @@
-Function: __local_stdio_printf_options at 0x1400029d0 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x0001400029d0  48 8d 05 79 06 00 00      lea rax,[140003050h]
-  0x0001400029d7  c3                        ret
-Total instructions: 2

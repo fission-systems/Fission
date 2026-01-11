@@ -4,9 +4,9 @@ use crossbeam_channel::Sender;
 use std::path::Path;
 use std::sync::Arc;
 
-use fission_loader::loader::LoadedBinary;
 use crate::ui::gui::core::messages::AsyncMessage;
 use crate::ui::gui::core::state::AppState;
+use fission_loader::loader::LoadedBinary;
 
 /// Open native file dialog to select a binary
 pub fn open_file_dialog(tx: Sender<AsyncMessage>) {
@@ -38,8 +38,6 @@ pub fn open_folder_dialog(tx: Sender<AsyncMessage>) {
 pub fn load_binary(state: &mut AppState, tx: Sender<AsyncMessage>, path: &str) {
     let path = path.to_string();
 
-    // Clear cache on new binary load
-    state.analysis.domain.decompile_cache.clear();
     // Save path
     state.analysis.domain.last_binary_path = Some(path.clone());
 
@@ -89,44 +87,42 @@ pub fn load_snapshot_dialog(tx: Sender<AsyncMessage>) {
 /// Load all binaries from a folder
 pub fn load_folder(state: &mut AppState, tx: Sender<AsyncMessage>, folder_path: &str) {
     let folder_path = folder_path.to_string();
-    
+
     state.log(format!("[*] Scanning folder: {}...", folder_path));
-    
-    std::thread::spawn(move || {
-        match scan_folder_for_binaries(&folder_path) {
-            Ok(binary_paths) => {
-                if binary_paths.is_empty() {
-                    let _ = tx.send(AsyncMessage::ProjectLoaded {
-                        path: folder_path,
-                        binaries: Vec::new(),
-                    });
-                    return;
-                }
-                
-                let mut binaries = Vec::new();
-                for path in binary_paths {
-                    match LoadedBinary::from_file(&path) {
-                        Ok(binary) => {
-                            binaries.push(Arc::new(binary));
-                        }
-                        Err(e) => {
-                            eprintln!("[!] Failed to load {}: {}", path, e);
-                        }
-                    }
-                }
-                
-                let _ = tx.send(AsyncMessage::ProjectLoaded {
-                    path: folder_path,
-                    binaries,
-                });
-            }
-            Err(e) => {
-                eprintln!("[!] Failed to scan folder: {}", e);
+
+    std::thread::spawn(move || match scan_folder_for_binaries(&folder_path) {
+        Ok(binary_paths) => {
+            if binary_paths.is_empty() {
                 let _ = tx.send(AsyncMessage::ProjectLoaded {
                     path: folder_path,
                     binaries: Vec::new(),
                 });
+                return;
             }
+
+            let mut binaries = Vec::new();
+            for path in binary_paths {
+                match LoadedBinary::from_file(&path) {
+                    Ok(binary) => {
+                        binaries.push(Arc::new(binary));
+                    }
+                    Err(e) => {
+                        eprintln!("[!] Failed to load {}: {}", path, e);
+                    }
+                }
+            }
+
+            let _ = tx.send(AsyncMessage::ProjectLoaded {
+                path: folder_path,
+                binaries,
+            });
+        }
+        Err(e) => {
+            eprintln!("[!] Failed to scan folder: {}", e);
+            let _ = tx.send(AsyncMessage::ProjectLoaded {
+                path: folder_path,
+                binaries: Vec::new(),
+            });
         }
     });
 }
@@ -135,28 +131,32 @@ pub fn load_folder(state: &mut AppState, tx: Sender<AsyncMessage>, folder_path: 
 fn scan_folder_for_binaries(folder_path: &str) -> Result<Vec<String>, std::io::Error> {
     let mut binaries = Vec::new();
     let path = Path::new(folder_path);
-    
+
     if !path.is_dir() {
         return Ok(binaries);
     }
-    
+
     scan_dir_recursive(path, &mut binaries, 0)?;
-    
+
     Ok(binaries)
 }
 
 /// Recursively scan directory for binary files (max depth: 10)
-fn scan_dir_recursive(dir: &Path, binaries: &mut Vec<String>, depth: usize) -> Result<(), std::io::Error> {
+fn scan_dir_recursive(
+    dir: &Path,
+    binaries: &mut Vec<String>,
+    depth: usize,
+) -> Result<(), std::io::Error> {
     const MAX_DEPTH: usize = 10;
-    
+
     if depth > MAX_DEPTH {
         return Ok(());
     }
-    
+
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.is_dir() {
             scan_dir_recursive(&path, binaries, depth + 1)?;
         } else if path.is_file() {
@@ -167,7 +167,7 @@ fn scan_dir_recursive(dir: &Path, binaries: &mut Vec<String>, depth: usize) -> R
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -213,7 +213,7 @@ fn export_results(path: String) {
     // This is a placeholder - actual implementation would serialize
     // the decompile cache and project info to the selected format
     println!("[*] Exporting results to: {}", path);
-    
+
     // TODO: Implement actual export logic
     // - Iterate through decompile_cache
     // - For each cached function, export address, name, and C code

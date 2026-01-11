@@ -3,8 +3,8 @@
 //! Generates DOT graphs for visualizing control flow graphs
 //! with support for loop highlighting, dominators, and custom styling.
 
+use super::{BasicBlock, ControlFlowGraph, EdgeKind, Loop};
 use std::collections::HashSet;
-use super::{ControlFlowGraph, Loop, BasicBlock, EdgeKind};
 
 /// Options for DOT visualization
 #[derive(Debug, Clone)]
@@ -135,7 +135,9 @@ impl CfgVisualizer {
                 } else {
                     dot.push_str(&format!(
                         "  BB{} -> BB{} [label=\"{}\"{}];\n",
-                        block.index, edge.target, edge_label,
+                        block.index,
+                        edge.target,
+                        edge_label,
                         edge_style.replace("[", ", ").replace("]", "")
                     ));
                 }
@@ -146,7 +148,10 @@ impl CfgVisualizer {
         if options.highlight_loops {
             for (i, loop_info) in loops.iter().enumerate() {
                 dot.push_str(&format!("\n  subgraph cluster_loop_{} {{\n", i));
-                dot.push_str(&format!("    label=\"Loop {} (header: BB{})\";\n", i, loop_info.header));
+                dot.push_str(&format!(
+                    "    label=\"Loop {} (header: BB{})\";\n",
+                    i, loop_info.header
+                ));
                 dot.push_str("    style=dashed;\n");
                 dot.push_str("    color=blue;\n");
                 for &block_idx in &loop_info.body {
@@ -229,12 +234,7 @@ impl CfgVisualizer {
     }
 
     /// Get edge style based on edge kind
-    fn get_edge_style(
-        from: usize,
-        to: usize,
-        kind: &EdgeKind,
-        loops: &[Loop],
-    ) -> String {
+    fn get_edge_style(from: usize, to: usize, kind: &EdgeKind, loops: &[Loop]) -> String {
         let mut attrs = Vec::new();
 
         // Color based on edge kind
@@ -247,9 +247,9 @@ impl CfgVisualizer {
         }
 
         // Check if this is a back edge
-        let is_back_edge = loops.iter().any(|l| {
-            l.back_edges.iter().any(|(f, t)| *f == from && *t == to)
-        });
+        let is_back_edge = loops
+            .iter()
+            .any(|l| l.back_edges.iter().any(|(f, t)| *f == from && *t == to));
         if is_back_edge {
             attrs.push("penwidth=2".to_string());
             attrs.push("constraint=false".to_string()); // Don't use for ranking
@@ -278,7 +278,9 @@ impl CfgVisualizer {
         dot.push_str("  node [shape=record];\n");
 
         for block in &cfg.blocks {
-            let ops_str: String = block.operations.iter()
+            let ops_str: String = block
+                .operations
+                .iter()
                 .take(5)
                 .map(|op| format!("{:?}", op.opcode))
                 .collect::<Vec<_>>()
@@ -318,7 +320,9 @@ impl CfgVisualizer {
 
             // Predecessors
             if !block.predecessors.is_empty() {
-                let preds: Vec<String> = block.predecessors.iter()
+                let preds: Vec<String> = block
+                    .predecessors
+                    .iter()
                     .map(|p| format!("BB{}", p))
                     .collect();
                 output.push_str(&format!("  <- {}\n", preds.join(", ")));
@@ -326,7 +330,9 @@ impl CfgVisualizer {
 
             // Successors
             if !block.successors.is_empty() {
-                let succs: Vec<String> = block.successors.iter()
+                let succs: Vec<String> = block
+                    .successors
+                    .iter()
                     .map(|e| format!("BB{} ({})", e.target, e.kind.label()))
                     .collect();
                 output.push_str(&format!("  -> {}\n", succs.join(", ")));
@@ -342,7 +348,7 @@ impl CfgVisualizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::cfg::{BlockEdge};
+    use crate::analysis::cfg::BlockEdge;
 
     fn create_test_cfg() -> ControlFlowGraph {
         let mut cfg = ControlFlowGraph::new();

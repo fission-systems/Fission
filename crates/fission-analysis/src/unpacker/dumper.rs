@@ -342,7 +342,7 @@ pub fn rebuild_imports(
                 } else {
                     &new_section_data[ilt_pos..ilt_pos + 4]
                 };
-                
+
                 let offset_val = if thunk_size == 8 {
                     let bytes: [u8; 8] = match offset_bytes.try_into() {
                         Ok(b) => b,

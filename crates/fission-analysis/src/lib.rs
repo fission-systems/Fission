@@ -193,11 +193,10 @@
 pub mod analysis;
 pub mod app;
 pub mod debug;
-pub mod unpacker;
-pub mod parser;
 pub mod plugin;
-pub mod script;
 pub mod prelude;
+pub mod script;
+pub mod unpacker;
 
 pub use fission_core as core;
 

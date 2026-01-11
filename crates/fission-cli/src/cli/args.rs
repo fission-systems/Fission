@@ -15,7 +15,9 @@ pub fn parse_hex_address(s: &str) -> Result<u64, String> {
 #[command(author = "Fission Dev Team")]
 #[command(version = "0.2.0")]
 #[command(about = "🔬 Next-Gen Binary Analysis & Decompilation")]
-#[command(long_about = "Fission - A powerful binary analysis tool with native Ghidra decompilation support.\n\nQuick Start:\n  fission binary.exe -i              # Show info\n  fission binary.exe -l              # List functions\n  fission binary.exe --decomp 0x1400 # Decompile function\n  fission binary.exe --asm 0x1400    # Disassemble\n")]
+#[command(
+    long_about = "Fission - A powerful binary analysis tool with native Ghidra decompilation support.\n\nQuick Start:\n  fission binary.exe -i              # Show info\n  fission binary.exe -l              # List functions\n  fission binary.exe --decomp 0x1400 # Decompile function\n  fission binary.exe --asm 0x1400    # Disassemble\n"
+)]
 pub struct OneShotArgs {
     /// Path to the binary file to analyze
     pub binary: PathBuf,

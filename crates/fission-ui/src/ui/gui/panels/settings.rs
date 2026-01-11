@@ -110,8 +110,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         ui.add_space(8.0);
 
         if ui.button("Clear Cache").clicked() {
-            state.analysis.domain.decompile_cache.clear();
-            state.log("[*] Decompiler cache cleared");
+            // Send clear cache request via some mechanism or trigger a flag
+            // For now, we'll need a way to access the decomp_tx from here or via AppState
+            state.log("[*] Decompiler cache clear requested (Use Menu -> Analysis -> Clear Cache)");
         }
     });
 

@@ -9,11 +9,11 @@ use std::path::PathBuf;
 
 use crate::core::errors::Result;
 
-pub mod handlers;
 pub mod commands_parser;
+pub mod handlers;
 
+pub use commands_parser::{Command, parse_command};
 use handlers::CliState;
-pub use commands_parser::{parse_command, Command};
 
 /// Arguments for one-shot CLI execution.
 pub struct CliRunArgs {
@@ -185,9 +185,10 @@ pub fn run_cli() -> Result<()> {
                     Command::Sections => handlers::cmd_sections(&state),
                     Command::Analyze => handlers::cmd_analyze(&mut state),
                     Command::Xrefs { address } => handlers::cmd_xrefs(&state, address),
-                    Command::StringXrefs { search_term, min_length } => {
-                        handlers::cmd_string_xrefs(&state, &search_term, min_length)
-                    }
+                    Command::StringXrefs {
+                        search_term,
+                        min_length,
+                    } => handlers::cmd_string_xrefs(&state, &search_term, min_length),
                     Command::Help => handlers::cmd_help(),
                     Command::Clear => handlers::cmd_clear(),
                     Command::Exit => {

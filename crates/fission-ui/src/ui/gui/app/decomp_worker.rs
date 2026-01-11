@@ -42,11 +42,16 @@ pub struct DecompileRequest {
     /// Known function symbols for on-demand lookups
     pub functions: Vec<FunctionInfo>,
     /// GDT types JSON path for Windows structure definitions
+    #[allow(dead_code)]
     pub gdt_json_path: Option<String>,
     /// Binary sections for memory mapping
     pub sections: Vec<SectionInfo>,
+    /// Binary hash for persistent caching
+    pub binary_hash: String,
     /// Is this a CFG analysis request
     pub is_cfg_request: bool,
+    /// Is this a cache clear request
+    pub is_clear_cache: bool,
 }
 
 impl DecompileRequest {
@@ -65,7 +70,30 @@ impl DecompileRequest {
             functions: Vec::new(),
             gdt_json_path: None,
             sections: Vec::new(),
+            binary_hash: String::new(),
             is_cfg_request: false,
+            is_clear_cache: false,
+        }
+    }
+
+    /// Create a request to clear the decompiler cache
+    pub fn clear_cache() -> Self {
+        Self {
+            request_id: 0,
+            bytes: Vec::new(),
+            address: 0,
+            is_64bit: false,
+            is_prefetch: false,
+            is_binary_load: false,
+            image_base: 0,
+            iat_symbols: HashMap::new(),
+            global_symbols: HashMap::new(),
+            functions: Vec::new(),
+            gdt_json_path: None,
+            sections: Vec::new(),
+            binary_hash: String::new(),
+            is_cfg_request: false,
+            is_clear_cache: true,
         }
     }
 
@@ -84,7 +112,9 @@ impl DecompileRequest {
             functions: Vec::new(),
             gdt_json_path: None,
             sections: Vec::new(),
+            binary_hash: String::new(),
             is_cfg_request: true,
+            is_clear_cache: false,
         }
     }
 
@@ -96,6 +126,7 @@ impl DecompileRequest {
         functions: Vec<FunctionInfo>,
         gdt_json_path: Option<String>,
         sections: Vec<SectionInfo>,
+        binary_hash: String,
     ) -> Self {
         Self {
             request_id: 0,
@@ -110,7 +141,9 @@ impl DecompileRequest {
             functions,
             gdt_json_path,
             sections,
+            binary_hash,
             is_cfg_request: false,
+            is_clear_cache: false,
         }
     }
 
@@ -129,7 +162,9 @@ impl DecompileRequest {
             functions: Vec::new(),
             gdt_json_path: None,
             sections: Vec::new(),
+            binary_hash: String::new(),
             is_cfg_request: false,
+            is_clear_cache: false,
         }
     }
 }
@@ -144,10 +179,10 @@ pub fn spawn_worker(
     result_tx: Sender<AsyncMessage>,
     latest_request_id: Arc<AtomicU64>,
 ) {
-    use fission_ffi::DecompilerNative;
+    use fission_analysis::analysis::decomp::CachingDecompiler;
 
     let request_rx = Arc::new(Mutex::new(request_rx));
-    let native_decomp: Arc<Mutex<Option<DecompilerNative>>> = Arc::new(Mutex::new(None));
+    let native_decomp: Arc<Mutex<Option<CachingDecompiler>>> = Arc::new(Mutex::new(None));
     let num_workers = 1; // Single worker for FFI to avoid Ghidra thread-safety issues
 
     crate::core::logging::info(
@@ -176,7 +211,7 @@ fn worker_loop_native(
     worker_id: usize,
     request_rx: Arc<Mutex<Receiver<DecompileRequest>>>,
     result_tx: Sender<AsyncMessage>,
-    native_decomp: Arc<Mutex<Option<fission_ffi::DecompilerNative>>>,
+    native_decomp: Arc<Mutex<Option<fission_analysis::analysis::decomp::CachingDecompiler>>>,
     latest_request_id: Arc<AtomicU64>,
 ) {
     loop {
@@ -219,6 +254,19 @@ fn worker_loop_native(
             continue;
         }
 
+        // Handle cache clear requests
+        if request.is_clear_cache {
+            let mut decomp_guard = match native_decomp.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(ref mut decomp) = *decomp_guard {
+                decomp.clear_cache();
+                crate::core::logging::info("[decomp-worker] Persistent decompiler cache cleared");
+            }
+            continue;
+        }
+
         // Handle binary load requests
         if request.is_binary_load {
             handle_binary_load_native(&request, &native_decomp, &result_tx);
@@ -238,7 +286,7 @@ fn worker_loop_native(
 #[cfg(feature = "native_decomp")]
 fn handle_binary_load_native(
     request: &DecompileRequest,
-    native_decomp: &Arc<Mutex<Option<fission_ffi::DecompilerNative>>>,
+    native_decomp: &Arc<Mutex<Option<fission_analysis::analysis::decomp::CachingDecompiler>>>,
     result_tx: &Sender<AsyncMessage>,
 ) {
     // Step 1: Resolve SLA directory path
@@ -262,21 +310,33 @@ fn handle_binary_load_native(
 
     crate::core::logging::info(&format!("[decomp-worker] Using SLA directory: {}", sla_dir));
 
-    // Step 2: Initialize native decompiler
+    // Step 2: Initialize native decompiler with CachingDecompiler
     let mut decomp_guard = match native_decomp.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
 
-    match fission_ffi::DecompilerNative::new(&sla_dir) {
+    // Use dummy LoadedBinary for CachingDecompiler initialization as we only need the hash
+    // In a real scenario, we should pass the actual LoadedBinary if available
+    let dummy_binary =
+        fission_loader::loader::LoadedBinaryBuilder::new("dummy".to_string(), Vec::new())
+            .build()
+            .expect("Failed to build dummy binary");
+
+    // Override hash with the actual binary hash from request
+    let mut actual_binary = dummy_binary;
+    actual_binary.hash = request.binary_hash.clone();
+
+    match fission_analysis::analysis::decomp::CachingDecompiler::new(&actual_binary, &sla_dir, 100)
+    {
         Ok(decomp) => {
             *decomp_guard = Some(decomp);
             crate::core::logging::info(
-                "[decomp-worker] Native decompiler initialized successfully",
+                "[decomp-worker] Caching decompiler initialized successfully",
             );
         }
         Err(e) => {
-            let error_msg = format!("Failed to initialize native decompiler: {}", e);
+            let error_msg = format!("Failed to initialize caching decompiler: {}", e);
             crate::core::logging::error(&error_msg);
             let _ = result_tx.send(AsyncMessage::DecompilerContextError {
                 error: error_msg,
@@ -297,7 +357,8 @@ fn handle_binary_load_native(
         Err(poisoned) => poisoned.into_inner(),
     };
 
-    if let Some(ref mut decomp) = *decomp_guard {
+    if let Some(ref mut caching_decomp) = *decomp_guard {
+        let decomp = caching_decomp.inner_mut();
         let is_64bit = detect_is_64bit(&request.bytes);
 
         crate::core::logging::info(&format!(
@@ -417,15 +478,15 @@ fn resolve_sla_directory() -> Result<String, String> {
 #[cfg(feature = "native_decomp")]
 fn handle_decompile_native(
     request: &DecompileRequest,
-    native_decomp: &Arc<Mutex<Option<fission_ffi::DecompilerNative>>>,
+    native_decomp: &Arc<Mutex<Option<fission_analysis::analysis::decomp::CachingDecompiler>>>,
     result_tx: &Sender<AsyncMessage>,
 ) {
-    let decomp_guard = match native_decomp.lock() {
+    let mut decomp_guard = match native_decomp.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
 
-    if let Some(ref decomp) = *decomp_guard {
+    if let Some(ref mut decomp) = *decomp_guard {
         match decomp.decompile(request.address) {
             Ok(c_code) => {
                 let _ = result_tx.send(AsyncMessage::DecompileResult {

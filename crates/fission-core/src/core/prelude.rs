@@ -12,6 +12,7 @@ pub use super::config::CONFIG;
 
 // Re-export error types
 pub use super::errors::{FissionError, Result};
+pub use super::models::QuickPatch;
 pub use crate::err;
 
 // Re-export settings types

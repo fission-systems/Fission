@@ -13,8 +13,8 @@
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::cognitive_complexity)]
 
-mod pcode;
 pub mod disasm;
+mod pcode;
 pub mod prelude;
 
 // Re-export main P-code types

@@ -433,29 +433,17 @@ fn heap_blob<'a>(heap: &'a [u8], index: u32) -> DotNetResult<&'a [u8]> {
 }
 
 fn heap_size(heap_sizes: u8, flag: u8) -> usize {
-    if heap_sizes & flag != 0 {
-        4
-    } else {
-        2
-    }
+    if heap_sizes & flag != 0 { 4 } else { 2 }
 }
 
 fn coded_index_size(row_counts: &[u32], tag_bits: u8) -> usize {
     let max_rows = row_counts.iter().copied().max().unwrap_or(0) as u64;
     let bits = 16 - tag_bits as u64;
-    if max_rows < (1u64 << bits) {
-        2
-    } else {
-        4
-    }
+    if max_rows < (1u64 << bits) { 2 } else { 4 }
 }
 
 fn table_index_size(rows: u32) -> usize {
-    if rows < 0x10000 {
-        2
-    } else {
-        4
-    }
+    if rows < 0x10000 { 2 } else { 4 }
 }
 
 fn next_list_limit<F>(

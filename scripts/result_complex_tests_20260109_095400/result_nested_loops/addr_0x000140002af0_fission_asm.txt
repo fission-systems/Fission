@@ -1,7 +1,0 @@
-Function: _initialize_narrow_environment at 0x140002af0 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140002af0  ff 25 5a 58 00 00         jmp qword ptr [140008350h]
-  0x000140002af6  90                        nop
-  0x000140002af7  90                        nop
-Total instructions: 3

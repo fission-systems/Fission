@@ -1,7 +1,7 @@
 //! Decompiler Module - Ghidra Integration
 //!
 //! Provides high-performance decompilation via Ghidra engine.
-//! 
+//!
 //! ## Architecture
 //!
 //! The decompiler uses FFI bindings provided by `fission-ffi` crate
@@ -18,10 +18,10 @@
 //! ## Usage
 //!
 //! Use the `fission-ffi` crate directly for decompilation:
-//! 
+//!
 //! ```rust,ignore
 //! use fission_ffi::DecompilerNative;
-//! 
+//!
 //! let decomp = DecompilerNative::new(binary)?;
 //! let result = decomp.decompile_function(addr)?;
 //! ```
@@ -29,9 +29,64 @@
 // NOTE: FFI bindings have been moved to fission-ffi crate
 // This module now provides high-level safe wrappers only
 
+pub mod cache;
+
+#[cfg(feature = "native_decomp")]
+use self::cache::DecompilerCache;
+#[cfg(feature = "native_decomp")]
+use fission_loader::LoadedBinary;
+
 #[cfg(feature = "native_decomp")]
 pub type DecompilerNative = fission_ffi::DecompilerNative;
 
-/// Recommended decompiler type (re-exported from fission-ffi)
+/// High-level decompiler with persistent caching
 #[cfg(feature = "native_decomp")]
-pub type RecommendedDecompiler = fission_ffi::DecompilerNative;
+pub struct CachingDecompiler {
+    inner: DecompilerNative,
+    cache: DecompilerCache,
+}
+
+#[cfg(feature = "native_decomp")]
+impl CachingDecompiler {
+    /// Create a new caching decompiler
+    pub fn new(
+        binary: &LoadedBinary,
+        sla_dir: &str,
+        cache_size: usize,
+    ) -> fission_core::Result<Self> {
+        let inner = DecompilerNative::new(sla_dir)?;
+        let cache = DecompilerCache::new(&binary.hash, cache_size)?;
+
+        Ok(Self { inner, cache })
+    }
+
+    /// Decompile a function with caching
+    pub fn decompile(&mut self, address: u64) -> fission_core::Result<String> {
+        // 1. Check cache
+        if let Some(code) = self.cache.get(address) {
+            return Ok(code);
+        }
+
+        // 2. Decompile using native engine
+        let code = self.inner.decompile(address)?;
+
+        // 3. Store in cache
+        self.cache.put(address, code.clone());
+
+        Ok(code)
+    }
+
+    /// Access the underlying native decompiler
+    pub fn inner_mut(&mut self) -> &mut DecompilerNative {
+        &mut self.inner
+    }
+
+    /// Clear the decompiler cache
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
+    }
+}
+
+/// Recommended decompiler type (CachingDecompiler when native is available)
+#[cfg(feature = "native_decomp")]
+pub type RecommendedDecompiler = CachingDecompiler;

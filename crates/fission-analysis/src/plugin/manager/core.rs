@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::types::{HookCallback, LoadedPlugin};
 use super::super::api::PluginAPI;
 use super::super::hooks::PluginHook;
+use super::types::{HookCallback, LoadedPlugin};
 use crate::app::events::EventBus;
 
 /// Plugin Manager - Central plugin registry and event dispatcher

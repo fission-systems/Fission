@@ -3,40 +3,40 @@
 //! This module provides utilities to parse decompiled C code into AST,
 //! apply optimizations, and regenerate improved C code.
 
-use super::{Optimizer, OptimizerConfig, Expr, Stmt, BinOpKind, UnaryOpKind};
+use super::{BinOpKind, Expr, Optimizer, OptimizerConfig, Stmt, UnaryOpKind};
 
 /// Parse decompiled C code into statements
 pub fn parse_c_to_ast(c_code: &str) -> Vec<Stmt> {
     let mut stmts = Vec::new();
-    
+
     // Split by semicolons and braces
     for line in c_code.lines() {
         let line = line.trim();
-        
+
         // Skip empty lines, comments, and function signatures
         if line.is_empty() || line.starts_with("//") || line.starts_with("/*") {
             continue;
         }
-        
+
         // Parse variable declarations: type name = expr;
         if let Some(stmt) = try_parse_var_decl(line) {
             stmts.push(stmt);
             continue;
         }
-        
+
         // Parse assignments: name = expr;
         if let Some(stmt) = try_parse_assignment(line) {
             stmts.push(stmt);
             continue;
         }
-        
+
         // Parse if statements
         if line.starts_with("if") {
             if let Some(stmt) = try_parse_if(line) {
                 stmts.push(stmt);
             }
         }
-        
+
         // Parse return statements
         if line.starts_with("return") {
             if let Some(stmt) = try_parse_return(line) {
@@ -44,7 +44,7 @@ pub fn parse_c_to_ast(c_code: &str) -> Vec<Stmt> {
             }
         }
     }
-    
+
     stmts
 }
 
@@ -55,7 +55,7 @@ fn try_parse_var_decl(line: &str) -> Option<Stmt> {
     if parts.len() >= 2 {
         let lhs = parts[0].trim();
         let rhs = parts[1].trim().trim_end_matches(';').trim();
-        
+
         // Extract variable name (last word before =)
         let lhs_parts: Vec<&str> = lhs.split_whitespace().collect();
         if let Some(var_name) = lhs_parts.last() {
@@ -74,14 +74,16 @@ fn try_parse_assignment(line: &str) -> Option<Stmt> {
     if let Some(eq_pos) = line.find('=') {
         let lhs = line[..eq_pos].trim();
         let rhs = line[eq_pos + 1..].trim().trim_end_matches(';').trim();
-        
+
         // Skip if it looks like a declaration (has type keywords)
-        if lhs.contains(" ") && (lhs.contains("int") || lhs.contains("char") || lhs.contains("void")) {
+        if lhs.contains(" ")
+            && (lhs.contains("int") || lhs.contains("char") || lhs.contains("void"))
+        {
             return None;
         }
-        
+
         let rhs_expr = parse_expr(rhs);
-        
+
         return Some(Stmt::Expr(Expr::Assign {
             target: lhs.to_string(),
             value: Box::new(rhs_expr),
@@ -97,10 +99,10 @@ fn try_parse_if(line: &str) -> Option<Stmt> {
     let if_start = line.find("if")?;
     let paren_start = line[if_start..].find('(')?;
     let paren_end = line[if_start..].rfind(')')?;
-    
+
     let cond_str = &line[if_start + paren_start + 1..if_start + paren_end];
     let condition = parse_expr(cond_str);
-    
+
     Some(Stmt::If {
         condition,
         then_block: vec![], // TODO: Parse block
@@ -110,24 +112,28 @@ fn try_parse_if(line: &str) -> Option<Stmt> {
 
 /// Try to parse return statement: return expr;
 fn try_parse_return(line: &str) -> Option<Stmt> {
-    let expr_str = line.strip_prefix("return")?.trim().trim_end_matches(';').trim();
-    
+    let expr_str = line
+        .strip_prefix("return")?
+        .trim()
+        .trim_end_matches(';')
+        .trim();
+
     if expr_str.is_empty() || expr_str == "void" {
         return Some(Stmt::Return(None));
     }
-    
+
     Some(Stmt::Return(Some(parse_expr(expr_str))))
 }
 
 /// Parse expression from string
 pub fn parse_expr(s: &str) -> Expr {
     let s = s.trim();
-    
+
     // Parse binary operations
     if let Some(expr) = try_parse_binop(s) {
         return expr;
     }
-    
+
     // Parse unary operations
     if let Some(stripped) = s.strip_prefix('!') {
         return Expr::UnaryOp {
@@ -135,7 +141,7 @@ pub fn parse_expr(s: &str) -> Expr {
             operand: Box::new(parse_expr(stripped)),
         };
     }
-    
+
     if let Some(stripped) = s.strip_prefix('-') {
         let is_number = stripped
             .chars()
@@ -149,19 +155,19 @@ pub fn parse_expr(s: &str) -> Expr {
             };
         }
     }
-    
+
     // Parse literals
     if let Ok(val) = s.parse::<i64>() {
         return Expr::Const(val);
     }
-    
+
     // Hex literals
     if s.starts_with("0x") || s.starts_with("0X") {
         if let Ok(val) = i64::from_str_radix(&s[2..], 16) {
             return Expr::Const(val);
         }
     }
-    
+
     // Variable reference
     Expr::Var(s.to_string())
 }
@@ -186,22 +192,22 @@ fn try_parse_binop(s: &str) -> Option<Expr> {
         ("|", BinOpKind::Or),
         ("^", BinOpKind::Xor),
     ];
-    
+
     for (op_str, op_kind) in operators {
         if let Some(pos) = s.rfind(op_str) {
             // Avoid matching inside hex literals
-            if op_str == "x" && pos > 0 && &s[pos-1..pos] == "0" {
+            if op_str == "x" && pos > 0 && &s[pos - 1..pos] == "0" {
                 continue;
             }
-            
+
             let left = s[..pos].trim();
             let right = s[pos + op_str.len()..].trim();
-            
+
             // Skip if empty
             if left.is_empty() || right.is_empty() {
                 continue;
             }
-            
+
             return Some(Expr::BinOp {
                 left: Box::new(parse_expr(left)),
                 op: op_kind,
@@ -209,24 +215,24 @@ fn try_parse_binop(s: &str) -> Option<Expr> {
             });
         }
     }
-    
+
     None
 }
 
 /// Convert AST back to C code
 pub fn ast_to_c(stmts: &[Stmt]) -> String {
     let mut output = String::new();
-    
+
     for stmt in stmts {
         output.push_str(&stmt_to_c(stmt, 2)); // indent level 2 (inside function)
     }
-    
+
     output
 }
 
 fn stmt_to_c(stmt: &Stmt, indent: usize) -> String {
     let ind = "  ".repeat(indent);
-    
+
     match stmt {
         Stmt::Expr(expr) => {
             // Check if it's an assignment
@@ -236,13 +242,17 @@ fn stmt_to_c(stmt: &Stmt, indent: usize) -> String {
                 format!("{}{};\n", ind, expr_to_c(expr))
             }
         }
-        Stmt::If { condition, then_block, else_block } => {
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
             let mut s = format!("{}if ({}) {{\n", ind, expr_to_c(condition));
             for stmt in then_block {
                 s.push_str(&stmt_to_c(stmt, indent + 1));
             }
             s.push_str(&format!("{}}}", ind));
-            
+
             if let Some(else_stmts) = else_block {
                 s.push_str(" else {\n");
                 for stmt in else_stmts {
@@ -275,7 +285,12 @@ fn expr_to_c(expr: &Expr) -> String {
         }
         Expr::Var(name) => name.clone(),
         Expr::BinOp { left, op, right } => {
-            format!("({} {} {})", expr_to_c(left), binop_to_str(op), expr_to_c(right))
+            format!(
+                "({} {} {})",
+                expr_to_c(left),
+                binop_to_str(op),
+                expr_to_c(right)
+            )
         }
         Expr::UnaryOp { op, operand } => {
             format!("({}{})", unaryop_to_str(op), expr_to_c(operand))
@@ -284,7 +299,8 @@ fn expr_to_c(expr: &Expr) -> String {
             format!("{} = {}", target, expr_to_c(value))
         }
         Expr::Call { name, args } => {
-            let args_str = args.iter()
+            let args_str = args
+                .iter()
                 .map(|a| expr_to_c(a))
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -328,11 +344,11 @@ fn unaryop_to_str(op: &UnaryOpKind) -> &str {
 pub fn optimize_c_code(c_code: &str, config: OptimizerConfig) -> String {
     // Parse C to AST
     let stmts = parse_c_to_ast(c_code);
-    
+
     // Apply optimizer
     let mut optimizer = Optimizer::with_config(config);
     let optimized = optimizer.optimize_stmts(stmts);
-    
+
     // Convert back to C
     ast_to_c(&optimized)
 }

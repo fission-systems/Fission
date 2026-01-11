@@ -1,10 +1,10 @@
 //! UI rendering components
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
-    Frame,
 };
 
 use super::app::App;
@@ -35,7 +35,7 @@ fn render_header(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     ))
     .block(Block::default().borders(Borders::ALL).title("Fission"))
     .style(Style::default().fg(Color::Cyan));
-    
+
     frame.render_widget(header, area);
 }
 
@@ -94,6 +94,6 @@ fn render_code_view(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_status_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let status = Paragraph::new(format!(" {}", app.status()))
         .style(Style::default().bg(Color::Blue).fg(Color::White));
-    
+
     frame.render_widget(status, area);
 }

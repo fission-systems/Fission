@@ -12,7 +12,6 @@
 
 use std::sync::{Arc, RwLock};
 
-
 use crate::app::context::FissionContext;
 use fission_core::settings::SettingsState;
 use fission_loader::loader::LoadedBinary;

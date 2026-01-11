@@ -192,10 +192,7 @@ mod tests {
                 operand: Box::new(Expr::Var("x".to_string())),
             }),
         };
-        assert_eq!(
-            remove_double_negation(expr),
-            Expr::Var("x".to_string())
-        );
+        assert_eq!(remove_double_negation(expr), Expr::Var("x".to_string()));
     }
 
     #[test]

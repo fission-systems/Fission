@@ -11,5 +11,5 @@ pub mod functions;
 pub mod search;
 pub mod settings;
 pub mod side_bar;
-pub mod xrefs;
 pub mod string_xrefs;
+pub mod xrefs;

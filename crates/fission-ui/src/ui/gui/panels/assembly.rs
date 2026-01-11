@@ -1,8 +1,8 @@
 //! Assembly view panel - displays disassembled instructions with virtual scrolling.
 
+use super::super::components::widgets::empty_state_with_spacing;
 use super::super::core::state::AppState;
 use super::super::theme::{catppuccin, code};
-use super::super::components::widgets::empty_state_with_spacing;
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 

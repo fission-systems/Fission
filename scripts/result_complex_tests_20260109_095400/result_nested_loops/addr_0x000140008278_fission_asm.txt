@@ -1,8 +1,0 @@
-Function: KERNEL32.dll!LeaveCriticalSection at 0x140008278 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140008278  44 84 00                  test [rax],r8b
-  0x00014000827b  00 00                     add [rax],al
-  0x00014000827d  00 00                     add [rax],al
-  0x00014000827f  00                        (bad)
-Total instructions: 4

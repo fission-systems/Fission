@@ -8,14 +8,26 @@ pub enum Command {
     Load(String),
     Info,
     Functions,
-    Disasm { address: Option<u64>, count: Option<usize> },
-    Decompile { address: Option<u64> },
-    Graph { address: Option<u64> },
+    Disasm {
+        address: Option<u64>,
+        count: Option<usize>,
+    },
+    Decompile {
+        address: Option<u64>,
+    },
+    Graph {
+        address: Option<u64>,
+    },
     Strings,
     Sections,
     Analyze,
-    Xrefs { address: u64 },
-    StringXrefs { search_term: String, min_length: usize },
+    Xrefs {
+        address: u64,
+    },
+    StringXrefs {
+        search_term: String,
+        min_length: usize,
+    },
     Help,
     Clear,
     Exit,
@@ -69,9 +81,7 @@ pub fn parse_command(input: &str) -> Command {
         }
         "string-xrefs" | "strxrefs" | "sx" => {
             if let Some(search_term) = parts.get(1) {
-                let min_length = parts.get(2)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(4);
+                let min_length = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(4);
                 Command::StringXrefs {
                     search_term: search_term.to_string(),
                     min_length,

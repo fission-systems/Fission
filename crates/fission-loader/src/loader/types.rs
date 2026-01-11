@@ -1,11 +1,12 @@
 use crate::prelude::*;
-use bytecheck::CheckBytes;
+// use bytecheck::CheckBytes; removed as it was causing a warning
+use fission_disasm::DisasmEngine;
 use rkyv::{Archive, Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
 
 // ============================================================================
-// rkyv Wrapper for Arc<Vec<u8>>
+// rkyv Wrappers for Arc<T> types (COW optimization)
 // ============================================================================
 
 /// Custom rkyv wrapper for `Arc<Vec<u8>>` that serializes as `Vec<u8>`.
@@ -25,7 +26,9 @@ impl rkyv::with::ArchiveWith<Arc<Vec<u8>>> for ArcVecWrapper {
         resolver: Self::Resolver,
         out: *mut Self::Archived,
     ) {
-        rkyv::vec::ArchivedVec::resolve_from_slice(field.as_slice(), pos, resolver, out);
+        unsafe {
+            rkyv::vec::ArchivedVec::resolve_from_slice(field.as_slice(), pos, resolver, out);
+        }
     }
 }
 
@@ -45,13 +48,21 @@ impl<D: rkyv::Fallible + ?Sized>
 {
     fn deserialize_with(
         field: &rkyv::vec::ArchivedVec<u8>,
-        deserializer: &mut D,
+        _deserializer: &mut D,
     ) -> std::result::Result<Arc<Vec<u8>>, D::Error> {
-        // ArchivedVec<u8> can be converted to a slice directly, then to Vec
         let vec: Vec<u8> = field.as_slice().to_vec();
         Ok(Arc::new(vec))
     }
 }
+
+/// rkyv wrapper for `Arc<Vec<FunctionInfo>>` - functions list
+pub struct ArcFunctionsWrapper;
+
+/// rkyv wrapper for `Arc<Vec<SectionInfo>>` - sections list  
+pub struct ArcSectionsWrapper;
+
+/// rkyv wrapper for `Arc<HashMap<u64, String>>` - symbol maps
+pub struct ArcSymbolMapWrapper;
 
 /// Information about a function found in the binary
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
@@ -91,20 +102,17 @@ pub struct SectionInfo {
     pub is_writable: bool,
 }
 
-/// Parsed binary information
-///
-/// Note: The `data` field uses `Arc<Vec<u8>>` for efficient cloning.
-/// When cloning a LoadedBinary, only metadata is copied while the raw bytes
-/// are shared via reference counting. This enables cheap "copy-on-write"
-/// semantics: patching operations will only clone the data when necessary.
+/// Inner data structure containing all binary information.
+/// This is wrapped in Arc for O(1) cloning with COW semantics.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
 #[archive(check_bytes)]
-pub struct LoadedBinary {
+pub struct LoadedBinaryInner {
     /// Original file path
     pub path: String,
-    /// Raw bytes of the file (Arc for cheap clone, COW via Arc::make_mut)
-    #[with(ArcVecWrapper)]
-    pub data: Arc<Vec<u8>>,
+    /// Binary data hash (Blake3) for caching and identification
+    pub hash: String,
+    /// Raw bytes of the file
+    pub data: Vec<u8>,
     /// Detected architecture (e.g., "x86:LE:64:default")
     pub arch_spec: String,
     /// Entry point address
@@ -132,15 +140,70 @@ pub struct LoadedBinary {
     /// Index of functions by name for O(1) lookup
     pub function_name_index: std::collections::HashMap<String, usize>,
     /// Flag indicating functions are sorted by address
-    /// This is set during build() and after discover_internal_functions()
-    /// Note: This is a runtime-only flag, serialized as false by default
-    #[with(rkyv::with::Skip)]
-    functions_sorted: bool,
+    pub functions_sorted: bool,
+}
+
+/// Parsed binary information with O(1) clone via Arc.
+///
+/// This wrapper provides Copy-on-Write semantics:
+/// - Clone is O(1) - only increments Arc reference count
+/// - Modifications use `Arc::make_mut` to clone only when needed
+/// - All fields are accessed through the inner Arc
+#[derive(Debug, Clone)]
+pub struct LoadedBinary {
+    inner: Arc<LoadedBinaryInner>,
+}
+
+impl LoadedBinary {
+    /// Create a new LoadedBinary from inner data
+    pub fn from_inner(inner: LoadedBinaryInner) -> Self {
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    /// Get immutable reference to inner data
+    #[inline]
+    pub fn inner(&self) -> &LoadedBinaryInner {
+        &self.inner
+    }
+
+    /// Get mutable reference with COW semantics
+    /// Clones the inner data only if there are other references
+    #[inline]
+    pub fn inner_mut(&mut self) -> &mut LoadedBinaryInner {
+        Arc::make_mut(&mut self.inner)
+    }
+
+    /// Check if this is the only reference (for debugging)
+    #[inline]
+    pub fn is_unique(&self) -> bool {
+        Arc::strong_count(&self.inner) == 1
+    }
+}
+
+// Deref allows direct field access: binary.path instead of binary.inner().path
+impl std::ops::Deref for LoadedBinary {
+    type Target = LoadedBinaryInner;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+// DerefMut provides COW semantics: modifying binary.path clones if needed
+impl std::ops::DerefMut for LoadedBinary {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Arc::make_mut(&mut self.inner)
+    }
 }
 
 /// Builder for LoadedBinary
 pub struct LoadedBinaryBuilder {
     path: String,
+    hash: String,
     data: Vec<u8>,
     arch_spec: String,
     entry_point: u64,
@@ -157,8 +220,10 @@ pub struct LoadedBinaryBuilder {
 
 impl LoadedBinaryBuilder {
     pub fn new(path: String, data: Vec<u8>) -> Self {
+        let hash = blake3::hash(&data).to_hex().to_string();
         Self {
             path,
+            hash,
             data,
             arch_spec: "unknown".to_string(),
             entry_point: 0,
@@ -254,9 +319,20 @@ impl LoadedBinaryBuilder {
         let mut functions = self.functions;
         functions.sort_by_key(|f| f.address);
 
-        let mut binary = LoadedBinary {
+        // Build indices
+        let mut function_addr_index = std::collections::HashMap::new();
+        let mut function_name_index = std::collections::HashMap::new();
+        for (idx, func) in functions.iter().enumerate() {
+            function_addr_index.insert(func.address, idx);
+            if !func.name.is_empty() {
+                function_name_index.insert(func.name.clone(), idx);
+            }
+        }
+
+        let inner = LoadedBinaryInner {
             path: self.path,
-            data: Arc::new(self.data),
+            hash: self.hash,
+            data: self.data,
             arch_spec: self.arch_spec,
             entry_point: self.entry_point,
             image_base: self.image_base,
@@ -268,20 +344,12 @@ impl LoadedBinaryBuilder {
             format: self.format,
             iat_symbols: self.iat_symbols,
             global_symbols: self.global_symbols,
-            function_addr_index: std::collections::HashMap::new(),
-            function_name_index: std::collections::HashMap::new(),
+            function_addr_index,
+            function_name_index,
             functions_sorted: true,
         };
 
-        // Build indices
-        for (idx, func) in binary.functions.iter().enumerate() {
-            binary.function_addr_index.insert(func.address, idx);
-            if !func.name.is_empty() {
-                binary.function_name_index.insert(func.name.clone(), idx);
-            }
-        }
-
-        Ok(binary)
+        Ok(LoadedBinary::from_inner(inner))
     }
 }
 
@@ -500,14 +568,7 @@ impl LoadedBinary {
 
     /// Discover internal functions by scanning executable code for CALL instructions
     /// This finds functions that are called but not exported/imported
-    ///
-    /// TODO: DisasmEngine moved to fission-pcode, need to refactor dependencies
     pub fn discover_internal_functions(&mut self) {
-        // Temporarily disabled - DisasmEngine is in fission-pcode crate
-        // Need to decide architecture: should loader depend on pcode? Or vice versa?
-        return;
-
-        /* Original implementation:
         use std::collections::HashSet;
 
         // Create disassembler for this binary's architecture
@@ -517,8 +578,6 @@ impl LoadedBinary {
         };
 
         // Pre-compute executable section ranges for fast range checking
-        // This avoids O(N) iteration over sections for each discovered target
-        // Note: For typical binaries with <10 executable sections, linear search is efficient.
         let executable_ranges: Vec<(u64, u64)> = self
             .sections
             .iter()
@@ -527,7 +586,6 @@ impl LoadedBinary {
             .collect();
 
         // Helper closure to check if target is in executable range
-        // Uses linear search (efficient for small number of sections)
         let is_in_executable_range = |target: u64| -> bool {
             executable_ranges
                 .iter()
@@ -557,13 +615,10 @@ impl LoadedBinary {
             let targets = engine.discover_call_targets(bytes, section.virtual_address);
 
             for target in targets {
-                // Use O(1) HashMap lookup instead of HashSet contains for existing functions
-                // (function_addr_index is already maintained by the LoadedBinary)
                 if self.function_addr_index.contains_key(&target) {
                     continue;
                 }
 
-                // Only add if not already discovered and within executable range
                 if !discovered.contains(&target) && is_in_executable_range(target) {
                     discovered.insert(target);
                 }
@@ -590,7 +645,6 @@ impl LoadedBinary {
 
         // Rebuild function indices after adding new functions
         self.rebuild_function_indices();
-        */
     }
 
     /// Rebuild function lookup indices after modifying the functions vector
@@ -598,10 +652,18 @@ impl LoadedBinary {
         self.function_addr_index.clear();
         self.function_name_index.clear();
 
-        for (idx, func) in self.functions.iter().enumerate() {
-            self.function_addr_index.insert(func.address, idx);
-            if !func.name.is_empty() {
-                self.function_name_index.insert(func.name.clone(), idx);
+        // Collect data first to avoid borrow issues
+        let entries: Vec<_> = self
+            .functions
+            .iter()
+            .enumerate()
+            .map(|(idx, func)| (idx, func.address, func.name.clone()))
+            .collect();
+
+        for (idx, addr, name) in entries {
+            self.function_addr_index.insert(addr, idx);
+            if !name.is_empty() {
+                self.function_name_index.insert(name, idx);
             }
         }
     }
@@ -613,8 +675,9 @@ impl LoadedBinary {
     /// Patch bytes at a file offset
     /// Returns the original bytes that were replaced
     ///
-    /// Uses Copy-on-Write semantics: if this is the only reference to the data,
-    /// the patch is applied in-place. Otherwise, the data is cloned first.
+    /// Uses Copy-on-Write semantics at the LoadedBinary level:
+    /// If the LoadedBinary is cloned (via Arc), this modification
+    /// will trigger a clone of the entire inner structure.
     pub fn patch_bytes(&mut self, offset: u64, new_bytes: &[u8]) -> Option<Vec<u8>> {
         let offset = offset as usize;
         let end = offset + new_bytes.len();
@@ -623,13 +686,11 @@ impl LoadedBinary {
             return None;
         }
 
-        // Save original bytes (before COW clone)
+        // Save original bytes
         let original = self.data[offset..end].to_vec();
 
-        // Apply patch using Copy-on-Write
-        // Arc::make_mut clones only if there are other references
-        let data = Arc::make_mut(&mut self.data);
-        data[offset..end].copy_from_slice(new_bytes);
+        // Apply patch - DerefMut triggers COW at LoadedBinary level
+        self.data[offset..end].copy_from_slice(new_bytes);
 
         Some(original)
     }
@@ -655,16 +716,21 @@ impl LoadedBinary {
 
     /// Save the (potentially patched) binary to a file
     pub fn save_as<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        std::fs::write(path, self.data.as_ref())?;
+        std::fs::write(path, &self.data)?;
         Ok(())
     }
 
-    // TODO: QuickPatch integration disabled - circular dependency with fission-analysis
-    // Apply a quick patch at a file offset
-    // pub fn apply_quick_patch(&mut self, offset: u64, patch_type: QuickPatch) -> Option<Vec<u8>>
-    //
-    // Apply a quick patch at a virtual address
-    // pub fn apply_quick_patch_va(&mut self, va: u64, patch_type: QuickPatch) -> Option<Vec<u8>>
+    /// Apply a quick patch at a file offset
+    pub fn apply_quick_patch(&mut self, offset: u64, patch_type: QuickPatch) -> Option<Vec<u8>> {
+        let bytes = patch_type.bytes();
+        self.patch_bytes(offset, &bytes)
+    }
+
+    /// Apply a quick patch at a virtual address
+    pub fn apply_quick_patch_va(&mut self, va: u64, patch_type: QuickPatch) -> Option<Vec<u8>> {
+        let bytes = patch_type.bytes();
+        self.patch_bytes_va(va, &bytes)
+    }
 }
 
 // ============================================================================

@@ -2,9 +2,9 @@
 //!
 //! Core database structure with indexing and matching logic
 
-use std::collections::HashMap;
-use super::signature::FunctionSignature;
 use super::msvc_sigs;
+use super::signature::FunctionSignature;
+use std::collections::HashMap;
 
 /// CRT Signature Database
 ///

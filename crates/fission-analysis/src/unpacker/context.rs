@@ -2,8 +2,8 @@ use super::types::*;
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::*, Win32::Foundation::*, Win32::System::Diagnostics::Debug::*,
-    Win32::System::Threading::*,
+    Win32::Foundation::*, Win32::System::Diagnostics::Debug::*, Win32::System::Threading::*,
+    core::*,
 };
 
 /// Wrapper around platform-specific CONTEXT structure.

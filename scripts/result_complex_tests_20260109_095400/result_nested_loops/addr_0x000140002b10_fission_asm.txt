@@ -1,7 +1,0 @@
-Function: _set_invalid_parameter_handler at 0x140002b10 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140002b10  ff 25 5a 58 00 00         jmp qword ptr [140008370h]
-  0x000140002b16  90                        nop
-  0x000140002b17  90                        nop
-Total instructions: 3

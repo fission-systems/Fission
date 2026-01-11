@@ -116,13 +116,14 @@ pub fn handle_binary_loaded(
     ));
 
     let request = decomp_worker::DecompileRequest::load_binary(
-        (*binary.data).clone(),
+        binary.data.clone(),
         binary.image_base,
         combined_symbols,
         binary.global_symbols.clone(),
         binary.functions.clone(),
         gdt_json_path_opt,
         binary.sections.clone(),
+        binary.hash.clone(),
     );
     if let Err(e) = decomp_tx.send(request) {
         state.log(format!(

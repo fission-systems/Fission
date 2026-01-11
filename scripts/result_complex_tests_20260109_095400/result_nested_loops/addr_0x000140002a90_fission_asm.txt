@@ -1,7 +1,0 @@
-Function: __acrt_iob_func at 0x140002a90 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140002a90  ff 25 02 59 00 00         jmp qword ptr [140008398h]
-  0x000140002a96  90                        nop
-  0x000140002a97  90                        nop
-Total instructions: 3

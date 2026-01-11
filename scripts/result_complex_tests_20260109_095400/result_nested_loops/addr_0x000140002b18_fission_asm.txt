@@ -1,7 +1,0 @@
-Function: abort at 0x140002b18 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140002b18  ff 25 5a 58 00 00         jmp qword ptr [140008378h]
-  0x000140002b1e  90                        nop
-  0x000140002b1f  90                        nop
-Total instructions: 3

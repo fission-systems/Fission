@@ -13,15 +13,15 @@ pub mod win_api;
 pub mod win_constants;
 pub mod win_types;
 
-mod signature;
 mod database;
 mod msvc_sigs;
+mod signature;
 
 pub mod prelude;
 
 // Re-export main types
-pub use signature::FunctionSignature;
 pub use database::SignatureDatabase;
+pub use signature::FunctionSignature;
 
 // Re-export lazily-initialized global databases for efficient reuse
 pub use win_api::WIN_API_DB;

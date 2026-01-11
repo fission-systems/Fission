@@ -38,7 +38,7 @@ impl StringXrefAnalysis {
     pub fn add(&mut self, string: ExtractedString, xrefs: Vec<Xref>) {
         let content = string.content.clone();
         let index = self.strings.len();
-        
+
         self.strings.push(StringWithXrefs { string, xrefs });
         self.by_content
             .entry(content)
@@ -82,10 +82,7 @@ impl StringXrefAnalysis {
 
     /// Get all strings without references
     pub fn unreferenced_strings(&self) -> Vec<&StringWithXrefs> {
-        self.strings
-            .iter()
-            .filter(|s| s.xrefs.is_empty())
-            .collect()
+        self.strings.iter().filter(|s| s.xrefs.is_empty()).collect()
     }
 
     /// Get statistics
@@ -93,16 +90,16 @@ impl StringXrefAnalysis {
         let total = self.strings.len();
         let referenced = self.referenced_strings().len();
         let unreferenced = total - referenced;
-        
+
         let ascii_count = self
             .strings
             .iter()
             .filter(|s| s.string.string_type == StringType::Ascii)
             .count();
         let unicode_count = total - ascii_count;
-        
+
         let total_xrefs: usize = self.strings.iter().map(|s| s.xrefs.len()).sum();
-        
+
         StringXrefStats {
             total_strings: total,
             referenced_strings: referenced,
@@ -126,10 +123,7 @@ pub struct StringXrefStats {
 }
 
 /// Analyze string cross-references in a binary
-pub fn analyze_string_xrefs(
-    binary: &LoadedBinary,
-    min_length: usize,
-) -> StringXrefAnalysis {
+pub fn analyze_string_xrefs(binary: &LoadedBinary, min_length: usize) -> StringXrefAnalysis {
     let mut analysis = StringXrefAnalysis::new();
 
     // Extract strings from all sections
@@ -164,16 +158,16 @@ mod tests {
     #[test]
     fn test_string_xref_analysis() {
         let mut analysis = StringXrefAnalysis::new();
-        
+
         let string = ExtractedString {
             address: 0x1000,
             content: "test".to_string(),
             string_type: StringType::Ascii,
             length: 4,
         };
-        
+
         analysis.add(string, vec![]);
-        
+
         assert_eq!(analysis.strings.len(), 1);
         assert_eq!(analysis.find_by_content("test").len(), 1);
     }
@@ -181,13 +175,13 @@ mod tests {
     #[test]
     fn test_partial_search() {
         let mut analysis = StringXrefAnalysis::new();
-        
+
         let strings = vec![
             ("Hello, World!", 0x1000),
             ("Test Hello", 0x2000),
             ("Goodbye", 0x3000),
         ];
-        
+
         for (content, addr) in strings {
             analysis.add(
                 ExtractedString {
@@ -199,7 +193,7 @@ mod tests {
                 vec![],
             );
         }
-        
+
         let results = analysis.find_by_partial("Hello");
         assert_eq!(results.len(), 2);
     }

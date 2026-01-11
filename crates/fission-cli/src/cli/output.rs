@@ -49,11 +49,7 @@ impl OutputSilencer {
     }
 
     pub fn new_if(enabled: bool) -> Option<Self> {
-        if enabled {
-            Self::new().ok()
-        } else {
-            None
-        }
+        if enabled { Self::new().ok() } else { None }
     }
 }
 

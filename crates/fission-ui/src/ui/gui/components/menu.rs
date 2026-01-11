@@ -188,7 +188,8 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                     }
                     if ui
                         .button(
-                            egui::RichText::new("🔤 String Cross-References").color(catppuccin::PEACH),
+                            egui::RichText::new("🔤 String Cross-References")
+                                .color(catppuccin::PEACH),
                         )
                         .clicked()
                     {
@@ -259,7 +260,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                         }
                         ui.separator();
                     }
-                    
+
                     if ui
                         .button(
                             egui::RichText::new("🗑 Clear Decompile Cache")

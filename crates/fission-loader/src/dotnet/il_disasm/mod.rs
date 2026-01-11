@@ -2,11 +2,11 @@
 //!
 //! CIL bytecode disassembler for .NET methods
 
-mod types;
-mod opcodes;
 mod decoder;
 mod disassembler;
+mod opcodes;
+mod types;
 
 // Re-export public API
-pub use types::ILInstruction;
 pub use disassembler::IlDisassembler;
+pub use types::ILInstruction;

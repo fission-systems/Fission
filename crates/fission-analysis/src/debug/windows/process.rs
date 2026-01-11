@@ -5,8 +5,8 @@ use super::super::types::ProcessInfo;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, MAX_PATH};
 use windows::Win32::System::ProcessStatus::{EnumProcesses, GetModuleBaseNameW};
 use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_INFORMATION,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+    OpenProcess, PROCESS_NAME_FORMAT, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_VM_READ, QueryFullProcessImageNameW,
 };
 
 /// Enumerate all running processes

@@ -1,8 +1,8 @@
 //! Decompiled code panel - displays C-like decompiled output with syntax highlighting.
 
+use super::super::components::widgets::empty_state_with_spacing;
 use super::super::core::state::AppState;
 use super::super::theme::{catppuccin, code};
-use super::super::components::widgets::empty_state_with_spacing;
 use eframe::egui;
 
 /// Render the decompiled code as a fixed right panel.

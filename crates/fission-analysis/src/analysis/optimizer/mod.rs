@@ -7,8 +7,8 @@
 
 pub mod bitops;
 pub mod control_flow;
-pub mod temp_inline;
 pub mod integration;
+pub mod temp_inline;
 
 use std::collections::HashMap;
 
@@ -154,7 +154,10 @@ impl Optimizer {
     }
 
     fn simplify_stmts(&self, stmts: Vec<Stmt>) -> Vec<Stmt> {
-        stmts.into_iter().map(|stmt| self.simplify_stmt(stmt)).collect()
+        stmts
+            .into_iter()
+            .map(|stmt| self.simplify_stmt(stmt))
+            .collect()
     }
 
     fn simplify_stmt(&self, stmt: Stmt) -> Stmt {

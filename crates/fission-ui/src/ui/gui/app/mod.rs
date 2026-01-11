@@ -276,7 +276,6 @@ impl eframe::App for FissionApp {
                         .log(format!("[*] Switching to binary: {}", file_name));
 
                     // Clear current state
-                    self.state.analysis.domain.decompile_cache.clear();
                     self.state.analysis.domain.selected_function = None;
                     self.state.ui.open_tabs.clear();
                     self.state.ui.active_tab_index = None;
@@ -379,10 +378,10 @@ impl FissionApp {
                 self.state.log("[*] Console cleared");
             }
             MenuAction::ClearCache => {
-                let count = self.state.analysis.domain.decompile_cache.len();
-                self.state.analysis.domain.decompile_cache.clear();
-                self.state
-                    .log(format!("[*] Cleared {} cached items", count));
+                let _ = self
+                    .decomp_request_tx
+                    .send(decomp_worker::DecompileRequest::clear_cache());
+                self.state.log("[*] Decompiler cache clear requested");
             }
             MenuAction::ShowAbout => {
                 self.state

@@ -31,29 +31,30 @@ impl LoadedBinary {
     pub fn from_bytes_dynamic(data: Vec<u8>, path: String) -> Result<Self> {
         Self::auto_detect_and_parse(data, path)
     }
-    
+
     /// Auto-detect binary format and parse
     fn auto_detect_and_parse(data: Vec<u8>, path: String) -> Result<Self> {
         // Try to detect format by magic bytes
         if data.len() < 4 {
             return Err(FissionError::loader("Binary too small"));
         }
-        
+
         // Check for PE
         if data.len() > 0x3C + 4 {
-            let pe_offset = u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
+            let pe_offset =
+                u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
             if pe_offset < data.len() - 4 {
-                if &data[pe_offset..pe_offset+2] == b"PE" {
+                if &data[pe_offset..pe_offset + 2] == b"PE" {
                     return pe::PeLoader::parse(data, path);
                 }
             }
         }
-        
+
         // Check for ELF
         if data.starts_with(b"\x7fELF") {
             return elf::ElfLoader::parse(data, path);
         }
-        
+
         // Check for Mach-O
         if data.len() >= 4 {
             let magic = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
@@ -61,7 +62,7 @@ impl LoadedBinary {
                 return macho::MachoLoader::parse(data, path);
             }
         }
-        
+
         Err(FissionError::loader("Unknown binary format"))
     }
 }

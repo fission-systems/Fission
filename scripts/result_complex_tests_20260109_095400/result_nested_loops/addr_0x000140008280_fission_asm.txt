@@ -1,9 +1,0 @@
-Function: KERNEL32.dll!SetUnhandledExceptionFilter at 0x140008280 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x000140008280  5c                        pop rsp
-  0x000140008281  84 00                     test [rax],al
-  0x000140008283  00 00                     add [rax],al
-  0x000140008285  00 00                     add [rax],al
-  0x000140008287  00                        (bad)
-Total instructions: 5

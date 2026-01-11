@@ -3,8 +3,8 @@
 //! Integrates with the side bar to allow searching across the loaded binary's
 //! functions and strings with real-time filtering.
 
-use crate::ui::gui::core::state::AppState;
 use crate::ui::gui::components::widgets::empty_state;
+use crate::ui::gui::core::state::AppState;
 use eframe::egui;
 
 /// Render the search panel in the side bar

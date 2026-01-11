@@ -1,8 +1,8 @@
-mod types;
 mod core;
-mod loader;
 mod hooks;
+mod loader;
 mod queries;
+mod types;
 
 pub use core::PluginManager;
 
@@ -12,8 +12,8 @@ mod tests {
     use crate::app::events::{EventBus, FissionEvent, FissionEventType};
     use crate::plugin::api::{BinaryInfo, PluginInfo};
     use crate::plugin::{FissionPlugin, HookPriority, PluginAPI, PluginContext};
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use types::LoadedPlugin;
 
     struct MockPlugin {

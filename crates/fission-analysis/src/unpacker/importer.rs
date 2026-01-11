@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 #[cfg(target_os = "windows")]
 use windows::{
-    core::*, Win32::Foundation::*, Win32::System::ProcessStatus::*,
-    Win32::System::SystemServices::*,
+    Win32::Foundation::*, Win32::System::ProcessStatus::*, Win32::System::SystemServices::*,
+    core::*,
 };
 
 #[derive(Debug, Clone)]
@@ -257,7 +257,9 @@ impl ImportReconstructor {
 
         if let Some((base, mod_name)) = target_module {
             // Check if we have exports cached
-            let needs_parsing = self.module_cache.get(&base)
+            let needs_parsing = self
+                .module_cache
+                .get(&base)
                 .map(|info| info.exports.is_none())
                 .unwrap_or(true);
 

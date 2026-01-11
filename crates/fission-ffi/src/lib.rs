@@ -17,8 +17,7 @@
 //!
 //! - **pcode**: Raw C FFI for pcode optimization (unsafe)
 //! - **pcode_safe**: Safe Rust wrapper for pcode operations
-//! - **decomp**: Raw C FFI for decompiler (unsafe, requires native_decomp feature)
-//! - **decomp_safe**: Safe Rust wrapper for decompiler operations (requires native_decomp feature)
+//! - **decomp**: Raw C FFI for decompiler and its Safe Wrapper (requires native_decomp feature)
 //!
 //! ## Exported Functions
 //!
@@ -42,9 +41,6 @@ pub mod decomp;
 // Safe Rust wrappers
 pub mod pcode_safe;
 
-#[cfg(feature = "native_decomp")]
-pub mod decomp_safe;
-
 // Re-export main FFI functions for C/C++ consumers
 pub use pcode::*;
 
@@ -53,6 +49,3 @@ pub use decomp::*;
 
 // Re-export safe interfaces for Rust consumers
 pub use pcode_safe::*;
-
-#[cfg(feature = "native_decomp")]
-pub use decomp_safe::*;

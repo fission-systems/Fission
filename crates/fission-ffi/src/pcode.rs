@@ -8,20 +8,20 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
 /// Optimize Pcode JSON (called from C++)
-/// 
+///
 /// # Safety
 /// - `pcode_json` must be a valid null-terminated C string
 /// - Caller must free the returned pointer using `fission_free_string`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fission_optimize_pcode_json(
     pcode_json: *const c_char,
-    json_len: usize,
+    _json_len: usize,
 ) -> *mut c_char {
     if pcode_json.is_null() {
         eprintln!("[fission_optimize_pcode_json] Error: null input");
         return std::ptr::null_mut();
     }
-    
+
     // Convert C string to Rust string
     let json_str = match unsafe { CStr::from_ptr(pcode_json) }.to_str() {
         Ok(s) => s,
@@ -30,7 +30,7 @@ pub unsafe extern "C" fn fission_optimize_pcode_json(
             return std::ptr::null_mut();
         }
     };
-    
+
     // Parse Pcode
     let mut pcode = match PcodeFunction::from_json(json_str) {
         Ok(p) => p,
@@ -39,14 +39,17 @@ pub unsafe extern "C" fn fission_optimize_pcode_json(
             return std::ptr::null_mut();
         }
     };
-    
+
     // Optimize
     let config = PcodeOptimizerConfig::default();
     let mut optimizer = PcodeOptimizer::new(config);
     let num_passes = optimizer.optimize(&mut pcode);
-    
-    eprintln!("[fission_optimize_pcode_json] Applied {} optimization passes", num_passes);
-    
+
+    eprintln!(
+        "[fission_optimize_pcode_json] Applied {} optimization passes",
+        num_passes
+    );
+
     // Serialize back to JSON
     let optimized_json = match serde_json::to_string(&pcode) {
         Ok(json) => json,
@@ -55,19 +58,22 @@ pub unsafe extern "C" fn fission_optimize_pcode_json(
             return std::ptr::null_mut();
         }
     };
-    
+
     // Convert to C string
     match CString::new(optimized_json) {
         Ok(c_str) => c_str.into_raw(),
         Err(e) => {
-            eprintln!("[fission_optimize_pcode_json] CString conversion error: {}", e);
+            eprintln!(
+                "[fission_optimize_pcode_json] CString conversion error: {}",
+                e
+            );
             std::ptr::null_mut()
         }
     }
 }
 
 /// Free string allocated by Rust (called from C++)
-/// 
+///
 /// # Safety
 /// - `ptr` must have been allocated by `fission_optimize_pcode_json`
 /// - `ptr` must not be used after calling this function
@@ -87,14 +93,12 @@ mod tests {
     #[test]
     fn test_ffi_optimize_roundtrip() {
         let json = r#"{"blocks":[{"index":0,"start_addr":"0x1000","ops":[{"seq":0,"opcode":"INT_XOR","addr":"0x1000","output":{"space":1,"offset":"0x100","size":4},"inputs":[{"space":2,"offset":"0x10","size":4},{"space":0,"offset":"0x0","size":4,"const_val":0}]}]}]}"#;
-        
+
         let c_json = CString::new(json).unwrap();
-        let result_ptr = unsafe { 
-            fission_optimize_pcode_json(c_json.as_ptr(), json.len()) 
-        };
-        
+        let result_ptr = unsafe { fission_optimize_pcode_json(c_json.as_ptr(), json.len()) };
+
         assert!(!result_ptr.is_null());
-        
+
         unsafe {
             let result_str = CStr::from_ptr(result_ptr).to_str().unwrap();
             eprintln!("Result: {}", result_str);

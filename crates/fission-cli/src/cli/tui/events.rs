@@ -1,7 +1,7 @@
 //! Event handling
 
-use std::io;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use std::io;
 
 use super::app::App;
 

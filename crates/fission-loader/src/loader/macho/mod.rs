@@ -1,6 +1,6 @@
 use crate::loader::types::{
-    extract_cstring, extract_fixed_string, FunctionInfo, LoadedBinary, LoadedBinaryBuilder,
-    SectionInfo,
+    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
+    extract_fixed_string,
 };
 use crate::prelude::*;
 use binrw::BinRead;
@@ -32,16 +32,16 @@ impl MachoLoader {
         } else {
             binrw::Endian::Big
         }; // Assuming host is Little? No.
-           // Wait, BE/LE depends on file format.
-           // MACH-O logic:
-           // CIGAM means "Swapped". If Host is LE, and file is CIGAM, then file is BE.
-           // If File is MAGIC, then file is same as Host.
-           // BUT binrw's Endian is "Target Format Endian".
-           // We know standard Mac is usually LE (Intel/ARM).
-           // However, PowerPC was BE.
-           // Let's assume standard definitions:
-           // MAGIC = 0xFEEDFACE (Big Endian representation of the value).
-           // If we read as BE and see 0xFEEDFACE, it matches.
+        // Wait, BE/LE depends on file format.
+        // MACH-O logic:
+        // CIGAM means "Swapped". If Host is LE, and file is CIGAM, then file is BE.
+        // If File is MAGIC, then file is same as Host.
+        // BUT binrw's Endian is "Target Format Endian".
+        // We know standard Mac is usually LE (Intel/ARM).
+        // However, PowerPC was BE.
+        // Let's assume standard definitions:
+        // MAGIC = 0xFEEDFACE (Big Endian representation of the value).
+        // If we read as BE and see 0xFEEDFACE, it matches.
 
         // Let's rely on standard practice:
         // Big Endian Magic: 0xFEEDFACE
@@ -76,12 +76,15 @@ impl MachoLoader {
 
         let is_64bit = true;
         let cputype = header.cputype;
-        
+
         let arch_spec = match cputype {
             0x1000007 | 0x7 => "x86:LE:64:default", // x86_64 (CPU_TYPE_X86_64)
             0x100000C | 0xC => "AARCH64:LE:64:v8A", // ARM64 (CPU_TYPE_ARM64)
             _ => {
-                eprintln!("[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86_64", cputype, cputype);
+                eprintln!(
+                    "[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86_64",
+                    cputype, cputype
+                );
                 "x86:LE:64:default"
             }
         };
@@ -90,7 +93,7 @@ impl MachoLoader {
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
         let entry_point = 0; // Mach-O entry is usually in LC_MAIN or LC_UNIXTHREAD, tricky to parse fully for POC
-        
+
         // Store symbol table info for later use
         let mut symtab_info: Option<SymtabCommand> = None;
         let mut dysymtab_info: Option<DysymtabCommand> = None;
@@ -150,7 +153,7 @@ impl MachoLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
-        
+
         // Parse dynamic symbols to get external function imports
         let mut iat_symbols = std::collections::HashMap::new();
         if let (Some(symtab), Some(dysymtab)) = (symtab_info, dysymtab_info) {
@@ -184,10 +187,13 @@ impl MachoLoader {
         let is_64bit = false;
         let cputype = header.cputype;
         let arch_spec = match cputype {
-            0x7 => "x86:LE:32:default",      // x86 (CPU_TYPE_X86)
-            0xC => "ARM:LE:32:v7",           // ARM (CPU_TYPE_ARM)
+            0x7 => "x86:LE:32:default", // x86 (CPU_TYPE_X86)
+            0xC => "ARM:LE:32:v7",      // ARM (CPU_TYPE_ARM)
             _ => {
-                eprintln!("[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86", cputype, cputype);
+                eprintln!(
+                    "[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86",
+                    cputype, cputype
+                );
                 "x86:LE:32:default"
             }
         };
@@ -257,7 +263,7 @@ impl MachoLoader {
             }
         }
     }
-    
+
     fn parse_dynamic_symbols_64(
         data: &[u8],
         symtab: &SymtabCommand,
@@ -269,26 +275,26 @@ impl MachoLoader {
         // Find __stubs and __got sections
         let stubs_section = sections.iter().find(|s| s.name == "__stubs");
         let got_section = sections.iter().find(|s| s.name == "__got");
-        
+
         if dysymtab.nindirectsyms == 0 {
             return;
         }
-        
+
         let mut reader = Cursor::new(data);
         let indirect_off = dysymtab.indirectsymoff as u64;
-        
+
         if indirect_off as usize + (dysymtab.nindirectsyms as usize * 4) > data.len() {
             return;
         }
-        
+
         // Parse __stubs section
         if let Some(stubs) = stubs_section {
             let stub_size = 6; // Standard stub size on x86_64: jmp *offset(%rip) = 6 bytes
             let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
-            
+
             for i in 0..num_stubs {
                 let stub_addr = stubs.virtual_address + (i * stub_size);
-                
+
                 // Read indirect symbol table entry
                 reader.set_position(indirect_off + (i * 4));
                 if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
@@ -301,22 +307,22 @@ impl MachoLoader {
                 }
             }
         }
-        
+
         // Parse __got section
         if let Some(got) = got_section {
             let entry_size = 8; // GOT entry is 8 bytes on 64-bit
             let num_entries = (got.virtual_size / entry_size).min(dysymtab.nindirectsyms as u64);
-            
+
             // GOT entries come after stubs in indirect symbol table
             let stubs_count = if let Some(stubs) = stubs_section {
                 (stubs.virtual_size / 6) as u32
             } else {
                 0
             };
-            
+
             for i in 0..num_entries {
                 let got_addr = got.virtual_address + (i * entry_size);
-                
+
                 // Read indirect symbol table entry (offset by stubs count)
                 reader.set_position(indirect_off + ((stubs_count as u64 + i) * 4));
                 if let Ok(sym_idx) = u32::read_options(&mut reader, endian, ()) {
@@ -330,7 +336,7 @@ impl MachoLoader {
             }
         }
     }
-    
+
     fn get_symbol_name(
         data: &[u8],
         symtab: &SymtabCommand,
@@ -340,7 +346,7 @@ impl MachoLoader {
         let sym_off = symtab.symoff as u64 + (sym_idx as u64 * 16); // Nlist64 is 16 bytes
         let mut reader = Cursor::new(data);
         reader.set_position(sym_off);
-        
+
         if let Ok(nlist) = Nlist64::read_options(&mut reader, endian, ()) {
             let str_off = symtab.stroff as usize + nlist.n_strx as usize;
             if str_off < data.len() {

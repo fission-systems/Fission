@@ -12,6 +12,7 @@ pub mod config_store;
 pub mod constants;
 pub mod errors;
 pub mod logging;
+pub mod models;
 pub mod prelude;
 pub mod settings;
 
@@ -19,3 +20,4 @@ pub mod settings;
 pub use config::CONFIG;
 pub use constants::*;
 pub use errors::{FissionError, Result};
+pub use models::*;
