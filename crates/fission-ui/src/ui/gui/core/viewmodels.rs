@@ -28,6 +28,12 @@ pub struct StringsViewModel {
 
     /// Minimum string length to display
     pub min_length: usize,
+
+    /// Cached filter key (filter text + string count)
+    pub cache_key: Option<(String, usize)>,
+
+    /// Cached indices of filtered strings
+    pub cached_indices: Vec<usize>,
 }
 
 impl StringsViewModel {
@@ -35,6 +41,18 @@ impl StringsViewModel {
         Self {
             filter: String::new(),
             min_length: 4,
+            cache_key: None,
+            cached_indices: Vec::new(),
+        }
+    }
+
+    /// Check if cache needs refresh
+    pub fn needs_refresh(&self, string_count: usize) -> bool {
+        match &self.cache_key {
+            Some((cached_filter, cached_count)) => {
+                *cached_filter != self.filter || *cached_count != string_count
+            }
+            None => true,
         }
     }
 }
@@ -44,6 +62,9 @@ impl StringsViewModel {
 pub struct FunctionsViewModel {
     /// Rename dialog state: (address, current_input)
     pub rename_dialog: Option<(u64, String)>,
+
+    /// Comment dialog state: (address, current_input)
+    pub comment_dialog: Option<(u64, String)>,
 
     /// Function name filter text (case-insensitive search)
     pub filter: String,
@@ -56,16 +77,44 @@ pub struct FunctionsViewModel {
 
     /// Show internal (non-import, non-export) functions
     pub show_internals: bool,
+
+    /// Cached filter key for invalidation (filter + toggles + function count)
+    pub cache_key: Option<(String, bool, bool, bool, usize)>,
+
+    /// Cached indices of filtered functions (indices into binary.functions)
+    pub cached_indices: Vec<usize>,
 }
 
 impl FunctionsViewModel {
     pub fn new() -> Self {
         Self {
             rename_dialog: None,
+            comment_dialog: None,
             filter: String::new(),
             show_imports: true,
             show_exports: true,
             show_internals: true,
+            cache_key: None,
+            cached_indices: Vec::new(),
+        }
+    }
+
+    /// Check if cache is valid and return current key
+    pub fn current_cache_key(&self, func_count: usize) -> (String, bool, bool, bool, usize) {
+        (
+            self.filter.clone(),
+            self.show_imports,
+            self.show_exports,
+            self.show_internals,
+            func_count,
+        )
+    }
+
+    /// Check if cache needs refresh
+    pub fn needs_refresh(&self, func_count: usize) -> bool {
+        match &self.cache_key {
+            Some(key) => *key != self.current_cache_key(func_count),
+            None => true,
         }
     }
 }
@@ -154,6 +203,48 @@ impl SearchViewModel {
         }
     }
 }
+// ============================================================================
+// Navigation ViewModels
+// ============================================================================
+
+/// ViewModel for Navigation - holds Go to Address dialog state
+#[derive(Default)]
+pub struct NavigationViewModel {
+    /// Go to address dialog: Option<current_input>
+    pub goto_address_input: Option<String>,
+}
+
+impl NavigationViewModel {
+    pub fn new() -> Self {
+        Self {
+            goto_address_input: None,
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct DecomToken {
+    pub text: String,
+    pub color: eframe::egui::Color32,
+    pub is_clickable: bool,
+    /// If true, this token represents a function call that can be navigated to
+    pub is_function_call: bool,
+}
+
+/// ViewModel for Decompiled Code panel - holds tokenized cache
+#[derive(Default)]
+pub struct DecompileViewModel {
+    /// Cached tokenized lines for the current function
+    pub tokenized_lines: Vec<Vec<DecomToken>>,
+}
+
+impl DecompileViewModel {
+    pub fn new() -> Self {
+        Self {
+            tokenized_lines: Vec::new(),
+        }
+    }
+}
 
 // ============================================================================
 // Composite ViewModel Container
@@ -171,6 +262,8 @@ pub struct ViewModelContainer {
     pub string_xrefs: StringXrefsViewModel,
     pub debug: DebugViewModel,
     pub search: SearchViewModel,
+    pub navigation: NavigationViewModel,
+    pub decompile: DecompileViewModel,
 }
 
 impl ViewModelContainer {
@@ -182,6 +275,8 @@ impl ViewModelContainer {
             string_xrefs: StringXrefsViewModel::new(),
             debug: DebugViewModel::new(),
             search: SearchViewModel::new(),
+            navigation: NavigationViewModel::new(),
+            decompile: DecompileViewModel::new(),
         }
     }
 }

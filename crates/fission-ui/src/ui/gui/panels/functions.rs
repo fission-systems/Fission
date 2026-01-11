@@ -15,6 +15,8 @@ pub enum FunctionAction {
     Analyze,
     /// User wants to rename a function
     Rename(u64), // function address
+    /// User wants to scan for hidden functions
+    DeepScan,
 }
 
 /// Render the functions list panel on the left side.
@@ -58,6 +60,15 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
                     .clicked()
                 {
                     action = Some(FunctionAction::Analyze);
+                }
+
+                // Deep scan button
+                if ui
+                    .small_button("🕵")
+                    .on_hover_text("Deep scan for hidden functions (Prologue Search)")
+                    .clicked()
+                {
+                    action = Some(FunctionAction::DeepScan);
                 }
             }
         });
@@ -114,51 +125,61 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
         ui.separator();
 
         if let Some(ref binary) = state.analysis.domain.loaded_binary {
-            // Apply filters to get visible functions
-            let filter_lower = state.viewmodels.functions.filter.to_lowercase();
-            let show_imports = state.viewmodels.functions.show_imports;
-            let show_exports = state.viewmodels.functions.show_exports;
-            let show_internals = state.viewmodels.functions.show_internals;
+            let func_count = binary.functions.len();
 
-            let filtered_functions: Vec<&FunctionInfo> = binary
-                .functions
-                .iter()
-                .filter(|func| {
-                    // Category filter
-                    let category_match = if func.is_import {
-                        show_imports
-                    } else if func.is_export {
-                        show_exports
-                    } else {
-                        show_internals
-                    };
+            // Use cached filter if valid, otherwise recompute
+            if state.viewmodels.functions.needs_refresh(func_count) {
+                let filter_lower = state.viewmodels.functions.filter.to_lowercase();
+                let show_imports = state.viewmodels.functions.show_imports;
+                let show_exports = state.viewmodels.functions.show_exports;
+                let show_internals = state.viewmodels.functions.show_internals;
 
-                    // Name filter (case-insensitive)
-                    let name_match = if filter_lower.is_empty() {
-                        true
-                    } else {
-                        func.name.to_lowercase().contains(&filter_lower)
-                            || format!("{:x}", func.address).contains(&filter_lower)
-                    };
+                let indices: Vec<usize> = binary
+                    .functions
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, func)| {
+                        // Category filter
+                        let category_match = if func.is_import {
+                            show_imports
+                        } else if func.is_export {
+                            show_exports
+                        } else {
+                            show_internals
+                        };
 
-                    category_match && name_match
-                })
-                .collect();
+                        // Name filter (case-insensitive)
+                        let name_match = if filter_lower.is_empty() {
+                            true
+                        } else {
+                            func.name.to_lowercase().contains(&filter_lower)
+                                || format!("{:x}", func.address).contains(&filter_lower)
+                        };
 
+                        if category_match && name_match {
+                            Some(idx)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                state.viewmodels.functions.cached_indices = indices;
+                state.viewmodels.functions.cache_key =
+                    Some(state.viewmodels.functions.current_cache_key(func_count));
+            }
+
+            let cached_indices = &state.viewmodels.functions.cached_indices;
             let available_height = ui.available_height();
             let row_height = 22.0;
-            let total_rows = filtered_functions.len();
+            let total_rows = cached_indices.len();
 
             // Show filtered count if different from total
-            if total_rows != binary.functions.len() {
+            if total_rows != func_count {
                 ui.label(
-                    egui::RichText::new(format!(
-                        "Showing {} of {}",
-                        total_rows,
-                        binary.functions.len()
-                    ))
-                    .color(catppuccin::SUBTEXT0)
-                    .small(),
+                    egui::RichText::new(format!("Showing {} of {}", total_rows, func_count))
+                        .color(catppuccin::SUBTEXT0)
+                        .small(),
                 );
             }
 
@@ -171,7 +192,8 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
                 .max_scroll_height(available_height)
                 .body(|body| {
                     body.rows(row_height, total_rows, |mut row| {
-                        let func = filtered_functions[row.index()];
+                        let func_idx = cached_indices[row.index()];
+                        let func = &binary.functions[func_idx];
 
                         row.col(|ui| {
                             // Determine icon and color based on function type
@@ -183,12 +205,20 @@ pub fn render_inside(ui: &mut egui::Ui, state: &mut AppState) -> Option<Function
                                 ("◆", catppuccin::BLUE) // Regular function
                             };
 
-                            let label = if func.name.is_empty() {
+                            let display_name = state
+                                .analysis
+                                .domain
+                                .user_function_names
+                                .get(&func.address)
+                                .cloned()
+                                .unwrap_or_else(|| func.name.clone());
+
+                            let label = if display_name.is_empty() {
                                 format!("{} sub_{:08x}", icon, func.address)
-                            } else if func.name.len() > 25 {
-                                format!("{} {}...", icon, &func.name[..22])
+                            } else if display_name.len() > 25 {
+                                format!("{} {}...", icon, &display_name[..22])
                             } else {
-                                format!("{} {}", icon, func.name)
+                                format!("{} {}", icon, display_name)
                             };
 
                             let is_selected = state

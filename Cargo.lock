@@ -1904,6 +1904,7 @@ dependencies = [
  "fission-core",
  "fission-ffi",
  "fission-loader",
+ "fission-signatures",
  "lru",
  "regex",
  "rfd",

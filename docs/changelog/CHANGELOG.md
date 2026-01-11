@@ -4,7 +4,90 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ---
 
-## Recent Updates
+### Analysis Enhancements: Deep Scan & FID (2026-01-11)
+
+**🕵️ Deep Function Scan**
+Standard analysis often misses functions in obfuscated binaries. We introduced heuristic scanning based on prologue patterns and call targets.
+
+- **Heuristic Discovery**: Scans executable sections for function prologues (x86/x64, Windows/Linux, MSVC/GCC).
+- **Control Flow Recovery**: Discovers functions via direct relative CALL instructions.
+- **Ghidra Pattern Integration**: Integrated robust function patterns extracted from Ghidra's `x86-64win_patterns.xml`.
+
+**🧬 Function Identification (FID)**
+Implemented automatic function identification to recover names of standard library functions.
+
+- **Signature Matching**: Matches discovered functions against Fission's internal signature database (`fission-signatures`).
+- **Standard Library Recovery**: Automatically renames functions like `strcpy`, `malloc`, `memcpy` (MSVC/CRT).
+- **UI Integration**: Deep Scan results are logged, and function names are updated in real-time.
+
+### Core Navigation & Analysis Workflow Enhancements (2026-01-11)
+
+**🧭 브라우저 스타일 네비게이션 (Browser-style Navigation)**
+
+분석가가 바이너리의 여러 함수를 탐색할 때 흐름을 잃지 않도록 브라우저와 유사한 히스토리 관리 기능을 구현했습니다.
+
+- **뒤로가기/앞으로가기**: 탐색한 주소를 스택으로 관리하여 언제든지 이전 코드 위치로 돌아갈 수 있습니다.
+- **단축키 및 UI 버튼**: 에디터 상단의 '⬅', '➡' 버튼과 `Alt + Left/Right` (macOS는 `Cmd + Left/Right`) 단축키를 지원합니다.
+
+**🚀 실전적 주소 이동 (Go to Address - 'G')**
+
+특정 오프셋이나 심볼로 즉시 이동할 수 있는 단축 명령 기능을 추가했습니다.
+
+- **단축키 'G'**: 분석 중 어떤 뷰에서든 'G' 키를 눌러 점프 다이얼로그를 띄울 수 있습니다.
+- **지능형 검색**: 16진수, 10진수 입력은 물론, 바이너리의 원래 심볼 이름과 사용자가 직접 수정한(Rename) 이름까지 인식하여 이동합니다.
+
+**🔦 기호 하이라이팅 및 선택 동기화 (Symbolic Highlighting & Sync)**
+
+현재 보고 있는 기호(레지스터, 변수, 함수명 등)가 코드 전체에서 어디에서 쓰이는지 즉시 시각화합니다.
+
+- **상호작용 토큰**: 어셈블리와 디컴파일 뷰의 모든 식별자를 클릭할 수 있습니다. 클릭 시 해당 기호가 프로젝트 전체에서 하이라이트됩니다.
+- **상태 표시줄 통합**: 현재 추적 중인 기호가 하단 상태 표시줄에 표시되며, 클릭 한 번으로 모든 하이라이트를 해제할 수 있습니다.
+
+**📌 북마크 시스템 (Bookmarks & Management)**
+
+분석 과정에서 나중에 다시 돌아와야 할 중요한 지점을 저장하고 관리하는 기능을 도입했습니다.
+
+- **원터치 북마크 (F2)**: 어셈블리 뷰에서 `F2` 키를 눌러 현재 위치를 즉시 북마크에 추가하거나 제거할 수 있습니다.
+- **북마크 관리 패널**: 하단 탭에 전용 패널을 추가하여 저장된 모든 지점을 리스트로 확인하고 클릭 한 번으로 점프할 수 있습니다.
+- **영속성 지원**: 북마크는 `.fprj` 프로젝트 파일에 함께 저장되어 세션이 종료된 후에도 유지됩니다.
+
+---
+
+### User Comments, Rename Synchronization & Project Persistence (2026-01-11)
+
+**📝 User Comments & Annotation System**
+
+Implemented a persistent annotation system to allow analysts to record findings directly within the disassembly and decompiled views.
+
+- **Integrated Display**: Comments are now displayed in a dedicated column in the **Assembly View** and as C-style header comments in the **Decompiled View**.
+- **Contextual Editing**: Added right-click context menus (`✏️ Edit Comment`) to both the function list and assembly instructions for quick annotations.
+- **Data Persistence**: All comments are stored in the `AnalysisDomain` and can be saved/loaded as part of the project.
+
+**🏷️ 지능형 Rename 동기화 (Intelligent Rename Synchronization)**
+
+Enhanced the symbol management system to ensure that manual renames are reflected immediately across the entire analysis environment.
+
+- **Global Visibility**: Renaming a function immediately updates its display in the **Function Explorer**, **Search Results**, and all **Editor Tab** titles.
+- **Decompiler Re-analysis**: Renames trigger an automatic re-decompilation, ensuring that all cross-references (calls, jumps) within the decompiled code use the updated symbol name.
+- **Search Integration**: The search panel now indexes both original symbol names and user-defined aliases.
+
+**📊 프로젝트 영속성 (Project Persistence - .fprj)**
+
+Introduced a specialized project file format to save and restore analysis sessions without modifying the original binary.
+
+- **Fission Project (.fprj)**: A new JSON-based format that stores user-defined names, comments, and session metadata.
+- **Binary Verification**: Implemented Blake3 hash-based verification to ensure project files are only loaded for their corresponding binaries, preventing data corruption.
+- **Workflow Continuity**: Added `Save Project` and `Load Project` to the `File` menu, allowing analysts to persist their work across sessions.
+
+**Files Modified/Added:**
+
+- `fission-analysis/src/app/project.rs`: New module for project serialization logic.
+- `fission-ui/src/ui/gui/panels/assembly.rs`: Added comment column and context menus.
+- `fission-ui/src/ui/gui/app/decompiler.rs`: Integrated comments into C output.
+- `fission-ui/src/ui/gui/app/handlers/message_handlers.rs`: Implemented project save/load handlers.
+- `fission-ui/src/ui/gui/components/menu.rs`: Added new project-related menu items.
+
+---
 
 ### RR/TTD Integration & macOS Library Loading Fix (2026-01-11)
 

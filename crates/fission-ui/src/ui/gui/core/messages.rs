@@ -22,9 +22,12 @@ pub enum AsyncMessage {
 
     /// Save snapshot to path
     SaveSnapshot(String),
-
     /// Load snapshot from path
     LoadSnapshot(String),
+    /// Save project to path
+    SaveProject(String),
+    /// Load project from path
+    LoadProject(String),
 
     /// Debug event from debugger loop
     DebugEvent(DebugEvent),

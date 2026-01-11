@@ -2,6 +2,7 @@
 //!
 //! This module organizes the bottom panel into separate sub-modules for each tab.
 
+mod bookmarks;
 pub mod cfg;
 mod console;
 mod debug;
@@ -33,6 +34,12 @@ pub fn render(
     let mut cfg_action = CfgAction::None;
 
     egui::TopBottomPanel::bottom("bottom_panel")
+        .frame(
+            egui::Frame::none()
+                .fill(catppuccin::MANTLE)
+                .stroke(egui::Stroke::new(1.0, catppuccin::SURFACE1))
+                .inner_margin(egui::Margin::symmetric(8.0, 4.0)),
+        )
         .resizable(true)
         .default_height(200.0)
         .min_height(120.0)
@@ -52,15 +59,20 @@ pub fn render(
                     (BottomTab::Debug, "Debug", catppuccin::RED),
                     (BottomTab::Script, "Script", catppuccin::YELLOW),
                     (BottomTab::Timeline, "Timeline", catppuccin::TEAL),
+                    (BottomTab::Bookmarks, "Bookmarks", catppuccin::PINK),
+                    (BottomTab::Search, "Search", catppuccin::MAUVE),
+                    (BottomTab::Xrefs, "Xrefs", catppuccin::SAPPHIRE),
                 ];
 
                 for (tab, label, accent) in tabs {
                     // Filter tabs based on mode
                     let visible = match tab {
                         BottomTab::Debug | BottomTab::Timeline => state.ui.dynamic_mode,
-                        BottomTab::Strings | BottomTab::Imports | BottomTab::Cfg => {
-                            !state.ui.dynamic_mode
-                        }
+                        BottomTab::Strings
+                        | BottomTab::Imports
+                        | BottomTab::Cfg
+                        | BottomTab::Xrefs => !state.ui.dynamic_mode,
+                        BottomTab::Search => true,
                         _ => true,
                     };
 
@@ -121,6 +133,22 @@ pub fn render(
                         {
                             state.debug.pending_debug_action = Some(action);
                         }
+                    }
+                    BottomTab::Bookmarks => {
+                        bookmarks::render(ui, state);
+                    }
+                    BottomTab::Search => {
+                        crate::ui::gui::panels::search::render(ui, state);
+                    }
+                    BottomTab::Xrefs => {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(20.0);
+                            ui.label(egui::RichText::new("🔗 Cross-references").strong());
+                            ui.label("Selected address references are shown in a floating window.");
+                            if ui.button("Open Xrefs Window").clicked() {
+                                state.ui.show_xrefs_window = true;
+                            }
+                        });
                     }
                 },
             );

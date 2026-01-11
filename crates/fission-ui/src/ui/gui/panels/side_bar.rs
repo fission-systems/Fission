@@ -14,6 +14,8 @@ pub enum SideBarAction {
     AnalyzeFunctions,
     /// User wants to rename a function
     RenameFunction(u64),
+    /// User requested deep scan functions
+    DeepScanFunctions,
     /// User switched to a different binary in project
     SwitchBinary(std::sync::Arc<fission_loader::loader::LoadedBinary>),
 }
@@ -26,7 +28,11 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction
     }
 
     egui::SidePanel::left("side_bar")
-        .frame(egui::Frame::none().fill(ctx.style().visuals.panel_fill))
+        .frame(
+            egui::Frame::none()
+                .fill(ctx.style().visuals.panel_fill)
+                .stroke(egui::Stroke::new(1.0, catppuccin::SURFACE0)),
+        )
         .default_width(240.0)
         .min_width(150.0)
         .resizable(true)
@@ -70,6 +76,7 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction
                             FunctionAction::Select(func) => SideBarAction::SelectFunction(func),
                             FunctionAction::Analyze => SideBarAction::AnalyzeFunctions,
                             FunctionAction::Rename(addr) => SideBarAction::RenameFunction(addr),
+                            FunctionAction::DeepScan => SideBarAction::DeepScanFunctions,
                         });
                     }
                 }

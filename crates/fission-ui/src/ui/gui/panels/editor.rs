@@ -8,18 +8,69 @@ use eframe::egui;
 /// Render the central editor area with tabs.
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
     egui::CentralPanel::default()
-        .frame(egui::Frame::none().fill(catppuccin::BASE))
+        .frame(
+            egui::Frame::none()
+                .fill(catppuccin::BASE)
+                .inner_margin(egui::Margin::symmetric(4.0, 0.0)),
+        )
         .show(ctx, |ui| {
-            render_tabs(ui, state);
+            // Capture full available width before rendering tabs
+            let full_width = ui.available_width();
+
+            // Tab bar in a fixed-height area with horizontal scroll
+            ui.allocate_ui_with_layout(
+                egui::vec2(full_width, 36.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    egui::ScrollArea::horizontal()
+                        .id_salt("editor_tabs_scroll")
+                        .show(ui, |ui| {
+                            render_tabs(ui, state);
+                        });
+                },
+            );
 
             ui.separator();
 
+            // Content area gets full width
             render_active_tab_content(ui, state);
         });
 }
 
 fn render_tabs(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
+        ui.style_mut().spacing.item_spacing.x = 4.0; // Slightly more space for nav buttons
+
+        // Navigation Buttons
+        ui.group(|ui| {
+            ui.style_mut().spacing.item_spacing.x = 2.0;
+
+            let back_enabled = !state.ui.back_stack.is_empty();
+            if ui
+                .add_enabled(
+                    back_enabled,
+                    egui::Button::new(egui::RichText::new(" ⬅ ").strong()),
+                )
+                .on_hover_text("Go Back (Alt + Left)")
+                .clicked()
+            {
+                state.ui.pending_nav_back = true;
+            }
+
+            let forward_enabled = !state.ui.forward_stack.is_empty();
+            if ui
+                .add_enabled(
+                    forward_enabled,
+                    egui::Button::new(egui::RichText::new(" ➡ ").strong()),
+                )
+                .on_hover_text("Go Forward (Alt + Right)")
+                .clicked()
+            {
+                state.ui.pending_nav_forward = true;
+            }
+        });
+
+        ui.separator();
         ui.style_mut().spacing.item_spacing.x = 0.0;
 
         let mut close_tab = None;

@@ -51,6 +51,11 @@ pub struct AnalysisDomain {
     /// User-defined function names (address -> custom name)
     pub user_function_names: std::collections::HashMap<u64, String>,
 
+    /// User-defined comments (address -> comment string)
+    pub user_comments: std::collections::HashMap<u64, String>,
+    /// Bookmarked addresses: addr -> label
+    pub bookmarks: std::collections::HashMap<u64, String>,
+
     /// Reconstructed imports (Dynamic Mode)
     pub reconstructed_imports: Vec<crate::unpacker::importer::ImportEntry>,
 
@@ -161,6 +166,8 @@ impl Default for AnalysisDomain {
             detection_result: None,
             xref_db: None,
             user_function_names: std::collections::HashMap::new(),
+            user_comments: std::collections::HashMap::new(),
+            bookmarks: std::collections::HashMap::new(),
             reconstructed_imports: Vec::new(),
             string_xref_results: None,
             string_xref_min_len: 4,
@@ -169,6 +176,21 @@ impl Default for AnalysisDomain {
             project_binaries: Vec::new(),
             selected_binary_index: None,
             cfg_analysis: None,
+        }
+    }
+}
+
+impl AnalysisDomain {
+    /// Scan for missing logic by searching for function prologues in the binary code.
+    /// This helps finding functions that are reached via obfuscated paths (indirect calls)
+    /// and thus disconnected from the main call graph.
+    pub fn scan_for_missing_functions(&mut self) -> usize {
+        if let Some(ref mut binary_arc) = self.loaded_binary {
+            // Arc::make_mut ensures we have unique ownership (CoW)
+            // Then we call discover_functions_by_prologue on the LoadedBinary
+            std::sync::Arc::make_mut(binary_arc).discover_functions_by_prologue()
+        } else {
+            0
         }
     }
 }

@@ -59,10 +59,24 @@ pub struct UIState {
     pub expanded_folders: std::collections::HashSet<String>,
     /// Current memory usage in bytes
     pub memory_usage: u64,
+    /// Current CPU usage percentage (0.0-100.0)
+    pub cpu_usage: f32,
     /// Current git branch
     pub git_branch: String,
     /// Current progress (percentage 0.0-1.0, message)
     pub progress: Option<(f32, String)>,
+    /// Navigation back stack (address history)
+    pub back_stack: Vec<u64>,
+    /// Navigation forward stack
+    pub forward_stack: Vec<u64>,
+    /// Pending navigation action: go back
+    pub pending_nav_back: bool,
+    /// Pending navigation action: go forward
+    pub pending_nav_forward: bool,
+    /// Currently highlighted symbol (e.g. clicked register or name)
+    pub highlighted_symbol: Option<String>,
+    /// Pending jump request (address)
+    pub pending_jump: Option<u64>,
 }
 
 impl Default for UIState {
@@ -81,9 +95,16 @@ impl Default for UIState {
             show_string_xrefs_window: false,
             cursor_pos: None,
             memory_usage: 0,
+            cpu_usage: 0.0,
             git_branch: get_git_branch(),
             progress: None,
             expanded_folders: std::collections::HashSet::new(),
+            back_stack: Vec::new(),
+            forward_stack: Vec::new(),
+            pending_nav_back: false,
+            pending_nav_forward: false,
+            highlighted_symbol: None,
+            pending_jump: None,
         }
     }
 }
@@ -331,6 +352,9 @@ pub enum BottomTab {
     Console,
     HexView,
     Strings,
+    Xrefs,
+    Search,
+    Bookmarks,
     Imports,
     Cfg,
     Debug,

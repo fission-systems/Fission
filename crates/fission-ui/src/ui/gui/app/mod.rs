@@ -169,7 +169,9 @@ impl eframe::App for FissionApp {
                 use crate::ui::gui::core::state::BottomTab;
                 let invalid = match self.state.ui.bottom_tab {
                     BottomTab::Debug | BottomTab::Timeline => !dynamic_mode,
-                    BottomTab::Strings | BottomTab::Imports => dynamic_mode,
+                    BottomTab::Strings | BottomTab::Imports | BottomTab::Cfg | BottomTab::Xrefs => {
+                        dynamic_mode
+                    }
                     _ => false,
                 };
                 if invalid {
@@ -208,16 +210,21 @@ impl eframe::App for FissionApp {
             }
         }
 
-        // Update memory usage every 2 seconds
+        // Update resource usage every 2 seconds
         if self.last_mem_update.elapsed().as_secs() >= 2 {
-            self.sysinfo.refresh_memory();
-            let pid = std::process::id();
-            // Note: sysinfo might not support getting memory for current process easily cross-platform without iterating
-            // For now, let's try to find our process
-            use sysinfo::Pid;
-            if let Some(process) = self.sysinfo.process(Pid::from(pid as usize)) {
+            use sysinfo::{Pid, ProcessesToUpdate};
+
+            let pid = Pid::from(std::process::id() as usize);
+
+            // Refresh processes to get current CPU/memory
+            self.sysinfo
+                .refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+
+            if let Some(process) = self.sysinfo.process(pid) {
                 self.state.ui.memory_usage = process.memory();
+                self.state.ui.cpu_usage = process.cpu_usage();
             }
+
             self.last_mem_update = std::time::Instant::now();
         }
 
@@ -228,10 +235,17 @@ impl eframe::App for FissionApp {
             &self.rx,
             &self.tx,
             &self.decomp_request_tx,
+            &self.latest_request_id,
             &self.dbg_event_rx,
         );
         #[cfg(not(target_os = "windows"))]
-        handlers::process_messages(&mut self.state, &self.rx, &self.tx, &self.decomp_request_tx);
+        handlers::process_messages(
+            &mut self.state,
+            &self.rx,
+            &self.tx,
+            &self.decomp_request_tx,
+            &self.latest_request_id,
+        );
 
         // Render menu bar and handle actions
         let menu_action = menu::render(ctx, &mut self.state);
@@ -249,10 +263,89 @@ impl eframe::App for FissionApp {
         if let Some(action) = side_bar::render(ctx, &mut self.state) {
             match action {
                 side_bar::SideBarAction::SelectFunction(func) => {
+                    // Record current location before jump
+                    let current_addr = self
+                        .state
+                        .analysis
+                        .domain
+                        .selected_function
+                        .as_ref()
+                        .map(|f| f.address);
+
+                    if let Some(addr) = current_addr {
+                        analysis_ops::push_navigation(&mut self.state, addr);
+                    }
                     self.open_function_tabs(&func);
                 }
                 side_bar::SideBarAction::AnalyzeFunctions => {
                     analysis_ops::analyze_functions(&mut self.state);
+                }
+                side_bar::SideBarAction::DeepScanFunctions => {
+                    let count = self.state.analysis.domain.scan_for_missing_functions();
+                    if count > 0 {
+                        self.state.log(format!(
+                            "[*] Recovered {} hidden functions via prologue scan.",
+                            count
+                        ));
+
+                        // Function Identification (FID)
+                        let mut fid_count = 0;
+                        let mut logs = Vec::new();
+
+                        if let Some(ref mut binary_arc) = self.state.analysis.domain.loaded_binary {
+                            let binary = std::sync::Arc::make_mut(binary_arc);
+
+                            // Initialize signature database
+                            let db = fission_signatures::SignatureDatabase::new();
+
+                            // Collect only the newly scanned functions to identify
+                            let scanned_funcs: Vec<_> = binary
+                                .functions
+                                .iter()
+                                .filter(|f| f.name.ends_with("_scanned"))
+                                .map(|f| (f.address, f.name.clone()))
+                                .collect();
+
+                            if !scanned_funcs.is_empty() {
+                                // Identify functions
+                                let matched = db.identify_functions_in_binary(
+                                    &binary.data,
+                                    &scanned_funcs,
+                                    binary.image_base,
+                                );
+
+                                if !matched.is_empty() {
+                                    for func in &mut binary.functions {
+                                        if let Some(new_name) = matched.get(&func.address) {
+                                            logs.push(format!(
+                                                "    [+] Identified 0x{:x} as {}",
+                                                func.address, new_name
+                                            ));
+                                            func.name = new_name.clone();
+                                            fid_count += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Apply updates to state
+                        for msg in logs {
+                            self.state.log(msg);
+                        }
+
+                        if fid_count > 0 {
+                            // Force UI refresh
+                            self.state.viewmodels.functions.cache_key = None;
+                            self.state.log(format!(
+                                "[*] Identified {} functions using built-in signatures.",
+                                fid_count
+                            ));
+                        }
+                    } else {
+                        self.state
+                            .log("[*] No additional hidden functions found by signature scanning.");
+                    }
                 }
                 side_bar::SideBarAction::RenameFunction(addr) => {
                     // Get current name for the function
@@ -350,6 +443,14 @@ impl eframe::App for FissionApp {
         // Render string xrefs window
         use super::panels::string_xrefs;
         string_xrefs::render(ctx, &mut self.state);
+
+        // Render input dialogs
+        self.render_rename_dialog(ctx);
+        self.render_comment_dialog(ctx);
+        self.render_goto_address_dialog(ctx);
+
+        // Handle navigation actions
+        self.handle_navigation_actions(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -368,6 +469,8 @@ impl FissionApp {
             MenuAction::OpenFolder => file_ops::open_folder_dialog(self.tx.clone()),
             MenuAction::SaveSnapshot => file_ops::save_snapshot_dialog(self.tx.clone()),
             MenuAction::LoadSnapshot => file_ops::load_snapshot_dialog(self.tx.clone()),
+            MenuAction::SaveProject => file_ops::save_project_dialog(self.tx.clone()),
+            MenuAction::LoadProject => file_ops::load_project_dialog(self.tx.clone()),
             MenuAction::AttachToProcess => {
                 self.state.ui.show_attach_dialog = true;
                 self.state.debug.domain.process_list = crate::debug::enumerate_processes();
@@ -583,6 +686,354 @@ impl FissionApp {
     #[cfg(not(target_os = "windows"))]
     fn attach_to_process(&mut self, pid: u32) {
         debug_ops::attach_to_process(&mut self.state, pid);
+    }
+
+    fn render_rename_dialog(&mut self, ctx: &egui::Context) {
+        let mut rename_result = None;
+        if let Some((addr, ref mut name)) = self.state.viewmodels.functions.rename_dialog {
+            egui::Window::new("Rename Symbol")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Rename symbol at 0x{:x}", addr)).strong(),
+                    );
+                    ui.add_space(8.0);
+                    let res = ui.add(
+                        egui::TextEdit::singleline(name)
+                            .hint_text("New name...")
+                            .desired_width(200.0),
+                    );
+                    if res.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        rename_result = Some((addr, name.clone()));
+                    }
+                    res.request_focus();
+
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Confirm").clicked() {
+                            rename_result = Some((addr, name.clone()));
+                        }
+                        if ui.button("Cancel").clicked() {
+                            rename_result = Some((0, String::new())); // Close signal
+                        }
+                    });
+                });
+        }
+
+        if let Some((addr, name)) = rename_result {
+            if addr != 0 {
+                use crate::ui::gui::core::state::EditorTab;
+
+                // 1. Determine the previous display name to find existing tabs
+                let old_name = self
+                    .state
+                    .analysis
+                    .domain
+                    .user_function_names
+                    .get(&addr)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        self.state
+                            .analysis
+                            .domain
+                            .loaded_binary
+                            .as_ref()
+                            .and_then(|b| b.functions.iter().find(|f| f.address == addr))
+                            .map(|f| f.name.clone())
+                            .unwrap_or_else(|| format!("sub_{:x}", addr))
+                    });
+
+                // 2. Update the name map
+                self.state
+                    .analysis
+                    .domain
+                    .user_function_names
+                    .insert(addr, name.clone());
+                self.state
+                    .log(format!("[*] Renamed symbol at 0x{:x} to {}", addr, name));
+
+                // 3. Update any open tabs with the old name
+                for tab in self.state.ui.open_tabs.iter_mut() {
+                    match tab {
+                        EditorTab::Assembly(n) if *n == old_name => *n = name.clone(),
+                        EditorTab::Decompiled(n) if *n == old_name => *n = name.clone(),
+                        _ => {}
+                    }
+                }
+
+                // 4. Trigger re-decompilation if the current function is affected
+                if let Some(ref selected) = self.state.analysis.domain.selected_function {
+                    self.open_function_tabs(&selected.clone());
+                }
+            }
+            self.state.viewmodels.functions.rename_dialog = None;
+        }
+    }
+
+    fn render_comment_dialog(&mut self, ctx: &egui::Context) {
+        use crate::ui::gui::theme::catppuccin;
+
+        let mut comment_result: Option<(u64, Option<String>)> = None;
+
+        if let Some((addr, ref mut comment)) = self.state.viewmodels.functions.comment_dialog {
+            egui::Window::new("💬 Edit Comment")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Address: 0x{:x}", addr))
+                            .color(catppuccin::BLUE)
+                            .strong(),
+                    );
+                    ui.add_space(8.0);
+
+                    let res = ui.add(
+                        egui::TextEdit::multiline(comment)
+                            .hint_text("Enter your comment here...")
+                            .desired_width(320.0)
+                            .desired_rows(3)
+                            .font(egui::TextStyle::Monospace),
+                    );
+                    res.request_focus();
+
+                    // Handle Enter (with Ctrl) to save, Escape to cancel
+                    let enter_pressed =
+                        ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl);
+                    let escape_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Ctrl+Enter to save • Escape to cancel")
+                            .small()
+                            .color(catppuccin::OVERLAY0),
+                    );
+
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("💾 Save").clicked() || enter_pressed {
+                            comment_result = Some((addr, Some(comment.clone())));
+                        }
+                        if ui
+                            .button(egui::RichText::new("🗑 Delete").color(catppuccin::RED))
+                            .clicked()
+                        {
+                            comment_result = Some((addr, None)); // Delete comment
+                        }
+                        if ui.button("Cancel").clicked() || escape_pressed {
+                            comment_result = Some((0, None)); // Close without saving
+                        }
+                    });
+                });
+        }
+
+        if let Some((addr, maybe_comment)) = comment_result {
+            if addr != 0 {
+                match maybe_comment {
+                    Some(comment) if !comment.is_empty() => {
+                        self.state
+                            .analysis
+                            .domain
+                            .user_comments
+                            .insert(addr, comment);
+                        self.state.log(format!("[*] Comment saved at 0x{:x}", addr));
+                    }
+                    _ => {
+                        self.state.analysis.domain.user_comments.remove(&addr);
+                        self.state
+                            .log(format!("[*] Comment removed from 0x{:x}", addr));
+                    }
+                }
+
+                // Refresh view
+                if let Some(ref selected) = self.state.analysis.domain.selected_function {
+                    self.open_function_tabs(&selected.clone());
+                }
+            }
+            self.state.viewmodels.functions.comment_dialog = None;
+        }
+    }
+
+    pub fn handle_navigation_actions(&mut self, ctx: &egui::Context) {
+        // 1. Check Keyboard Shortcuts (Alt + Left / Alt + Right)
+        let back_pressed = ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::ALT, egui::Key::ArrowLeft)
+                || i.consume_key(egui::Modifiers::COMMAND, egui::Key::ArrowLeft)
+        });
+
+        let forward_pressed = ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::ALT, egui::Key::ArrowRight)
+                || i.consume_key(egui::Modifiers::COMMAND, egui::Key::ArrowRight)
+        });
+
+        // 2. Go to Address (G)
+        let g_pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::G));
+        if g_pressed
+            && self
+                .state
+                .viewmodels
+                .navigation
+                .goto_address_input
+                .is_none()
+        {
+            self.state.viewmodels.navigation.goto_address_input = Some(String::new());
+        }
+
+        if back_pressed || self.state.ui.pending_nav_back {
+            self.state.ui.pending_nav_back = false;
+            analysis_ops::navigate_back(
+                &mut self.state,
+                &self.decomp_request_tx,
+                &self.latest_request_id,
+            );
+        }
+
+        if forward_pressed || self.state.ui.pending_nav_forward {
+            self.state.ui.pending_nav_forward = false;
+            analysis_ops::navigate_forward(
+                &mut self.state,
+                &self.decomp_request_tx,
+                &self.latest_request_id,
+            );
+        }
+
+        // 3. Toggle Bookmark (F2)
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+            if let Some(addr) = self.state.ui.selected_xref_addr {
+                if self.state.analysis.domain.bookmarks.contains_key(&addr) {
+                    self.state.analysis.domain.bookmarks.remove(&addr);
+                    self.state
+                        .log(format!("[*] Bookmark removed at 0x{:08X}", addr));
+                } else {
+                    let label = self
+                        .state
+                        .analysis
+                        .domain
+                        .user_function_names
+                        .get(&addr)
+                        .cloned()
+                        .unwrap_or_else(|| format!("loc_{:x}", addr));
+                    self.state.analysis.domain.bookmarks.insert(addr, label);
+                    self.state
+                        .log(format!("[*] Bookmark added at 0x{:08X}", addr));
+                }
+            }
+        }
+
+        if let Some(addr) = self.state.ui.pending_jump.take() {
+            analysis_ops::navigate_to_address(
+                &mut self.state,
+                addr,
+                &self.decomp_request_tx,
+                &self.latest_request_id,
+            );
+        }
+    }
+
+    /// Render Go to Address (G) dialog
+    fn render_goto_address_dialog(&mut self, ctx: &egui::Context) {
+        let mut jump_target = None;
+        let mut close_dialog = false;
+
+        if let Some(ref mut input) = self.state.viewmodels.navigation.goto_address_input {
+            egui::Window::new("🚀 Go to Address")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -100.0))
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Target:");
+                        let text_edit = egui::TextEdit::singleline(input)
+                            .hint_text("0x1234, 4660, function_name")
+                            .desired_width(200.0);
+
+                        let res = ui.add(text_edit);
+                        res.request_focus();
+
+                        if ui.button("Go").clicked()
+                            || (res.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        {
+                            jump_target = Some(input.clone());
+                        }
+                    });
+
+                    ui.label(
+                        egui::RichText::new("Enter hex (0x...), decimal, or function name")
+                            .small()
+                            .color(super::theme::catppuccin::OVERLAY0),
+                    );
+
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        close_dialog = true;
+                    }
+                });
+        }
+
+        if close_dialog {
+            self.state.viewmodels.navigation.goto_address_input = None;
+        }
+
+        if let Some(target) = jump_target {
+            self.state.viewmodels.navigation.goto_address_input = None;
+
+            // Try to parse as hex
+            let addr = if target.starts_with("0x") {
+                u64::from_str_radix(&target[2..], 16).ok()
+            } else if let Ok(val) = u64::from_str_radix(&target, 16) {
+                Some(val)
+            } else {
+                target.parse::<u64>().ok()
+            };
+
+            if let Some(a) = addr {
+                analysis_ops::navigate_to_address(
+                    &mut self.state,
+                    a,
+                    &self.decomp_request_tx,
+                    &self.latest_request_id,
+                );
+            } else {
+                // Try to find function by name
+                let functions = self
+                    .state
+                    .analysis
+                    .loaded_binary()
+                    .as_ref()
+                    .map(|b| b.functions.clone())
+                    .unwrap_or_default();
+
+                // Search user names first, then original names
+                let user_match = self
+                    .state
+                    .analysis
+                    .domain
+                    .user_function_names
+                    .iter()
+                    .find(|(_, name)| **name == target)
+                    .map(|(addr, _)| *addr);
+
+                if let Some(a) = user_match {
+                    analysis_ops::navigate_to_address(
+                        &mut self.state,
+                        a,
+                        &self.decomp_request_tx,
+                        &self.latest_request_id,
+                    );
+                } else if let Some(f) = functions.iter().find(|f| f.name == target) {
+                    analysis_ops::navigate_to_address(
+                        &mut self.state,
+                        f.address,
+                        &self.decomp_request_tx,
+                        &self.latest_request_id,
+                    );
+                } else {
+                    self.state
+                        .log(format!("[!] Invalid jump target: {}", target));
+                }
+            }
+        }
     }
 }
 

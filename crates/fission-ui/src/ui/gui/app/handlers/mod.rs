@@ -14,6 +14,7 @@ pub fn process_messages(
     rx: &Receiver<AsyncMessage>,
     tx: &Sender<AsyncMessage>,
     decomp_tx: &Sender<super::decomp_worker::DecompileRequest>,
+    req_id: &std::sync::Arc<std::sync::atomic::AtomicU64>,
     #[cfg(target_os = "windows")] dbg_event_rx: &mut Option<
         crossbeam_channel::Receiver<crate::debug::types::DebugEvent>,
     >,
@@ -58,6 +59,12 @@ pub fn process_messages(
             }
             AsyncMessage::LoadSnapshot(path) => {
                 message_handlers::handle_load_snapshot(state, tx.clone(), path);
+            }
+            AsyncMessage::SaveProject(path) => {
+                message_handlers::handle_save_project(state, path);
+            }
+            AsyncMessage::LoadProject(path) => {
+                message_handlers::handle_load_project(state, path, decomp_tx, req_id);
             }
             AsyncMessage::DecompilerContextLoaded => {
                 crate::core::logging::info("Decompiler context initialized");
