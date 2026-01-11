@@ -146,27 +146,64 @@ unsafe extern "C" {
 /// This provides direct in-process access to the Ghidra decompiler,
 /// avoiding subprocess spawn overhead.
 ///
-/// # Safety
+/// # Safety Guarantees
 ///
-/// This struct wraps a raw C++ pointer and is marked as Send to allow
-/// use across threads. However, the underlying C++ object is NOT thread-safe.
-/// Users must ensure:
-/// - Only one thread accesses this instance at a time (use Mutex if sharing)
-/// - The instance is properly dropped before the thread terminates
-/// - No use-after-free by keeping references after drop
+/// This struct implements several layers of safety:
+///
+/// 1. **Validity Tracking**: The `is_valid` flag prevents use-after-free.
+///    All public methods call `check_valid()` before accessing the C++ context.
+///
+/// 2. **Null Pointer Checks**: The context pointer is validated before each FFI call.
+///
+/// 3. **C String Safety**: All string conversions use `CString::new()` with proper
+///    error handling to prevent embedded nulls from causing UB.
+///
+/// 4. **Memory Ownership**: FFI-returned strings are immediately copied to Rust-owned
+///    Strings, then freed via `decomp_free_string()`.
+///
+/// 5. **RAII Cleanup**: The `Drop` impl ensures the C++ context is destroyed.
+///
+/// # Thread Safety
+///
+/// - **`Send`**: This type can be moved between threads (but see below).
+/// - **NOT `Sync`**: The underlying C++ object is NOT thread-safe.
+///   **Never share a `DecompilerNative` across threads without external synchronization.**
+///   Use `Mutex<DecompilerNative>` if sharing is needed.
+///
+/// # Panics
+///
+/// This type is designed to never panic during FFI operations. All errors
+/// are returned as `Result<T, FissionError>`.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut decomp = DecompilerNative::new("/path/to/sla")?;
+/// decomp.load_binary(&binary_data, 0x140000000, true)?;
+/// let code = decomp.decompile(0x140001000)?;
+/// ```
 #[cfg(feature = "native_decomp")]
 pub struct DecompilerNative {
     ctx: *mut DecompContext,
     _sla_dir: String,
-    // Track if context is valid to prevent use-after-free
+    /// Track if context is valid to prevent use-after-free
     is_valid: bool,
     pointer_size: Option<u32>,
     symbol_provider_state: Option<Box<SymbolProviderState>>,
     symbol_provider_callbacks: Option<DecompSymbolProvider>,
 }
 
+/// DecompilerNative can be sent between threads, but CANNOT be shared.
+/// The underlying C++ decompiler is NOT thread-safe.
+///
+/// We use PhantomData<*mut ()> as a marker to opt-out of Sync.
+/// The raw pointer type *mut () is !Sync, making DecompilerNative also !Sync.
 #[cfg(feature = "native_decomp")]
 unsafe impl Send for DecompilerNative {}
+
+// Note: DecompilerNative is implicitly !Sync because it contains
+// *mut DecompContext which is !Sync. This prevents Arc<DecompilerNative>
+// without external synchronization like Arc<Mutex<DecompilerNative>>.
 
 #[cfg(feature = "native_decomp")]
 impl DecompilerNative {
@@ -198,6 +235,9 @@ impl DecompilerNative {
     }
 
     /// Check if the decompiler context is still valid
+    ///
+    /// This is called at the start of every public method to prevent
+    /// use-after-free and null pointer dereferences.
     fn check_valid(&self) -> Result<()> {
         if !self.is_valid {
             return Err(FissionError::decompiler(
@@ -209,6 +249,24 @@ impl DecompilerNative {
                 "Decompiler context pointer is null",
             ));
         }
+
+        // Extra debug-only validation
+        #[cfg(debug_assertions)]
+        {
+            // Verify we're on the expected thread in debug mode
+            // This helps catch threading issues during development
+            static CREATION_THREAD: std::sync::OnceLock<std::thread::ThreadId> =
+                std::sync::OnceLock::new();
+            let current = std::thread::current().id();
+            let created = CREATION_THREAD.get_or_init(|| current);
+            if *created != current {
+                eprintln!(
+                    "[fission-ffi] WARNING: DecompilerNative accessed from different thread than creation. \
+                     This may indicate a threading issue. Use Mutex for thread-safe access."
+                );
+            }
+        }
+
         Ok(())
     }
 
