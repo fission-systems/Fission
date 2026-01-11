@@ -1,2 +1,33 @@
+# Cargo configuration for Fission development
+
+# Use sccache for faster rebuilds (uncomment after installing sccache)
+# [build]
+# rustc-wrapper = "sccache"
+
+# Address Sanitizer configuration (for debugging memory issues)
+# Usage: RUSTFLAGS="-Zsanitizer=address" cargo +nightly run --target x86_64-apple-darwin
+[target.x86_64-apple-darwin]
+rustflags = []
+
+[target.aarch64-apple-darwin]
+rustflags = []
+
+# Linker settings for better performance
+[profile.dev]
+# Faster linking with lld (if available)
+# linker = "clang"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+# Profiling build (with debug symbols)
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+
 [env]
-DYLD_LIBRARY_PATH = "/Users/sjkim1127/Fission/ghidra_decompiler/build"
+# Enable colored output in CI
+CARGO_TERM_COLOR = "always"

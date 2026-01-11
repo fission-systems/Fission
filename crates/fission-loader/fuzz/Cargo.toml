@@ -1,0 +1,29 @@
+[package]
+name = "fission-loader-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.fission-loader]
+path = ".."
+
+[[bin]]
+name = "fuzz_pe_parser"
+path = "fuzz_targets/fuzz_pe_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_elf_parser"
+path = "fuzz_targets/fuzz_elf_parser.rs"
+test = false
+doc = false
+bench = false
