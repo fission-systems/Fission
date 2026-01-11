@@ -47,19 +47,35 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     }
 
-    // Filter strings
-    let filter = state.viewmodels.strings.filter.to_lowercase();
-    let filtered_strings: Vec<_> = state
-        .analysis
-        .domain
-        .extracted_strings
-        .iter()
-        .filter(|s| filter.is_empty() || s.value.to_lowercase().contains(&filter))
-        .collect();
+    let string_count = state.analysis.domain.extracted_strings.len();
 
+    // Use cached filter if valid, otherwise recompute
+    if state.viewmodels.strings.needs_refresh(string_count) {
+        let filter = state.viewmodels.strings.filter.to_lowercase();
+        let indices: Vec<usize> = state
+            .analysis
+            .domain
+            .extracted_strings
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, s)| {
+                if filter.is_empty() || s.value.to_lowercase().contains(&filter) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        state.viewmodels.strings.cached_indices = indices;
+        state.viewmodels.strings.cache_key =
+            Some((state.viewmodels.strings.filter.clone(), string_count));
+    }
+
+    let cached_indices = &state.viewmodels.strings.cached_indices;
     let available_height = ui.available_height();
     let row_height = 20.0;
-    let total_rows = filtered_strings.len();
+    let total_rows = cached_indices.len();
 
     // Virtual scrolling table for strings
     ui.push_id("strings_table", |ui| {
@@ -93,7 +109,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
             })
             .body(|body| {
                 body.rows(row_height, total_rows, |mut row| {
-                    let s = &filtered_strings[row.index()];
+                    let s_idx = cached_indices[row.index()];
+                    let s = &state.analysis.domain.extracted_strings[s_idx];
 
                     row.col(|ui| {
                         let _ = ui.selectable_label(

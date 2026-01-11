@@ -11,6 +11,8 @@ pub enum MenuAction {
     OpenFolder,
     SaveSnapshot,
     LoadSnapshot,
+    SaveProject,
+    LoadProject,
     AttachToProcess,
     DetachProcess,
     ClearConsole,
@@ -62,6 +64,27 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                         .clicked()
                     {
                         action = MenuAction::LoadSnapshot;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui
+                        .button(
+                            egui::RichText::new("📊 Save Project (.fprj)...")
+                                .color(catppuccin::TEAL),
+                        )
+                        .clicked()
+                    {
+                        action = MenuAction::SaveProject;
+                        ui.close_menu();
+                    }
+                    if ui
+                        .button(
+                            egui::RichText::new("📖 Load Project (.fprj)...")
+                                .color(catppuccin::SAPPHIRE),
+                        )
+                        .clicked()
+                    {
+                        action = MenuAction::LoadProject;
                         ui.close_menu();
                     }
                     ui.separator();
@@ -209,6 +232,10 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> MenuAction {
                         (BottomTab::HexView, "Hex View", catppuccin::PEACH),
                         (BottomTab::Strings, "Strings", catppuccin::GREEN),
                         (BottomTab::Imports, "Imports", catppuccin::MAUVE),
+                        (BottomTab::Cfg, "CFG", catppuccin::FLAMINGO),
+                        (BottomTab::Search, "Search", catppuccin::YELLOW),
+                        (BottomTab::Xrefs, "Xrefs", catppuccin::SAPPHIRE),
+                        (BottomTab::Bookmarks, "Bookmarks", catppuccin::PINK),
                         (BottomTab::Debug, "Debug", catppuccin::RED),
                     ];
 

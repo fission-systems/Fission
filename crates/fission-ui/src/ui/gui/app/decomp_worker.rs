@@ -21,6 +21,8 @@ use std::sync::{
 pub struct DecompileRequest {
     /// Unique request ID for debouncing
     pub request_id: u64,
+    /// Binary identifier (hash) for routing to correct worker
+    pub binary_id: String,
     /// Function bytes to decompile
     pub bytes: Vec<u8>,
     /// Base address
@@ -59,6 +61,7 @@ impl DecompileRequest {
     pub fn new(request_id: u64, bytes: Vec<u8>, address: u64, is_64bit: bool) -> Self {
         Self {
             request_id,
+            binary_id: String::new(),
             bytes,
             address,
             is_64bit,
@@ -80,6 +83,7 @@ impl DecompileRequest {
     pub fn clear_cache() -> Self {
         Self {
             request_id: 0,
+            binary_id: String::new(),
             bytes: Vec::new(),
             address: 0,
             is_64bit: false,
@@ -101,6 +105,7 @@ impl DecompileRequest {
     pub fn cfg_analysis(address: u64) -> Self {
         Self {
             request_id: 0,
+            binary_id: String::new(),
             bytes: Vec::new(),
             address,
             is_64bit: false,
@@ -130,6 +135,7 @@ impl DecompileRequest {
     ) -> Self {
         Self {
             request_id: 0,
+            binary_id: binary_hash.clone(),
             bytes,
             address: 0,
             is_64bit: false,
@@ -151,6 +157,7 @@ impl DecompileRequest {
     pub fn prefetch(bytes: Vec<u8>, address: u64, is_64bit: bool) -> Self {
         Self {
             request_id: 0,
+            binary_id: String::new(),
             bytes,
             address,
             is_64bit,
@@ -173,40 +180,348 @@ impl DecompileRequest {
 // Native implementation (requires native_decomp feature)
 // =============================================================================
 
+/// Worker handle for a specific binary
+#[cfg(feature = "native_decomp")]
+struct BinaryWorker {
+    /// Channel to send requests to this worker
+    tx: crossbeam_channel::Sender<DecompileRequest>,
+}
+
+/// Pool of per-binary decompiler workers
+#[cfg(feature = "native_decomp")]
+struct DecompilerPool {
+    workers: HashMap<String, BinaryWorker>,
+    result_tx: Sender<AsyncMessage>,
+    latest_request_id: Arc<AtomicU64>,
+}
+
+#[cfg(feature = "native_decomp")]
+impl DecompilerPool {
+    fn new(result_tx: Sender<AsyncMessage>, latest_request_id: Arc<AtomicU64>) -> Self {
+        Self {
+            workers: HashMap::new(),
+            result_tx,
+            latest_request_id,
+        }
+    }
+
+    fn get_or_create_worker(&mut self, binary_id: &str) -> &BinaryWorker {
+        if !self.workers.contains_key(binary_id) {
+            let (tx, rx) = crossbeam_channel::unbounded();
+            let result_tx = self.result_tx.clone();
+            let latest_request_id = Arc::clone(&self.latest_request_id);
+            let binary_id_clone = binary_id.to_string();
+
+            // Spawn a dedicated worker thread for this binary
+            std::thread::Builder::new()
+                .name(format!(
+                    "decomp-worker-{}",
+                    &binary_id[..8.min(binary_id.len())]
+                ))
+                .spawn(move || {
+                    binary_worker_loop(binary_id_clone, rx, result_tx, latest_request_id);
+                })
+                .expect("Failed to spawn binary worker thread");
+
+            self.workers
+                .insert(binary_id.to_string(), BinaryWorker { tx });
+            crate::core::logging::info(&format!(
+                "[decomp-pool] Spawned new worker for binary: {}...",
+                &binary_id[..16.min(binary_id.len())]
+            ));
+        }
+
+        self.workers.get(binary_id).unwrap()
+    }
+
+    fn dispatch(&mut self, request: DecompileRequest) {
+        let binary_id = if request.binary_id.is_empty() {
+            // Use binary_hash as fallback if binary_id not set
+            if request.binary_hash.is_empty() {
+                "default".to_string()
+            } else {
+                request.binary_hash.clone()
+            }
+        } else {
+            request.binary_id.clone()
+        };
+
+        let worker = self.get_or_create_worker(&binary_id);
+        let _ = worker.tx.send(request);
+    }
+}
+
 #[cfg(feature = "native_decomp")]
 pub fn spawn_worker(
     request_rx: Receiver<DecompileRequest>,
     result_tx: Sender<AsyncMessage>,
     latest_request_id: Arc<AtomicU64>,
 ) {
-    use fission_analysis::analysis::decomp::CachingDecompiler;
+    crate::core::logging::info("[decomp-pool] Starting multi-binary decompiler pool (FFI mode)");
 
-    let request_rx = Arc::new(Mutex::new(request_rx));
-    let native_decomp: Arc<Mutex<Option<CachingDecompiler>>> = Arc::new(Mutex::new(None));
-    let num_workers = 1; // Single worker for FFI to avoid Ghidra thread-safety issues
+    // Spawn the router thread that dispatches to per-binary workers
+    std::thread::Builder::new()
+        .name("decomp-router".to_string())
+        .spawn(move || {
+            let mut pool = DecompilerPool::new(result_tx, latest_request_id);
 
-    crate::core::logging::info(
-        "[decomp-worker] Native FFI backend (single worker for thread safety)",
-    );
+            loop {
+                match request_rx.recv() {
+                    Ok(request) => {
+                        pool.dispatch(request);
+                    }
+                    Err(_) => {
+                        crate::core::logging::info(
+                            "[decomp-router] Request channel closed, exiting",
+                        );
+                        return;
+                    }
+                }
+            }
+        })
+        .expect("Failed to spawn decompiler router thread");
 
-    for i in 0..num_workers {
-        let request_rx = Arc::clone(&request_rx);
-        let result_tx = result_tx.clone();
-        let latest_request_id = Arc::clone(&latest_request_id);
-        let native_decomp = Arc::clone(&native_decomp);
-
-        std::thread::Builder::new()
-            .name(format!("decomp-worker-{}", i))
-            .spawn(move || {
-                worker_loop_native(i, request_rx, result_tx, native_decomp, latest_request_id);
-            })
-            .expect("Failed to spawn decompiler worker thread");
-    }
-
-    crate::core::logging::info("[decomp-worker] Spawned 1 worker thread (FFI mode)");
+    crate::core::logging::info("[decomp-pool] Router thread started");
 }
 
+/// Worker loop for a single binary's decompiler context
 #[cfg(feature = "native_decomp")]
+fn binary_worker_loop(
+    binary_id: String,
+    request_rx: crossbeam_channel::Receiver<DecompileRequest>,
+    result_tx: Sender<AsyncMessage>,
+    latest_request_id: Arc<AtomicU64>,
+) {
+    use fission_analysis::analysis::decomp::CachingDecompiler;
+
+    // Each binary worker has its own decompiler context
+    let mut native_decomp: Option<CachingDecompiler> = None;
+
+    crate::core::logging::info(&format!(
+        "[decomp-worker-{}] Worker started",
+        &binary_id[..8.min(binary_id.len())]
+    ));
+
+    loop {
+        let request = match request_rx.recv() {
+            Ok(req) => req,
+            Err(_) => {
+                crate::core::logging::info(&format!(
+                    "[decomp-worker-{}] Channel closed, exiting",
+                    &binary_id[..8.min(binary_id.len())]
+                ));
+                return;
+            }
+        };
+
+        // Handle CFG analysis requests
+        if request.is_cfg_request {
+            let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
+                address: request.address,
+                block_count: 0,
+                edge_count: 0,
+                cyclomatic_complexity: 0,
+                max_nesting_depth: 0,
+                loops: Vec::new(),
+                blocks: Vec::new(),
+                dot_content: String::new(),
+            });
+            continue;
+        }
+
+        // Handle cache clear requests
+        if request.is_clear_cache {
+            if let Some(ref mut decomp) = native_decomp {
+                decomp.clear_cache();
+                crate::core::logging::info(&format!(
+                    "[decomp-worker-{}] Cache cleared",
+                    &binary_id[..8.min(binary_id.len())]
+                ));
+            }
+            continue;
+        }
+
+        // Handle binary load requests
+        if request.is_binary_load {
+            handle_binary_load_for_worker(&request, &mut native_decomp, &result_tx);
+            continue;
+        }
+
+        // Debouncing: Skip if this is not the latest request
+        if request.request_id != latest_request_id.load(Ordering::SeqCst) {
+            continue;
+        }
+
+        // Handle decompilation request
+        handle_decompile_for_worker(&request, &mut native_decomp, &result_tx);
+    }
+}
+
+/// Handle binary load for a specific worker
+#[cfg(feature = "native_decomp")]
+fn handle_binary_load_for_worker(
+    request: &DecompileRequest,
+    native_decomp: &mut Option<fission_analysis::analysis::decomp::CachingDecompiler>,
+    result_tx: &Sender<AsyncMessage>,
+) {
+    // Resolve SLA directory
+    let sla_dir = match resolve_sla_directory() {
+        Ok(dir) => dir,
+        Err(e) => {
+            let _ = result_tx.send(AsyncMessage::DecompilerContextError {
+                error: e,
+                suggestion: Some("Set FISSION_SLA_DIR environment variable".to_string()),
+            });
+            return;
+        }
+    };
+
+    // Build a minimal LoadedBinary for CachingDecompiler
+    let is_64bit = detect_is_64bit(&request.bytes);
+    let mut dummy_binary = fission_loader::loader::LoadedBinaryBuilder::new(
+        "dummy".to_string(),
+        request.bytes.clone(),
+    )
+    .image_base(request.image_base)
+    .is_64bit(is_64bit)
+    .format("PE")
+    .add_sections(request.sections.clone())
+    .build()
+    .map_err(|e| format!("Failed to build binary: {}", e))
+    .unwrap(); // Assuming build won't fail with basic inputs
+
+    dummy_binary.inner_mut().hash = request.binary_hash.clone();
+
+    // Create CachingDecompiler
+    match fission_analysis::analysis::decomp::CachingDecompiler::new(&dummy_binary, &sla_dir, 100) {
+        Ok(mut decomp) => {
+            // Load binary data
+            let inner = decomp.inner_mut();
+            if let Err(e) = inner.load_binary(&request.bytes, request.image_base, is_64bit) {
+                let _ = result_tx.send(AsyncMessage::DecompilerContextError {
+                    error: format!("Failed to load binary: {}", e),
+                    suggestion: None,
+                });
+                return;
+            }
+
+            // Register sections
+            for section in &request.sections {
+                let _ = inner.add_memory_block(
+                    &section.name,
+                    section.virtual_address,
+                    section.virtual_size,
+                    section.file_offset,
+                    section.file_size,
+                    section.is_executable,
+                    section.is_writable,
+                );
+            }
+
+            // Add symbols
+            inner.add_symbols(&request.iat_symbols);
+            inner.add_global_symbols(&request.global_symbols);
+
+            // Add function entries
+            for func in &request.functions {
+                let _ = inner.add_function(func.address, Some(&func.name));
+            }
+
+            // Set symbol provider
+            inner.set_symbol_provider(
+                &request.functions,
+                &request.global_symbols,
+                &request.sections,
+            );
+
+            *native_decomp = Some(decomp);
+            crate::core::logging::info(&format!(
+                "[decomp-worker] Binary context loaded (hash: {}...)",
+                &request.binary_hash[..16.min(request.binary_hash.len())]
+            ));
+            let _ = result_tx.send(AsyncMessage::DecompilerContextLoaded);
+        }
+        Err(e) => {
+            let _ = result_tx.send(AsyncMessage::DecompilerContextError {
+                error: format!("Failed to create decompiler: {}", e),
+                suggestion: Some("Check libdecomp library is accessible".to_string()),
+            });
+        }
+    }
+}
+
+/// Handle decompilation for a specific worker
+#[cfg(feature = "native_decomp")]
+fn handle_decompile_for_worker(
+    request: &DecompileRequest,
+    native_decomp: &mut Option<fission_analysis::analysis::decomp::CachingDecompiler>,
+    result_tx: &Sender<AsyncMessage>,
+) {
+    if let Some(decomp) = native_decomp {
+        match decomp.decompile(request.address) {
+            Ok(c_code) => {
+                let _ = result_tx.send(AsyncMessage::DecompileResult {
+                    address: request.address,
+                    c_code,
+                });
+            }
+            Err(e) => {
+                let error_str = e.to_string();
+
+                let user_message = if error_str.contains("recursive decompilation") {
+                    format!(
+                        "// Decompilation failed: Recursive decompilation detected\n\
+                         //\n\
+                         // This happens when the decompiler is still processing a previous request.\n\
+                         // Please wait a moment and try again by clicking a different function,\n\
+                         // then return to this one.\n\
+                         //\n\
+                         // Address: 0x{:x}\n",
+                        request.address
+                    )
+                } else if error_str.contains("Function loaded for inlining") {
+                    format!(
+                        "// Decompilation failed: Function loaded for inlining\n\
+                         //\n\
+                         // This function was likely inlined by the compiler but still has a symbol entry.\n\
+                         // The decompiler cannot process it as a standalone function because its code\n\
+                         // is merged into its callers.\n\
+                         //\n\
+                         // Suggestion: Check the callers (XRefs) or view the Assembly.\n\
+                         //\n\
+                         // Address: 0x{:x}\n\
+                         // Error: {}\n",
+                        request.address, e
+                    )
+                } else if error_str.contains("already being decompiled") {
+                    format!(
+                        "// Decompilation busy\n\
+                         //\n\
+                         // The decompiler is currently processing another function.\n\
+                         // Please wait a moment and try again.\n\
+                         //\n\
+                         // Address: 0x{:x}\n",
+                        request.address
+                    )
+                } else {
+                    format!("// Decompilation failed: {}", e)
+                };
+
+                let _ = result_tx.send(AsyncMessage::DecompileResult {
+                    address: request.address,
+                    c_code: user_message,
+                });
+            }
+        }
+    } else {
+        let _ = result_tx.send(AsyncMessage::DecompileResult {
+            address: request.address,
+            c_code: "// Native decompiler not initialized via Worker Pool".to_string(),
+        });
+    }
+}
+
+#[cfg(all(feature = "native_decomp", feature = "legacy_single_worker"))]
 fn worker_loop_native(
     worker_id: usize,
     request_rx: Arc<Mutex<Receiver<DecompileRequest>>>,
@@ -284,7 +599,7 @@ fn worker_loop_native(
 }
 
 #[cfg(feature = "native_decomp")]
-fn handle_binary_load_native(
+fn _handle_binary_load_native(
     request: &DecompileRequest,
     native_decomp: &Arc<Mutex<Option<fission_analysis::analysis::decomp::CachingDecompiler>>>,
     result_tx: &Sender<AsyncMessage>,
@@ -476,7 +791,7 @@ fn resolve_sla_directory() -> Result<String, String> {
 }
 
 #[cfg(feature = "native_decomp")]
-fn handle_decompile_native(
+fn _handle_decompile_native(
     request: &DecompileRequest,
     native_decomp: &Arc<Mutex<Option<fission_analysis::analysis::decomp::CachingDecompiler>>>,
     result_tx: &Sender<AsyncMessage>,
@@ -495,9 +810,37 @@ fn handle_decompile_native(
                 });
             }
             Err(e) => {
+                let error_str = e.to_string();
+
+                // Detect recursive decompilation error and provide helpful message
+                let user_message = if error_str.contains("recursive decompilation") {
+                    format!(
+                        "// Decompilation failed: Recursive decompilation detected\n\
+                         //\n\
+                         // This happens when the decompiler is still processing a previous request.\n\
+                         // Please wait a moment and try again by clicking a different function,\n\
+                         // then return to this one.\n\
+                         //\n\
+                         // Address: 0x{:x}\n",
+                        request.address
+                    )
+                } else if error_str.contains("already being decompiled") {
+                    format!(
+                        "// Decompilation busy\n\
+                         //\n\
+                         // The decompiler is currently processing another function.\n\
+                         // Please wait a moment and try again.\n\
+                         //\n\
+                         // Address: 0x{:x}\n",
+                        request.address
+                    )
+                } else {
+                    format!("// Decompilation failed: {}", e)
+                };
+
                 let _ = result_tx.send(AsyncMessage::DecompileResult {
                     address: request.address,
-                    c_code: format!("// Decompilation failed: {}", e),
+                    c_code: user_message,
                 });
             }
         }

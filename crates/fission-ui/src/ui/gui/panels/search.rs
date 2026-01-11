@@ -41,8 +41,18 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
             ui.heading(egui::RichText::new("Functions").size(12.0).strong());
 
             for func in &binary.functions {
+                let display_name = state
+                    .analysis
+                    .domain
+                    .user_function_names
+                    .get(&func.address)
+                    .cloned()
+                    .unwrap_or_else(|| func.name.clone());
+
                 // Use case-insensitive substring check
-                if contains_case_insensitive(&func.name, &query) {
+                if contains_case_insensitive(&display_name, &query)
+                    || (display_name != func.name && contains_case_insensitive(&func.name, &query))
+                {
                     func_matches += 1;
                     if func_matches > 50 {
                         ui.label(egui::RichText::new("... too many results").small());
@@ -51,7 +61,8 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> Option<super::side_bar
 
                     if ui
                         .button(
-                            egui::RichText::new(&func.name).color(ui.visuals().strong_text_color()),
+                            egui::RichText::new(&display_name)
+                                .color(ui.visuals().strong_text_color()),
                         )
                         .clicked()
                     {

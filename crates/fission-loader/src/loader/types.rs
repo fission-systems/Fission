@@ -647,6 +647,127 @@ impl LoadedBinary {
         self.rebuild_function_indices();
     }
 
+    /// Discover functions by scanning for common prologue patterns and CALL targets
+    ///
+    /// This is useful when the control flow is obfuscated (e.g., indirect calls)
+    /// and standard call-graph usage fails to find all functions.
+    pub fn discover_functions_by_prologue(&mut self) -> usize {
+        let mut count = 0;
+        let mut candidates = std::collections::HashSet::new();
+
+        // Define common prologues
+        let patterns: &[&[u8]] = if self.is_64bit {
+            &[
+                &[0x55, 0x48, 0x89, 0xe5],       // push rbp; mov rbp, rsp
+                &[0x48, 0x83, 0xec],             // sub rsp, X
+                &[0x48, 0x81, 0xec],             // sub rsp, X (32-bit imm)
+                &[0x55, 0x48, 0x8d, 0x2c, 0x24], // push rbp; lea rbp, [rsp] (Win/Ghidra)
+                &[0x40, 0x55, 0x48, 0x8b, 0xec], // push rbp; mov rbp, rsp (Win/REX)
+                &[0x48, 0x8b, 0xc4],             // mov rax, rsp (Win/Ghidra)
+            ]
+        } else {
+            &[
+                &[0x55, 0x89, 0xe5], // push ebp; mov ebp, esp (GCC)
+                &[0x55, 0x8b, 0xec], // push ebp; mov ebp, esp (MSVC)
+                &[0x83, 0xec],       // sub esp, X (minimal)
+                &[0x81, 0xec],       // sub esp, X (32-bit imm)
+            ]
+        };
+
+        // Pre-calculate executable ranges to validate call targets
+        let mut exec_ranges = Vec::new();
+        for section in &self.sections {
+            if section.is_executable {
+                exec_ranges.push((
+                    section.virtual_address,
+                    section.virtual_address + section.virtual_size,
+                ));
+            }
+        }
+
+        // Scan executable sections
+        for section in &self.sections {
+            if !section.is_executable {
+                continue;
+            }
+
+            let start = section.file_offset as usize;
+            let end = (section.file_offset + section.file_size) as usize;
+            if end > self.data.len() {
+                continue;
+            }
+
+            let data = &self.data[start..end];
+            let va_start = section.virtual_address;
+
+            for i in 0..data.len() {
+                // 1. Prologue Matching
+                if i + 4 <= data.len() {
+                    let window = &data[i..];
+                    for pat in patterns {
+                        if window.starts_with(pat) {
+                            let potential_addr = va_start + i as u64;
+                            if !self.function_addr_index.contains_key(&potential_addr) {
+                                candidates.insert(potential_addr);
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // 2. CALL Target Discovery (0xE8 rel32)
+                // This finds functions even if they have obfuscated prologues
+                if i + 5 <= data.len() && data[i] == 0xE8 {
+                    // Read relative offset (i32)
+                    let rel_bytes = [data[i + 1], data[i + 2], data[i + 3], data[i + 4]];
+                    let rel = i32::from_le_bytes(rel_bytes);
+
+                    let call_insn_addr = va_start + i as u64;
+                    // Target = NextIP + Rel = (Addr + 5) + Rel
+                    let target_addr = (call_insn_addr.wrapping_add(5)).wrapping_add(rel as u64);
+
+                    // Validate target is within executable memory
+                    let is_valid = exec_ranges
+                        .iter()
+                        .any(|(s, e)| target_addr >= *s && target_addr < *e);
+
+                    if is_valid {
+                        // Keep within 32/64 bit limits
+                        let addr_masked = if self.is_64bit {
+                            target_addr
+                        } else {
+                            target_addr & 0xFFFFFFFF
+                        };
+
+                        if !self.function_addr_index.contains_key(&addr_masked) {
+                            candidates.insert(addr_masked);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Register valid candidates
+        for addr in candidates {
+            self.functions.push(FunctionInfo {
+                name: format!("sub_{:x}_scanned", addr),
+                address: addr,
+                size: 0,
+                is_export: false,
+                is_import: false,
+            });
+            count += 1;
+        }
+
+        if count > 0 {
+            self.functions.sort_by_key(|f| f.address);
+            self.functions_sorted = true;
+            self.rebuild_function_indices();
+        }
+
+        count
+    }
+
     /// Rebuild function lookup indices after modifying the functions vector
     pub fn rebuild_function_indices(&mut self) {
         self.function_addr_index.clear();

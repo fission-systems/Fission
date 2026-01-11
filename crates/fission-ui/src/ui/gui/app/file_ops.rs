@@ -84,6 +84,38 @@ pub fn load_snapshot_dialog(tx: Sender<AsyncMessage>) {
     });
 }
 
+/// Open native file dialog to save a project
+pub fn save_project_dialog(tx: Sender<AsyncMessage>) {
+    std::thread::spawn(move || {
+        let file = rfd::FileDialog::new()
+            .set_title("Save Project")
+            .add_filter("Fission Project", &["fprj"])
+            .save_file();
+
+        if let Some(path) = file {
+            let _ = tx.send(AsyncMessage::SaveProject(
+                path.to_string_lossy().to_string(),
+            ));
+        }
+    });
+}
+
+/// Open native file dialog to load a project
+pub fn load_project_dialog(tx: Sender<AsyncMessage>) {
+    std::thread::spawn(move || {
+        let file = rfd::FileDialog::new()
+            .set_title("Load Project")
+            .add_filter("Fission Project", &["fprj"])
+            .pick_file();
+
+        if let Some(path) = file {
+            let _ = tx.send(AsyncMessage::LoadProject(
+                path.to_string_lossy().to_string(),
+            ));
+        }
+    });
+}
+
 /// Load all binaries from a folder
 pub fn load_folder(state: &mut AppState, tx: Sender<AsyncMessage>, folder_path: &str) {
     let folder_path = folder_path.to_string();

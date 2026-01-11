@@ -19,6 +19,7 @@ test = false
 fission-core = { path = "../fission-core" }
 fission-analysis = { path = "../fission-analysis" }
 fission-loader = { path = "../fission-loader" }
+fission-signatures = { path = "../fission-signatures" }
 fission-ffi = { path = "../fission-ffi", optional = true }
 eframe = "0.29"
 egui = "0.29"

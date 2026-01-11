@@ -235,6 +235,76 @@ pub fn handle_load_snapshot(state: &mut AppState, tx: Sender<AsyncMessage>, path
     }
 }
 
+/// Handle project save
+pub fn handle_save_project(state: &mut AppState, path: String) {
+    if let Some(binary) = &state.analysis.domain.loaded_binary {
+        use fission_analysis::app::project::AnalysisProject;
+
+        let project = AnalysisProject {
+            binary_hash: binary.hash.clone(),
+            binary_path: binary.path.clone(),
+            user_function_names: state.analysis.domain.user_function_names.clone(),
+            user_comments: state.analysis.domain.user_comments.clone(),
+            bookmarks: state.analysis.domain.bookmarks.clone(),
+            metadata: std::collections::HashMap::new(),
+        };
+
+        if let Err(e) = project.save(std::path::Path::new(&path)) {
+            state.log(format!("[!] Error saving project: {}", e));
+        } else {
+            state.log(format!("[✓] Project saved to: {}", path));
+        }
+    } else {
+        state.log("[!] No binary loaded to save project");
+    }
+}
+
+/// Handle project load
+pub fn handle_load_project(
+    state: &mut AppState,
+    path: String,
+    decomp_tx: &Sender<decomp_worker::DecompileRequest>,
+    req_id: &Arc<std::sync::atomic::AtomicU64>,
+) {
+    use fission_analysis::app::project::AnalysisProject;
+
+    match AnalysisProject::load(std::path::Path::new(&path)) {
+        Ok(project) => {
+            // Check if current binary matches (if loaded)
+            if let Some(binary) = &state.analysis.domain.loaded_binary {
+                if binary.hash != project.binary_hash {
+                    state.log(
+                        "[!] Warning: Project was created for a different binary (hash mismatch)",
+                    );
+                    state.log(format!("    Project binary: {}", project.binary_path));
+                }
+            }
+
+            // Apply analysis data
+            state.analysis.domain.user_function_names = project.user_function_names;
+            state.analysis.domain.user_comments = project.user_comments;
+            state.analysis.domain.bookmarks = project.bookmarks;
+
+            state.log(format!("[✓] Project loaded from: {}", path));
+            state.log(format!(
+                "    Restored {} names, {} comments, and {} bookmarks",
+                state.analysis.domain.user_function_names.len(),
+                state.analysis.domain.user_comments.len(),
+                state.analysis.domain.bookmarks.len()
+            ));
+
+            // Refresh view and update tab titles if needed
+            if let Some(selected) = state.analysis.domain.selected_function.clone() {
+                // Use existing analysis_ops helper to refresh everything
+                super::super::analysis_ops::open_function_tabs(state, &selected, decomp_tx, req_id);
+            }
+        }
+        Err(e) => {
+            state.log(format!("[!] Error loading project: {}", e));
+        }
+    }
+}
+
 /// Handle folder selection
 pub fn handle_folder_selected(state: &mut AppState, tx: Sender<AsyncMessage>, path: String) {
     super::super::file_ops::load_folder(state, tx, &path);

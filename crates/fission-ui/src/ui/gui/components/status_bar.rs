@@ -85,7 +85,31 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
                             .color(ui.visuals().weak_text_color())
                             .size(11.0)
                             .italics(),
-                    ); // could truncate if too long
+                    );
+                }
+
+                // Show highlighted symbol if any
+                let mut clear_highlight = false;
+                if let Some(ref text) = state.ui.highlighted_symbol {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        ui.label(egui::RichText::new("🔦").small());
+                        let resp = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new(text)
+                                    .small()
+                                    .color(catppuccin::SURFACE0),
+                            )
+                            .fill(catppuccin::YELLOW),
+                        );
+                        if resp.on_hover_text("Click to clear highlight").clicked() {
+                            clear_highlight = true;
+                        }
+                    });
+                }
+                if clear_highlight {
+                    state.ui.highlighted_symbol = None;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -155,12 +179,40 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) {
 
                     ui.add_space(10.0);
 
-                    // Right: Memory
-                    let mem_mb = state.ui.memory_usage as f64 / 1024.0 / 1024.0;
+                    // Right: Resource Usage (CPU + Memory)
+                    ui.separator();
+
+                    // CPU Usage
+                    let cpu = state.ui.cpu_usage;
+                    let cpu_color = if cpu > 80.0 {
+                        catppuccin::RED
+                    } else if cpu > 50.0 {
+                        catppuccin::YELLOW
+                    } else {
+                        catppuccin::GREEN
+                    };
                     ui.label(
-                        egui::RichText::new(format!("{:.1} MB", mem_mb))
+                        egui::RichText::new(format!("{:.0}%", cpu))
                             .small()
-                            .color(ui.visuals().weak_text_color()),
+                            .color(cpu_color),
+                    );
+                    ui.label(egui::RichText::new("🖥").small());
+
+                    ui.add_space(8.0);
+
+                    // Memory Usage
+                    let mem_mb = state.ui.memory_usage as f64 / 1024.0 / 1024.0;
+                    let mem_color = if mem_mb > 500.0 {
+                        catppuccin::RED
+                    } else if mem_mb > 200.0 {
+                        catppuccin::YELLOW
+                    } else {
+                        catppuccin::GREEN
+                    };
+                    ui.label(
+                        egui::RichText::new(format!("{:.0} MB", mem_mb))
+                            .small()
+                            .color(mem_color),
                     );
                     ui.label(egui::RichText::new("💾").small());
                 });

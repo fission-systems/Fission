@@ -41,6 +41,17 @@ pub fn navigate_to_address(
     decomp_tx: &Sender<DecompileRequest>,
     req_id: &Arc<AtomicU64>,
 ) {
+    // 1. Record current location before jump
+    let current_addr = state
+        .analysis
+        .domain
+        .selected_function
+        .as_ref()
+        .map(|f| f.address);
+    if let Some(addr) = current_addr {
+        push_navigation(state, addr);
+    }
+
     // Clone the functions list to avoid borrow issues
     let functions: Vec<FunctionInfo> = state
         .analysis
@@ -72,14 +83,106 @@ pub fn navigate_to_address(
     }
 }
 
+/// Push an address to the navigation back stack
+pub fn push_navigation(state: &mut AppState, addr: u64) {
+    // Avoid pushing the same address twice in a row
+    if state.ui.back_stack.last() == Some(&addr) {
+        return;
+    }
+
+    state.ui.back_stack.push(addr);
+    // Limit stack size
+    if state.ui.back_stack.len() > 100 {
+        state.ui.back_stack.remove(0);
+    }
+    // Clear forward stack on new jump
+    state.ui.forward_stack.clear();
+}
+
+pub fn navigate_back(
+    state: &mut AppState,
+    decomp_tx: &Sender<DecompileRequest>,
+    req_id: &Arc<AtomicU64>,
+) {
+    if let Some(target_addr) = state.ui.back_stack.pop() {
+        // Push current to forward stack
+        let current_addr = state
+            .analysis
+            .domain
+            .selected_function
+            .as_ref()
+            .map(|f| f.address);
+        if let Some(addr) = current_addr {
+            state.ui.forward_stack.push(addr);
+        }
+
+        // Navigate without pushing to back stack (already handled)
+        jump_to_address_internal(state, target_addr, decomp_tx, req_id);
+    }
+}
+
+pub fn navigate_forward(
+    state: &mut AppState,
+    decomp_tx: &Sender<DecompileRequest>,
+    req_id: &Arc<AtomicU64>,
+) {
+    if let Some(target_addr) = state.ui.forward_stack.pop() {
+        // Push current to back stack
+        let current_addr = state
+            .analysis
+            .domain
+            .selected_function
+            .as_ref()
+            .map(|f| f.address);
+        if let Some(addr) = current_addr {
+            state.ui.back_stack.push(addr);
+        }
+
+        jump_to_address_internal(state, target_addr, decomp_tx, req_id);
+    }
+}
+
+/// Internal helper for jumping without touching navigation stacks
+fn jump_to_address_internal(
+    state: &mut AppState,
+    addr: u64,
+    decomp_tx: &Sender<DecompileRequest>,
+    req_id: &Arc<AtomicU64>,
+) {
+    let functions: Vec<FunctionInfo> = state
+        .analysis
+        .loaded_binary()
+        .as_ref()
+        .map(|b| b.functions.clone())
+        .unwrap_or_default();
+
+    for func in &functions {
+        let range = CONFIG.analysis.function_address_range as u64;
+        if addr >= func.address && addr < func.address + range {
+            state.analysis.domain.selected_function = Some(func.clone());
+            state.ui.selected_xref_addr = Some(func.address);
+            open_function_tabs(state, func, decomp_tx, req_id);
+            return;
+        }
+    }
+}
+
 pub fn open_function_tabs(
     state: &mut AppState,
     func: &FunctionInfo,
     decomp_tx: &Sender<DecompileRequest>,
     req_id: &Arc<AtomicU64>,
 ) {
-    let asm_tab = EditorTab::Assembly(func.name.clone());
-    let decomp_tab = EditorTab::Decompiled(func.name.clone());
+    let display_name = state
+        .analysis
+        .domain
+        .user_function_names
+        .get(&func.address)
+        .cloned()
+        .unwrap_or_else(|| func.name.clone());
+
+    let asm_tab = EditorTab::Assembly(display_name.clone());
+    let decomp_tab = EditorTab::Decompiled(display_name);
 
     // Open Assembly tab if not open
     if !state.ui.open_tabs.contains(&asm_tab) {

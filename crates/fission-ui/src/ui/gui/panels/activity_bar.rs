@@ -6,7 +6,14 @@ use eframe::egui;
 /// Render the vertical activity bar on the far left.
 pub fn render(ctx: &egui::Context, state: &mut AppState) {
     egui::SidePanel::left("activity_bar")
-        .frame(egui::Frame::none().fill(ctx.style().visuals.extreme_bg_color))
+        .frame(
+            egui::Frame::none()
+                .fill(ctx.style().visuals.extreme_bg_color)
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    crate::ui::gui::theme::catppuccin::SURFACE0,
+                )),
+        )
         .exact_width(48.0)
         .resizable(false)
         .show(ctx, |ui| {
