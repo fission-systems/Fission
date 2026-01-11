@@ -175,10 +175,26 @@ pub fn handle_debug_action(
         state.log("[!] Debug control is disabled in static mode");
         return;
     }
+
+    match action {
+        DebugAction::ReverseStep => {
+            state.debug.domain.timeline.rewind(1);
+            state.log("[*] TTD: Reverse Step");
+            return;
+        }
+        DebugAction::ReverseContinue => {
+            state.debug.domain.timeline.seek_start();
+            state.log("[*] TTD: Reverse Continue (to start)");
+            return;
+        }
+        _ => {}
+    }
+
     if let Some(dbg) = debugger.as_mut() {
         let result = match action {
             DebugAction::Continue => dbg.continue_execution(),
             DebugAction::Step => dbg.single_step(),
+            _ => Ok(()),
         };
         if let Err(e) = result {
             state.log(format!("[✗] Debug action failed: {}", e));
@@ -191,7 +207,20 @@ pub fn handle_debug_action(
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn handle_debug_action(state: &mut AppState, _action: DebugAction) {
+pub fn handle_debug_action(state: &mut AppState, action: DebugAction) {
+    match action {
+        DebugAction::ReverseStep => {
+            state.debug.domain.timeline.rewind(1);
+            state.log("[*] TTD: Reverse Step");
+            return;
+        }
+        DebugAction::ReverseContinue => {
+            state.debug.domain.timeline.seek_start();
+            state.log("[*] TTD: Reverse Continue (to start)");
+            return;
+        }
+        _ => {}
+    }
     state.log("[!] Debug control is only supported on Windows builds right now.");
 }
 

@@ -22,3 +22,6 @@ pub use info::cmd_info;
 pub use load::cmd_load;
 pub use string_xrefs::cmd_string_xrefs;
 pub use xrefs::cmd_xrefs;
+
+pub mod rr;
+pub use rr::{cmd_rr_record, cmd_rr_replay};

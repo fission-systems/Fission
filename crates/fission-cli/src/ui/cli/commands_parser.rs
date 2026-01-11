@@ -28,6 +28,13 @@ pub enum Command {
         search_term: String,
         min_length: usize,
     },
+    RrRecord {
+        binary: String,
+        args: Vec<String>,
+    },
+    RrReplay {
+        trace_path: Option<String>,
+    },
     Help,
     Clear,
     Exit,
@@ -88,6 +95,30 @@ pub fn parse_command(input: &str) -> Command {
                 }
             } else {
                 Command::Unknown("string-xrefs requires a search term".to_string())
+            }
+        }
+        "rr" => {
+            if let Some(subcmd) = parts.get(1) {
+                match *subcmd {
+                    "record" => {
+                        if let Some(binary) = parts.get(2) {
+                            let args = parts[3..].iter().map(|s| s.to_string()).collect();
+                            Command::RrRecord {
+                                binary: binary.to_string(),
+                                args,
+                            }
+                        } else {
+                            Command::Unknown("rr record requires a binary path".to_string())
+                        }
+                    }
+                    "replay" => {
+                        let trace_path = parts.get(2).map(|s| s.to_string());
+                        Command::RrReplay { trace_path }
+                    }
+                    _ => Command::Unknown(format!("Unknown rr subcommand: {}", subcmd)),
+                }
+            } else {
+                Command::Unknown("rr requires a subcommand (record, replay)".to_string())
             }
         }
         "help" | "h" | "?" => Command::Help,

@@ -1,203 +1,323 @@
 //! Timeline - Manages recorded history and navigation.
 
 use super::recorder::TTDRecorder;
-use super::snapshot::ExecutionSnapshot;
+use super::snapshot::{ExecutionSnapshot, SnapshotStats};
+#[cfg(target_os = "linux")]
+use crate::debug::rr::RRDebugger;
+use crate::debug::traits::TimeTravelDebugger;
 
 /// Timeline navigation result
 #[derive(Debug, Clone)]
 pub enum SeekResult {
-    /// Successfully seeked to the target
     Success(ExecutionSnapshot),
-    /// Target is out of bounds
     OutOfBounds { min: u64, max: u64, requested: u64 },
-    /// No snapshots available
     Empty,
 }
 
-/// Timeline for navigating recorded execution history
 #[derive(Debug)]
+pub enum Backend {
+    Internal(TTDRecorder),
+    #[cfg(target_os = "linux")]
+    RR(RRDebugger),
+}
+
+impl Default for Backend {
+    fn default() -> Self {
+        Self::Internal(TTDRecorder::new())
+    }
+}
+
+/// Timeline for navigating recorded execution history
+#[derive(Debug, Default)]
 pub struct Timeline {
-    /// The underlying recorder
-    recorder: TTDRecorder,
-    /// Current position in the timeline (snapshot index)
+    backend: Backend,
     current_position: Option<u64>,
-    /// Are we in replay mode?
     replay_mode: bool,
+    current_snapshot: Option<Box<ExecutionSnapshot>>,
 }
 
 impl Timeline {
-    /// Create a new timeline with a fresh recorder
     pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn new_rr(rr: RRDebugger) -> Self {
         Self {
-            recorder: TTDRecorder::new(),
+            backend: Backend::RR(rr),
             current_position: None,
-            replay_mode: false,
+            replay_mode: true,
+            current_snapshot: None,
         }
     }
 
-    /// Create a timeline from an existing recorder
     pub fn from_recorder(recorder: TTDRecorder) -> Self {
         let position = recorder.latest_snapshot().map(|s| s.step_index);
         Self {
-            recorder,
+            backend: Backend::Internal(recorder),
             current_position: position,
             replay_mode: false,
+            current_snapshot: None,
         }
     }
 
-    /// Get mutable access to the recorder
-    pub fn recorder_mut(&mut self) -> &mut TTDRecorder {
-        &mut self.recorder
-    }
-
-    /// Get read access to the recorder
-    pub fn recorder(&self) -> &TTDRecorder {
-        &self.recorder
-    }
-
-    /// Start recording (delegates to recorder)
     pub fn start_recording(&mut self) {
-        self.recorder.start_recording();
-        self.current_position = None;
-        self.replay_mode = false;
-    }
-
-    /// Stop recording (delegates to recorder)
-    pub fn stop_recording(&mut self) {
-        self.recorder.stop_recording();
-        self.current_position = self.recorder.latest_snapshot().map(|s| s.step_index);
-    }
-
-    /// Enter replay mode at current position
-    pub fn enter_replay_mode(&mut self) {
-        if self.recorder.snapshot_count() > 0 {
-            self.replay_mode = true;
-            if self.current_position.is_none() {
-                self.current_position = self.recorder.latest_snapshot().map(|s| s.step_index);
+        match &mut self.backend {
+            Backend::Internal(rec) => {
+                rec.start_recording();
+                self.current_position = None;
+                self.replay_mode = false;
             }
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => {}
         }
     }
 
-    /// Exit replay mode
+    pub fn stop_recording(&mut self) {
+        match &mut self.backend {
+            Backend::Internal(rec) => {
+                rec.stop_recording();
+                self.current_position = rec.latest_snapshot().map(|s| s.step_index);
+            }
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => {}
+        }
+    }
+
+    pub fn is_recording(&self) -> bool {
+        match &self.backend {
+            Backend::Internal(rec) => rec.is_recording(),
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => false,
+        }
+    }
+
+    pub fn stats(&self) -> SnapshotStats {
+        match &self.backend {
+            Backend::Internal(rec) => rec.stats(),
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => SnapshotStats::default(),
+        }
+    }
+
+    pub fn duration(&self) -> Option<std::time::Duration> {
+        match &self.backend {
+            Backend::Internal(rec) => rec.duration(),
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => None,
+        }
+    }
+
+    pub fn latest_snapshot(&self) -> Option<&ExecutionSnapshot> {
+        match &self.backend {
+            Backend::Internal(rec) => rec.latest_snapshot(),
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => self.current_snapshot.as_deref(),
+        }
+    }
+
+    pub fn enter_replay_mode(&mut self) {
+        match &self.backend {
+            Backend::Internal(rec) if rec.snapshot_count() > 0 => {
+                self.replay_mode = true;
+                if self.current_position.is_none() {
+                    self.current_position = rec.latest_snapshot().map(|s| s.step_index);
+                }
+            }
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => {
+                self.replay_mode = true;
+            }
+            _ => {}
+        }
+    }
+
     pub fn exit_replay_mode(&mut self) {
         self.replay_mode = false;
     }
 
-    /// Is in replay mode?
     pub fn is_replay_mode(&self) -> bool {
         self.replay_mode
     }
 
-    /// Seek to a specific step index
+    pub fn record_step_internal(
+        &mut self,
+        registers: crate::debug::types::RegisterState,
+        thread_id: u32,
+    ) {
+        match &mut self.backend {
+            Backend::Internal(rec) => {
+                rec.record_step(registers, thread_id);
+            }
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => {}
+        }
+    }
+
     pub fn seek_to(&mut self, step_index: u64) -> SeekResult {
-        if self.recorder.snapshot_count() == 0 {
-            return SeekResult::Empty;
-        }
+        match &mut self.backend {
+            Backend::Internal(rec) => {
+                if rec.snapshot_count() == 0 {
+                    return SeekResult::Empty;
+                }
 
-        let snapshots = self.recorder.snapshots();
-        let min_step = snapshots.first().map(|s| s.step_index).unwrap_or(0);
-        let max_step = snapshots.last().map(|s| s.step_index).unwrap_or(0);
+                let snapshots = rec.snapshots();
+                let min_step = snapshots.first().map(|s| s.step_index).unwrap_or(0);
+                let max_step = snapshots.last().map(|s| s.step_index).unwrap_or(0);
 
-        if step_index < min_step || step_index > max_step {
-            return SeekResult::OutOfBounds {
-                min: min_step,
-                max: max_step,
-                requested: step_index,
-            };
-        }
+                if step_index < min_step || step_index > max_step {
+                    return SeekResult::OutOfBounds {
+                        min: min_step,
+                        max: max_step,
+                        requested: step_index,
+                    };
+                }
 
-        if let Some(snapshot) = self.recorder.get_snapshot(step_index) {
-            self.current_position = Some(step_index);
-            self.replay_mode = true;
-            SeekResult::Success(snapshot.clone())
-        } else {
-            // Step exists in range but not in snapshots (may have been pruned)
-            SeekResult::OutOfBounds {
-                min: min_step,
-                max: max_step,
-                requested: step_index,
+                if let Some(snapshot) = rec.get_snapshot(step_index) {
+                    self.current_position = Some(step_index);
+                    self.replay_mode = true;
+                    // We don't cache internal snapshots, they are memoized in recorder
+                    SeekResult::Success(snapshot.clone())
+                } else {
+                    SeekResult::OutOfBounds {
+                        min: min_step,
+                        max: max_step,
+                        requested: step_index,
+                    }
+                }
             }
+            #[cfg(target_os = "linux")]
+            Backend::RR(rr) => match rr.seek_to(step_index) {
+                Ok(snap) => {
+                    self.current_position = Some(step_index);
+                    self.current_snapshot = Some(Box::new(snap.clone()));
+                    self.replay_mode = true;
+                    SeekResult::Success(snap)
+                }
+                Err(_) => SeekResult::Empty,
+            },
         }
     }
 
-    /// Rewind N steps from current position
     pub fn rewind(&mut self, steps: u64) -> SeekResult {
-        match self.current_position {
-            Some(pos) => {
-                let target = pos.saturating_sub(steps);
-                self.seek_to(target)
+        #[cfg(target_os = "linux")]
+        if let Backend::RR(rr) = &mut self.backend {
+            if steps == 1 {
+                return match rr.reverse_step() {
+                    Ok(snap) => {
+                        self.current_position = Some(snap.step_index);
+                        self.current_snapshot = Some(Box::new(snap.clone()));
+                        SeekResult::Success(snap)
+                    }
+                    Err(_) => SeekResult::Empty,
+                };
             }
-            None => SeekResult::Empty,
+        }
+
+        if let Some(pos) = self.current_position {
+            let target = pos.saturating_sub(steps);
+            self.seek_to(target)
+        } else {
+            SeekResult::Empty
         }
     }
 
-    /// Forward N steps from current position
     pub fn forward(&mut self, steps: u64) -> SeekResult {
-        match self.current_position {
-            Some(pos) => {
-                let target = pos.saturating_add(steps);
-                self.seek_to(target)
+        #[cfg(target_os = "linux")]
+        if let Backend::RR(rr) = &mut self.backend {
+            if steps == 1 {
+                return match rr.forward_step() {
+                    Ok(snap) => {
+                        self.current_position = Some(snap.step_index);
+                        self.current_snapshot = Some(Box::new(snap.clone()));
+                        SeekResult::Success(snap)
+                    }
+                    Err(_) => SeekResult::Empty,
+                };
             }
-            None => SeekResult::Empty,
+        }
+
+        if let Some(pos) = self.current_position {
+            let target = pos.saturating_add(steps);
+            self.seek_to(target)
+        } else {
+            SeekResult::Empty
         }
     }
 
-    /// Go to the first snapshot
     pub fn seek_start(&mut self) -> SeekResult {
-        if let Some(first) = self.recorder.snapshots().first() {
-            self.seek_to(first.step_index)
+        let target = match &self.backend {
+            Backend::Internal(rec) => rec.snapshots().first().map(|s| s.step_index),
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => Some(0),
+        };
+
+        if let Some(t) = target {
+            self.seek_to(t)
         } else {
             SeekResult::Empty
         }
     }
 
-    /// Go to the last snapshot
     pub fn seek_end(&mut self) -> SeekResult {
-        if let Some(last) = self.recorder.snapshots().last() {
-            self.seek_to(last.step_index)
+        let target = match &self.backend {
+            Backend::Internal(rec) => rec.snapshots().last().map(|s| s.step_index),
+            #[cfg(target_os = "linux")]
+            Backend::RR(rr) => Some(rr.step_count() as u64),
+        };
+
+        if let Some(t) = target {
+            self.seek_to(t)
         } else {
             SeekResult::Empty
         }
     }
 
-    /// Get current position
     pub fn current_position(&self) -> Option<u64> {
         self.current_position
     }
 
-    /// Get current snapshot
     pub fn current_snapshot(&self) -> Option<&ExecutionSnapshot> {
-        self.current_position
-            .and_then(|pos| self.recorder.get_snapshot(pos))
-    }
-
-    /// Get the range of available steps
-    pub fn step_range(&self) -> Option<(u64, u64)> {
-        let snapshots = self.recorder.snapshots();
-        if snapshots.is_empty() {
-            return None;
+        match &self.backend {
+            Backend::Internal(rec) => self.current_position.and_then(|pos| rec.get_snapshot(pos)),
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => self.current_snapshot.as_deref(),
         }
-        let min = snapshots.first().map(|s| s.step_index).unwrap_or(0);
-        let max = snapshots.last().map(|s| s.step_index).unwrap_or(0);
-        Some((min, max))
     }
 
-    /// Get total number of available snapshots
+    pub fn step_range(&self) -> Option<(u64, u64)> {
+        match &self.backend {
+            Backend::Internal(rec) => {
+                let snapshots = rec.snapshots();
+                if snapshots.is_empty() {
+                    return None;
+                }
+                let min = snapshots.first().map(|s| s.step_index).unwrap_or(0);
+                let max = snapshots.last().map(|s| s.step_index).unwrap_or(0);
+                Some((min, max))
+            }
+            #[cfg(target_os = "linux")]
+            Backend::RR(rr) => rr.timeline_range(),
+        }
+    }
+
     pub fn snapshot_count(&self) -> usize {
-        self.recorder.snapshot_count()
+        match &self.backend {
+            Backend::Internal(rec) => rec.snapshot_count(),
+            #[cfg(target_os = "linux")]
+            Backend::RR(rr) => rr.step_count(),
+        }
     }
 
-    /// Clear the timeline
     pub fn clear(&mut self) {
-        self.recorder.clear();
+        match &mut self.backend {
+            Backend::Internal(rec) => rec.clear(),
+            #[cfg(target_os = "linux")]
+            Backend::RR(_) => {}
+        }
         self.current_position = None;
         self.replay_mode = false;
-    }
-}
-
-impl Default for Timeline {
-    fn default() -> Self {
-        Self::new()
+        self.current_snapshot = None;
     }
 }
 
@@ -215,7 +335,7 @@ mod tests {
         for i in 0..5 {
             let mut regs = RegisterState::default();
             regs.rip = 0x401000 + i * 4;
-            timeline.recorder_mut().record_step(regs, 1);
+            timeline.record_step_internal(regs, 1);
         }
 
         timeline.stop_recording();

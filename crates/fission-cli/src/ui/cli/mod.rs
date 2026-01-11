@@ -189,6 +189,10 @@ pub fn run_cli() -> Result<()> {
                         search_term,
                         min_length,
                     } => handlers::cmd_string_xrefs(&state, &search_term, min_length),
+                    Command::RrRecord { binary, args } => handlers::cmd_rr_record(&binary, &args),
+                    Command::RrReplay { trace_path } => {
+                        handlers::cmd_rr_replay(&mut state, trace_path)
+                    }
                     Command::Help => handlers::cmd_help(),
                     Command::Clear => handlers::cmd_clear(),
                     Command::Exit => {

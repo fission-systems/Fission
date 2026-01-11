@@ -6,6 +6,49 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ## Recent Updates
 
+### RR/TTD Integration & macOS Library Loading Fix (2026-01-11)
+
+**🔄 RR (Record and Replay) Debugging Integration**
+
+Implemented a unified time-travel debugging (TTD) interface supporting both internal snapshot-based TTD (Windows/macOS) and RR (Linux).
+
+- **Unified API**: Created `TimeTravelDebugger` trait in `fission-analysis` to abstract different TTD backends.
+- **RR Backend Implementation**:
+  - Full GDB/MI protocol parser for communication with `rr replay`.
+  - Support for `rr record` and `rr replay` from the CLI.
+  - Interactive navigation: reverse-step, reverse-continue, and seeking.
+- **GUI Timeline Enhancements**:
+  - Refactored `Timeline` component to be backend-agnostic.
+  - Added global keyboard shortcuts for reverse execution:
+    - `Shift + F7`: Reverse Single Step
+    - `Shift + F9`: Reverse Continue (Seek to Start)
+- **Linux Support**: RR integration enabled on Linux, providing deterministic replay and time-travel capabilities.
+
+**🔧 native_decomp Stability & macOS Fixes**
+
+Resolved critical library loading issues and improved the native decompiler integration.
+
+- **macOS dylib Loading Fix**:
+  - Added `rpath` linker arguments to `fission-ffi` and `fission-cli` build scripts.
+  - Automatically embeds the decompiler library search path (`ghidra_decompiler/build`) into the binary.
+  - Eliminates the need for manual `DYLD_LIBRARY_PATH` configuration on macOS.
+- **Native Decompiler by Default**:
+  - Enabled `native_decomp` feature by default in `fission-cli`.
+  - Ensures the native Ghidra decompiler engine is available out-of-the-box.
+- **Code Health**:
+  - Fixed various compilation warnings related to platform-specific code (e.g., irrefutable let patterns).
+  - Cleaned up unused imports and variables in debug modules.
+
+**Files Modified/Added:**
+
+- `fission-analysis/src/debug/rr/`: New module for RR debugger implementation.
+- `fission-analysis/src/debug/ttd/timeline.rs`: Refactored for multi-backend support.
+- `fission-cli/src/ui/cli/handlers/commands/rr.rs`: Added RR command handlers.
+- `fission-cli/build.rs`: New build script for rpath injection.
+- `fission-ui/src/ui/gui/app/debug_ops.rs`: Added TTD action handling.
+
+---
+
 ### Development Tools & Configuration (2026-01-11)
 
 **🔧 DX: Enhanced Developer Experience**
