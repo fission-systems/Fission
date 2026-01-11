@@ -94,10 +94,8 @@ impl WindowsDebugger {
     fn record_ttd_snapshot(&self, thread_id: u32, registers: &super::types::RegisterState) {
         if let Some(timeline_arc) = &self.ttd_timeline {
             if let Ok(mut timeline) = timeline_arc.lock() {
-                if timeline.recorder().is_recording() {
-                    timeline
-                        .recorder_mut()
-                        .record_step(registers.clone(), thread_id);
+                if timeline.is_recording() {
+                    timeline.record_step_internal(registers.clone(), thread_id);
                 }
             }
         }

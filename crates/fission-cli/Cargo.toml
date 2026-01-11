@@ -2,6 +2,7 @@
 name = "fission-cli"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
 authors = ["Fission Dev Team"]
 description = "Fission CLI and entrypoint"
 license = "MIT"
@@ -17,7 +18,7 @@ path = "src/lib.rs"
 test = false
 
 [features]
-default = ["gui", "cli"]
+default = ["gui", "cli", "native_decomp"]
 gui = ["dep:fission-ui", "dep:eframe", "dep:egui"]
 cli = ["dep:reedline", "dep:clap"]
 tui = ["dep:ratatui", "dep:crossterm", "dep:clap"]

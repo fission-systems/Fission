@@ -306,6 +306,8 @@ pub enum DebugAction {
     Detach,
     Dump,
     ImportRec,
+    ReverseStep,
+    ReverseContinue,
 }
 
 /// Breakpoint actions requested from UI

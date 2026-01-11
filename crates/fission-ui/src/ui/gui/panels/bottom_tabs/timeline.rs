@@ -14,7 +14,7 @@ pub fn render(ui: &mut egui::Ui, timeline: &mut Timeline) {
         ui.separator();
 
         // Recording controls
-        let is_recording = timeline.recorder().is_recording();
+        let is_recording = timeline.is_recording();
         let is_replay = timeline.is_replay_mode();
 
         // Record button
@@ -48,7 +48,7 @@ pub fn render(ui: &mut egui::Ui, timeline: &mut Timeline) {
 
         // Stats
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let stats = timeline.recorder().stats();
+            let stats = timeline.stats();
             ui.label(
                 egui::RichText::new(format!(
                     "Steps: {} | Memory: {:.1} KB",
@@ -65,7 +65,7 @@ pub fn render(ui: &mut egui::Ui, timeline: &mut Timeline) {
 
     // Show content based on state
     if timeline.snapshot_count() == 0 {
-        render_empty(ui, timeline.recorder().is_recording());
+        render_empty(ui, timeline.is_recording());
     } else if timeline.is_replay_mode() {
         render_replay_controls(ui, timeline);
     } else {
@@ -97,17 +97,17 @@ fn render_empty(ui: &mut egui::Ui, is_recording: bool) {
 
 /// Render recording info (not in replay mode)
 fn render_recording_info(ui: &mut egui::Ui, timeline: &Timeline) {
-    let stats = timeline.recorder().stats();
+    let stats = timeline.stats();
 
     ui.horizontal(|ui| {
         ui.label(format!("📊 {} snapshots recorded", stats.count));
-        if let Some(duration) = timeline.recorder().duration() {
+        if let Some(duration) = timeline.duration() {
             ui.label(format!("| Duration: {:.1}s", duration.as_secs_f64()));
         }
     });
 
     // Show latest snapshot info
-    if let Some(snap) = timeline.recorder().latest_snapshot() {
+    if let Some(snap) = timeline.latest_snapshot() {
         ui.group(|ui| {
             ui.label(egui::RichText::new("Latest Snapshot").color(catppuccin::LAVENDER));
             ui.horizontal(|ui| {
