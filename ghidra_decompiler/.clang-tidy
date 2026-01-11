@@ -1,0 +1,26 @@
+# Clang-Tidy configuration for ghidra_decompiler
+# Run: clang-tidy src/**/*.cpp -- -Iinclude
+
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -bugprone-easily-swappable-parameters
+
+WarningsAsErrors: ""
+
+HeaderFilterRegex: "include/fission/.*"
+
+CheckOptions:
+  - key: modernize-loop-convert.UseCxx20ReverseRanges
+    value: false
+  - key: readability-function-cognitive-complexity.Threshold
+    value: 50
+  - key: readability-braces-around-statements.ShortStatementLines
+    value: 2
