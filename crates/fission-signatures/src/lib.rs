@@ -15,12 +15,14 @@ pub mod win_types;
 
 mod database;
 mod msvc_sigs;
+pub mod relation;
 mod signature;
 
 pub mod prelude;
 
 // Re-export main types
-pub use database::SignatureDatabase;
+pub use database::{IdentifyResult, SignatureDatabase};
+pub use relation::{CallGraph, RelationValidation, validate_relation};
 pub use signature::FunctionSignature;
 
 // Re-export lazily-initialized global databases for efficient reuse
