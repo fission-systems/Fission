@@ -1,0 +1,32 @@
+// ============================================
+// Function: _FindPESectionByName @ 0x140002570
+// ============================================
+
+
+char * _FindPESectionByName(char *param_1)
+
+{
+  int iVar1;
+  ulonglong uVar2;
+  char *lhs;
+  int *piVar3;
+  uint uVar4;
+  
+  uVar2 = strlen(param_1);
+  if ((((uVar2 < 9) && (*_refptr___CTOR_LIST__._8_8_ == 0x5a4d)) &&
+      (piVar3 = (int *)((longlong)*(int *)(_refptr___CTOR_LIST__._8_8_ + 0x1e) +
+                        (longlong)_refptr___CTOR_LIST__._8_8_), *piVar3 == 0x4550)) &&
+     (((int2)piVar3[6] == 0x20b && (*(int2 *)((longlong)piVar3 + 6) != 0)))) {
+    uVar4 = 0;
+    lhs = (char *)((longlong)piVar3 + (ulonglong)*(uint2 *)(piVar3 + 5) + 0x18);
+    do {
+      iVar1 = strncmp(lhs,param_1,8);
+      if (iVar1 == 0) {
+        return lhs;
+      }
+      uVar4 = uVar4 + 1;
+      lhs = (char *)((longlong)lhs + 0x28);
+    } while (uVar4 < *(uint2 *)((longlong)piVar3 + 6));
+  }
+  return (char *)0x0;
+}

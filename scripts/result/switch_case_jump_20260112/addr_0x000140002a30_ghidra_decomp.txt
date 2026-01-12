@@ -1,0 +1,10 @@
+void __cdecl _amsg_exit(int param_1)
+
+{
+  FILE *_File;
+  
+  _File = (FILE *)__acrt_iob_func(2);
+  fprintf(_File,"runtime error %d\n",(ulonglong)(uint)param_1);
+                    /* WARNING: Subroutine does not return */
+  _exit(0xff);
+}

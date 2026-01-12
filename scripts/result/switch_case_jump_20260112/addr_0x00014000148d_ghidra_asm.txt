@@ -1,0 +1,51 @@
+0x14000148D      PUSH     RBP
+  0x14000148E      MOV      RBP, RSP
+  0x140001491      SUB      RSP, 0x10
+  0x140001495      MOV      EAX, ECX
+  0x140001497      MOV      dword ptr [RBP + 0x18], EDX
+  0x14000149A      MOV      byte ptr [RBP + 0x10], AL
+  0x14000149D      MOV      dword ptr [RBP + -0x4], 0x0
+  0x1400014A4      MOVSX    EAX, byte ptr [RBP + 0x10]
+  0x1400014A8      CMP      EAX, 0x66
+  0x1400014AB      JZ       0x14000155b
+  0x1400014B1      CMP      EAX, 0x66
+  0x1400014B4      JG       0x140001562
+  0x1400014BA      CMP      EAX, 0x64
+  0x1400014BD      JZ       0x140001552
+  0x1400014C3      CMP      EAX, 0x64
+  0x1400014C6      JG       0x140001562
+  0x1400014CC      CMP      EAX, 0x63
+  0x1400014CF      JZ       0x140001549
+  0x1400014D1      CMP      EAX, 0x63
+  0x1400014D4      JG       0x140001562
+  0x1400014DA      CMP      EAX, 0x62
+  0x1400014DD      JZ       0x140001540
+  0x1400014DF      CMP      EAX, 0x62
+  0x1400014E2      JG       0x140001562
+  0x1400014E4      CMP      EAX, 0x61
+  0x1400014E7      JZ       0x140001518
+  0x1400014E9      CMP      EAX, 0x61
+  0x1400014EC      JG       0x140001562
+  0x1400014EE      CMP      EAX, 0x46
+  0x1400014F1      JZ       0x14000155b
+  0x1400014F3      CMP      EAX, 0x46
+  0x1400014F6      JG       0x140001562
+  0x1400014F8      CMP      EAX, 0x44
+  0x1400014FB      JZ       0x140001552
+  0x1400014FD      CMP      EAX, 0x44
+  0x140001500      JG       0x140001562
+  0x140001502      CMP      EAX, 0x43
+  0x140001505      JZ       0x140001549
+  0x140001507      CMP      EAX, 0x43
+  0x14000150A      JG       0x140001562
+  0x14000150C      CMP      EAX, 0x41
+  0x14000150F      JZ       0x140001518
+  0x140001511      CMP      EAX, 0x42
+  0x140001514      JZ       0x140001540
+  0x140001516      JMP      0x140001562
+  0x140001518      MOV      dword ptr [RBP + -0x4], 0x5a
+  0x14000151F      CMP      dword ptr [RBP + 0x18], 0x5a
+  0x140001523      JZ       0x140001533
+  0x140001525      CMP      dword ptr [RBP + 0x18], 0x64
+  0x140001529      JNZ      0x14000153b
+  ... (truncated)

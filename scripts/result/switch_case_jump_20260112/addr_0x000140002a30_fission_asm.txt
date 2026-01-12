@@ -1,0 +1,18 @@
+Function: _amsg_exit at 0x140002a30 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002a30  53                        push rbx
+  0x000140002a31  48 83 ec 20               sub rsp,20h
+  0x000140002a35  89 cb                     mov ebx,ecx
+  0x000140002a37  b9 02 00 00 00            mov ecx,2
+  0x000140002a3c  e8 8f 00 00 00            call 0000000140002AD0h
+  0x000140002a41  41 89 d8                  mov r8d,ebx
+  0x000140002a44  48 8d 15 25 1a 00 00      lea rdx,[140004470h]
+  0x000140002a4b  48 89 c1                  mov rcx,rax
+  0x000140002a4e  e8 6d ff ff ff            call 00000001400029C0h
+  0x000140002a53  b9 ff 00 00 00            mov ecx,0FFh
+  0x000140002a58  e8 cb 00 00 00            call 0000000140002B28h
+  0x000140002a5d  90                        nop
+  0x000140002a5e  90                        nop
+  0x000140002a5f  90                        nop
+Total instructions: 14

@@ -1,0 +1,48 @@
+0x14000158D      PUSH     RBP
+  0x14000158E      MOV      RBP, RSP
+  0x140001591      SUB      RSP, 0x20
+  0x140001595      MOV      dword ptr [RBP + 0x10], ECX
+  0x140001598      MOV      dword ptr [RBP + 0x18], EDX
+  0x14000159B      CMP      dword ptr [RBP + 0x10], 0x20
+  0x14000159F      JZ       0x140001600
+  0x1400015A1      CMP      dword ptr [RBP + 0x10], 0x20
+  0x1400015A5      JG       0x140001611
+  0x1400015A7      CMP      dword ptr [RBP + 0x10], 0x12
+  0x1400015AB      JG       0x140001611
+  0x1400015AD      CMP      dword ptr [RBP + 0x10], 0x10
+  0x1400015B1      JGE      0x1400015e7
+  0x1400015B3      CMP      dword ptr [RBP + 0x10], 0x1
+  0x1400015B7      JZ       0x1400015c1
+  0x1400015B9      CMP      dword ptr [RBP + 0x10], 0x2
+  0x1400015BD      JZ       0x1400015d4
+  0x1400015BF      JMP      0x140001611
+  0x1400015C1      MOV      EAX, dword ptr [RBP + 0x18]
+  0x1400015C4      LEA      RCX, [0x140004018]
+  0x1400015CB      MOV      EDX, EAX
+  0x1400015CD      CALL     0x140002960
+  0x1400015D2      JMP      0x140001623
+  0x1400015D4      MOV      EAX, dword ptr [RBP + 0x18]
+  0x1400015D7      LEA      RCX, [0x14000402c]
+  0x1400015DE      MOV      EDX, EAX
+  0x1400015E0      CALL     0x140002960
+  0x1400015E5      JMP      0x140001623
+  0x1400015E7      MOV      EDX, dword ptr [RBP + 0x18]
+  0x1400015EA      MOV      EAX, dword ptr [RBP + 0x10]
+  0x1400015ED      LEA      RCX, [0x14000403e]
+  0x1400015F4      MOV      R8D, EDX
+  0x1400015F7      MOV      EDX, EAX
+  0x1400015F9      CALL     0x140002960
+  0x1400015FE      JMP      0x140001623
+  0x140001600      LEA      RAX, [0x14000405a]
+  0x140001607      MOV      RCX, RAX
+  0x14000160A      CALL     0x140002af0
+  0x14000160F      JMP      0x140001623
+  0x140001611      MOV      EAX, dword ptr [RBP + 0x10]
+  0x140001614      LEA      RCX, [0x140004063]
+  0x14000161B      MOV      EDX, EAX
+  0x14000161D      CALL     0x140002960
+  0x140001622      NOP      
+  0x140001623      NOP      
+  0x140001624      ADD      RSP, 0x20
+  0x140001628      POP      RBP
+  0x140001629      RET

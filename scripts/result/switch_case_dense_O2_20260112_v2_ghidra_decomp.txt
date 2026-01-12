@@ -1,0 +1,11 @@
+/* WARNING: Unknown calling convention */
+
+void __dyn_tls_dtor(HANDLE hDllHandle,DWORD dwReason,LPVOID lpreserved)
+
+{
+  if ((dwReason != 3) && (dwReason != 0)) {
+    return;
+  }
+  __mingw_TLScallback(hDllHandle,dwReason,lpreserved);
+  return;
+}

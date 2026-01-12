@@ -1,0 +1,17 @@
+/* WARNING: Unknown calling convention */
+
+char * get_day_type(int day)
+
+{
+  int in_ECX;
+  
+  if (in_ECX < 6) {
+    if (0 < in_ECX) {
+      return "Weekday";
+    }
+  }
+  else if (in_ECX - 6U < 2) {
+    return "Weekend";
+  }
+  return "Invalid";
+}

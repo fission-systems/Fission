@@ -1,0 +1,21 @@
+// ============================================
+// Function: fprintf @ 0x1400029c0
+// ============================================
+
+
+int __cdecl fprintf(void *stream,char *format,...)
+
+{
+  undefined8 *pxVar1;
+  int iVar2;
+  undefined8 in_R8;
+  undefined8 in_R9;
+  undefined8 local_18;
+  undefined8 local_20;
+  
+  local_18 = in_R8;
+  local_20 = in_R9;
+  pxVar1 = (undefined8 *)__local_stdio_printf_options();
+  iVar2 = __stdio_common_vfprintf(*pxVar1,stream,format,0,&local_18);
+  return iVar2;
+}

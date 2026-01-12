@@ -1,0 +1,34 @@
+Function: main at 0x140002aa0 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002aa0  48 83 ec 28               sub rsp,28h
+  0x000140002aa4  e8 b7 ec ff ff            call 0000000140001760h
+  0x000140002aa9  48 8d 0d 97 16 00 00      lea rcx,[140004147h]
+  0x000140002ab0  e8 bb fe ff ff            call 0000000140002970h
+  0x000140002ab5  48 8d 15 44 15 00 00      lea rdx,[140004000h]
+  0x000140002abc  48 8d 0d 9e 16 00 00      lea rcx,[140004161h]
+  0x000140002ac3  e8 18 fd ff ff            call 00000001400027E0h
+  0x000140002ac8  48 8d 15 39 15 00 00      lea rdx,[140004008h]
+  0x000140002acf  48 8d 0d 96 16 00 00      lea rcx,[14000416Ch]
+  0x000140002ad6  e8 05 fd ff ff            call 00000001400027E0h
+  0x000140002adb  ba 64 00 00 00            mov edx,64h
+  0x000140002ae0  48 8d 0d 91 16 00 00      lea rcx,[140004178h]
+  0x000140002ae7  e8 f4 fc ff ff            call 00000001400027E0h
+  0x000140002aec  ba 58 00 00 00            mov edx,58h
+  0x000140002af1  48 8d 0d 9f 16 00 00      lea rcx,[140004197h]
+  0x000140002af8  e8 e3 fc ff ff            call 00000001400027E0h
+  0x000140002afd  ba 2a 00 00 00            mov edx,2Ah
+  0x000140002b02  48 8d 0d a7 15 00 00      lea rcx,[1400040B0h]
+  0x000140002b09  e8 d2 fc ff ff            call 00000001400027E0h
+  0x000140002b0e  41 b8 64 00 00 00         mov r8d,64h
+  0x000140002b14  ba 11 00 00 00            mov edx,11h
+  0x000140002b19  48 8d 0d b6 15 00 00      lea rcx,[1400040D6h]
+  0x000140002b20  e8 bb fc ff ff            call 00000001400027E0h
+  0x000140002b25  48 8d 0d 89 16 00 00      lea rcx,[1400041B5h]
+  0x000140002b2c  e8 7f ea ff ff            call 00000001400015B0h
+  0x000140002b31  48 8d 0d 82 16 00 00      lea rcx,[1400041BAh]
+  0x000140002b38  e8 73 ea ff ff            call 00000001400015B0h
+  0x000140002b3d  31 c0                     xor eax,eax
+  0x000140002b3f  48 83 c4 28               add rsp,28h
+  0x000140002b43  c3                        ret
+Total instructions: 30

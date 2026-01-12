@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/switch_case_x64.exe",
+    "address": "0x1400022b0",
+    "timestamp": "2026-01-12T11:51:48.235902Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 21,
+        "chars": 548,
+        "functions": 10,
+        "branches": 2
+      },
+      "fission": {
+        "lines": 26,
+        "chars": 787,
+        "functions": 16,
+        "branches": 2
+      }
+    },
+    "similarity": 32.26
+  },
+  "timings": {
+    "ghidra_sec": 2.618,
+    "fission_asm_sec": 0.024,
+    "fission_decomp_sec": 3.323
+  },
+  "ghidra_assembly": "0x1400022B0      SUB      RSP, 0x38\n  0x1400022B4      MOV      EAX, dword ptr [0x1400070e8]\n  0x1400022BA      MOV      R9D, ECX\n  0x1400022BD      TEST     EAX, EAX\n  0x1400022BF      JNZ      0x1400022d0\n  0x1400022C1      XOR      EAX, EAX\n  0x1400022C3      ADD      RSP, 0x38\n  0x1400022C7      RET      \n  0x1400022D0      MOV      qword ptr [RSP + 0x48], RDX\n  0x1400022D5      MOV      ECX, 0x1\n  0x1400022DA      MOV      EDX, 0x18\n  0x1400022DF      MOV      dword ptr [RSP + 0x40], R9D\n  0x1400022E4      CALL     0x140002ba8\n  0x1400022E9      TEST     RAX, RAX\n  0x1400022EC      JZ       0x140002337\n  0x1400022EE      MOV      R9D, dword ptr [RSP + 0x40]\n  0x1400022F3      MOV      R8, qword ptr [RSP + 0x48]\n  0x1400022F8      MOV      qword ptr [RSP + 0x28], RAX\n  0x1400022FD      LEA      RCX, [0x140007100]\n  0x140002304      MOV      dword ptr [RAX], R9D\n  0x140002307      MOV      qword ptr [RAX + 0x8], R8\n  0x14000230B      CALL     qword ptr [0x140008258]\n  0x140002311      MOV      RDX, qword ptr [0x1400070e0]\n  0x140002318      MOV      RAX, qword ptr [RSP + 0x28]\n  0x14000231D      LEA      RCX, [0x140007100]\n  0x140002324      MOV      qword ptr [RAX + 0x10], RDX\n  0x140002328      MOV      qword ptr [0x1400070e0], RAX\n  0x14000232F      CALL     qword ptr [0x140008270]\n  0x140002335      JMP      0x1400022c1\n  0x140002337      MOV      EAX, 0xffffffff\n  0x14000233C      JMP      0x1400022c3",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nint ___w64_mingwthr_add_key_dtor(DWORD key,_func_void_void_ptr *dtor)\n\n{\n  __mingwthr_key_t *p_Var1;\n  \n  if (__mingwthr_cs_init != 0) {\n    p_Var1 = (__mingwthr_key_t *)calloc(1,0x18);\n    if (p_Var1 == (__mingwthr_key_t *)0x0) {\n      return -1;\n    }\n    p_Var1->key = key;\n    p_Var1->dtor = dtor;\n    EnterCriticalSection((LPCRITICAL_SECTION)&__mingwthr_cs);\n    p_Var1->next = key_dtor_list;\n    key_dtor_list = p_Var1;\n    LeaveCriticalSection((LPCRITICAL_SECTION)&__mingwthr_cs);\n  }\n  return 0;\n}",
+  "fission_assembly": "Function: ___w64_mingwthr_add_key_dtor at 0x1400022b0 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x0001400022b0  48 83 ec 38               sub rsp,38h\n  0x0001400022b4  8b 05 2e 4e 00 00         mov eax,[1400070E8h]\n  0x0001400022ba  41 89 c9                  mov r9d,ecx\n  0x0001400022bd  85 c0                     test eax,eax\n  0x0001400022bf  75 0f                     jne short 00000001400022D0h\n  0x0001400022c1  31 c0                     xor eax,eax\n  0x0001400022c3  48 83 c4 38               add rsp,38h\n  0x0001400022c7  c3                        ret\nTotal instructions: 8",
+  "fission_decompilation": "// ============================================\n// Function: ___w64_mingwthr_add_key_dtor @ 0x1400022b0\n// ============================================\n\n\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\n\nundefined8 ___w64_mingwthr_add_key_dtor(undefined4 param_1,undefined8 param_2)\n\n{\n  void *pvVar1;\n  \n  if (g_00000001400070e8 != 0) {\n    pvVar1 = calloc(1,0x18);\n    if (pvVar1 == (void *)0x0) {\n      return 0xffffffff;\n    }\n    *(undefined4 *)pvVar1 = param_1;\n    *(undefined8 *)((longlong)pvVar1 + 8) = param_2;\n    (*_KERNEL32.dll!EnterCriticalSection)(0x140007100);\n    *(void **)((longlong)pvVar1 + 0x10) = pvRam00000001400070e0;\n    pvRam00000001400070e0 = pvVar1;\n    (*_KERNEL32.dll!LeaveCriticalSection)(0x140007100);\n  }\n  return 0;\n}"
+}

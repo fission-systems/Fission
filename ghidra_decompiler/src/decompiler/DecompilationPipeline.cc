@@ -55,11 +55,7 @@ static constexpr int MAX_PTRSUB_OPS = 100;           // Limit analyzed operation
 static const std::vector<std::string> FID_SEARCH_DIRS = {
     "./utils/signatures/fid/",
     "../utils/signatures/fid/",
-    "../../utils/signatures/fid/",
-    // Legacy paths (for backward compatibility)
-    "./utils/ghidra/funtionID/",
-    "../utils/ghidra/funtionID/",
-    "../../utils/ghidra/funtionID/"
+    "../../utils/signatures/fid/"
 };
 
 // MSVC FID database filenames by version (highest priority)
@@ -115,8 +111,7 @@ static const std::vector<std::string> COMMON_SYMBOL_FILES = {
     "./utils/signatures/fid/common_symbols_win32.txt",
     "./utils/signatures/fid/common_symbols_win64.txt",
     "../utils/signatures/fid/common_symbols_win32.txt",
-    "./utils/ghidra/funtionID/common_symbols_win32.txt",
-    "./utils/ghidra/funtionID/common_symbols_win64.txt"
+    "../utils/signatures/fid/common_symbols_win64.txt"
 };
 
 // Helper: Find first existing FID file from search paths
@@ -956,12 +951,12 @@ std::string DecompilationPipeline::handle_decompile(
     // Step 6d: GUID substitution
     if (state.guid_map.empty()) {
         std::vector<std::string> guid_files = {
-            "../../utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
-            "../utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
-            "./utils/ghidra/typeinfo/win32/msvcrt/guids.txt",
-            "../../utils/ghidra/typeinfo/win32/msvcrt/iids.txt",
-            "../utils/ghidra/typeinfo/win32/msvcrt/iids.txt",
-            "./utils/ghidra/typeinfo/win32/msvcrt/iids.txt"
+            "../../utils/signatures/typeinfo/win32/msvcrt/guids.txt",
+            "../utils/signatures/typeinfo/win32/msvcrt/guids.txt",
+            "./utils/signatures/typeinfo/win32/msvcrt/guids.txt",
+            "../../utils/signatures/typeinfo/win32/msvcrt/iids.txt",
+            "../utils/signatures/typeinfo/win32/msvcrt/iids.txt",
+            "./utils/signatures/typeinfo/win32/msvcrt/iids.txt"
         };
         
         for (const auto& path : guid_files) {

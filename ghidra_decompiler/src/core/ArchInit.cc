@@ -56,10 +56,10 @@ static void load_gdt_for_arch(ghidra::Architecture* arch, bool is_64bit, const s
 
     std::string suffix = is_64bit ? "_64.gdt" : "_32.gdt";
     std::vector<std::string> candidates = {
-        "../../utils/ghidra/typeinfo/win32/windows_vs12" + suffix,
-        "../utils/ghidra/typeinfo/win32/windows_vs12" + suffix,
-        "./utils/ghidra/typeinfo/win32/windows_vs12" + suffix,
-        "utils/ghidra/typeinfo/win32/windows_vs12" + suffix
+        "../../utils/signatures/typeinfo/win32/windows_vs12" + suffix,
+        "../utils/signatures/typeinfo/win32/windows_vs12" + suffix,
+        "./utils/signatures/typeinfo/win32/windows_vs12" + suffix,
+        "utils/signatures/typeinfo/win32/windows_vs12" + suffix
     };
 
     const bool gdt_loaded = std::any_of(candidates.begin(), candidates.end(), [&](const auto& path) {

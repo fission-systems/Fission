@@ -1,0 +1,8 @@
+Function: dense_switch_table at 0x140001690 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140001690  83 f9 3f                  cmp ecx,3Fh
+  0x000140001693  77 0b                     ja short 00000001400016A0h
+  0x000140001695  8d 41 64                  lea eax,[rcx+64h]
+  0x000140001698  c3                        ret
+Total instructions: 4

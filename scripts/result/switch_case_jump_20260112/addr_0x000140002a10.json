@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/switch_case_x64.exe",
+    "address": "0x000140002a10",
+    "timestamp": "2026-01-12T11:50:46.506505Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 7,
+        "chars": 113,
+        "functions": 1,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 10,
+        "chars": 227,
+        "functions": 1,
+        "branches": 0
+      }
+    },
+    "similarity": 50.0
+  },
+  "timings": {
+    "ghidra_sec": 2.614,
+    "fission_asm_sec": 0.025,
+    "fission_decomp_sec": 3.322
+  },
+  "ghidra_assembly": "0x140002A10      LEA      RAX, [0x140003050]\n  0x140002A17      RET",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nulonglong * __local_stdio_printf_options(void)\n\n{\n  return &options;\n}",
+  "fission_assembly": "Function: __local_stdio_printf_options at 0x140002a10 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002a10  48 8d 05 39 06 00 00      lea rax,[140003050h]\n  0x000140002a17  c3                        ret\nTotal instructions: 2",
+  "fission_decompilation": "// ============================================\n// Function: __local_stdio_printf_options @ 0x140002a10\n// ============================================\n\n\nfloat4 * __local_stdio_printf_options(void)\n\n{\n  return &DAT_140003050;\n}"
+}

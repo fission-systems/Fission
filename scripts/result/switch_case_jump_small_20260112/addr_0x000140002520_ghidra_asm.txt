@@ -1,0 +1,23 @@
+0x140002520      MOVSXD   RAX, dword ptr [RCX + 0x3c]
+  0x140002524      ADD      RAX, RCX
+  0x140002527      MOVZX    ECX, word ptr [RAX + 0x6]
+  0x14000252B      TEST     CX, CX
+  0x14000252E      JZ       0x14000256d
+  0x140002530      MOVZX    R8D, word ptr [RAX + 0x14]
+  0x140002535      SUB      ECX, 0x1
+  0x140002538      LEA      RCX, [RCX + RCX*0x4]
+  0x14000253C      LEA      RAX, [RAX + R8*0x1 + 0x18]
+  0x140002541      LEA      R9, [RAX + RCX*0x8 + 0x28]
+  0x140002546      NOP      word ptr CS:[RAX + RAX*0x1]
+  0x140002550      MOV      R8D, dword ptr [RAX + 0xc]
+  0x140002554      MOV      RCX, R8
+  0x140002557      CMP      RDX, R8
+  0x14000255A      JC       0x140002564
+  0x14000255C      ADD      ECX, dword ptr [RAX + 0x8]
+  0x14000255F      CMP      RDX, RCX
+  0x140002562      JC       0x14000256f
+  0x140002564      ADD      RAX, 0x28
+  0x140002568      CMP      RAX, R9
+  0x14000256B      JNZ      0x140002550
+  0x14000256D      XOR      EAX, EAX
+  0x14000256F      RET

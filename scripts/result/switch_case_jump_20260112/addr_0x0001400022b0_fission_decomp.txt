@@ -1,0 +1,26 @@
+// ============================================
+// Function: ___w64_mingwthr_add_key_dtor @ 0x1400022b0
+// ============================================
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+undefined8 ___w64_mingwthr_add_key_dtor(undefined4 param_1,undefined8 param_2)
+
+{
+  void *pvVar1;
+  
+  if (g_00000001400070e8 != 0) {
+    pvVar1 = calloc(1,0x18);
+    if (pvVar1 == (void *)0x0) {
+      return 0xffffffff;
+    }
+    *(undefined4 *)pvVar1 = param_1;
+    *(undefined8 *)((longlong)pvVar1 + 8) = param_2;
+    (*_KERNEL32.dll!EnterCriticalSection)(0x140007100);
+    *(void **)((longlong)pvVar1 + 0x10) = pvRam00000001400070e0;
+    pvRam00000001400070e0 = pvVar1;
+    (*_KERNEL32.dll!LeaveCriticalSection)(0x140007100);
+  }
+  return 0;
+}

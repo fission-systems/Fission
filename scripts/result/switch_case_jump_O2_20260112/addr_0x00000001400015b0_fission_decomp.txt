@@ -1,0 +1,50 @@
+// ============================================
+// Function: parse_simple_command @ 0x1400015b0
+// ============================================
+
+// Inferred Structure Definitions
+typedef struct f_1400015b0_arg_8 {
+    char field_0; // Offset 0
+    char field_1; // Offset 1
+    char field_2; // Offset 2
+    char field_3; // Offset 3
+} f_1400015b0_arg_8;
+
+
+
+undefined8 parse_simple_command(f_1400015b0_arg_8 *param_1)
+
+{
+  ulonglong uVar1;
+  uint1 uVar2;
+  
+  if ((param_1 != (char *)0x0) && (*param_1 != '\0')) {
+    uVar2 = *param_1 + 0xb8;
+    if (uVar2 < 0x2b) {
+      uVar1 = 1LL << (uVar2 & 0x3f);
+      if ((uVar1 & 0x40000000400) != 0) {
+        puts("Run command");
+        return 2;
+      }
+      if ((uVar1 & 0x20000000200) != 0) {
+        puts("Quit command");
+        return 1;
+      }
+      if ((uVar1 & 0x100000001) != 0) {
+        if (param_1[1] != 'e') {
+          return 0xffffffff;
+        }
+        if (param_1[2] != 'l') {
+          return 0xffffffff;
+        }
+        if (param_1[3] != 'p') {
+          return 0xffffffff;
+        }
+        puts("Help command");
+        return 0;
+      }
+    }
+    printf("Unknown: %s\n");
+  }
+  return 0xffffffff;
+}

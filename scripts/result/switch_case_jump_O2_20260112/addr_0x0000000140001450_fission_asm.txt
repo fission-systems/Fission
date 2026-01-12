@@ -1,0 +1,12 @@
+Function: get_day_type at 0x140001450 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140001450  83 f9 05                  cmp ecx,5
+  0x000140001453  7e 1b                     jle short 0000000140001470h
+  0x000140001455  83 e9 06                  sub ecx,6
+  0x000140001458  48 8d 15 b1 2b 00 00      lea rdx,[140004010h]
+  0x00014000145f  48 8d 05 a2 2b 00 00      lea rax,[140004008h]
+  0x000140001466  83 f9 02                  cmp ecx,2
+  0x000140001469  48 0f 43 c2               cmovae rax,rdx
+  0x00014000146d  c3                        ret
+Total instructions: 8

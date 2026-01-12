@@ -1,0 +1,13 @@
+Function: _IsNonwritableInCurrentImage at 0x140002790 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002790  48 8b 15 29 1d 00 00      mov rdx,[1400044C0h]
+  0x000140002797  31 c0                     xor eax,eax
+  0x000140002799  66 81 3a 4d 5a            cmp word ptr [rdx],5A4Dh
+  0x00014000279e  75 10                     jne short 00000001400027B0h
+  0x0001400027a0  4c 63 42 3c               movsxd r8,[rdx+3Ch]
+  0x0001400027a4  49 01 d0                  add r8,rdx
+  0x0001400027a7  41 81 38 50 45 00 00      cmp dword ptr [r8],4550h
+  0x0001400027ae  74 08                     je short 00000001400027B8h
+  0x0001400027b0  c3                        ret
+Total instructions: 9

@@ -1,0 +1,3 @@
+0x140001480 adler32
+0x1400014f0 complex_bit_manip
+0x1400017d0 simple_parser

@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/switch_case_x64.exe",
+    "address": "0x000140002790",
+    "timestamp": "2026-01-12T11:50:22.544409Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 26,
+        "chars": 953,
+        "functions": 49,
+        "branches": 3
+      },
+      "fission": {
+        "lines": 31,
+        "chars": 1154,
+        "functions": 49,
+        "branches": 3
+      }
+    },
+    "similarity": 63.83
+  },
+  "timings": {
+    "ghidra_sec": 2.724,
+    "fission_asm_sec": 0.025,
+    "fission_decomp_sec": 3.316
+  },
+  "ghidra_assembly": "0x140002790      MOV      RDX, qword ptr [0x1400044c0]\n  0x140002797      XOR      EAX, EAX\n  0x140002799      CMP      word ptr [RDX], 0x5a4d\n  0x14000279E      JNZ      0x1400027b0\n  0x1400027A0      MOVSXD   R8, dword ptr [RDX + 0x3c]\n  0x1400027A4      ADD      R8, RDX\n  0x1400027A7      CMP      dword ptr [R8], 0x4550\n  0x1400027AE      JZ       0x1400027b8\n  0x1400027B0      RET      \n  0x1400027B8      CMP      word ptr [R8 + 0x18], 0x20b\n  0x1400027BF      JNZ      0x1400027b0\n  0x1400027C1      MOVZX    R9D, word ptr [R8 + 0x6]\n  0x1400027C6      TEST     R9W, R9W\n  0x1400027CA      JZ       0x1400027b0\n  0x1400027CC      MOVZX    EAX, word ptr [R8 + 0x14]\n  0x1400027D1      SUB      RCX, RDX\n  0x1400027D4      LEA      EDX, [R9 + -0x1]\n  0x1400027D8      LEA      RDX, [RDX + RDX*0x4]\n  0x1400027DC      LEA      RAX, [R8 + RAX*0x1 + 0x18]\n  0x1400027E1      LEA      R9, [RAX + RDX*0x8 + 0x28]\n  0x1400027E6      NOP      word ptr CS:[RAX + RAX*0x1]\n  0x1400027F0      MOV      R8D, dword ptr [RAX + 0xc]\n  0x1400027F4      MOV      RDX, R8\n  0x1400027F7      CMP      RCX, R8\n  0x1400027FA      JC       0x140002804\n  0x1400027FC      ADD      EDX, dword ptr [RAX + 0x8]\n  0x1400027FF      CMP      RCX, RDX\n  0x140002802      JC       0x140002810\n  0x140002804      ADD      RAX, 0x28\n  0x140002808      CMP      R9, RAX\n  0x14000280B      JNZ      0x1400027f0\n  0x14000280D      XOR      EAX, EAX\n  0x14000280F      RET      \n  0x140002810      MOV      EAX, dword ptr [RAX + 0x24]\n  0x140002813      NOT      EAX\n  0x140002815      SHR      EAX, 0x1f\n  0x140002818      RET",
+  "ghidra_decompilation": "BOOL __cdecl _IsNonwritableInCurrentImage(PBYTE pTarget)\n\n{\n  longlong lVar1;\n  longlong lVar2;\n  int *piVar3;\n  \n  if ((((*(short *)_refptr___ImageBase == 0x5a4d) &&\n       (piVar3 = (int *)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)),\n       *piVar3 == 0x4550)) && ((short)piVar3[6] == 0x20b)) &&\n     (*(ushort *)((longlong)piVar3 + 6) != 0)) {\n    lVar2 = (longlong)piVar3 + (ulonglong)*(ushort *)(piVar3 + 5) + 0x18;\n    lVar1 = lVar2 + 0x28;\n    while (((ulonglong)((longlong)pTarget - (longlong)_refptr___ImageBase) <\n            (ulonglong)*(uint *)(lVar2 + 0xc) ||\n           ((ulonglong)(*(uint *)(lVar2 + 0xc) + *(int *)(lVar2 + 8)) <=\n            (ulonglong)((longlong)pTarget - (longlong)_refptr___ImageBase)))) {\n      lVar2 = lVar2 + 0x28;\n      if (lVar1 + (ulonglong)(*(ushort *)((longlong)piVar3 + 6) - 1) * 0x28 == lVar2) {\n        return 0;\n      }\n    }\n    return ~*(uint *)(lVar2 + 0x24) >> 0x1f;\n  }\n  return 0;\n}",
+  "fission_assembly": "Function: _IsNonwritableInCurrentImage at 0x140002790 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002790  48 8b 15 29 1d 00 00      mov rdx,[1400044C0h]\n  0x000140002797  31 c0                     xor eax,eax\n  0x000140002799  66 81 3a 4d 5a            cmp word ptr [rdx],5A4Dh\n  0x00014000279e  75 10                     jne short 00000001400027B0h\n  0x0001400027a0  4c 63 42 3c               movsxd r8,[rdx+3Ch]\n  0x0001400027a4  49 01 d0                  add r8,rdx\n  0x0001400027a7  41 81 38 50 45 00 00      cmp dword ptr [r8],4550h\n  0x0001400027ae  74 08                     je short 00000001400027B8h\n  0x0001400027b0  c3                        ret\nTotal instructions: 9",
+  "fission_decompilation": "// ============================================\n// Function: _IsNonwritableInCurrentImage @ 0x140002790\n// ============================================\n\n\nuint _IsNonwritableInCurrentImage(longlong param_1)\n\n{\n  longlong lVar1;\n  longlong lVar2;\n  int *piVar3;\n  \n  if ((((*_refptr___CTOR_LIST__._8_8_ == 0x5a4d) &&\n       (piVar3 = (int *)((longlong)*(int *)(_refptr___CTOR_LIST__._8_8_ + 0x1e) +\n                         (longlong)_refptr___CTOR_LIST__._8_8_), *piVar3 == 0x4550)) &&\n      ((int2)piVar3[6] == 0x20b)) && (*(uint2 *)((longlong)piVar3 + 6) != 0)) {\n    lVar2 = (longlong)piVar3 + (ulonglong)*(uint2 *)(piVar3 + 5) + 0x18;\n    lVar1 = lVar2 + 0x28;\n    while (((ulonglong)(param_1 - (longlong)_refptr___CTOR_LIST__._8_8_) <\n            (ulonglong)*(uint *)(lVar2 + 0xc) ||\n           ((ulonglong)(*(uint *)(lVar2 + 0xc) + *(int *)(lVar2 + 8)) <=\n            (ulonglong)(param_1 - (longlong)_refptr___CTOR_LIST__._8_8_)))) {\n      lVar2 = lVar2 + 0x28;\n      if (lVar1 + (ulonglong)((uint)*(uint2 *)((longlong)piVar3 + 6) - 1) * 0x28 == lVar2) {\n        return 0;\n      }\n    }\n    return ~*(uint *)(lVar2 + 0x24) >> 0x1f;\n  }\n  return 0;\n}"
+}

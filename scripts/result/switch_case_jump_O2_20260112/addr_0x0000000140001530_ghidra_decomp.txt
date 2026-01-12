@@ -1,0 +1,26 @@
+/* WARNING: Unknown calling convention */
+
+void process_command(int cmd,int arg)
+
+{
+  if (cmd < 0x13) {
+    if (0xf < cmd) {
+      printf("Network command 0x%02x: %d\n",(ulonglong)(uint)cmd,(ulonglong)(uint)arg);
+      return;
+    }
+    if (cmd == 1) {
+      printf("Initialize with %d\n");
+      return;
+    }
+    if (cmd == 2) {
+      printf("Process %d items\n");
+      return;
+    }
+  }
+  else if (cmd == 0x20) {
+    puts("Shutdown");
+    return;
+  }
+  printf("Unknown command: 0x%02x\n",(ulonglong)(uint)cmd);
+  return;
+}

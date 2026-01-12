@@ -1,0 +1,26 @@
+BOOL __cdecl _IsNonwritableInCurrentImage(PBYTE pTarget)
+
+{
+  longlong lVar1;
+  longlong lVar2;
+  int *piVar3;
+  
+  if ((((*(short *)_refptr___ImageBase == 0x5a4d) &&
+       (piVar3 = (int *)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)),
+       *piVar3 == 0x4550)) && ((short)piVar3[6] == 0x20b)) &&
+     (*(ushort *)((longlong)piVar3 + 6) != 0)) {
+    lVar2 = (longlong)piVar3 + (ulonglong)*(ushort *)(piVar3 + 5) + 0x18;
+    lVar1 = lVar2 + 0x28;
+    while (((ulonglong)((longlong)pTarget - (longlong)_refptr___ImageBase) <
+            (ulonglong)*(uint *)(lVar2 + 0xc) ||
+           ((ulonglong)(*(uint *)(lVar2 + 0xc) + *(int *)(lVar2 + 8)) <=
+            (ulonglong)((longlong)pTarget - (longlong)_refptr___ImageBase)))) {
+      lVar2 = lVar2 + 0x28;
+      if (lVar1 + (ulonglong)(*(ushort *)((longlong)piVar3 + 6) - 1) * 0x28 == lVar2) {
+        return 0;
+      }
+    }
+    return ~*(uint *)(lVar2 + 0x24) >> 0x1f;
+  }
+  return 0;
+}
