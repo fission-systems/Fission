@@ -10,6 +10,7 @@ pub const LC_SEGMENT: u32 = 0x1;
 pub const LC_SYMTAB: u32 = 0x2;
 pub const LC_DYSYMTAB: u32 = 0xB;
 pub const LC_SEGMENT_64: u32 = 0x19;
+pub const LC_MAIN: u32 = 0x80000028; // LC_REQ_DYLD | 0x28
 
 #[derive(BinRead, Debug, Clone)]
 pub struct MachHeader64 {
@@ -157,4 +158,12 @@ pub struct Nlist32 {
     pub n_sect: u8,
     pub n_desc: u16,
     pub n_value: u32,
+}
+
+#[derive(BinRead, Debug, Clone)]
+pub struct EntryPointCommand {
+    pub cmd: u32,
+    pub cmdsize: u32,
+    pub entryoff: u64,  // file (__TEXT) offset of main()
+    pub stacksize: u64, // initial stack size (usually 0)
 }
