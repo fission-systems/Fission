@@ -231,6 +231,28 @@ pub struct DecomToken {
     pub is_function_call: bool,
 }
 
+#[derive(Default, Clone)]
+pub struct XrefCallSummary {
+    pub addr: u64,
+    pub label: String,
+    pub count: usize,
+}
+
+#[derive(Default)]
+pub struct XrefsViewModel {
+    pub cache_key: Option<(String, u64, u64)>,
+    pub callers: Vec<XrefCallSummary>,
+    pub callees: Vec<XrefCallSummary>,
+}
+
+impl XrefsViewModel {
+    pub fn clear(&mut self) {
+        self.cache_key = None;
+        self.callers.clear();
+        self.callees.clear();
+    }
+}
+
 /// ViewModel for Decompiled Code panel - holds tokenized cache
 #[derive(Default)]
 pub struct DecompileViewModel {
@@ -260,6 +282,7 @@ pub struct ViewModelContainer {
     pub strings: StringsViewModel,
     pub functions: FunctionsViewModel,
     pub string_xrefs: StringXrefsViewModel,
+    pub xrefs: XrefsViewModel,
     pub debug: DebugViewModel,
     pub search: SearchViewModel,
     pub navigation: NavigationViewModel,
@@ -273,6 +296,7 @@ impl ViewModelContainer {
             strings: StringsViewModel::new(),
             functions: FunctionsViewModel::default(),
             string_xrefs: StringXrefsViewModel::new(),
+            xrefs: XrefsViewModel::default(),
             debug: DebugViewModel::new(),
             search: SearchViewModel::new(),
             navigation: NavigationViewModel::new(),

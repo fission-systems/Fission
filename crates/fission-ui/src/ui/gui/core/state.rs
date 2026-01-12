@@ -51,6 +51,8 @@ pub struct UIState {
     pub show_xrefs_window: bool,
     /// Selected address for xrefs viewing
     pub selected_xref_addr: Option<u64>,
+    /// Group xrefs by function (call graph style)
+    pub xrefs_group_by_function: bool,
     /// Show string cross-references window
     pub show_string_xrefs_window: bool,
     /// Current cursor position (Line, Column)
@@ -92,6 +94,7 @@ impl Default for UIState {
             show_attach_dialog: false,
             show_xrefs_window: false,
             selected_xref_addr: None,
+            xrefs_group_by_function: false,
             show_string_xrefs_window: false,
             cursor_pos: None,
             memory_usage: 0,

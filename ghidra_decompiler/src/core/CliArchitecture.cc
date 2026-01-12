@@ -69,6 +69,8 @@ void CliArchitecture::refreshReadOnly() {
 void configure_arch(CliArchitecture* arch) {
     arch->max_instructions = 500000; // Increased for Jump Table analysis (Phase 6)
     arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
+    arch->max_jumptable_size = 2048;
+    arch->flowoptions |= ghidra::FlowInfo::record_jumploads;
     
     // === Analysis Improvements ===
     arch->infer_pointers = true;      // Infers pointers from constants (e.g. 0x401000 -> func_401000)

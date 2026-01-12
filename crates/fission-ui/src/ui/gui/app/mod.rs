@@ -342,6 +342,19 @@ impl eframe::App for FissionApp {
                                 fid_count
                             ));
                         }
+
+                        if let (Some(ref binary), Some(ref xref_db)) = (
+                            self.state.analysis.domain.loaded_binary.as_ref(),
+                            self.state.analysis.domain.xref_db.as_ref(),
+                        ) {
+                            let call_graph = crate::analysis::callgraph::CallGraph::build_from_xrefs(
+                                &binary.functions,
+                                xref_db,
+                                crate::core::config::CONFIG.analysis.function_address_range as u64,
+                            );
+                            self.state.analysis.domain.call_graph = Some(call_graph);
+                            self.state.viewmodels.xrefs.clear();
+                        }
                     } else {
                         self.state
                             .log("[*] No additional hidden functions found by signature scanning.");
@@ -751,6 +764,7 @@ impl FissionApp {
                     .domain
                     .user_function_names
                     .insert(addr, name.clone());
+                self.state.viewmodels.xrefs.clear();
                 self.state
                     .log(format!("[*] Renamed symbol at 0x{:x} to {}", addr, name));
 

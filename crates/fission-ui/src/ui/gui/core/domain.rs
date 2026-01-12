@@ -48,6 +48,9 @@ pub struct AnalysisDomain {
     /// Cross-references database
     pub xref_db: Option<crate::analysis::xrefs::XrefDatabase>,
 
+    /// Call graph derived from cross-references
+    pub call_graph: Option<crate::analysis::CallGraph>,
+
     /// User-defined function names (address -> custom name)
     pub user_function_names: std::collections::HashMap<u64, String>,
 
@@ -165,6 +168,7 @@ impl Default for AnalysisDomain {
             extracted_strings: Vec::new(),
             detection_result: None,
             xref_db: None,
+            call_graph: None,
             user_function_names: std::collections::HashMap::new(),
             user_comments: std::collections::HashMap::new(),
             bookmarks: std::collections::HashMap::new(),

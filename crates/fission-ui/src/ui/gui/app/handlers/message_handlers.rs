@@ -3,6 +3,7 @@
 use crossbeam_channel::Sender;
 use std::sync::Arc;
 
+use crate::core::config::CONFIG;
 use crate::ui::gui::core::messages::AsyncMessage;
 use crate::ui::gui::core::state::AppState;
 use fission_loader::loader::LoadedBinary;
@@ -60,6 +61,20 @@ pub fn handle_binary_loaded(
     let xref_count = xref_db.total_refs();
     state.log(format!("[*] 🔗 Built {} cross-references", xref_count));
     state.analysis.domain.xref_db = Some(xref_db);
+    state.viewmodels.xrefs.clear();
+
+    if let Some(ref xref_db) = state.analysis.domain.xref_db {
+        let call_graph = crate::analysis::callgraph::CallGraph::build_from_xrefs(
+            &binary.functions,
+            xref_db,
+            CONFIG.analysis.function_address_range as u64,
+        );
+        state.log(format!(
+            "[*] 📞 Built call graph ({} call sites)",
+            call_graph.total_call_sites()
+        ));
+        state.analysis.domain.call_graph = Some(call_graph);
+    }
 
     state.analysis.domain.loaded_binary = Some(binary.clone());
 

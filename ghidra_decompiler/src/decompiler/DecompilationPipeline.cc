@@ -20,6 +20,7 @@
 #include "fission/processing/Constants.h"
 #include "fission/analysis/FidDatabase.h"
 #include "fission/analysis/FunctionMatcher.h"
+#include "fission/analysis/CallingConvDetector.h"
 #include "fission/analysis/VTableAnalyzer.h"
 #include "fission/analysis/GlobalDataAnalyzer.h"
 #include "fission/analysis/EmulationAnalyzer.h"
@@ -736,13 +737,31 @@ std::string DecompilationPipeline::handle_decompile(
     if (fd == nullptr) {
         fd = global_scope->addFunction(func_addr, "func")->getFunction();
     }
+
+    // Step 2b: Detect and apply calling convention for this function
+    {
+        fission::analysis::CallingConvDetector detector(arch);
+        auto conv = detector.detect(fd);
+        if (conv == fission::analysis::CallingConvDetector::CONV_UNKNOWN) {
+            conv = is_64bit
+                ? fission::analysis::CallingConvDetector::CONV_MS_X64
+                : fission::analysis::CallingConvDetector::CONV_CDECL;
+        }
+        detector.apply(fd, conv);
+    }
     
     std::cerr << "[fission_decomp] Step 3: Resetting actions" << std::endl;
     arch->allacts.getCurrent()->reset(*fd);
     
     // Step 3b: Enforce GDT prototypes
-    PrototypeEnforcer proto_enforcer;
-    proto_enforcer.enforce_iat_prototypes(arch, state.iat_symbols);
+    {
+        PrototypeEnforcer proto_enforcer;
+        proto_enforcer.enforce_iat_prototypes(arch, state.iat_symbols);
+        auto it = state.iat_symbols.find(address);
+        if (it != state.iat_symbols.end()) {
+            proto_enforcer.enforce_single_prototype(arch, address, it->second);
+        }
+    }
     
     // Step 4: Primary Decompilation
     {
