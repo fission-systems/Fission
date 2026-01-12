@@ -119,6 +119,22 @@ def strip_banner_and_comments(text: str) -> str:
     return "\n".join(cleaned).strip()
 
 
+def normalize_for_similarity(text: str) -> str:
+    """Normalize code for more fuzzy similarity comparison"""
+    # 1. Remove comments and banner
+    text = strip_banner_and_comments(text)
+    # 2. Normalize whitespace (all spaces/tabs to single space, trim lines)
+    lines = [re.sub(r"\s+", " ", l.strip()) for l in text.splitlines() if l.strip()]
+    # 3. Join back
+    text = "\n".join(lines)
+    # 4. Optional: variable normalization (e.g., local_1c -> VAR)
+    text = re.sub(r"\blocal_[0-9a-f]+\b", "VAR", text)
+    text = re.sub(r"\buVar[0-9]+\b", "VAR", text)
+    text = re.sub(r"\biVar[0-9]+\b", "VAR", text)
+    text = re.sub(r"\bpVar[0-9]+\b", "VAR", text)
+    return text
+
+
 def extract_ghidra_parts(ghidra_full: str) -> tuple[str, str]:
     asm = ""
     decomp = ""
@@ -182,20 +198,30 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def summarize_timings(results: list[dict]) -> dict:
+def summarize_results(results: list[dict]) -> dict:
     ghidra_vals = []
     fission_vals = []
+    similarities = []
     faster_counts = {"ghidra": 0, "fission": 0, "tie": 0}
 
     for item in results:
+        info = item.get("comparison_info", {})
         timings = item.get("timings", {})
+        
         ghidra_sec = timings.get("ghidra_sec", 0.0)
         fission_sec = timings.get("fission_decomp_sec", 0.0)
-        if ghidra_sec:
+        similarity = info.get("similarity", 0.0)
+        
+        similarities.append(similarity)
+        
+        # In batch mode, ghidra_sec might be 0.0 (cached)
+        if ghidra_sec > 0:
             ghidra_vals.append(ghidra_sec)
-        if fission_sec:
+        
+        if fission_sec > 0:
             fission_vals.append(fission_sec)
-        if ghidra_sec and fission_sec:
+            
+        if ghidra_sec > 0 and fission_sec > 0:
             if ghidra_sec < fission_sec:
                 faster_counts["ghidra"] += 1
             elif fission_sec < ghidra_sec:
@@ -218,6 +244,8 @@ def summarize_timings(results: list[dict]) -> dict:
         "ghidra": stats(ghidra_vals),
         "fission": stats(fission_vals),
         "faster_counts": faster_counts,
+        "average_similarity": round(statistics.fmean(similarities), 2) if similarities else 0.0,
+        "total_functions": len(results)
     }
 
 
@@ -230,17 +258,37 @@ def compare_single(binary: Path, address: str, output_json: Path, timeout: int) 
     fission_cmd = detect_fission_cmd(project_root)
     env = build_env(project_root)
 
-    ghidra_cmd = [
-        python_bin,
-        str(scripts_dir / "ghidra" / "pyghidra_decompile.py"),
-        str(binary),
-        address,
-    ]
+    # Normalize address for cache lookup
+    addr_val = int(address, 16) if address.startswith("0x") else int(address)
+    norm_addr = f"0x{addr_val:x}"
+    
+    # Check for pre-generated Ghidra results in batch mode
+    ghidra_cached_json = output_json.parent / "ghidra_cache" / f"ghidra_{norm_addr}.json"
+    ghidra_full = ""
+    ghidra_sec = 0.0
+    
+    if ghidra_cached_json.exists():
+        with open(ghidra_cached_json, "r") as f:
+            cached = json.load(f)
+            ghidra_full = cached.get("code", "")
+            print(f"    - Using cached Ghidra results for {address}")
+    else:
+        ghidra_cmd = [
+            python_bin,
+            str(scripts_dir / "ghidra" / "pyghidra_decompile.py"),
+            str(binary),
+            address,
+        ]
+        print(f"    - Running Ghidra analysis...")
+        ghidra_full, ghidra_sec = run_command(ghidra_cmd, project_root, env, timeout)
+    
     fission_asm_cmd = fission_cmd + [str(binary), "--disasm-function", address]
     fission_decomp_cmd = fission_cmd + [str(binary), "--decomp", address]
 
-    ghidra_full, ghidra_sec = run_command(ghidra_cmd, project_root, env, timeout)
+    print(f"    - Running Fission disassembly...")
     fission_asm_raw, fission_asm_sec = run_command(fission_asm_cmd, project_root, env, timeout)
+    
+    print(f"    - Running Fission decompilation...")
     fission_decomp_raw, fission_decomp_sec = run_command(fission_decomp_cmd, project_root, env, timeout)
 
     ghidra_full = strip_ansi(ghidra_full)
@@ -253,14 +301,16 @@ def compare_single(binary: Path, address: str, output_json: Path, timeout: int) 
     ghidra_metrics = analyze_code(ghidra_decomp)
     fission_metrics = analyze_code(fission_decomp)
 
-    fission_decomp_similarity = strip_banner_and_comments(strip_inferred_structs(fission_decomp))
-    ghidra_decomp_similarity = strip_banner_and_comments(ghidra_decomp)
+    fission_norm = normalize_for_similarity(fission_decomp)
+    ghidra_norm = normalize_for_similarity(ghidra_decomp)
 
-    ghidra_lines = ghidra_decomp_similarity.splitlines()
-    fission_lines = fission_decomp_similarity.splitlines()
+    ghidra_lines = ghidra_norm.splitlines()
+    fission_lines = fission_norm.splitlines()
     similarity = 0.0
-    if ghidra_lines or fission_lines:
+    if ghidra_lines and fission_lines:
         similarity = difflib.SequenceMatcher(None, ghidra_lines, fission_lines).ratio()
+    elif not ghidra_lines and not fission_lines:
+        similarity = 1.0 # Both empty?? 
 
     result = {
         "comparison_info": {
@@ -298,7 +348,7 @@ def compare_single(binary: Path, address: str, output_json: Path, timeout: int) 
     log_lines = [
         f"timestamp: {timestamp}",
         "",
-        "command: " + " ".join(ghidra_cmd),
+        "command: " + (" ".join(ghidra_cmd) if 'ghidra_cmd' in locals() else "CACHED (Batch)"),
         "---- ghidra output ----",
         ghidra_full,
         "",
@@ -413,17 +463,32 @@ def main() -> int:
         return 1
 
     if args.batch:
-        scripts_dir = Path(__file__).resolve().parent.parent
+        script_dir = Path(__file__).resolve().parent
+        scripts_dir = script_dir.parent
+        project_root = scripts_dir.parent
+        
         output_dir = Path(args.output or (scripts_dir / "result")).expanduser()
         output_dir.mkdir(parents=True, exist_ok=True)
         addr_file = Path(args.address_or_file).expanduser()
+        
+        # Performance optimization: Run Ghidra batch decompilation ONCE for all addresses
+        ghidra_cache = output_dir / "ghidra_cache"
+        if not ghidra_cache.exists():
+            print(f"[*] Running Ghidra batch decompilation for performance...")
+            python_bin = detect_python()
+            batch_script = scripts_dir / "ghidra" / "pyghidra_decompile_batch.py"
+            batch_cmd = [python_bin, str(batch_script), str(binary), str(addr_file), str(ghidra_cache)]
+            # Don't capture output so run_complex_tests.py can see the start/end markers
+            subprocess.run(batch_cmd, cwd=str(project_root), check=False)
+            print(f"[*] Ghidra batch decompilation complete.")
+
         entries = parse_address_file(addr_file)
         results: list[dict] = []
         for addr, _name in entries:
             output_json = output_dir / f"addr_{addr}.json"
             print(f"== {addr} ==")
             results.append(compare_single(binary, addr, output_json, args.timeout))
-        summary = summarize_timings(results)
+        summary = summarize_results(results)
         summary_path = output_dir / "summary.json"
         summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
         print("")
