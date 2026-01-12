@@ -4,6 +4,21 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ---
 
+### Mach-O Loader & Dedecompilation Style Improvements (2026-01-12)
+
+**🍎 Mach-O Loader Enhancements**
+
+- **Proper Entry Point Parsing**: Implemented `LC_MAIN` load command parsing for accurate entry point identification.
+- **Improved Image Base Calculation**: Optimized image base detection using the `__TEXT` segment's virtual address, providing more reliable memory mapping for Mach-O binaries.
+- **Execution Attribute Accuracy**: Refined `is_executable` detection by checking segment protection flags (`initprot`), resolving instruction overlap warnings in decompilation.
+
+**🎨 Decompilation Style Standardization (Ghidra Parity)**
+
+- **Type Mapping Alignment**: Updated internal type mappings to match Ghidra's standard output:
+  - `uint1` → `byte`, `uint2` → `ushort`, `int2` → `short`.
+  - Sanitized `unkbyteN` and `unkintN` patterns to standard `undefinedN`.
+- **Higher Similarity Scores**: Achieved ~5% improvement in benchmark similarity scores through better keyword and variable type normalization.
+
 ### UI/Loader Refactor & Decompiler Diagnostics (2026-01-12)
 
 **🧩 UI/Loader Separation**

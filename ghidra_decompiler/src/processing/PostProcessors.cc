@@ -557,6 +557,26 @@ std::string replace_xunknown_types(const std::string& code) {
     std::regex int8_regex(R"(\bint8\b)");
     result = std::regex_replace(result, int8_regex, "longlong");
     
+    // uint1 -> byte (Ghidra standard for unsigned char)
+    std::regex uint1_regex(R"(\buint1\b)");
+    result = std::regex_replace(result, uint1_regex, "byte");
+    
+    // uint2 -> ushort
+    std::regex uint2_regex(R"(\buint2\b)");
+    result = std::regex_replace(result, uint2_regex, "ushort");
+    
+    // int2 -> short
+    std::regex int2_regex(R"(\bint2\b)");
+    result = std::regex_replace(result, int2_regex, "short");
+    
+    // unkbyteN -> undefinedN (for obscure padding types)
+    std::regex unkbyte_regex(R"(\bunkbyte([0-9]+)\b)");
+    result = std::regex_replace(result, unkbyte_regex, "undefined$1");
+    
+    // unkintN -> undefinedN  
+    std::regex unkint_regex(R"(\bunkint([0-9]+)\b)");
+    result = std::regex_replace(result, unkint_regex, "undefined$1");
+    
     return result;
 }
 

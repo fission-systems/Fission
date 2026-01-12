@@ -68,7 +68,8 @@ impl MachoLoader {
         let mut sections_info = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
-        let entry_point = 0; // Mach-O entry is usually in LC_MAIN or LC_UNIXTHREAD, tricky to parse fully for POC
+        let mut entry_point = 0u64;
+        let mut text_segment_vmaddr = 0u64;
 
         // Store symbol table info for later use
         let mut symtab_info: Option<SymtabCommand> = None;
@@ -83,14 +84,27 @@ impl MachoLoader {
 
             if cmd_header.cmd == LC_SEGMENT_64 {
                 let seg = SegmentCommand64::read_options(&mut reader, endian, ()).unwrap();
+                let seg_name = extract_fixed_string(&seg.segname);
+
+                // Use __TEXT segment's vmaddr as image base (most reliable)
+                if seg_name == "__TEXT" && seg.vmaddr != 0 {
+                    text_segment_vmaddr = seg.vmaddr;
+                    if seg.vmaddr < image_base {
+                        image_base = seg.vmaddr;
+                    }
+                }
+
+                // Determine if segment is executable from protection flags
+                // VM_PROT_EXECUTE = 0x04
+                let seg_is_executable = (seg.initprot & 0x04) != 0;
 
                 // Process Sections
                 for _ in 0..seg.nsects {
                     let sect = Section64::read_options(&mut reader, endian, ()).unwrap();
 
-                    if (sect.flags & 0x80000000) != 0 && sect.addr < image_base && sect.addr != 0 {
-                        image_base = sect.addr; // Rough
-                    }
+                    // S_ATTR_PURE_INSTRUCTIONS = 0x80000000
+                    // S_ATTR_SOME_INSTRUCTIONS = 0x00000400
+                    let sect_has_instructions = (sect.flags & 0x80000400) != 0;
 
                     sections_info.push(SectionInfo {
                         name: extract_fixed_string(&sect.sectname),
@@ -98,9 +112,9 @@ impl MachoLoader {
                         virtual_size: sect.size,
                         file_offset: sect.offset as u64,
                         file_size: sect.size,
-                        is_executable: (sect.flags & 0x80000400) != 0, // S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS
+                        is_executable: seg_is_executable || sect_has_instructions,
                         is_readable: true,
-                        is_writable: (sect.flags & 0x1) == 0, // Very rough approx
+                        is_writable: (seg.initprot & 0x02) != 0, // VM_PROT_WRITE = 0x02
                     });
                 }
 
@@ -118,6 +132,11 @@ impl MachoLoader {
             } else if cmd_header.cmd == LC_DYSYMTAB {
                 let dysymtab = DysymtabCommand::read_options(&mut reader, endian, ()).unwrap();
                 dysymtab_info = Some(dysymtab);
+            } else if cmd_header.cmd == LC_MAIN {
+                // Parse LC_MAIN for entry point
+                let entry_cmd = EntryPointCommand::read_options(&mut reader, endian, ()).unwrap();
+                // entryoff is offset from __TEXT segment start
+                entry_point = text_segment_vmaddr + entry_cmd.entryoff;
             }
 
             // Skip command
