@@ -1,0 +1,23 @@
+// ============================================
+// Function: __getmainargs @ 0x140002a60
+// ============================================
+
+
+undefined8 __getmainargs(undefined4 *param_1,undefined8 *param_2,undefined8 *param_3,int param_4,
+                       undefined4 *param_5)
+
+{
+  undefined4 *pxVar1;
+  undefined8 *pxVar2;
+  
+  _initialize_narrow_environment();
+  _configure_narrow_argv(2 - (uint)(param_4 == 0));
+  pxVar1 = (undefined4 *)__p___argc();
+  *param_1 = *pxVar1;
+  pxVar2 = (undefined8 *)__p___argv();
+  *param_2 = *pxVar2;
+  pxVar2 = (undefined8 *)__p__environ();
+  *param_3 = *pxVar2;
+  _set_new_mode(*param_5);
+  return 0;
+}

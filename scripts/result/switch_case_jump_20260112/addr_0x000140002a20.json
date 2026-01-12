@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/switch_case_x64.exe",
+    "address": "0x000140002a20",
+    "timestamp": "2026-01-12T11:50:52.479854Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 7,
+        "chars": 122,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 10,
+        "chars": 220,
+        "functions": 1,
+        "branches": 0
+      }
+    },
+    "similarity": 50.0
+  },
+  "timings": {
+    "ghidra_sec": 2.615,
+    "fission_asm_sec": 0.025,
+    "fission_decomp_sec": 3.333
+  },
+  "ghidra_assembly": "0x140002A20      MOV      RAX, qword ptr [0x140004510]\n  0x140002A27      MOV      RAX, qword ptr [RAX]\n  0x140002A2A      RET",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nchar *** __p___initenv(void)\n\n{\n  return *(char ****)_refptr___imp___initenv;\n}",
+  "fission_assembly": "Function: __p___initenv at 0x140002a20 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002a20  48 8b 05 e9 1a 00 00      mov rax,[140004510h]\n  0x000140002a27  48 8b 00                  mov rax,[rax]\n  0x000140002a2a  c3                        ret\nTotal instructions: 3",
+  "fission_decompilation": "// ============================================\n// Function: __p___initenv @ 0x140002a20\n// ============================================\n\n\nundefined8 __p___initenv(void)\n\n{\n  return *_refptr___globallocalestatus._8_8_;\n}"
+}

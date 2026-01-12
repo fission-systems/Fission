@@ -1,0 +1,32 @@
+0x140001490      SUB      ECX, 0x41
+  0x140001493      CMP      CL, 0x25
+  0x140001496      JA       0x1400014b0
+  0x140001498      LEA      R8, [0x140004018]
+  0x14000149F      MOVZX    ECX, CL
+  0x1400014A2      MOVSXD   RAX, dword ptr [R8 + RCX*0x4]
+  0x1400014A6      ADD      RAX, R8
+  0x1400014A9      JMP      RAX
+  0x1400014B0      MOV      EAX, 0xffffffff
+  0x1400014B5      RET      
+  0x1400014C0      MOV      ECX, 0x50
+  0x1400014C5      MOVSXD   RAX, EDX
+  0x1400014C8      SAR      EDX, 0x1f
+  0x1400014CB      IMUL     RAX, RAX, 0x66666667
+  0x1400014D2      SAR      RAX, 0x22
+  0x1400014D6      SUB      EAX, EDX
+  0x1400014D8      ADD      EAX, ECX
+  0x1400014DA      RET      
+  0x1400014E0      MOV      EAX, 0x5f
+  0x1400014E5      CMP      EDX, 0x5a
+  0x1400014E8      JZ       0x1400014b5
+  0x1400014EA      CMP      EDX, 0x64
+  0x1400014ED      MOV      EAX, 0x64
+  0x1400014F2      MOV      EDX, 0x5a
+  0x1400014F7      CMOVNZ   EAX, EDX
+  0x1400014FA      RET      
+  0x140001500      MOV      ECX, 0x46
+  0x140001505      JMP      0x1400014c5
+  0x140001510      MOV      ECX, 0x3c
+  0x140001515      JMP      0x1400014c5
+  0x140001520      XOR      EAX, EAX
+  0x140001522      RET

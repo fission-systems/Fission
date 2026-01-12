@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/switch_case_x64_O2.exe",
+    "address": "0x0000000140001530",
+    "timestamp": "2026-01-12T11:58:41.825495Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 26,
+        "chars": 526,
+        "functions": 17,
+        "branches": 5
+      },
+      "fission": {
+        "lines": 1,
+        "chars": 127,
+        "functions": 1,
+        "branches": 1
+      }
+    },
+    "similarity": 0.0
+  },
+  "timings": {
+    "ghidra_sec": 2.595,
+    "fission_asm_sec": 0.025,
+    "fission_decomp_sec": 3.065
+  },
+  "ghidra_assembly": "0x140001530      CMP      ECX, 0x12\n  0x140001533      JG       0x140001580\n  0x140001535      CMP      ECX, 0xf\n  0x140001538      JG       0x140001550\n  0x14000153A      CMP      ECX, 0x1\n  0x14000153D      JZ       0x140001598\n  0x14000153F      CMP      ECX, 0x2\n  0x140001542      JNZ      0x140001568\n  0x140001544      LEA      RCX, [0x1400040c4]\n  0x14000154B      JMP      0x1400027e0\n  0x140001550      MOV      R8D, EDX\n  0x140001553      MOV      EDX, ECX\n  0x140001555      LEA      RCX, [0x1400040d6]\n  0x14000155C      JMP      0x1400027e0\n  0x140001568      MOV      EDX, ECX\n  0x14000156A      LEA      RCX, [0x1400040fb]\n  0x140001571      JMP      0x1400027e0\n  0x140001580      CMP      ECX, 0x20\n  0x140001583      JNZ      0x140001568\n  0x140001585      LEA      RCX, [0x1400040f2]\n  0x14000158C      JMP      0x140002970\n  0x140001598      LEA      RCX, [0x1400040b0]\n  0x14000159F      JMP      0x1400027e0",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nvoid process_command(int cmd,int arg)\n\n{\n  if (cmd < 0x13) {\n    if (0xf < cmd) {\n      printf(\"Network command 0x%02x: %d\\n\",(ulonglong)(uint)cmd,(ulonglong)(uint)arg);\n      return;\n    }\n    if (cmd == 1) {\n      printf(\"Initialize with %d\\n\");\n      return;\n    }\n    if (cmd == 2) {\n      printf(\"Process %d items\\n\");\n      return;\n    }\n  }\n  else if (cmd == 0x20) {\n    puts(\"Shutdown\");\n    return;\n  }\n  printf(\"Unknown command: 0x%02x\\n\",(ulonglong)(uint)cmd);\n  return;\n}",
+  "fission_assembly": "Function: process_command at 0x140001530 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140001530  83 f9 12                  cmp ecx,12h\n  0x000140001533  7f 4b                     jg short 0000000140001580h\n  0x000140001535  83 f9 0f                  cmp ecx,0Fh\n  0x000140001538  7f 16                     jg short 0000000140001550h\n  0x00014000153a  83 f9 01                  cmp ecx,1\n  0x00014000153d  74 59                     je short 0000000140001598h\n  0x00014000153f  83 f9 02                  cmp ecx,2\n  0x000140001542  75 24                     jne short 0000000140001568h\n  0x000140001544  48 8d 0d 79 2b 00 00      lea rcx,[1400040C4h]\n  0x00014000154b  e9 90 12 00 00            jmp 00000001400027E0h\n  0x000140001550  41 89 d0                  mov r8d,edx\n  0x000140001553  89 ca                     mov edx,ecx\n  0x000140001555  48 8d 0d 7a 2b 00 00      lea rcx,[1400040D6h]\n  0x00014000155c  e9 7f 12 00 00            jmp 00000001400027E0h\n  0x000140001561  0f 1f 80 00 00 00 00      nop [rax]\n  0x000140001568  89 ca                     mov edx,ecx\n  0x00014000156a  48 8d 0d 8a 2b 00 00      lea rcx,[1400040FBh]\n  0x000140001571  e9 6a 12 00 00            jmp 00000001400027E0h\n  0x000140001576  66 2e 0f 1f 84 00 00 00 00 00  nop [rax+rax]\n  0x000140001580  83 f9 20                  cmp ecx,20h\n  0x000140001583  75 e3                     jne short 0000000140001568h\n  0x000140001585  48 8d 0d 66 2b 00 00      lea rcx,[1400040F2h]\n  0x00014000158c  e9 df 13 00 00            jmp 0000000140002970h\n  0x000140001591  0f 1f 80 00 00 00 00      nop [rax]\n  0x000140001598  48 8d 0d 11 2b 00 00      lea rcx,[1400040B0h]\n  0x00014000159f  e9 3c 12 00 00            jmp 00000001400027E0h\n  0x0001400015a4  90                        nop\n  0x0001400015a5  66 66 2e 0f 1f 84 00 00 00 00 00  nop [rax+rax]\nTotal instructions: 28",
+  "fission_decompilation": "// Error decompiling process_command (0x140001530): Decompiler error: Error: Ghidra LowlevelError: Function loaded for inlining"
+}

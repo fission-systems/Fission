@@ -1,0 +1,20 @@
+/* WARNING: Unknown calling convention */
+
+char * get_day_type(int day)
+
+{
+  char *pcVar1;
+  
+  if (5 < day) {
+    pcVar1 = "Weekend";
+    if (1 < day - 6U) {
+      pcVar1 = "Invalid";
+    }
+    return pcVar1;
+  }
+  pcVar1 = "Invalid";
+  if (0 < day) {
+    pcVar1 = "Weekday";
+  }
+  return pcVar1;
+}

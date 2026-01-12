@@ -1,0 +1,17 @@
+int __cdecl fprintf(FILE *_File,char *_Format,...)
+
+{
+  int iVar1;
+  ulonglong *puVar2;
+  undefined8 in_R8;
+  undefined8 in_R9;
+  undefined8 local_res18;
+  undefined8 local_res20;
+  char *ap;
+  
+  local_res18 = in_R8;
+  local_res20 = in_R9;
+  puVar2 = __local_stdio_printf_options();
+  iVar1 = __stdio_common_vfprintf(*puVar2,_File,_Format,0,&local_res18);
+  return iVar1;
+}

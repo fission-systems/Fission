@@ -1,0 +1,14 @@
+// ============================================
+// Function: vfprintf @ 0x140002920
+// ============================================
+
+
+void vfprintf(undefined8 param_1,undefined8 param_2,undefined8 param_3)
+
+{
+  undefined8 *pxVar1;
+  
+  pxVar1 = (undefined8 *)__local_stdio_printf_options();
+  __stdio_common_vfprintf(*pxVar1,param_1,param_2,0,param_3);
+  return;
+}

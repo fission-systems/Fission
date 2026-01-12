@@ -1,0 +1,21 @@
+/* WARNING: Unknown calling convention */
+
+int ___w64_mingwthr_add_key_dtor(DWORD key,_func_void_void_ptr *dtor)
+
+{
+  __mingwthr_key_t *p_Var1;
+  
+  if (__mingwthr_cs_init != 0) {
+    p_Var1 = (__mingwthr_key_t *)calloc(1,0x18);
+    if (p_Var1 == (__mingwthr_key_t *)0x0) {
+      return -1;
+    }
+    p_Var1->key = key;
+    p_Var1->dtor = dtor;
+    EnterCriticalSection((LPCRITICAL_SECTION)&__mingwthr_cs);
+    p_Var1->next = key_dtor_list;
+    key_dtor_list = p_Var1;
+    LeaveCriticalSection((LPCRITICAL_SECTION)&__mingwthr_cs);
+  }
+  return 0;
+}

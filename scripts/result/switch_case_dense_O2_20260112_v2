@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/switch_case_x64_O2.exe",
+    "address": "0x140001790",
+    "timestamp": "2026-01-12T12:03:53.105236Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 11,
+        "chars": 244,
+        "functions": 5,
+        "branches": 1
+      },
+      "fission": {
+        "lines": 1,
+        "chars": 130,
+        "functions": 1,
+        "branches": 2
+      }
+    },
+    "similarity": 0.0
+  },
+  "timings": {
+    "ghidra_sec": 2.748,
+    "fission_asm_sec": 0.025,
+    "fission_decomp_sec": 3.077
+  },
+  "ghidra_assembly": "0x140001790      CMP      EDX, 0x3\n  0x140001793      JZ       0x1400017a0\n  0x140001795      TEST     EDX, EDX\n  0x140001797      JZ       0x1400017a0\n  0x140001799      RET      \n  0x1400017A0      JMP      0x140002250",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nvoid __dyn_tls_dtor(HANDLE hDllHandle,DWORD dwReason,LPVOID lpreserved)\n\n{\n  if ((dwReason != 3) && (dwReason != 0)) {\n    return;\n  }\n  __mingw_TLScallback(hDllHandle,dwReason,lpreserved);\n  return;\n}",
+  "fission_assembly": "Function: dense_switch_table at 0x140001790 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140001790  83 f9 0f                  cmp ecx,0Fh\n  0x000140001793  0f 87 11 01 00 00         ja 00000001400018AAh\n  0x000140001799  48 8d 15 a8 29 00 00      lea rdx,[140004148h]\n  0x0001400017a0  89 c9                     mov ecx,ecx\n  0x0001400017a2  48 63 04 8a               movsxd rax,[rdx+rcx*4]\n  0x0001400017a6  48 01 d0                  add rax,rdx\n  0x0001400017a9  ff e0                     jmp rax\n  0x0001400017ab  0f 1f 44 00 00            nop [rax+rax]\n  0x0001400017b0  b9 0e 00 00 00            mov ecx,0Eh\n  0x0001400017b5  eb b9                     jmp short 0000000140001770h\n  0x0001400017b7  66 0f 1f 84 00 00 00 00 00  nop [rax+rax]\n  0x0001400017c0  b9 0f 00 00 00            mov ecx,0Fh\n  0x0001400017c5  eb b9                     jmp short 0000000140001780h\n  0x0001400017c7  66 0f 1f 84 00 00 00 00 00  nop [rax+rax]\n  0x0001400017d0  31 c9                     xor ecx,ecx\n  0x0001400017d2  e9 b9 fe ff ff            jmp 0000000140001690h\n  0x0001400017d7  66 0f 1f 84 00 00 00 00 00  nop [rax+rax]\n  0x0001400017e0  b9 01 00 00 00            mov ecx,1\n  0x0001400017e5  e9 b6 fe ff ff            jmp 00000001400016A0h\n  0x0001400017ea  66 0f 1f 44 00 00         nop [rax+rax]\n  0x0001400017f0  b9 02 00 00 00            mov ecx,2\n  0x0001400017f5  e9 b6 fe ff ff            jmp 00000001400016B0h\n  0x0001400017fa  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001800  b9 03 00 00 00            mov ecx,3\n  0x000140001805  e9 b6 fe ff ff            jmp 00000001400016C0h\n  0x00014000180a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001810  b9 04 00 00 00            mov ecx,4\n  0x000140001815  e9 b6 fe ff ff            jmp 00000001400016D0h\n  0x00014000181a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001820  b9 05 00 00 00            mov ecx,5\n  0x000140001825  e9 b6 fe ff ff            jmp 00000001400016E0h\n  0x00014000182a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001830  b9 06 00 00 00            mov ecx,6\n  0x000140001835  e9 b6 fe ff ff            jmp 00000001400016F0h\n  0x00014000183a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001840  b9 07 00 00 00            mov ecx,7\n  0x000140001845  e9 b6 fe ff ff            jmp 0000000140001700h\n  0x00014000184a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001850  b9 08 00 00 00            mov ecx,8\n  0x000140001855  e9 b6 fe ff ff            jmp 0000000140001710h\n  0x00014000185a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001860  b9 09 00 00 00            mov ecx,9\n  0x000140001865  e9 b6 fe ff ff            jmp 0000000140001720h\n  0x00014000186a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001870  b9 0a 00 00 00            mov ecx,0Ah\n  0x000140001875  e9 b6 fe ff ff            jmp 0000000140001730h\n  0x00014000187a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001880  b9 0b 00 00 00            mov ecx,0Bh\n  0x000140001885  e9 b6 fe ff ff            jmp 0000000140001740h\n  0x00014000188a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x000140001890  b9 0c 00 00 00            mov ecx,0Ch\n  0x000140001895  e9 b6 fe ff ff            jmp 0000000140001750h\n  0x00014000189a  66 0f 1f 44 00 00         nop [rax+rax]\n  0x0001400018a0  b9 0d 00 00 00            mov ecx,0Dh\n  0x0001400018a5  e9 b6 fe ff ff            jmp 0000000140001760h\n  0x0001400018aa  b8 ff ff ff ff            mov eax,0FFFFFFFFh\n  0x0001400018af  c3                        ret\nTotal instructions: 57",
+  "fission_decompilation": "// Error decompiling dense_switch_table (0x140001790): Decompiler error: Error: Ghidra LowlevelError: Function loaded for inlining"
+}

@@ -1,0 +1,10 @@
+// ============================================
+// Function: __p___initenv @ 0x140002a20
+// ============================================
+
+
+undefined8 __p___initenv(void)
+
+{
+  return *_refptr___globallocalestatus._8_8_;
+}

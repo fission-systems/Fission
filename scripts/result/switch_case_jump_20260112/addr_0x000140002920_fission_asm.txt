@@ -1,0 +1,23 @@
+Function: vfprintf at 0x140002920 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000140002920  57                        push rdi
+  0x000140002921  56                        push rsi
+  0x000140002922  53                        push rbx
+  0x000140002923  48 83 ec 30               sub rsp,30h
+  0x000140002927  48 89 cb                  mov rbx,rcx
+  0x00014000292a  48 89 d6                  mov rsi,rdx
+  0x00014000292d  4c 89 c7                  mov rdi,r8
+  0x000140002930  e8 db 00 00 00            call 0000000140002A10h
+  0x000140002935  45 31 c9                  xor r9d,r9d
+  0x000140002938  49 89 f0                  mov r8,rsi
+  0x00014000293b  48 89 da                  mov rdx,rbx
+  0x00014000293e  48 8b 08                  mov rcx,[rax]
+  0x000140002941  48 89 7c 24 20            mov [rsp+20h],rdi
+  0x000140002946  e8 9d 01 00 00            call 0000000140002AE8h
+  0x00014000294b  48 83 c4 30               add rsp,30h
+  0x00014000294f  5b                        pop rbx
+  0x000140002950  5e                        pop rsi
+  0x000140002951  5f                        pop rdi
+  0x000140002952  c3                        ret
+Total instructions: 19

@@ -1,0 +1,35 @@
+0x140002340      SUB      RSP, 0x28
+  0x140002344      MOV      EAX, dword ptr [0x1400070e8]
+  0x14000234A      TEST     EAX, EAX
+  0x14000234C      JNZ      0x140002358
+  0x14000234E      XOR      EAX, EAX
+  0x140002350      ADD      RSP, 0x28
+  0x140002354      RET      
+  0x140002358      MOV      dword ptr [RSP + 0x30], ECX
+  0x14000235C      LEA      RCX, [0x140007100]
+  0x140002363      CALL     qword ptr [0x140008258]
+  0x140002369      MOV      RCX, qword ptr [0x1400070e0]
+  0x140002370      TEST     RCX, RCX
+  0x140002373      JZ       0x1400023a3
+  0x140002375      MOV      EDX, dword ptr [RSP + 0x30]
+  0x140002379      XOR      R8D, R8D
+  0x14000237C      JMP      0x14000238b
+  0x140002380      MOV      R8, RCX
+  0x140002383      TEST     RAX, RAX
+  0x140002386      JZ       0x1400023a3
+  0x140002388      MOV      RCX, RAX
+  0x14000238B      MOV      EAX, dword ptr [RCX]
+  0x14000238D      CMP      EAX, EDX
+  0x14000238F      MOV      RAX, qword ptr [RCX + 0x10]
+  0x140002393      JNZ      0x140002380
+  0x140002395      TEST     R8, R8
+  0x140002398      JZ       0x1400023c0
+  0x14000239A      MOV      qword ptr [R8 + 0x10], RAX
+  0x14000239E      CALL     0x140002bb0
+  0x1400023A3      LEA      RCX, [0x140007100]
+  0x1400023AA      CALL     qword ptr [0x140008270]
+  0x1400023B0      XOR      EAX, EAX
+  0x1400023B2      ADD      RSP, 0x28
+  0x1400023B6      RET      
+  0x1400023C0      MOV      qword ptr [0x1400070e0], RAX
+  0x1400023C7      JMP      0x14000239e

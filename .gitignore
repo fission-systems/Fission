@@ -3,6 +3,12 @@
 /target2/
 /coverage/
 
+# Python and environment
+.venv/
+.opencode/
+__pycache__/
+*.pyc
+
 # Cargo lock for binaries (optional, some prefer to commit it)
 # Cargo.lock
 
@@ -50,22 +56,23 @@ memory_loadimage.cc
 # Submodule build directories
 ghidra_decompiler/build/
 
-# Ghidra installation directory
-ghidra_11.*/
-ghidra_12.*/
-ghidra/
+# Ghidra and vendor dependencies
+/vendor/ghidra/
+/vendor/
 
-# PyGhidra cache
-.ghidra/
+# Build artifacts
+/build/
+ghidra_decompiler/build/
 ghidra_decompiler/fission_decomp
-scripts/result/
+*.obj
+*.lib
+*.exe
+*.pdb
 
-# Local virtual env
-.venv/
-
-# Ghidra build outputs and temp projects
-ghidra-Ghidra_11.4.2_build/
-test/*_ghidra/
+# Examples and results
+/examples/results/
+/examples/binaries/**/*.exe_ghidra/
+/examples/binaries/**/*.exe
 
 # Backup artifacts
 *.backup

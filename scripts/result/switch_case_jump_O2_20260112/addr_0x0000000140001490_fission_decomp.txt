@@ -1,0 +1,41 @@
+// ============================================
+// Function: calculate_score @ 0x140001490
+// ============================================
+
+
+int calculate_score(undefined1 param_1,int param_2)
+
+{
+  int iVar1;
+  
+  switch(param_1) {
+  case 0x41:
+  case 0x61:
+    if (param_2 == 0x5a) {
+      return 0x5f;
+    }
+    iVar1 = 100;
+    if (param_2 != 100) {
+      iVar1 = 0x5a;
+    }
+    return iVar1;
+  case 0x42:
+  case 0x62:
+    iVar1 = 0x50;
+    break;
+  case 0x43:
+  case 99:
+    iVar1 = 0x46;
+    break;
+  case 0x44:
+  case 100:
+    iVar1 = 0x3c;
+    break;
+  default:
+    return -1;
+  case 0x46:
+  case 0x66:
+    return 0;
+  }
+  return param_2 / 10 + iVar1;
+}

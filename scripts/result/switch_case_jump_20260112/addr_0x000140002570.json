@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/switch_case_x64.exe",
+    "address": "0x000140002570",
+    "timestamp": "2026-01-12T11:50:10.404848Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 29,
+        "chars": 855,
+        "functions": 34,
+        "branches": 3
+      },
+      "fission": {
+        "lines": 32,
+        "chars": 958,
+        "functions": 37,
+        "branches": 3
+      }
+    },
+    "similarity": 44.9
+  },
+  "timings": {
+    "ghidra_sec": 2.662,
+    "fission_asm_sec": 0.025,
+    "fission_decomp_sec": 3.332
+  },
+  "ghidra_assembly": "0x140002570      PUSH     RBP\n  0x140002571      PUSH     RDI\n  0x140002572      PUSH     RSI\n  0x140002573      PUSH     RBX\n  0x140002574      SUB      RSP, 0x28\n  0x140002578      MOV      RDI, RCX\n  0x14000257B      CALL     0x140002ac0\n  0x140002580      CMP      RAX, 0x8\n  0x140002584      JA       0x140002594\n  0x140002586      MOV      RAX, qword ptr [0x1400044c0]\n  0x14000258D      CMP      word ptr [RAX], 0x5a4d\n  0x140002592      JZ       0x1400025a8\n  0x140002594      XOR      EBX, EBX\n  0x140002596      MOV      RAX, RBX\n  0x140002599      ADD      RSP, 0x28\n  0x14000259D      POP      RBX\n  0x14000259E      POP      RSI\n  0x14000259F      POP      RDI\n  0x1400025A0      POP      RBP\n  0x1400025A1      RET      \n  0x1400025A8      MOVSXD   RBP, dword ptr [RAX + 0x3c]\n  0x1400025AC      ADD      RBP, RAX\n  0x1400025AF      CMP      dword ptr [RBP], 0x4550\n  0x1400025B6      JNZ      0x140002594\n  0x1400025B8      CMP      word ptr [RBP + 0x18], 0x20b\n  0x1400025BE      JNZ      0x140002594\n  0x1400025C0      CMP      word ptr [RBP + 0x6], 0x0\n  0x1400025C5      JZ       0x140002594\n  0x1400025C7      MOVZX    EAX, word ptr [RBP + 0x14]\n  0x1400025CB      XOR      ESI, ESI\n  0x1400025CD      LEA      RBX, [RBP + RAX*0x1 + 0x18]\n  0x1400025D2      NOP      dword ptr [RAX]\n  0x1400025D5      NOP      dword ptr CS:[RAX + RAX*0x1]\n  0x1400025E0      MOV      R8D, 0x8\n  0x1400025E6      MOV      RDX, RDI\n  0x1400025E9      MOV      RCX, RBX\n  0x1400025EC      CALL     0x140002ac8\n  0x1400025F1      TEST     EAX, EAX\n  0x1400025F3      JZ       0x140002596\n  0x1400025F5      MOVZX    EAX, word ptr [RBP + 0x6]\n  0x1400025F9      ADD      ESI, 0x1\n  0x1400025FC      ADD      RBX, 0x28\n  0x140002600      CMP      ESI, EAX\n  0x140002602      JC       0x1400025e0\n  0x140002604      JMP      0x140002594",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nPIMAGE_SECTION_HEADER _FindPESectionByName(char *pName)\n\n{\n  int iVar1;\n  size_t sVar2;\n  PIMAGE_SECTION_HEADER _Str1;\n  int *piVar3;\n  uint uVar4;\n  \n  sVar2 = strlen(pName);\n  if ((((sVar2 < 9) && (*(short *)_refptr___ImageBase == 0x5a4d)) &&\n      (piVar3 = (int *)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)),\n      *piVar3 == 0x4550)) &&\n     (((short)piVar3[6] == 0x20b && (*(short *)((longlong)piVar3 + 6) != 0)))) {\n    uVar4 = 0;\n    _Str1 = (PIMAGE_SECTION_HEADER)((longlong)piVar3 + (ulonglong)*(ushort *)(piVar3 + 5) + 0x18);\n    do {\n      iVar1 = strncmp((char *)_Str1,pName,8);\n      if (iVar1 == 0) {\n        return _Str1;\n      }\n      uVar4 = uVar4 + 1;\n      _Str1 = _Str1 + 1;\n    } while (uVar4 < *(ushort *)((longlong)piVar3 + 6));\n  }\n  return (PIMAGE_SECTION_HEADER)0x0;\n}",
+  "fission_assembly": "Function: _FindPESectionByName at 0x140002570 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140002570  55                        push rbp\n  0x000140002571  57                        push rdi\n  0x000140002572  56                        push rsi\n  0x000140002573  53                        push rbx\n  0x000140002574  48 83 ec 28               sub rsp,28h\n  0x000140002578  48 89 cf                  mov rdi,rcx\n  0x00014000257b  e8 40 05 00 00            call 0000000140002AC0h\n  0x000140002580  48 83 f8 08               cmp rax,8\n  0x000140002584  77 0e                     ja short 0000000140002594h\n  0x000140002586  48 8b 05 33 1f 00 00      mov rax,[1400044C0h]\n  0x00014000258d  66 81 38 4d 5a            cmp word ptr [rax],5A4Dh\n  0x000140002592  74 14                     je short 00000001400025A8h\n  0x000140002594  31 db                     xor ebx,ebx\n  0x000140002596  48 89 d8                  mov rax,rbx\n  0x000140002599  48 83 c4 28               add rsp,28h\n  0x00014000259d  5b                        pop rbx\n  0x00014000259e  5e                        pop rsi\n  0x00014000259f  5f                        pop rdi\n  0x0001400025a0  5d                        pop rbp\n  0x0001400025a1  c3                        ret\nTotal instructions: 20",
+  "fission_decompilation": "// ============================================\n// Function: _FindPESectionByName @ 0x140002570\n// ============================================\n\n\nchar * _FindPESectionByName(char *param_1)\n\n{\n  int iVar1;\n  ulonglong uVar2;\n  char *lhs;\n  int *piVar3;\n  uint uVar4;\n  \n  uVar2 = strlen(param_1);\n  if ((((uVar2 < 9) && (*_refptr___CTOR_LIST__._8_8_ == 0x5a4d)) &&\n      (piVar3 = (int *)((longlong)*(int *)(_refptr___CTOR_LIST__._8_8_ + 0x1e) +\n                        (longlong)_refptr___CTOR_LIST__._8_8_), *piVar3 == 0x4550)) &&\n     (((int2)piVar3[6] == 0x20b && (*(int2 *)((longlong)piVar3 + 6) != 0)))) {\n    uVar4 = 0;\n    lhs = (char *)((longlong)piVar3 + (ulonglong)*(uint2 *)(piVar3 + 5) + 0x18);\n    do {\n      iVar1 = strncmp(lhs,param_1,8);\n      if (iVar1 == 0) {\n        return lhs;\n      }\n      uVar4 = uVar4 + 1;\n      lhs = (char *)((longlong)lhs + 0x28);\n    } while (uVar4 < *(uint2 *)((longlong)piVar3 + 6));\n  }\n  return (char *)0x0;\n}"
+}

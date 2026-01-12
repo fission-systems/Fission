@@ -86,9 +86,9 @@ static void load_win_api_db() {
     win_api_loaded = true;
 
     const std::vector<std::string> paths = {
-        "utils/ghidra/typeinfo/win32/win_api_signatures.txt",
-        "./utils/ghidra/typeinfo/win32/win_api_signatures.txt",
-        "../utils/ghidra/typeinfo/win32/win_api_signatures.txt",
+        "utils/signatures/typeinfo/win32/win_api_signatures.txt",
+        "./utils/signatures/typeinfo/win32/win_api_signatures.txt",
+        "../utils/signatures/typeinfo/win32/win_api_signatures.txt",
         "ghidra_decompiler/typeinfo/win32/win_api_signatures.txt",
         "./ghidra_decompiler/typeinfo/win32/win_api_signatures.txt"
     };

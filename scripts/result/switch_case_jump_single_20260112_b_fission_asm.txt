@@ -1,0 +1,12 @@
+Function: ___w64_mingwthr_add_key_dtor at 0x1400022b0 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x0001400022b0  48 83 ec 38               sub rsp,38h
+  0x0001400022b4  8b 05 2e 4e 00 00         mov eax,[1400070E8h]
+  0x0001400022ba  41 89 c9                  mov r9d,ecx
+  0x0001400022bd  85 c0                     test eax,eax
+  0x0001400022bf  75 0f                     jne short 00000001400022D0h
+  0x0001400022c1  31 c0                     xor eax,eax
+  0x0001400022c3  48 83 c4 38               add rsp,38h
+  0x0001400022c7  c3                        ret
+Total instructions: 8

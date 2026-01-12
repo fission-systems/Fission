@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/test/bin_x64/switch_case_x64_O2.exe",
+    "address": "0x0000000140001490",
+    "timestamp": "2026-01-12T11:58:36.140548Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 38,
+        "chars": 558,
+        "functions": 4,
+        "branches": 3
+      },
+      "fission": {
+        "lines": 41,
+        "chars": 661,
+        "functions": 4,
+        "branches": 3
+      }
+    },
+    "similarity": 55.88
+  },
+  "timings": {
+    "ghidra_sec": 3.082,
+    "fission_asm_sec": 0.025,
+    "fission_decomp_sec": 3.285
+  },
+  "ghidra_assembly": "0x140001490      SUB      ECX, 0x41\n  0x140001493      CMP      CL, 0x25\n  0x140001496      JA       0x1400014b0\n  0x140001498      LEA      R8, [0x140004018]\n  0x14000149F      MOVZX    ECX, CL\n  0x1400014A2      MOVSXD   RAX, dword ptr [R8 + RCX*0x4]\n  0x1400014A6      ADD      RAX, R8\n  0x1400014A9      JMP      RAX\n  0x1400014B0      MOV      EAX, 0xffffffff\n  0x1400014B5      RET      \n  0x1400014C0      MOV      ECX, 0x50\n  0x1400014C5      MOVSXD   RAX, EDX\n  0x1400014C8      SAR      EDX, 0x1f\n  0x1400014CB      IMUL     RAX, RAX, 0x66666667\n  0x1400014D2      SAR      RAX, 0x22\n  0x1400014D6      SUB      EAX, EDX\n  0x1400014D8      ADD      EAX, ECX\n  0x1400014DA      RET      \n  0x1400014E0      MOV      EAX, 0x5f\n  0x1400014E5      CMP      EDX, 0x5a\n  0x1400014E8      JZ       0x1400014b5\n  0x1400014EA      CMP      EDX, 0x64\n  0x1400014ED      MOV      EAX, 0x64\n  0x1400014F2      MOV      EDX, 0x5a\n  0x1400014F7      CMOVNZ   EAX, EDX\n  0x1400014FA      RET      \n  0x140001500      MOV      ECX, 0x46\n  0x140001505      JMP      0x1400014c5\n  0x140001510      MOV      ECX, 0x3c\n  0x140001515      JMP      0x1400014c5\n  0x140001520      XOR      EAX, EAX\n  0x140001522      RET",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nint calculate_score(char grade,int attendance)\n\n{\n  int iVar1;\n  \n  switch(grade) {\n  case 'A':\n  case 'a':\n    if (attendance == 0x5a) {\n      return 0x5f;\n    }\n    iVar1 = 100;\n    if (attendance != 100) {\n      iVar1 = 0x5a;\n    }\n    return iVar1;\n  case 'B':\n  case 'b':\n    iVar1 = 0x50;\n    break;\n  case 'C':\n  case 'c':\n    iVar1 = 0x46;\n    break;\n  case 'D':\n  case 'd':\n    iVar1 = 0x3c;\n    break;\n  default:\n    return -1;\n  case 'F':\n  case 'f':\n    return 0;\n  }\n  return attendance / 10 + iVar1;\n}",
+  "fission_assembly": "Function: calculate_score at 0x140001490 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000140001490  83 e9 41                  sub ecx,41h\n  0x000140001493  80 f9 25                  cmp cl,25h\n  0x000140001496  77 18                     ja short 00000001400014B0h\n  0x000140001498  4c 8d 05 79 2b 00 00      lea r8,[140004018h]\n  0x00014000149f  0f b6 c9                  movzx ecx,cl\n  0x0001400014a2  49 63 04 88               movsxd rax,[r8+rcx*4]\n  0x0001400014a6  4c 01 c0                  add rax,r8\n  0x0001400014a9  ff e0                     jmp rax\n  0x0001400014ab  0f 1f 44 00 00            nop [rax+rax]\n  0x0001400014b0  b8 ff ff ff ff            mov eax,0FFFFFFFFh\n  0x0001400014b5  c3                        ret\nTotal instructions: 11",
+  "fission_decompilation": "// ============================================\n// Function: calculate_score @ 0x140001490\n// ============================================\n\n\nint calculate_score(undefined1 param_1,int param_2)\n\n{\n  int iVar1;\n  \n  switch(param_1) {\n  case 0x41:\n  case 0x61:\n    if (param_2 == 0x5a) {\n      return 0x5f;\n    }\n    iVar1 = 100;\n    if (param_2 != 100) {\n      iVar1 = 0x5a;\n    }\n    return iVar1;\n  case 0x42:\n  case 0x62:\n    iVar1 = 0x50;\n    break;\n  case 0x43:\n  case 99:\n    iVar1 = 0x46;\n    break;\n  case 0x44:\n  case 100:\n    iVar1 = 0x3c;\n    break;\n  default:\n    return -1;\n  case 0x46:\n  case 0x66:\n    return 0;\n  }\n  return param_2 / 10 + iVar1;\n}"
+}

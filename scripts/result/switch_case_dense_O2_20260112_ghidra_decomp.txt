@@ -1,0 +1,15 @@
+/* WARNING: Unknown calling convention -- yet parameter storage is locked */
+
+void __do_global_dtors(void)
+
+{
+  func_ptr p_Var1;
+  
+  p_Var1 = *__do_global_dtors::p;
+  while (p_Var1 != (func_ptr)0x0) {
+    (*p_Var1)();
+    p_Var1 = __do_global_dtors::p[1];
+    __do_global_dtors::p = __do_global_dtors::p + 1;
+  }
+  return;
+}

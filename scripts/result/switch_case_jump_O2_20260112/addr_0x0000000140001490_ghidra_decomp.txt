@@ -1,0 +1,38 @@
+/* WARNING: Unknown calling convention */
+
+int calculate_score(char grade,int attendance)
+
+{
+  int iVar1;
+  
+  switch(grade) {
+  case 'A':
+  case 'a':
+    if (attendance == 0x5a) {
+      return 0x5f;
+    }
+    iVar1 = 100;
+    if (attendance != 100) {
+      iVar1 = 0x5a;
+    }
+    return iVar1;
+  case 'B':
+  case 'b':
+    iVar1 = 0x50;
+    break;
+  case 'C':
+  case 'c':
+    iVar1 = 0x46;
+    break;
+  case 'D':
+  case 'd':
+    iVar1 = 0x3c;
+    break;
+  default:
+    return -1;
+  case 'F':
+  case 'f':
+    return 0;
+  }
+  return attendance / 10 + iVar1;
+}
