@@ -40,6 +40,8 @@ pub struct DecompilerConfig {
     pub enable_prefetch: bool,
     /// Number of functions to prefetch
     pub prefetch_count: usize,
+    /// SLA (Sleigh) directory override (if empty, resolve from environment)
+    pub sla_dir: String,
 }
 
 /// Analysis configuration
@@ -90,6 +92,7 @@ impl Default for DecompilerConfig {
             timeout_ms: 30000, // 30 seconds
             enable_prefetch: true,
             prefetch_count: 3,
+            sla_dir: String::new(),
         }
     }
 }
@@ -105,6 +108,48 @@ impl DecompilerConfig {
         } else {
             self.num_workers.min(self.max_workers)
         }
+    }
+
+    pub fn resolve_sla_directory(&self) -> Result<String, String> {
+        if !self.sla_dir.is_empty() {
+            let path = std::path::Path::new(&self.sla_dir);
+            if path.exists() && path.is_dir() {
+                return Ok(self.sla_dir.clone());
+            }
+            return Err(format!(
+                "Config sla_dir is set but path does not exist: {}",
+                self.sla_dir
+            ));
+        }
+
+        if let Ok(env_path) = std::env::var("FISSION_SLA_DIR") {
+            let path = std::path::Path::new(&env_path);
+            if path.exists() && path.is_dir() {
+                return Ok(env_path);
+            }
+            return Err(format!(
+                "FISSION_SLA_DIR is set but path does not exist: {}",
+                env_path
+            ));
+        }
+
+        if let Ok(cwd) = std::env::current_dir() {
+            let local_path = cwd.join("ghidra_decompiler").join("languages");
+            if local_path.exists() && local_path.is_dir() {
+                return Ok(local_path.to_string_lossy().into_owned());
+            }
+
+            if let Some(parent) = cwd.parent() {
+                let parent_path = parent.join("ghidra_decompiler").join("languages");
+                if parent_path.exists() && parent_path.is_dir() {
+                    return Ok(parent_path.to_string_lossy().into_owned());
+                }
+            }
+        }
+
+        Err("SLA directory not found. Expected at: \
+             ./ghidra_decompiler/languages or set FISSION_SLA_DIR environment variable"
+            .to_string())
     }
 }
 

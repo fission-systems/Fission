@@ -204,6 +204,25 @@ impl PeLoader {
     }
 }
 
+pub fn detect_pe_is_64bit(bytes: &[u8]) -> bool {
+    if bytes.len() < 0x40 {
+        return true;
+    }
+
+    let pe_offset = if bytes.len() > 0x3F {
+        u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize
+    } else {
+        return true;
+    };
+
+    if bytes.len() > pe_offset + 6 {
+        let machine = u16::from_le_bytes([bytes[pe_offset + 4], bytes[pe_offset + 5]]);
+        machine == 0x8664
+    } else {
+        true
+    }
+}
+
 struct PeLoaderImpl<'a> {
     data: &'a [u8],
     sections: &'a [SectionInfo],

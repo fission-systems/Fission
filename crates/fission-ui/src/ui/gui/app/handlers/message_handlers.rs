@@ -151,10 +151,74 @@ pub fn handle_decompile_result(state: &mut AppState, address: u64, c_code: Strin
 
 /// Handle decompilation error
 pub fn handle_decompile_error(state: &mut AppState, address: u64, error: String) {
-    state.analysis.domain.decompiled_code = format!(
-        "// Decompilation failed\n// Error: {}\n\n// Possible causes:\n// - Function may not exist at this address\n// - fission_decomp CLI may not be built\n// - Try running: cd ghidra_decompiler/build && cmake .. && make",
-        error
-    );
+    let user_message = if error.contains("recursive decompilation") {
+        format!(
+            "// Decompilation failed: Recursive decompilation detected\n\
+             //\n\
+             // This happens when the decompiler is still processing a previous request.\n\
+             // Please wait a moment and try again by clicking a different function,\n\
+             // then return to this one.\n\
+             //\n\
+             // Address: 0x{:x}\n",
+            address
+        )
+    } else if error.contains("Function loaded for inlining") {
+        format!(
+            "// Decompilation failed: Function loaded for inlining\n\
+             //\n\
+             // This function was likely inlined by the compiler but still has a symbol entry.\n\
+             // The decompiler cannot process it as a standalone function because its code\n\
+             // is merged into its callers.\n\
+             //\n\
+             // Suggestion: Check the callers (XRefs) or view the Assembly.\n\
+             //\n\
+             // Address: 0x{:x}\n\
+             // Error: {}\n",
+            address, error
+        )
+    } else if error.contains("already being decompiled") {
+        format!(
+            "// Decompilation busy\n\
+             //\n\
+             // The decompiler is currently processing another function.\n\
+             // Please wait a moment and try again.\n\
+             //\n\
+             // Address: 0x{:x}\n",
+            address
+        )
+    } else if error.contains("Native decompiler not initialized") {
+        format!(
+            "// Native decompiler not initialized\n\
+             //\n\
+             // The decompiler context is not ready yet.\n\
+             // Try reloading the binary or restarting the app.\n\
+             //\n\
+             // Address: 0x{:x}\n",
+            address
+        )
+    } else if error.contains("Native decompiler not available") {
+        format!(
+            "// Native decompiler not available\n\
+             //\n\
+             // Build with: cargo build --features native_decomp\n\
+             //\n\
+             // Address: 0x{:x}\n",
+            address
+        )
+    } else {
+        format!(
+            "// Decompilation failed\n\
+             // Error: {}\n\
+             //\n\
+             // Possible causes:\n\
+             // - Function may not exist at this address\n\
+             // - fission_decomp CLI may not be built\n\
+             // - Try running: cd ghidra_decompiler/build && cmake .. && make\n",
+            error
+        )
+    };
+
+    state.analysis.domain.decompiled_code = user_message;
     state.analysis.domain.decompiling = false;
     state.log(format!("[✗] Decompile error (0x{:x}): {}", address, error));
     state.log("    → Check if ghidra_decompiler/build/fission_decomp exists".to_string());
