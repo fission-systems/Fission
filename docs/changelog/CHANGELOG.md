@@ -4,6 +4,27 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 ---
 
+### UI/Loader Refactor & Decompiler Diagnostics (2026-01-12)
+
+**🧩 UI/Loader Separation**
+
+- Moved PE 64-bit detection into `fission-loader` and removed the UI-local helper.
+- Centralized SLA (Sleigh) directory resolution under `fission-core` config.
+- Deleted legacy GUI worker stub (`decomp_worker_old.rs`).
+
+**🧪 Decompiler Diagnostics**
+
+- Added detailed TypePropagator logging for STORE/CALL pointer inference (high-type visibility).
+- Added timestamped run logs to `compare_decompilers_v2.py` for reproducible comparisons.
+
+**🧯 Error Handling (UI)**
+
+- Shifted decompilation error formatting to the UI handler layer; workers now emit structured errors.
+
+**📄 Documentation**
+
+- Added `docs/analysis/KNOWN_ISSUES.md` to track current decompiler workflow issues and reproduction steps.
+
 ### Analysis Enhancements: Deep Scan & FID (2026-01-11)
 
 **🕵️ Deep Function Scan**

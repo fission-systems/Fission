@@ -8,6 +8,8 @@
 
 use crate::ui::gui::core::messages::AsyncMessage;
 use crossbeam_channel::{Receiver, Sender};
+use fission_core::config::CONFIG;
+use fission_loader::detect_pe_is_64bit;
 use fission_loader::loader::FunctionInfo;
 use fission_loader::loader::types::SectionInfo;
 use std::collections::HashMap;
@@ -365,7 +367,7 @@ fn handle_binary_load_for_worker(
     result_tx: &Sender<AsyncMessage>,
 ) {
     // Resolve SLA directory
-    let sla_dir = match resolve_sla_directory() {
+    let sla_dir = match CONFIG.decompiler.resolve_sla_directory() {
         Ok(dir) => dir,
         Err(e) => {
             let _ = result_tx.send(AsyncMessage::DecompilerContextError {
@@ -377,7 +379,7 @@ fn handle_binary_load_for_worker(
     };
 
     // Build a minimal LoadedBinary for CachingDecompiler
-    let is_64bit = detect_is_64bit(&request.bytes);
+    let is_64bit = detect_pe_is_64bit(&request.bytes);
     let mut dummy_binary = fission_loader::loader::LoadedBinaryBuilder::new(
         "dummy".to_string(),
         request.bytes.clone(),
@@ -466,57 +468,16 @@ fn handle_decompile_for_worker(
                 });
             }
             Err(e) => {
-                let error_str = e.to_string();
-
-                let user_message = if error_str.contains("recursive decompilation") {
-                    format!(
-                        "// Decompilation failed: Recursive decompilation detected\n\
-                         //\n\
-                         // This happens when the decompiler is still processing a previous request.\n\
-                         // Please wait a moment and try again by clicking a different function,\n\
-                         // then return to this one.\n\
-                         //\n\
-                         // Address: 0x{:x}\n",
-                        request.address
-                    )
-                } else if error_str.contains("Function loaded for inlining") {
-                    format!(
-                        "// Decompilation failed: Function loaded for inlining\n\
-                         //\n\
-                         // This function was likely inlined by the compiler but still has a symbol entry.\n\
-                         // The decompiler cannot process it as a standalone function because its code\n\
-                         // is merged into its callers.\n\
-                         //\n\
-                         // Suggestion: Check the callers (XRefs) or view the Assembly.\n\
-                         //\n\
-                         // Address: 0x{:x}\n\
-                         // Error: {}\n",
-                        request.address, e
-                    )
-                } else if error_str.contains("already being decompiled") {
-                    format!(
-                        "// Decompilation busy\n\
-                         //\n\
-                         // The decompiler is currently processing another function.\n\
-                         // Please wait a moment and try again.\n\
-                         //\n\
-                         // Address: 0x{:x}\n",
-                        request.address
-                    )
-                } else {
-                    format!("// Decompilation failed: {}", e)
-                };
-
-                let _ = result_tx.send(AsyncMessage::DecompileResult {
+                let _ = result_tx.send(AsyncMessage::DecompileError {
                     address: request.address,
-                    c_code: user_message,
+                    error: e.to_string(),
                 });
             }
         }
     } else {
-        let _ = result_tx.send(AsyncMessage::DecompileResult {
+        let _ = result_tx.send(AsyncMessage::DecompileError {
             address: request.address,
-            c_code: "// Native decompiler not initialized via Worker Pool".to_string(),
+            error: "Native decompiler not initialized via Worker Pool".to_string(),
         });
     }
 }
@@ -584,7 +545,7 @@ fn worker_loop_native(
 
         // Handle binary load requests
         if request.is_binary_load {
-            handle_binary_load_native(&request, &native_decomp, &result_tx);
+            _handle_binary_load_native(&request, &native_decomp, &result_tx);
             continue;
         }
 
@@ -605,7 +566,7 @@ fn _handle_binary_load_native(
     result_tx: &Sender<AsyncMessage>,
 ) {
     // Step 1: Resolve SLA directory path
-    let sla_dir = resolve_sla_directory();
+    let sla_dir = CONFIG.decompiler.resolve_sla_directory();
 
     let sla_dir = match sla_dir {
         Ok(dir) => dir,
@@ -674,7 +635,7 @@ fn _handle_binary_load_native(
 
     if let Some(ref mut caching_decomp) = *decomp_guard {
         let decomp = caching_decomp.inner_mut();
-        let is_64bit = detect_is_64bit(&request.bytes);
+        let is_64bit = detect_pe_is_64bit(&request.bytes);
 
         crate::core::logging::info(&format!(
             "[decomp-worker] Loading binary: {} bytes, base=0x{:x}, 64bit={}",
@@ -748,48 +709,6 @@ fn _handle_binary_load_native(
     let _ = result_tx.send(AsyncMessage::DecompilerContextLoaded);
 }
 
-/// Resolve the SLA (Sleigh Language Architecture) directory path.
-///
-/// Search order:
-/// 1. FISSION_SLA_DIR environment variable
-/// 2. ./ghidra_decompiler/languages (relative to current dir)
-/// 3. ../ghidra_decompiler/languages (workspace root)
-#[cfg(feature = "native_decomp")]
-fn resolve_sla_directory() -> Result<String, String> {
-    // Priority 1: Environment variable
-    if let Ok(env_path) = std::env::var("FISSION_SLA_DIR") {
-        let path = std::path::Path::new(&env_path);
-        if path.exists() && path.is_dir() {
-            return Ok(env_path);
-        } else {
-            return Err(format!(
-                "FISSION_SLA_DIR is set but path does not exist: {}",
-                env_path
-            ));
-        }
-    }
-
-    // Priority 2: Relative to current directory
-    if let Ok(cwd) = std::env::current_dir() {
-        let local_path = cwd.join("ghidra_decompiler").join("languages");
-        if local_path.exists() && local_path.is_dir() {
-            return Ok(local_path.to_string_lossy().into_owned());
-        }
-
-        // Priority 3: Workspace root (one level up)
-        if let Some(parent) = cwd.parent() {
-            let parent_path = parent.join("ghidra_decompiler").join("languages");
-            if parent_path.exists() && parent_path.is_dir() {
-                return Ok(parent_path.to_string_lossy().into_owned());
-            }
-        }
-    }
-
-    Err("SLA directory not found. Expected at: \
-         ./ghidra_decompiler/languages or set FISSION_SLA_DIR environment variable"
-        .to_string())
-}
-
 #[cfg(feature = "native_decomp")]
 fn _handle_decompile_native(
     request: &DecompileRequest,
@@ -810,65 +729,17 @@ fn _handle_decompile_native(
                 });
             }
             Err(e) => {
-                let error_str = e.to_string();
-
-                // Detect recursive decompilation error and provide helpful message
-                let user_message = if error_str.contains("recursive decompilation") {
-                    format!(
-                        "// Decompilation failed: Recursive decompilation detected\n\
-                         //\n\
-                         // This happens when the decompiler is still processing a previous request.\n\
-                         // Please wait a moment and try again by clicking a different function,\n\
-                         // then return to this one.\n\
-                         //\n\
-                         // Address: 0x{:x}\n",
-                        request.address
-                    )
-                } else if error_str.contains("already being decompiled") {
-                    format!(
-                        "// Decompilation busy\n\
-                         //\n\
-                         // The decompiler is currently processing another function.\n\
-                         // Please wait a moment and try again.\n\
-                         //\n\
-                         // Address: 0x{:x}\n",
-                        request.address
-                    )
-                } else {
-                    format!("// Decompilation failed: {}", e)
-                };
-
-                let _ = result_tx.send(AsyncMessage::DecompileResult {
+                let _ = result_tx.send(AsyncMessage::DecompileError {
                     address: request.address,
-                    c_code: user_message,
+                    error: e.to_string(),
                 });
             }
         }
     } else {
-        let _ = result_tx.send(AsyncMessage::DecompileResult {
+        let _ = result_tx.send(AsyncMessage::DecompileError {
             address: request.address,
-            c_code: "// Native decompiler not initialized".to_string(),
+            error: "Native decompiler not initialized".to_string(),
         });
-    }
-}
-
-#[cfg(feature = "native_decomp")]
-fn detect_is_64bit(bytes: &[u8]) -> bool {
-    if bytes.len() < 0x40 {
-        return true;
-    }
-
-    let pe_offset = if bytes.len() > 0x3F {
-        u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize
-    } else {
-        return true;
-    };
-
-    if bytes.len() > pe_offset + 6 {
-        let machine = u16::from_le_bytes([bytes[pe_offset + 4], bytes[pe_offset + 5]]);
-        machine == 0x8664
-    } else {
-        true
     }
 }
 
@@ -905,9 +776,9 @@ pub fn spawn_worker(
                 } else if request.is_binary_load {
                     // Context loaded - no specific message needed
                 } else {
-                    let _ = result_tx.send(AsyncMessage::DecompileResult {
+                    let _ = result_tx.send(AsyncMessage::DecompileError {
                         address: request.address,
-                        c_code: "// Native decompiler not available\n// Build with: cargo build --features native_decomp".to_string(),
+                        error: "Native decompiler not available (build with --features native_decomp)".to_string(),
                     });
                 }
             }

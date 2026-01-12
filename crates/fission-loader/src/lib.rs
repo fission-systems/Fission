@@ -23,3 +23,4 @@ pub use dotnet::{
     disassemble_method_rva, parse_dotnet_metadata,
 };
 pub use loader::{FunctionInfo, LoadedBinary, SectionInfo};
+pub use loader::pe::detect_pe_is_64bit;
