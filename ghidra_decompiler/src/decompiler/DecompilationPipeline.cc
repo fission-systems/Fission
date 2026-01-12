@@ -48,6 +48,63 @@ namespace decompiler {
 static constexpr size_t MAX_FUNCTION_SIZE = 10000;  // 10KB code limit
 static constexpr int MAX_PTRSUB_OPS = 100;           // Limit analyzed operations
 
+// ============================================================================
+// Centralized FID/Signature Path Configuration
+// ============================================================================
+// Primary directory for FID databases (unified location)
+static const std::vector<std::string> FID_SEARCH_DIRS = {
+    "./utils/signatures/fid/",
+    "../utils/signatures/fid/",
+    "../../utils/signatures/fid/",
+    // Legacy paths (for backward compatibility)
+    "./utils/ghidra/funtionID/",
+    "../utils/ghidra/funtionID/",
+    "../../utils/ghidra/funtionID/"
+};
+
+// MSVC FID database filenames by version
+static const std::vector<std::string> MSVC_FID_FILES_X64 = {
+    "vs2019_x64.fidbf", "vs2017_x64.fidbf", "vs2015_x64.fidbf", 
+    "vs2012_x64.fidbf", "vsOlder_x64.fidbf"
+};
+static const std::vector<std::string> MSVC_FID_FILES_X86 = {
+    "vs2019_x86.fidbf", "vs2017_x86.fidbf", "vs2015_x86.fidbf", 
+    "vs2012_x86.fidbf", "vsOlder_x86.fidbf"
+};
+
+// Common symbols filter files
+static const std::vector<std::string> COMMON_SYMBOL_FILES = {
+    "./utils/signatures/fid/common_symbols_win32.txt",
+    "./utils/signatures/fid/common_symbols_win64.txt",
+    "../utils/signatures/fid/common_symbols_win32.txt",
+    "./utils/ghidra/funtionID/common_symbols_win32.txt",
+    "./utils/ghidra/funtionID/common_symbols_win64.txt"
+};
+
+// Helper: Find first existing FID file from search paths
+static std::string find_fid_file(const std::string& filename) {
+    for (const auto& dir : FID_SEARCH_DIRS) {
+        std::string path = dir + filename;
+        if (file_exists(path)) {
+            return path;
+        }
+    }
+    return "";
+}
+
+// Helper: Get all available FID paths for a given architecture
+static std::vector<std::string> get_all_fid_paths(bool is_64bit) {
+    std::vector<std::string> result;
+    const auto& files = is_64bit ? MSVC_FID_FILES_X64 : MSVC_FID_FILES_X86;
+    for (const auto& filename : files) {
+        std::string path = find_fid_file(filename);
+        if (!path.empty()) {
+            result.push_back(path);
+        }
+    }
+    return result;
+}
+
 std::string DecompilationPipeline::process_request(
     core::DecompilerContext& state, 
     const std::string& input
@@ -194,14 +251,12 @@ std::string DecompilationPipeline::handle_load_bin(
         }
         
         if (!fid_filename.empty()) {
-            std::vector<std::string> fid_paths = {
-                "../../utils/ghidra/funtionID/" + fid_filename,
-                "../utils/ghidra/funtionID/" + fid_filename,
-                "./utils/ghidra/funtionID/" + fid_filename
-            };
+            // Use centralized path finder
+            std::string fid_path = find_fid_file(fid_filename);
             
-            for (const auto& fid_path : fid_paths) {
+            if (!fid_path.empty()) {
                 if (file_exists(fid_path)) {
+
                     std::cerr << "[fission_decomp] Loading FID database: " << fid_path << std::endl;
                     FidDatabase fid_db;
                     if (fid_db.load(fid_path)) {
@@ -316,7 +371,6 @@ std::string DecompilationPipeline::handle_load_bin(
                         std::cerr << "[fission_decomp] FID Analysis: Identified " 
                                  << matches_found << " functions." << std::endl;
                     }
-                    break;
                 }
             }
         }
@@ -526,14 +580,8 @@ std::string DecompilationPipeline::handle_load_bin(
     
     // Phase 12: Load FID databases
     {
-        std::vector<std::string> fid_candidates = {
-            "./utils/ghidra/funtionID/vs2019_x86.fidbf",
-            "./utils/ghidra/funtionID/vs2017_x86.fidbf",
-            "./utils/ghidra/funtionID/vs2015_x86.fidbf",
-            "./utils/ghidra/funtionID/vs2012_x86.fidbf",
-            "../utils/ghidra/funtionID/vs2019_x86.fidbf",
-            "../../utils/ghidra/funtionID/vs2019_x86.fidbf"
-        };
+        // Use centralized path configuration
+        std::vector<std::string> fid_candidates = get_all_fid_paths(bin_info.is_64bit);
         
         static FidDatabase fid_db;
         static FunctionMatcher func_matcher;
@@ -541,39 +589,30 @@ std::string DecompilationPipeline::handle_load_bin(
         
         if (!fid_initialized) {
             for (const auto& path : fid_candidates) {
-                if (file_exists(path)) {
-                    if (fid_db.load(path)) {
-                        std::cerr << "[fission_decomp] Loaded FID database: " << path 
-                                  << " (" << fid_db.get_function_count() << " functions)" << std::endl;
-                        func_matcher.set_fid_database(&fid_db);
-                        break;
-                    }
+                if (fid_db.load(path)) {
+                    std::cerr << "[fission_decomp] Loaded FID database: " << path 
+                              << " (" << fid_db.get_function_count() << " functions)" << std::endl;
+                    func_matcher.set_fid_database(&fid_db);
+                    break;
                 }
             }
             fid_initialized = true;
         }
         
-        // Load ALL available FID databases
+        // Load ALL available FID databases using centralized paths
         static std::vector<FidDatabase> all_fid_dbs;
         if (all_fid_dbs.empty()) {
-            std::vector<std::string> all_fidbf = {
-                "./utils/ghidra/funtionID/vs2019_x86.fidbf",
-                "./utils/ghidra/funtionID/vs2017_x86.fidbf",
-                "./utils/ghidra/funtionID/vs2015_x86.fidbf",
-                "./utils/ghidra/funtionID/vs2012_x86.fidbf",
-                "./utils/ghidra/funtionID/vsOlder_x86.fidbf"
-            };
-            for (const auto& path : all_fidbf) {
-                if (file_exists(path)) {
-                    FidDatabase db;
-                    if (db.load(path)) {
-                        all_fid_dbs.push_back(std::move(db));
-                    }
+            std::vector<std::string> all_fid_paths = get_all_fid_paths(bin_info.is_64bit);
+            for (const auto& path : all_fid_paths) {
+                FidDatabase db;
+                if (db.load(path)) {
+                    all_fid_dbs.push_back(std::move(db));
                 }
             }
             std::cerr << "[fission_decomp] Loaded " << all_fid_dbs.size() 
                      << " FID databases total" << std::endl;
         }
+
         
         // Improved function prologue detection
         size_t matched_count = 0;
@@ -601,12 +640,8 @@ std::string DecompilationPipeline::handle_load_bin(
                      << " functions by hash" << std::endl;
         }
         
-        // Load common symbols
-        std::vector<std::string> symbol_files = {
-            "./utils/ghidra/funtionID/common_symbols_win32.txt",
-            "./utils/ghidra/funtionID/common_symbols_win64.txt",
-            "../utils/ghidra/funtionID/common_symbols_win32.txt"
-        };
+        // Use centralized common symbols path configuration
+        const auto& symbol_files = COMMON_SYMBOL_FILES;
         
         for (const auto& path : symbol_files) {
             if (file_exists(path)) {

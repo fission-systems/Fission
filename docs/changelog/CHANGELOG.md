@@ -2,6 +2,18 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
+### FID Path Centralization (2026-01-12)
+
+**🗂️ Configuration Consolidation**
+
+- **Unified FID Directory**: Changed primary FID database location from legacy `utils/ghidra/funtionID/` to `utils/signatures/fid/`.
+- **Centralized Path Constants**: Introduced `FID_SEARCH_DIRS`, `MSVC_FID_FILES_X64/X86`, and `COMMON_SYMBOL_FILES` constants in `DecompilationPipeline.cc`.
+- **Helper Functions**: Added `find_fid_file()` and `get_all_fid_paths()` to eliminate hardcoded paths throughout the codebase.
+- **Backward Compatibility**: Legacy paths are still searched as fallback for existing installations.
+- **Rust CLI Updated**: `fission-cli` now prioritizes `utils/signatures/fid/` with legacy fallback.
+
+---
+
 ### Call Graph Relation Matching (2026-01-12)
 
 **🔗 FID False Positive Prevention (Ghidra Parity)**

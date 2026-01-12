@@ -109,14 +109,21 @@ pub(super) fn run_decompilation(
     };
 
     // Build comprehensive FID database list
-    // Prioritize: GCC/MinGW for Linux/MinGW binaries, MSVC for Windows native
+    // Primary: utils/signatures/fid/ (unified location)
+    // Fallback: utils/ghidra/funtionID/ (legacy location)
     let fid_paths = vec![
-        // GCC/MinGW databases (for cross-compiled and native GCC binaries)
-        format!("utils/ghidra/funtionID/gcc13{}", target_suffix),
-        format!("utils/ghidra/funtionID/gcc12{}", target_suffix),
-        format!("utils/ghidra/funtionID/gcc11{}", target_suffix),
-        format!("utils/ghidra/funtionID/mingw{}", target_suffix),
-        // MSVC databases (for native Windows binaries)
+        // Primary unified location
+        format!("utils/signatures/fid/vs2019{}", target_suffix),
+        format!("utils/signatures/fid/vs2017{}", target_suffix),
+        format!("utils/signatures/fid/vs2015{}", target_suffix),
+        format!("utils/signatures/fid/vs2012{}", target_suffix),
+        format!("utils/signatures/fid/vsOlder{}", target_suffix),
+        // GCC/MinGW databases
+        format!("utils/signatures/fid/gcc13{}", target_suffix),
+        format!("utils/signatures/fid/gcc12{}", target_suffix),
+        format!("utils/signatures/fid/gcc11{}", target_suffix),
+        format!("utils/signatures/fid/mingw{}", target_suffix),
+        // Legacy location (backward compatibility)
         format!("utils/ghidra/funtionID/vs2019{}", target_suffix),
         format!("utils/ghidra/funtionID/vs2017{}", target_suffix),
         format!("utils/ghidra/funtionID/vs2015{}", target_suffix),
