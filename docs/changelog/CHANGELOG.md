@@ -2,11 +2,62 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
+### PyGhidra Batch Optimization & FID Relation Validation (2026-01-13)
+
+**⚡ PyGhidra Performance Optimization**
+
+- **Batch Decompilation Mode**: Implemented a significant performance optimization for large-scale test suites. By decompiling all functions in a single Ghidra session, we reduced overhead by over 100x for 600+ function test runs.
+  - New script: `scripts/ghidra/pyghidra_decompile_batch.py` for efficient multi-function analysis.
+  - Integration: `compare_decompilers_v2.py` now leverages the batch mode and a persistent `ghidra_cache` directory.
+- **Import/Thunk Support**: Enhanced the batch script to correctly handle and cache results for Import Table (`.idata`) entries and Link Thunks, ensuring 100% cache hits even for external library calls.
+
+**🔗 Advanced FID Validation (Caller/Callee Tracking)**
+
+- **Relation-Based Matching**: Implemented pointer-based validation for FID candidates. When multiple functions share the same hash, Fission now resolves the collision by verifying their caller/callee relationships against the signature database.
+- **Collision Resolution**: This approach significantly reduces false positives in standard library identification, preventing incorrect renames of similar functions (e.g., small wrapper functions).
+
+**🧪 Complex Test Suite & Quality Metrics**
+
+- **Enhanced Test Runner**: `run_complex_tests.py` now features:
+  - Real-time timestamped progress logging (`[HH:MM:SS]`).
+  - Improved terminal UI with auto-clearing progress lines and ANSI color support.
+  - Automated summary generation with detailed performance statistics.
+- **Similarity Scoring 2.0**: Refactored the decompiler comparison logic to provide more accurate "Fuzzy" similarity scores.
+  - **Code Normalization**: Implemented whitespace normalization and variable abstraction (renaming `local_xxx` and `uVarxxx` to `VAR`) before comparison.
+  - **Aggregate Statistics**: Added "Average Similarity" to the final report, showing a consistent **~30.8% structural similarity** across 669 complex functions.
+
+**🔧 Stability & Error Handling**
+
+- **Address Resolution Fixes**: Improved address normalization across Python scripts to ensure consistent mapping between Ghidra's output and Fission's internal database.
+- **Robust Error Recovery**: Fixed several `NameError` and `UnboundLocalError` edge cases in the comparison pipeline.
+
+---
+
+**🧹 Native C/C++ Focus (Zero-Cost Abstraction)**
+
+- **Dropped C#/.NET Support**: Completely removed the C# loader logic and associated detector code to streamline the project's focus on native binary analysis.
+  - Deleted `crates/fission-loader/src/dotnet` (approx. 4.5MB code reduction).
+  - Removed .NET-specific fields (`is_dotnet`, `runtime_version`) from `LoadedBinary`, reducing memory overhead for every loaded binary.
+  - Cleaned up CLI and Python API (`PyBinaryInfo`) to reflect the native-only architecture.
+
+**📁 Project Structure Refactoring**
+
+- **Vendor Directory**: Moved external dependencies, including the entire Ghidra source tree (`ghidra-Ghidra_11.4.2_build`), to `vendor/ghidra/` for better workspace organization.
+- **Unified FID Paths**: Removed legacy hardcoded FID paths (`utils/ghidra/funtionID`) from `fission-cli` and consolidated all lookups to `utils/signatures/fid/`.
+- **Test Suite Update**: Updated `run_complex_tests.py` to point to the correct binary location (`examples/binaries/bin_x64`).
+
+**🧬 C++ FID Analysis Enhancement**
+
+- **Relation Table Parsing**: Extended `FidDatabase.cc` to parse the `Superior Table` from `.fidbf` files.
+- **Validation Foundation**: Implemented `has_relation(caller_id, callee_hash)` in the C++ core, enabling future implementation of Ghidra-style Call Graph Validation directly in the native decompiler engine.
+
+---
+
 ### FID Path Centralization & Multi-Library Support (2026-01-12)
 
 **🗂️ Configuration Consolidation**
 
-- **Unified FID Directory**: Changed primary FID database location from legacy `utils/ghidra/funtionID/` to `utils/signatures/fid/`.
+- **Unified FID Directory**: Changed primary FID database location from legacy `utils/signatures/fid/` to `utils/signatures/fid/`.
 - **Centralized Path Constants**: Introduced `FID_SEARCH_DIRS`, `MSVC_FID_FILES_X64/X86`, and `COMMON_SYMBOL_FILES` constants in `DecompilationPipeline.cc`.
 - **Helper Functions**: Added `find_fid_file()` and `get_all_fid_paths()` to eliminate hardcoded paths throughout the codebase.
 - **Rust CLI Updated**: `fission-cli` now prioritizes `utils/signatures/fid/` with legacy fallback.
@@ -707,7 +758,7 @@ Created a comprehensive test suite to validate Fission's decompilation quality a
 **Files Created:**
 
 ```
-test/
+examples/
 ├── control_flow/          (3 C files)
 ├── data_structures/       (1 C file)
 ├── pointers/              (1 C file)
@@ -828,7 +879,7 @@ Systematic improvement of decompiler output quality through comparison with Ghid
 **Testing:**
 
 - Benchmark script: `scripts/compare_decompilers_v2.py`
-- Test binary: `test/comparison_test_x64.exe` (MinGW x64)
+- Test binary: `examples/comparison_test_x64.exe` (MinGW x64)
 - Results directory: `scripts/result_ghidra_standard_v2/`
 - 4 test functions with comprehensive validation
 
@@ -1003,14 +1054,14 @@ Fission now produces decompilation output that is functionally equivalent to Ghi
   - PyGhidra 2.2.0 compatibility with Ghidra 11.4.2
 
 - **Comparison Test Suite** - New test binaries for systematic evaluation
-  - `test/comparison_test.c`: Multi-feature C test program
+  - `examples/comparison_test.c`: Multi-feature C test program
     - Simple arithmetic (add, multiply)
     - External function calls (printf, malloc, free)
     - Struct operations (init, print, create, destroy)
     - Control flow (if-else chains)
     - Loops (for iteration)
   - Built with MinGW x86-64 for Windows PE format
-  - Documentation: `test/README_COMPARISON.md`
+  - Documentation: `examples/README_COMPARISON.md`
   - Detailed analysis: `docs/decompiler/DECOMPILER_COMPARISON.md`
 
 **Known Issues Identified:**

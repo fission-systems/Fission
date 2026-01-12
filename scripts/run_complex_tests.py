@@ -9,6 +9,7 @@ import sys
 import json
 import subprocess
 import time
+import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 from datetime import datetime
@@ -22,6 +23,11 @@ class Colors:
     CYAN = '\033[0;36m'
     BOLD = '\033[1m'
     NC = '\033[0m'  # No Color
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from string."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
 
 class TestCase:
     """Represents a single test case"""
@@ -41,43 +47,43 @@ class TestCase:
 TEST_CASES = [
     TestCase(
         name="Nested Loops",
-        binary="test/bin_x64/nested_loops_x64.exe",
-        addresses="test/addresses/nested_loops_addrs.txt",
+        binary="examples/binaries/bin_x64/nested_loops_x64.exe",
+        addresses="examples/addresses/nested_loops_addrs.txt",
         category="Control Flow",
         difficulty=3
     ),
     TestCase(
         name="Switch-Case",
-        binary="test/bin_x64/switch_case_x64.exe",
-        addresses="test/addresses/switch_case_addrs.txt",
+        binary="examples/binaries/bin_x64/switch_case_x64.exe",
+        addresses="examples/addresses/switch_case_addrs.txt",
         category="Control Flow",
         difficulty=2
     ),
     TestCase(
         name="Recursion",
-        binary="test/bin_x64/recursion_x64.exe",
-        addresses="test/addresses/recursion_addrs.txt",
+        binary="examples/binaries/bin_x64/recursion_x64.exe",
+        addresses="examples/addresses/recursion_addrs.txt",
         category="Control Flow",
         difficulty=4
     ),
     TestCase(
         name="Complex Structs",
-        binary="test/bin_x64/complex_structs_x64.exe",
-        addresses="test/addresses/complex_structs_addrs.txt",
+        binary="examples/binaries/bin_x64/complex_structs_x64.exe",
+        addresses="examples/addresses/complex_structs_addrs.txt",
         category="Data Structures",
         difficulty=4
     ),
     TestCase(
         name="Function Pointers",
-        binary="test/bin_x64/function_pointers_x64.exe",
-        addresses="test/addresses/function_pointers_addrs.txt",
+        binary="examples/binaries/bin_x64/function_pointers_x64.exe",
+        addresses="examples/addresses/function_pointers_addrs.txt",
         category="Pointers",
         difficulty=5
     ),
     TestCase(
         name="Virtual Functions",
-        binary="test/bin_x64/virtual_functions_x64.exe",
-        addresses="test/addresses/virtual_functions_addrs.txt",
+        binary="examples/binaries/bin_x64/virtual_functions_x64.exe",
+        addresses="examples/addresses/virtual_functions_addrs.txt",
         category="C++ Features",
         difficulty=5
     ),
@@ -126,6 +132,7 @@ def run_test(test: TestCase, base_output_dir: str) -> bool:
     # Run comparison script
     cmd = [
         "python3",
+        "-u", # Unbuffered
         "scripts/compare_decompilers_v2.py",
         test.binary,
         test.addresses,
@@ -137,25 +144,58 @@ def run_test(test: TestCase, base_output_dir: str) -> bool:
     start_time = time.time()
     
     try:
-        result = subprocess.run(
+        # Use Popen to read output in real-time
+        process = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=600  # 10 minute timeout
+            cwd=os.getcwd(),
+            bufsize=1 # Line buffered
         )
         
+        # Monitor output for progress
+        stdout_lines = []
+        func_index = 0
+        for line in process.stdout:
+            stdout_lines.append(line)
+            # Get current time for timestamp
+            ts = datetime.now().strftime('%H:%M:%S')
+            
+            # Check for progress patterns like "== 0x... =="
+            if line.startswith("== 0x"):
+                func_index += 1
+                addr = line.strip().replace("==", "").strip()
+                # Use \r and clear with spaces to keep it single-line but clean
+                progress = f"    {Colors.BLUE}[{ts}]{Colors.NC} {Colors.CYAN}→ [{func_index}/{func_count}] Analyzing {addr}{Colors.NC}"
+                print(f"\r{progress}{' ' * (70 - len(strip_ansi(progress)))}", end="", flush=True)
+            elif "Running Ghidra batch decompilation" in line:
+                print(f"\r    {Colors.BLUE}[{ts}]{Colors.NC} {Colors.YELLOW}⚡ Initializing Ghidra (Batch Mode)...{Colors.NC}", end="", flush=True)
+            elif "Ghidra batch decompilation complete" in line:
+                print(f"\n    {Colors.BLUE}[{ts}]{Colors.NC} {Colors.GREEN}✓ Ghidra analyzed all functions{Colors.NC}")
+            elif "Running Ghidra analysis" in line:
+                # Still a cache miss? Show it. 
+                print(f"\n    {Colors.BLUE}[{ts}]{Colors.NC} {Colors.RED}⚠ Cache miss: Individual Ghidra analysis for {addr}{Colors.NC}")
+            elif "Timing summary" in line:
+                print(f"\n    {Colors.BLUE}[{ts}]{Colors.NC} {Colors.GREEN}✓ Analysis complete, generating summary...{Colors.NC}")
+        
+        process.wait(timeout=600)
         test.duration = time.time() - start_time
         
-        if result.returncode != 0:
+        if process.returncode != 0:
             test.status = "error"
-            test.error = f"Comparison script failed (exit {result.returncode})"
-            print(f"  {Colors.RED}✗ Failed: {test.error}{Colors.NC}")
-            if result.stderr:
-                print(f"  Error output: {result.stderr[:200]}")
+            test.error = f"Comparison script failed (exit {process.returncode})"
+            print(f"\n  {Colors.RED}✗ Failed: {test.error}{Colors.NC}")
+            # Print last few lines of error
+            for line in stdout_lines[-10:]:
+                print(f"    {line.strip()}")
             return False
         
+        # Clear the progress line
+        print(" " * 60, end="\r")
+        
         # Parse results
-        summary_file = os.path.join(test.result_dir, "comparison_summary.json")
+        summary_file = os.path.join(test.result_dir, "summary.json")
         if os.path.exists(summary_file):
             with open(summary_file, 'r') as f:
                 summary = json.load(f)
@@ -482,7 +522,7 @@ def main():
     
     # Create output directory
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_dir = f"scripts/result_complex_tests_{timestamp}"
+    output_dir = f"examples/results/complex_tests_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
     print(f"Output directory: {Colors.CYAN}{output_dir}{Colors.NC}")
