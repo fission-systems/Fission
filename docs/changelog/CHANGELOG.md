@@ -12,6 +12,7 @@ All notable changes to the Fission project (November 2025 - January 2026).
 - Centralized SLA (Sleigh) directory resolution under `fission-core` config.
 - Deleted legacy GUI worker stub (`decomp_worker_old.rs`).
 - Refactored decompiler worker requests into explicit enum variants (decompile/load/clear/CFG).
+- Split decompiler worker implementation into focused modules (requests/pool/worker/native/stub).
 
 **🧪 Decompiler Diagnostics**
 
