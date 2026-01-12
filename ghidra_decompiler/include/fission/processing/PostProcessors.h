@@ -56,6 +56,9 @@ std::string apply_fid_names(const std::string& code, const std::map<uint64_t, st
 // Add inline comments for structure field accesses
 std::string annotate_structure_offsets(const std::string& code);
 
+// Demangle C++ names and standardize 'this' pointer
+std::string demangle_cpp_names(const std::string& code);
+
 } // namespace processing
 } // namespace fission
 
