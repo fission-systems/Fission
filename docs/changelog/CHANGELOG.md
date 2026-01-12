@@ -2,15 +2,26 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
-### FID Path Centralization (2026-01-12)
+### FID Path Centralization & Multi-Library Support (2026-01-12)
 
 **🗂️ Configuration Consolidation**
 
 - **Unified FID Directory**: Changed primary FID database location from legacy `utils/ghidra/funtionID/` to `utils/signatures/fid/`.
 - **Centralized Path Constants**: Introduced `FID_SEARCH_DIRS`, `MSVC_FID_FILES_X64/X86`, and `COMMON_SYMBOL_FILES` constants in `DecompilationPipeline.cc`.
 - **Helper Functions**: Added `find_fid_file()` and `get_all_fid_paths()` to eliminate hardcoded paths throughout the codebase.
-- **Backward Compatibility**: Legacy paths are still searched as fallback for existing installations.
 - **Rust CLI Updated**: `fission-cli` now prioritizes `utils/signatures/fid/` with legacy fallback.
+
+**📚 Comprehensive Library Signature Support**
+
+- **57 FIDB Files Available**: Converted all `.fidb` files from `ghidra-fidb-repo` to `.fidbf` format using custom Ghidra headless script.
+- **Multi-Library Auto-Loading**: `get_all_fid_paths()` now automatically discovers and loads signatures for:
+  - **MSVC** (vs2012, vs2015, vs2017, vs2019, vsOlder)
+  - **GCC** (x86, ARM, AARCH64)
+  - **libc** (x86, ARM, AARCH64)
+  - **OpenSSL** (1.0.1u, 1.0.2l, 1.1.0f)
+  - **libsodium** (x86)
+  - **Enterprise Linux** (el6, el7)
+- **Conversion Tools Added**: `scripts/ghidra/ConvertFidbToFidbf.java` and `convert_fidb_batch.sh` for batch conversion.
 
 ---
 

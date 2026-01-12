@@ -62,7 +62,7 @@ static const std::vector<std::string> FID_SEARCH_DIRS = {
     "../../utils/ghidra/funtionID/"
 };
 
-// MSVC FID database filenames by version
+// MSVC FID database filenames by version (highest priority)
 static const std::vector<std::string> MSVC_FID_FILES_X64 = {
     "vs2019_x64.fidbf", "vs2017_x64.fidbf", "vs2015_x64.fidbf", 
     "vs2012_x64.fidbf", "vsOlder_x64.fidbf"
@@ -70,6 +70,44 @@ static const std::vector<std::string> MSVC_FID_FILES_X64 = {
 static const std::vector<std::string> MSVC_FID_FILES_X86 = {
     "vs2019_x86.fidbf", "vs2017_x86.fidbf", "vs2015_x86.fidbf", 
     "vs2012_x86.fidbf", "vsOlder_x86.fidbf"
+};
+
+// GCC/MinGW FID database patterns
+static const std::vector<std::string> GCC_FID_FILES_X64 = {
+    "gcc-x86.LE.64.default.fidbf", "gcc-AARCH64.LE.64.v8A.fidbf"
+};
+static const std::vector<std::string> GCC_FID_FILES_X86 = {
+    "gcc-x86.LE.32.default.fidbf", "gcc-ARM.LE.32.v8.fidbf"
+};
+
+// libc FID database patterns
+static const std::vector<std::string> LIBC_FID_FILES_X64 = {
+    "libc-x86.LE.64.default.fidbf", "libc-AARCH64.LE.64.v8A.fidbf"
+};
+static const std::vector<std::string> LIBC_FID_FILES_X86 = {
+    "libc-x86.LE.32.default.fidbf", "libc-ARM.LE.32.v8.fidbf"
+};
+
+// Crypto library FID databases (OpenSSL, libsodium)
+static const std::vector<std::string> CRYPTO_FID_FILES_X64 = {
+    "sigmoid-openssl-1.1.0f-x86.LE.64.default.fidbf",
+    "sigmoid-openssl-1.0.2l-x86.LE.64.default.fidbf",
+    "sigmoid-openssl-1.0.1u-x86.LE.64.default.fidbf",
+    "libsodium-x86.LE.64.default.fidbf"
+};
+static const std::vector<std::string> CRYPTO_FID_FILES_X86 = {
+    "sigmoid-openssl-1.1.0f-x86.LE.32.default.fidbf",
+    "sigmoid-openssl-1.0.2l-x86.LE.32.default.fidbf",
+    "sigmoid-openssl-1.0.1u-x86.LE.32.default.fidbf",
+    "libsodium-x86.LE.32.default.fidbf"
+};
+
+// Enterprise Linux FID databases
+static const std::vector<std::string> EL_FID_FILES_X64 = {
+    "el7.x86_64.fidbf", "el6.x86_64.fidbf"
+};
+static const std::vector<std::string> EL_FID_FILES_X86 = {
+    "el7.i686.fidbf", "el6.i686.fidbf"
 };
 
 // Common symbols filter files
@@ -92,18 +130,33 @@ static std::string find_fid_file(const std::string& filename) {
     return "";
 }
 
-// Helper: Get all available FID paths for a given architecture
+// Helper: Get all available FID paths for a given architecture (comprehensive)
 static std::vector<std::string> get_all_fid_paths(bool is_64bit) {
     std::vector<std::string> result;
-    const auto& files = is_64bit ? MSVC_FID_FILES_X64 : MSVC_FID_FILES_X86;
-    for (const auto& filename : files) {
-        std::string path = find_fid_file(filename);
-        if (!path.empty()) {
-            result.push_back(path);
+    
+    // Collect all file lists for this architecture
+    std::vector<const std::vector<std::string>*> all_lists;
+    if (is_64bit) {
+        all_lists = {&MSVC_FID_FILES_X64, &GCC_FID_FILES_X64, &LIBC_FID_FILES_X64, 
+                     &CRYPTO_FID_FILES_X64, &EL_FID_FILES_X64};
+    } else {
+        all_lists = {&MSVC_FID_FILES_X86, &GCC_FID_FILES_X86, &LIBC_FID_FILES_X86,
+                     &CRYPTO_FID_FILES_X86, &EL_FID_FILES_X86};
+    }
+    
+    // Find all available files
+    for (const auto* file_list : all_lists) {
+        for (const auto& filename : *file_list) {
+            std::string path = find_fid_file(filename);
+            if (!path.empty()) {
+                result.push_back(path);
+            }
         }
     }
+    
     return result;
 }
+
 
 std::string DecompilationPipeline::process_request(
     core::DecompilerContext& state, 
