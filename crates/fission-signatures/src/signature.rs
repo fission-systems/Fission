@@ -15,6 +15,17 @@ pub struct FunctionSignature {
     pub params: Vec<String>,
     /// Return type description
     pub ret_type: String,
+
+    // === Call Graph Relation Matching (Ghidra FID parity) ===
+    /// Names of functions this function is expected to call (children)
+    /// If non-empty, at least one of these must be present in the call graph
+    pub expected_callees: Vec<String>,
+    /// Names of functions that are expected to call this function (parents)
+    pub expected_callers: Vec<String>,
+    /// If true, force relation check - reject match if no expected callees found
+    pub force_relation: bool,
+    /// Base confidence score (0-100). Reduced if relations don't match.
+    pub confidence: u8,
 }
 
 impl FunctionSignature {
@@ -38,7 +49,35 @@ impl FunctionSignature {
             min_size: 16,
             params: Vec::new(),
             ret_type: String::new(),
+            expected_callees: Vec::new(),
+            expected_callers: Vec::new(),
+            force_relation: false,
+            confidence: 100,
         }
+    }
+
+    /// Create a signature with expected callees for relation validation
+    pub fn with_callees(mut self, callees: &[&str]) -> Self {
+        self.expected_callees = callees.iter().map(|s| s.to_string()).collect();
+        self
+    }
+
+    /// Create a signature with expected callers for relation validation
+    pub fn with_callers(mut self, callers: &[&str]) -> Self {
+        self.expected_callers = callers.iter().map(|s| s.to_string()).collect();
+        self
+    }
+
+    /// Set force_relation flag - require at least one expected callee to be found
+    pub fn force_relation(mut self) -> Self {
+        self.force_relation = true;
+        self
+    }
+
+    /// Set confidence score
+    pub fn with_confidence(mut self, score: u8) -> Self {
+        self.confidence = score;
+        self
     }
 
     /// Match pattern against bytes

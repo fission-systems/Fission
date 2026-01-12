@@ -6,6 +6,19 @@ use super::msvc_sigs;
 use super::signature::FunctionSignature;
 use std::collections::HashMap;
 
+/// Result of signature identification with relation validation
+#[derive(Debug, Clone)]
+pub struct IdentifyResult {
+    /// The matched signature
+    pub signature: FunctionSignature,
+    /// Confidence score after relation validation (0-100)
+    pub confidence: u8,
+    /// Expected callees that were found in the call graph
+    pub matched_callees: Vec<String>,
+    /// Expected callers that were found in the call graph
+    pub matched_callers: Vec<String>,
+}
+
 /// CRT Signature Database
 ///
 /// Uses a first-byte index for faster signature matching. Most signatures
@@ -87,6 +100,68 @@ impl SignatureDatabase {
         }
 
         None
+    }
+
+    /// Try to match a function's bytes with call graph relation validation
+    ///
+    /// This provides Ghidra FID-style matching by:
+    /// 1. First matching byte patterns
+    /// 2. Then validating call graph relations if signature has constraints
+    /// 3. Rejecting matches that don't pass relation checks (if force_relation is set)
+    pub fn identify_with_relation(
+        &self,
+        bytes: &[u8],
+        func_addr: u64,
+        call_graph: &super::relation::CallGraph,
+    ) -> Option<IdentifyResult> {
+        // First, find all byte-pattern matches
+        let candidates = self.find_all_matches(bytes);
+
+        for sig in candidates {
+            let validation = super::relation::validate_relation(sig, func_addr, call_graph);
+
+            if validation.passed {
+                return Some(IdentifyResult {
+                    signature: sig.clone(),
+                    confidence: validation.confidence,
+                    matched_callees: validation.matched_callees,
+                    matched_callers: validation.matched_callers,
+                });
+            }
+        }
+
+        None
+    }
+
+    /// Find all byte-pattern matches (internal helper)
+    fn find_all_matches(&self, bytes: &[u8]) -> Vec<&FunctionSignature> {
+        let mut matches = Vec::new();
+
+        if bytes.is_empty() {
+            return matches;
+        }
+
+        let first_byte = bytes[0];
+
+        if let Some(indices) = self.first_byte_index.get(&first_byte) {
+            for &idx in indices {
+                if let Some(sig) = self.signatures.get(idx) {
+                    if sig.matches(bytes) {
+                        matches.push(sig);
+                    }
+                }
+            }
+        }
+
+        for &idx in &self.wildcard_signatures {
+            if let Some(sig) = self.signatures.get(idx) {
+                if sig.matches(bytes) {
+                    matches.push(sig);
+                }
+            }
+        }
+
+        matches
     }
 
     /// Get all signatures

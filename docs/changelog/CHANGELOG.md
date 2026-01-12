@@ -2,6 +2,18 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
+### Call Graph Relation Matching (2026-01-12)
+
+**🔗 FID False Positive Prevention (Ghidra Parity)**
+
+- **Call Graph Validation**: Implemented Ghidra-style relation matching that validates FID matches by verifying call graph relationships.
+- **`CallGraph` Structure**: New data structure to track function call relationships (caller/callee mappings) with O(1) lookup by address or name.
+- **`FunctionSignature` Extensions**: Added `expected_callees`, `expected_callers`, `force_relation`, and `confidence` fields for fine-grained match control.
+- **Validation API**: New `validate_relation()` function and `identify_with_relation()` method that combines byte-pattern matching with relation validation.
+- **Confidence Scoring**: Dynamically adjusts match confidence based on how many expected relations are found in the actual call graph.
+
+---
+
 ### C++ Analysis & FIDB Library Integration (2026-01-12)
 
 **🎯 C++ Decompilation Parity**
