@@ -16,8 +16,7 @@ mod tests;
 #[cfg(test)]
 mod tests_dead_bit;
 
-use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
-use std::collections::{HashMap, HashSet};
+use crate::pcode::{PcodeFunction, PcodeOpcode};
 
 pub use cse::CommonSubexpressionEliminator;
 pub use dead_code::DeadCodeEliminator;

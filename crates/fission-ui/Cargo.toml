@@ -35,3 +35,4 @@ sysinfo = "0.37.2"
 default = ["native_decomp"]
 native_decomp = ["fission-analysis/native_decomp", "dep:fission-ffi"]
 python = ["fission-analysis/python"]
+legacy_single_worker = []

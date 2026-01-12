@@ -19,7 +19,7 @@ impl MachoLoader {
             u32::read_be(&mut cursor).map_err(|e| err!(loader, "Invalid MachO Magic: {}", e))?;
 
         // Detect Props
-        let (is_64, is_swap) = match magic {
+        let (is_64, _is_swap) = match magic {
             MH_MAGIC => (false, false),
             MH_CIGAM => (false, true),
             MH_MAGIC_64 => (true, false),
@@ -27,30 +27,6 @@ impl MachoLoader {
             _ => return Err(err!(loader, "Not a Mach-O binary (magic: {:x})", magic)),
         };
 
-        let endian = if is_swap {
-            binrw::Endian::Little
-        } else {
-            binrw::Endian::Big
-        }; // Assuming host is Little? No.
-        // Wait, BE/LE depends on file format.
-        // MACH-O logic:
-        // CIGAM means "Swapped". If Host is LE, and file is CIGAM, then file is BE.
-        // If File is MAGIC, then file is same as Host.
-        // BUT binrw's Endian is "Target Format Endian".
-        // We know standard Mac is usually LE (Intel/ARM).
-        // However, PowerPC was BE.
-        // Let's assume standard definitions:
-        // MAGIC = 0xFEEDFACE (Big Endian representation of the value).
-        // If we read as BE and see 0xFEEDFACE, it matches.
-
-        // Let's rely on standard practice:
-        // Big Endian Magic: 0xFEEDFACE
-        // Little Endian Magic: 0xCEFAEDFE (bytes are FE ED FA CE reversed) - wait no.
-        // 0xFEEDFACE as u32 in LE is [CE, FA, ED, FE].
-        // If we read u32 BE and get 0xFEEDFACE, then file is BE.
-        // If we read u32 BE and get 0xCEFAEDFE, then bytes are [CE, FA, ED, FE], which means LE file.
-
-        // Let's just pass explicit Endian based on magic match.
         let endian = match magic {
             0xFEEDFACE => binrw::Endian::Big,
             0xFEEDFACF => binrw::Endian::Big,

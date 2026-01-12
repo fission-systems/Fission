@@ -11,6 +11,7 @@ All notable changes to the Fission project (November 2025 - January 2026).
 - Moved PE 64-bit detection into `fission-loader` and removed the UI-local helper.
 - Centralized SLA (Sleigh) directory resolution under `fission-core` config.
 - Deleted legacy GUI worker stub (`decomp_worker_old.rs`).
+- Refactored decompiler worker requests into explicit enum variants (decompile/load/clear/CFG).
 
 **🧪 Decompiler Diagnostics**
 

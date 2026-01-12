@@ -63,7 +63,7 @@ pub struct FissionApp {
     dbg_stop_tx: Option<crossbeam_channel::Sender<()>>,
 
     /// Decompile request sender (to worker thread)
-    decomp_request_tx: Sender<decomp_worker::DecompileRequest>,
+    decomp_request_tx: Sender<decomp_worker::WorkerRequest>,
 
     /// Latest request ID for debouncing
     latest_request_id: Arc<AtomicU64>,
@@ -483,7 +483,7 @@ impl FissionApp {
             MenuAction::ClearCache => {
                 let _ = self
                     .decomp_request_tx
-                    .send(decomp_worker::DecompileRequest::clear_cache());
+                .send(decomp_worker::WorkerRequest::clear_cache(String::new()));
                 self.state.log("[*] Decompiler cache clear requested");
             }
             MenuAction::ShowAbout => {

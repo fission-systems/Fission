@@ -18,111 +18,53 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-/// Request to decompile a function
 #[derive(Debug, Clone)]
-pub struct DecompileRequest {
-    /// Unique request ID for debouncing
+pub struct DecompileTask {
     pub request_id: u64,
-    /// Binary identifier (hash) for routing to correct worker
     pub binary_id: String,
-    /// Function bytes to decompile
-    pub bytes: Vec<u8>,
-    /// Base address
     pub address: u64,
-    /// Is 64-bit architecture
-    #[allow(dead_code)]
-    pub is_64bit: bool,
-    /// Is this a prefetch request (low priority, can be skipped)
-    #[allow(dead_code)]
-    pub is_prefetch: bool,
-    /// Is this a binary load request (loads full binary into context)
-    pub is_binary_load: bool,
-    /// Image base address for binary load (critical for address translation)
-    pub image_base: u64,
-    /// IAT symbols to inject into decompiler (address -> name)
-    pub iat_symbols: HashMap<u64, String>,
-    /// Global data symbols to improve global name cleanup
-    pub global_symbols: HashMap<u64, String>,
-    /// Known function symbols for on-demand lookups
-    pub functions: Vec<FunctionInfo>,
-    /// GDT types JSON path for Windows structure definitions
-    #[allow(dead_code)]
-    pub gdt_json_path: Option<String>,
-    /// Binary sections for memory mapping
-    pub sections: Vec<SectionInfo>,
-    /// Binary hash for persistent caching
-    pub binary_hash: String,
-    /// Is this a CFG analysis request
-    pub is_cfg_request: bool,
-    /// Is this a cache clear request
-    pub is_clear_cache: bool,
 }
 
-impl DecompileRequest {
+#[derive(Debug, Clone)]
+pub struct LoadBinaryRequest {
+    pub binary_id: String,
+    pub bytes: Vec<u8>,
+    pub image_base: u64,
+    pub iat_symbols: HashMap<u64, String>,
+    pub global_symbols: HashMap<u64, String>,
+    pub functions: Vec<FunctionInfo>,
     #[allow(dead_code)]
-    pub fn new(request_id: u64, bytes: Vec<u8>, address: u64, is_64bit: bool) -> Self {
-        Self {
+    pub gdt_json_path: Option<String>,
+    pub sections: Vec<SectionInfo>,
+    pub binary_hash: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CfgAnalysisRequest {
+    pub address: u64,
+    pub binary_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClearCacheRequest {
+    pub binary_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum WorkerRequest {
+    Decompile(DecompileTask),
+    LoadBinary(LoadBinaryRequest),
+    ClearCache(ClearCacheRequest),
+    CfgAnalysis(CfgAnalysisRequest),
+}
+
+impl WorkerRequest {
+    pub fn decompile(request_id: u64, binary_id: String, address: u64) -> Self {
+        Self::Decompile(DecompileTask {
             request_id,
-            binary_id: String::new(),
-            bytes,
+            binary_id,
             address,
-            is_64bit,
-            is_prefetch: false,
-            is_binary_load: false,
-            image_base: 0,
-            iat_symbols: HashMap::new(),
-            global_symbols: HashMap::new(),
-            functions: Vec::new(),
-            gdt_json_path: None,
-            sections: Vec::new(),
-            binary_hash: String::new(),
-            is_cfg_request: false,
-            is_clear_cache: false,
-        }
-    }
-
-    /// Create a request to clear the decompiler cache
-    pub fn clear_cache() -> Self {
-        Self {
-            request_id: 0,
-            binary_id: String::new(),
-            bytes: Vec::new(),
-            address: 0,
-            is_64bit: false,
-            is_prefetch: false,
-            is_binary_load: false,
-            image_base: 0,
-            iat_symbols: HashMap::new(),
-            global_symbols: HashMap::new(),
-            functions: Vec::new(),
-            gdt_json_path: None,
-            sections: Vec::new(),
-            binary_hash: String::new(),
-            is_cfg_request: false,
-            is_clear_cache: true,
-        }
-    }
-
-    /// Create a CFG analysis request
-    pub fn cfg_analysis(address: u64) -> Self {
-        Self {
-            request_id: 0,
-            binary_id: String::new(),
-            bytes: Vec::new(),
-            address,
-            is_64bit: false,
-            is_prefetch: false,
-            is_binary_load: false,
-            image_base: 0,
-            iat_symbols: HashMap::new(),
-            global_symbols: HashMap::new(),
-            functions: Vec::new(),
-            gdt_json_path: None,
-            sections: Vec::new(),
-            binary_hash: String::new(),
-            is_cfg_request: true,
-            is_clear_cache: false,
-        }
+        })
     }
 
     pub fn load_binary(
@@ -135,14 +77,9 @@ impl DecompileRequest {
         sections: Vec<SectionInfo>,
         binary_hash: String,
     ) -> Self {
-        Self {
-            request_id: 0,
+        Self::LoadBinary(LoadBinaryRequest {
             binary_id: binary_hash.clone(),
             bytes,
-            address: 0,
-            is_64bit: false,
-            is_prefetch: false,
-            is_binary_load: true,
             image_base,
             iat_symbols,
             global_symbols,
@@ -150,30 +87,23 @@ impl DecompileRequest {
             gdt_json_path,
             sections,
             binary_hash,
-            is_cfg_request: false,
-            is_clear_cache: false,
-        }
+        })
     }
 
-    #[allow(dead_code)]
-    pub fn prefetch(bytes: Vec<u8>, address: u64, is_64bit: bool) -> Self {
-        Self {
-            request_id: 0,
-            binary_id: String::new(),
-            bytes,
-            address,
-            is_64bit,
-            is_prefetch: true,
-            is_binary_load: false,
-            image_base: 0,
-            iat_symbols: HashMap::new(),
-            global_symbols: HashMap::new(),
-            functions: Vec::new(),
-            gdt_json_path: None,
-            sections: Vec::new(),
-            binary_hash: String::new(),
-            is_cfg_request: false,
-            is_clear_cache: false,
+    pub fn cfg_analysis(address: u64, binary_id: String) -> Self {
+        Self::CfgAnalysis(CfgAnalysisRequest { address, binary_id })
+    }
+
+    pub fn clear_cache(binary_id: String) -> Self {
+        Self::ClearCache(ClearCacheRequest { binary_id })
+    }
+
+    fn binary_id(&self) -> &str {
+        match self {
+            WorkerRequest::Decompile(req) => &req.binary_id,
+            WorkerRequest::LoadBinary(req) => &req.binary_id,
+            WorkerRequest::ClearCache(req) => &req.binary_id,
+            WorkerRequest::CfgAnalysis(req) => &req.binary_id,
         }
     }
 }
@@ -186,7 +116,7 @@ impl DecompileRequest {
 #[cfg(feature = "native_decomp")]
 struct BinaryWorker {
     /// Channel to send requests to this worker
-    tx: crossbeam_channel::Sender<DecompileRequest>,
+    tx: crossbeam_channel::Sender<WorkerRequest>,
 }
 
 /// Pool of per-binary decompiler workers
@@ -236,16 +166,10 @@ impl DecompilerPool {
         self.workers.get(binary_id).unwrap()
     }
 
-    fn dispatch(&mut self, request: DecompileRequest) {
-        let binary_id = if request.binary_id.is_empty() {
-            // Use binary_hash as fallback if binary_id not set
-            if request.binary_hash.is_empty() {
-                "default".to_string()
-            } else {
-                request.binary_hash.clone()
-            }
-        } else {
-            request.binary_id.clone()
+    fn dispatch(&mut self, request: WorkerRequest) {
+        let binary_id = match request.binary_id() {
+            "" => "default".to_string(),
+            id => id.to_string(),
         };
 
         let worker = self.get_or_create_worker(&binary_id);
@@ -255,7 +179,7 @@ impl DecompilerPool {
 
 #[cfg(feature = "native_decomp")]
 pub fn spawn_worker(
-    request_rx: Receiver<DecompileRequest>,
+    request_rx: Receiver<WorkerRequest>,
     result_tx: Sender<AsyncMessage>,
     latest_request_id: Arc<AtomicU64>,
 ) {
@@ -290,7 +214,7 @@ pub fn spawn_worker(
 #[cfg(feature = "native_decomp")]
 fn binary_worker_loop(
     binary_id: String,
-    request_rx: crossbeam_channel::Receiver<DecompileRequest>,
+    request_rx: crossbeam_channel::Receiver<WorkerRequest>,
     result_tx: Sender<AsyncMessage>,
     latest_request_id: Arc<AtomicU64>,
 ) {
@@ -316,53 +240,45 @@ fn binary_worker_loop(
             }
         };
 
-        // Handle CFG analysis requests
-        if request.is_cfg_request {
-            let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
-                address: request.address,
-                block_count: 0,
-                edge_count: 0,
-                cyclomatic_complexity: 0,
-                max_nesting_depth: 0,
-                loops: Vec::new(),
-                blocks: Vec::new(),
-                dot_content: String::new(),
-            });
-            continue;
-        }
-
-        // Handle cache clear requests
-        if request.is_clear_cache {
-            if let Some(ref mut decomp) = native_decomp {
-                decomp.clear_cache();
-                crate::core::logging::info(&format!(
-                    "[decomp-worker-{}] Cache cleared",
-                    &binary_id[..8.min(binary_id.len())]
-                ));
+        match request {
+            WorkerRequest::CfgAnalysis(req) => {
+                let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
+                    address: req.address,
+                    block_count: 0,
+                    edge_count: 0,
+                    cyclomatic_complexity: 0,
+                    max_nesting_depth: 0,
+                    loops: Vec::new(),
+                    blocks: Vec::new(),
+                    dot_content: String::new(),
+                });
             }
-            continue;
+            WorkerRequest::ClearCache(_) => {
+                if let Some(ref mut decomp) = native_decomp {
+                    decomp.clear_cache();
+                    crate::core::logging::info(&format!(
+                        "[decomp-worker-{}] Cache cleared",
+                        &binary_id[..8.min(binary_id.len())]
+                    ));
+                }
+            }
+            WorkerRequest::LoadBinary(req) => {
+                handle_binary_load_for_worker(&req, &mut native_decomp, &result_tx);
+            }
+            WorkerRequest::Decompile(req) => {
+                if req.request_id != latest_request_id.load(Ordering::SeqCst) {
+                    continue;
+                }
+                handle_decompile_for_worker(&req, &mut native_decomp, &result_tx);
+            }
         }
-
-        // Handle binary load requests
-        if request.is_binary_load {
-            handle_binary_load_for_worker(&request, &mut native_decomp, &result_tx);
-            continue;
-        }
-
-        // Debouncing: Skip if this is not the latest request
-        if request.request_id != latest_request_id.load(Ordering::SeqCst) {
-            continue;
-        }
-
-        // Handle decompilation request
-        handle_decompile_for_worker(&request, &mut native_decomp, &result_tx);
     }
 }
 
 /// Handle binary load for a specific worker
 #[cfg(feature = "native_decomp")]
 fn handle_binary_load_for_worker(
-    request: &DecompileRequest,
+    request: &LoadBinaryRequest,
     native_decomp: &mut Option<fission_analysis::analysis::decomp::CachingDecompiler>,
     result_tx: &Sender<AsyncMessage>,
 ) {
@@ -455,7 +371,7 @@ fn handle_binary_load_for_worker(
 /// Handle decompilation for a specific worker
 #[cfg(feature = "native_decomp")]
 fn handle_decompile_for_worker(
-    request: &DecompileRequest,
+    request: &DecompileTask,
     native_decomp: &mut Option<fission_analysis::analysis::decomp::CachingDecompiler>,
     result_tx: &Sender<AsyncMessage>,
 ) {
@@ -485,7 +401,7 @@ fn handle_decompile_for_worker(
 #[cfg(all(feature = "native_decomp", feature = "legacy_single_worker"))]
 fn worker_loop_native(
     worker_id: usize,
-    request_rx: Arc<Mutex<Receiver<DecompileRequest>>>,
+    request_rx: Arc<Mutex<Receiver<WorkerRequest>>>,
     result_tx: Sender<AsyncMessage>,
     native_decomp: Arc<Mutex<Option<fission_analysis::analysis::decomp::CachingDecompiler>>>,
     latest_request_id: Arc<AtomicU64>,
@@ -515,53 +431,47 @@ fn worker_loop_native(
             }
         };
 
-        // Handle CFG analysis requests
-        if request.is_cfg_request {
-            let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
-                address: request.address,
-                block_count: 0,
-                edge_count: 0,
-                cyclomatic_complexity: 0,
-                max_nesting_depth: 0,
-                loops: Vec::new(),
-                blocks: Vec::new(),
-                dot_content: String::new(),
-            });
-            continue;
-        }
-
-        // Handle cache clear requests
-        if request.is_clear_cache {
-            let mut decomp_guard = match native_decomp.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            if let Some(ref mut decomp) = *decomp_guard {
-                decomp.clear_cache();
-                crate::core::logging::info("[decomp-worker] Persistent decompiler cache cleared");
+        match request {
+            WorkerRequest::CfgAnalysis(req) => {
+                let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
+                    address: req.address,
+                    block_count: 0,
+                    edge_count: 0,
+                    cyclomatic_complexity: 0,
+                    max_nesting_depth: 0,
+                    loops: Vec::new(),
+                    blocks: Vec::new(),
+                    dot_content: String::new(),
+                });
             }
-            continue;
+            WorkerRequest::ClearCache(_) => {
+                let mut decomp_guard = match native_decomp.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                if let Some(ref mut decomp) = *decomp_guard {
+                    decomp.clear_cache();
+                    crate::core::logging::info(
+                        "[decomp-worker] Persistent decompiler cache cleared",
+                    );
+                }
+            }
+            WorkerRequest::LoadBinary(req) => {
+                _handle_binary_load_native(&req, &native_decomp, &result_tx);
+            }
+            WorkerRequest::Decompile(req) => {
+                if req.request_id != latest_request_id.load(Ordering::SeqCst) {
+                    continue;
+                }
+                handle_decompile_native(&req, &native_decomp, &result_tx);
+            }
         }
-
-        // Handle binary load requests
-        if request.is_binary_load {
-            _handle_binary_load_native(&request, &native_decomp, &result_tx);
-            continue;
-        }
-
-        // Debouncing: Skip if this is not the latest request
-        if request.request_id != latest_request_id.load(Ordering::SeqCst) {
-            continue;
-        }
-
-        // Decompile the function
-        handle_decompile_native(&request, &native_decomp, &result_tx);
     }
 }
 
 #[cfg(feature = "native_decomp")]
 fn _handle_binary_load_native(
-    request: &DecompileRequest,
+    request: &LoadBinaryRequest,
     native_decomp: &Arc<Mutex<Option<fission_analysis::analysis::decomp::CachingDecompiler>>>,
     result_tx: &Sender<AsyncMessage>,
 ) {
@@ -711,7 +621,7 @@ fn _handle_binary_load_native(
 
 #[cfg(feature = "native_decomp")]
 fn _handle_decompile_native(
-    request: &DecompileRequest,
+    request: &DecompileTask,
     native_decomp: &Arc<Mutex<Option<fission_analysis::analysis::decomp::CachingDecompiler>>>,
     result_tx: &Sender<AsyncMessage>,
 ) {
@@ -749,7 +659,7 @@ fn _handle_decompile_native(
 
 #[cfg(not(feature = "native_decomp"))]
 pub fn spawn_worker(
-    request_rx: Receiver<DecompileRequest>,
+    request_rx: Receiver<WorkerRequest>,
     result_tx: Sender<AsyncMessage>,
     _latest_request_id: Arc<AtomicU64>,
 ) {
@@ -762,24 +672,30 @@ pub fn spawn_worker(
         .name("decomp-worker-stub".to_string())
         .spawn(move || {
             for request in request_rx {
-                if request.is_cfg_request {
-                    let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
-                        address: request.address,
-                        block_count: 0,
-                        edge_count: 0,
-                        cyclomatic_complexity: 1,
-                        max_nesting_depth: 0,
-                        loops: Vec::new(),
-                        blocks: Vec::new(),
-                        dot_content: String::new(),
-                    });
-                } else if request.is_binary_load {
-                    // Context loaded - no specific message needed
-                } else {
-                    let _ = result_tx.send(AsyncMessage::DecompileError {
-                        address: request.address,
-                        error: "Native decompiler not available (build with --features native_decomp)".to_string(),
-                    });
+                match request {
+                    WorkerRequest::CfgAnalysis(req) => {
+                        let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
+                            address: req.address,
+                            block_count: 0,
+                            edge_count: 0,
+                            cyclomatic_complexity: 1,
+                            max_nesting_depth: 0,
+                            loops: Vec::new(),
+                            blocks: Vec::new(),
+                            dot_content: String::new(),
+                        });
+                    }
+                    WorkerRequest::LoadBinary(_) => {
+                        // Context loaded - no specific message needed
+                    }
+                    WorkerRequest::ClearCache(_) => {}
+                    WorkerRequest::Decompile(req) => {
+                        let _ = result_tx.send(AsyncMessage::DecompileError {
+                            address: req.address,
+                            error: "Native decompiler not available (build with --features native_decomp)"
+                                .to_string(),
+                        });
+                    }
                 }
             }
         })
