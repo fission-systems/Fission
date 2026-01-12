@@ -30,6 +30,19 @@ pub fn analyze_functions(state: &mut AppState) {
             "[✓] Found {} new internal functions ({} total)",
             discovered, after_count
         ));
+
+        if let (Some(ref binary), Some(ref xref_db)) = (
+            state.analysis.domain.loaded_binary.as_ref(),
+            state.analysis.domain.xref_db.as_ref(),
+        ) {
+            let call_graph = crate::analysis::callgraph::CallGraph::build_from_xrefs(
+                &binary.functions,
+                xref_db,
+                CONFIG.analysis.function_address_range as u64,
+            );
+            state.analysis.domain.call_graph = Some(call_graph);
+            state.viewmodels.xrefs.clear();
+        }
     } else {
         state.log("[!] No binary loaded");
     }

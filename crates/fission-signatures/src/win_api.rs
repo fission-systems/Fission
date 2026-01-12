@@ -96,6 +96,10 @@ impl WinApiDatabase {
         self.signatures.insert(sig.name.clone(), sig);
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &ApiSignature> {
+        self.signatures.values()
+    }
+
     fn load_kernel32(&mut self) {
         // Memory functions with enum groups for context-aware constant substitution
         self.add(ApiSignature::with_enums(

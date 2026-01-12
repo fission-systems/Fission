@@ -6,6 +6,12 @@
 
 #include <stdio.h>
 
+#if defined(_MSC_VER)
+#define NOINLINE __declspec(noinline)
+#else
+#define NOINLINE __attribute__((noinline))
+#endif
+
 // Test 1: Large switch with fall-through
 const char* get_day_type(int day) {
     switch (day) {
@@ -107,8 +113,49 @@ int parse_simple_command(const char* str) {
     return -1;
 }
 
-int main() {
+// Test 5: Dense switch for jump-table recovery
+NOINLINE int dense_case0(int x) { return (x * 3) ^ 0x11; }
+NOINLINE int dense_case1(int x) { return (x + 7) * 5; }
+NOINLINE int dense_case2(int x) { return (x << 2) + 9; }
+NOINLINE int dense_case3(int x) { return (x ^ 0x5a) + 1; }
+NOINLINE int dense_case4(int x) { return (x * x) - 3; }
+NOINLINE int dense_case5(int x) { return (x + 13) ^ 0x33; }
+NOINLINE int dense_case6(int x) { return (x * 11) - 4; }
+NOINLINE int dense_case7(int x) { return (x << 1) + 21; }
+NOINLINE int dense_case8(int x) { return (x + 29) ^ 0x7; }
+NOINLINE int dense_case9(int x) { return (x * 9) + 2; }
+NOINLINE int dense_case10(int x) { return (x - 5) ^ 0x2d; }
+NOINLINE int dense_case11(int x) { return (x << 3) - 6; }
+NOINLINE int dense_case12(int x) { return (x + 1) * 17; }
+NOINLINE int dense_case13(int x) { return (x ^ 0x3c) - 8; }
+NOINLINE int dense_case14(int x) { return (x * 13) + 19; }
+NOINLINE int dense_case15(int x) { return (x + 31) ^ 0x55; }
+
+NOINLINE int dense_switch_table(int code) {
+    switch (code) {
+        case 0: return dense_case0(code);
+        case 1: return dense_case1(code);
+        case 2: return dense_case2(code);
+        case 3: return dense_case3(code);
+        case 4: return dense_case4(code);
+        case 5: return dense_case5(code);
+        case 6: return dense_case6(code);
+        case 7: return dense_case7(code);
+        case 8: return dense_case8(code);
+        case 9: return dense_case9(code);
+        case 10: return dense_case10(code);
+        case 11: return dense_case11(code);
+        case 12: return dense_case12(code);
+        case 13: return dense_case13(code);
+        case 14: return dense_case14(code);
+        case 15: return dense_case15(code);
+        default: return -1;
+    }
+}
+
+int main(int argc, char** argv) {
     printf("=== Switch-Case Test ===\n\n");
+    (void)argv;
     
     // Test 1
     printf("Day 3: %s\n", get_day_type(3));
@@ -125,6 +172,13 @@ int main() {
     // Test 4
     parse_simple_command("help");
     parse_simple_command("quit");
+
+    // Test 5
+    {
+        volatile int selector = argc;
+        int result = dense_switch_table(selector & 0x3f);
+        printf("Dense switch: %d\n", result);
+    }
     
     return 0;
 }

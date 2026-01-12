@@ -19,6 +19,17 @@ All notable changes to the Fission project (November 2025 - January 2026).
 - Added detailed TypePropagator logging for STORE/CALL pointer inference (high-type visibility).
 - Added timestamped run logs to `compare_decompilers_v2.py` for reproducible comparisons.
 
+**🧠 Decompiler Control Flow (Jump Tables & Tail Calls)**
+
+- Enabled jump-table recovery options (record jump-table loads, larger table cap).
+- Added tail-call flow overrides to preserve case dispatch calls in switch tables.
+- Relaxed inline-only restriction and added retry path for inline-loaded functions.
+
+**🧰 Tooling & Tests**
+
+- PyGhidra runner now uses a fresh temp project per run to avoid stale analysis.
+- Added dense switch-case test to force jump-table codegen in O2 builds.
+
 **🧯 Error Handling (UI)**
 
 - Shifted decompilation error formatting to the UI handler layer; workers now emit structured errors.

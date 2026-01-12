@@ -3,6 +3,7 @@
 //! Contains decompilation, disassembly, binary loading, patching, detection, CFG analysis, and xrefs.
 
 pub mod cfg;
+pub mod callgraph;
 pub mod decomp;
 pub mod optimizer;
 pub mod patch;
@@ -27,6 +28,7 @@ pub use cfg::{
     ComplexityAnalyzer, ControlFlowGraph, DominatorTree, DotOptions, EdgeKind, Loop, LoopAnalyzer,
     LoopKind,
 };
+pub use callgraph::{CallEdge, CallGraph};
 pub use optimizer::{Optimizer, OptimizerConfig};
 pub use patch::{Patch, PatchManager, QuickPatch};
 pub use xrefs::{Xref, XrefDatabase, XrefType};

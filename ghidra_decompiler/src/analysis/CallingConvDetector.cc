@@ -247,8 +247,14 @@ void CallingConvDetector::apply(Funcdata* fd, ConvType type) {
             model = arch->getModel("__fastcall");
             break;
         case CONV_SYSV_X64:
-            // Linux/Mac x64 uses "__stdcall" (System V ABI)
-            model = arch->getModel("__stdcall");
+            // Linux/Mac x64 System V ABI
+            model = arch->getModel("__sysv_abi");
+            if (!model) {
+                model = arch->getModel("sysv");
+            }
+            if (!model) {
+                model = arch->getModel("__cdecl");
+            }
             break;
         case CONV_CDECL:
             model = arch->getModel("__cdecl");

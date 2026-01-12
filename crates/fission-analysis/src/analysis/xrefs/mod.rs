@@ -79,6 +79,11 @@ impl XrefDatabase {
         self.total_count
     }
 
+    /// Iterate over all xrefs stored in the database.
+    pub fn iter(&self) -> impl Iterator<Item = &Xref> {
+        self.refs_from.values().flatten()
+    }
+
     /// Build xref database from disassembled code
     pub fn build_from_binary(binary: &fission_loader::loader::LoadedBinary) -> Self {
         let mut db = Self::new();

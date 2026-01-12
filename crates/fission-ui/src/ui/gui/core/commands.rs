@@ -154,6 +154,7 @@ impl Command for RenameFunctionCommand {
             func.name = self.new_name.clone();
 
             update_binary(state, binary);
+            state.viewmodels.xrefs.clear();
             state.log(format!(
                 "Renamed function 0x{:x} to '{}'",
                 self.address, self.new_name
@@ -178,6 +179,7 @@ impl Command for RenameFunctionCommand {
             func.name = self.old_name.clone();
 
             update_binary(state, binary);
+            state.viewmodels.xrefs.clear();
             state.log(format!(
                 "Reverted rename of function 0x{:x} to '{}'",
                 self.address, self.old_name

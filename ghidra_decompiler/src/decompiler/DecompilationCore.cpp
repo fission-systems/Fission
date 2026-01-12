@@ -10,8 +10,10 @@
 #include "fission/decompiler/AnalysisPipeline.h"
 #include "libdecomp.hh"
 #include "address.hh"
+#include "block.hh"
 #include "funcdata.hh"
 #include "op.hh"
+#include "override.hh"
 #include "varnode.hh"
 
 #include <iostream>
@@ -48,6 +50,64 @@ static std::string json_escape(const std::string& input) {
         }
     }
     return output;
+}
+
+static bool apply_tailcall_flow_overrides(
+    fission::ffi::DecompContext* ctx,
+    ghidra::Funcdata* fd
+) {
+    if (!ctx || !fd || !ctx->arch || !ctx->arch->symboltab) {
+        return false;
+    }
+
+    ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
+    if (!global_scope) {
+        return false;
+    }
+
+    ghidra::AddrSpace* code_space = ctx->arch->getDefaultCodeSpace();
+    if (!code_space) {
+        return false;
+    }
+
+    bool applied = false;
+    for (auto it = fd->beginOpAll(); it != fd->endOpAll(); ++it) {
+        ghidra::PcodeOp* op = it->second;
+        if (!op || op->code() != ghidra::CPUI_BRANCH) {
+            continue;
+        }
+        if (op->getParent() && op->getParent()->lastOp() != op) {
+            continue;
+        }
+        ghidra::Varnode* dest = op->getIn(0);
+        if (!dest) {
+            continue;
+        }
+
+        ghidra::Address dest_addr = dest->getAddr();
+        if (dest_addr.isInvalid()) {
+            continue;
+        }
+
+        uint64_t target_offset = dest_addr.getOffset();
+        if (dest_addr.getSpace() != code_space && !dest->isConstant()) {
+            continue;
+        }
+        if (target_offset == fd->getAddress().getOffset()) {
+            continue;
+        }
+
+        ghidra::Address target(code_space, target_offset);
+        ghidra::Funcdata* target_fd = global_scope->findFunction(target);
+        if (!target_fd || target_fd == fd) {
+            continue;
+        }
+
+        fd->getOverride().insertFlowOverride(op->getAddr(), ghidra::Override::CALL_RETURN);
+        applied = true;
+    }
+
+    return applied;
 }
 
 // ============================================================================
@@ -132,10 +192,11 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Failed to get function data");
     }
     
-    // Check if function is marked as inline - these cannot be decompiled directly
+    // If function is marked inline, warn and clear inline flag for standalone decompilation
     if (fd->getFuncProto().isInline()) {
-        std::cerr << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec << " is marked as inline" << std::endl;
-        throw std::runtime_error("Cannot decompile inline function - function is marked for inlining");
+        std::cerr << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec
+                  << " is marked inline; forcing standalone decompilation" << std::endl;
+        fd->getFuncProto().setInline(false);
     }
     
     // Check if function is already being decompiled (recursive call)
@@ -168,22 +229,37 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     } catch (...) {
         std::cerr << "[DecompilerCore] ERROR: Unknown exception in followFlow" << std::endl;
     }
+
+    if (apply_tailcall_flow_overrides(ctx, fd)) {
+        std::cerr << "[DecompilerCore] Applied tail-call flow overrides; restarting flow analysis"
+                  << std::endl;
+        if (ctx->arch) {
+            ctx->arch->clearAnalysis(fd);
+        } else {
+            fd->clear();
+        }
+        try {
+            fd->followFlow(start_addr, end_addr);
+            std::cerr << "[DecompilerCore] Control flow analysis complete (override pass)" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "[DecompilerCore] ERROR in followFlow (override pass): " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[DecompilerCore] ERROR: Unknown exception in followFlow (override pass)" << std::endl;
+        }
+    }
     
     // ========================================================================
-    // Calling Convention Application (Binary Format-based)
+    // Calling Convention Detection + Application
     // ========================================================================
-    // For Windows PE binaries, force MS x64 calling convention
-    // For Unix/Mac binaries (Mach-O, ELF), it will use System V ABI by default
     try {
-        if (ctx->is_64bit) {
-            // Assume Windows PE for now - can be extended with binary format detection
-            ghidra::ProtoModel* model = ctx->arch->getModel("__fastcall");  // MS x64
-            if (model) {
-                ghidra::FuncProto& proto = fd->getFuncProto();
-                proto.setModel(model);
-                std::cerr << "[DecompilerCore] Applied MS x64 calling convention (__fastcall)" << std::endl;
-            }
+        fission::analysis::CallingConvDetector detector(ctx->arch.get());
+        auto conv = detector.detect(fd);
+        if (conv == fission::analysis::CallingConvDetector::CONV_UNKNOWN) {
+            conv = ctx->is_64bit
+                ? fission::analysis::CallingConvDetector::CONV_MS_X64
+                : fission::analysis::CallingConvDetector::CONV_CDECL;
         }
+        detector.apply(fd, conv);
     } catch (const std::exception& e) {
         std::cerr << "[DecompilerCore] ERROR applying calling convention: " << e.what() << std::endl;
     }
@@ -195,9 +271,26 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     }
 
     // Enforce GDT-based and built-in prototypes before action reset.
-    if (!ctx->symbols.empty()) {
+    {
         fission::types::PrototypeEnforcer proto_enforcer;
-        proto_enforcer.enforce_iat_prototypes(ctx->arch.get(), ctx->symbols);
+        if (!ctx->symbols.empty()) {
+            proto_enforcer.enforce_iat_prototypes(ctx->arch.get(), ctx->symbols);
+        }
+
+        std::string func_name;
+        auto it = ctx->symbols.find(addr);
+        if (it != ctx->symbols.end()) {
+            func_name = it->second;
+        } else {
+            auto it_global = ctx->global_symbols.find(addr);
+            if (it_global != ctx->global_symbols.end()) {
+                func_name = it_global->second;
+            }
+        }
+
+        if (!func_name.empty()) {
+            proto_enforcer.enforce_single_prototype(ctx->arch.get(), addr, func_name);
+        }
     }
 
     // CRITICAL: Reset action state for this function AFTER prototypes are applied
@@ -210,7 +303,21 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     try {
         current_action->perform(*fd);
     } catch (const ghidra::LowlevelError& e) {
-        throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+        std::string msg = e.explain;
+        if (msg.find("Function loaded for inlining") != std::string::npos) {
+            std::cerr << "[DecompilerCore] WARNING: Inline-loaded function, clearing analysis and retrying"
+                      << std::endl;
+            if (ctx->arch) {
+                ctx->arch->clearAnalysis(fd);
+            } else {
+                fd->clear();
+            }
+            fd->getFuncProto().setInline(false);
+            current_action->reset(*fd);
+            current_action->perform(*fd);
+        } else {
+            throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+        }
     } catch (const std::exception& e) {
         throw;
     } catch (...) {
