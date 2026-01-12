@@ -2,6 +2,19 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
+### C++ Analysis & FIDB Library Integration (2026-01-12)
+
+**🎯 C++ Decompilation Parity**
+
+- **Native Demangling**: Integrated `abi::__cxa_demangle` into the post-processing pipeline to automatically recover C++ class and method names.
+- **`this` Pointer Normalization**: Implemented a heuristic pass to identify member functions and rename `param_1` to `this`, including type inference for the object pointer (e.g., `Circle *this`).
+- **High Similarity Scores**: Improved C++ virtual function similarity from 50% to **75%** through structural normalization.
+
+**📚 FIDB Library Expansion**
+
+- **Standard Signature Integration**: Integrated 47+ standard FIDB (Function ID Databases) from `ghidra-fidb-repo` into `utils/signatures/fidb/`.
+- **Broader Platform Support**: Added signatures for `libc`, `openssl`, `qt5`, and `SDL` across multiple architectures (x86, ARM, MIPS, PowerPC).
+
 ---
 
 ### Mach-O Loader & Dedecompilation Style Improvements (2026-01-12)
