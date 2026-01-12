@@ -13,7 +13,7 @@ pub fn process_messages(
     state: &mut AppState,
     rx: &Receiver<AsyncMessage>,
     tx: &Sender<AsyncMessage>,
-    decomp_tx: &Sender<super::decomp_worker::DecompileRequest>,
+    decomp_tx: &Sender<super::decomp_worker::WorkerRequest>,
     req_id: &std::sync::Arc<std::sync::atomic::AtomicU64>,
     #[cfg(target_os = "windows")] dbg_event_rx: &mut Option<
         crossbeam_channel::Receiver<crate::debug::types::DebugEvent>,
@@ -72,7 +72,7 @@ pub fn process_messages(
 
             AsyncMessage::CfgAnalysisRequest { address } => {
                 // Send CFG request to worker
-                let request = super::decomp_worker::DecompileRequest::cfg_analysis(address);
+                let request = super::decomp_worker::WorkerRequest::cfg_analysis(address, String::new());
                 let _ = decomp_tx.send(request);
                 state.log(format!("[*] CFG analysis started for 0x{:x}", address));
             }

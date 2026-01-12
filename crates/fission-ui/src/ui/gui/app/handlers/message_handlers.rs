@@ -13,7 +13,7 @@ use super::super::decomp_worker;
 pub fn handle_binary_loaded(
     state: &mut AppState,
     binary: Arc<LoadedBinary>,
-    decomp_tx: &Sender<decomp_worker::DecompileRequest>,
+    decomp_tx: &Sender<decomp_worker::WorkerRequest>,
 ) {
     // Note: Internal function discovery now disabled for fast loading
     // Can be triggered separately via "Analyze" button
@@ -115,7 +115,7 @@ pub fn handle_binary_loaded(
         binary.image_base
     ));
 
-    let request = decomp_worker::DecompileRequest::load_binary(
+    let request = decomp_worker::WorkerRequest::load_binary(
         binary.data.clone(),
         binary.image_base,
         combined_symbols,
@@ -327,7 +327,7 @@ pub fn handle_save_project(state: &mut AppState, path: String) {
 pub fn handle_load_project(
     state: &mut AppState,
     path: String,
-    decomp_tx: &Sender<decomp_worker::DecompileRequest>,
+    decomp_tx: &Sender<decomp_worker::WorkerRequest>,
     req_id: &Arc<std::sync::atomic::AtomicU64>,
 ) {
     use fission_analysis::app::project::AnalysisProject;
@@ -379,7 +379,7 @@ pub fn handle_project_loaded(
     state: &mut AppState,
     path: String,
     binaries: Vec<Arc<LoadedBinary>>,
-    decomp_tx: &Sender<decomp_worker::DecompileRequest>,
+    decomp_tx: &Sender<decomp_worker::WorkerRequest>,
 ) {
     if binaries.is_empty() {
         state.log(format!("[!] No binaries found in folder: {}", path));

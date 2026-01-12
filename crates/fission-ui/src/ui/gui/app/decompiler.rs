@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 // use std::time::Instant;
 
-use super::decomp_worker::DecompileRequest;
+use super::decomp_worker::WorkerRequest;
 use crate::analysis::disasm::DisasmEngine;
 use crate::core::config::CONFIG;
 // use crate::ui::gui::core::domain::CachedDecompile;
@@ -15,7 +15,7 @@ use fission_loader::loader::FunctionInfo;
 /// Decompile a function (sends request to worker thread)
 pub fn decompile_function(
     state: &mut AppState,
-    decomp_tx: &Sender<DecompileRequest>,
+    decomp_tx: &Sender<WorkerRequest>,
     latest_request_id: &Arc<AtomicU64>,
     func: &FunctionInfo,
 ) {
@@ -136,32 +136,7 @@ pub fn decompile_function(
     latest_request_id.store(request_id, Ordering::SeqCst);
 
     // Send request to worker thread (non-blocking)
-    // Send request to worker thread (non-blocking)
-    // Optimization: If decompiler context is loaded, send empty bytes to use persistent memory
-    let request_bytes = if state.analysis.domain.decompiler_context_loaded {
-        Vec::new()
-    } else {
-        bytes.to_vec()
-    };
-
-    let request = DecompileRequest {
-        request_id,
-        binary_id: binary_hash.clone(),
-        bytes: request_bytes,
-        address,
-        is_64bit,
-        is_prefetch: false,
-        is_binary_load: false,
-        image_base: 0,
-        iat_symbols: std::collections::HashMap::new(),
-        global_symbols: std::collections::HashMap::new(),
-        functions: Vec::new(),
-        gdt_json_path: None,
-        sections: Vec::new(),
-        binary_hash,
-        is_cfg_request: false,
-        is_clear_cache: false,
-    };
+    let request = WorkerRequest::decompile(request_id, binary_hash, address);
 
     if let Err(e) = decomp_tx.send(request) {
         state.log(format!("[!] Failed to send decompile request: {}", e));

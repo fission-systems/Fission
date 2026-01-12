@@ -37,5 +37,6 @@ pub(super) struct OpCodeDef {
     pub code: u16,
     pub name: &'static str,
     pub operand: OperandType,
+    #[allow(dead_code)]
     pub size: u8,
 }

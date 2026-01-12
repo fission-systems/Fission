@@ -1,4 +1,4 @@
-use super::decomp_worker::DecompileRequest;
+use super::decomp_worker::WorkerRequest;
 use crate::core::config::CONFIG;
 use crate::ui::gui::core::state::{AppState, EditorTab};
 use crossbeam_channel::Sender;
@@ -38,7 +38,7 @@ pub fn analyze_functions(state: &mut AppState) {
 pub fn navigate_to_address(
     state: &mut AppState,
     addr: u64,
-    decomp_tx: &Sender<DecompileRequest>,
+    decomp_tx: &Sender<WorkerRequest>,
     req_id: &Arc<AtomicU64>,
 ) {
     // 1. Record current location before jump
@@ -101,7 +101,7 @@ pub fn push_navigation(state: &mut AppState, addr: u64) {
 
 pub fn navigate_back(
     state: &mut AppState,
-    decomp_tx: &Sender<DecompileRequest>,
+    decomp_tx: &Sender<WorkerRequest>,
     req_id: &Arc<AtomicU64>,
 ) {
     if let Some(target_addr) = state.ui.back_stack.pop() {
@@ -123,7 +123,7 @@ pub fn navigate_back(
 
 pub fn navigate_forward(
     state: &mut AppState,
-    decomp_tx: &Sender<DecompileRequest>,
+    decomp_tx: &Sender<WorkerRequest>,
     req_id: &Arc<AtomicU64>,
 ) {
     if let Some(target_addr) = state.ui.forward_stack.pop() {
@@ -146,7 +146,7 @@ pub fn navigate_forward(
 fn jump_to_address_internal(
     state: &mut AppState,
     addr: u64,
-    decomp_tx: &Sender<DecompileRequest>,
+    decomp_tx: &Sender<WorkerRequest>,
     req_id: &Arc<AtomicU64>,
 ) {
     let functions: Vec<FunctionInfo> = state
@@ -170,7 +170,7 @@ fn jump_to_address_internal(
 pub fn open_function_tabs(
     state: &mut AppState,
     func: &FunctionInfo,
-    decomp_tx: &Sender<DecompileRequest>,
+    decomp_tx: &Sender<WorkerRequest>,
     req_id: &Arc<AtomicU64>,
 ) {
     let display_name = state
@@ -205,7 +205,7 @@ pub fn open_function_tabs(
 
 pub fn batch_decompile_project(
     state: &mut AppState,
-    decomp_tx: &Sender<DecompileRequest>,
+    decomp_tx: &Sender<WorkerRequest>,
     req_id: &Arc<AtomicU64>,
 ) {
     // Clone project binaries to avoid borrow checker issues

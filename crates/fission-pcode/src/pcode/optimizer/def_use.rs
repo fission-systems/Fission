@@ -303,7 +303,7 @@ impl DefUseTracker {
         // 2. Identify "Critical" operations (Store, Branch, Return, Call). Mark their inputs as fully consumed (u64::MAX).
         // 3. Propagate backwards.
 
-        let mut changed = true;
+        let mut changed;
         let max_iterations = 10;
 
         // Initialize:
@@ -425,7 +425,6 @@ impl DefUseTracker {
                                 } else {
                                     0
                                 };
-                                let size = op.output.as_ref().map(|o| o.size).unwrap_or(4);
                                 // Create mask for the slice in B's space
                                 // The consumed bits of A (input_consume_req) map to B at (req << (offset*8))
                                 let shifted_req = input_consume_req << (offset * 8);

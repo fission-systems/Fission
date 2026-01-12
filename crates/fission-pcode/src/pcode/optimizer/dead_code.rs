@@ -3,7 +3,7 @@
 //! Removes operations whose outputs are never used, except for operations
 //! with side effects (stores, calls, returns, branches).
 
-use crate::pcode::{PcodeFunction, PcodeOpcode, Varnode};
+use crate::pcode::{PcodeFunction, PcodeOpcode};
 use std::collections::HashSet;
 
 /// Dead code eliminator

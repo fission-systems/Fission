@@ -93,6 +93,7 @@ struct MethodRow {
     flags: u16,
     name: String,
     signature: Vec<u8>,
+    #[allow(dead_code)]
     param_list: u32,
 }
 
@@ -109,7 +110,7 @@ pub fn parse_metadata(
     metadata: &[u8],
     runtime_version: Option<String>,
 ) -> DotNetResult<DotNetMetadata> {
-    let (header_version, streams, mut offset) = parse_metadata_header(metadata)?;
+    let (header_version, streams, _offset) = parse_metadata_header(metadata)?;
 
     let mut stream_map = Streams::default();
     for stream in streams {
@@ -164,7 +165,7 @@ pub fn parse_metadata(
     let param_index_size = table_index_size(row_counts[8]);
 
     // Compute offsets through table stream until we reach the tables we care about
-    offset = reader.offset;
+    let mut offset = reader.offset;
     let mut type_refs = Vec::new();
     let mut type_defs = Vec::new();
     let mut fields = Vec::new();

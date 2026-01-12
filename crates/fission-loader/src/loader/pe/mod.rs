@@ -20,7 +20,7 @@ impl PeLoader {
             OptionalHeader::Pe32Plus(_) => true,
         };
 
-        let (image_base, entry_point, section_alignment) = match &pe_file.nt_headers.optional_header
+        let (image_base, entry_point, _section_alignment) = match &pe_file.nt_headers.optional_header
         {
             OptionalHeader::Pe32(opt) => (
                 opt.image_base as u64,
@@ -231,6 +231,7 @@ struct PeLoaderImpl<'a> {
 
 impl<'a> PeLoaderImpl<'a> {
     // Simplified version - main logic is in rva_to_file_offset
+    #[allow(dead_code)]
     fn rva_to_offset(&self, _rva: u32) -> Option<u64> {
         None
     }
@@ -522,7 +523,7 @@ impl<'a> PeLoaderImpl<'a> {
         &self,
         symbol_table_offset: u32,
         symbol_count: u32,
-        image_base: u64,
+        _image_base: u64,
     ) -> Result<Vec<crate::loader::types::FunctionInfo>> {
         let mut functions = Vec::new();
 
@@ -538,7 +539,7 @@ impl<'a> PeLoaderImpl<'a> {
         let string_table_offset = symbols_end;
 
         // Read string table size (first 4 bytes)
-        let string_table_size = if string_table_offset + 4 <= self.data.len() as u64 {
+        let _string_table_size = if string_table_offset + 4 <= self.data.len() as u64 {
             u32::from_le_bytes([
                 self.data[string_table_offset as usize],
                 self.data[(string_table_offset + 1) as usize],
@@ -551,11 +552,6 @@ impl<'a> PeLoaderImpl<'a> {
 
         let mut cursor = Cursor::new(self.data);
         cursor.set_position(symbols_offset);
-
-        let mut total_processed = 0;
-        let mut skipped_class = 0;
-        let mut skipped_type = 0;
-        let mut skipped_section = 0;
 
         let mut i = 0;
         while i < symbol_count {
@@ -571,13 +567,10 @@ impl<'a> PeLoaderImpl<'a> {
 
             i += 1; // Count this symbol
 
-            total_processed += 1;
-
             // Only process external symbols (C_EXT = 2) and static symbols (C_STAT = 3) with function type
             if symbol.storage_class != storage_class::C_EXT
                 && symbol.storage_class != storage_class::C_STAT
             {
-                skipped_class += 1;
                 // Skip aux symbols for this symbol too
                 if aux_count > 0 {
                     cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
@@ -589,7 +582,6 @@ impl<'a> PeLoaderImpl<'a> {
             // Check if it's a function (DT_FCN in high byte of type)
             let is_function = (symbol.symbol_type >> 4) == symbol_type::DT_FCN;
             if !is_function {
-                skipped_type += 1;
                 // Skip aux symbols for this symbol too
                 if aux_count > 0 {
                     cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
@@ -622,7 +614,6 @@ impl<'a> PeLoaderImpl<'a> {
 
             // Section number is 1-based, 0 = undefined, -1 = absolute, -2 = debug
             if symbol.section_number <= 0 {
-                skipped_section += 1;
                 // Skip aux symbols
                 if aux_count > 0 {
                     cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
@@ -634,7 +625,6 @@ impl<'a> PeLoaderImpl<'a> {
             // Find section to calculate actual address
             let section_idx = (symbol.section_number - 1) as usize;
             if section_idx >= self.sections.len() {
-                skipped_section += 1;
                 // Skip aux symbols
                 if aux_count > 0 {
                     cursor.set_position(symbol_pos + 18 + (aux_count as u64 * 18));
