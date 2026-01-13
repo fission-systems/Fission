@@ -2,4 +2,4 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/test/test_fid.sh" "$@"
+exec "$SCRIPT_DIR/examples/test_fid.sh" "$@"

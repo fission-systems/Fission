@@ -10,7 +10,7 @@ echo "============================="
 echo ""
 
 # Check if FID databases exist
-FID_DIR="ghidra/funtionID"
+FID_DIR="utils/signatures/fid"
 
 if [ ! -d "$FID_DIR" ]; then
     echo "ERROR: FID directory not found: $FID_DIR"
@@ -30,4 +30,4 @@ echo "FID databases ready for testing!"
 echo ""
 echo "To test FID matching, use:"
 echo "  cargo run --release --features native_decomp --bin fission -- \\"
-echo "    --headless test/your_binary.exe 0x140001000"
+echo "    --headless examples/your_binary.exe 0x140001000"
