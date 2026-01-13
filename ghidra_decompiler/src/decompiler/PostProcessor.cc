@@ -1,4 +1,5 @@
 #include "fission/decompiler/PostProcessor.h"
+#include "fission/decompiler/CFGStructurizer.h"
 #include <vector>
 #include <cctype>
 #include <regex>
@@ -75,24 +76,8 @@ std::string PostProcessor::convert_integer_constants(std::string c_code) {
 }
 
 std::string PostProcessor::convert_while_to_for(std::string c_code) {
-    // Pattern: 
-    //   VAR = INIT;
-    //   ...
-    //   do {
-    //     ...
-    //     if (COND) { break/return; }
-    //     VAR = VAR + STEP;
-    //   } while(true);
-    //
-    // Or:
-    //   while(true) { ... if(i >= n) break; ... i++; }
+    // Convert compound assignment operators
     
-    // Regex to find "do { ... } while( true );" patterns
-    std::regex do_while_true_pattern(
-        R"((\w+)\s*=\s*(\d+)\s*;\s*\n\s*do\s*\{)"
-    );
-    
-    // For now, implement a simpler transformation:
     // Convert "i = i + 1" to "i++"
     std::regex increment_pattern(R"((\w+)\s*=\s*\1\s*\+\s*1\s*;)");
     c_code = std::regex_replace(c_code, increment_pattern, "$1++;");
@@ -125,12 +110,6 @@ std::string PostProcessor::convert_while_to_for(std::string c_code) {
 }
 
 std::string PostProcessor::simplify_nested_if(std::string c_code) {
-    // Pattern: if (COND1) {\n  if (COND2) { BODY } }
-    // Replace with: if (COND1 && COND2) { BODY }
-    
-    // This is a complex transformation that requires proper parsing.
-    // For now, implement a simpler version that handles common cases.
-    
     // Remove redundant parentheses in conditions
     std::regex double_paren(R"(\(\(([^()]+)\)\))");
     c_code = std::regex_replace(c_code, double_paren, "($1)");
@@ -143,77 +122,23 @@ std::string PostProcessor::simplify_nested_if(std::string c_code) {
     std::regex zero_check(R"(if\s*\(\s*(\w+)\s*==\s*0\s*\))");
     c_code = std::regex_replace(c_code, zero_check, "if (!$1)");
     
-    // Simplify "if (true)" to remove the if entirely (keep the body)
-    // This requires more complex parsing, skip for now
-    
     return c_code;
 }
 
 std::string PostProcessor::fold_array_init(std::string c_code) {
-    // Pattern: Consecutive assignments to local variables with sequential offsets
-    // local_28 = 1;
-    // local_24 = 4;
-    // local_20 = 7;
-    // ...
-    
-    // This requires tracking the offsets and values, then replacing with array init.
-    // For now, add a comment when we detect this pattern.
-    
-    std::regex local_assign_pattern(R"(local_([0-9a-f]+)\s*=\s*(\d+)\s*;)");
-    std::smatch match;
-    std::string::const_iterator search_start = c_code.cbegin();
-    
-    std::vector<std::pair<std::string, std::string>> assignments;
-    size_t last_pos = 0;
-    
-    while (std::regex_search(search_start, c_code.cend(), match, local_assign_pattern)) {
-        std::string offset = match[1].str();
-        std::string value = match[2].str();
-        
-        // Check if this is part of a consecutive sequence
-        size_t current_pos = match.position() + (search_start - c_code.cbegin());
-        
-        if (!assignments.empty() && current_pos - last_pos < 40) {
-            // Likely part of the same array
-            assignments.push_back({offset, value});
-        } else {
-            // New sequence
-            if (assignments.size() >= 4) {
-                // Could add array init comment here
-            }
-            assignments.clear();
-            assignments.push_back({offset, value});
-        }
-        
-        last_pos = current_pos + match.length();
-        search_start = match.suffix().first;
-    }
-    
+    // Pattern detection for sequential local variable assignments
     // For now, just return the original code
-    // Full implementation would replace the assignments with array init
+    // Full implementation would replace with array initializers
     return c_code;
 }
 
 std::string PostProcessor::improve_variable_names(std::string c_code) {
-    // Heuristic-based variable renaming
-    
-    // 1. Variables used in loop conditions -> loop_idx, loop_var
-    // 2. Variables passed to printf/puts -> str, msg
-    // 3. Variables assigned before return -> result, ret
-    // 4. Pointer variables -> ptr, buf
-    
-    // For now, implement simple pattern-based renaming:
-    
-    // If a variable is used with printf, rename it to suggest string usage
-    std::regex printf_arg_pattern(R"(printf\s*\([^,]*,\s*(\w+)\s*\))");
-    
     // If a variable is returned, rename it to "result"
     std::regex return_var_pattern(R"(return\s+(local_\w+)\s*;)");
     std::smatch match;
     
     if (std::regex_search(c_code, match, return_var_pattern)) {
         std::string var_name = match[1].str();
-        // Only rename if it's a simple local variable
         if (var_name.find("local_") == 0) {
             // Count occurrences - only rename if used more than once
             std::regex var_pattern(var_name);
@@ -222,7 +147,6 @@ std::string PostProcessor::improve_variable_names(std::string c_code) {
             int count = std::distance(begin, end);
             
             if (count >= 2 && count <= 10) {
-                // Safe to rename
                 c_code = std::regex_replace(c_code, var_pattern, "result");
             }
         }
@@ -231,14 +155,31 @@ std::string PostProcessor::improve_variable_names(std::string c_code) {
     return c_code;
 }
 
+std::string PostProcessor::structurize_control_flow(std::string c_code) {
+    // Use CFGStructurizer for goto elimination and loop normalization
+    return CFGStructurizer::structurize(c_code);
+}
+
 std::string PostProcessor::process(const std::string& c_code) {
     std::string result = c_code;
     
     // Apply all optimization passes in order
+    // 1. Extract string literals from integer constants
     result = convert_integer_constants(result);
+    
+    // 2. Structurize control flow (eliminate gotos, normalize loops)
+    result = structurize_control_flow(result);
+    
+    // 3. Convert to compound operators (i++ etc)
     result = convert_while_to_for(result);
+    
+    // 4. Simplify conditions
     result = simplify_nested_if(result);
+    
+    // 5. Detect array initializations
     result = fold_array_init(result);
+    
+    // 6. Improve variable names
     result = improve_variable_names(result);
     
     return result;
@@ -246,3 +187,4 @@ std::string PostProcessor::process(const std::string& c_code) {
 
 } // namespace decompiler
 } // namespace fission
+

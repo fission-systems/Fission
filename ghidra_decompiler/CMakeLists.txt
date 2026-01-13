@@ -72,6 +72,7 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/analysis/FunctionMatcher.cc
     ${FISSION_MODULES_DIR}/analysis/InternalMatcher.cc
     ${FISSION_MODULES_DIR}/analysis/FidDatabase.cc
+    ${FISSION_MODULES_DIR}/analysis/RelationValidator.cc
     ${FISSION_MODULES_DIR}/analysis/TypePropagator.cc
     ${FISSION_MODULES_DIR}/analysis/CallingConvDetector.cc
     ${FISSION_MODULES_DIR}/analysis/StackFrameAnalyzer.cc
@@ -94,6 +95,7 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/core/DataSymbolRegistry.cc
     # New modular decompiler components
     ${FISSION_MODULES_DIR}/decompiler/PostProcessor.cc
+    ${FISSION_MODULES_DIR}/decompiler/CFGStructurizer.cc
     ${FISSION_MODULES_DIR}/decompiler/PostProcessPipeline.cpp
     ${FISSION_MODULES_DIR}/decompiler/AnalysisPipeline.cpp
     ${FISSION_MODULES_DIR}/decompiler/DecompilationCore.cpp

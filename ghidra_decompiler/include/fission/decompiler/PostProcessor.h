@@ -77,7 +77,29 @@ public:
     static std::string improve_variable_names(std::string c_code);
     
     /**
+     * @brief Structurize control flow - eliminate gotos and normalize loops
+     * 
+     * Uses LLVM-inspired CFG structurization algorithms to:
+     * - Convert backward gotos to do-while/while loops
+     * - Convert forward gotos to if/else structures
+     * - Normalize do-while(true) with break to while(cond)
+     * - Remove unused labels
+     * 
+     * @param c_code The C code string to process
+     * @return Modified C code with structured control flow
+     */
+    static std::string structurize_control_flow(std::string c_code);
+    
+    /**
      * @brief Apply all post-processing steps
+     * 
+     * Order of processing:
+     * 1. convert_integer_constants - Extract string literals
+     * 2. structurize_control_flow - Eliminate gotos
+     * 3. convert_while_to_for - Compound operators
+     * 4. simplify_nested_if - Condition simplification
+     * 5. fold_array_init - Array detection
+     * 6. improve_variable_names - Variable renaming
      * 
      * @param c_code The raw decompiled C code
      * @return Processed C code
