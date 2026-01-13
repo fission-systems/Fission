@@ -88,7 +88,7 @@ sum_array(&local_38,5);             // 암시적 변환
 
 **새로운 테스트 케이스 필요**:
 ```c
-// test/complex_control_flow.c
+// examples/complex_control_flow.c
 void nested_loops() {
     for (int i = 0; i < 10; i++) {
         for (int j = 0; j < 10; j++) {

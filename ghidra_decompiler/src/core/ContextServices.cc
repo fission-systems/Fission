@@ -132,7 +132,9 @@ DecompError load_binary(
     const uint8_t* data,
     size_t len,
     uint64_t base_addr,
-    bool is_64bit
+    bool is_64bit,
+    const char* sleigh_id,
+    const char* compiler_id
 ) {
     if (!ctx) {
         return DECOMP_ERR_INVALID_CONTEXT;
@@ -145,6 +147,8 @@ DecompError load_binary(
         ctx->memory_image = std::make_unique<SectionAwareLoadImage>(ctx->binary_data);
         ctx->base_addr = base_addr;
         ctx->is_64bit = is_64bit;
+        if (sleigh_id) ctx->sleigh_id = sleigh_id;
+        if (compiler_id) ctx->compiler_id = compiler_id;
         ctx->arch.reset();
         return DECOMP_OK;
     } catch (const std::exception& e) {

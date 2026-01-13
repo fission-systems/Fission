@@ -9,12 +9,14 @@
 #include "type.hh"
 #include "architecture.hh"
 #include "fspec.hh"
+#include "fission/config/PathConfig.h"
 #include <iostream>
 
 namespace fission {
 namespace analysis {
 
 using namespace ghidra;
+using namespace fission::config;
 
 namespace {
 
@@ -1216,17 +1218,7 @@ std::string TypePropagator::apply_struct_types(
 }
 
 std::string TypePropagator::get_fid_filename(bool is_64bit, const std::string& compiler_id) {
-    std::string suffix = is_64bit ? "_x64.fidbf" : "_x86.fidbf";
-    std::string fid_filename = "vs2019" + suffix; // Default
-
-    if (compiler_id.find("vs2017") != std::string::npos) 
-        fid_filename = "vs2017" + suffix;
-    else if (compiler_id.find("vs2015") != std::string::npos) 
-        fid_filename = "vs2015" + suffix;
-    else if (compiler_id.find("vs2012") != std::string::npos) 
-        fid_filename = "vs2012" + suffix;
-    
-    return fid_filename;
+    return fission::config::get_fid_filename(is_64bit, compiler_id);
 }
 
 bool TypePropagator::write_back(Funcdata* fd) {

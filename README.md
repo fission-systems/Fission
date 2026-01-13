@@ -347,7 +347,7 @@ cargo run --release -- --cli binary.exe -vvv
 cargo run --release --bin fission_tui --features "tui,native_decomp" -- <binary_path>
 
 # Example
-cargo run --release --bin fission_tui --features "tui,native_decomp" -- test/comparison_test_x64.exe
+cargo run --release --bin fission_tui --features "tui,native_decomp" -- examples/comparison_test_x64.exe
 ```
 
 ---

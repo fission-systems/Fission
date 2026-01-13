@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FISSION_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-GHIDRA_HOME="${GHIDRA_HOME:-$FISSION_ROOT/ghidra_11.4.2_PUBLIC}"
+GHIDRA_HOME="${GHIDRA_HOME:-$FISSION_ROOT/vendor/ghidra/ghidra_11.4.2_PUBLIC}"
 
 # Input/output directories
 FIDB_INPUT_DIR="$FISSION_ROOT/utils/signatures/fid"

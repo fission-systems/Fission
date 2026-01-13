@@ -1,6 +1,0 @@
-Function: _fpreset at 0x1400024e0 (size: auto-detected)
-           Address  Bytes                     Instruction
-──────────────────────────────────────────────────────────────────────
-  0x0001400024e0  db e3                     fninit
-  0x0001400024e2  c3                        ret
-Total instructions: 2

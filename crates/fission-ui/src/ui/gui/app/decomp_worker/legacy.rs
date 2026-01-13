@@ -158,14 +158,32 @@ fn _handle_binary_load_native(
         let decomp = caching_decomp.inner_mut();
         let is_64bit = detect_pe_is_64bit(&request.bytes);
 
+        // Try to detect compiler
+        let detection = fission_loader::detect(&actual_binary);
+        let compiler_id = detection
+            .compiler()
+            .map(|d| match d.name.to_lowercase().as_str() {
+                "microsoft visual c++" | "msvc" => "windows",
+                "gcc" | "mingw" => "gcc",
+                "clang" => "clang",
+                _ => "default",
+            });
+
         crate::core::logging::info(&format!(
-            "[decomp-worker] Loading binary: {} bytes, base=0x{:x}, 64bit={}",
+            "[decomp-worker] Loading binary: {} bytes, base=0x{:x}, 64bit={}, arch={}",
             request.bytes.len(),
             request.image_base,
-            is_64bit
+            is_64bit,
+            actual_binary.arch_spec
         ));
 
-        if let Err(e) = decomp.load_binary(&request.bytes, request.image_base, is_64bit) {
+        if let Err(e) = decomp.load_binary(
+            &request.bytes,
+            request.image_base,
+            is_64bit,
+            Some(&actual_binary.arch_spec),
+            compiler_id,
+        ) {
             let error_msg = format!("Failed to load binary: {}", e);
             crate::core::logging::error(&error_msg);
             let _ = result_tx.send(AsyncMessage::DecompilerContextError {

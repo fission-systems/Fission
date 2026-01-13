@@ -6,7 +6,7 @@
 
 ### Original Symptoms
 - `compare_decompilers_v2.py` runs complete, but no `[TypePropagator] STORE/CALL` logs appear in the
-  generated `*_run.log` when decompiling `0x140001680` from `test/comparison_test_x64.exe`.
+  generated `*_run.log` when decompiling `0x140001680` from `examples/comparison_test_x64.exe`.
 - After the recent rebuild, `fission_cli --decomp` can fail with:
   `Unknown decompilation error` (seen in `scripts/result/202601081137_result/comparison_fission_decomp.txt`).
 
@@ -33,7 +33,7 @@
 ### Verification
 ```bash
 # Run comparison benchmark
-python3 scripts/compare/compare_decompilers_v2.py test/comparison_test_x64.exe 0x140001680
+python3 scripts/compare/compare_decompilers_v2.py examples/comparison_test_x64.exe 0x140001680
 
 # Expected result:
 # - Fission: 33 lines, 1 branches

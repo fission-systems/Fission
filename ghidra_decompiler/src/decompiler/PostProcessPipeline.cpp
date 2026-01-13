@@ -3,6 +3,7 @@
  */
 
 #include "fission/decompiler/PostProcessPipeline.h"
+#include "fission/config/PathConfig.h"
 #include "fission/analysis/FidDatabase.h"
 #include "fission/analysis/TypePropagator.h"
 #include "fission/processing/PostProcessors.h"
@@ -30,16 +31,7 @@ namespace decompiler {
 static std::map<std::string, std::string> load_guid_maps() {
     std::map<std::string, std::string> guid_map;
 
-    std::vector<std::string> guid_files = {
-        "../../utils/signatures/typeinfo/win32/msvcrt/guids.txt",
-        "../utils/signatures/typeinfo/win32/msvcrt/guids.txt",
-        "./utils/signatures/typeinfo/win32/msvcrt/guids.txt",
-        "utils/signatures/typeinfo/win32/msvcrt/guids.txt",
-        "../../utils/signatures/typeinfo/win32/msvcrt/iids.txt",
-        "../utils/signatures/typeinfo/win32/msvcrt/iids.txt",
-        "./utils/signatures/typeinfo/win32/msvcrt/iids.txt",
-        "utils/signatures/typeinfo/win32/msvcrt/iids.txt"
-    };
+    std::vector<std::string> guid_files = fission::config::get_guid_files();
 
     for (const auto& path : guid_files) {
         if (file_exists(path)) {

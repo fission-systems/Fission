@@ -1,7 +1,0 @@
-/* WARNING: Unknown calling convention */
-
-ulonglong * __local_stdio_printf_options(void)
-
-{
-  return &options;
-}

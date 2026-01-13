@@ -1,3 +1,0 @@
-0x140002A20      MOV      RAX, qword ptr [0x140004510]
-  0x140002A27      MOV      RAX, qword ptr [RAX]
-  0x140002A2A      RET

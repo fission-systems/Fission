@@ -61,6 +61,8 @@ struct DecompContext {
     std::vector<uint8_t> binary_data;  // Keep raw PE data alive
     uint64_t base_addr = 0;
     bool is_64bit = true;
+    std::string sleigh_id;
+    std::string compiler_id;
     
     // Symbol table
     std::map<uint64_t, std::string> symbols;

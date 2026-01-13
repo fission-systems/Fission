@@ -52,6 +52,17 @@ std::string json_escape(const std::string& s);
  */
 std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json);
 
+/**
+ * Generic JSON Map Parser
+ * Parses a subset of JSON: a flat object containing string keys (parsed as addresses) and string values.
+ * e.g. {"0x401000": "funcName", "4096": "label"}
+ * 
+ * @param json_content The content to parse (must start with {)
+ * @param start_pos Position to start parsing from (default 0)
+ * @return Map of address -> name
+ */
+std::map<uint64_t, std::string> parse_json_string_map(const std::string& json_content, size_t start_pos = 0);
+
 } // namespace utils
 } // namespace fission
 

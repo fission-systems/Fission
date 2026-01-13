@@ -12,9 +12,11 @@ DecompError fission::ffi::load_binary(
     const uint8_t* data,
     size_t len,
     uint64_t base_addr,
-    bool is_64bit
+    bool is_64bit,
+    const char* sleigh_id,
+    const char* compiler_id
 ) {
-    return fission::core::load_binary(ctx, data, len, base_addr, is_64bit);
+    return fission::core::load_binary(ctx, data, len, base_addr, is_64bit, sleigh_id, compiler_id);
 }
 
 DecompError fission::ffi::add_memory_block(

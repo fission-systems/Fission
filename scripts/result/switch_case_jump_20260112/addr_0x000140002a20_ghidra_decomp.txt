@@ -1,7 +1,0 @@
-/* WARNING: Unknown calling convention */
-
-char *** __p___initenv(void)
-
-{
-  return *(char ****)_refptr___imp___initenv;
-}

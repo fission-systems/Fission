@@ -52,63 +52,9 @@ static std::string json_escape(const std::string& input) {
     return output;
 }
 
-static bool apply_tailcall_flow_overrides(
-    fission::ffi::DecompContext* ctx,
-    ghidra::Funcdata* fd
-) {
-    if (!ctx || !fd || !ctx->arch || !ctx->arch->symboltab) {
-        return false;
-    }
-
-    ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
-    if (!global_scope) {
-        return false;
-    }
-
-    ghidra::AddrSpace* code_space = ctx->arch->getDefaultCodeSpace();
-    if (!code_space) {
-        return false;
-    }
-
-    bool applied = false;
-    for (auto it = fd->beginOpAll(); it != fd->endOpAll(); ++it) {
-        ghidra::PcodeOp* op = it->second;
-        if (!op || op->code() != ghidra::CPUI_BRANCH) {
-            continue;
-        }
-        if (op->getParent() && op->getParent()->lastOp() != op) {
-            continue;
-        }
-        ghidra::Varnode* dest = op->getIn(0);
-        if (!dest) {
-            continue;
-        }
-
-        ghidra::Address dest_addr = dest->getAddr();
-        if (dest_addr.isInvalid()) {
-            continue;
-        }
-
-        uint64_t target_offset = dest_addr.getOffset();
-        if (dest_addr.getSpace() != code_space && !dest->isConstant()) {
-            continue;
-        }
-        if (target_offset == fd->getAddress().getOffset()) {
-            continue;
-        }
-
-        ghidra::Address target(code_space, target_offset);
-        ghidra::Funcdata* target_fd = global_scope->findFunction(target);
-        if (!target_fd || target_fd == fd) {
-            continue;
-        }
-
-        fd->getOverride().insertFlowOverride(op->getAddr(), ghidra::Override::CALL_RETURN);
-        applied = true;
-    }
-
-    return applied;
-}
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
 // ============================================================================
 // Helper Functions
@@ -220,7 +166,9 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     }
     
     // CRITICAL: Follow control flow to discover instructions
-    ghidra::Address end_addr = start_addr + 0x1000;
+    // Higher range (32KB) to handle large functions. 
+    // Ghidra's followFlow will stop at returns anyway.
+    ghidra::Address end_addr = start_addr + 0x8000;
     try {
         fd->followFlow(start_addr, end_addr);
         std::cerr << "[DecompilerCore] Control flow analysis complete" << std::endl;
@@ -230,23 +178,8 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         std::cerr << "[DecompilerCore] ERROR: Unknown exception in followFlow" << std::endl;
     }
 
-    if (apply_tailcall_flow_overrides(ctx, fd)) {
-        std::cerr << "[DecompilerCore] Applied tail-call flow overrides; restarting flow analysis"
-                  << std::endl;
-        if (ctx->arch) {
-            ctx->arch->clearAnalysis(fd);
-        } else {
-            fd->clear();
-        }
-        try {
-            fd->followFlow(start_addr, end_addr);
-            std::cerr << "[DecompilerCore] Control flow analysis complete (override pass)" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "[DecompilerCore] ERROR in followFlow (override pass): " << e.what() << std::endl;
-        } catch (...) {
-            std::cerr << "[DecompilerCore] ERROR: Unknown exception in followFlow (override pass)" << std::endl;
-        }
-    }
+    // TAIL-CALL OVERRIDE REMOVED: It was causing recursive stubs for correctly followed functions.
+    // Ghidra's action pipeline handles tail-calls better than our manual p-code override.
     
     // ========================================================================
     // Calling Convention Detection + Application

@@ -27,20 +27,20 @@ Improve Fission's decompilation quality for GCC and MinGW compiled binaries by a
 ```rust
 // OLD: Only MSVC databases
 let fid_paths = [
-    format!("ghidra/funtionID/vs2019{}", target_suffix),
-    format!("ghidra/funtionID/vs2017{}", target_suffix),
+    format!("utils/signatures/fid/vs2019{}", target_suffix),
+    format!("utils/signatures/fid/vs2017{}", target_suffix),
     // ...
 ];
 
 // NEW: GCC/MinGW + MSVC databases
 let fid_paths = vec![
     // GCC/MinGW (priority for cross-compiled binaries)
-    format!("ghidra/funtionID/gcc13{}", target_suffix),
-    format!("ghidra/funtionID/gcc12{}", target_suffix),
-    format!("ghidra/funtionID/gcc11{}", target_suffix),
-    format!("ghidra/funtionID/mingw{}", target_suffix),
+    format!("utils/signatures/fid/gcc13{}", target_suffix),
+    format!("utils/signatures/fid/gcc12{}", target_suffix),
+    format!("utils/signatures/fid/gcc11{}", target_suffix),
+    format!("utils/signatures/fid/mingw{}", target_suffix),
     // MSVC (for native Windows binaries)
-    format!("ghidra/funtionID/vs2019{}", target_suffix),
+    format!("utils/signatures/fid/vs2019{}", target_suffix),
     // ...
 ];
 ```
@@ -151,7 +151,7 @@ void test_memory(void) {
 4. Load `common_symbols_gcc_x64.txt` (or x86)
 5. Add test binaries from `fid_test_binaries/`
 6. Export to `.fidbf` format
-7. Copy to `ghidra/funtionID/`
+7. Copy to `utils/signatures/fid/`
 
 **Option B: Request Pre-built Databases**
 - GCC FID databases are large (~10-50MB each)
@@ -189,16 +189,16 @@ void test_memory(void) {
 
 ### Modified:
 - `src/cli/oneshot/decompile.rs` (FID path expansion)
-- `ghidra/funtionID/building_fid.txt` (added GCC info)
+- `utils/signatures/fid/building_fid.txt` (added GCC info)
 
 ### Created:
-- `ghidra/funtionID/common_symbols_gcc_x64.txt`
-- `ghidra/funtionID/common_symbols_gcc_x86.txt`
-- `ghidra/funtionID/BUILDING_GCC_FID.md`
-- `ghidra/funtionID/README.md`
-- `ghidra/funtionID/build_fid_samples.sh`
-- `ghidra/funtionID/test_fid_runtime.c`
-- `ghidra/funtionID/fid_test_binaries/` (directory structure)
+- `utils/signatures/fid/common_symbols_gcc_x64.txt`
+- `utils/signatures/fid/common_symbols_gcc_x86.txt`
+- `utils/signatures/fid/BUILDING_GCC_FID.md`
+- `utils/signatures/fid/README.md`
+- `utils/signatures/fid/build_fid_samples.sh`
+- `utils/signatures/fid/test_fid_runtime.c`
+- `utils/signatures/fid/fid_test_binaries/` (directory structure)
 
 ## 🎓 Knowledge Transfer
 

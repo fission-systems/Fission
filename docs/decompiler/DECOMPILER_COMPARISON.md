@@ -1,7 +1,7 @@
 # Decompiler Comparison: Fission vs Ghidra
 
 **Date:** 2026-01-05  
-**Test Binary:** `test/struct_test` (Mach-O 64-bit x86_64)  
+**Test Binary:** `examples/struct_test` (Mach-O 64-bit x86_64)  
 **Ghidra Version:** 11.4.2 (via PyGhidra 2.2.0)  
 **Fission Version:** Current development branch
 
@@ -308,7 +308,7 @@ export GHIDRA_INSTALL_DIR=/path/to/ghidra_11.4.2_PUBLIC
 ### Test Binary Compilation
 ```bash
 # Compile test with debug symbols
-clang -g -O0 test/struct_test.c -o test/struct_test
+clang -g -O0 examples/struct_test.c -o examples/struct_test
 ```
 
 ### Comparison Script

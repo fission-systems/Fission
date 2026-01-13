@@ -14,7 +14,7 @@ def decompile_function(binary_path, address_str):
     """Decompile a function at the given address using PyGhidra"""
     
     # Set Ghidra installation path
-    ghidra_path = "/Users/sjkim1127/Fission/ghidra_11.4.2_PUBLIC"
+    ghidra_path = "/Users/sjkim1127/Fission/vendor/ghidra/ghidra_11.4.2_PUBLIC"
     os.environ['GHIDRA_INSTALL_DIR'] = ghidra_path
     
     # Parse address

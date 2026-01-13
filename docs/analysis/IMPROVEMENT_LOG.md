@@ -150,7 +150,7 @@ ghidra_decompiler/decompile/printc.cc
 
 # Test
 python3 scripts/compare_decompilers_v2.py \
-  test/comparison_test_x64.exe \
+  examples/comparison_test_x64.exe \
   scripts/compare/example_addresses.txt \
   scripts/result_priority2 --batch --html
 ```

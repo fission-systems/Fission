@@ -184,7 +184,7 @@ pub fn detect(binary: &LoadedBinary) -> DetectionResult {
     detect_by_imports(binary, &mut result);
     detect_by_strings(binary, &mut result);
     detect_by_entry_point(binary, &mut result);
-    detect_dotnet(binary, &mut result);
+    detect_by_entry_point(binary, &mut result);
 
     // Sort by confidence (highest first)
     result
@@ -565,44 +565,6 @@ fn matches_signature(bytes: &[u8], sig: &[u8], mask: Option<&[u8]>) -> bool {
         }
     }
     true
-}
-
-/// Detect .NET binaries
-///
-/// Performance optimization: Uses byte pattern search instead of string conversion
-fn detect_dotnet(binary: &LoadedBinary, result: &mut DetectionResult) {
-    if binary.is_dotnet {
-        result.add(Detection::new(
-            DetectionType::Language,
-            ".NET",
-            binary.dotnet_runtime_version.clone(),
-            Confidence::High,
-        ));
-
-        // Check for obfuscators using byte search (avoids string allocation)
-        let search_limit = (64 * 1024).min(binary.data.len());
-        let data = &binary.data[..search_limit];
-
-        // ConfuserEx detection (uses module-level contains_bytes helper)
-        if contains_bytes(data, b"ConfuserEx") {
-            result.add(Detection::new(
-                DetectionType::Protector,
-                "ConfuserEx",
-                None,
-                Confidence::High,
-            ));
-        }
-
-        // .NET Reactor detection
-        if contains_bytes(data, b".NET Reactor") {
-            result.add(Detection::new(
-                DetectionType::Protector,
-                ".NET Reactor",
-                None,
-                Confidence::High,
-            ));
-        }
-    }
 }
 
 #[cfg(test)]

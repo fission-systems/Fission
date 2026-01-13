@@ -24,14 +24,6 @@ pub fn cmd_load(state: &mut CliState, path: &str) {
             println!("  {} {}", "Sections:".bold(), binary.sections.len());
             println!("  {} {}", "Functions:".bold(), binary.functions.len());
 
-            if binary.is_dotnet {
-                println!(
-                    "  {} {}",
-                    ".NET:".bold(),
-                    binary.dotnet_runtime_version.as_deref().unwrap_or("yes")
-                );
-            }
-
             state.binary = Some(Arc::new(binary));
             state.disasm = None; // Reset disassembler for new binary
         }

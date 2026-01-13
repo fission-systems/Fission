@@ -166,6 +166,8 @@ impl App {
                         &self.binary_data,
                         self.binary.image_base,
                         self.binary.is_64bit,
+                        Some(&self.binary.arch_spec),
+                        self.binary.get_ghidra_compiler_id().as_deref(),
                     ) {
                         self.decompiled_code = format!("// Error loading binary: {}", e);
                         self.status = "Error loading binary".to_string();
@@ -244,6 +246,8 @@ impl App {
                         &self.binary_data,
                         self.binary.image_base,
                         self.binary.is_64bit,
+                        Some(&self.binary.arch_spec),
+                        self.binary.get_ghidra_compiler_id().as_deref(),
                     ) {
                         self.cfg_summary = Some(format!("Error loading binary: {}", e));
                         self.status = "Error loading binary".to_string();

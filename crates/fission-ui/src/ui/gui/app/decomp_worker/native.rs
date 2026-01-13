@@ -46,7 +46,28 @@ pub(crate) fn handle_binary_load_for_worker(
         Ok(mut decomp) => {
             // Load binary data
             let inner = decomp.inner_mut();
-            if let Err(e) = inner.load_binary(&request.bytes, request.image_base, is_64bit) {
+
+            // Get arch info from LoadedBinary
+            let arch_spec = dummy_binary.arch_spec.clone();
+
+            // Try to detect compiler
+            let detection = fission_loader::detect(&dummy_binary);
+            let compiler_id = detection
+                .compiler()
+                .map(|d| match d.name.to_lowercase().as_str() {
+                    "microsoft visual c++" | "msvc" => "windows",
+                    "gcc" | "mingw" => "gcc",
+                    "clang" => "clang",
+                    _ => "default",
+                });
+
+            if let Err(e) = inner.load_binary(
+                &request.bytes,
+                request.image_base,
+                is_64bit,
+                Some(&arch_spec),
+                compiler_id,
+            ) {
                 let _ = result_tx.send(AsyncMessage::DecompilerContextError {
                     error: format!("Failed to load binary: {}", e),
                     suggestion: None,
