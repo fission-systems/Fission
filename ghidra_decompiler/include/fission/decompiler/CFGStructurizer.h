@@ -104,6 +104,38 @@ public:
      */
     static std::string flatten_nested_if_goto(const std::string& c_code);
     
+    /**
+     * @brief Convert for-loop patterns from goto structure
+     * 
+     * Pattern:
+     *   i = 0;
+     *   LABEL:
+     *   if (i >= n) goto EXIT;
+     *   body;
+     *   i++;
+     *   goto LABEL;
+     *   EXIT:
+     *   
+     * Becomes:
+     *   for (i = 0; i < n; i++) { body; }
+     */
+    static std::string convert_for_loop_patterns(const std::string& c_code);
+    
+    /**
+     * @brief Convert nested loop patterns with multiple labels
+     * 
+     * Handles complex patterns with inner/outer loop labels
+     * and converts unconditional backward gotos to loops.
+     */
+    static std::string convert_nested_loop_patterns(const std::string& c_code);
+    
+    /**
+     * @brief Convert unconditional backward gotos to continue statements
+     * 
+     * Inside a loop, converts "goto LOOP_LABEL;" to "continue;"
+     */
+    static std::string convert_unconditional_backward_goto(const std::string& c_code);
+    
 private:
     struct Label {
         std::string name;
