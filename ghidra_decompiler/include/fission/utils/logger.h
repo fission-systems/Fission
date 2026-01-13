@@ -20,6 +20,22 @@ public:
 };
 
 /**
+ * Simple Logger for centralized output control
+ */
+class Logger {
+public:
+    static void initialize(const std::string& filename = "");
+    
+    // Direct log (just message)
+    static void log(const std::string& msg);
+    
+    // Leveled logging
+    static void info(const std::string& msg);
+    static void warn(const std::string& msg);
+    static void error(const std::string& msg);
+};
+
+/**
  * Get null output stream (discards all output)
  */
 std::ostream& null_stream();

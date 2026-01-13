@@ -20,6 +20,14 @@ All notable changes to the Fission project (November 2025 - January 2026).
   - **Natural Loop Detection**: Implements Tarjan/Havlak approach to correctly identify natural loops.
 - **Structural Integrity**: Updated `CFGStructurizer` to use these rigorous algorithms for backward-goto transformation, ensuring that only valid natural loops are converted to `do-while` structures, eliminating the risk of incorrect transforms based on regex guessing.
 
+**🛡️ Stability & Observability**
+
+- **Exception-Safe Initialization**: Hardened `ArchInit::initialize_architecture` to automatically clean up partial states ("Zombie Architectures") upon failure, preventing subsequent "Symbol table not initialized" errors.
+- **Centralized Logging System**:
+  - Implemented a thread-safe C++ `Logger` (`fission::utils::Logger`) replacing raw `std::cerr` usage.
+  - Added support for file-based logging via `FISSION_LOG_FILE` environment variable.
+  - Logs now include high-precision timestamps (`[YYYY-MM-DD HH:MM:SS]`) and severity levels.
+
 **🧹 Script Organization**
 
 - **Wrapper Cleanup**: Removed redundant top-level wrapper scripts (`build_decompiler.sh`, `compare_decompilers.sh`, etc.) to streamline the project structure.
