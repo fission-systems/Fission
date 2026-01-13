@@ -10,6 +10,7 @@
 #include "fission/types/GuidParser.h"
 #include "fission/utils/file_utils.h"
 #include "fission/ffi/DecompContext.h"
+#include "fission/decompiler/PostProcessor.h"
 
 #include "address.hh"
 
@@ -221,6 +222,10 @@ std::string run_post_processing(
             result = apply_fid_names(result, fid_names);
         }
     }
+
+    // Step 11: Advanced Structurization and Cleanup (Fission Core Improvement)
+    // This includes goto elimination, for-loop recovery, and if-flattening.
+    result = PostProcessor::process(result);
 
     return result;
 }

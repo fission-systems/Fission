@@ -93,6 +93,33 @@ def decompile_batch(binary_path, address_file, output_dir):
                 if function:
                     addr_hex = f"0x{addr_int:x}"
                     print(f"  [+] Decompiling {function.getName()} at {addr_hex}...")
+                    
+                    # Get assembly listing
+                    asm_listing = ""
+                    try:
+                        listing = program.getListing()
+                        func_body = function.getBody()
+                        instruction_iter = listing.getInstructions(func_body, True)
+                        
+                        instr_count = 0
+                        for instruction in instruction_iter:
+                            instr_addr = f"0x{instruction.getAddress().getOffset():X}"
+                            mnemonic = instruction.getMnemonicString()
+                            
+                            op_count = instruction.getNumOperands()
+                            op_list = []
+                            for i in range(op_count):
+                                op_list.append(instruction.getDefaultOperandRepresentation(i))
+                            operands_str = ", ".join(op_list) if op_list else ""
+                            
+                            asm_listing += f"  {instr_addr:16s} {mnemonic:8s} {operands_str}\n"
+                            instr_count += 1
+                            if instr_count >= 50:
+                                asm_listing += "  ... (truncated)\n"
+                                break
+                    except Exception as e:
+                        asm_listing = f"Error capturing assembly: {e}"
+
                     results = decompiler.decompileFunction(function, 30, monitor)
                     if results.decompileCompleted():
                         decomp_source = results.getDecompiledFunction()
@@ -102,7 +129,8 @@ def decompile_batch(binary_path, address_file, output_dir):
                         res_obj = {
                             "name": function.getName(),
                             "address": addr_hex,
-                            "code": code
+                            "code": code,
+                            "asm": asm_listing
                         }
                         with open(output_path / f"ghidra_{addr_hex}.json", "w", encoding="utf-8") as out:
                             json.dump(res_obj, out, indent=2)
