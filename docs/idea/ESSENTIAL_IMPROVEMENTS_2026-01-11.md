@@ -24,7 +24,7 @@
 
 ## 3. FID Database Expansion
 
-- **Task**: Parse and import Ghidra's `.fidbf` files found in `utils/ghidra/funtionID`.
+- **Task**: Parse and import Ghidra's `.fidbf` files found in `utils/signatures/fid`.
 - **Benefit**: Access to a massive database of standard library signatures (VS2012-2019, GCC, etc.) without needing to manually convert them to `msvc_sigs.rs`.
 
 ## 4. UI Enhancements

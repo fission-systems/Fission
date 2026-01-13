@@ -762,7 +762,7 @@ cargo test test_loader
 cargo run --bin ffi_test
 
 # Or manually
-./target/release/fission --cli test/struct_test.exe --info
+./target/release/fission --cli examples/struct_test.exe --info
 ```
 
 ### Check Dependencies

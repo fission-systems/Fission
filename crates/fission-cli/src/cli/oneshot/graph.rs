@@ -65,7 +65,24 @@ pub fn generate_pcode_graph(
 
     {
         let _silencer = OutputSilencer::new_if(!verbose);
-        if let Err(e) = decomp.load_binary(&binary_data, binary.image_base, binary.is_64bit) {
+        // Try to detect compiler
+        let detection = fission_loader::detect(binary);
+        let compiler_id = detection
+            .compiler()
+            .map(|d| match d.name.to_lowercase().as_str() {
+                "microsoft visual c++" | "msvc" => "windows",
+                "gcc" | "mingw" => "gcc",
+                "clang" => "clang",
+                _ => "default",
+            });
+
+        if let Err(e) = decomp.load_binary(
+            &binary_data,
+            binary.image_base,
+            binary.is_64bit,
+            Some(&binary.arch_spec),
+            compiler_id,
+        ) {
             eprintln!("Error: Failed to load binary: {}", e);
             std::process::exit(1);
         }

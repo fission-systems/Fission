@@ -55,10 +55,10 @@ Display comprehensive binary information.
 
 **Example**:
 ```bash
-$ fission --cli test/winapi_test.exe --info
+$ fission --cli examples/winapi_test.exe --info
 
 Binary Information
-  Path: test/winapi_test.exe
+  Path: examples/winapi_test.exe
   Format: PE (binrw)
   Architecture: x86:LE:64:default
   Bitness: 64-bit
@@ -82,7 +82,7 @@ Display section table with permissions.
 
 **Example**:
 ```bash
-$ fission --cli test/winapi_test.exe --sections
+$ fission --cli examples/winapi_test.exe --sections
 
 Section Information
   Name         Virtual Addr       Size         Flags
@@ -375,7 +375,7 @@ if args.new_flag {
 ## Related Documentation
 
 - [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) - Overall system architecture
-- [test/README.md](../test/README.md) - Test cases and validation
+- [examples/README.md](../examples/README.md) - Test cases and validation
 
 ---
 

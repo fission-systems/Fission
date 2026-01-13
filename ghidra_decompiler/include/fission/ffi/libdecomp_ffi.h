@@ -87,7 +87,9 @@ DECOMP_API DecompError decomp_load_binary(
     const uint8_t* data,
     size_t len,
     uint64_t base_addr,
-    int is_64bit
+    int is_64bit,
+    const char* sleigh_id,
+    const char* compiler_id
 );
 
 // ============================================================================

@@ -78,6 +78,7 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/analysis/StackFrameAnalyzer.cc
     ${FISSION_MODULES_DIR}/analysis/TypeSharing.cc
     ${FISSION_MODULES_DIR}/analysis/GlobalDataAnalyzer.cc
+    ${FISSION_MODULES_DIR}/analysis/GraphAlgorithms.cc
     ${FISSION_MODULES_DIR}/analysis/VTableAnalyzer.cc
     ${FISSION_MODULES_DIR}/core/ContextServices.cc
     ${FISSION_MODULES_DIR}/core/ArchInit.cc
@@ -88,10 +89,10 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/processing/Constants.cc
     ${FISSION_MODULES_DIR}/processing/PostProcessors.cc
     ${FISSION_MODULES_DIR}/processing/StringScanner.cc
-    ${FISSION_MODULES_DIR}/loader/PeHeader.cc
     ${FISSION_MODULES_DIR}/loader/SymbolLoader.cc
     ${FISSION_MODULES_DIR}/loader/BinaryDetector.cc
     ${FISSION_MODULES_DIR}/loaders/DataSectionScanner.cc
+    ${FISSION_MODULES_DIR}/config/PathConfig.cc
     ${FISSION_MODULES_DIR}/core/DataSymbolRegistry.cc
     # New modular decompiler components
     ${FISSION_MODULES_DIR}/decompiler/PostProcessor.cc
@@ -108,7 +109,7 @@ set(FISSION_SOURCES
 
 # Fission Decompiler CLI
 add_executable(fission_decomp
-    fission_decomp.cpp
+    src/decompiler/main.cc
     ${CORE_SOURCES}
     ${FISSION_SOURCES}
 )

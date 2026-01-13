@@ -19,8 +19,6 @@ pub struct PyBinaryInfo {
     #[pyo3(get)]
     pub is_64bit: bool,
     #[pyo3(get)]
-    pub is_dotnet: bool,
-    #[pyo3(get)]
     pub section_count: usize,
     #[pyo3(get)]
     pub function_count: usize,

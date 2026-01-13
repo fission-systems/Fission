@@ -14,6 +14,9 @@
 
 #include <algorithm>
 #include <iostream>
+#include "fission/config/PathConfig.h"
+
+using namespace fission::config;
 
 // Forward declaration for data symbol registration
 namespace fission {
@@ -31,6 +34,18 @@ using fission::types::TypeManager;
 using fission::utils::file_exists;
 
 static std::string select_sleigh_id(const DecompContext* ctx) {
+    if (!ctx->sleigh_id.empty()) {
+        if (!ctx->compiler_id.empty() && ctx->sleigh_id.find(':') != std::string::npos) {
+            // Check if it already has 4 segments (e.g. x86:LE:64:default)
+            // Ghidra expects 5 segments for full spec: x86:LE:64:default:windows
+            size_t colon_count = 0;
+            for (char c : ctx->sleigh_id) if (c == ':') colon_count++;
+            if (colon_count == 3) {
+                return ctx->sleigh_id + ":" + ctx->compiler_id;
+            }
+        }
+        return ctx->sleigh_id;
+    }
     return ctx->is_64bit ? "x86:LE:64:default" : "x86:LE:32:default";
 }
 
@@ -54,13 +69,7 @@ static void load_gdt_for_arch(ghidra::Architecture* arch, bool is_64bit, const s
         return;
     }
 
-    std::string suffix = is_64bit ? "_64.gdt" : "_32.gdt";
-    std::vector<std::string> candidates = {
-        "../../utils/signatures/typeinfo/win32/windows_vs12" + suffix,
-        "../utils/signatures/typeinfo/win32/windows_vs12" + suffix,
-        "./utils/signatures/typeinfo/win32/windows_vs12" + suffix,
-        "utils/signatures/typeinfo/win32/windows_vs12" + suffix
-    };
+    std::vector<std::string> candidates = fission::config::get_gdt_candidates(is_64bit);
 
     const bool gdt_loaded = std::any_of(candidates.begin(), candidates.end(), [&](const auto& path) {
         return try_load_gdt(arch, path);

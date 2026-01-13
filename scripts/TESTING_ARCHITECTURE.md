@@ -168,7 +168,7 @@ timeout=1200  # 20분
 ```bash
 # 단일 함수 디컴파일 (PyGhidra 사용)
 python3 scripts/ghidra/pyghidra_decompile.py \
-    test/bin_x64/nested_loops_x64.exe \
+    examples/bin_x64/nested_loops_x64.exe \
     0x450
 ```
 
@@ -176,8 +176,8 @@ python3 scripts/ghidra/pyghidra_decompile.py \
 ```bash
 # Ghidra vs Fission 비교
 python3 scripts/compare_decompilers_v2.py \
-    test/bin_x64/nested_loops_x64.exe \
-    test/addresses/nested_loops_addrs.txt \
+    examples/bin_x64/nested_loops_x64.exe \
+    examples/addresses/nested_loops_addrs.txt \
     scripts/result_nested_loops \
     --batch
 ```
@@ -253,7 +253,7 @@ export JAVA_HOME=/path/to/java17
 - **PyGhidra 문서**: https://github.com/Defense-Cyber-Crime-Center/pyghidra
 - **Ghidra API**: https://ghidra.re/ghidra_docs/api/
 - **프로젝트 구조**: `scripts/README.md`
-- **테스트 가이드**: `test/README_TESTS.md`
+- **테스트 가이드**: `examples/README_TESTS.md`
 
 ## 요약
 

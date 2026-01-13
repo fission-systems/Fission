@@ -96,6 +96,8 @@ unsafe extern "C" {
         len: usize,
         base_addr: u64,
         is_64bit: c_int,
+        sleigh_id: *const c_char,
+        compiler_id: *const c_char,
     ) -> DecompError;
     fn decomp_add_symbol(ctx: *mut DecompContext, addr: u64, name: *const c_char);
     fn decomp_clear_symbols(ctx: *mut DecompContext);
@@ -270,13 +272,23 @@ impl DecompilerNative {
         Ok(())
     }
 
-    /// Load a binary into the decompiler context
-    pub fn load_binary(&mut self, data: &[u8], base_addr: u64, is_64bit: bool) -> Result<()> {
+    pub fn load_binary(
+        &mut self,
+        data: &[u8],
+        base_addr: u64,
+        is_64bit: bool,
+        sleigh_id: Option<&str>,
+        compiler_id: Option<&str>,
+    ) -> Result<()> {
         self.check_valid()?;
 
         if data.is_empty() {
             return Err(FissionError::decompiler("Cannot load empty binary"));
         }
+
+        let sleigh_cstr = sleigh_id.map(|id| CString::new(id).ok()).flatten();
+        let compiler_cstr = compiler_id.map(|id| CString::new(id).ok()).flatten();
+
         let result = unsafe {
             decomp_load_binary(
                 self.ctx,
@@ -284,6 +296,8 @@ impl DecompilerNative {
                 data.len(),
                 base_addr,
                 if is_64bit { 1 } else { 0 },
+                sleigh_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr()),
+                compiler_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr()),
             )
         };
 

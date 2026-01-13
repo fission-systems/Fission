@@ -32,15 +32,5 @@ pub fn cmd_info(state: &CliState) {
     println!("  {} {}", "Sections:".bold(), binary.sections.len());
     println!("  {} {}", "Functions:".bold(), binary.functions.len());
 
-    if binary.is_dotnet {
-        println!(
-            "  {} {}",
-            ".NET Runtime:".bold(),
-            binary
-                .dotnet_runtime_version
-                .as_deref()
-                .unwrap_or("unknown")
-        );
-    }
     println!();
 }

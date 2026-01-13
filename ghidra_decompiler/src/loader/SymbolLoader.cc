@@ -2,6 +2,7 @@
 #include "fission/utils/json_utils.h"
 #include "fission/utils/file_utils.h"
 #include <iostream>
+#include <fstream>
 
 namespace fission {
 namespace loader {
@@ -12,43 +13,32 @@ std::map<uint64_t, std::string> SymbolLoader::load_symbols_json(const std::strin
     std::string content = fission::utils::read_file_content(path);
     if (content.empty()) return symbols;
     
-    // Very simple JSON parse for flat k:v object (requires robust parser ideally)
-    // For now, let's assume a simple line-based format or basic regex-like scanning
-    // as we don't have a full JSON DOM library in utils yet (only extract helpers).
-    
-    // Fallback: expect "address": "name" format
-    // "0x401000": "main",
-    
-    size_t pos = 0;
-    while (pos < content.length()) {
-        size_t quote1 = content.find('"', pos);
-        if (quote1 == std::string::npos) break;
-        
-        size_t quote2 = content.find('"', quote1 + 1);
-        if (quote2 == std::string::npos) break;
-        
-        std::string key = content.substr(quote1 + 1, quote2 - quote1 - 1);
-        
-        size_t colon = content.find(':', quote2);
-        if (colon == std::string::npos) break;
-        
-        size_t quote3 = content.find('"', colon);
-        if (quote3 == std::string::npos) break;
-        
-        size_t quote4 = content.find('"', quote3 + 1);
-        if (quote4 == std::string::npos) break;
-        
-        std::string val = content.substr(quote3 + 1, quote4 - quote3 - 1);
-        
-        // Parse key as address
-        try {
-            uint64_t addr = std::stoull(key, nullptr, 0); // Handles 0x prefix
-            symbols[addr] = val;
-        } catch (...) {}
-        
-        pos = quote4 + 1;
+    // Use the robust parser from utils
+    return fission::utils::parse_json_string_map(content);
+}
+
+std::map<uint64_t, std::string> SymbolLoader::load_symbols_text(const std::string& path) {
+    std::map<uint64_t, std::string> symbols;
+    std::ifstream ifs(path);
+    if (!ifs.is_open()) return symbols;
+
+    std::string line;
+    while (std::getline(ifs, line)) {
+        if (!line.empty() && line[0] != '#') {
+            size_t space = line.find(' ');
+            if (space != std::string::npos && line.substr(0, 2) == "0x") {
+                try {
+                    uint64_t addr = std::stoull(line.substr(2, space - 2), nullptr, 16);
+                    std::string name = line.substr(space + 1);
+                    // Trim newline if present
+                    if (!name.empty() && name.back() == '\r') name.pop_back();
+                    symbols[addr] = name;
+                } catch (...) {
+                    // Ignore malformed lines
+                }
+            }
+        }
     }
-    
     return symbols;
 }
 

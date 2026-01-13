@@ -11,7 +11,7 @@ SCRIPTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [ -z "$BINARY" ] || [ -z "$ADDRESS" ]; then
     echo "Usage: $0 <binary> <address>"
-    echo "Example: $0 test/struct_test 0x1000004b0"
+    echo "Example: $0 examples/struct_test 0x1000004b0"
     exit 1
 fi
 

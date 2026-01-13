@@ -83,28 +83,26 @@ std::string json_escape(const std::string& s) {
     return result;
 }
 
-std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json) {
+std::map<uint64_t, std::string> parse_json_string_map(const std::string& json, size_t start_pos) {
     std::map<uint64_t, std::string> symbols;
-    
-    std::string search = "\"iat_symbols\":";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return symbols;
-    pos += search.length();
+    size_t pos = start_pos;
     
     // Skip whitespace
-    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t')) pos++;
+    while (pos < json.length() && std::isspace(json[pos])) pos++;
+    
+    // Ensure starts with {
     if (pos >= json.length() || json[pos] != '{') return symbols;
     pos++; // skip '{'
     
     // Parse key-value pairs until '}'
     while (pos < json.length()) {
         // Skip whitespace
-        while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n')) pos++;
+        while (pos < json.length() && std::isspace(json[pos])) pos++;
         
         if (pos >= json.length() || json[pos] == '}') break;
         if (json[pos] == ',') { pos++; continue; }
         
-        // Parse key (address like "0x401000")
+        // Parse key
         if (json[pos] != '"') break;
         pos++; // skip opening quote
         size_t key_end = json.find('"', pos);
@@ -113,9 +111,9 @@ std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json) {
         pos = key_end + 1;
         
         // Skip ":"
-        while (pos < json.length() && (json[pos] == ' ' || json[pos] == ':')) pos++;
+        while (pos < json.length() && (std::isspace(json[pos]) || json[pos] == ':')) pos++;
         
-        // Parse value (function name)
+        // Parse value
         if (pos >= json.length() || json[pos] != '"') break;
         pos++; // skip opening quote
         size_t val_end = pos;
@@ -129,16 +127,33 @@ std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json) {
         
         // Parse address (supports "0x" hex prefix)
         uint64_t addr = 0;
-        if (addr_str.substr(0, 2) == "0x" || addr_str.substr(0, 2) == "0X") {
-            addr = std::stoull(addr_str.substr(2), nullptr, 16);
-        } else {
-            addr = std::stoull(addr_str, nullptr, 10);
+        try {
+            if (addr_str.length() > 2 && (addr_str.substr(0, 2) == "0x" || addr_str.substr(0, 2) == "0X")) {
+                addr = std::stoull(addr_str.substr(2), nullptr, 16);
+            } else {
+                addr = std::stoull(addr_str, nullptr, 10);
+            }
+        } catch (...) {
+            continue; // Skip invalid addresses
         }
         
         symbols[addr] = func_name;
     }
     
     return symbols;
+}
+
+std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json) {
+    std::string search = "\"iat_symbols\":";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return {};
+    pos += search.length();
+    
+    // Skip whitespace
+    while (pos < json.length() && std::isspace(json[pos])) pos++;
+    
+    // Parse map starting at current position
+    return parse_json_string_map(json, pos);
 }
 
 } // namespace utils

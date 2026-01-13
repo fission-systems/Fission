@@ -150,5 +150,5 @@ cd ghidra_decompiler/build && make decomp -j8
 
 # 비교 테스트
 cd /Users/sjkim1127/Fission
-python3 scripts/compare_decompilers_v2.py test/comparison_test_x64.exe scripts/compare/example_addresses.txt scripts/result_test --batch
+python3 scripts/compare_decompilers_v2.py examples/comparison_test_x64.exe scripts/compare/example_addresses.txt scripts/result_test --batch
 ```

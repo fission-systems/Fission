@@ -3,6 +3,7 @@
 
 #include <map>
 #include <set>
+#include <unordered_set>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -64,6 +65,13 @@ private:
     // Load common symbols filter
     bool load_common_symbols(const std::string& filter_path);
 
+    // Relation table storage (Superior Table keys)
+    // Key format: (CallerID * PRIME) ^ CalleeFullHash
+    std::unordered_set<uint64_t> superior_relations;
+    
+    // Parse relations table
+    bool parse_relations_table(std::ifstream& file, uint64_t offset, uint64_t count);
+
 public:
     FidDatabase();
     ~FidDatabase();
@@ -80,6 +88,10 @@ public:
     /// Lookup function by full hash (filtered by common symbols)
     /// \return vector of matching function names
     std::vector<std::string> lookup_by_hash(uint64_t full_hash) const;
+
+    /// Lookup function records by full hash 
+    /// \return vector of matching function records (pointers to internal storage)
+    std::vector<const FidFunctionRecord*> lookup_records_by_hash(uint64_t full_hash) const;
     
     /// Lookup function by full hash + specific hash (more accurate)
     /// \return vector of matching function names
@@ -87,6 +99,11 @@ public:
     
     /// Check if a symbol is in the common symbols filter
     bool is_common_symbol(const std::string& name) const;
+    
+    /// Check if a relation exists (CallerID -> CalleeHash)
+    /// \param caller_id The Function ID of the caller (from FidFunctionRecord)
+    /// \param callee_hash The Full Hash of the callee
+    bool has_relation(uint64_t caller_id, uint64_t callee_hash) const;
     
     /// Lookup function by name pattern (contains check)
     std::string lookup_name_contains(const std::string& pattern) const;

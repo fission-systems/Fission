@@ -7,7 +7,6 @@
 #include "fission/utils/StepTimer.h"
 #include "fission/utils/logger.h"
 #include "fission/loader/BinaryDetector.h"
-#include "fission/loader/PeHeader.h"
 #include "fission/loader/SymbolLoader.h"
 #include "fission/loaders/DataSectionScanner.h"
 #include "fission/types/RttiAnalyzer.h"
@@ -20,10 +19,12 @@
 #include "fission/processing/Constants.h"
 #include "fission/analysis/FidDatabase.h"
 #include "fission/analysis/FunctionMatcher.h"
+#include "fission/analysis/RelationValidator.h"
 #include "fission/analysis/CallingConvDetector.h"
 #include "fission/analysis/VTableAnalyzer.h"
 #include "fission/analysis/GlobalDataAnalyzer.h"
 #include "fission/analysis/EmulationAnalyzer.h"
+#include "fission/config/PathConfig.h"
 #include "libdecomp.hh"
 #include "database.hh"
 #include "type.hh"
@@ -51,105 +52,12 @@ static constexpr int MAX_PTRSUB_OPS = 100;           // Limit analyzed operation
 // ============================================================================
 // Centralized FID/Signature Path Configuration
 // ============================================================================
-// Primary directory for FID databases (unified location)
-static const std::vector<std::string> FID_SEARCH_DIRS = {
-    "./utils/signatures/fid/",
-    "../utils/signatures/fid/",
-    "../../utils/signatures/fid/"
-};
 
-// MSVC FID database filenames by version (highest priority)
-static const std::vector<std::string> MSVC_FID_FILES_X64 = {
-    "vs2019_x64.fidbf", "vs2017_x64.fidbf", "vs2015_x64.fidbf", 
-    "vs2012_x64.fidbf", "vsOlder_x64.fidbf"
-};
-static const std::vector<std::string> MSVC_FID_FILES_X86 = {
-    "vs2019_x86.fidbf", "vs2017_x86.fidbf", "vs2015_x86.fidbf", 
-    "vs2012_x86.fidbf", "vsOlder_x86.fidbf"
-};
+using namespace fission::config;
 
-// GCC/MinGW FID database patterns
-static const std::vector<std::string> GCC_FID_FILES_X64 = {
-    "gcc-x86.LE.64.default.fidbf", "gcc-AARCH64.LE.64.v8A.fidbf"
-};
-static const std::vector<std::string> GCC_FID_FILES_X86 = {
-    "gcc-x86.LE.32.default.fidbf", "gcc-ARM.LE.32.v8.fidbf"
-};
-
-// libc FID database patterns
-static const std::vector<std::string> LIBC_FID_FILES_X64 = {
-    "libc-x86.LE.64.default.fidbf", "libc-AARCH64.LE.64.v8A.fidbf"
-};
-static const std::vector<std::string> LIBC_FID_FILES_X86 = {
-    "libc-x86.LE.32.default.fidbf", "libc-ARM.LE.32.v8.fidbf"
-};
-
-// Crypto library FID databases (OpenSSL, libsodium)
-static const std::vector<std::string> CRYPTO_FID_FILES_X64 = {
-    "sigmoid-openssl-1.1.0f-x86.LE.64.default.fidbf",
-    "sigmoid-openssl-1.0.2l-x86.LE.64.default.fidbf",
-    "sigmoid-openssl-1.0.1u-x86.LE.64.default.fidbf",
-    "libsodium-x86.LE.64.default.fidbf"
-};
-static const std::vector<std::string> CRYPTO_FID_FILES_X86 = {
-    "sigmoid-openssl-1.1.0f-x86.LE.32.default.fidbf",
-    "sigmoid-openssl-1.0.2l-x86.LE.32.default.fidbf",
-    "sigmoid-openssl-1.0.1u-x86.LE.32.default.fidbf",
-    "libsodium-x86.LE.32.default.fidbf"
-};
-
-// Enterprise Linux FID databases
-static const std::vector<std::string> EL_FID_FILES_X64 = {
-    "el7.x86_64.fidbf", "el6.x86_64.fidbf"
-};
-static const std::vector<std::string> EL_FID_FILES_X86 = {
-    "el7.i686.fidbf", "el6.i686.fidbf"
-};
-
-// Common symbols filter files
-static const std::vector<std::string> COMMON_SYMBOL_FILES = {
-    "./utils/signatures/fid/common_symbols_win32.txt",
-    "./utils/signatures/fid/common_symbols_win64.txt",
-    "../utils/signatures/fid/common_symbols_win32.txt",
-    "../utils/signatures/fid/common_symbols_win64.txt"
-};
-
-// Helper: Find first existing FID file from search paths
-static std::string find_fid_file(const std::string& filename) {
-    for (const auto& dir : FID_SEARCH_DIRS) {
-        std::string path = dir + filename;
-        if (file_exists(path)) {
-            return path;
-        }
-    }
-    return "";
-}
-
-// Helper: Get all available FID paths for a given architecture (comprehensive)
-static std::vector<std::string> get_all_fid_paths(bool is_64bit) {
-    std::vector<std::string> result;
-    
-    // Collect all file lists for this architecture
-    std::vector<const std::vector<std::string>*> all_lists;
-    if (is_64bit) {
-        all_lists = {&MSVC_FID_FILES_X64, &GCC_FID_FILES_X64, &LIBC_FID_FILES_X64, 
-                     &CRYPTO_FID_FILES_X64, &EL_FID_FILES_X64};
-    } else {
-        all_lists = {&MSVC_FID_FILES_X86, &GCC_FID_FILES_X86, &LIBC_FID_FILES_X86,
-                     &CRYPTO_FID_FILES_X86, &EL_FID_FILES_X86};
-    }
-    
-    // Find all available files
-    for (const auto* file_list : all_lists) {
-        for (const auto& filename : *file_list) {
-            std::string path = find_fid_file(filename);
-            if (!path.empty()) {
-                result.push_back(path);
-            }
-        }
-    }
-    
-    return result;
+// Helper: Get all available FID paths for a given architecture
+static std::vector<std::string> get_all_fid_paths_wrapper(bool is_64bit) {
+    return ::fission::config::get_all_fid_paths(is_64bit);
 }
 
 
@@ -219,17 +127,37 @@ std::string DecompilationPipeline::handle_load_bin(
         return "{\"status\":\"error\",\"message\":\"Failed to initialize Ghidra\"}";
     }
     
+    // Parse optional architecture/compiler info to avoid redundant detection
+    std::string req_sleigh_id = extract_json_string(input, "sleigh_id");
+    std::string req_compiler_id = extract_json_string(input, "compiler_id");
+    
     // Phase 1: Binary Format Detection
-    std::cerr << "[fission_decomp] Debug: Detecting Binary Format..." << std::endl;
-    BinaryInfo bin_info = BinaryDetector::detect(bin_bytes.data(), bin_bytes.size());
+    BinaryInfo bin_info;
+    if (!req_sleigh_id.empty()) {
+        std::cerr << "[fission_decomp] Using provided architecture: " << req_sleigh_id << std::endl;
+        bin_info.sleigh_id = req_sleigh_id;
+        bin_info.compiler_id = req_compiler_id.empty() ? "default" : req_compiler_id;
+        
+        // Infer format and bitness from sleigh_id if possible
+        if (req_sleigh_id.find(":64:") != std::string::npos) bin_info.is_64bit = true;
+        if (req_sleigh_id.find("x86") != std::string::npos) bin_info.arch = ArchType::X86_64; // simplified
+        
+        // Map compiler_id to format for internal logic
+        if (bin_info.compiler_id == "windows") bin_info.format = BinaryFormat::PE;
+        else if (bin_info.compiler_id == "gcc") bin_info.format = BinaryFormat::ELF;
+        else if (bin_info.compiler_id == "clang") bin_info.format = BinaryFormat::MACHO;
+    } else {
+        std::cerr << "[fission_decomp] Debug: Detecting Binary Format..." << std::endl;
+        bin_info = BinaryDetector::detect(bin_bytes.data(), bin_bytes.size());
+    }
     
     bool is_pe = (bin_info.format == BinaryFormat::PE);
     bool is_elf = (bin_info.format == BinaryFormat::ELF);
     bool is_macho = (bin_info.format == BinaryFormat::MACHO);
     std::string compiler_id = bin_info.compiler_id.empty() ? "default" : bin_info.compiler_id;
     
-    if (bin_info.format != BinaryFormat::UNKNOWN) {
-        std::cerr << "[fission_decomp] Detected Binary: " 
+    if (bin_info.format != BinaryFormat::UNKNOWN || !bin_info.sleigh_id.empty()) {
+        std::cerr << "[fission_decomp] Binary Info: " 
                   << (is_pe ? "PE" : (is_elf ? "ELF" : (is_macho ? "Mach-O" : "Unknown")))
                   << " " << (bin_info.is_64bit ? "64-bit" : "32-bit") 
                   << " Arch=" << bin_info.sleigh_id
@@ -241,12 +169,6 @@ std::string DecompilationPipeline::handle_load_bin(
         bin_info.sleigh_id = "x86:LE:64:default";
         compiler_id = "windows";
     }
-    
-    // Backward compatibility
-    PeDetectionResult pe_info;
-    pe_info.is_pe = is_pe;
-    pe_info.is_64bit = bin_info.is_64bit;
-    pe_info.compiler_id = compiler_id;
     
     // Phase 2: Setup 64-bit Architecture
     if (!state.arch_64bit_ready) {
@@ -295,7 +217,7 @@ std::string DecompilationPipeline::handle_load_bin(
         // Phase 7: FID Analysis
         std::string fid_filename;
         if (is_pe) {
-            fid_filename = fission::analysis::TypePropagator::get_fid_filename(pe_info.is_64bit, compiler_id);
+            fid_filename = TypePropagator::get_fid_filename(bin_info.is_64bit, compiler_id);
         }
         
         if (!fid_filename.empty()) {
@@ -313,7 +235,7 @@ std::string DecompilationPipeline::handle_load_bin(
                         size_t step = 1;
                         for (size_t i = 0; i < bin_bytes.size() - 32; i += step) {
                             bool possible_start = false;
-                            if (pe_info.is_64bit) {
+                            if (bin_info.is_64bit) {
                                 // x64 Prologues (comprehensive patterns)
                                 uint8_t b0 = bin_bytes[i];
                                 uint8_t b1 = (i+1 < bin_bytes.size()) ? bin_bytes[i+1] : 0;
@@ -503,7 +425,7 @@ std::string DecompilationPipeline::handle_load_bin(
             }
         }
         
-        fission::loaders::DataSectionScanner data_scanner;
+        loaders::DataSectionScanner data_scanner;
         int total_data_symbols = 0;
         
         for (const auto& section : data_sections) {
@@ -524,7 +446,7 @@ std::string DecompilationPipeline::handle_load_bin(
             const uint8_t* section_data = bin_bytes.data() + start_idx;
             
             // Scan for symbols
-            std::vector<fission::loaders::DataSymbol> symbols = data_scanner.scanDataSection(
+            std::vector<loaders::DataSymbol> symbols = data_scanner.scanDataSection(
                 section_data,
                 section.va_addr,
                 section.file_size
@@ -629,7 +551,7 @@ std::string DecompilationPipeline::handle_load_bin(
     // Phase 12: Load FID databases
     {
         // Use centralized path configuration
-        std::vector<std::string> fid_candidates = get_all_fid_paths(bin_info.is_64bit);
+        std::vector<std::string> fid_candidates = ::fission::config::get_all_fid_paths(bin_info.is_64bit);
         
         static FidDatabase fid_db;
         static FunctionMatcher func_matcher;
@@ -650,7 +572,7 @@ std::string DecompilationPipeline::handle_load_bin(
         // Load ALL available FID databases using centralized paths
         static std::vector<FidDatabase> all_fid_dbs;
         if (all_fid_dbs.empty()) {
-            std::vector<std::string> all_fid_paths = get_all_fid_paths(bin_info.is_64bit);
+            std::vector<std::string> all_fid_paths = ::fission::config::get_all_fid_paths(bin_info.is_64bit);
             for (const auto& path : all_fid_paths) {
                 FidDatabase db;
                 if (db.load(path)) {
@@ -661,23 +583,72 @@ std::string DecompilationPipeline::handle_load_bin(
                      << " FID databases total" << std::endl;
         }
 
-        
-        // Improved function prologue detection
-        size_t matched_count = 0;
+        // Improved function prologue detection with 2-pass Relation Validation
+        std::cerr << "[fission_decomp] Starting FID scan on " << bin_bytes.size() << " bytes..." << std::endl;
         std::vector<uint64_t> prologues = PatternLoader::scan_function_prologues(bin_bytes, image_base);
         size_t prologue_count = prologues.size();
+        std::cerr << "[fission_decomp] Found " << prologue_count << " prologues to evaluate." << std::endl;
         
+        // Pass 1: Calculate hashes for all identified prologues
+        std::map<uint64_t, uint64_t> addr_to_hash;
         for (uint64_t addr : prologues) {
             size_t offset = addr - image_base;
             if (offset + 64 >= bin_bytes.size()) continue;
+            addr_to_hash[addr] = FidHasher::calculate_full_hash(&bin_bytes[offset], 64);
+        }
+
+        // Pass 2: Match and Validate relations
+        size_t matched_count = 0;
+        for (uint64_t addr : prologues) {
+            uint64_t func_hash = addr_to_hash[addr];
+            if (func_hash == 0) continue;
+
+            // Find all candidates across all loaded databases
+            std::vector<const FidFunctionRecord*> all_candidates;
+            FidDatabase* best_db = nullptr;
             
             for (auto& db : all_fid_dbs) {
-                func_matcher.set_fid_database(&db);
-                std::string name = func_matcher.match_by_fid(addr, &bin_bytes[offset], 64, true);
-                if (!name.empty()) {
-                    state.fid_function_names[addr] = name;
+                std::vector<const FidFunctionRecord*> candidates = db.lookup_records_by_hash(func_hash);
+                if (!candidates.empty()) {
+                    all_candidates.insert(all_candidates.end(), candidates.begin(), candidates.end());
+                    if (!best_db) best_db = &db; // Keep track of a DB for the validator
+                }
+            }
+
+            if (all_candidates.empty()) continue;
+
+            if (all_candidates.size() == 1) {
+                // Unique match, apply immediately
+                state.fid_function_names[addr] = all_candidates[0]->name;
+                matched_count++;
+            } else if (best_db) {
+                // Multiple candidates, use RelationValidator
+                RelationValidator validator(std::shared_ptr<FidDatabase>(best_db, [](FidDatabase*){})); // Quick wrap
+                
+                // Collect actual callee hashes (simple scan)
+                std::vector<uint64_t> actual_callees;
+                size_t offset = addr - image_base;
+                // Limit scan to 0x100 for performance and to avoid getting stuck in loops
+                for (size_t i = 0; i < 0x100 && (offset + i + 5) < bin_bytes.size(); ++i) {
+                    if (bin_bytes[offset + i] == 0xE8) { // CALL rel32
+                        int32_t rel = *(int32_t*)&bin_bytes[offset + i + 1];
+                        uint64_t target = addr + i + 5 + rel;
+                        if (addr_to_hash.count(target)) {
+                            actual_callees.push_back(addr_to_hash[target]);
+                        }
+                    }
+                    if (bin_bytes[offset + i] == 0xC3) break; // RET
+                }
+
+                auto result = validator.find_best_match(all_candidates, actual_callees);
+                if (!result.name.empty()) {
+                    state.fid_function_names[addr] = result.name;
                     matched_count++;
-                    break;
+                } else if (!all_candidates.empty()) {
+                     // Fallback to first candidate if validation didn't pick one but we have candidates
+                     // (This is what we did before, but now we're informed by the validator)
+                     state.fid_function_names[addr] = all_candidates[0]->name;
+                     matched_count++;
                 }
             }
         }
@@ -689,21 +660,13 @@ std::string DecompilationPipeline::handle_load_bin(
         }
         
         // Use centralized common symbols path configuration
-        const auto& symbol_files = COMMON_SYMBOL_FILES;
+        const auto symbol_files = ::fission::config::get_common_symbol_files();
         
         for (const auto& path : symbol_files) {
             if (file_exists(path)) {
-                std::ifstream ifs(path);
-                std::string line;
-                while (std::getline(ifs, line)) {
-                    if (!line.empty() && line[0] != '#') {
-                        size_t space = line.find(' ');
-                        if (space != std::string::npos && line.substr(0, 2) == "0x") {
-                            uint64_t addr = std::stoull(line.substr(2, space - 2), nullptr, 16);
-                            std::string name = line.substr(space + 1);
-                            state.fid_function_names[addr] = name;
-                        }
-                    }
+                auto symbols = SymbolLoader::load_symbols_text(path);
+                for (const auto& [addr, name] : symbols) {
+                    state.fid_function_names[addr] = name;
                 }
                 std::cerr << "[fission_decomp] Loaded common symbols from: " << path << std::endl;
             }
@@ -743,7 +706,7 @@ std::string DecompilationPipeline::handle_decompile(
     
     // Determine loader/arch
     MemoryLoadImage* loader = nullptr;
-    fission::core::CliArchitecture* arch = nullptr;
+    core::CliArchitecture* arch = nullptr;
     
     if (is_64bit) {
         loader = state.loader_64bit;
@@ -821,14 +784,27 @@ std::string DecompilationPipeline::handle_decompile(
         fd = global_scope->addFunction(func_addr, "func")->getFunction();
     }
 
+    // Step 2a: Follow control flow to discover instructions (CRITICAL)
+    // Without this, the decompiler sees an empty function and generates a recursive stub.
+    try {
+        std::cerr << "[fission_decomp] Step 2a: Following control flow..." << std::endl;
+        fd->clear();
+        ghidra::Address end_addr = func_addr + 0x2000; // 8KB heuristic
+        fd->followFlow(func_addr, end_addr);
+    } catch (const std::exception& e) {
+        std::cerr << "[fission_decomp] WARNING: flow analysis failed: " << e.what() << std::endl;
+    } catch (...) {
+        std::cerr << "[fission_decomp] WARNING: flow analysis failed (unknown error)" << std::endl;
+    }
+
     // Step 2b: Detect and apply calling convention for this function
     {
-        fission::analysis::CallingConvDetector detector(arch);
+        CallingConvDetector detector(arch);
         auto conv = detector.detect(fd);
-        if (conv == fission::analysis::CallingConvDetector::CONV_UNKNOWN) {
+        if (conv == CallingConvDetector::CONV_UNKNOWN) {
             conv = is_64bit
-                ? fission::analysis::CallingConvDetector::CONV_MS_X64
-                : fission::analysis::CallingConvDetector::CONV_CDECL;
+                ? CallingConvDetector::CONV_MS_X64
+                : CallingConvDetector::CONV_CDECL;
         }
         detector.apply(fd, conv);
     }
@@ -897,7 +873,7 @@ std::string DecompilationPipeline::handle_decompile(
         // Step 4b-2: Reverse Type Propagation
         StepTimer timer_rev("Step 4b-2: Reverse Propagation");
         // Use TypePropagator with struct registry
-        fission::analysis::TypePropagator type_propagator(arch, &global_struct_registry);
+        TypePropagator type_propagator(arch, &global_struct_registry);
         type_propagator.clear();
         bool struct_changed = type_propagator.propagate_struct_types(fd);
         if (struct_changed) {
@@ -941,7 +917,7 @@ std::string DecompilationPipeline::handle_decompile(
     // Inject inferred struct definitions
     if (!inferred_struct_defs.empty()) {
         c_code = inferred_struct_defs + "\n" + c_code;
-        c_code = fission::analysis::TypePropagator::apply_struct_types(c_code, fd, captured_structs);
+        c_code = TypePropagator::apply_struct_types(c_code, fd, captured_structs);
     }
     
     c_code = post_process_iat_calls(c_code, state.iat_symbols);

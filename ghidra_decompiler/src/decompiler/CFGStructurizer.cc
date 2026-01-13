@@ -9,6 +9,7 @@
  */
 
 #include "fission/decompiler/CFGStructurizer.h"
+#include "fission/analysis/GraphAlgorithms.h"
 #include <regex>
 #include <sstream>
 #include <algorithm>
@@ -16,6 +17,10 @@
 
 namespace fission {
 namespace decompiler {
+
+using analysis::GraphAnalyzer;
+using analysis::Block;
+using analysis::Loop;
 
 // ============================================================================
 // Helper Functions
@@ -402,6 +407,23 @@ std::string CFGStructurizer::eliminate_forward_gotos(const std::string& c_code) 
 std::string CFGStructurizer::convert_backward_gotos_to_loops(const std::string& c_code) {
     std::string result = c_code;
     
+    // 1. Analyze CFG using robust Graph Algorithms
+    auto blocks = GraphAnalyzer::build_cfg_from_text(result);
+    auto loops = GraphAnalyzer::detect_loops(blocks);
+    
+    std::ostringstream output;
+    std::vector<std::string> lines;
+    std::stringstream ss(result);
+    std::string line;
+    while (std::getline(ss, line)) {
+        lines.push_back(line);
+    }
+    
+    // We need to apply transformations. Since multiple loops might exist,
+    // working on the line vector is tricky if we insert/remove lines.
+    // However, the GraphAnalyzer gave us line numbers valid for 'result'.
+    // We can use the detected loops to confirm valid Natural Loops before transforming.
+    
     // Pattern: LABEL: body; if (cond) goto LABEL;
     std::regex pattern(
         R"((\w+)\s*:\s*\n((?:[^\n]*\n)*?)if\s*\(\s*([^)]+)\s*\)\s*goto\s+\1\s*;)"
@@ -409,16 +431,36 @@ std::string CFGStructurizer::convert_backward_gotos_to_loops(const std::string& 
     
     std::smatch match;
     std::string::const_iterator search_start = result.cbegin();
-    std::ostringstream output;
     
     while (std::regex_search(search_start, result.cend(), match, pattern)) {
-        output << match.prefix().str();
+        std::string prefix = match.prefix().str();
+        output << prefix;
         
         std::string label = match[1].str();
         std::string body = match[2].str();
         std::string condition = match[3].str();
         
-        output << "do {\n" << body << "} while (" << condition << ");\n";
+        // Validation: Verify this really constitutes a natural loop in the CFG
+        bool is_valid_loop = false;
+        
+        // Find which loop corresponds to this label
+        // The regex match location can be mapped to a block
+        // Approximate check: does 'label' appear as a header in our loops?
+        for (const auto& loop : loops) {
+            const auto& header_blk = blocks[loop.header_id];
+            if (header_blk.label == label) {
+                // Yes, this label heads a natural loop
+                is_valid_loop = true;
+                break;
+            }
+        }
+        
+        if (is_valid_loop) {
+            output << "do {\n" << body << "} while (" << condition << ");\n";
+        } else {
+            // Not a natural loop (maybe irreducible or cross-jump), keep as goto
+            output << match.str();
+        }
         
         search_start = match.suffix().first;
     }

@@ -359,6 +359,39 @@ bool FidDatabase::load(const std::string& path) {
         }
     }
     
+    // Find "Superior Table" header (for Relation Validation)
+    const char* rels_marker = "Superior Table";
+    size_t rels_table_offset = 0;
+    uint32_t rels_count = 0;
+    
+    for (size_t i = 0; i < file_size - 50; ++i) {
+        if (memcmp(&data[i], rels_marker, 14) == 0) {
+            // Found "Superior Table"
+            for (size_t j = i; j < std::min(i + 200, file_size - 12); ++j) {
+                if ((uint8_t)data[j] == 0xFF && (uint8_t)data[j+1] == 0xFF && 
+                    (uint8_t)data[j+2] == 0xFF && (uint8_t)data[j+3] == 0xFF) {
+                    
+                    // Read count from j+12
+                    if (j + 16 < file_size) {
+                        rels_count = ((uint8_t)data[j+12] << 24) | ((uint8_t)data[j+13] << 16) |
+                                          ((uint8_t)data[j+14] << 8) | (uint8_t)data[j+15];
+                        // Relations can be numerous
+                        if (rels_count > 10000000) rels_count = 500000;
+                    }
+                    
+                    rels_table_offset = j + 20;
+                    break;
+                }
+            }
+            
+            if (rels_table_offset > 0) {
+                std::cerr << "[FidDatabase] Found Superior Table at 0x" << std::hex 
+                          << rels_table_offset << " (count=" << std::dec << rels_count << ")" << std::endl;
+                break;
+            }
+        }
+    }
+
     // Parse strings table first (needed for name resolution)
     if (strings_table_offset > 0) {
         file.clear();
@@ -372,9 +405,16 @@ bool FidDatabase::load(const std::string& path) {
         file.seekg(0);
         parse_functions_table(file, functions_table_offset, functions_count > 0 ? functions_count : 100000);
     }
+
+    // Parse relations table
+    if (rels_table_offset > 0) {
+        file.clear();
+        file.seekg(0);
+        parse_relations_table(file, rels_table_offset, rels_count > 0 ? rels_count : 100000);
+    }
     
     std::cerr << "[FidDatabase] Loaded " << functions.size() << " functions, " 
-              << strings_table.size() << " strings" << std::endl;
+              << strings_table.size() << " strings, " << superior_relations.size() << " relations" << std::endl;
     
     loaded = !functions.empty();
     return loaded;
@@ -391,6 +431,20 @@ std::vector<std::string> FidDatabase::lookup_by_hash(uint64_t full_hash) const {
             if (common_symbols.find(func.name) == common_symbols.end()) {
                 results.push_back(func.name);
             }
+        }
+    }
+    
+    return results;
+}
+
+std::vector<const FidFunctionRecord*> FidDatabase::lookup_records_by_hash(uint64_t full_hash) const {
+    std::vector<const FidFunctionRecord*> results;
+    auto range = hash_index.equal_range(full_hash);
+    
+    for (auto it = range.first; it != range.second; ++it) {
+        size_t index = it->second;
+        if (index < functions.size()) {
+            results.push_back(&functions[index]);
         }
     }
     
@@ -447,6 +501,38 @@ void FidDatabase::print_sample_hashes(size_t count) const {
         }
     }
     std::cerr << "[FidDatabase] Showing " << found << " sample hashes from " << functions.size() << " total functions" << std::endl;
+}
+
+bool FidDatabase::parse_relations_table(std::ifstream& file, uint64_t offset, uint64_t count) {
+    file.seekg(offset);
+    
+    // Skip header text (variable length, ends with 0xFF sentinel)
+    char c;
+    while (file.get(c) && c != (char)0xFF) {}
+    
+    superior_relations.clear();
+    superior_relations.reserve(count);
+    
+    // Read relation keys (8 bytes each)
+    for (uint64_t i = 0; i < count && !file.eof(); ++i) {
+        uint64_t key = read_be64(file);
+        if (file.eof()) break;
+        superior_relations.insert(key);
+    }
+    
+    return true;
+}
+
+bool FidDatabase::has_relation(uint64_t caller_id, uint64_t callee_hash) const {
+    if (caller_id == 0 || callee_hash == 0) return false;
+    
+    // Calculate "Smash" key: (CallerID * PRIME) ^ CalleeHash
+    // FNV_64_PRIME from FidHasher logic
+    static const uint64_t FNV_64_PRIME = 1099511628211ULL;
+    
+    uint64_t key = (caller_id * FNV_64_PRIME) ^ callee_hash;
+    
+    return superior_relations.find(key) != superior_relations.end();
 }
 
 // FID Hash Calculator

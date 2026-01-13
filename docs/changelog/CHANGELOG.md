@@ -2,6 +2,40 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
+### Refactored FID/GDT Path Management & Loop Detection (2026-01-13)
+
+**🔄 Centralized Path Configuration**
+
+- **Unified FID/GDT Paths**: Centralized the management of signature file paths into a new `fission::config::PathConfig` component.
+  - Eliminated hardcoded paths across `DecompilationPipeline.cc`, `TypePropagator.cc`, and `ArchInit.cc`.
+  - Provides a single source of truth for all signature files (FID, GDT, common symbols), significantly improving maintainability.
+- **JSON Parsing Refactoring**:
+  - Implemented a robust `parse_json_string_map` utility in `fission::utils`.
+  - Removed duplicate and manual JSON parsing logic from `SymbolLoader` and `DecompilationPipeline`, replacing them with the centralized utility.
+
+**🔄 Advanced Loop Detection (Graph-Based)**
+
+- **Graph Algorithms Implementation**: Introduced `GraphAnalyzer` in C++ implementing standard graph-theoretic algorithms aligning with the Rust analysis engine.
+  - **Dominator Tree**: Implements Cooper-Harvey-Kennedy algorithm for precise dominance calculation.
+  - **Natural Loop Detection**: Implements Tarjan/Havlak approach to correctly identify natural loops.
+- **Structural Integrity**: Updated `CFGStructurizer` to use these rigorous algorithms for backward-goto transformation, ensuring that only valid natural loops are converted to `do-while` structures, eliminating the risk of incorrect transforms based on regex guessing.
+
+**🧹 Script Organization**
+
+- **Wrapper Cleanup**: Removed redundant top-level wrapper scripts (`build_decompiler.sh`, `compare_decompilers.sh`, etc.) to streamline the project structure.
+- **Documentation Update**: Updated `scripts/README.md` to point users to the canonical script locations in subdirectories.
+
+---
+
+**🔄 Redundancy Elimination**
+
+- **Unified Binary Detection**: Eliminated redundant binary analysis in the C++ decompiler by leveraging the comprehensive detection capabilities of the Rust-based `fission-loader`.
+- **Architecture Propagation**:
+  - Updated FFI interfaces (`load_binary`) to accept architecture (`sleigh_id`) and compiler information directly from Rust.
+  - Modified C++ core to respect provided architecture/compiler IDs, bypassing the internal `BinaryDetector` fallback.
+  - Ensures consistent binary handling across UI, CLI, and Decompiler backend (e.g., correct handling of MinGW/GCC vs MSVC).
+- **CLI & UI**: Updated `fission-cli` and `fission-ui` to pass detected compiler information (e.g., `gcc`, `clang`, `windows`) to the decompiler context.
+
 ### CFG Structurizer Refinement & Loop Recovery (2026-01-13)
 
 **🔄 CFG Structurization & Loop Recognition**

@@ -168,7 +168,6 @@ impl FissionAPI {
             arch: binary.arch_spec.clone(),
             entry_point: binary.entry_point,
             is_64bit: binary.is_64bit,
-            is_dotnet: binary.is_dotnet,
             section_count: binary.sections.len(),
             function_count: binary.functions.len(),
         })

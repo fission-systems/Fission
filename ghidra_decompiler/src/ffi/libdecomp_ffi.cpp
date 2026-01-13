@@ -38,9 +38,11 @@ extern "C" DECOMP_API DecompError decomp_load_binary(
     const uint8_t* data,
     size_t len,
     uint64_t base_addr,
-    int is_64bit
+    int is_64bit,
+    const char* sleigh_id,
+    const char* compiler_id
 ) {
-    return load_binary(ctx, data, len, base_addr, is_64bit != 0);
+    return load_binary(ctx, data, len, base_addr, is_64bit != 0, sleigh_id, compiler_id);
 }
 
 // ============================================================================

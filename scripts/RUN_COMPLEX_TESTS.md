@@ -51,7 +51,7 @@ Total test cases: 6
 ─────────────────────────────────────────────────────────────────
 
 [1/6] [Control Flow] Nested Loops
-  Binary: test/bin_x64/nested_loops_x64.exe
+  Binary: examples/bin_x64/nested_loops_x64.exe
   Difficulty: ⭐⭐⭐
   Functions to test: 56
   Running comparison...
@@ -189,9 +189,9 @@ Similarity가 낮은 카테고리 집중
 
 ## 추가 정보
 
-- 테스트 소스: `test/control_flow/`, `test/data_structures/`, etc.
+- 테스트 소스: `examples/control_flow/`, `examples/data_structures/`, etc.
 - 비교 스크립트: `scripts/compare_decompilers_v2.py`
-- 빌드 가이드: `test/README_TESTS.md`
+- 빌드 가이드: `examples/README_TESTS.md`
 
 ## 문의 및 기여
 

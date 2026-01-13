@@ -40,7 +40,24 @@ pub(super) fn run_decompilation(
     // Load binary
     {
         let _silencer = OutputSilencer::new_if(!cli.verbose);
-        if let Err(e) = decomp.load_binary(binary_data, binary.image_base, binary.is_64bit) {
+        // Try to detect compiler
+        let detection = fission_loader::detect(binary);
+        let compiler_id = detection
+            .compiler()
+            .map(|d| match d.name.to_lowercase().as_str() {
+                "microsoft visual c++" | "msvc" => "windows",
+                "gcc" | "mingw" => "gcc",
+                "clang" => "clang",
+                _ => "default",
+            });
+
+        if let Err(e) = decomp.load_binary(
+            binary_data,
+            binary.image_base,
+            binary.is_64bit,
+            Some(&binary.arch_spec),
+            compiler_id,
+        ) {
             eprintln!("Error: Failed to load binary: {}", e);
             std::process::exit(1);
         }
@@ -110,9 +127,8 @@ pub(super) fn run_decompilation(
 
     // Build comprehensive FID database list
     // Primary: utils/signatures/fid/ (unified location)
-    // Fallback: utils/ghidra/funtionID/ (legacy location)
     let fid_paths = vec![
-        // Primary unified location
+        // MSVC databases
         format!("utils/signatures/fid/vs2019{}", target_suffix),
         format!("utils/signatures/fid/vs2017{}", target_suffix),
         format!("utils/signatures/fid/vs2015{}", target_suffix),
@@ -123,12 +139,6 @@ pub(super) fn run_decompilation(
         format!("utils/signatures/fid/gcc12{}", target_suffix),
         format!("utils/signatures/fid/gcc11{}", target_suffix),
         format!("utils/signatures/fid/mingw{}", target_suffix),
-        // Legacy location (backward compatibility)
-        format!("utils/ghidra/funtionID/vs2019{}", target_suffix),
-        format!("utils/ghidra/funtionID/vs2017{}", target_suffix),
-        format!("utils/ghidra/funtionID/vs2015{}", target_suffix),
-        format!("utils/ghidra/funtionID/vs2012{}", target_suffix),
-        format!("utils/ghidra/funtionID/vsOlder{}", target_suffix),
     ];
 
     // Load all available FID databases for better matching coverage

@@ -125,10 +125,6 @@ pub struct LoadedBinaryInner {
     pub sections: Vec<SectionInfo>,
     /// Is this a 64-bit binary?
     pub is_64bit: bool,
-    /// Does the image contain a CLR (.NET) runtime header?
-    pub is_dotnet: bool,
-    /// Reported CLR metadata version string (e.g. "v4.0.30319")
-    pub dotnet_runtime_version: Option<String>,
     /// Binary format (PE, ELF, Mach-O)
     pub format: String,
     /// IAT address to symbol name mapping for decompiler output
@@ -166,6 +162,19 @@ impl LoadedBinary {
     #[inline]
     pub fn inner(&self) -> &LoadedBinaryInner {
         &self.inner
+    }
+
+    /// Get Ghidra-compatible compiler ID based on detections
+    pub fn get_ghidra_compiler_id(&self) -> Option<String> {
+        let detection = crate::detector::detect(self);
+        detection
+            .compiler()
+            .map(|d| match d.name.to_lowercase().as_str() {
+                "microsoft visual c++" | "msvc" => "windows".to_string(),
+                "gcc" | "mingw" => "gcc".to_string(),
+                "clang" => "clang".to_string(),
+                _ => "default".to_string(),
+            })
     }
 
     /// Get mutable reference with COW semantics
@@ -211,8 +220,6 @@ pub struct LoadedBinaryBuilder {
     functions: Vec<FunctionInfo>,
     sections: Vec<SectionInfo>,
     is_64bit: bool,
-    is_dotnet: bool,
-    dotnet_runtime_version: Option<String>,
     format: String,
     iat_symbols: std::collections::HashMap<u64, String>,
     global_symbols: std::collections::HashMap<u64, String>,
@@ -231,8 +238,6 @@ impl LoadedBinaryBuilder {
             functions: Vec::new(),
             sections: Vec::new(),
             is_64bit: false,
-            is_dotnet: false,
-            dotnet_runtime_version: None,
             format: "unknown".to_string(),
             iat_symbols: std::collections::HashMap::new(),
             global_symbols: std::collections::HashMap::new(),
@@ -256,16 +261,6 @@ impl LoadedBinaryBuilder {
 
     pub fn is_64bit(mut self, is_64bit: bool) -> Self {
         self.is_64bit = is_64bit;
-        self
-    }
-
-    pub fn is_dotnet(mut self, is_dotnet: bool) -> Self {
-        self.is_dotnet = is_dotnet;
-        self
-    }
-
-    pub fn dotnet_runtime_version(mut self, version: Option<String>) -> Self {
-        self.dotnet_runtime_version = version;
         self
     }
 
@@ -339,8 +334,6 @@ impl LoadedBinaryBuilder {
             functions,
             sections: self.sections,
             is_64bit: self.is_64bit,
-            is_dotnet: self.is_dotnet,
-            dotnet_runtime_version: self.dotnet_runtime_version,
             format: self.format,
             iat_symbols: self.iat_symbols,
             global_symbols: self.global_symbols,
@@ -455,18 +448,12 @@ impl LoadedBinary {
             "{} {} binary\n\
              Entry: 0x{:x}\n\
              Image Base: 0x{:x}\n\
-             .NET: {}{}\n\
              Sections: {}\n\
              Functions: {}",
             if self.is_64bit { "64-bit" } else { "32-bit" },
             self.format,
             self.entry_point,
             self.image_base,
-            if self.is_dotnet { "yes" } else { "no" },
-            self.dotnet_runtime_version
-                .as_ref()
-                .map(|v| format!(" (runtime {v})"))
-                .unwrap_or_default(),
             self.sections.len(),
             self.functions.len()
         )

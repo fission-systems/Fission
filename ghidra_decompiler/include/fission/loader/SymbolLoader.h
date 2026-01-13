@@ -12,6 +12,9 @@ class SymbolLoader {
 public:
     // Load simple JSON symbol map: { "address": "name", ... }
     static std::map<uint64_t, std::string> load_symbols_json(const std::string& path);
+    
+    // Load text symbol map: "0xADDR NAME" per line
+    static std::map<uint64_t, std::string> load_symbols_text(const std::string& path);
 };
 
 } // namespace loader

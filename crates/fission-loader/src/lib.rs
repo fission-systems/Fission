@@ -1,7 +1,7 @@
 //! Fission Loader - Binary format parsing and loading
 //!
 //! This crate provides functionality for loading and parsing various binary formats
-//! including PE (Windows), ELF (Linux), Mach-O (macOS), and .NET assemblies.
+//! including PE (Windows), ELF (Linux), and Mach-O (macOS).
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
@@ -12,15 +12,10 @@
 #![allow(clippy::cast_sign_loss)]
 
 pub mod detector;
-pub mod dotnet;
 pub mod loader;
 pub mod prelude;
 
 // Re-exports
 pub use detector::{Confidence, Detection, DetectionResult, DetectionType, detect};
-pub use dotnet::{
-    DotNetError, DotNetMetadata, DotNetMethod, DotNetType, ILInstruction, IlDisassembler,
-    disassemble_method_rva, parse_dotnet_metadata,
-};
-pub use loader::{FunctionInfo, LoadedBinary, SectionInfo};
 pub use loader::pe::detect_pe_is_64bit;
+pub use loader::{FunctionInfo, LoadedBinary, SectionInfo};

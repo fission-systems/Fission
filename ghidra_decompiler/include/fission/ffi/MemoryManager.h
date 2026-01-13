@@ -28,7 +28,9 @@ DecompError load_binary(
     const uint8_t* data,
     size_t len,
     uint64_t base_addr,
-    bool is_64bit
+    bool is_64bit,
+    const char* sleigh_id = nullptr,
+    const char* compiler_id = nullptr
 );
 
 /**

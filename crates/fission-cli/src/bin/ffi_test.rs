@@ -65,7 +65,7 @@ fn main() {
         let base_addr = 0x140000000u64;
         eprintln!("[*] Loading binary at base 0x{:x}...", base_addr);
 
-        if let Err(e) = decomp.load_binary(&binary_data, base_addr, true) {
+        if let Err(e) = decomp.load_binary(&binary_data, base_addr, true, None, None) {
             eprintln!("Error loading binary: {}", e);
             std::process::exit(1);
         }
