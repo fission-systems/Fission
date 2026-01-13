@@ -14,7 +14,9 @@
 #include <cstring>
 #include <map>
 #include <cstdint>
+#include <cstdlib>
 #include "fission/decompiler/ServerMode.h"
+#include "fission/utils/logger.h"
 
 // Global Structure Registry - declared extern, defined in DecompilationPipeline.cc
 extern std::map<uint64_t, std::map<int, std::string>> global_struct_registry;
@@ -27,6 +29,12 @@ int main(int argc, char** argv) {
             server_mode = true;
             break;
         }
+    }
+
+    // Initialize logger
+    const char* log_file = std::getenv("FISSION_LOG_FILE");
+    if (log_file) {
+        fission::utils::Logger::initialize(log_file);
     }
     
     if (server_mode) {

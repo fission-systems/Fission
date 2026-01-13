@@ -238,49 +238,59 @@ void initialize_architecture(DecompContext* ctx, const ArchInitOptions& options)
         &ctx->err_stream
     );
 
-    ensure_symbol_provider(ctx);
-    ctx->arch->setSymbolProvider(ctx->symbol_provider.get());
+    try {
+        ensure_symbol_provider(ctx);
+        ctx->arch->setSymbolProvider(ctx->symbol_provider.get());
 
-    ghidra::DocumentStorage store;
-    ctx->arch->init(store);
+        ghidra::DocumentStorage store;
+        ctx->arch->init(store);
 
-    bool readonly_props_set = apply_default_space(ctx);
+        bool readonly_props_set = apply_default_space(ctx);
 
-    configure_arch(ctx->arch.get());
+        configure_arch(ctx->arch.get());
 
-    if (options.apply_feature_flags) {
-        apply_feature_flags(ctx);
-    }
-
-    if (options.register_windows_types) {
-        TypeManager::register_windows_types(ctx->arch->types, ArchPolicy::getPointerSize(ctx->arch.get()));
-    }
-
-    if (options.load_gdt) {
-        load_gdt_for_arch(ctx->arch.get(), ctx->is_64bit, ctx->gdt_path);
-    }
-
-    if (options.inject_symbols && options.register_functions) {
-        register_functions_from_symbols(ctx);
-    } else if (options.inject_symbols) {
-        std::cerr << "[DecompilerCore] Injecting " << ctx->symbols.size() << " symbols" << std::endl;
-        ctx->arch->injectIatSymbols(ctx->symbols);
-    }
-
-    if (options.apply_memory_blocks) {
-        if (!readonly_props_set) {
-            apply_memory_block_readonly(ctx);
+        if (options.apply_feature_flags) {
+            apply_feature_flags(ctx);
         }
-        log_memory_blocks(ctx);
-    }
 
-    // FISSION IMPROVEMENT: Register data section symbols (floating-point constants, etc.)
-    // This enables proper type propagation through memory loads
-    if (options.register_data_symbols && !ctx->binary_data.empty()) {
-        registerDataSectionSymbols(ctx);
-    }
+        if (options.register_windows_types) {
+            TypeManager::register_windows_types(ctx->arch->types, ArchPolicy::getPointerSize(ctx->arch.get()));
+        }
 
-    std::cerr << "[DecompilerCore] Architecture initialized: " << sleigh_id << std::endl;
+        if (options.load_gdt) {
+            load_gdt_for_arch(ctx->arch.get(), ctx->is_64bit, ctx->gdt_path);
+        }
+
+        if (options.inject_symbols && options.register_functions) {
+            register_functions_from_symbols(ctx);
+        } else if (options.inject_symbols) {
+            std::cerr << "[DecompilerCore] Injecting " << ctx->symbols.size() << " symbols" << std::endl;
+            ctx->arch->injectIatSymbols(ctx->symbols);
+        }
+
+        if (options.apply_memory_blocks) {
+            if (!readonly_props_set) {
+                apply_memory_block_readonly(ctx);
+            }
+            log_memory_blocks(ctx);
+        }
+
+        // FISSION IMPROVEMENT: Register data section symbols
+        if (options.register_data_symbols && !ctx->binary_data.empty()) {
+            registerDataSectionSymbols(ctx);
+        }
+
+        std::cerr << "[DecompilerCore] Architecture initialized: " << sleigh_id << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cerr << "[DecompilerCore] ERROR: Architecture initialization failed: " << e.what() << std::endl;
+        ctx->arch.reset(); // Destroy zombie architecture
+        throw;
+    } catch (...) {
+        std::cerr << "[DecompilerCore] ERROR: Unknown error during architecture initialization" << std::endl;
+        ctx->arch.reset(); // Destroy zombie architecture
+        throw;
+    }
 }
 
 } // namespace core
