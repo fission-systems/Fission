@@ -2,6 +2,24 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
+### CFG Structurizer Refinement & Loop Recovery (2026-01-13)
+
+**🔄 CFG Structurization & Loop Recognition**
+
+- **Enhanced Loop Recovery**: Implemented advanced pattern recognition for C-style loops in the `CFGStructurizer`.
+  - **For-Loop Recovery**: Significantly improved regex-based detection to handle variable initializations, complex bounds, and various increment styles.
+  - **Continue Restoration**: Identified loop headers and transformed backward jumps to those headers into `continue` statements.
+  - **Break Restoration**: Implemented `eliminate_loop_exits` to convert jumps to labels immediately following a loop into structured `break` statements.
+- **Nested Loop Support**: Refactored the structurizer to better handle multi-level nested loops and unstructured control flow, drawing inspiration from LLVM's `StructurizeCFG`.
+- **Pipeline Integration**: Fully integrated the refined `CFGStructurizer` into the main post-processing pipeline, ensuring all decompiled output benefits from these structural enhancements.
+
+**📊 Quality & Reporting Improvements**
+
+- **Assembly in Batch Mode**: Updated `pyghidra_decompile_batch.py` and `compare_decompilers_v2.py` to capture and display Ghidra's assembly listing even when using cached results from batch analysis.
+- **Goto Elimination Tracking**: Added debug logging to quantify the effectiveness of the structurization process (e.g., "[CFGStructurizer] Eliminated X gotos").
+
+---
+
 ### PyGhidra Batch Optimization & FID Relation Validation (2026-01-13)
 
 **⚡ PyGhidra Performance Optimization**
