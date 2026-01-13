@@ -65,3 +65,43 @@
 - **세부 내용**:
   - **Reference Follower**: 특정 메모리 주소나 상수를 참조하는 모든 코드 위치를 즉시 추적.
   - **String/Handle Search**: 로드된 프로세스 내의 모든 핸들, 문자열, 힙 객체를 스캔하여 코드 분석과 연결.
+
+## 9. Radare2 기반의 ESIL 에뮬레이션 및 유연한 스크립팅
+
+- **참고**: `vendor/radare2-master`
+- **아이디어**: ESIL(Evaluable Strings Intermediate Language)을 활용하여 아키텍처 중립적인 가벼운 에뮬레이션 환경 구축.
+- **세부 내용**:
+  - **Virtual Machine Emulation**: 아키텍처에 상관없이 문자열 기반의 ESIL 가상 머신을 통해 특정 코드 블록의 사이드 이펙트(레지스터 변화 등)를 빠르게 계산.
+  - **r2pipe 스타일 API**: 분석 프로세스의 모든 단계를 파이썬이나 자바스크립트로 제어할 수 있는 강력한 파이프 API를 제공하여 대규모 바이너리 자동 분석 지원.
+
+## 10. Wireshark Dissector 연동을 통한 프로토콜 인지형 디컴파일
+
+- **참고**: `vendor/wireshark-master`
+- **아이디어**: 네트워크 통신 바이너리 분석 시, Wireshark의 수천 개의 프로토콜 디섹터 로직을 활용하여 데이터 구조 자동 파악.
+- **세부 내용**:
+  - **Socket Buffer Reconstruction**: `send`, `recv` 등의 시스템 콜에 사용되는 버퍼가 어떤 네트워크 프로토콜(HTTP, TLS, 커스텀 프로토콜 등)인지 식별하고 해당 구조체 템플릿을 디컴파일 뷰에 자동 적용.
+  - **Field-to-Variable Mapping**: 패킷의 특정 필드(예: `Packet.Length`)를 사용하는 변수를 디컴파일러가 자동으로 인식하여 의미 있는 변수명으로 리네임.
+
+## 11. Cheat Engine 스타일의 고성능 포인터 맵 및 시그니처 분석
+
+- **참고**: `vendor/cheat-engine-master`
+- **아이디어**: 변동하는 주소 공간에서도 유효한 데이터 접근 경로를 찾기 위해 고차원 포인터 분석 기능을 도입.
+- **세부 내용**:
+  - **Multi-level Pointer Map**: 전역 객체가 복잡한 포인터 체인을 통해 접근될 때, 수천 단계의 포인터 경로를 실시간으로 탐색하여 "이 데이터에 도달하는 모든 루트 주소"를 시각화.
+  - **AOB (Array of Bytes) Signature Scan**: 특정 함수나 데이터 패턴을 찾는 CE 스타일의 와イルド카드 시그니처 스캐너를 통합하여 바이너리 버전 간 데이터 매핑 성능 향상.
+
+## 12. Capstone 6.0 기반의 특수 명령어 로직 복구
+
+- **참고**: `vendor/capstone-6.0.0-Alpha5`
+- **아이디어**: 최신 CPU의 특수 명령어 및 가속기 명령어를 사용하는 고성능 연산 코드의 가독성 개선.
+- **세부 내용**:
+  - **Architecture-Specific Decomposition**: Intel AMX, ARM SVE/SME 등 하이엔드 연산 명령어를 사용하는 코드를 분석하여, 이를 단순히 인라인 어셈블리로 보여주는 대신 원래의 행렬 연산이나 벡터 연산 수식으로 복원.
+  - **Instruction Detail 분석**: Capstone이 제공하는 상세 오퍼런드 정보를 활용하여, 부동 소수점 연산이나 비트 필드 조작 명령어를 보다 직관적인 C 연산자로 변환.
+
+## 13. Binary Diffing 및 유사도 분석 엔진 (Radare2/RetDec 응용)
+
+- **참고**: `vendor/radare2-master`, `vendor/retdec-5.0`
+- **아이디어**: 패치된 바이너리나 서로 다른 컴파일러 옵션으로 빌드된 바이너리 간의 로직 차이를 시각적이고 구조적으로 분석.
+- **세부 내용**:
+  - **Control Flow Graph Diffing**: 두 바이너리의 함수 간 CFG 구조를 비교하여 추가되거나 삭제된 분기문을 하이라이트 표시.
+  - **Symbolic Similarity Check**: 변수명이나 오프셋이 다르더라도 논리적으로 동일한 연산 흐름을 가진 함수를 찾아내어 기존 분석 정보를 전파(Porting).
