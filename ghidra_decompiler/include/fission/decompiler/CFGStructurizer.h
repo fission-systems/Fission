@@ -136,6 +136,11 @@ public:
      */
     static std::string convert_unconditional_backward_goto(const std::string& c_code);
     
+    /**
+     * @brief Convert gotos that exit a loop to break statements
+     */
+    static std::string eliminate_loop_exits(const std::string& c_code);
+    
 private:
     struct Label {
         std::string name;

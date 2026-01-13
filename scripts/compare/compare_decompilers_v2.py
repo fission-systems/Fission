@@ -271,6 +271,10 @@ def compare_single(binary: Path, address: str, output_json: Path, timeout: int) 
         with open(ghidra_cached_json, "r") as f:
             cached = json.load(f)
             ghidra_full = cached.get("code", "")
+            # If batch script saved assembly separately, use it
+            cached_asm = cached.get("asm", "")
+            if cached_asm:
+                ghidra_full = f"--- Assembly Listing ---\n{cached_asm}\n--- Decompiled Code ---\n{ghidra_full}"
             print(f"    - Using cached Ghidra results for {address}")
     else:
         ghidra_cmd = [

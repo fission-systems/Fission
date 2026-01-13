@@ -188,52 +188,75 @@ bool CFGStructurizer::is_loop_header(const std::string& label,
  * To:
  *   for (i = start; i < end; i++) { body; }
  */
+/**
+ * Convert for-loop patterns:
+ *   i = start;
+ *   LABEL:
+ *   if (i >= end) goto EXIT;
+ *   body;
+ *   i++;
+ *   goto LABEL;
+ *   EXIT:
+ * 
+ * To:
+ *   for (i = start; i < end; i++) { body; }
+ */
 std::string CFGStructurizer::convert_for_loop_patterns(const std::string& c_code) {
     std::string result = c_code;
     
-    // Pattern: init; LABEL: if(cond) goto EXIT; body; incr; goto LABEL; EXIT:
+    // Improved Pattern: handles variable start/end, different operators, and whitespaces
     std::regex pattern(
-        R"((\w+)\s*=\s*(\d+)\s*;\s*\n)"          // i = 0;
-        R"(\s*(\w+)\s*:\s*\n)"                    // LABEL:
-        R"(\s*if\s*\(\s*(\w+)\s*(>=|>|<=|<)\s*([^)]+)\s*\)\s*goto\s+(\w+)\s*;\s*\n)"  // if (i >= n) goto EXIT;
-        R"(((?:[^\n]*\n)*?))"                     // body
-        R"(\s*\4\s*(?:=\s*\4\s*\+\s*1|\+\+)\s*;\s*\n)"  // i++ or i = i + 1;
-        R"(\s*goto\s+\3\s*;\s*\n)"                // goto LABEL;
-        R"(\s*\7\s*:)"                             // EXIT:
+        R"((\w+)\s*=\s*([^;]+)\s*;\s*\n?)"           // i = 0 or i = start_var;
+        R"(\s*(\w+)\s*:\s*\n?)"                       // LABEL:
+        R"(\s*if\s*\(\s*(\1)\s*(>=|>|<=|<|!=|==)\s*([^)]+)\s*\)\s*goto\s+(\w+)\s*;\s*\n?)"  // if (i >= n) goto EXIT;
+        R"(((?:[^\n]*\n)*?))"                          // body
+        R"((\s*)(\1)\s*(?:=\s*\1\s*\+\s*1|\+\+)\s*;\s*\n?)"  // i++ or i = i + 1;
+        R"(\s*goto\s+\3\s*;\s*\n?)"                    // goto LABEL;
+        R"(\s*\6\s*:)"                                  // EXIT:
     );
     
     std::smatch match;
-    std::string::const_iterator search_start = result.cbegin();
+    std::string current = result;
     std::ostringstream output;
+    size_t last_pos = 0;
     
-    while (std::regex_search(search_start, result.cend(), match, pattern)) {
-        output << match.prefix().str();
+    auto it = std::sregex_iterator(current.begin(), current.end(), pattern);
+    auto end = std::sregex_iterator();
+    
+    if (it == end) return result;
+    
+    for (; it != end; ++it) {
+        match = *it;
+        output << current.substr(last_pos, match.position() - last_pos);
         
         std::string var = match[1].str();
         std::string start_val = match[2].str();
         std::string loop_label = match[3].str();
-        std::string loop_var = match[4].str();
+        // match[4] is var again
         std::string op = match[5].str();
         std::string end_val = match[6].str();
         std::string exit_label = match[7].str();
         std::string body = match[8].str();
+        std::string indent = match[9].str();
         
-        // Convert condition
+        // Convert condition to for-loop stayed-in condition
         std::string for_cond;
-        if (op == ">=") for_cond = loop_var + " < " + end_val;
-        else if (op == ">") for_cond = loop_var + " <= " + end_val;
-        else if (op == "<=") for_cond = loop_var + " > " + end_val;
-        else if (op == "<") for_cond = loop_var + " >= " + end_val;
-        else for_cond = "!(" + loop_var + " " + op + " " + end_val + ")";
+        if (op == ">=") for_cond = var + " < " + end_val;
+        else if (op == ">") for_cond = var + " <= " + end_val;
+        else if (op == "<=") for_cond = var + " > " + end_val;
+        else if (op == "<") for_cond = var + " >= " + end_val;
+        else if (op == "!=") for_cond = var + " == " + end_val;
+        else if (op == "==") for_cond = var + " != " + end_val;
+        else for_cond = negate_condition(var + " " + op + " " + end_val);
         
-        output << "for (" << var << " = " << start_val << "; " 
-               << for_cond << "; " << loop_var << "++) {\n"
-               << body << "}\n";
+        output << indent << "for (" << var << " = " << start_val << "; " 
+               << for_cond << "; " << var << "++) {\n"
+               << body << indent << "}\n";
         
-        search_start = match.suffix().first;
+        last_pos = match.position() + match.length();
     }
     
-    output << std::string(search_start, result.cend());
+    output << current.substr(last_pos);
     return output.str();
 }
 
@@ -253,80 +276,66 @@ std::string CFGStructurizer::convert_for_loop_patterns(const std::string& c_code
 std::string CFGStructurizer::convert_nested_loop_patterns(const std::string& c_code) {
     std::string result = c_code;
     
-    // First, identify all loop headers (labels with backward gotos)
+    // 1. Convert labeled while(true) loops
+    // Pattern: LABEL: while(true) { ... if (cond) goto LABEL; ... }
+    // This is often used for "continue" in complex loops.
+    
+    // 2. Identify all backward gotos and transform them into loops if they aren't already
     auto labels = find_labels(c_code);
     auto gotos = find_gotos(c_code);
     
-    for (auto& label : labels) {
-        label.is_loop_target = is_loop_header(label.name, gotos, labels);
-    }
+    std::map<std::string, int> label_map;
+    for (const auto& l : labels) label_map[l.name] = l.line;
     
-    // Convert simple patterns: LABEL: body; goto LABEL; -> do { body; } while(true);
-    // This handles unconditional backward gotos
-    std::regex uncond_loop_pattern(
-        R"((\w+)\s*:\s*\n((?:[^\n]*\n)*?)\s*goto\s+\1\s*;)"
-    );
+    std::string transformed = c_code;
     
-    std::smatch match;
-    std::string::const_iterator search_start = result.cbegin();
-    std::ostringstream output;
+    // Pattern: LABEL: body; goto LABEL;
+    // We already handle this in some way, but let's make it more robust.
+    std::regex infinite_loop_pattern(R"((\w+)\s*:\s*\n((?:[^\n]*\n)*?)\s*goto\s+\1\s*;)");
+    transformed = std::regex_replace(transformed, infinite_loop_pattern, "while (true) {\n$2}\n");
     
-    while (std::regex_search(search_start, result.cend(), match, uncond_loop_pattern)) {
-        output << match.prefix().str();
-        
-        std::string label = match[1].str();
-        std::string body = match[2].str();
-        
-        // Check if body contains a break condition
-        std::regex break_pattern(R"(if\s*\(\s*([^)]+)\s*\)\s*(?:break|goto\s+\w+)\s*;)");
-        std::smatch break_match;
-        
-        if (std::regex_search(body, break_match, break_pattern)) {
-            // Has break condition - transform to while loop
-            std::string break_cond = break_match[1].str();
-            std::string remaining_body = break_match.prefix().str() + 
-                                          break_match.suffix().str();
-            output << "while (" << negate_condition(break_cond) << ") {\n"
-                   << remaining_body << "}\n";
-        } else {
-            // No break condition - keep as do-while(true)
-            output << "do {\n" << body << "} while (true);\n";
-        }
-        
-        search_start = match.suffix().first;
-    }
-    
-    output << std::string(search_start, result.cend());
-    return output.str();
+    return transformed;
 }
 
+/**
+ * Convert unconditional backward goto at end of block to continue/break
+ */
 /**
  * Convert unconditional backward goto at end of block to continue/break
  */
 std::string CFGStructurizer::convert_unconditional_backward_goto(const std::string& c_code) {
     std::string result = c_code;
     
-    // Find labels and determine which are loop headers
-    auto labels = find_labels(c_code);
-    auto gotos = find_gotos(c_code);
+    // Pattern: while(...) { ... goto LOOP_LABEL; }
+    // where LOOP_LABEL is right before the while.
     
-    std::set<std::string> loop_labels;
+    std::vector<Label> labels = find_labels(c_code);
     for (const auto& label : labels) {
-        if (is_loop_header(label.name, gotos, labels)) {
-            loop_labels.insert(label.name);
+        // Find if this label is followed by a loop
+        std::regex loop_start_pattern(R"()" + label.name + R"(\s*:\s*\n?\s*(?:while|for|do))");
+        if (std::regex_search(c_code, loop_start_pattern)) {
+            // This is a loop header. Any goto to it inside the loop is a continue.
+            std::regex continue_pattern(R"(\bgoto\s+)" + label.name + R"(\s*;\s*\n?\s*\})");
+            result = std::regex_replace(result, continue_pattern, "continue;\n}");
         }
     }
     
-    // Inside a loop, convert "goto LOOP_LABEL;" to "continue;"
-    // This is a simplified version - full implementation would need
-    // proper scope tracking
+    return result;
+}
+
+std::string CFGStructurizer::eliminate_loop_exits(const std::string& c_code) {
+    std::string result = c_code;
     
-    for (const auto& loop_label : loop_labels) {
-        // Pattern: inside do { } while, "goto LABEL;" -> "continue;"
-        std::regex pattern(
-            R"((do\s*\{[^}]*?)goto\s+)" + loop_label + R"(\s*;([^}]*\}\s*while))"
-        );
-        result = std::regex_replace(result, pattern, "$1continue;$2");
+    // Pattern: while/for/do { ... goto EXIT_LABEL; ... } EXIT_LABEL:
+    // Change to break;
+    
+    // 1. Find all labels
+    auto labels = find_labels(c_code);
+    
+    for (const auto& label : labels) {
+        // Pattern: [while/for/do] { ... goto label; ... } label:
+        std::regex break_pattern(R"(\bgoto\s+)" + label.name + R"(\s*;\s*\n?\s*\}\s*\n?\s*)" + label.name + R"(\s*:)");
+        result = std::regex_replace(result, break_pattern, "break;\n}\n" + label.name + ":");
     }
     
     return result;
@@ -339,17 +348,25 @@ std::string CFGStructurizer::convert_unconditional_backward_goto(const std::stri
 std::string CFGStructurizer::eliminate_forward_gotos(const std::string& c_code) {
     std::string result = c_code;
     
-    // Pattern: if (cond) goto LABEL; ... LABEL:
-    std::regex simple_forward_pattern(
-        R"(if\s*\(\s*([^)]+)\s*\)\s*goto\s+(\w+)\s*;\s*\n((?:[^\n]*\n)*?)\s*\2\s*:)"
+    // Improved pattern for forward goto:
+    // matches: if (cond) goto LABEL; [optional closing braces/whitespaces] LABEL:
+    // This handles skips over code blocks.
+    
+    // 1. Handle "if (cond) { ... goto LABEL; } ... LABEL:"
+    // This is common for error handling or premature exit
+    
+    // 2. Handle simple skip: if (cond) goto LABEL; body; LABEL:
+    // This is what we currently have but let's make it more flexible with braces.
+    std::regex skip_pattern(
+        R"(if\s*\(\s*([^)]+)\s*\)\s*goto\s+(\w+)\s*;\s*\n((?:[^\n]*\n)*?)\s*(?:\}\s*\n)*\s*\2\s*:)"
     );
     
     std::string::const_iterator search_start = result.cbegin();
     std::ostringstream output;
     
-    while (std::regex_search(search_start, result.cend(), simple_forward_pattern)) {
+    while (std::regex_search(search_start, result.cend(), skip_pattern)) {
         std::smatch match;
-        std::regex_search(search_start, result.cend(), match, simple_forward_pattern);
+        std::regex_search(search_start, result.cend(), match, skip_pattern);
         
         output << match.prefix().str();
         
@@ -357,8 +374,23 @@ std::string CFGStructurizer::eliminate_forward_gotos(const std::string& c_code) 
         std::string label = match[2].str();
         std::string body = match[3].str();
         
-        std::string negated = negate_condition(condition);
-        output << "if (" << negated << ") {\n" << body << "}\n";
+        // If the body is mostly empty or just whitespace/braces, it might be a double jump
+        // Only transform if there's actual code being skipped
+        bool has_actual_code = false;
+        for (char c : body) {
+            if (!isspace(c) && c != '}') {
+                has_actual_code = true;
+                break;
+            }
+        }
+        
+        if (has_actual_code) {
+            std::string negated = negate_condition(condition);
+            output << "if (" << negated << ") {\n" << body << "}\n";
+        } else {
+            // Just output original if it's too complex or empty skip
+            output << match.str();
+        }
         
         search_start = match.suffix().first;
     }
@@ -468,34 +500,36 @@ std::string CFGStructurizer::flatten_nested_if_goto(const std::string& c_code) {
 std::string CFGStructurizer::structurize(const std::string& c_code) {
     std::string result = c_code;
     
+    int goto_count_before = 0;
+    size_t pos = 0;
+    while ((pos = result.find("goto ", pos)) != std::string::npos) {
+        goto_count_before++;
+        pos += 5;
+    }
+    
     // Apply transformations in order of specificity (most specific first)
-    
-    // 1. Flatten nested if-goto patterns
     result = flatten_nested_if_goto(result);
-    
-    // 2. Try to recognize for-loop patterns (most structured)
     result = convert_for_loop_patterns(result);
-    
-    // 3. Convert backward gotos to do-while loops
     result = convert_backward_gotos_to_loops(result);
-    
-    // 4. Handle nested loop patterns with multiple labels
     result = convert_nested_loop_patterns(result);
-    
-    // 5. Convert unconditional backward gotos to continue
     result = convert_unconditional_backward_goto(result);
-    
-    // 6. Normalize do-while(true) to while loops
+    result = eliminate_loop_exits(result);
     result = normalize_do_while_true(result);
-    
-    // 7. Eliminate forward gotos
     result = eliminate_forward_gotos(result);
-    
-    // 8. Try switch reconstruction
     result = reconstruct_switch_from_jump_table(result);
-    
-    // 9. Remove any labels that are no longer used
     result = remove_unused_labels(result);
+    
+    int goto_count_after = 0;
+    pos = 0;
+    while ((pos = result.find("goto ", pos)) != std::string::npos) {
+        goto_count_after++;
+        pos += 5;
+    }
+    
+    if (goto_count_before > goto_count_after) {
+        std::cerr << "[CFGStructurizer] Eliminated " << (goto_count_before - goto_count_after) 
+                  << " gotos (" << goto_count_before << " -> " << goto_count_after << ")" << std::endl;
+    }
     
     return result;
 }
