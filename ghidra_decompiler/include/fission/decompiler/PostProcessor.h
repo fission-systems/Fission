@@ -27,6 +27,56 @@ public:
     static std::string convert_integer_constants(std::string c_code);
     
     /**
+     * @brief Convert while(true) loops to for loops when induction variable is detected
+     * 
+     * Transforms patterns like:
+     *   i = 0;
+     *   while(true) { if(i >= n) break; ...; i = i + 1; }
+     * Into:
+     *   for(i = 0; i < n; i++) { ... }
+     * 
+     * @param c_code The C code string to process
+     * @return Modified C code with for loops
+     */
+    static std::string convert_while_to_for(std::string c_code);
+    
+    /**
+     * @brief Simplify nested if statements
+     * 
+     * Transforms: if(a) { if(b) { ... } } -> if(a && b) { ... }
+     * 
+     * @param c_code The C code string to process
+     * @return Modified C code with simplified conditions
+     */
+    static std::string simplify_nested_if(std::string c_code);
+    
+    /**
+     * @brief Fold sequential local variable assignments into array initializers
+     * 
+     * Transforms:
+     *   local_28 = 1; local_24 = 2; local_20 = 3; local_1c = 4;
+     * Into:
+     *   int arr[4] = {1, 2, 3, 4};
+     * 
+     * @param c_code The C code string to process
+     * @return Modified C code with array initializers
+     */
+    static std::string fold_array_init(std::string c_code);
+    
+    /**
+     * @brief Improve variable names based on usage context
+     * 
+     * Renames local_XX to more meaningful names like:
+     * - loop_idx when used as loop counter
+     * - str_ptr when used with string functions
+     * - result when assigned before return
+     * 
+     * @param c_code The C code string to process
+     * @return Modified C code with improved variable names  
+     */
+    static std::string improve_variable_names(std::string c_code);
+    
+    /**
      * @brief Apply all post-processing steps
      * 
      * @param c_code The raw decompiled C code
