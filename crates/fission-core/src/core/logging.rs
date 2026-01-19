@@ -7,6 +7,8 @@
 //! backward compatibility with the existing codebase which uses
 //! `logging::info(&format!(...))` patterns.
 
+use crate::config::LogConfig;
+
 pub use tracing::Level as LogLevel;
 pub use tracing::{
     debug as _debug, error as _error, info as _info, trace as _trace, warn as _warn,
@@ -20,6 +22,32 @@ pub fn init(level: LogLevel) {
         .finish();
 
     let _ = tracing::subscriber::set_global_default(subscriber);
+}
+
+/// Initialize logger from LogConfig
+pub fn init_from_config(config: &LogConfig) {
+    let level = config.level.to_tracing_level();
+
+    // Build subscriber based on config
+    // Note: Conditional time format requires different approach due to type differences
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_target(config.include_target)
+        .finish();
+
+    let _ = tracing::subscriber::set_global_default(subscriber);
+
+    // Set environment variable for C++ logger if file logging is enabled
+    if let Some((key, value)) = config.get_cpp_log_file_env() {
+        // SAFETY: We're setting an environment variable in a single-threaded init context.
+        // The C++ logger will read this value once during its initialization.
+        unsafe { std::env::set_var(key, value) };
+    }
+}
+
+/// Initialize logger using global CONFIG
+pub fn init_from_global_config() {
+    init_from_config(&crate::CONFIG.logging);
 }
 
 pub fn enable_file_logging(_path: &str) -> std::io::Result<()> {

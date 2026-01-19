@@ -14,4 +14,5 @@ pub use crate::core::path_config;
 pub use crate::core::prelude;
 pub use crate::core::settings;
 
+pub use crate::core::config::{LogConfig, LogLevel};
 pub use crate::core::{CONFIG, FissionError, PATHS, Result};
