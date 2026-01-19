@@ -1,6 +1,7 @@
 #include "fission/analysis/FidDatabase.h"
 #include "fission/util/BinaryReader.h"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <iomanip>
 #include <cstring>
 #include <algorithm>
@@ -32,7 +33,7 @@ bool FidDatabase::parse_header(std::ifstream& file) {
     
     // Verify magic: "/01,4),*" followed by metadata
     if (magic[0] != '/' || magic[1] != '0' || magic[2] != '1') {
-        std::cerr << "[FidDatabase] Invalid FIDBF magic" << std::endl;
+        fission::utils::log_stream() << "[FidDatabase] Invalid FIDBF magic" << std::endl;
         return false;
     }
     
@@ -72,14 +73,14 @@ bool FidDatabase::parse_strings_table(std::ifstream& file, uint64_t offset, uint
         parsed++;
         
         if (parsed <= 3) {
-            std::cerr << "[FidDatabase] String #" << parsed << ": key=0x" << std::hex << key 
+            fission::utils::log_stream() << "[FidDatabase] String #" << parsed << ": key=0x" << std::hex << key 
                       << " \"" << value << "\"" << std::dec << std::endl;
         }
     }
     
     // If direct parsing failed, use heuristic scraping from file
     if (parsed < 100) {
-        std::cerr << "[FidDatabase] Direct parsing got " << parsed << " strings, trying heuristic scan..." << std::endl;
+        fission::utils::log_stream() << "[FidDatabase] Direct parsing got " << parsed << " strings, trying heuristic scan..." << std::endl;
         
         // Scan from ~50% of file size to find string data blocks
         file.clear();
@@ -128,7 +129,7 @@ bool FidDatabase::parse_strings_table(std::ifstream& file, uint64_t offset, uint
                         strings_found++;
                         
                         if (strings_found <= 5) {
-                            std::cerr << "[FidDatabase] Heuristic String #" << strings_found 
+                            fission::utils::log_stream() << "[FidDatabase] Heuristic String #" << strings_found 
                                       << ": key=0x" << std::hex << key << " \"" << s << "\"" << std::dec << std::endl;
                         }
                         
@@ -141,7 +142,7 @@ bool FidDatabase::parse_strings_table(std::ifstream& file, uint64_t offset, uint
         parsed = strings_found;
     }
     
-    std::cerr << "[FidDatabase] Parsed " << strings_table.size() << " strings" << std::endl;
+    fission::utils::log_stream() << "[FidDatabase] Parsed " << strings_table.size() << " strings" << std::endl;
     return true;
 }
 
@@ -200,7 +201,7 @@ bool FidDatabase::parse_functions_table(std::ifstream& file, uint64_t offset, ui
         
         // Debug: Print first 5 records with names
         if (!rec.name.empty() && debug_count < 5) {
-            std::cerr << "[FidDatabase] Sample record #" << i << ": " 
+            fission::utils::log_stream() << "[FidDatabase] Sample record #" << i << ": " 
                       << rec.name << " hash=0x" << std::hex << rec.full_hash 
                       << " size=" << std::dec << rec.code_unit_size 
                       << " lib_id=" << rec.library_id << std::endl;
@@ -226,7 +227,7 @@ bool FidDatabase::parse_libraries_table(std::ifstream& file, uint64_t offset, ui
 bool FidDatabase::load_common_symbols(const std::string& filter_path) {
     std::ifstream file(filter_path);
     if (!file.is_open()) {
-        std::cerr << "[FidDatabase] Warning: Could not load common symbols filter: " << filter_path << std::endl;
+        fission::utils::log_stream() << "[FidDatabase] Warning: Could not load common symbols filter: " << filter_path << std::endl;
         return false;
     }
     
@@ -243,7 +244,7 @@ bool FidDatabase::load_common_symbols(const std::string& filter_path) {
         }
     }
     
-    std::cerr << "[FidDatabase] Loaded " << count << " common symbols from " << filter_path << std::endl;
+    fission::utils::log_stream() << "[FidDatabase] Loaded " << count << " common symbols from " << filter_path << std::endl;
     return true;
 }
 
@@ -253,7 +254,7 @@ bool FidDatabase::load(const std::string& path) {
     
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "[FidDatabase] Failed to open: " << path << std::endl;
+        fission::utils::log_stream() << "[FidDatabase] Failed to open: " << path << std::endl;
         return false;
     }
     
@@ -262,7 +263,7 @@ bool FidDatabase::load(const std::string& path) {
     size_t file_size = file.tellg();
     file.seekg(0);
     
-    std::cerr << "[FidDatabase] Loading " << path << " (" << file_size << " bytes)" << std::endl;
+    fission::utils::log_stream() << "[FidDatabase] Loading " << path << " (" << file_size << " bytes)" << std::endl;
     
     // Try to load corresponding common symbols filter
     std::string filter_path;
@@ -320,7 +321,7 @@ bool FidDatabase::load(const std::string& path) {
             }
             
             if (strings_table_offset > 0) {
-                std::cerr << "[FidDatabase] Found Strings Table at 0x" << std::hex 
+                fission::utils::log_stream() << "[FidDatabase] Found Strings Table at 0x" << std::hex 
                           << strings_table_offset << " (count=" << std::dec << strings_count << ")" << std::endl;
                 break;
             }
@@ -352,7 +353,7 @@ bool FidDatabase::load(const std::string& path) {
             }
             
             if (functions_table_offset > 0) {
-                std::cerr << "[FidDatabase] Found Functions Table at 0x" << std::hex 
+                fission::utils::log_stream() << "[FidDatabase] Found Functions Table at 0x" << std::hex 
                           << functions_table_offset << " (count=" << std::dec << functions_count << ")" << std::endl;
                 break;
             }
@@ -385,7 +386,7 @@ bool FidDatabase::load(const std::string& path) {
             }
             
             if (rels_table_offset > 0) {
-                std::cerr << "[FidDatabase] Found Superior Table at 0x" << std::hex 
+                fission::utils::log_stream() << "[FidDatabase] Found Superior Table at 0x" << std::hex 
                           << rels_table_offset << " (count=" << std::dec << rels_count << ")" << std::endl;
                 break;
             }
@@ -413,7 +414,7 @@ bool FidDatabase::load(const std::string& path) {
         parse_relations_table(file, rels_table_offset, rels_count > 0 ? rels_count : 100000);
     }
     
-    std::cerr << "[FidDatabase] Loaded " << functions.size() << " functions, " 
+    fission::utils::log_stream() << "[FidDatabase] Loaded " << functions.size() << " functions, " 
               << strings_table.size() << " strings, " << superior_relations.size() << " relations" << std::endl;
     
     loaded = !functions.empty();
@@ -490,17 +491,17 @@ std::string FidDatabase::lookup_name_contains(const std::string& pattern) const 
 
 // Get some sample hashes for debugging
 void FidDatabase::print_sample_hashes(size_t count) const {
-    std::cerr << "[FidDatabase] Sample hashes from database:" << std::endl;
+    fission::utils::log_stream() << "[FidDatabase] Sample hashes from database:" << std::endl;
     size_t found = 0;
     for (size_t i = 0; i < functions.size() && found < count; ++i) {
         const auto& f = functions[i];
         if (!f.name.empty() && f.full_hash != 0) {
-            std::cerr << "  0x" << std::hex << std::setfill('0') << std::setw(16) << f.full_hash 
+            fission::utils::log_stream() << "  0x" << std::hex << std::setfill('0') << std::setw(16) << f.full_hash 
                       << std::dec << " -> " << f.name << std::endl;
             found++;
         }
     }
-    std::cerr << "[FidDatabase] Showing " << found << " sample hashes from " << functions.size() << " total functions" << std::endl;
+    fission::utils::log_stream() << "[FidDatabase] Showing " << found << " sample hashes from " << functions.size() << " total functions" << std::endl;
 }
 
 bool FidDatabase::parse_relations_table(std::ifstream& file, uint64_t offset, uint64_t count) {

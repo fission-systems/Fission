@@ -24,9 +24,11 @@ All notable changes to the Fission project (November 2025 - January 2026).
 
 - **Exception-Safe Initialization**: Hardened `ArchInit::initialize_architecture` to automatically clean up partial states ("Zombie Architectures") upon failure, preventing subsequent "Symbol table not initialized" errors.
 - **Centralized Logging System**:
-  - Implemented a thread-safe C++ `Logger` (`fission::utils::Logger`) replacing raw `std::cerr` usage.
+  - Implemented a thread-safe C++ `Logger` (`fission::utils::Logger`) with dual-output (`TeeBuffer`) to both console and file.
+  - Added `log_stream()` function as a drop-in replacement for `std::cerr`, enabling seamless migration of 34 source files.
   - Added support for file-based logging via `FISSION_LOG_FILE` environment variable.
   - Logs now include high-precision timestamps (`[YYYY-MM-DD HH:MM:SS]`) and severity levels.
+  - **Full Migration**: Replaced all 150+ instances of `std::cerr` across the C++ codebase with the unified logger.
 
 **🧹 Script Organization**
 

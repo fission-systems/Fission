@@ -5,6 +5,7 @@
 #include "architecture.hh"
 #include "translate.hh"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <algorithm>
 
 namespace fission {
@@ -56,7 +57,7 @@ bool CallingConvDetector::check_ms_x64(Funcdata* fd) {
             // Get register name from translator
             std::string reg_name = trans->getRegisterName(sp, vn->getOffset(), vn->getSize());
             
-            std::cerr << "  Found input register: " << reg_name 
+            fission::utils::log_stream() << "  Found input register: " << reg_name 
                       << " (offset=0x" << std::hex << vn->getOffset() 
                       << ", size=" << std::dec << vn->getSize() << ")" << std::endl;
             
@@ -64,18 +65,18 @@ bool CallingConvDetector::check_ms_x64(Funcdata* fd) {
             if (reg_name == "RCX" || reg_name == "RDX" || 
                 reg_name == "R8" || reg_name == "R9") {
                 regs_used.insert(reg_name);
-                std::cerr << "    -> MS x64 arg register!" << std::endl;
+                fission::utils::log_stream() << "    -> MS x64 arg register!" << std::endl;
             }
         }
         
         // Early exit if we found enough evidence
         if (regs_used.size() >= 2) {
-            std::cerr << "[CallingConvDetector] MS x64 detected (" << regs_used.size() << " arg regs)" << std::endl;
+            fission::utils::log_stream() << "[CallingConvDetector] MS x64 detected (" << regs_used.size() << " arg regs)" << std::endl;
             return true;
         }
     }
     
-    std::cerr << "[CallingConvDetector] MS x64 check: total_ops=" << total_ops 
+    fission::utils::log_stream() << "[CallingConvDetector] MS x64 check: total_ops=" << total_ops 
               << ", input_varnodes=" << input_varnodes 
               << ", arg_regs=" << regs_used.size() << std::endl;
     
@@ -196,16 +197,16 @@ bool CallingConvDetector::check_thiscall(Funcdata* fd) {
 CallingConvDetector::ConvType CallingConvDetector::detect(Funcdata* fd) {
     if (!fd) return CONV_UNKNOWN;
     
-    std::cerr << "[CallingConvDetector] Detecting convention for function at 0x" 
+    fission::utils::log_stream() << "[CallingConvDetector] Detecting convention for function at 0x" 
               << std::hex << fd->getAddress().getOffset() << std::dec 
               << ", is_64bit=" << is_64bit << std::endl;
     
     if (is_64bit) {
         // 64-bit: check MS x64 first (Windows), then SYSV (Linux/Mac)
-        std::cerr << "[CallingConvDetector] Checking MS x64..." << std::endl;
+        fission::utils::log_stream() << "[CallingConvDetector] Checking MS x64..." << std::endl;
         if (check_ms_x64(fd)) return CONV_MS_X64;
         
-        std::cerr << "[CallingConvDetector] Checking SYSV x64..." << std::endl;
+        fission::utils::log_stream() << "[CallingConvDetector] Checking SYSV x64..." << std::endl;
         if (check_sysv_x64(fd)) return CONV_SYSV_X64;
     } else {
         // 32-bit: check in order of specificity
@@ -215,7 +216,7 @@ CallingConvDetector::ConvType CallingConvDetector::detect(Funcdata* fd) {
         return CONV_CDECL; // Default for 32-bit
     }
     
-    std::cerr << "[CallingConvDetector] No convention detected" << std::endl;
+    fission::utils::log_stream() << "[CallingConvDetector] No convention detected" << std::endl;
     return CONV_UNKNOWN;
 }
 
@@ -234,7 +235,7 @@ const char* CallingConvDetector::conv_name(ConvType type) {
 void CallingConvDetector::apply(Funcdata* fd, ConvType type) {
     if (!fd || type == CONV_UNKNOWN) return;
     
-    std::cerr << "[CallingConvDetector] Detected " << conv_name(type) 
+    fission::utils::log_stream() << "[CallingConvDetector] Detected " << conv_name(type) 
               << " for function at 0x" << std::hex 
               << fd->getAddress().getOffset() << std::dec << std::endl;
     
@@ -275,11 +276,11 @@ void CallingConvDetector::apply(Funcdata* fd, ConvType type) {
     if (model) {
         FuncProto& proto = fd->getFuncProto();
         proto.setModel(model);
-        std::cerr << "[CallingConvDetector] Applied " << model->getName() 
+        fission::utils::log_stream() << "[CallingConvDetector] Applied " << model->getName() 
                   << " to function at 0x" << std::hex 
                   << fd->getAddress().getOffset() << std::dec << std::endl;
     } else {
-        std::cerr << "[CallingConvDetector] WARNING: Could not find ProtoModel for " 
+        fission::utils::log_stream() << "[CallingConvDetector] WARNING: Could not find ProtoModel for " 
                   << conv_name(type) << std::endl;
     }
 }

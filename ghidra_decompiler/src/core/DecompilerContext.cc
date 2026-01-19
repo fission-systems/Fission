@@ -25,7 +25,7 @@ static void load_gdt_for_arch(ghidra::Architecture* arch, bool is_64bit) {
     
     for (const auto& path : candidates) {
         if (file_exists(path)) {
-            std::cerr << "[DecompilerContext] Loading GDT (" << (is_64bit ? "64-bit" : "32-bit") << ") from: " << path << std::endl;
+            fission::utils::log_stream() << "[DecompilerContext] Loading GDT (" << (is_64bit ? "64-bit" : "32-bit") << ") from: " << path << std::endl;
             GdtBinaryParser gdt;
             if (gdt.load(path)) {
                 TypeManager::load_types_from_gdt(arch->types, &gdt, ArchPolicy::getPointerSize(arch));
@@ -99,7 +99,7 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             load_gdt_for_arch(arch_64bit, true);
             
             arch_64bit_ready = true;
-            std::cerr << "[DecompilerContext] Initialized 64-bit architecture" << std::endl;
+            fission::utils::log_stream() << "[DecompilerContext] Initialized 64-bit architecture" << std::endl;
         } else {
             // Only update data if bytes is not empty, otherwise preserve existing binary
             if (!bytes.empty()) {
@@ -123,7 +123,7 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             load_gdt_for_arch(arch_32bit, false);
             
             arch_32bit_ready = true;
-            std::cerr << "[DecompilerContext] Initialized 32-bit architecture" << std::endl;
+            fission::utils::log_stream() << "[DecompilerContext] Initialized 32-bit architecture" << std::endl;
         } else {
             // Only update data if bytes is not empty, otherwise preserve existing binary
             if (!bytes.empty()) {

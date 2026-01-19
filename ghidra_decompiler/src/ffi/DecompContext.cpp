@@ -10,6 +10,7 @@
 #include "sleigh_arch.hh"
 
 #include <iostream>
+#include "fission/utils/logger.h"
 
 using namespace fission::ffi;
 using namespace fission::core;
@@ -68,13 +69,13 @@ bool fission::ffi::initialize_ghidra_library(const std::string& sla_dir) {
         ghidra::SleighArchitecture::getDescriptions();
         
         ghidra_library_initialized = true;
-        std::cerr << "[DecompContext] Ghidra library initialized with specpath: " << langDir << std::endl;
+        fission::utils::log_stream() << "[DecompContext] Ghidra library initialized with specpath: " << langDir << std::endl;
         return true;
     } catch (const ghidra::LowlevelError& e) {
-        std::cerr << "[DecompContext] Failed to init Ghidra: " << e.explain << std::endl;
+        fission::utils::log_stream() << "[DecompContext] Failed to init Ghidra: " << e.explain << std::endl;
         return false;
     } catch (...) {
-        std::cerr << "[DecompContext] Unknown error during Ghidra init" << std::endl;
+        fission::utils::log_stream() << "[DecompContext] Unknown error during Ghidra init" << std::endl;
         return false;
     }
 }

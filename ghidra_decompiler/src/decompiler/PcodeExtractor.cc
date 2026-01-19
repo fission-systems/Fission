@@ -1,4 +1,5 @@
 #include "fission/decompiler/PcodeExtractor.h"
+#include "fission/utils/logger.h"
 #include <sstream>
 #include <iomanip>
 
@@ -229,7 +230,7 @@ std::string PcodeExtractor::extract_pcode_json(ghidra::Funcdata* fd) {
 
 bool PcodeExtractor::inject_pcode(ghidra::Funcdata* fd, const std::string& pcode_json) {
     if (!fd) {
-        std::cerr << "[PcodeExtractor] Error: null Funcdata" << std::endl;
+        fission::utils::log_stream() << "[PcodeExtractor] Error: null Funcdata" << std::endl;
         return false;
     }
     
@@ -241,8 +242,8 @@ bool PcodeExtractor::inject_pcode(ghidra::Funcdata* fd, const std::string& pcode
         // This is a simplified approach - full injection would require
         // rebuilding the entire Pcode structure, which is complex
         // Instead, we'll mark operations for transformation
-        std::cerr << "[PcodeExtractor] Warning: Full Pcode injection not yet implemented" << std::endl;
-        std::cerr << "[PcodeExtractor] Falling back to post-C-generation optimization" << std::endl;
+        fission::utils::log_stream() << "[PcodeExtractor] Warning: Full Pcode injection not yet implemented" << std::endl;
+        fission::utils::log_stream() << "[PcodeExtractor] Falling back to post-C-generation optimization" << std::endl;
         return false;
     } catch (...) {
         return false;
@@ -260,7 +261,7 @@ std::string PcodeExtractor::apply_optimized_pcode(ghidra::Funcdata* fd, const st
     // 3. Apply transformations at the C generation level
     
     // For now, return empty - this will be enhanced with actual transformation logic
-    std::cerr << "[PcodeExtractor] apply_optimized_pcode called (placeholder)" << std::endl;
+    fission::utils::log_stream() << "[PcodeExtractor] apply_optimized_pcode called (placeholder)" << std::endl;
     return "";
 }
 

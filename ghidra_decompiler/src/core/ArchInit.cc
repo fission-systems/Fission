@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include "fission/utils/logger.h"
 #include "fission/config/PathConfig.h"
 
 using namespace fission::config;
@@ -54,7 +55,7 @@ static bool try_load_gdt(ghidra::Architecture* arch, const std::string& path) {
         return false;
     }
 
-    std::cerr << "[DecompilerCore] Loading GDT from: " << path << std::endl;
+    fission::utils::log_stream() << "[DecompilerCore] Loading GDT from: " << path << std::endl;
     GdtBinaryParser gdt;
     if (gdt.load(path)) {
         TypeManager::load_types_from_gdt(arch->types, &gdt, ArchPolicy::getPointerSize(arch));
@@ -124,7 +125,7 @@ static void register_functions_from_symbols(DecompContext* ctx) {
         return;
     }
 
-    std::cerr << "[DecompilerCore] Injecting " << ctx->symbols.size() << " symbols" << std::endl;
+    fission::utils::log_stream() << "[DecompilerCore] Injecting " << ctx->symbols.size() << " symbols" << std::endl;
     ctx->arch->injectIatSymbols(ctx->symbols);
 
     ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
@@ -132,7 +133,7 @@ static void register_functions_from_symbols(DecompContext* ctx) {
         return;
     }
 
-    std::cerr << "[DecompilerCore] Using code space for registration: "
+    fission::utils::log_stream() << "[DecompilerCore] Using code space for registration: "
               << ctx->arch->getDefaultCodeSpace()->getName() << std::endl;
 
     int func_count = 0;
@@ -148,7 +149,7 @@ static void register_functions_from_symbols(DecompContext* ctx) {
                     func_count++;
                 } else {
                     failed_count++;
-                    std::cerr << "[DecompilerCore] Failed to add function at 0x" << std::hex << addr << std::dec
+                    fission::utils::log_stream() << "[DecompilerCore] Failed to add function at 0x" << std::hex << addr << std::dec
                               << ": " << name << std::endl;
                 }
             } else {
@@ -156,16 +157,16 @@ static void register_functions_from_symbols(DecompContext* ctx) {
             }
         } catch (const std::exception& e) {
             failed_count++;
-            std::cerr << "[DecompilerCore] Exception adding function at 0x" << std::hex << addr << std::dec
+            fission::utils::log_stream() << "[DecompilerCore] Exception adding function at 0x" << std::hex << addr << std::dec
                       << ": " << e.what() << std::endl;
         } catch (...) {
             failed_count++;
         }
     }
 
-    std::cerr << "[DecompilerCore] Function registration: " << func_count << " added, "
+    fission::utils::log_stream() << "[DecompilerCore] Function registration: " << func_count << " added, "
               << existing_count << " already exist, " << failed_count << " failed" << std::endl;
-    std::cerr << "[DecompilerCore] Global scope: "
+    fission::utils::log_stream() << "[DecompilerCore] Global scope: "
               << static_cast<const void*>(global_scope) << std::endl;
 }
 
@@ -210,9 +211,9 @@ static void log_memory_blocks(const DecompContext* ctx) {
         return;
     }
 
-    std::cerr << "[DecompilerCore] Registering " << ctx->memory_blocks.size() << " memory blocks" << std::endl;
+    fission::utils::log_stream() << "[DecompilerCore] Registering " << ctx->memory_blocks.size() << " memory blocks" << std::endl;
     for (const auto& block : ctx->memory_blocks) {
-        std::cerr << "  - " << block.name
+        fission::utils::log_stream() << "  - " << block.name
                   << ": VA 0x" << std::hex << block.va_addr << "-0x" << (block.va_addr + block.va_size)
                   << std::dec << " (vsize: " << block.va_size << " bytes, "
                   << "file_off: 0x" << std::hex << block.file_offset << std::dec << ", "
@@ -264,7 +265,7 @@ void initialize_architecture(DecompContext* ctx, const ArchInitOptions& options)
         if (options.inject_symbols && options.register_functions) {
             register_functions_from_symbols(ctx);
         } else if (options.inject_symbols) {
-            std::cerr << "[DecompilerCore] Injecting " << ctx->symbols.size() << " symbols" << std::endl;
+            fission::utils::log_stream() << "[DecompilerCore] Injecting " << ctx->symbols.size() << " symbols" << std::endl;
             ctx->arch->injectIatSymbols(ctx->symbols);
         }
 
@@ -280,14 +281,14 @@ void initialize_architecture(DecompContext* ctx, const ArchInitOptions& options)
             registerDataSectionSymbols(ctx);
         }
 
-        std::cerr << "[DecompilerCore] Architecture initialized: " << sleigh_id << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Architecture initialized: " << sleigh_id << std::endl;
 
     } catch (const std::exception& e) {
-        std::cerr << "[DecompilerCore] ERROR: Architecture initialization failed: " << e.what() << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] ERROR: Architecture initialization failed: " << e.what() << std::endl;
         ctx->arch.reset(); // Destroy zombie architecture
         throw;
     } catch (...) {
-        std::cerr << "[DecompilerCore] ERROR: Unknown error during architecture initialization" << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] ERROR: Unknown error during architecture initialization" << std::endl;
         ctx->arch.reset(); // Destroy zombie architecture
         throw;
     }

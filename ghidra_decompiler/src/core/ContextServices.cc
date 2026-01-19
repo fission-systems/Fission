@@ -6,6 +6,7 @@
 #include "libdecomp.hh"
 
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <sstream>
 
 namespace fission {
@@ -70,7 +71,7 @@ DecompError add_function(DecompContext* ctx, uint64_t addr, const char* name) {
                 const ghidra::Funcdata* existing = global_scope->findFunction(func_addr);
                 if (!existing) {
                     global_scope->addFunction(func_addr, func_name);
-                    std::cerr << "[SymbolManager] Declared function at 0x" << std::hex << addr
+                    fission::utils::log_stream() << "[SymbolManager] Declared function at 0x" << std::hex << addr
                               << std::dec << ": " << func_name << std::endl;
                 }
             }
@@ -200,7 +201,7 @@ DecompError add_memory_block(
             );
         }
 
-        std::cerr << "[MemoryManager] Registered memory block: " << name
+        fission::utils::log_stream() << "[MemoryManager] Registered memory block: " << name
                   << " at VA 0x" << std::hex << va_addr << std::dec
                   << " (vsize: " << va_size << ", file_off: 0x" << std::hex << file_offset
                   << std::dec << ", fsize: " << file_size << ", "

@@ -11,6 +11,7 @@
 #include "fspec.hh"
 #include "fission/config/PathConfig.h"
 #include <iostream>
+#include "fission/utils/logger.h"
 
 namespace fission {
 namespace analysis {
@@ -482,7 +483,7 @@ void TypePropagator::apply_inferred_types(Funcdata* fd) {
     }
 
     if (applied > 0) {
-        std::cerr << "[TypePropagator] Applied " << applied << " inferred types" << std::endl;
+        fission::utils::log_stream() << "[TypePropagator] Applied " << applied << " inferred types" << std::endl;
     }
 }
 
@@ -599,7 +600,7 @@ int TypePropagator::propagate(Funcdata* fd) {
     // Prevent infinite loops (Ghidra uses max 7 iterations)
     if (local_count >= MAX_TYPE_ITERATIONS) {
         if (local_count == MAX_TYPE_ITERATIONS) {
-            std::cerr << "[TypePropagator] Type propagation not settling after "
+            fission::utils::log_stream() << "[TypePropagator] Type propagation not settling after "
                       << MAX_TYPE_ITERATIONS << " iterations" << std::endl;
             local_count++;
         }
@@ -751,7 +752,7 @@ void TypePropagator::infer_stack_pointer_types(Funcdata* fd) {
     }
     
     if (pointer_types_applied > 0) {
-        std::cerr << "[TypePropagator] Inferred " << pointer_types_applied 
+        fission::utils::log_stream() << "[TypePropagator] Inferred " << pointer_types_applied 
                   << " pointer types from usage analysis" << std::endl;
     }
 }
@@ -769,7 +770,7 @@ void TypePropagator::infer_parameter_pointer_types(Funcdata* fd) {
     FuncProto& proto = fd->getFuncProto();
     int num_params = proto.numParams();
     
-    std::cerr << "[TypePropagator] Analyzing " << num_params << " parameters for pointer inference" << std::endl;
+    fission::utils::log_stream() << "[TypePropagator] Analyzing " << num_params << " parameters for pointer inference" << std::endl;
     
     // Check each parameter
     for (int i = 0; i < num_params; ++i) {
@@ -909,7 +910,7 @@ void TypePropagator::infer_parameter_pointer_types(Funcdata* fd) {
                         inferred_types[vid] = ptr_type;
                         pointer_params_applied++;
                         
-                        std::cerr << "[TypePropagator] Parameter " << i << " inferred as " 
+                        fission::utils::log_stream() << "[TypePropagator] Parameter " << i << " inferred as " 
                                   << ptr_type->getName() << " (was " 
                                   << (current_type ? current_type->getName() : "unknown") << ")" << std::endl;
                         break;
@@ -920,7 +921,7 @@ void TypePropagator::infer_parameter_pointer_types(Funcdata* fd) {
     }
     
     if (pointer_params_applied > 0) {
-        std::cerr << "[TypePropagator] Inferred " << pointer_params_applied 
+        fission::utils::log_stream() << "[TypePropagator] Inferred " << pointer_params_applied 
                   << " parameter pointer types from usage analysis" << std::endl;
     }
 }
@@ -971,7 +972,7 @@ bool TypePropagator::propagate_struct_types(Funcdata* fd) {
                                 arg->updateType(ptr_type, true, true);
                                 changed = true;
 
-                                std::cerr << "[TypePropagator] Applied " << struct_name
+                                fission::utils::log_stream() << "[TypePropagator] Applied " << struct_name
                                           << "* to arg " << i << " of call to 0x"
                                           << std::hex << callee_addr << std::dec << std::endl;
                             }
@@ -1023,7 +1024,7 @@ bool TypePropagator::propagate_struct_types(Funcdata* fd) {
         }
 
         if (read_op && read_op->code() == CPUI_STORE) {
-            std::cerr << "[TypePropagator] STORE value types: temp=" << type_label(temp_type)
+            fission::utils::log_stream() << "[TypePropagator] STORE value types: temp=" << type_label(temp_type)
                       << " base=" << type_label(base_type)
                       << " inferred=" << type_label(inferred)
                       << " high_read=" << type_label(high_read)
@@ -1034,7 +1035,7 @@ bool TypePropagator::propagate_struct_types(Funcdata* fd) {
         if (is_pointer_type(inferred) || is_pointer_type(temp_type) || is_pointer_type(base_type) ||
             is_pointer_type(high_read) || is_pointer_type(high_def)) {
             if (read_op && read_op->code() == CPUI_STORE) {
-                std::cerr << "[TypePropagator] STORE value pointer hit (direct)" << std::endl;
+                fission::utils::log_stream() << "[TypePropagator] STORE value pointer hit (direct)" << std::endl;
             }
             return true;
         }
@@ -1048,7 +1049,7 @@ bool TypePropagator::propagate_struct_types(Funcdata* fd) {
             FuncCallSpecs* fc = fd->getCallSpecs(def);
             Datatype* ret = fc ? fc->getOutputType() : nullptr;
             bool is_ptr = is_pointer_type(ret);
-            std::cerr << "[TypePropagator] CALL value types: ret=" << type_label(ret)
+            fission::utils::log_stream() << "[TypePropagator] CALL value types: ret=" << type_label(ret)
                       << " ptr=" << (is_ptr ? "yes" : "no") << std::endl;
             return is_ptr;
         }
@@ -1207,7 +1208,7 @@ std::string TypePropagator::apply_struct_types(
                     std::string old_type = c_code.substr(type_start, type_end - type_start);
                     c_code.replace(type_start, type_end - type_start, sname);
                     
-                    std::cerr << "[TypePropagator] Replaced type '" << old_type 
+                    fission::utils::log_stream() << "[TypePropagator] Replaced type '" << old_type 
                               << "' for " << pname << " with " << sname << std::endl;
                 }
             }
@@ -1283,7 +1284,7 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
         
         if (fc->isOutputLocked()) {
             Datatype* retType = fc->getOutputType();
-            std::cerr << "[TypePropagator] " << func_name_dbg << " output locked, type=" 
+            fission::utils::log_stream() << "[TypePropagator] " << func_name_dbg << " output locked, type=" 
                       << (retType ? retType->getName() : "null") 
                       << ", meta=" << (retType ? (int)retType->getMetatype() : -1) << std::endl;
             // Only skip heuristic if already a pointer type
@@ -1298,15 +1299,15 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
         
         // Apply heuristic if no valid type was found
         if (!should_apply_heuristic) {
-            std::cerr << "Skipping heuristic for " << func_name_dbg << " (already valid)" << std::endl;
+            fission::utils::log_stream() << "Skipping heuristic for " << func_name_dbg << " (already valid)" << std::endl;
             continue;
         }
         
-        std::cerr << "Proceeding to heuristic for " << func_name_dbg << std::endl;
+        fission::utils::log_stream() << "Proceeding to heuristic for " << func_name_dbg << std::endl;
         
         // For non-locked prototypes, check if called function returns pointer
         // (heuristic: functions named *alloc*, *create*, *new*, etc.)
-        std::cerr << "[TypePropagator] Checking " << func_name_dbg 
+        fission::utils::log_stream() << "[TypePropagator] Checking " << func_name_dbg 
                   << ", output_size=" << output->getSize() 
                   << ", ptr_size=" << ptr_size << std::endl;
         if (output->getSize() == ptr_size) {
@@ -1328,7 +1329,7 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
                 lower_name.find("new") != std::string::npos ||
                 lower_name.find("open") != std::string::npos) {
                 is_allocator = true;
-                std::cerr << "[TypePropagator] Matched allocator-like function: " 
+                fission::utils::log_stream() << "[TypePropagator] Matched allocator-like function: " 
                           << func_name << std::endl;
             }
             
@@ -1358,7 +1359,7 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
                             fc->setOutput(piece);
                             fc->setOutputLock(true);
                             
-                            std::cerr << "[TypePropagator] Locked return type to void* for: " 
+                            fission::utils::log_stream() << "[TypePropagator] Locked return type to void* for: " 
                                       << func_name << std::endl;
                         }
                     } catch (...) {
@@ -1373,7 +1374,7 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
     }
     
     if (types_set > 0) {
-        std::cerr << "[TypePropagator] Set " << types_set 
+        fission::utils::log_stream() << "[TypePropagator] Set " << types_set 
                   << " return types from FuncCallSpecs" << std::endl;
     }
 }

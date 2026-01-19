@@ -33,12 +33,20 @@ public:
     static void info(const std::string& msg);
     static void warn(const std::string& msg);
     static void error(const std::string& msg);
+    
+    // Stream-based logging (returns ostream that logs on destruction)
+    static std::ostream& stream();
 };
 
 /**
  * Get null output stream (discards all output)
  */
 std::ostream& null_stream();
+
+/**
+ * Get logging stream (replacement for std::cerr)
+ */
+std::ostream& log_stream();
 
 } // namespace utils
 } // namespace fission

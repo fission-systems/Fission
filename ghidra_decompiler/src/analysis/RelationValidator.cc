@@ -1,6 +1,7 @@
 #include "fission/analysis/RelationValidator.h"
 #include <algorithm>
 #include <iostream>
+#include "fission/utils/logger.h"
 
 namespace fission {
 namespace analysis {
@@ -27,7 +28,7 @@ float RelationValidator::evaluate_relations(uint64_t caller_id, const std::vecto
     }
 
     if (checked > 0) {
-         std::cerr << "[RelationValidator] Evaluated " << checked << " relations for caller " << std::hex << caller_id << ": matched " << std::dec << matched << std::endl;
+         fission::utils::log_stream() << "[RelationValidator] Evaluated " << checked << " relations for caller " << std::hex << caller_id << ": matched " << std::dec << matched << std::endl;
     }
 
     if (checked == 0) return 0.5f;
@@ -35,7 +36,7 @@ float RelationValidator::evaluate_relations(uint64_t caller_id, const std::vecto
     float score = static_cast<float>(matched) / static_cast<float>(checked);
     
     // Debug logging
-    // std::cerr << "[RelationValidator] Caller 0x" << std::hex << caller_id 
+    // fission::utils::log_stream() << "[RelationValidator] Caller 0x" << std::hex << caller_id 
     //           << " matched " << std::dec << matched << "/" << checked 
     //           << " relations (score=" << score << ")" << std::endl;
 

@@ -4,6 +4,7 @@
 #include "architecture.hh"
 #include "database.hh"
 #include <iostream>
+#include "fission/utils/logger.h"
 
 namespace fission {
 namespace analysis {
@@ -22,7 +23,7 @@ void TypeSharing::build_call_graph() {
     // Note: This is a simplified approach - in practice we'd iterate
     // over actually decompiled functions
     
-    std::cerr << "[TypeSharing] Building call graph..." << std::endl;
+    fission::utils::log_stream() << "[TypeSharing] Building call graph..." << std::endl;
 }
 
 void TypeSharing::propagate_to_callers(uint64_t callee_addr) {
@@ -72,7 +73,7 @@ int TypeSharing::share_types() {
         if (shared == prev_shared) break;
     }
     
-    std::cerr << "[TypeSharing] Shared " << shared << " types across call graph" << std::endl;
+    fission::utils::log_stream() << "[TypeSharing] Shared " << shared << " types across call graph" << std::endl;
     return shared;
 }
 

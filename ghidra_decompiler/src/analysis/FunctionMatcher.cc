@@ -1,5 +1,6 @@
 #include "fission/analysis/FunctionMatcher.h"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <fstream>
 #include <sstream>
 #include <cstring>
@@ -90,7 +91,7 @@ void FunctionMatcher::load_builtin_msvc_x64() {
         // Very common, skip
     }
 
-    std::cerr << "[FunctionMatcher] Loaded " << signatures.size() 
+    fission::utils::log_stream() << "[FunctionMatcher] Loaded " << signatures.size() 
               << " built-in MSVC x64 signatures" << std::endl;
 }
 
@@ -107,7 +108,7 @@ void FunctionMatcher::load_builtin_signatures(const std::string& platform) {
 bool FunctionMatcher::load_signatures(const std::string& json_path) {
     std::ifstream file(json_path);
     if (!file.is_open()) {
-        std::cerr << "[FunctionMatcher] Failed to open: " << json_path << std::endl;
+        fission::utils::log_stream() << "[FunctionMatcher] Failed to open: " << json_path << std::endl;
         return false;
     }
     
@@ -119,7 +120,7 @@ bool FunctionMatcher::load_signatures(const std::string& json_path) {
     // TODO: Parse JSON format like:
     // [{"name": "malloc", "pattern": "48 83 EC", "mask": "FF FF FF"}, ...]
     
-    std::cerr << "[FunctionMatcher] JSON loading not yet implemented" << std::endl;
+    fission::utils::log_stream() << "[FunctionMatcher] JSON loading not yet implemented" << std::endl;
     return false;
 }
 
@@ -147,7 +148,7 @@ std::string FunctionMatcher::match(uint64_t address, const uint8_t* bytes, int s
     for (const auto& sig : signatures) {
         if (match_pattern(bytes, size, sig)) {
             matched_funcs[address] = sig.name;
-            std::cerr << "[FunctionMatcher] Matched " << sig.name 
+            fission::utils::log_stream() << "[FunctionMatcher] Matched " << sig.name 
                       << " at 0x" << std::hex << address << std::dec << std::endl;
             return sig.name;
         }
@@ -180,14 +181,14 @@ std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes
     
     // Debug: Print first 3 computed hashes
     if (debug_hash_count < 3) {
-        std::cerr << "[FunctionMatcher] Computed hash at 0x" << std::hex << address 
+        fission::utils::log_stream() << "[FunctionMatcher] Computed hash at 0x" << std::hex << address 
                   << ": 0x" << hash << std::dec;
         // Show first few bytes
-        std::cerr << " bytes=[";
+        fission::utils::log_stream() << " bytes=[";
         for (size_t i = 0; i < std::min(size, (size_t)8); ++i) {
-            std::cerr << std::hex << (int)bytes[i] << " ";
+            fission::utils::log_stream() << std::hex << (int)bytes[i] << " ";
         }
-        std::cerr << "]" << std::dec << std::endl;
+        fission::utils::log_stream() << "]" << std::dec << std::endl;
         debug_hash_count++;
     }
     
@@ -198,7 +199,7 @@ std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes
         // Take first match (could implement scoring for multiple matches)
         std::string name = matches[0];
         matched_funcs[address] = name;
-        std::cerr << "[FunctionMatcher] FID MATCH! 0x" << std::hex << address 
+        fission::utils::log_stream() << "[FunctionMatcher] FID MATCH! 0x" << std::hex << address 
                   << " -> " << name << " (hash=0x" << hash << ")" << std::dec << std::endl;
         return name;
     }

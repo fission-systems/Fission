@@ -1,5 +1,6 @@
 #include "fission/core/CliArchitecture.h"
 #include "fission/core/ScopeFission.h"
+#include "fission/utils/logger.h"
 #include "database.hh"
 #include "flow.hh"
 
@@ -49,12 +50,12 @@ void CliArchitecture::injectIatSymbols(const std::map<uint64_t, std::string>& sy
     }
     
     if (injected > 0) {
-        std::cerr << "[fission_core] Injected " << injected << " IAT symbols" << std::endl;
-        std::cerr << "[fission_core] First few injected: ";
+        fission::utils::log_stream() << "[fission_core] Injected " << injected << " IAT symbols" << std::endl;
+        fission::utils::log_stream() << "[fission_core] First few injected: ";
         for (size_t i = 0; i < std::min(size_t(5), injected_addrs.size()); i++) {
-            std::cerr << "0x" << std::hex << injected_addrs[i] << std::dec << " ";
+            fission::utils::log_stream() << "0x" << std::hex << injected_addrs[i] << std::dec << " ";
         }
-        std::cerr << std::endl;
+        fission::utils::log_stream() << std::endl;
     }
 }
 

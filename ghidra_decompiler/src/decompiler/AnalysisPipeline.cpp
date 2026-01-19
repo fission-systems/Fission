@@ -17,6 +17,7 @@
 
 #include <cctype>
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <set>
 
 using namespace fission::analysis;
@@ -394,25 +395,25 @@ AnalysisArtifacts run_analysis_passes(
             updated_self = apply_pointer_return_prototype(ctx->arch.get(), fd);
         }
     } catch (const ghidra::LowlevelError& e) {
-        std::cerr << "[DecompilerCore] Pointer inference failed (self): " << e.explain << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (self): " << e.explain << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "[DecompilerCore] Pointer inference failed (self): " << e.what() << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (self): " << e.what() << std::endl;
     } catch (...) {
-        std::cerr << "[DecompilerCore] Pointer inference failed (self): unknown error" << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (self): unknown error" << std::endl;
     }
 
     bool updated_callee = false;
     try {
         updated_callee = infer_callee_pointer_returns(ctx, fd, action);
     } catch (const ghidra::LowlevelError& e) {
-        std::cerr << "[DecompilerCore] Pointer inference failed (callee): " << e.explain << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (callee): " << e.explain << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "[DecompilerCore] Pointer inference failed (callee): " << e.what() << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (callee): " << e.what() << std::endl;
     } catch (...) {
-        std::cerr << "[DecompilerCore] Pointer inference failed (callee): unknown error" << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (callee): unknown error" << std::endl;
     }
     if (updated_self || updated_callee) {
-        std::cerr << "[DecompilerCore] Updated callee prototypes, re-running..." << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Updated callee prototypes, re-running..." << std::endl;
         rerun_action(fd, action);
     }
 
@@ -425,7 +426,7 @@ AnalysisArtifacts run_analysis_passes(
         bool structs_found = struct_analyzer.analyze_function_structures(fd);
 
         if (structs_found) {
-            std::cerr << "[DecompilerCore] Inferred structures, re-running..." << std::endl;
+            fission::utils::log_stream() << "[DecompilerCore] Inferred structures, re-running..." << std::endl;
             artifacts.inferred_struct_definitions = struct_analyzer.generate_struct_definitions();
             artifacts.captured_structs = struct_analyzer.get_inferred_structs();
 
@@ -444,7 +445,7 @@ AnalysisArtifacts run_analysis_passes(
             }
         }
     } else {
-        std::cerr << "[DecompilerCore] Skipping structure recovery (function too large: "
+        fission::utils::log_stream() << "[DecompilerCore] Skipping structure recovery (function too large: "
                   << func_size << " bytes)" << std::endl;
     }
 
@@ -465,7 +466,7 @@ AnalysisArtifacts run_analysis_passes(
             global_analyzer.infer_structures();
             int created = global_analyzer.create_types(ctx->arch->types, ctx->arch->types->getSizeOfPointer());
             if (created > 0) {
-                std::cerr << "[DecompilerCore] Global data structures created: "
+                fission::utils::log_stream() << "[DecompilerCore] Global data structures created: "
                           << created << std::endl;
             }
 
@@ -552,17 +553,17 @@ AnalysisArtifacts run_analysis_passes(
                     }
                 }
 
-                std::cerr << "[DecompilerCore] Stack frame structures created: "
+                fission::utils::log_stream() << "[DecompilerCore] Stack frame structures created: "
                           << detected << std::endl;
             }
         }
         */
         
-        std::cerr << "[DecompilerCore] Using Ghidra's default stack variable handling" << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Using Ghidra's default stack variable handling" << std::endl;
     }
 
     if (rerun_for_struct_symbols) {
-        std::cerr << "[DecompilerCore] Struct symbols applied, re-running..." << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Struct symbols applied, re-running..." << std::endl;
         rerun_action(fd, action);
     }
 
@@ -571,7 +572,7 @@ AnalysisArtifacts run_analysis_passes(
     
     bool struct_changed = type_propagator.propagate_struct_types(fd);
     if (struct_changed) {
-        std::cerr << "[DecompilerCore] Struct types propagated, re-running..." << std::endl;
+        fission::utils::log_stream() << "[DecompilerCore] Struct types propagated, re-running..." << std::endl;
         rerun_action(fd, action);
         type_propagator.clear();
     }
@@ -581,10 +582,10 @@ AnalysisArtifacts run_analysis_passes(
     bool struct_changed_after = type_propagator.propagate_struct_types(fd);
     if (types_inferred > 0 || struct_changed_after) {
         if (struct_changed_after) {
-            std::cerr << "[DecompilerCore] Struct types updated after type propagation, re-running..."
+            fission::utils::log_stream() << "[DecompilerCore] Struct types updated after type propagation, re-running..."
                       << std::endl;
         } else {
-            std::cerr << "[DecompilerCore] Type propagation complete (" << types_inferred
+            fission::utils::log_stream() << "[DecompilerCore] Type propagation complete (" << types_inferred
                       << " types), re-running for output..." << std::endl;
         }
         rerun_action(fd, action);

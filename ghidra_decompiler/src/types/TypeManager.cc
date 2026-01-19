@@ -4,6 +4,7 @@
 
 #include "fission/types/TypeManager.h"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <algorithm>
 
 namespace fission {
@@ -43,7 +44,7 @@ void TypeManager::load_types_from_gdt(TypeFactory* types, const GdtBinaryParser*
         }
     }
     
-    std::cerr << "[TypeManager] Loaded " << gdt->get_types().size() << " types from GDT" << std::endl;
+    fission::utils::log_stream() << "[TypeManager] Loaded " << gdt->get_types().size() << " types from GDT" << std::endl;
 }
 
 void TypeManager::register_windows_types(TypeFactory* types, int ptr_size) {
