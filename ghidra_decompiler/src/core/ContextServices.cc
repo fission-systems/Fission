@@ -150,7 +150,7 @@ DecompError load_binary(
         ctx->is_64bit = is_64bit;
         if (sleigh_id) ctx->sleigh_id = sleigh_id;
         if (compiler_id) ctx->compiler_id = compiler_id;
-        ctx->arch.reset();
+        ctx->arch.release(); // WORKAROUND: Leak instead of crash
         return DECOMP_OK;
     } catch (const std::exception& e) {
         ctx->last_error = e.what();

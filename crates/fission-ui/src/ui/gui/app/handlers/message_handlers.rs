@@ -139,6 +139,7 @@ pub fn handle_binary_loaded(
         gdt_json_path_opt,
         binary.sections.clone(),
         binary.hash.clone(),
+        binary.arch_spec.clone(),
     );
     if let Err(e) = decomp_tx.send(request) {
         state.log(format!(

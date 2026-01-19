@@ -6,7 +6,9 @@ use crate::prelude::*;
 use std::fs;
 use std::path::Path;
 
+pub mod demangle;
 pub mod elf;
+pub mod golang;
 pub mod macho;
 pub mod pe;
 pub mod types;
@@ -39,31 +41,140 @@ impl LoadedBinary {
             return Err(FissionError::loader("Binary too small"));
         }
 
-        // Check for PE
-        if data.len() > 0x3C + 4 {
+        let format = if data.len() > 0x3C + 4 {
             let pe_offset =
                 u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
-            if pe_offset < data.len() - 4 {
-                if &data[pe_offset..pe_offset + 2] == b"PE" {
-                    return pe::PeLoader::parse(data, path);
+            if pe_offset < data.len() - 4 && &data[pe_offset..pe_offset + 2] == b"PE" {
+                "PE"
+            } else if data.starts_with(b"\x7fELF") {
+                "ELF"
+            } else {
+                let magic = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
+                if matches!(magic, 0xfeedface | 0xfeedfacf | 0xcefaedfe | 0xcffaedfe) {
+                    "Mach-O"
+                } else {
+                    "Unknown"
+                }
+            }
+        } else if data.starts_with(b"\x7fELF") {
+            "ELF"
+        } else {
+            let magic = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
+            if matches!(magic, 0xfeedface | 0xfeedfacf | 0xcefaedfe | 0xcffaedfe) {
+                "Mach-O"
+            } else {
+                "Unknown"
+            }
+        };
+
+        let mut binary = match format {
+            "PE" => pe::PeLoader::parse(data, path)?,
+            "ELF" => elf::ElfLoader::parse(data, path)?,
+            "Mach-O" => macho::MachoLoader::parse(data, path)?,
+            _ => return Err(FissionError::loader("Unknown binary format")),
+        };
+
+        // Go Language Analysis
+        let detection = crate::detector::detect(&binary);
+        if detection.language().map_or(false, |d| d.name == "Go") {
+            let analyzer = golang::GoAnalyzer::new(&binary);
+            if let Ok(go_functions) = analyzer.analyze() {
+                // Merge Go functions into binary
+                for go_func in go_functions {
+                    if let Some(existing) = binary
+                        .inner_mut()
+                        .functions
+                        .iter_mut()
+                        .find(|f| f.address == go_func.address)
+                    {
+                        if existing.name.starts_with("FUN_")
+                            || existing.name.starts_with("sub_")
+                            || existing.name.is_empty()
+                        {
+                            existing.name = go_func.name;
+                        }
+                    } else {
+                        binary.inner_mut().functions.push(go_func);
+                    }
+                }
+                binary.rebuild_indices();
+            }
+        }
+
+        // Apple (ObjC/Swift) Analysis
+        if format == "Mach-O" {
+            // ObjC function analysis
+            {
+                let analyzer = macho::apple::AppleAnalyzer::new(&binary);
+                if let Ok(apple_functions) = analyzer.analyze() {
+                    for apple_func in apple_functions {
+                        if let Some(existing) = binary
+                            .inner_mut()
+                            .functions
+                            .iter_mut()
+                            .find(|f| f.address == apple_func.address)
+                        {
+                            if existing.name.starts_with("sub_") || existing.name.is_empty() {
+                                existing.name = apple_func.name;
+                            }
+                        } else {
+                            binary.inner_mut().functions.push(apple_func);
+                        }
+                    }
+                    binary.rebuild_indices();
+                }
+            }
+
+            // Swift type metadata analysis (separate scope to avoid borrow conflict)
+            {
+                let analyzer = macho::apple::AppleAnalyzer::new(&binary);
+                if let Ok(swift_types) = analyzer.analyze_swift_types() {
+                    for ty in swift_types {
+                        let inferred = types::InferredTypeInfo {
+                            name: ty.name,
+                            mangled_name: ty.mangled_name,
+                            kind: format!("{:?}", ty.kind),
+                            fields: ty
+                                .fields
+                                .into_iter()
+                                .map(|f| types::InferredFieldInfo {
+                                    name: f.name,
+                                    type_name: f.type_name,
+                                    offset: f.offset,
+                                    size: 0,
+                                })
+                                .collect(),
+                            size: ty.size,
+                            metadata_address: 0,
+                        };
+                        binary.inner_mut().inferred_types.push(inferred);
+                    }
                 }
             }
         }
 
-        // Check for ELF
-        if data.starts_with(b"\x7fELF") {
-            return elf::ElfLoader::parse(data, path);
-        }
+        Ok(binary)
+    }
+}
 
-        // Check for Mach-O
-        if data.len() >= 4 {
-            let magic = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
-            if matches!(magic, 0xfeedface | 0xfeedfacf | 0xcefaedfe | 0xcffaedfe) {
-                return macho::MachoLoader::parse(data, path);
+impl LoadedBinary {
+    /// Rebuild internal indices after modifying functions
+    pub fn rebuild_indices(&mut self) {
+        let inner = self.inner_mut();
+        inner.functions.sort_by_key(|f| f.address);
+
+        let mut addr_index = std::collections::HashMap::new();
+        let mut name_index = std::collections::HashMap::new();
+
+        for (idx, func) in inner.functions.iter().enumerate() {
+            addr_index.insert(func.address, idx);
+            if !func.name.is_empty() {
+                name_index.insert(func.name.clone(), idx);
             }
         }
 
-        Err(FissionError::loader("Unknown binary format"))
+        inner.function_addr_index = addr_index;
+        inner.function_name_index = name_index;
     }
 }
 

@@ -102,6 +102,38 @@ pub struct SectionInfo {
     pub is_writable: bool,
 }
 
+/// Information about an inferred field in a type
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[archive(check_bytes)]
+pub struct InferredFieldInfo {
+    /// Field name
+    pub name: String,
+    /// Field type (may be mangled or simplified)
+    pub type_name: String,
+    /// Offset from struct base
+    pub offset: u32,
+    /// Size in bytes (0 if unknown)
+    pub size: u32,
+}
+
+/// Information about an inferred type (class/struct) from metadata
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[archive(check_bytes)]
+pub struct InferredTypeInfo {
+    /// Type name (demangled if possible)
+    pub name: String,
+    /// Mangled name (for lookup)
+    pub mangled_name: String,
+    /// Kind of type (class, struct, enum)
+    pub kind: String,
+    /// Fields in this type
+    pub fields: Vec<InferredFieldInfo>,
+    /// Total size of type (0 if unknown)
+    pub size: u32,
+    /// Associated metadata address (if any)
+    pub metadata_address: u64,
+}
+
 /// Inner data structure containing all binary information.
 /// This is wrapped in Arc for O(1) cloning with COW semantics.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
@@ -137,6 +169,8 @@ pub struct LoadedBinaryInner {
     pub function_name_index: std::collections::HashMap<String, usize>,
     /// Flag indicating functions are sorted by address
     pub functions_sorted: bool,
+    /// Inferred types from metadata analysis (Swift, Go, etc.)
+    pub inferred_types: Vec<InferredTypeInfo>,
 }
 
 /// Parsed binary information with O(1) clone via Arc.
@@ -314,14 +348,33 @@ impl LoadedBinaryBuilder {
         let mut functions = self.functions;
         functions.sort_by_key(|f| f.address);
 
-        // Build indices
+        // Build indices and demangle names
         let mut function_addr_index = std::collections::HashMap::new();
         let mut function_name_index = std::collections::HashMap::new();
-        for (idx, func) in functions.iter().enumerate() {
-            function_addr_index.insert(func.address, idx);
+        for (idx, func) in functions.iter_mut().enumerate() {
             if !func.name.is_empty() {
+                // Apply demangling
+                let demangled = crate::loader::demangle::demangle(&func.name);
+                if demangled != func.name {
+                    func.name = demangled;
+                }
                 function_name_index.insert(func.name.clone(), idx);
             }
+            function_addr_index.insert(func.address, idx);
+        }
+
+        // Demangle IAT symbols
+        let mut iat_symbols = std::collections::HashMap::new();
+        for (addr, name) in self.iat_symbols {
+            let demangled = crate::loader::demangle::demangle(&name);
+            iat_symbols.insert(addr, demangled);
+        }
+
+        // Demangle Global symbols
+        let mut global_symbols = std::collections::HashMap::new();
+        for (addr, name) in self.global_symbols {
+            let demangled = crate::loader::demangle::demangle(&name);
+            global_symbols.insert(addr, demangled);
         }
 
         let inner = LoadedBinaryInner {
@@ -335,11 +388,12 @@ impl LoadedBinaryBuilder {
             sections: self.sections,
             is_64bit: self.is_64bit,
             format: self.format,
-            iat_symbols: self.iat_symbols,
-            global_symbols: self.global_symbols,
+            iat_symbols,
+            global_symbols,
             function_addr_index,
             function_name_index,
             functions_sorted: true,
+            inferred_types: Vec::new(),
         };
 
         Ok(LoadedBinary::from_inner(inner))

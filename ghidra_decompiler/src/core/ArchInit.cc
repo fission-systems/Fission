@@ -221,6 +221,8 @@ static void log_memory_blocks(const DecompContext* ctx) {
     }
 }
 
+static std::mutex arch_init_mutex;
+
 void initialize_architecture(DecompContext* ctx) {
     ArchInitOptions options;
     initialize_architecture(ctx, options);
@@ -231,6 +233,8 @@ void initialize_architecture(DecompContext* ctx, const ArchInitOptions& options)
         return;
     }
 
+    std::lock_guard<std::mutex> lock(arch_init_mutex);
+    
     std::string sleigh_id = select_sleigh_id(ctx);
 
     ctx->arch = std::make_unique<fission::core::CliArchitecture>(
@@ -283,13 +287,17 @@ void initialize_architecture(DecompContext* ctx, const ArchInitOptions& options)
 
         fission::utils::log_stream() << "[DecompilerCore] Architecture initialized: " << sleigh_id << std::endl;
 
+    } catch (const ghidra::LowlevelError& e) {
+        fission::utils::log_stream() << "[DecompilerCore] ERROR: Ghidra LowlevelError during architecture initialization: " << e.explain << std::endl;
+        ctx->arch.release(); // WORKAROUND: Leak instead of crash on failed init
+        throw;
     } catch (const std::exception& e) {
         fission::utils::log_stream() << "[DecompilerCore] ERROR: Architecture initialization failed: " << e.what() << std::endl;
-        ctx->arch.reset(); // Destroy zombie architecture
+        ctx->arch.release(); // WORKAROUND: Leak instead of crash on failed init
         throw;
     } catch (...) {
         fission::utils::log_stream() << "[DecompilerCore] ERROR: Unknown error during architecture initialization" << std::endl;
-        ctx->arch.reset(); // Destroy zombie architecture
+        ctx->arch.release(); // WORKAROUND: Leak instead of crash on failed init
         throw;
     }
 }
