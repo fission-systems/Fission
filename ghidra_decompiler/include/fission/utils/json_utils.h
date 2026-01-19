@@ -7,6 +7,7 @@
 #define FISSION_UTILS_JSON_UTILS_H
 
 #include <string>
+#include <vector>
 #include <map>
 #include <cstdint>
 
@@ -62,6 +63,17 @@ std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json);
  * @return Map of address -> name
  */
 std::map<uint64_t, std::string> parse_json_string_map(const std::string& json_content, size_t start_pos = 0);
+
+/**
+ * Extract JSON array elements
+ * Parses a JSON array and returns each object as a string.
+ * e.g. [{"name":"a"},{"name":"b"}] -> ["{"name":"a"}", "{"name":"b"}"]
+ * 
+ * @param json_content The JSON array content (must start with [)
+ * @return Vector of JSON object strings
+ */
+std::vector<std::string> extract_json_array(const std::string& json_content);
+
 
 } // namespace utils
 } // namespace fission

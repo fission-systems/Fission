@@ -12,6 +12,14 @@ All notable changes to the Fission project (November 2025 - January 2026).
 - **JSON Parsing Refactoring**:
   - Implemented a robust `parse_json_string_map` utility in `fission::utils`.
   - Removed duplicate and manual JSON parsing logic from `SymbolLoader` and `DecompilationPipeline`, replacing them with the centralized utility.
+  - Added `extract_json_array` function for parsing JSON arrays of objects.
+
+**🔍 FunctionMatcher JSON Signature Loading (2026-01-19)**
+
+- **External Signature Files**: Implemented JSON-based signature loading in `FunctionMatcher`, allowing users to define custom byte patterns for function recognition.
+  - Format: `[{"name": "malloc", "pattern": "48 83 EC", "mask": "FF FF FF", "library": "ucrtbase"}, ...]`
+  - Supports wildcard bytes using `??` or `XX` in patterns.
+  - Example file provided: `utils/signatures/patterns/msvc_x64_crt.json`.
 
 **🔄 Advanced Loop Detection (Graph-Based)**
 

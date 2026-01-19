@@ -156,5 +156,74 @@ std::map<uint64_t, std::string> extract_iat_symbols(const std::string& json) {
     return parse_json_string_map(json, pos);
 }
 
+std::vector<std::string> extract_json_array(const std::string& json_content) {
+    std::vector<std::string> elements;
+    size_t pos = 0;
+    
+    // Skip whitespace
+    while (pos < json_content.length() && std::isspace(json_content[pos])) pos++;
+    
+    // Must start with '['
+    if (pos >= json_content.length() || json_content[pos] != '[') {
+        return elements;
+    }
+    pos++; // skip '['
+    
+    while (pos < json_content.length()) {
+        // Skip whitespace and commas
+        while (pos < json_content.length() && 
+               (std::isspace(json_content[pos]) || json_content[pos] == ',')) {
+            pos++;
+        }
+        
+        if (pos >= json_content.length() || json_content[pos] == ']') {
+            break;
+        }
+        
+        // Must be start of object '{'
+        if (json_content[pos] != '{') {
+            break;
+        }
+        
+        // Find matching '}'
+        size_t start = pos;
+        int depth = 0;
+        bool in_string = false;
+        
+        while (pos < json_content.length()) {
+            char c = json_content[pos];
+            
+            if (in_string) {
+                if (c == '\\' && pos + 1 < json_content.length()) {
+                    pos += 2; // skip escaped char
+                    continue;
+                }
+                if (c == '"') {
+                    in_string = false;
+                }
+            } else {
+                if (c == '"') {
+                    in_string = true;
+                } else if (c == '{') {
+                    depth++;
+                } else if (c == '}') {
+                    depth--;
+                    if (depth == 0) {
+                        pos++; // include closing '}'
+                        break;
+                    }
+                }
+            }
+            pos++;
+        }
+        
+        if (depth == 0 && pos > start) {
+            elements.push_back(json_content.substr(start, pos - start));
+        }
+    }
+    
+    return elements;
+}
+
 } // namespace utils
 } // namespace fission

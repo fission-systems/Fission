@@ -1,6 +1,7 @@
 #include "fission/analysis/FunctionMatcher.h"
-#include <iostream>
 #include "fission/utils/logger.h"
+#include "fission/utils/json_utils.h"
+#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstring>
@@ -112,16 +113,69 @@ bool FunctionMatcher::load_signatures(const std::string& json_path) {
         return false;
     }
     
-    // Simple JSON parsing (for demonstration)
-    // In production, use a proper JSON library
     std::string content((std::istreambuf_iterator<char>(file)),
                          std::istreambuf_iterator<char>());
     
-    // TODO: Parse JSON format like:
-    // [{"name": "malloc", "pattern": "48 83 EC", "mask": "FF FF FF"}, ...]
+    // Parse JSON array of signature objects
+    // Format: [{"name": "malloc", "pattern": "48 83 EC", "mask": "FF FF FF", "library": "ucrtbase"}, ...]
     
-    fission::utils::log_stream() << "[FunctionMatcher] JSON loading not yet implemented" << std::endl;
-    return false;
+    auto parse_hex_bytes = [](const std::string& hex_str) -> std::vector<uint8_t> {
+        std::vector<uint8_t> bytes;
+        std::istringstream iss(hex_str);
+        std::string token;
+        while (iss >> token) {
+            // Handle wildcards (e.g., "??" or "XX")
+            if (token == "??" || token == "XX" || token == "xx") {
+                bytes.push_back(0x00);
+            } else {
+                try {
+                    bytes.push_back(static_cast<uint8_t>(std::stoul(token, nullptr, 16)));
+                } catch (...) {
+                    bytes.push_back(0x00);
+                }
+            }
+        }
+        return bytes;
+    };
+    
+    auto objects = fission::utils::extract_json_array(content);
+    
+    int loaded_count = 0;
+    for (const auto& obj : objects) {
+        std::string name = fission::utils::extract_json_string(obj, "name");
+        std::string pattern_str = fission::utils::extract_json_string(obj, "pattern");
+        std::string mask_str = fission::utils::extract_json_string(obj, "mask");
+        std::string library = fission::utils::extract_json_string(obj, "library");
+        
+        if (name.empty() || pattern_str.empty()) {
+            continue;
+        }
+        
+        FunctionSignature sig;
+        sig.name = name;
+        sig.library = library;
+        sig.pattern = parse_hex_bytes(pattern_str);
+        
+        if (!mask_str.empty()) {
+            sig.mask = parse_hex_bytes(mask_str);
+        } else {
+            // Default mask: all FF (exact match)
+            sig.mask = std::vector<uint8_t>(sig.pattern.size(), 0xFF);
+        }
+        
+        // Ensure mask and pattern have same length
+        while (sig.mask.size() < sig.pattern.size()) {
+            sig.mask.push_back(0xFF);
+        }
+        
+        sig.pattern_length = static_cast<int>(sig.pattern.size());
+        signatures.push_back(sig);
+        loaded_count++;
+    }
+    
+    fission::utils::log_stream() << "[FunctionMatcher] Loaded " << loaded_count 
+              << " signatures from " << json_path << std::endl;
+    return loaded_count > 0;
 }
 
 bool FunctionMatcher::match_pattern(const uint8_t* bytes, int size, 
