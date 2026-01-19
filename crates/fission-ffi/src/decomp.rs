@@ -193,6 +193,9 @@ pub struct DecompilerNative {
     pointer_size: Option<u32>,
     symbol_provider_state: Option<Box<SymbolProviderState>>,
     symbol_provider_callbacks: Option<DecompSymbolProvider>,
+    /// Thread ID where this instance was created (for debug validation)
+    #[cfg(debug_assertions)]
+    creation_thread: std::thread::ThreadId,
 }
 
 /// DecompilerNative can be sent between threads, but CANNOT be shared.
@@ -233,6 +236,8 @@ impl DecompilerNative {
             pointer_size: None,
             symbol_provider_state: None,
             symbol_provider_callbacks: None,
+            #[cfg(debug_assertions)]
+            creation_thread: std::thread::current().id(),
         })
     }
 
@@ -257,15 +262,18 @@ impl DecompilerNative {
         {
             // Verify we're on the expected thread in debug mode
             // This helps catch threading issues during development
-            static CREATION_THREAD: std::sync::OnceLock<std::thread::ThreadId> =
-                std::sync::OnceLock::new();
             let current = std::thread::current().id();
-            let created = CREATION_THREAD.get_or_init(|| current);
-            if *created != current {
-                eprintln!(
-                    "[fission-ffi] WARNING: DecompilerNative accessed from different thread than creation. \
-                     This may indicate a threading issue. Use Mutex for thread-safe access."
-                );
+            if self.creation_thread != current {
+                // Log warning only once globally to avoid spam
+                use std::sync::Once;
+                static WARN_ONCE: Once = Once::new();
+                WARN_ONCE.call_once(|| {
+                    eprintln!(
+                        "[fission-ffi] NOTE: DecompilerNative instances are being used across threads. \
+                         This is expected when using per-binary worker threads. \
+                         Each worker has its own isolated DecompilerNative instance."
+                    );
+                });
             }
         }
 

@@ -41,6 +41,12 @@ All notable changes to the Fission project (November 2025 - January 2026).
   - **Natural Loop Detection**: Implements Tarjan/Havlak approach to correctly identify natural loops.
 - **Structural Integrity**: Updated `CFGStructurizer` to use these rigorous algorithms for backward-goto transformation, ensuring that only valid natural loops are converted to `do-while` structures, eliminating the risk of incorrect transforms based on regex guessing.
 
+**🧵 Thread Safety Improvements (2026-01-19)**
+
+- **Per-Instance Thread Tracking**: `DecompilerNative` now tracks its creation thread per-instance instead of globally, eliminating false-positive warnings in multi-worker scenarios.
+- **Warning Spam Prevention**: Thread mismatch warnings are now output only once using `std::sync::Once`, preventing console log flooding.
+- **Architecture**: Each per-binary worker thread has its own isolated `DecompilerNative` instance, ensuring thread-safe decompilation without Mutex overhead on the hot path.
+
 **🛡️ Stability & Observability**
 
 - **Exception-Safe Initialization**: Hardened `ArchInit::initialize_architecture` to automatically clean up partial states ("Zombie Architectures") upon failure, preventing subsequent "Symbol table not initialized" errors.
