@@ -1,4 +1,41 @@
-//! Shared Domain Models
+/// Address type used throughout Fission
+pub type Address = u64;
+
+/// Architecture enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Architecture {
+    X86,
+    X64,
+    Arm,
+    Arm64,
+    Unknown,
+}
+
+/// Metadata about a binary
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BinaryInfo {
+    pub path: String,
+    pub filename: String,
+    pub architecture: Architecture,
+    pub base_address: Address,
+    pub entry_point: Address,
+    pub size: usize,
+    pub md5: String,
+    pub sha256: String,
+}
+
+/// Metadata about a function
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FunctionInfo {
+    pub name: String,
+    pub start_address: Address,
+    pub end_address: Address,
+    pub size: usize,
+    pub is_imported: bool,
+    pub is_exported: bool,
+    pub library: Option<String>,
+    pub signature: Option<String>,
+}
 
 /// Common patch types for quick application
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

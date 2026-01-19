@@ -18,6 +18,7 @@ pub mod path_config;
 pub mod prelude;
 pub mod settings;
 pub mod toml_config;
+pub mod utils;
 
 // Re-export commonly used items at the core level
 pub use config::{CONFIG, Config};

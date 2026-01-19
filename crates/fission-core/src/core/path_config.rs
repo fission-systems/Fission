@@ -87,7 +87,7 @@ impl Default for PathConfig {
 impl PathConfig {
     /// Detect paths based on current working directory and environment
     pub fn detect() -> Self {
-        let workspace_root = Self::find_workspace_root();
+        let workspace_root = crate::core::utils::find_workspace_root("FISSION_ROOT");
 
         let signatures_base = workspace_root
             .as_ref()
@@ -98,7 +98,7 @@ impl PathConfig {
             .as_ref()
             .map(|base| base.join("fid"))
             .filter(|p| p.exists())
-            .or_else(|| Self::find_existing_dir(FID_SEARCH_DIRS));
+            .or_else(|| crate::core::utils::find_existing_dir(FID_SEARCH_DIRS));
 
         let gdt_dir = workspace_root
             .as_ref()
@@ -109,19 +109,19 @@ impl PathConfig {
                     .join("win32")
             })
             .filter(|p| p.exists())
-            .or_else(|| Self::find_existing_dir(GDT_SEARCH_PREFIXES));
+            .or_else(|| crate::core::utils::find_existing_dir(GDT_SEARCH_PREFIXES));
 
         let die_dir = signatures_base
             .as_ref()
             .map(|base| base.join("die"))
             .filter(|p| p.exists())
-            .or_else(|| Self::find_existing_dir(DIE_SEARCH_DIRS));
+            .or_else(|| crate::core::utils::find_existing_dir(DIE_SEARCH_DIRS));
 
         let patterns_dir = signatures_base
             .as_ref()
             .map(|base| base.join("patterns"))
             .filter(|p| p.exists())
-            .or_else(|| Self::find_existing_dir(PATTERN_SEARCH_DIRS));
+            .or_else(|| crate::core::utils::find_existing_dir(PATTERN_SEARCH_DIRS));
 
         Self {
             signatures_base,
@@ -133,53 +133,9 @@ impl PathConfig {
         }
     }
 
-    /// Find workspace root by looking for Cargo.toml or .git
-    fn find_workspace_root() -> Option<PathBuf> {
-        // Check environment variable first
-        if let Ok(root) = std::env::var("FISSION_ROOT") {
-            let path = PathBuf::from(root);
-            if path.exists() {
-                return Some(path);
-            }
-        }
-
-        // Search upward from current directory
-        let cwd = std::env::current_dir().ok()?;
-        let mut current = cwd.as_path();
-
-        loop {
-            // Check for Fission workspace markers
-            if current.join("Cargo.toml").exists() && current.join("crates").is_dir() {
-                return Some(current.to_path_buf());
-            }
-            if current.join("ghidra_decompiler").is_dir() && current.join("utils").is_dir() {
-                return Some(current.to_path_buf());
-            }
-
-            current = current.parent()?;
-        }
-    }
-
-    /// Find first existing directory from candidates
-    fn find_existing_dir(candidates: &[&str]) -> Option<PathBuf> {
-        for candidate in candidates {
-            let path = Path::new(candidate);
-            if path.exists() && path.is_dir() {
-                return Some(path.to_path_buf());
-            }
-        }
-        None
-    }
-
     /// Find a file within search paths
     fn find_file_in_dirs(dirs: &[&str], filename: &str) -> Option<PathBuf> {
-        for dir in dirs {
-            let path = Path::new(dir).join(filename);
-            if path.exists() && path.is_file() {
-                return Some(path);
-            }
-        }
-        None
+        crate::core::utils::find_file_in_dirs(dirs, filename)
     }
 
     // ========================================================================
