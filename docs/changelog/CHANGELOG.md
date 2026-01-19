@@ -18,6 +18,14 @@ All notable changes to the Fission project (November 2025 - January 2026).
   - Removed duplicate and manual JSON parsing logic from `SymbolLoader` and `DecompilationPipeline`, replacing them with the centralized utility.
   - Added `extract_json_array` function for parsing JSON arrays of objects.
 
+**⚙️ TOML-based Configuration System (2026-01-19)**
+
+- **External Configuration File**: Introduced `fission.toml` for managing all runtime parameters.
+  - **Search Locations**: Automatically looks for config in `FISSION_CONFIG` env var, `./fission.toml`, and `~/.config/fission/fission.toml`.
+  - **Extensible Schema**: Supports configuration for logging, decompiler workers, analysis limits, and UI preferences.
+- **`fission_core::toml_config`**: New module for high-performance TOML parsing using `serde`.
+- **CLI Integration**: Updated `fission-cli` to respect `fission.toml` settings while allowing command-line argument overrides.
+
 **🔍 FunctionMatcher JSON Signature Loading (2026-01-19)**
 
 - **External Signature Files**: Implemented JSON-based signature loading in `FunctionMatcher`, allowing users to define custom byte patterns for function recognition.

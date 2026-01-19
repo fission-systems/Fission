@@ -17,9 +17,10 @@ pub mod models;
 pub mod path_config;
 pub mod prelude;
 pub mod settings;
+pub mod toml_config;
 
 // Re-export commonly used items at the core level
-pub use config::CONFIG;
+pub use config::{CONFIG, Config};
 pub use constants::*;
 pub use errors::{FissionError, Result};
 pub use models::*;
