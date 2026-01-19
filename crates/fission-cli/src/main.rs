@@ -83,16 +83,21 @@ struct Args {
 }
 
 fn main() -> fission_core::Result<()> {
-    // 1. Initialize logger with verbosity level
-    fission_core::logging::init(match std::env::args().filter(|a| a == "-v").count() {
-        0 => fission_core::logging::LogLevel::WARN,
-        1 => fission_core::logging::LogLevel::INFO,
-        2 => fission_core::logging::LogLevel::DEBUG,
-        _ => fission_core::logging::LogLevel::TRACE,
-    });
-
-    // 2. Parse command line arguments
+    // 1. Parse command line arguments
     let args = Args::parse();
+
+    // 2. Initialize logger from global config (fission.toml)
+    // If CLI verbosity flags are provided (-v), they override the config level.
+    let log_level = if args.verbose > 0 {
+        match args.verbose {
+            1 => fission_core::logging::LogLevel::INFO,
+            2 => fission_core::logging::LogLevel::DEBUG,
+            _ => fission_core::logging::LogLevel::TRACE,
+        }
+    } else {
+        fission_core::CONFIG.logging.level.to_tracing_level()
+    };
+    fission_core::logging::init(log_level);
 
     fission_core::logging::info("Fission Core Initialized");
     fission_core::logging::debug(&format!("Target: {:?}", args.target));

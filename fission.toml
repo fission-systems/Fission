@@ -1,0 +1,75 @@
+# Fission Configuration File
+# This file controls all runtime settings for Fission.
+# Place this file at: ~/.config/fission/fission.toml or ./fission.toml
+
+[logging]
+# Log level: trace, debug, info, warn, error
+level = "info"
+# Log file path (leave empty to disable file logging)
+file = ""
+# Enable console output
+console_enabled = true
+# Include timestamps in log output
+include_timestamp = true
+# Include module/target path in output
+include_target = false
+
+[decompiler]
+# Number of worker threads (0 = auto based on CPU cores)
+num_workers = 0
+# Maximum workers (caps auto-detection)
+max_workers = 8
+# Default function size when unknown (bytes)
+default_function_size = 4096
+# Maximum function size to decompile (bytes)
+max_function_size = 65536
+# Minimum function size (bytes)
+min_function_size = 16
+# Decompilation timeout in milliseconds (0 = no timeout)
+timeout_ms = 30000
+# Enable background prefetching of adjacent functions
+enable_prefetch = true
+# Number of functions to prefetch
+prefetch_count = 3
+# SLA directory override (leave empty to auto-detect)
+sla_dir = ""
+
+[analysis]
+# Maximum binary size for string/signature search (bytes)
+max_string_search_size = 262144
+# Minimum string length to detect
+min_string_length = 4
+# Enable cross-reference analysis on binary load
+auto_xref_analysis = true
+# Cache size for decompiled functions (max entries)
+decompile_cache_size = 100
+# Function address search range for navigation (bytes)
+function_address_range = 4096
+
+[debug]
+# Maximum snapshots to keep in TTD recorder
+max_snapshots = 10000
+# Maximum process IDs to enumerate
+max_process_ids = 4096
+
+[ui]
+# Show performance metrics in status bar
+show_performance = false
+# Auto-scroll to entry point on binary load
+auto_scroll_entry = true
+# Maximum log entries to keep in UI
+max_log_entries = 1000
+# Hex view rows per page
+hex_rows_per_page = 64
+
+[paths]
+# Override workspace root (leave empty to auto-detect)
+workspace_root = ""
+# FID database directory override
+fid_dir = ""
+# GDT (type info) directory override
+gdt_dir = ""
+# DIE signatures directory override
+die_dir = ""
+# Pattern signatures directory override
+patterns_dir = ""

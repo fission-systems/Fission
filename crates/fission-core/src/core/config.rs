@@ -6,10 +6,10 @@
 use std::sync::LazyLock;
 
 /// Global configuration instance
-pub static CONFIG: LazyLock<Config> = LazyLock::new(Config::default);
+pub static CONFIG: LazyLock<Config> = LazyLock::new(Config::load);
 
 /// Fission configuration
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Config {
     /// Decompiler settings
     pub decompiler: DecompilerConfig,
@@ -21,6 +21,19 @@ pub struct Config {
     pub ui: UiConfig,
     /// Logging settings
     pub logging: LogConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::load()
+    }
+}
+
+impl Config {
+    /// Load configuration from TOML file or environment
+    pub fn load() -> Self {
+        crate::core::toml_config::TomlConfig::load().into()
+    }
 }
 
 /// Decompiler configuration
