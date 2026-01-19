@@ -10,7 +10,8 @@ pub use crate::core::constants;
 pub use crate::core::errors;
 pub use crate::core::logging;
 pub use crate::core::models;
+pub use crate::core::path_config;
 pub use crate::core::prelude;
 pub use crate::core::settings;
 
-pub use crate::core::{CONFIG, FissionError, Result};
+pub use crate::core::{CONFIG, FissionError, PATHS, Result};
