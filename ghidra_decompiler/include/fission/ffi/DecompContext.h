@@ -19,6 +19,7 @@
 // Forward declarations
 namespace ghidra {
     class Architecture;
+    class TypeStruct;
 }
 
 // Include actual headers for std::unique_ptr members
@@ -91,6 +92,12 @@ struct DecompContext {
 
     // Struct type propagation across call sites
     std::map<uint64_t, std::map<int, std::string>> struct_registry;
+    
+    // Registered struct types for type recovery
+    std::map<std::string, ghidra::TypeStruct*> registered_types;
+    
+    // Parameter type hints (func_addr -> param_index -> struct_name)
+    std::map<uint64_t, std::map<int, std::string>> param_type_hints;
     
     // Thread safety
     std::mutex mutex;

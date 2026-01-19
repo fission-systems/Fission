@@ -21,6 +21,7 @@ pub struct LoadBinaryRequest {
     pub gdt_json_path: Option<String>,
     pub sections: Vec<SectionInfo>,
     pub binary_hash: String,
+    pub arch_spec: String,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +61,7 @@ impl WorkerRequest {
         gdt_json_path: Option<String>,
         sections: Vec<SectionInfo>,
         binary_hash: String,
+        arch_spec: String,
     ) -> Self {
         Self::LoadBinary(LoadBinaryRequest {
             binary_id: binary_hash.clone(),
@@ -71,6 +73,7 @@ impl WorkerRequest {
             gdt_json_path,
             sections,
             binary_hash,
+            arch_spec,
         })
     }
 

@@ -313,8 +313,59 @@ DECOMP_API DecompError decomp_load_fid_db(DecompContext* ctx, const char* db_pat
  */
 DECOMP_API char* decomp_get_fid_match(DecompContext* ctx, uint64_t addr, size_t len);
 
+// ============================================================================
+// Type Registration (for metadata-driven type recovery)
+// ============================================================================
+
+/**
+ * Field information for struct registration
+ */
+typedef struct DecompFieldInfo {
+    const char* name;      ///< Field name
+    const char* type_name; ///< Field type name (e.g., "int", "char*")
+    uint32_t offset;       ///< Offset in bytes from struct start
+    uint32_t size;         ///< Field size in bytes
+} DecompFieldInfo;
+
+/**
+ * Register a struct type with the decompiler's type system.
+ * This enables proper field access rendering (e.g., ptr->field).
+ * 
+ * @param ctx Decompiler context
+ * @param name Struct type name (e.g., "FissionSwiftTester")
+ * @param size Total size of the struct in bytes
+ * @param fields Array of field descriptors
+ * @param field_count Number of fields
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_register_struct_type(
+    DecompContext* ctx,
+    const char* name,
+    uint32_t size,
+    const DecompFieldInfo* fields,
+    size_t field_count
+);
+
+/**
+ * Apply a registered struct type to a function parameter.
+ * This marks the first parameter of the function as a pointer to the given struct.
+ * 
+ * @param ctx Decompiler context  
+ * @param func_addr Address of the function
+ * @param param_index Parameter index (0 for first param, typically 'self'/'this')
+ * @param struct_name Name of the struct type to apply
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_apply_struct_to_param(
+    DecompContext* ctx,
+    uint64_t func_addr,
+    int param_index,
+    const char* struct_name
+);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif // FISSION_LIBDECOMP_FFI_H
+

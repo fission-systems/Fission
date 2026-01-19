@@ -275,13 +275,20 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     
     std::string result = ss.str();
     
-    fission::utils::log_stream() << "[DecompilerCore] Raw output: " << result.size() << " bytes, post-processing..." << std::endl;
-
     // ========================================================================
     // Full Post-Processing Chain
     // ========================================================================
-    fission::decompiler::PostProcessOptions options;
-    result = fission::decompiler::run_post_processing(ctx, fd, result, analysis, options);
+    // Configure default options for standalone decompilation
+    PostProcessOptions options;
+    options.iat_symbols = true;
+    options.unicode_strings = true;
+    options.struct_offsets = true;
+    options.smart_constants = true;
+    options.interlocked_patterns = true;
+    options.seh_cleanup = true;
+
+    // Use the analysis artifacts gathered earlier for post-processing
+    result = run_post_processing(ctx, fd, result, analysis, options);
     
     fission::utils::log_stream() << "[DecompilerCore] Decompilation complete, " << result.size() << " bytes after post-processing" << std::endl;
     

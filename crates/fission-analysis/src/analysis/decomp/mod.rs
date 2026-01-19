@@ -30,6 +30,7 @@
 // This module now provides high-level safe wrappers only
 
 pub mod cache;
+pub mod postprocess;
 
 #[cfg(feature = "native_decomp")]
 use self::cache::DecompilerCache;
@@ -44,6 +45,7 @@ pub type DecompilerNative = fission_ffi::DecompilerNative;
 pub struct CachingDecompiler {
     inner: DecompilerNative,
     cache: DecompilerCache,
+    inferred_types: Vec<fission_loader::loader::types::InferredTypeInfo>,
 }
 
 #[cfg(feature = "native_decomp")]
@@ -56,8 +58,13 @@ impl CachingDecompiler {
     ) -> fission_core::Result<Self> {
         let inner = DecompilerNative::new(sla_dir)?;
         let cache = DecompilerCache::new(&binary.hash, cache_size)?;
+        let inferred_types = binary.inferred_types.clone();
 
-        Ok(Self { inner, cache })
+        Ok(Self {
+            inner,
+            cache,
+            inferred_types,
+        })
     }
 
     /// Decompile a function with caching
@@ -68,9 +75,14 @@ impl CachingDecompiler {
         }
 
         // 2. Decompile using native engine
-        let code = self.inner.decompile(address)?;
+        let raw_code = self.inner.decompile(address)?;
 
-        // 3. Store in cache
+        // 3. Post-process with inferred types for field resolution
+        let processor = self::postprocess::PostProcessor::new()
+            .with_inferred_types(self.inferred_types.clone());
+        let code = processor.process(&raw_code);
+
+        // 4. Store in cache
         self.cache.put(address, code.clone());
 
         Ok(code)

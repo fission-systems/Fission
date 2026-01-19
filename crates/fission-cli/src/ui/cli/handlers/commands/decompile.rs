@@ -46,7 +46,7 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
     // Try to use the FFI decompiler
     #[cfg(feature = "native_decomp")]
     {
-        use fission_ffi::DecompilerNative;
+        use fission_analysis::analysis::decomp::RecommendedDecompiler;
 
         println!("{} Initializing native decompiler...", "[*]".blue());
 
@@ -68,9 +68,10 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
             .as_deref()
             == Some("1");
 
-        let mut native = {
+        let mut decompiler = {
             let _silencer = OutputSilencer::new_if(suppress_native_logs);
-            match DecompilerNative::new(&sla_dir) {
+            // Default cache size 10MB
+            match RecommendedDecompiler::new(binary, &sla_dir, 10 * 1024 * 1024) {
                 Ok(d) => d,
                 Err(e) => {
                     println!("{} Failed to start decompiler: {}", "[!]".red(), e);
@@ -79,9 +80,11 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
             }
         };
 
+        // Inner setup block to access underlying native interface for loading
         {
             let _silencer = OutputSilencer::new_if(suppress_native_logs);
-            // Load binary into decompiler
+            let native = decompiler.inner_mut();
+
             // Try to detect compiler
             let detection = fission_loader::detect(&binary);
             let compiler_id = detection
@@ -107,16 +110,13 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
                 );
                 return;
             }
-        }
 
-        // Register all sections for proper VA-to-file-offset mapping
-        println!(
-            "{} Registering {} sections...",
-            "[*]".blue(),
-            binary.sections.len()
-        );
-        {
-            let _silencer = OutputSilencer::new_if(suppress_native_logs);
+            // Register sections
+            println!(
+                "{} Registering {} sections...",
+                "[*]".blue(),
+                binary.sections.len()
+            );
             for section in &binary.sections {
                 if let Err(e) = native.add_memory_block(
                     &section.name,
@@ -135,21 +135,43 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
                     );
                 }
             }
-        }
 
-        // Add symbols
-        {
-            let _silencer = OutputSilencer::new_if(suppress_native_logs);
-            native.add_symbols(&binary.iat_symbols);
+            // Add symbols
+            // Mix IAT symbols and function names (which key include demangled names)
+            let mut all_symbols = binary.iat_symbols.clone();
+            for func in &binary.functions {
+                if !func.name.is_empty() {
+                    all_symbols.insert(func.address, func.name.clone());
+                }
+            }
+
+            native.add_symbols(&all_symbols);
             native.add_global_symbols(&binary.global_symbols);
             native.set_symbol_provider(&binary.functions, &binary.global_symbols, &binary.sections);
+
+            // Register inferred types from metadata (Swift, Go, etc.)
+            if !binary.inferred_types.is_empty() {
+                println!(
+                    "{} Registering {} inferred types...",
+                    "[*]".blue(),
+                    binary.inferred_types.len()
+                );
+                if let Err(e) = native.register_inferred_types(&binary.inferred_types) {
+                    println!(
+                        "{} Warning: Failed to register types: {}",
+                        "[!]".yellow(),
+                        e
+                    );
+                }
+            }
         }
+
         println!("{} Decompiling...", "[*]".blue());
 
-        // Decompile
+        // Decompile via caching wrapper (which handles post-processing)
         {
             let _silencer = OutputSilencer::new_if(suppress_native_logs);
-            match native.decompile(addr) {
+            match decompiler.decompile(addr) {
                 Ok(c_code) => {
                     println!("{}", c_code);
                 }

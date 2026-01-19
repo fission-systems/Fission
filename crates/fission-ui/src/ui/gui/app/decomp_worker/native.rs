@@ -34,6 +34,7 @@ pub(crate) fn handle_binary_load_for_worker(
     .image_base(request.image_base)
     .is_64bit(is_64bit)
     .format("PE")
+    .arch_spec(request.arch_spec.clone())
     .add_sections(request.sections.clone())
     .build()
     .map_err(|e| format!("Failed to build binary: {}", e))
@@ -47,15 +48,12 @@ pub(crate) fn handle_binary_load_for_worker(
             // Load binary data
             let inner = decomp.inner_mut();
 
-            // Get arch info from LoadedBinary
-            let arch_spec = dummy_binary.arch_spec.clone();
-
             // Try to detect compiler
             let detection = fission_loader::detect(&dummy_binary);
             let compiler_id = detection
                 .compiler()
                 .map(|d| match d.name.to_lowercase().as_str() {
-                    "microsoft visual c++" | "msvc" => "windows",
+                    "microsoft visual c++" | "msvc" | "windows" => "windows",
                     "gcc" | "mingw" => "gcc",
                     "clang" => "clang",
                     _ => "default",
@@ -65,7 +63,7 @@ pub(crate) fn handle_binary_load_for_worker(
                 &request.bytes,
                 request.image_base,
                 is_64bit,
-                Some(&arch_spec),
+                Some(&request.arch_spec),
                 compiler_id,
             ) {
                 let _ = result_tx.send(AsyncMessage::DecompilerContextError {

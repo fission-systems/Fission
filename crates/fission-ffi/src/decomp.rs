@@ -31,6 +31,15 @@ struct DecompSymbolInfo {
     name_len: u32,
 }
 
+/// Field information for struct type registration (matches C struct)
+#[repr(C)]
+pub struct DecompFieldInfo {
+    pub name: *const c_char,
+    pub type_name: *const c_char,
+    pub offset: u32,
+    pub size: u32,
+}
+
 type DecompFindSymbolFn = extern "C" fn(
     userdata: *mut std::ffi::c_void,
     address: u64,
@@ -137,6 +146,22 @@ unsafe extern "C" {
         names: *const *const c_char,
         count: usize,
     );
+
+    // Type registration for metadata-driven type recovery
+    fn decomp_register_struct_type(
+        ctx: *mut DecompContext,
+        name: *const c_char,
+        size: u32,
+        fields: *const DecompFieldInfo,
+        field_count: usize,
+    ) -> DecompError;
+
+    fn decomp_apply_struct_to_param(
+        ctx: *mut DecompContext,
+        func_addr: u64,
+        param_index: c_int,
+        struct_name: *const c_char,
+    ) -> DecompError;
 }
 
 // ============================================================================
@@ -657,6 +682,105 @@ impl DecompilerNative {
         }
 
         unsafe { CStr::from_ptr(err_ptr).to_string_lossy().into_owned() }
+    }
+
+    /// Register a struct type with the decompiler's type system
+    ///
+    /// This enables proper field access rendering (e.g., ptr->field).
+    /// Fields should be sorted by offset.
+    pub fn register_struct_type(
+        &mut self,
+        name: &str,
+        size: u32,
+        fields: &[(String, String, u32, u32)], // (name, type_name, offset, size)
+    ) -> Result<()> {
+        self.check_valid()?;
+
+        if name.is_empty() {
+            return Err(FissionError::decompiler("Struct name cannot be empty"));
+        }
+
+        let name_cstr =
+            CString::new(name).map_err(|_| FissionError::decompiler("Invalid struct name"))?;
+
+        // Convert fields to FFI format
+        let field_names: Vec<CString> = fields
+            .iter()
+            .map(|(n, _, _, _)| CString::new(n.as_str()).unwrap_or_default())
+            .collect();
+        let field_types: Vec<CString> = fields
+            .iter()
+            .map(|(_, t, _, _)| CString::new(t.as_str()).unwrap_or_default())
+            .collect();
+
+        let ffi_fields: Vec<DecompFieldInfo> = fields
+            .iter()
+            .enumerate()
+            .map(|(i, (_, _, offset, sz))| DecompFieldInfo {
+                name: field_names[i].as_ptr(),
+                type_name: field_types[i].as_ptr(),
+                offset: *offset,
+                size: *sz,
+            })
+            .collect();
+
+        let result = unsafe {
+            decomp_register_struct_type(
+                self.ctx,
+                name_cstr.as_ptr(),
+                size,
+                ffi_fields.as_ptr(),
+                ffi_fields.len(),
+            )
+        };
+
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
+    /// Apply a registered struct type to a function parameter
+    ///
+    /// This marks the specified parameter as a pointer to the given struct type.
+    pub fn apply_struct_to_param(
+        &mut self,
+        func_addr: u64,
+        param_index: i32,
+        struct_name: &str,
+    ) -> Result<()> {
+        self.check_valid()?;
+
+        let name_cstr = CString::new(struct_name)
+            .map_err(|_| FissionError::decompiler("Invalid struct name"))?;
+
+        let result = unsafe {
+            decomp_apply_struct_to_param(self.ctx, func_addr, param_index, name_cstr.as_ptr())
+        };
+
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
+    /// Register types from InferredTypeInfo (convenience method)
+    pub fn register_inferred_types(
+        &mut self,
+        types: &[fission_loader::loader::types::InferredTypeInfo],
+    ) -> Result<()> {
+        for ty in types {
+            let fields: Vec<(String, String, u32, u32)> = ty
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.type_name.clone(), f.offset, f.size))
+                .collect();
+
+            self.register_struct_type(&ty.name, ty.size, &fields)?;
+        }
+        Ok(())
     }
 }
 

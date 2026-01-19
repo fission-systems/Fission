@@ -378,7 +378,33 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     let data = &binary.data[..search_limit];
 
     // Go detection
-    if contains_bytes(data, b"Go build ID:") || contains_bytes(data, b"runtime.gopanic") {
+    let mut is_go =
+        contains_bytes(data, b"Go build ID:") || contains_bytes(data, b"runtime.gopanic");
+
+    // Stronger detection using pclntab magic
+    if !is_go {
+        for section in &binary.sections {
+            if section.name == ".gopclntab"
+                || section.name == "__gopclntab"
+                || section.name == "gopclntab"
+            {
+                is_go = true;
+                break;
+            }
+            // Check first 16 bytes of data sections for magic
+            if !section.is_executable && section.file_size >= 4 {
+                if let Some(sdata) = binary.get_bytes(section.virtual_address, 16) {
+                    let magic = u32::from_le_bytes([sdata[0], sdata[1], sdata[2], sdata[3]]);
+                    if matches!(magic, 0xfffffffb | 0xfffffffa | 0xfffffff0 | 0xfffffff1) {
+                        is_go = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if is_go {
         result.add(Detection::new(
             DetectionType::Language,
             "Go",

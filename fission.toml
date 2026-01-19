@@ -11,6 +11,8 @@ file = ""
 console_enabled = true
 # Include timestamps in log output
 include_timestamp = true
+# Include thread ID in log output
+include_thread_id = true
 # Include module/target path in output
 include_target = false
 

@@ -13,7 +13,11 @@
 #include "fission/ffi/FidManager.h"
 #include "fission/ffi/DecompilerCore.h"
 
+// Ghidra types for type registration
+#include "type.hh"
+
 #include <cstring>
+#include <iostream>
 
 using namespace fission::ffi;
 
@@ -232,3 +236,136 @@ extern "C" DECOMP_API DecompError decomp_load_fid_db(DecompContext* ctx, const c
 extern "C" DECOMP_API char* decomp_get_fid_match(DecompContext* ctx, uint64_t addr, size_t len) {
     return get_fid_match(ctx, addr, len);
 }
+
+// ============================================================================
+// Type Registration
+// ============================================================================
+
+extern "C" DECOMP_API DecompError decomp_register_struct_type(
+    DecompContext* ctx,
+    const char* name,
+    uint32_t size,
+    const DecompFieldInfo* fields,
+    size_t field_count
+) {
+    if (!ctx || !name) return DECOMP_ERR_INVALID_CONTEXT;
+    if (!ctx->arch) return DECOMP_ERR_INIT;
+    
+    try {
+        ghidra::TypeFactory* factory = ctx->arch->types;
+        if (!factory) return DECOMP_ERR_INIT;
+        
+        // Check if type already exists
+        ghidra::Datatype* existing = factory->findByName(name);
+        if (existing != nullptr) {
+            // Type already registered
+            return DECOMP_OK;
+        }
+        
+        // Create new struct type
+        ghidra::TypeStruct* new_struct = factory->getTypeStruct(name);
+        
+        // Build field list
+        std::vector<ghidra::TypeField> field_list;
+        int ptr_size = factory->getSizeOfPointer();
+        
+        for (size_t i = 0; i < field_count; ++i) {
+            const DecompFieldInfo& f = fields[i];
+            if (!f.name) continue;
+            
+            // Determine field type based on size and type_name hint
+            ghidra::Datatype* field_type = nullptr;
+            int field_size = (f.size > 0) ? f.size : ptr_size;
+            
+            // Try to match common type names
+            if (f.type_name) {
+                std::string tn(f.type_name);
+                if (tn == "int" || tn == "Si" || tn == "Int") {
+                    field_type = factory->getBase(field_size, ghidra::TYPE_INT);
+                } else if (tn == "uint" || tn == "Su" || tn == "UInt") {
+                    field_type = factory->getBase(field_size, ghidra::TYPE_UINT);
+                } else if (tn == "float" || tn == "Sf") {
+                    field_type = factory->getBase(4, ghidra::TYPE_FLOAT);
+                } else if (tn == "double" || tn == "Sd") {
+                    field_type = factory->getBase(8, ghidra::TYPE_FLOAT);
+                } else if (tn == "char*" || tn == "SS" || tn == "String") {
+                    // String type - pointer to char
+                    ghidra::Datatype* char_type = factory->getBase(1, ghidra::TYPE_INT);
+                    field_type = factory->getTypePointer(ptr_size, char_type, 1);
+                } else {
+                    // Default to appropriate sized type
+                    field_type = factory->getBase(field_size, ghidra::TYPE_UNKNOWN);
+                }
+            } else {
+                field_type = factory->getBase(field_size, ghidra::TYPE_UNKNOWN);
+            }
+            
+            field_list.push_back(ghidra::TypeField(i, f.offset, f.name, field_type));
+        }
+        
+        // Apply fields to struct
+        if (!field_list.empty()) {
+            // Calculate appropriate size if not provided
+            int struct_size = (size > 0) ? size : 0;
+            if (struct_size == 0 && !field_list.empty()) {
+                const auto& last = field_list.back();
+                struct_size = last.offset + last.type->getSize();
+                // Align to pointer size
+                if (struct_size % ptr_size != 0) {
+                    struct_size += (ptr_size - (struct_size % ptr_size));
+                }
+            }
+            
+            factory->setFields(field_list, new_struct, struct_size, ptr_size, 0);
+        }
+        
+        // Store in context for later lookup
+        ctx->registered_types[name] = new_struct;
+        
+        std::cout << "[TypeRegistry] Registered struct '" << name 
+                  << "' with " << field_count << " fields, size=" << size << std::endl;
+        
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Type registration error: ") + e.what();
+        return DECOMP_ERR_INIT;
+    }
+}
+
+extern "C" DECOMP_API DecompError decomp_apply_struct_to_param(
+    DecompContext* ctx,
+    uint64_t func_addr,
+    int param_index,
+    const char* struct_name
+) {
+    if (!ctx || !struct_name) return DECOMP_ERR_INVALID_CONTEXT;
+    if (!ctx->arch) return DECOMP_ERR_INIT;
+    
+    try {
+        // Find the registered struct
+        auto it = ctx->registered_types.find(struct_name);
+        if (it == ctx->registered_types.end()) {
+            // Try to find in TypeFactory
+            ghidra::Datatype* dt = ctx->arch->types->findByName(struct_name);
+            if (!dt || dt->getMetatype() != ghidra::TYPE_STRUCT) {
+                ctx->last_error = "Struct type not found: " + std::string(struct_name);
+                return DECOMP_ERR_INIT;
+            }
+            // Store for future use
+            ctx->registered_types[struct_name] = static_cast<ghidra::TypeStruct*>(dt);
+        }
+        
+        // Store the param -> type mapping for use during decompilation
+        ctx->param_type_hints[func_addr][param_index] = struct_name;
+        
+        std::cout << "[TypeRegistry] Applied '" << struct_name 
+                  << "' to param " << param_index 
+                  << " of function @0x" << std::hex << func_addr << std::dec << std::endl;
+        
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Apply struct error: ") + e.what();
+        return DECOMP_ERR_INIT;
+    }
+}
+

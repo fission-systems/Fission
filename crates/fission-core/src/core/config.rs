@@ -312,7 +312,7 @@ impl DecompilerConfig {
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
-            max_string_search_size: 256 * 1024, // 256KB
+            max_string_search_size: 2 * 1024 * 1024, // 2MB
             min_string_length: 4,
             auto_xref_analysis: true,
             decompile_cache_size: 100,

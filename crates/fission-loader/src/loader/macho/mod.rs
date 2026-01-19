@@ -6,6 +6,7 @@ use crate::prelude::*;
 use binrw::BinRead;
 use std::io::{Cursor, Seek, SeekFrom};
 
+pub mod apple;
 pub mod schema;
 use schema::*;
 
@@ -229,7 +230,9 @@ impl MachoLoader {
         for _ in 0..nsyms {
             if let Ok(nlist) = Nlist64::read_options(&mut reader, endian, ()) {
                 // If n_type & N_STAB == 0 && (n_type & N_EXT)
-                if (nlist.n_type & 0xE0) == 0 && (nlist.n_type & 0x01) != 0 && nlist.n_value != 0 {
+                // (n_type & N_TYPE) == N_SECT (0x0e)
+                let n_type = nlist.n_type & 0x0e;
+                if n_type == 0x0e && nlist.n_value != 0 {
                     // Extract name using shared utility function
                     // Use checked_add to prevent potential overflow
                     let name_offset = (str_off as usize).checked_add(nlist.n_strx as usize);
