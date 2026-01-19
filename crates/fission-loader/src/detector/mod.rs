@@ -6,6 +6,7 @@
 //! - Compilers (MSVC, GCC, Clang, etc.)
 //! - Languages (C/C++, Delphi, Go, Rust, .NET, etc.)
 
+pub mod die_engine;
 mod signatures;
 
 use crate::loader::LoadedBinary;
@@ -184,7 +185,9 @@ pub fn detect(binary: &LoadedBinary) -> DetectionResult {
     detect_by_imports(binary, &mut result);
     detect_by_strings(binary, &mut result);
     detect_by_entry_point(binary, &mut result);
-    detect_by_entry_point(binary, &mut result);
+
+    // Run DIE signature-based detection
+    die_engine::detect_with_die(binary, &mut result);
 
     // Sort by confidence (highest first)
     result

@@ -21,7 +21,20 @@ All notable changes to the Fission project (November 2025 - January 2026).
   - Supports wildcard bytes using `??` or `XX` in patterns.
   - Example file provided: `utils/signatures/patterns/msvc_x64_crt.json`.
 
-**🔄 Advanced Loop Detection (Graph-Based)**
+**� Detect-It-Easy (DIE) Signature Integration (2026-01-19)**
+
+- **DIE-Compatible Signature Engine**: Implemented a Rust-based signature matching engine inspired by DIE.
+  - Supports multiple rule types: **section names**, **string patterns**, **entry point byte patterns**, **imports**, and **Rich header** detection.
+  - JSON signature database format: `utils/signatures/die/pe_signatures.json`.
+  - Integrated into `fission-loader` detection pipeline for automatic packer/compiler identification.
+- **20+ Pre-defined Signatures**: Initial database includes signatures for:
+  - **Packers**: UPX, ASPack, PECompact, MPRESS, Petite, FSG, NsPack, PyInstaller
+  - **Protectors**: VMProtect, Themida
+  - **Compilers**: MinGW, MSVC, Rust, Go, Delphi, AutoIt
+  - **Installers**: Inno Setup, NSIS, InstallShield
+  - **Frameworks**: Electron
+
+**�🔄 Advanced Loop Detection (Graph-Based)**
 
 - **Graph Algorithms Implementation**: Introduced `GraphAnalyzer` in C++ implementing standard graph-theoretic algorithms aligning with the Rust analysis engine.
   - **Dominator Tree**: Implements Cooper-Harvey-Kennedy algorithm for precise dominance calculation.
