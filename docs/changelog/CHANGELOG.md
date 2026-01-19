@@ -51,6 +51,17 @@ All notable changes to the Fission project (November 2025 - January 2026).
 - **Warning Spam Prevention**: Thread mismatch warnings are now output only once using `std::sync::Once`, preventing console log flooding.
 - **Architecture**: Each per-binary worker thread has its own isolated `DecompilerNative` instance, ensuring thread-safe decompilation without Mutex overhead on the hot path.
 
+**📋 LogConfig - Centralized Logging Configuration (2026-01-19)**
+
+- **`fission_core::LogConfig`**: Added centralized logging configuration struct.
+  - **Log Level**: Configurable via `FISSION_LOG_LEVEL` env var (trace, debug, info, warn, error).
+  - **File Logging**: Configurable via `FISSION_LOG_FILE` env var.
+  - **Console/File Toggle**: Independent enable/disable for console and file output.
+  - **Rotation Settings**: `max_file_size` and `max_rotated_files` for log file management.
+- **Preset Configurations**: `LogConfig::quiet()`, `LogConfig::verbose()`, `LogConfig::with_file()`.
+- **Integration**: `logging::init_from_config()` and `logging::init_from_global_config()` for easy initialization.
+- **C++ Sync**: Automatically sets `FISSION_LOG_FILE` env var for C++ logger compatibility.
+
 **🛡️ Stability & Observability**
 
 - **Exception-Safe Initialization**: Hardened `ArchInit::initialize_architecture` to automatically clean up partial states ("Zombie Architectures") upon failure, preventing subsequent "Symbol table not initialized" errors.

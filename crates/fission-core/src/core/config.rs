@@ -19,6 +19,8 @@ pub struct Config {
     pub debug: DebugConfig,
     /// UI settings
     pub ui: UiConfig,
+    /// Logging settings
+    pub logging: LogConfig,
 }
 
 /// Decompiler configuration
@@ -79,6 +81,147 @@ pub struct UiConfig {
     pub max_log_entries: usize,
     /// Hex view rows per page
     pub hex_rows_per_page: usize,
+}
+
+/// Logging configuration
+#[derive(Debug, Clone)]
+pub struct LogConfig {
+    /// Minimum log level to output (trace, debug, info, warn, error)
+    pub level: LogLevel,
+    /// Log file path (if empty, file logging disabled)
+    pub file_path: String,
+    /// Enable console output
+    pub console_enabled: bool,
+    /// Enable file output
+    pub file_enabled: bool,
+    /// Include timestamps in output
+    pub include_timestamp: bool,
+    /// Include module/target path in output
+    pub include_target: bool,
+    /// Maximum log file size in bytes (0 = unlimited)
+    pub max_file_size: usize,
+    /// Number of rotated log files to keep
+    pub max_rotated_files: usize,
+}
+
+/// Log level enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Default for LogLevel {
+    fn default() -> Self {
+        LogLevel::Info
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogLevel::Trace => write!(f, "TRACE"),
+            LogLevel::Debug => write!(f, "DEBUG"),
+            LogLevel::Info => write!(f, "INFO"),
+            LogLevel::Warn => write!(f, "WARN"),
+            LogLevel::Error => write!(f, "ERROR"),
+        }
+    }
+}
+
+impl LogLevel {
+    /// Parse log level from string (case-insensitive)
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "trace" => Some(LogLevel::Trace),
+            "debug" => Some(LogLevel::Debug),
+            "info" => Some(LogLevel::Info),
+            "warn" | "warning" => Some(LogLevel::Warn),
+            "error" => Some(LogLevel::Error),
+            _ => None,
+        }
+    }
+
+    /// Convert to tracing::Level
+    pub fn to_tracing_level(&self) -> tracing::Level {
+        match self {
+            LogLevel::Trace => tracing::Level::TRACE,
+            LogLevel::Debug => tracing::Level::DEBUG,
+            LogLevel::Info => tracing::Level::INFO,
+            LogLevel::Warn => tracing::Level::WARN,
+            LogLevel::Error => tracing::Level::ERROR,
+        }
+    }
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        // Check environment variables for configuration
+        let level = std::env::var("FISSION_LOG_LEVEL")
+            .ok()
+            .and_then(|s| LogLevel::from_str(&s))
+            .unwrap_or(LogLevel::Info);
+
+        let file_path = std::env::var("FISSION_LOG_FILE").unwrap_or_default();
+        let file_enabled = !file_path.is_empty();
+
+        Self {
+            level,
+            file_path,
+            console_enabled: true,
+            file_enabled,
+            include_timestamp: true,
+            include_target: false,
+            max_file_size: 10 * 1024 * 1024, // 10MB
+            max_rotated_files: 3,
+        }
+    }
+}
+
+impl LogConfig {
+    /// Create a config for quiet operation (errors only)
+    pub fn quiet() -> Self {
+        Self {
+            level: LogLevel::Error,
+            console_enabled: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create a config for verbose operation (trace level)
+    pub fn verbose() -> Self {
+        Self {
+            level: LogLevel::Trace,
+            include_target: true,
+            ..Default::default()
+        }
+    }
+
+    /// Create a config with file logging enabled
+    pub fn with_file(path: &str) -> Self {
+        Self {
+            file_path: path.to_string(),
+            file_enabled: true,
+            ..Default::default()
+        }
+    }
+
+    /// Check if any logging is enabled
+    pub fn is_enabled(&self) -> bool {
+        self.console_enabled || self.file_enabled
+    }
+
+    /// Get environment variable used for C++ logger initialization
+    pub fn get_cpp_log_file_env(&self) -> Option<(&'static str, String)> {
+        if self.file_enabled && !self.file_path.is_empty() {
+            Some(("FISSION_LOG_FILE", self.file_path.clone()))
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for DecompilerConfig {
