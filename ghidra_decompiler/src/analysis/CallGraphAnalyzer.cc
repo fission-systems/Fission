@@ -6,6 +6,7 @@
 #include "op.hh"
 
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <queue>
 #include <algorithm>
 
@@ -81,7 +82,7 @@ int CallGraphAnalyzer::propagate_backward() {
                 registry->mark_for_reanalysis(caller);
                 propagated++;
                 
-                std::cerr << "[CallGraphAnalyzer] Backward: 0x" << std::hex << func_addr
+                fission::utils::log_stream() << "[CallGraphAnalyzer] Backward: 0x" << std::hex << func_addr
                           << " types -> caller 0x" << caller << std::dec << std::endl;
             }
         }
@@ -109,7 +110,7 @@ int CallGraphAnalyzer::propagate_forward() {
                 registry->mark_for_reanalysis(callee);
                 propagated++;
                 
-                std::cerr << "[CallGraphAnalyzer] Forward: caller 0x" << std::hex << caller
+                fission::utils::log_stream() << "[CallGraphAnalyzer] Forward: caller 0x" << std::hex << caller
                           << " types -> 0x" << callee << std::dec << std::endl;
             }
         }

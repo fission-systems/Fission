@@ -2,6 +2,7 @@
 #include "fission/decompiler/DecompilationPipeline.h"
 #include "fission/core/DecompilerContext.h"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <sstream>
 #include <string>
 #include <cstdlib>
@@ -10,7 +11,7 @@ namespace fission {
 namespace decompiler {
 
 int ServerMode::run_server() {
-    std::cerr << "[fission_decomp] Server mode started" << std::endl;
+    fission::utils::log_stream() << "[fission_decomp] Server mode started" << std::endl;
     std::cout.setf(std::ios::unitbuf);
     
     core::DecompilerContext state;
@@ -30,7 +31,7 @@ int ServerMode::run_server() {
         std::cout.flush();
     }
     
-    std::cerr << "[fission_decomp] Server shutting down" << std::endl;
+    fission::utils::log_stream() << "[fission_decomp] Server shutting down" << std::endl;
     return 0;
 }
 

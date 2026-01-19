@@ -7,6 +7,7 @@
 #include "architecture.hh"
 #include "address.hh"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <algorithm>
 #include <sstream>
 
@@ -179,7 +180,7 @@ void StackFrameAnalyzer::collect_stack_accesses(Funcdata* fd) {
                 OpCode def_opc = def->code();
                 if (def_opc == CPUI_CALL || def_opc == CPUI_CALLIND) {
                     pointer_fields.insert(offset);
-                    std::cerr << "[StackFrameAnalyzer] Found pointer stack var at offset " 
+                    fission::utils::log_stream() << "[StackFrameAnalyzer] Found pointer stack var at offset " 
                               << offset << " from CALL" << std::endl;
                     break;
                 }
@@ -231,12 +232,12 @@ void StackFrameAnalyzer::collect_stack_accesses(Funcdata* fd) {
         if (opc == CPUI_STORE) {
             Varnode* val = op->getIn(2);
             if (val) {
-                std::cerr << "[StackFrameAnalyzer] STORE at " << offset 
+                fission::utils::log_stream() << "[StackFrameAnalyzer] STORE at " << offset 
                           << " Size: " << val->getSize() 
                           << " Written: " << val->isWritten() << std::endl;
                 if (val->isWritten()) {
                     PcodeOp* d = val->getDef();
-                    if (d) std::cerr << "  Def: " << (int)d->code() << std::endl;
+                    if (d) fission::utils::log_stream() << "  Def: " << (int)d->code() << std::endl;
                 }
             }
             if (val && val->getSize() == arch->types->getSizeOfPointer()) {
@@ -251,7 +252,7 @@ void StackFrameAnalyzer::collect_stack_accesses(Funcdata* fd) {
                     OpCode def_opc = def->code();
                     if (def_opc == CPUI_CALL || def_opc == CPUI_CALLIND) {
                         pointer_fields.insert(offset);
-                        std::cerr << "[StackFrameAnalyzer] Found pointer store at offset " 
+                        fission::utils::log_stream() << "[StackFrameAnalyzer] Found pointer store at offset " 
                                   << offset << " from CALL (depth " << depth << ")" << std::endl;
                         break;
                     }
@@ -402,7 +403,7 @@ int StackFrameAnalyzer::analyze(Funcdata* fd) {
     collect_stack_accesses(fd);
     cluster_accesses();
     
-    std::cerr << "[StackFrameAnalyzer] Found " << stack_accesses.size() 
+    fission::utils::log_stream() << "[StackFrameAnalyzer] Found " << stack_accesses.size() 
               << " stack accesses, " << clusters.size() << " structures, "
               << pointer_fields.size() << " pointer fields" << std::endl;
     
@@ -418,7 +419,7 @@ void StackFrameAnalyzer::apply_structures(TypeFactory* tf) {
         }
         TypeStruct* ts = create_struct_for_cluster(tf, cluster);
         if (ts && !existed) {
-            std::cerr << "[StackFrameAnalyzer] Created " << cluster.inferred_name 
+            fission::utils::log_stream() << "[StackFrameAnalyzer] Created " << cluster.inferred_name 
                       << " with " << cluster.members.size() << " fields" << std::endl;
         }
     }

@@ -74,5 +74,59 @@ void Logger::warn(const std::string& msg) {
 void Logger::error(const std::string& msg) {
      g_logger.log("[ERROR] ", msg);
 }
+
+std::ostream& Logger::stream() {
+    return log_stream();
+}
+
+// TeeBuffer: writes to both console and file
+class TeeBuffer : public std::streambuf {
+public:
+    TeeBuffer() {}
+    
+    void set_file(std::ofstream* f) { file_ = f; }
+    
+protected:
+    int overflow(int c) override {
+        if (c != EOF) {
+            // Write to console
+            std::cerr.put(static_cast<char>(c));
+            // Write to file if available
+            if (file_ && file_->is_open()) {
+                file_->put(static_cast<char>(c));
+            }
+        }
+        return c;
+    }
+    
+    std::streamsize xsputn(const char* s, std::streamsize n) override {
+        std::cerr.write(s, n);
+        if (file_ && file_->is_open()) {
+            file_->write(s, n);
+        }
+        return n;
+    }
+    
+    int sync() override {
+        std::cerr.flush();
+        if (file_ && file_->is_open()) {
+            file_->flush();
+        }
+        return 0;
+    }
+    
+private:
+    std::ofstream* file_ = nullptr;
+};
+
+static TeeBuffer tee_buffer;
+static std::ostream tee_stream(&tee_buffer);
+
+std::ostream& log_stream() {
+    // Update file pointer (in case logger was initialized after first call)
+    tee_buffer.set_file(&g_logger.file_stream);
+    return tee_stream;
+}
+
 } // namespace utils
 } // namespace fission

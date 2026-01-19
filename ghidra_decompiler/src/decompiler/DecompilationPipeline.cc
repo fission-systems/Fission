@@ -65,7 +65,7 @@ std::string DecompilationPipeline::process_request(
     core::DecompilerContext& state, 
     const std::string& input
 ) {
-    std::cerr << "[fission_decomp] Received request: " 
+    fission::utils::log_stream() << "[fission_decomp] Received request: " 
               << input.substr(0, std::min(input.size(), (size_t)100)) << "..." << std::endl;
     
     // Check for special commands
@@ -108,16 +108,16 @@ std::string DecompilationPipeline::handle_load_bin(
     int64_t image_base = extract_json_int(input, "image_base");
     std::string sla_dir = extract_json_string(input, "sla_dir");
     
-    std::cerr << "[fission_decomp] load_bin: size=" << bin_bytes.size() 
+    fission::utils::log_stream() << "[fission_decomp] load_bin: size=" << bin_bytes.size() 
               << " image_base=0x" << std::hex << image_base << std::dec << std::endl;
     
     // Debug: Print first 16 bytes
-    std::cerr << "[fission_decomp] First 16 bytes: ";
+    fission::utils::log_stream() << "[fission_decomp] First 16 bytes: ";
     for (size_t i = 0; i < std::min((size_t)16, bin_bytes.size()); ++i) {
-        std::cerr << std::hex << std::setw(2) << std::setfill('0') 
+        fission::utils::log_stream() << std::hex << std::setw(2) << std::setfill('0') 
                   << (int)bin_bytes[i] << " ";
     }
-    std::cerr << std::dec << std::endl;
+    fission::utils::log_stream() << std::dec << std::endl;
     
     // Initialize Ghidra if needed
     if (sla_dir.empty()) {
@@ -134,7 +134,7 @@ std::string DecompilationPipeline::handle_load_bin(
     // Phase 1: Binary Format Detection
     BinaryInfo bin_info;
     if (!req_sleigh_id.empty()) {
-        std::cerr << "[fission_decomp] Using provided architecture: " << req_sleigh_id << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Using provided architecture: " << req_sleigh_id << std::endl;
         bin_info.sleigh_id = req_sleigh_id;
         bin_info.compiler_id = req_compiler_id.empty() ? "default" : req_compiler_id;
         
@@ -147,7 +147,7 @@ std::string DecompilationPipeline::handle_load_bin(
         else if (bin_info.compiler_id == "gcc") bin_info.format = BinaryFormat::ELF;
         else if (bin_info.compiler_id == "clang") bin_info.format = BinaryFormat::MACHO;
     } else {
-        std::cerr << "[fission_decomp] Debug: Detecting Binary Format..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Debug: Detecting Binary Format..." << std::endl;
         bin_info = BinaryDetector::detect(bin_bytes.data(), bin_bytes.size());
     }
     
@@ -157,13 +157,13 @@ std::string DecompilationPipeline::handle_load_bin(
     std::string compiler_id = bin_info.compiler_id.empty() ? "default" : bin_info.compiler_id;
     
     if (bin_info.format != BinaryFormat::UNKNOWN || !bin_info.sleigh_id.empty()) {
-        std::cerr << "[fission_decomp] Binary Info: " 
+        fission::utils::log_stream() << "[fission_decomp] Binary Info: " 
                   << (is_pe ? "PE" : (is_elf ? "ELF" : (is_macho ? "Mach-O" : "Unknown")))
                   << " " << (bin_info.is_64bit ? "64-bit" : "32-bit") 
                   << " Arch=" << bin_info.sleigh_id
                   << " Compiler=" << compiler_id << std::endl;
     } else {
-        std::cerr << "[fission_decomp] Warning: Unknown binary format, assuming PE x64" << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Warning: Unknown binary format, assuming PE x64" << std::endl;
         bin_info.format = BinaryFormat::PE;
         bin_info.is_64bit = true;
         bin_info.sleigh_id = "x86:LE:64:default";
@@ -179,10 +179,10 @@ std::string DecompilationPipeline::handle_load_bin(
         // Phase 3: RTTI Recovery
         std::map<uint64_t, std::string> recovered_classes;
         if (is_pe || is_elf || is_macho) {
-            std::cerr << "[fission_decomp] Debug: Running RTTI Recovery..." << std::endl;
+            fission::utils::log_stream() << "[fission_decomp] Debug: Running RTTI Recovery..." << std::endl;
             recovered_classes = RttiAnalyzer::recover_class_names(bin_bytes, image_base, bin_info.is_64bit);
             if (!recovered_classes.empty()) {
-                std::cerr << "[fission_decomp] Recovered " << recovered_classes.size() 
+                fission::utils::log_stream() << "[fission_decomp] Recovered " << recovered_classes.size() 
                          << " class names via RTTI." << std::endl;
             }
         }
@@ -193,7 +193,7 @@ std::string DecompilationPipeline::handle_load_bin(
         if (!recovered_classes.empty()) {
             vtable_analyzer.link_with_rtti(recovered_classes);
         }
-        std::cerr << "[fission_decomp] VTable scan complete: " 
+        fission::utils::log_stream() << "[fission_decomp] VTable scan complete: " 
                   << vtable_analyzer.get_vtables().size() << " vtables found" << std::endl;
         
         // Phase 5: Global Data Analyzer
@@ -203,13 +203,13 @@ std::string DecompilationPipeline::handle_load_bin(
         global_analyzer.set_data_section(data_start, data_end);
         
         // Phase 6: Pattern Matching
-        std::cerr << "[fission_decomp] Debug: Loading Patterns..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Debug: Loading Patterns..." << std::endl;
         auto patterns = PatternLoader::load_standard_patterns();
         
-        std::cerr << "[fission_decomp] Debug: Running Pattern Matching..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Debug: Running Pattern Matching..." << std::endl;
         auto matches = PatternLoader::match_functions(bin_bytes, image_base, patterns);
         if (!matches.empty()) {
-            std::cerr << "[fission_decomp] Identified " << matches.size() 
+            fission::utils::log_stream() << "[fission_decomp] Identified " << matches.size() 
                      << " standard library functions via patterns." << std::endl;
             state.iat_symbols.insert(matches.begin(), matches.end());
         }
@@ -227,7 +227,7 @@ std::string DecompilationPipeline::handle_load_bin(
             if (!fid_path.empty()) {
                 if (file_exists(fid_path)) {
 
-                    std::cerr << "[fission_decomp] Loading FID database: " << fid_path << std::endl;
+                    fission::utils::log_stream() << "[fission_decomp] Loading FID database: " << fid_path << std::endl;
                     FidDatabase fid_db;
                     if (fid_db.load(fid_path)) {
                         int matches_found = 0;
@@ -331,14 +331,14 @@ std::string DecompilationPipeline::handle_load_bin(
                                         matches_found++;
                                         
                                         if (matches_found <= 5) {
-                                            std::cerr << "[FID] Matched @ 0x" << std::hex << addr 
+                                            fission::utils::log_stream() << "[FID] Matched @ 0x" << std::hex << addr 
                                                      << " -> " << name << std::dec << std::endl;
                                         }
                                     }
                                 }
                             }
                         }
-                        std::cerr << "[fission_decomp] FID Analysis: Identified " 
+                        fission::utils::log_stream() << "[fission_decomp] FID Analysis: Identified " 
                                  << matches_found << " functions." << std::endl;
                     }
                 }
@@ -346,21 +346,21 @@ std::string DecompilationPipeline::handle_load_bin(
         }
         
         // Phase 8: String Scanning
-        std::cerr << "[fission_decomp] Debug: String Scanning..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Debug: String Scanning..." << std::endl;
         auto ascii_strings = StringScanner::scan_ascii_strings(bin_bytes, image_base);
         auto unicode_strings = StringScanner::scan_unicode_strings(bin_bytes, image_base);
-        std::cerr << "[fission_decomp] Scanned " << ascii_strings.size() 
+        fission::utils::log_stream() << "[fission_decomp] Scanned " << ascii_strings.size() 
                   << " ASCII and " << unicode_strings.size() << " Unicode strings." << std::endl;
         
         state.enum_values.insert(ascii_strings.begin(), ascii_strings.end());
         state.enum_values.insert(unicode_strings.begin(), unicode_strings.end());
         
         // Phase 9: Setup Architecture
-        std::cerr << "[fission_decomp] Debug: Creating Loader and Arch..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Debug: Creating Loader and Arch..." << std::endl;
         state.setup_architecture(true, bin_bytes, image_base, compiler_id);
         
         // FISSION IMPROVEMENT: Phase 9.5: Scan data sections for floating-point constants
-        std::cerr << "[fission_decomp] Debug: Scanning data sections for constants..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Debug: Scanning data sections for constants..." << std::endl;
         
         // Simple PE section parsing (inline)
         struct SimplePeSection {
@@ -387,7 +387,7 @@ std::string DecompilationPipeline::handle_load_bin(
                         // Section table starts after optional header
                         uint32_t section_table_offset = pe_offset + 24 + optional_header_size;
                         
-                        std::cerr << "[fission_decomp] PE has " << num_sections << " sections" << std::endl;
+                        fission::utils::log_stream() << "[fission_decomp] PE has " << num_sections << " sections" << std::endl;
                         
                         for (int i = 0; i < num_sections && i < 64; i++) {
                             uint32_t section_offset = section_table_offset + i * 40;
@@ -414,7 +414,7 @@ std::string DecompilationPipeline::handle_load_bin(
                                 sec.file_size = raw_size;
                                 data_sections.push_back(sec);
                                 
-                                std::cerr << "[fission_decomp] Found data section: " << section_name 
+                                fission::utils::log_stream() << "[fission_decomp] Found data section: " << section_name 
                                           << " VA=0x" << std::hex << sec.va_addr 
                                           << " offset=0x" << raw_offset 
                                           << " size=" << std::dec << raw_size << std::endl;
@@ -429,7 +429,7 @@ std::string DecompilationPipeline::handle_load_bin(
         int total_data_symbols = 0;
         
         for (const auto& section : data_sections) {
-            std::cerr << "[fission_decomp] Scanning section: " << section.name 
+            fission::utils::log_stream() << "[fission_decomp] Scanning section: " << section.name 
                       << " at 0x" << std::hex << section.va_addr 
                       << " size=" << std::dec << section.file_size << std::endl;
             
@@ -438,7 +438,7 @@ std::string DecompilationPipeline::handle_load_bin(
             size_t end_idx = start_idx + section.file_size;
             
             if (end_idx > bin_bytes.size()) {
-                std::cerr << "[fission_decomp] Warning: section extends beyond binary data" << std::endl;
+                fission::utils::log_stream() << "[fission_decomp] Warning: section extends beyond binary data" << std::endl;
                 continue;
             }
             
@@ -458,7 +458,7 @@ std::string DecompilationPipeline::handle_load_bin(
             ghidra::AddrSpace* ram_space = state.arch_64bit->getDefaultDataSpace();
             
             if (!global_scope || !types || !ram_space) {
-                std::cerr << "[fission_decomp] Warning: Missing required components for symbol registration" << std::endl;
+                fission::utils::log_stream() << "[fission_decomp] Warning: Missing required components for symbol registration" << std::endl;
                 continue;
             }
             
@@ -482,7 +482,7 @@ std::string DecompilationPipeline::handle_load_bin(
                     }
                     
                     if (!dt) {
-                        std::cerr << "[fission_decomp] Could not create type for symbol at 0x" 
+                        fission::utils::log_stream() << "[fission_decomp] Could not create type for symbol at 0x" 
                                   << std::hex << sym.address << std::endl;
                         continue;
                     }
@@ -506,23 +506,23 @@ std::string DecompilationPipeline::handle_load_bin(
                     
                     if (entry) {
                         total_data_symbols++;
-                        std::cerr << "[fission_decomp] Registered data symbol: " << sym.name 
+                        fission::utils::log_stream() << "[fission_decomp] Registered data symbol: " << sym.name 
                                   << " at 0x" << std::hex << sym.address 
                                   << " type=" << dt->getName() << std::endl;
                     }
                     
                 } catch (const std::exception& e) {
-                    std::cerr << "[fission_decomp] Exception while registering symbol at 0x" 
+                    fission::utils::log_stream() << "[fission_decomp] Exception while registering symbol at 0x" 
                               << std::hex << sym.address << ": " << e.what() << std::endl;
                 } catch (...) {
-                    std::cerr << "[fission_decomp] Unknown exception while registering symbol at 0x" 
+                    fission::utils::log_stream() << "[fission_decomp] Unknown exception while registering symbol at 0x" 
                               << std::hex << sym.address << std::endl;
                 }
             }
         }
         
         state.data_symbols_scanned = true;
-        std::cerr << "[fission_decomp] Registered " << total_data_symbols 
+        fission::utils::log_stream() << "[fission_decomp] Registered " << total_data_symbols 
                   << " data section symbols (cached for future use)" << std::endl;
         
     } else {
@@ -532,7 +532,7 @@ std::string DecompilationPipeline::handle_load_bin(
     
     // Phase 10: Inject IAT symbols for 64-bit
     auto iat_symbols = extract_iat_symbols(input);
-    std::cerr << "[fission_decomp] Parsed " << iat_symbols.size() 
+    fission::utils::log_stream() << "[fission_decomp] Parsed " << iat_symbols.size() 
               << " IAT symbols from JSON" << std::endl;
     state.arch_64bit->injectIatSymbols(iat_symbols);
     state.iat_symbols = iat_symbols;
@@ -560,7 +560,7 @@ std::string DecompilationPipeline::handle_load_bin(
         if (!fid_initialized) {
             for (const auto& path : fid_candidates) {
                 if (fid_db.load(path)) {
-                    std::cerr << "[fission_decomp] Loaded FID database: " << path 
+                    fission::utils::log_stream() << "[fission_decomp] Loaded FID database: " << path 
                               << " (" << fid_db.get_function_count() << " functions)" << std::endl;
                     func_matcher.set_fid_database(&fid_db);
                     break;
@@ -579,15 +579,15 @@ std::string DecompilationPipeline::handle_load_bin(
                     all_fid_dbs.push_back(std::move(db));
                 }
             }
-            std::cerr << "[fission_decomp] Loaded " << all_fid_dbs.size() 
+            fission::utils::log_stream() << "[fission_decomp] Loaded " << all_fid_dbs.size() 
                      << " FID databases total" << std::endl;
         }
 
         // Improved function prologue detection with 2-pass Relation Validation
-        std::cerr << "[fission_decomp] Starting FID scan on " << bin_bytes.size() << " bytes..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Starting FID scan on " << bin_bytes.size() << " bytes..." << std::endl;
         std::vector<uint64_t> prologues = PatternLoader::scan_function_prologues(bin_bytes, image_base);
         size_t prologue_count = prologues.size();
-        std::cerr << "[fission_decomp] Found " << prologue_count << " prologues to evaluate." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Found " << prologue_count << " prologues to evaluate." << std::endl;
         
         // Pass 1: Calculate hashes for all identified prologues
         std::map<uint64_t, uint64_t> addr_to_hash;
@@ -653,9 +653,9 @@ std::string DecompilationPipeline::handle_load_bin(
             }
         }
         
-        std::cerr << "[fission_decomp] Scanned " << prologue_count << " function prologues" << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Scanned " << prologue_count << " function prologues" << std::endl;
         if (matched_count > 0) {
-            std::cerr << "[fission_decomp] FID matched " << matched_count 
+            fission::utils::log_stream() << "[fission_decomp] FID matched " << matched_count 
                      << " functions by hash" << std::endl;
         }
         
@@ -668,7 +668,7 @@ std::string DecompilationPipeline::handle_load_bin(
                 for (const auto& [addr, name] : symbols) {
                     state.fid_function_names[addr] = name;
                 }
-                std::cerr << "[fission_decomp] Loaded common symbols from: " << path << std::endl;
+                fission::utils::log_stream() << "[fission_decomp] Loaded common symbols from: " << path << std::endl;
             }
         }
     }
@@ -720,7 +720,7 @@ std::string DecompilationPipeline::handle_decompile(
         loader->updateData(bytes, address);
     }
     
-    std::cerr << "[fission_decomp] Step 1: Clearing global scope for 0x" 
+    fission::utils::log_stream() << "[fission_decomp] Step 1: Clearing global scope for 0x" 
               << std::hex << address << std::dec << std::endl;
     
     // Clear global scope
@@ -729,7 +729,7 @@ std::string DecompilationPipeline::handle_decompile(
     
     // FISSION IMPROVEMENT: Re-register cached data section symbols after clear
     if (state.data_symbols_scanned && !state.data_section_symbols.empty()) {
-        std::cerr << "[fission_decomp] Re-registering " << state.data_section_symbols.size() 
+        fission::utils::log_stream() << "[fission_decomp] Re-registering " << state.data_section_symbols.size() 
                   << " cached data section symbols..." << std::endl;
         
         ghidra::TypeFactory* types = arch->types;
@@ -770,11 +770,11 @@ std::string DecompilationPipeline::handle_decompile(
             }
         }
         
-        std::cerr << "[fission_decomp] Re-registered " << registered 
+        fission::utils::log_stream() << "[fission_decomp] Re-registered " << registered 
                   << " data section symbols" << std::endl;
     }
     
-    std::cerr << "[fission_decomp] Step 2: Adding function at 0x" 
+    fission::utils::log_stream() << "[fission_decomp] Step 2: Adding function at 0x" 
               << std::hex << address << std::dec << std::endl;
     
     // Add function
@@ -787,14 +787,14 @@ std::string DecompilationPipeline::handle_decompile(
     // Step 2a: Follow control flow to discover instructions (CRITICAL)
     // Without this, the decompiler sees an empty function and generates a recursive stub.
     try {
-        std::cerr << "[fission_decomp] Step 2a: Following control flow..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Step 2a: Following control flow..." << std::endl;
         fd->clear();
         ghidra::Address end_addr = func_addr + 0x2000; // 8KB heuristic
         fd->followFlow(func_addr, end_addr);
     } catch (const std::exception& e) {
-        std::cerr << "[fission_decomp] WARNING: flow analysis failed: " << e.what() << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] WARNING: flow analysis failed: " << e.what() << std::endl;
     } catch (...) {
-        std::cerr << "[fission_decomp] WARNING: flow analysis failed (unknown error)" << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] WARNING: flow analysis failed (unknown error)" << std::endl;
     }
 
     // Step 2b: Detect and apply calling convention for this function
@@ -809,7 +809,7 @@ std::string DecompilationPipeline::handle_decompile(
         detector.apply(fd, conv);
     }
     
-    std::cerr << "[fission_decomp] Step 3: Resetting actions" << std::endl;
+    fission::utils::log_stream() << "[fission_decomp] Step 3: Resetting actions" << std::endl;
     arch->allacts.getCurrent()->reset(*fd);
     
     // Step 3b: Enforce GDT prototypes
@@ -825,7 +825,7 @@ std::string DecompilationPipeline::handle_decompile(
     // Step 4: Primary Decompilation
     {
         StepTimer timer("Step 4: Decompilation");
-        std::cerr << "[fission_decomp] Step 4: Performing decompilation..." << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Step 4: Performing decompilation..." << std::endl;
         arch->allacts.getCurrent()->perform(*fd);
     }
     
@@ -840,7 +840,7 @@ std::string DecompilationPipeline::handle_decompile(
         bool structs_found = struct_analyzer.analyze_function_structures(fd);
         
         if (structs_found) {
-            std::cerr << "[fission_decomp] Step 4b: New structures inferred! Re-running decompilation..." 
+            fission::utils::log_stream() << "[fission_decomp] Step 4b: New structures inferred! Re-running decompilation..." 
                      << std::endl;
             try {
                 inferred_struct_defs = struct_analyzer.generate_struct_definitions();
@@ -851,7 +851,7 @@ std::string DecompilationPipeline::handle_decompile(
                 arch->allacts.getCurrent()->perform(*fd);
                 
                 // Register inferred types
-                std::cerr << "[fission_decomp] Registering inferred types for 0x" 
+                fission::utils::log_stream() << "[fission_decomp] Registering inferred types for 0x" 
                          << std::hex << fd->getAddress().getOffset() << std::dec << std::endl;
                 const ghidra::FuncProto& proto = fd->getFuncProto();
                 int num = proto.numParams();
@@ -864,9 +864,9 @@ std::string DecompilationPipeline::handle_decompile(
                     }
                 }
             } catch (const ghidra::LowlevelError& e) {
-                std::cerr << "[fission_decomp] Step 4b ERROR: " << e.explain << std::endl;
+                fission::utils::log_stream() << "[fission_decomp] Step 4b ERROR: " << e.explain << std::endl;
             } catch (const std::exception& e) {
-                std::cerr << "[fission_decomp] Step 4b EXCEPTION: " << e.what() << std::endl;
+                fission::utils::log_stream() << "[fission_decomp] Step 4b EXCEPTION: " << e.what() << std::endl;
             }
         }
         
@@ -877,7 +877,7 @@ std::string DecompilationPipeline::handle_decompile(
         type_propagator.clear();
         bool struct_changed = type_propagator.propagate_struct_types(fd);
         if (struct_changed) {
-            std::cerr << "[fission_decomp] Step 4b-2: Reverse propagation applied! Re-running..."
+            fission::utils::log_stream() << "[fission_decomp] Step 4b-2: Reverse propagation applied! Re-running..."
                      << std::endl;
             fd->clear();
             arch->allacts.getCurrent()->reset(*fd);
@@ -888,14 +888,14 @@ std::string DecompilationPipeline::handle_decompile(
         int types_inferred = type_propagator.propagate(fd);
         bool struct_changed_after = type_propagator.propagate_struct_types(fd);
         if (types_inferred > 0 || struct_changed_after) {
-            std::cerr << "[fission_decomp] Step 4b-2: Type propagation complete, re-running..."
+            fission::utils::log_stream() << "[fission_decomp] Step 4b-2: Type propagation complete, re-running..."
                      << std::endl;
             fd->clear();
             arch->allacts.getCurrent()->reset(*fd);
             arch->allacts.getCurrent()->perform(*fd);
         }
     } else {
-        std::cerr << "[fission_decomp] Step 4b: Skipped (function too large: " 
+        fission::utils::log_stream() << "[fission_decomp] Step 4b: Skipped (function too large: " 
                   << func_size << " bytes > " << MAX_FUNCTION_SIZE << " limit)" << std::endl;
     }
     
@@ -903,15 +903,15 @@ std::string DecompilationPipeline::handle_decompile(
     EmulationAnalyzer emu_analyzer;
     bool emu_tags_found = emu_analyzer.analyze(fd);
     if (emu_tags_found) {
-        std::cerr << "[fission_decomp] Step 4c: Emulation meta-tags added!" << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Step 4c: Emulation meta-tags added!" << std::endl;
     }
     
-    std::cerr << "[fission_decomp] Step 5: Generating output" << std::endl;
+    fission::utils::log_stream() << "[fission_decomp] Step 5: Generating output" << std::endl;
     std::ostringstream c_stream;
     arch->print->setOutputStream(&c_stream);
     arch->print->docFunction(fd);
     
-    std::cerr << "[fission_decomp] Step 6: Post-processing IAT calls" << std::endl;
+    fission::utils::log_stream() << "[fission_decomp] Step 6: Post-processing IAT calls" << std::endl;
     std::string c_code = c_stream.str();
     
     // Inject inferred struct definitions
@@ -937,7 +937,7 @@ std::string DecompilationPipeline::handle_decompile(
         
         for (const auto& path : guid_files) {
             if (file_exists(path)) {
-                std::cerr << "[fission_decomp] Loading GUIDs from: " << path << std::endl;
+                fission::utils::log_stream() << "[fission_decomp] Loading GUIDs from: " << path << std::endl;
                 std::string content = read_file_content(path);
                 if (!content.empty()) {
                     std::map<std::string, std::string> loaded = load_guids_to_map(content);
@@ -946,7 +946,7 @@ std::string DecompilationPipeline::handle_decompile(
             }
         }
         if (!state.guid_map.empty()) {
-            std::cerr << "[fission_decomp] Loaded " << state.guid_map.size() 
+            fission::utils::log_stream() << "[fission_decomp] Loaded " << state.guid_map.size() 
                      << " GUIDs/IIDs." << std::endl;
         }
     }
@@ -961,7 +961,7 @@ std::string DecompilationPipeline::handle_decompile(
     c_code = apply_fid_names(c_code, state.fid_function_names);
     c_code = PostProcessor::convert_integer_constants(c_code);
     
-    std::cerr << "[fission_decomp] Step 7: Done!" << std::endl;
+    fission::utils::log_stream() << "[fission_decomp] Step 7: Done!" << std::endl;
     return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_code) + "\"}";
 }
 

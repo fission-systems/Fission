@@ -1,6 +1,7 @@
 #include "fission/decompiler/PcodeOptimizationBridge.h"
 #include "fission/decompiler/PcodeExtractor.h"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <dlfcn.h>
 
 // Function pointer types for Rust FFI functions
@@ -31,18 +32,18 @@ static bool load_rust_ffi() {
     rust_free_fn = (FissionFreeString)dlsym(RTLD_DEFAULT, "fission_free_string");
     
     if (!rust_optimize_fn || !rust_free_fn) {
-        std::cerr << "[PcodeOptimizationBridge] Warning: Could not load Rust FFI functions" << std::endl;
-        std::cerr << "[PcodeOptimizationBridge] dlsym error: " << dlerror() << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Warning: Could not load Rust FFI functions" << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] dlsym error: " << dlerror() << std::endl;
         return false;
     }
     
-    std::cerr << "[PcodeOptimizationBridge] Rust FFI functions loaded successfully" << std::endl;
+    fission::utils::log_stream() << "[PcodeOptimizationBridge] Rust FFI functions loaded successfully" << std::endl;
     return true;
 }
 
 void PcodeOptimizationBridge::set_enabled(bool enabled) {
     optimization_enabled = enabled;
-    std::cerr << "[PcodeOptimizationBridge] Optimization " 
+    fission::utils::log_stream() << "[PcodeOptimizationBridge] Optimization " 
               << (enabled ? "ENABLED" : "DISABLED") << std::endl;
 }
 
@@ -56,13 +57,13 @@ std::string PcodeOptimizationBridge::optimize_pcode_via_rust(const std::string& 
     }
     
     if (pcode_json.empty()) {
-        std::cerr << "[PcodeOptimizationBridge] Warning: empty Pcode JSON" << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Warning: empty Pcode JSON" << std::endl;
         return pcode_json;
     }
     
     // Load Rust FFI functions if not already loaded
     if (!load_rust_ffi()) {
-        std::cerr << "[PcodeOptimizationBridge] FFI not available, returning unoptimized" << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] FFI not available, returning unoptimized" << std::endl;
         return pcode_json;
     }
     
@@ -71,7 +72,7 @@ std::string PcodeOptimizationBridge::optimize_pcode_via_rust(const std::string& 
         char* optimized_ptr = rust_optimize_fn(pcode_json.c_str(), pcode_json.length());
         
         if (!optimized_ptr) {
-            std::cerr << "[PcodeOptimizationBridge] Error: Rust optimizer returned null" << std::endl;
+            fission::utils::log_stream() << "[PcodeOptimizationBridge] Error: Rust optimizer returned null" << std::endl;
             return pcode_json; // Fallback to original
         }
         
@@ -81,17 +82,17 @@ std::string PcodeOptimizationBridge::optimize_pcode_via_rust(const std::string& 
         // Free Rust-allocated memory
         rust_free_fn(optimized_ptr);
         
-        std::cerr << "[PcodeOptimizationBridge] Optimization successful: " 
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Optimization successful: " 
                   << pcode_json.length() << " -> " << optimized.length() << " bytes" << std::endl;
         
         return optimized;
         
     } catch (const std::exception& e) {
-        std::cerr << "[PcodeOptimizationBridge] Exception during optimization: " 
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Exception during optimization: " 
                   << e.what() << std::endl;
         return pcode_json; // Fallback
     } catch (...) {
-        std::cerr << "[PcodeOptimizationBridge] Unknown error during optimization" << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Unknown error during optimization" << std::endl;
         return pcode_json; // Fallback
     }
 }
@@ -105,7 +106,7 @@ std::string PcodeOptimizationBridge::extract_and_optimize(ghidra::Funcdata* fd) 
     std::string pcode_json = PcodeExtractor::extract_pcode_json(fd);
     
     if (pcode_json.empty()) {
-        std::cerr << "[PcodeOptimizationBridge] Failed to extract Pcode" << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Failed to extract Pcode" << std::endl;
         return "";
     }
     

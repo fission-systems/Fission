@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
+#include "fission/utils/logger.h"
 
 namespace fission {
 namespace loaders {
@@ -197,13 +198,13 @@ std::vector<DataSymbol> DataSectionScanner::scanDataSection(
         return symbols;
     }
     
-    std::cerr << "[DataSectionScanner] Scanning section at 0x" << std::hex 
+    fission::utils::log_stream() << "[DataSectionScanner] Scanning section at 0x" << std::hex 
               << section_va << " size=" << std::dec << section_size << std::endl;
     
     // FIRST PASS: Scan for strings
     // Strings are prioritized because they can be of variable length and
     // we need to avoid marking string data as floats/doubles
-    std::cerr << "[DataSectionScanner] Pass 1: Scanning for strings..." << std::endl;
+    fission::utils::log_stream() << "[DataSectionScanner] Pass 1: Scanning for strings..." << std::endl;
     for (size_t offset = 0; offset < section_size; ) {
         size_t string_length = 0;
         if (looksLikeAsciiString(data, offset, section_size, string_length)) {
@@ -232,7 +233,7 @@ std::vector<DataSymbol> DataSectionScanner::scanDataSection(
                 str_preview += "...";
             }
             
-            std::cerr << "[DataSectionScanner] Found string at 0x" << std::hex 
+            fission::utils::log_stream() << "[DataSectionScanner] Found string at 0x" << std::hex 
                       << sym.address << " (len=" << std::dec << string_length 
                       << "): \"" << str_preview << "\"" << std::endl;
             
@@ -244,7 +245,7 @@ std::vector<DataSymbol> DataSectionScanner::scanDataSection(
     }
     
     // SECOND PASS: Scan for 8-byte aligned doubles
-    std::cerr << "[DataSectionScanner] Pass 2: Scanning for doubles..." << std::endl;
+    fission::utils::log_stream() << "[DataSectionScanner] Pass 2: Scanning for doubles..." << std::endl;
     for (size_t offset = 0; offset + 8 <= section_size; offset += 8) {
         uint64_t addr = section_va + offset;
         
@@ -276,14 +277,14 @@ std::vector<DataSymbol> DataSectionScanner::scanDataSection(
             ghidra::FloatFormat::floatclass fclass;
             double dval = format.getHostFloat(value64, &fclass);
             
-            std::cerr << "[DataSectionScanner] Found double at 0x" << std::hex 
+            fission::utils::log_stream() << "[DataSectionScanner] Found double at 0x" << std::hex 
                       << sym.address << ": " << std::dec << dval 
                       << " (0x" << std::hex << value64 << ")" << std::endl;
         }
     }
     
     // THIRD PASS: Scan for 4-byte aligned floats
-    std::cerr << "[DataSectionScanner] Pass 3: Scanning for floats..." << std::endl;
+    fission::utils::log_stream() << "[DataSectionScanner] Pass 3: Scanning for floats..." << std::endl;
     for (size_t offset = 0; offset + 4 <= section_size; offset += 4) {
         uint64_t addr = section_va + offset;
         
@@ -315,13 +316,13 @@ std::vector<DataSymbol> DataSectionScanner::scanDataSection(
             ghidra::FloatFormat::floatclass fclass;
             double fval = format.getHostFloat(value32, &fclass);
             
-            std::cerr << "[DataSectionScanner] Found float at 0x" << std::hex 
+            fission::utils::log_stream() << "[DataSectionScanner] Found float at 0x" << std::hex 
                       << sym.address << ": " << std::dec << fval 
                       << " (0x" << std::hex << value32 << ")" << std::endl;
         }
     }
     
-    std::cerr << "[DataSectionScanner] Found total " << symbols.size() 
+    fission::utils::log_stream() << "[DataSectionScanner] Found total " << symbols.size() 
               << " data symbols (strings + floats/doubles)" << std::endl;
     
     return symbols;

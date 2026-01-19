@@ -14,6 +14,7 @@
 #include <sstream>
 #include <algorithm>
 #include <iostream>
+#include "fission/utils/logger.h"
 
 namespace fission {
 namespace decompiler {
@@ -569,7 +570,7 @@ std::string CFGStructurizer::structurize(const std::string& c_code) {
     }
     
     if (goto_count_before > goto_count_after) {
-        std::cerr << "[CFGStructurizer] Eliminated " << (goto_count_before - goto_count_after) 
+        fission::utils::log_stream() << "[CFGStructurizer] Eliminated " << (goto_count_before - goto_count_after) 
                   << " gotos (" << goto_count_before << " -> " << goto_count_after << ")" << std::endl;
     }
     

@@ -1,6 +1,7 @@
 #include "fission/types/GdtBinaryParser.h"
 #include "fission/util/BinaryReader.h"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <cstring>
 #include <algorithm>
 #include <zlib.h>
@@ -50,13 +51,13 @@ bool GdtBinaryParser::parse_header(std::ifstream& file) {
     
     int64_t magic = read_java_long(file);
     if ((uint64_t)magic != MAGIC_NUMBER) {
-        std::cerr << "[GdtBinaryParser] Invalid magic" << std::endl;
+        fission::utils::log_stream() << "[GdtBinaryParser] Invalid magic" << std::endl;
         return false;
     }
     
     int32_t version = read_java_int(file);
     if (version != FORMAT_VERSION) {
-        std::cerr << "[GdtBinaryParser] Unsupported version: " << version << std::endl;
+        fission::utils::log_stream() << "[GdtBinaryParser] Unsupported version: " << version << std::endl;
         return false;
     }
     
@@ -65,7 +66,7 @@ bool GdtBinaryParser::parse_header(std::ifstream& file) {
     file_type = read_java_int(file);
     content_length = read_java_long(file);
     
-    std::cerr << "[GdtBinaryParser] Header: " << item_name << ", type=" << content_type << std::endl;
+    fission::utils::log_stream() << "[GdtBinaryParser] Header: " << item_name << ", type=" << content_type << std::endl;
     return true;
 }
 
@@ -131,7 +132,7 @@ bool GdtBinaryParser::decompress_content(std::ifstream& file, std::vector<uint8_
         return false;
     }
     
-    std::cerr << "[GdtBinaryParser] Decompressed: " << out.size() << " bytes" << std::endl;
+    fission::utils::log_stream() << "[GdtBinaryParser] Decompressed: " << out.size() << " bytes" << std::endl;
     return true;
 }
 
@@ -164,12 +165,12 @@ void GdtBinaryParser::parse_function_definitions(const std::vector<uint8_t>& dat
     auto it = std::search(data.begin(), data.end(),
                           FUNCTION_DEF_TABLE.begin(), FUNCTION_DEF_TABLE.end());
     if (it == data.end()) {
-        std::cerr << "[GdtBinaryParser] Function Definitions table not found" << std::endl;
+        fission::utils::log_stream() << "[GdtBinaryParser] Function Definitions table not found" << std::endl;
         return;
     }
     
     size_t table_pos = std::distance(data.begin(), it);
-    std::cerr << "[GdtBinaryParser] Function Definitions at: 0x" << std::hex << table_pos << std::dec << std::endl;
+    fission::utils::log_stream() << "[GdtBinaryParser] Function Definitions at: 0x" << std::hex << table_pos << std::dec << std::endl;
     
     // Extract names from the entire database
     std::set<std::string> unique_names;
@@ -208,7 +209,7 @@ void GdtBinaryParser::parse_function_definitions(const std::vector<uint8_t>& dat
         functions[name] = proto;
     }
     
-    std::cerr << "[GdtBinaryParser] Extracted " << functions.size() << " function names" << std::endl;
+    fission::utils::log_stream() << "[GdtBinaryParser] Extracted " << functions.size() << " function names" << std::endl;
 }
 
 // Parse parameter types from DB
@@ -241,13 +242,13 @@ void GdtBinaryParser::parse_parameters(const std::vector<uint8_t>& data) {
         }
     }
     
-    std::cerr << "[GdtBinaryParser] Found " << types.size() << " type definitions" << std::endl;
+    fission::utils::log_stream() << "[GdtBinaryParser] Found " << types.size() << " type definitions" << std::endl;
 }
 
 bool GdtBinaryParser::parse_db_content(const std::vector<uint8_t>& data) {
     // Check DB4 magic
     if (data.size() >= 8 && memcmp(data.data(), DB4_MAGIC, 8) == 0) {
-        std::cerr << "[GdtBinaryParser] Valid DB4 format (buffer size: 0x" 
+        fission::utils::log_stream() << "[GdtBinaryParser] Valid DB4 format (buffer size: 0x" 
                   << std::hex << BUFFER_SIZE << std::dec << ")" << std::endl;
     }
     
@@ -265,7 +266,7 @@ bool GdtBinaryParser::load(const std::string& path) {
     
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "[GdtBinaryParser] Failed to open: " << path << std::endl;
+        fission::utils::log_stream() << "[GdtBinaryParser] Failed to open: " << path << std::endl;
         return false;
     }
     
@@ -273,7 +274,7 @@ bool GdtBinaryParser::load(const std::string& path) {
     size_t file_size = file.tellg();
     file.seekg(0);
     
-    std::cerr << "[GdtBinaryParser] Loading " << path << " (" << file_size << " bytes)" << std::endl;
+    fission::utils::log_stream() << "[GdtBinaryParser] Loading " << path << " (" << file_size << " bytes)" << std::endl;
     
     if (!parse_header(file)) return false;
     

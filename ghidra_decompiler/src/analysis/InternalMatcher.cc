@@ -1,5 +1,6 @@
 #include "fission/analysis/InternalMatcher.h"
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <algorithm>
 #include <cstring>
 
@@ -80,7 +81,7 @@ void InternalMatcher::load_pyinstaller_signatures() {
         signatures.push_back(sig);
     }
 
-    std::cerr << "[InternalMatcher] Loaded " << signatures.size() 
+    fission::utils::log_stream() << "[InternalMatcher] Loaded " << signatures.size() 
               << " PyInstaller signatures" << std::endl;
 }
 
@@ -133,7 +134,7 @@ std::string InternalMatcher::match_by_strings(uint64_t address,
         // Require at least half of signature strings to match
         if (found > 0 && found >= (int)sig.strings.size() / 2 + 1) {
             matched[address] = sig.name;
-            std::cerr << "[InternalMatcher] Matched " << sig.name 
+            fission::utils::log_stream() << "[InternalMatcher] Matched " << sig.name 
                       << " at 0x" << std::hex << address << std::dec 
                       << " (" << found << "/" << sig.strings.size() << " strings)" << std::endl;
             return sig.name;
@@ -158,7 +159,7 @@ std::string InternalMatcher::match_by_prologue(uint64_t address,
         // Compare prologue
         if (std::memcmp(bytes, sig.prologue.data(), sig.prologue.size()) == 0) {
             matched[address] = sig.name;
-            std::cerr << "[InternalMatcher] Matched " << sig.name 
+            fission::utils::log_stream() << "[InternalMatcher] Matched " << sig.name 
                       << " at 0x" << std::hex << address << std::dec 
                       << " (by prologue)" << std::endl;
             return sig.name;

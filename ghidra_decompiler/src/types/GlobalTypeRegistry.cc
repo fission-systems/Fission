@@ -1,6 +1,7 @@
 #include "fission/types/GlobalTypeRegistry.h"
 
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <algorithm>
 
 namespace fission {
@@ -13,7 +14,7 @@ void GlobalTypeRegistry::register_function_types(uint64_t func_addr, const Funct
     signatures[func_addr] = sig;
     signatures[func_addr].analyzed = true;
     
-    std::cerr << "[GlobalTypeRegistry] Registered types for 0x" << std::hex << func_addr
+    fission::utils::log_stream() << "[GlobalTypeRegistry] Registered types for 0x" << std::hex << func_addr
               << " with " << std::dec << sig.params.size() << " params" << std::endl;
 }
 

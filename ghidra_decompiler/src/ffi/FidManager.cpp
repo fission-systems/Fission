@@ -7,6 +7,7 @@
 #include "fission/analysis/FunctionMatcher.h"
 
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <cstring>
 
 using namespace fission::ffi;
@@ -26,7 +27,7 @@ DecompError fission::ffi::load_fid_database(DecompContext* ctx, const char* db_p
         }
         
         if (ctx->fid_databases.empty()) {
-            std::cerr << "[FidManager] Loaded FID database: " << db_path 
+            fission::utils::log_stream() << "[FidManager] Loaded FID database: " << db_path 
                       << " (" << new_db->get_function_count() << " functions)" << std::endl;
         }
         

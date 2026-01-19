@@ -1,6 +1,7 @@
 #include "fission/analysis/VTableAnalyzer.h"
 
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <sstream>
 #include <cstring>
 
@@ -72,7 +73,7 @@ void VTableAnalyzer::scan_vtables(const uint8_t* data, size_t size, uint64_t ima
     
     int ptr_size = is_64bit ? 8 : 4;
     
-    std::cerr << "[VTableAnalyzer] Scanning for vtables (ptr_size=" << ptr_size << ")..." << std::endl;
+    fission::utils::log_stream() << "[VTableAnalyzer] Scanning for vtables (ptr_size=" << ptr_size << ")..." << std::endl;
     
     // In real implementation, we'd scan .rdata section specifically
     // For now, scan entire binary for patterns of consecutive function pointers
@@ -128,7 +129,7 @@ void VTableAnalyzer::scan_vtables(const uint8_t* data, size_t size, uint64_t ima
         }
     }
     
-    std::cerr << "[VTableAnalyzer] Found " << found << " potential vtables" << std::endl;
+    fission::utils::log_stream() << "[VTableAnalyzer] Found " << found << " potential vtables" << std::endl;
 }
 
 void VTableAnalyzer::link_with_rtti(const std::map<uint64_t, std::string>& rtti_classes) {
@@ -158,7 +159,7 @@ void VTableAnalyzer::link_with_rtti(const std::map<uint64_t, std::string>& rtti_
         }
     }
     
-    std::cerr << "[VTableAnalyzer] Linked " << linked << " vtables with RTTI class names" << std::endl;
+    fission::utils::log_stream() << "[VTableAnalyzer] Linked " << linked << " vtables with RTTI class names" << std::endl;
 }
 
 const VTable* VTableAnalyzer::get_vtable(uint64_t addr) const {

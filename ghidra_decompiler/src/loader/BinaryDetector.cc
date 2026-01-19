@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <iostream>
+#include "fission/utils/logger.h"
 
 namespace fission {
 namespace loader {
@@ -114,7 +115,7 @@ BinaryInfo BinaryDetector::parse_pe(const uint8_t* data, size_t size) {
         info.entry_point = info.image_base + *(const uint32_t*)(data + pe_offset + 24 + 16);
     }
     
-    std::cerr << "[BinaryDetector] PE: " << (info.is_64bit ? "64-bit" : "32-bit")
+    fission::utils::log_stream() << "[BinaryDetector] PE: " << (info.is_64bit ? "64-bit" : "32-bit")
               << " Arch=" << info.sleigh_id << std::endl;
     
     return info;
@@ -164,7 +165,7 @@ BinaryInfo BinaryDetector::parse_elf(const uint8_t* data, size_t size) {
         info.entry_point = *(const uint32_t*)(data + 24);
     }
     
-    std::cerr << "[BinaryDetector] ELF: " << (info.is_64bit ? "64-bit" : "32-bit")
+    fission::utils::log_stream() << "[BinaryDetector] ELF: " << (info.is_64bit ? "64-bit" : "32-bit")
               << " Arch=" << info.sleigh_id << std::endl;
     
     return info;
@@ -216,7 +217,7 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
             break;
     }
     
-    std::cerr << "[BinaryDetector] Mach-O: " << (info.is_64bit ? "64-bit" : "32-bit")
+    fission::utils::log_stream() << "[BinaryDetector] Mach-O: " << (info.is_64bit ? "64-bit" : "32-bit")
               << " Arch=" << info.sleigh_id << std::endl;
     
     return info;

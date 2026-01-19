@@ -10,6 +10,7 @@
 #include "address.hh"
 
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <sstream>
 #include <algorithm>
 #include <limits>
@@ -350,7 +351,7 @@ bool StructureAnalyzer::infer_structures(ghidra::TypeFactory* factory,
         inferred_structs[base_addr] = new_struct;
         new_types_created = true;
         
-        std::cerr << "[StructureAnalyzer] Created " << struct_name 
+        fission::utils::log_stream() << "[StructureAnalyzer] Created " << struct_name 
                   << " (" << (struct_size) << " bytes) with " 
                   << fields.size() << " detected fields" << std::endl;
     }
@@ -377,7 +378,7 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
             
             ghidra::TypePointer* ptr_type = ArchPolicy::getPointerType(factory, st, fd->getArch());
             if (!ptr_type) {
-                std::cerr << "[StructureAnalyzer] ERROR: Failed to create pointer type for " 
+                fission::utils::log_stream() << "[StructureAnalyzer] ERROR: Failed to create pointer type for " 
                           << st->getName() << std::endl;
                 continue;
             }
@@ -385,7 +386,7 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
             // Aggressively update type AND lock it
             vn->updateType(ptr_type, true, true);
             
-            std::cerr << "[StructureAnalyzer] Applied " << st->getName() << "* "
+            fission::utils::log_stream() << "[StructureAnalyzer] Applied " << st->getName() << "* "
                       << "to Varnode @" << std::hex << storage << std::dec << std::endl;
         }
     }

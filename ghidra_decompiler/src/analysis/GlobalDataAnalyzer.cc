@@ -8,6 +8,7 @@
 #include "op.hh"
 
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <sstream>
 #include <algorithm>
 
@@ -22,7 +23,7 @@ GlobalDataAnalyzer::~GlobalDataAnalyzer() {}
 void GlobalDataAnalyzer::set_data_section(uint64_t start, uint64_t end) {
     data_section_start = start;
     data_section_end = end;
-    std::cerr << "[GlobalDataAnalyzer] Data section: 0x" << std::hex 
+    fission::utils::log_stream() << "[GlobalDataAnalyzer] Data section: 0x" << std::hex 
               << start << " - 0x" << end << std::dec << std::endl;
 }
 
@@ -184,7 +185,7 @@ void GlobalDataAnalyzer::infer_structures() {
         inferred_globals.push_back(gs);
     }
     
-    std::cerr << "[GlobalDataAnalyzer] Inferred " << inferred_globals.size() 
+    fission::utils::log_stream() << "[GlobalDataAnalyzer] Inferred " << inferred_globals.size() 
               << " global structures from " << accesses.size() << " accesses" << std::endl;
 }
 
@@ -239,7 +240,7 @@ int GlobalDataAnalyzer::create_types(ghidra::TypeFactory* factory, int ptr_size)
         factory->setFields(fields, new_struct, aligned_size, ptr_size, 0);
         created++;
         
-        std::cerr << "[GlobalDataAnalyzer] Created " << gs.name 
+        fission::utils::log_stream() << "[GlobalDataAnalyzer] Created " << gs.name 
                   << " (" << fields.size() << " fields, " << aligned_size << " bytes)" << std::endl;
     }
     

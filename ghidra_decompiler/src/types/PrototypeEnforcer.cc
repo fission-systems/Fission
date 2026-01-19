@@ -8,6 +8,7 @@
 
 #include <fstream>
 #include <iostream>
+#include "fission/utils/logger.h"
 #include <map>
 #include <sstream>
 #include <cctype>
@@ -709,22 +710,22 @@ bool PrototypeEnforcer::enforce_single_prototype(
         if (build_builtin_prototype(arch, func_name, pieces)) {
             try {
                 arch->setPrototype(pieces);
-                std::cerr << "[PrototypeEnforcer] Applied built-in prototype for: "
+                fission::utils::log_stream() << "[PrototypeEnforcer] Applied built-in prototype for: "
                           << func_name << std::endl;
                 return true;
             } catch (const LowlevelError& e) {
-                std::cerr << "[PrototypeEnforcer] Error applying built-in prototype for "
+                fission::utils::log_stream() << "[PrototypeEnforcer] Error applying built-in prototype for "
                           << func_name << ": " << e.explain << std::endl;
             }
         }
         if (build_win_api_prototype(arch, func_name, pieces)) {
             try {
                 arch->setPrototype(pieces);
-                std::cerr << "[PrototypeEnforcer] Applied WinAPI prototype for: "
+                fission::utils::log_stream() << "[PrototypeEnforcer] Applied WinAPI prototype for: "
                           << func_name << std::endl;
                 return true;
             } catch (const LowlevelError& e) {
-                std::cerr << "[PrototypeEnforcer] Error applying WinAPI prototype for "
+                fission::utils::log_stream() << "[PrototypeEnforcer] Error applying WinAPI prototype for "
                           << func_name << ": " << e.explain << std::endl;
             }
         }
@@ -747,11 +748,11 @@ bool PrototypeEnforcer::enforce_single_prototype(
     // Apply the prototype to the architecture at this address
     try {
         arch->setPrototype(pieces);
-        std::cerr << "[PrototypeEnforcer] Applied prototype for: " << func_name 
+        fission::utils::log_stream() << "[PrototypeEnforcer] Applied prototype for: " << func_name 
                   << " (" << pieces.intypes.size() << " params)" << std::endl;
         return true;
     } catch (const LowlevelError& e) {
-        std::cerr << "[PrototypeEnforcer] Error applying prototype for " << func_name 
+        fission::utils::log_stream() << "[PrototypeEnforcer] Error applying prototype for " << func_name 
                   << ": " << e.explain << std::endl;
         return false;
     }
@@ -773,7 +774,7 @@ int PrototypeEnforcer::enforce_iat_prototypes(
     }
 
     if (count > 0) {
-        std::cerr << "[PrototypeEnforcer] Enforced " << count << "/" << iat_symbols.size() 
+        fission::utils::log_stream() << "[PrototypeEnforcer] Enforced " << count << "/" << iat_symbols.size() 
                   << " IAT prototypes" << std::endl;
     }
 
