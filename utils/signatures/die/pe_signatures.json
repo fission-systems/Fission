@@ -1,0 +1,321 @@
+{
+    "format_version": "1.0",
+    "description": "DIE-compatible binary signatures for Fission",
+    "source": "Detect-It-Easy",
+    "signatures": [
+        {
+            "name": "UPX",
+            "type": "packer",
+            "rules": [
+                {
+                    "type": "ep_pattern",
+                    "arch": "x86",
+                    "pattern": "60 BE ?? ?? ?? ?? 8D BE ?? ?? ?? ?? 57"
+                },
+                {
+                    "type": "ep_pattern",
+                    "arch": "x64",
+                    "pattern": "53 56 57 55 48 8D 35 ?? ?? ?? ?? 48 8D BE ?? ?? ?? ?? 57"
+                },
+                {
+                    "type": "section_name",
+                    "name": "UPX0"
+                },
+                {
+                    "type": "section_name",
+                    "name": "UPX1"
+                },
+                {
+                    "type": "string",
+                    "value": "UPX!"
+                }
+            ]
+        },
+        {
+            "name": "VMProtect",
+            "type": "protector",
+            "rules": [
+                {
+                    "type": "section_name",
+                    "name": ".vmp0"
+                },
+                {
+                    "type": "section_name",
+                    "name": ".vmp1"
+                },
+                {
+                    "type": "string",
+                    "value": "VMProtect"
+                }
+            ]
+        },
+        {
+            "name": "Themida",
+            "type": "protector",
+            "rules": [
+                {
+                    "type": "section_name",
+                    "name": ".themida"
+                },
+                {
+                    "type": "string",
+                    "value": "Themida"
+                },
+                {
+                    "type": "string",
+                    "value": "WinLicense"
+                }
+            ]
+        },
+        {
+            "name": "ASPack",
+            "type": "packer",
+            "rules": [
+                {
+                    "type": "ep_pattern",
+                    "arch": "x86",
+                    "pattern": "60 E8 03 00 00 00 E9 EB 04"
+                },
+                {
+                    "type": "section_name",
+                    "name": ".aspack"
+                }
+            ]
+        },
+        {
+            "name": "PECompact",
+            "type": "packer",
+            "rules": [
+                {
+                    "type": "ep_pattern",
+                    "arch": "x86",
+                    "pattern": "B8 ?? ?? ?? ?? 50 64 FF 35 00 00 00 00"
+                },
+                {
+                    "type": "string",
+                    "value": "PECompact2"
+                }
+            ]
+        },
+        {
+            "name": "MPRESS",
+            "type": "packer",
+            "rules": [
+                {
+                    "type": "section_name",
+                    "name": ".MPRESS1"
+                },
+                {
+                    "type": "section_name",
+                    "name": ".MPRESS2"
+                }
+            ]
+        },
+        {
+            "name": "Petite",
+            "type": "packer",
+            "rules": [
+                {
+                    "type": "section_name",
+                    "name": ".petite"
+                },
+                {
+                    "type": "ep_pattern",
+                    "arch": "x86",
+                    "pattern": "B8 ?? ?? ?? ?? 66 9C 60 50"
+                }
+            ]
+        },
+        {
+            "name": "FSG",
+            "type": "packer",
+            "rules": [
+                {
+                    "type": "ep_pattern",
+                    "arch": "x86",
+                    "pattern": "87 25 ?? ?? ?? ?? 61 94 55 A4 B6 80 FF 13"
+                }
+            ]
+        },
+        {
+            "name": "NsPack",
+            "type": "packer",
+            "rules": [
+                {
+                    "type": "section_name",
+                    "name": ".nsp0"
+                },
+                {
+                    "type": "section_name",
+                    "name": ".nsp1"
+                }
+            ]
+        },
+        {
+            "name": "MinGW",
+            "type": "compiler",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "GCC:"
+                },
+                {
+                    "type": "string",
+                    "value": "mingw"
+                },
+                {
+                    "type": "section_name",
+                    "name": ".eh_frame"
+                }
+            ]
+        },
+        {
+            "name": "MSVC",
+            "type": "compiler",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "Microsoft Visual C++"
+                },
+                {
+                    "type": "string",
+                    "value": "MSVCRT"
+                },
+                {
+                    "type": "rich_header",
+                    "present": true
+                }
+            ]
+        },
+        {
+            "name": "Rust",
+            "type": "compiler",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "rustc"
+                },
+                {
+                    "type": "import",
+                    "function": "_ZN3std"
+                }
+            ]
+        },
+        {
+            "name": "Go",
+            "type": "compiler",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "Go build ID:"
+                },
+                {
+                    "type": "section_name",
+                    "name": ".symtab"
+                },
+                {
+                    "type": "string",
+                    "value": "runtime.main"
+                }
+            ]
+        },
+        {
+            "name": "Delphi",
+            "type": "compiler",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "Borland Delphi"
+                },
+                {
+                    "type": "string",
+                    "value": "TObject"
+                },
+                {
+                    "type": "section_name",
+                    "name": "CODE"
+                }
+            ]
+        },
+        {
+            "name": "Inno Setup",
+            "type": "installer",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "Inno Setup"
+                },
+                {
+                    "type": "string",
+                    "value": "InnoSetupLdrWindow"
+                }
+            ]
+        },
+        {
+            "name": "NSIS",
+            "type": "installer",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "Nullsoft Install System"
+                },
+                {
+                    "type": "string",
+                    "value": "NSIS"
+                }
+            ]
+        },
+        {
+            "name": "InstallShield",
+            "type": "installer",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "InstallShield"
+                }
+            ]
+        },
+        {
+            "name": "PyInstaller",
+            "type": "packer",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "PyInstaller"
+                },
+                {
+                    "type": "string",
+                    "value": "pyi-"
+                }
+            ]
+        },
+        {
+            "name": "AutoIt",
+            "type": "compiler",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "AutoIt"
+                },
+                {
+                    "type": "string",
+                    "value": "AU3!"
+                }
+            ]
+        },
+        {
+            "name": "Electron",
+            "type": "framework",
+            "rules": [
+                {
+                    "type": "string",
+                    "value": "electron"
+                },
+                {
+                    "type": "string",
+                    "value": "chromium"
+                }
+            ]
+        }
+    ]
+}
