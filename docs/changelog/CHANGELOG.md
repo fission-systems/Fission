@@ -9,6 +9,10 @@ All notable changes to the Fission project (November 2025 - January 2026).
 - **Unified FID/GDT Paths**: Centralized the management of signature file paths into a new `fission::config::PathConfig` component.
   - Eliminated hardcoded paths across `DecompilationPipeline.cc`, `TypePropagator.cc`, and `ArchInit.cc`.
   - Provides a single source of truth for all signature files (FID, GDT, common symbols), significantly improving maintainability.
+- **Rust PathConfig (2026-01-19)**: Added `fission_core::PATHS` for Rust-side path resolution.
+  - Mirrors C++ `fission::config::PathConfig` for cross-language consistency.
+  - Auto-detects workspace root, FID/GDT directories, DIE signatures, and pattern files.
+  - Integrated into `fission-loader` DIE engine for centralized signature resolution.
 - **JSON Parsing Refactoring**:
   - Implemented a robust `parse_json_string_map` utility in `fission::utils`.
   - Removed duplicate and manual JSON parsing logic from `SymbolLoader` and `DecompilationPipeline`, replacing them with the centralized utility.

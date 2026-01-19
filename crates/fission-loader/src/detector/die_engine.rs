@@ -61,9 +61,16 @@ impl SignatureDatabase {
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse signature JSON: {}", e))
     }
 
-    /// Load from embedded default path
+    /// Load from default path using PathConfig
     pub fn load_default() -> Option<Self> {
-        // Try common paths relative to workspace
+        // Try PathConfig first (centralized path resolution)
+        if let Some(path) = fission_core::PATHS.get_die_signatures_path() {
+            if let Ok(db) = Self::load(&path) {
+                return Some(db);
+            }
+        }
+
+        // Fallback to hardcoded relative paths
         let paths = [
             "utils/signatures/die/pe_signatures.json",
             "../utils/signatures/die/pe_signatures.json",

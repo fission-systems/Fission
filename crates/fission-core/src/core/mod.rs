@@ -2,6 +2,7 @@
 //!
 //! Contains fundamental utilities used across the entire codebase:
 //! - config: Centralized configuration management
+//! - path_config: Resource path resolution (FID, GDT, signatures)
 //! - constants: Magic bytes, offsets, and other constants
 //! - errors: Unified error types and Result alias
 //! - logging: Level-based logging with file output
@@ -13,6 +14,7 @@ pub mod constants;
 pub mod errors;
 pub mod logging;
 pub mod models;
+pub mod path_config;
 pub mod prelude;
 pub mod settings;
 
@@ -21,3 +23,4 @@ pub use config::CONFIG;
 pub use constants::*;
 pub use errors::{FissionError, Result};
 pub use models::*;
+pub use path_config::PATHS;
