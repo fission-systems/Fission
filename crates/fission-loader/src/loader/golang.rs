@@ -234,4 +234,260 @@ impl<'a> GoAnalyzer<'a> {
         }
         Some(String::from_utf8_lossy(&bytes[..len]).to_string())
     }
+
+    /// Analyze Go type information from runtime type descriptors
+    /// Go preserves reflection data in .rodata/.data sections
+    pub fn analyze_types(&self) -> Vec<GoTypeInfo> {
+        let mut types = Vec::new();
+
+        // Find .rodata or __rodata section
+        let rodata_section = self
+            .binary
+            .sections
+            .iter()
+            .find(|s| s.name == ".rodata" || s.name == "__rodata" || s.name == "__DATA_CONST");
+
+        let Some(section) = rodata_section else {
+            return types;
+        };
+
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+        let Some(data) = self
+            .binary
+            .get_bytes(section.virtual_address, section.virtual_size as usize)
+        else {
+            return types;
+        };
+
+        // Search for type descriptors
+        // Go type header: kind (1 byte) + align (1 byte) + fieldAlign (1 byte) + size (4 bytes) + ...
+        // Struct type indicator: kind == 25 (reflect.Struct)
+        const KIND_STRUCT: u8 = 25;
+
+        let mut offset = 0;
+        while offset + 64 < data.len() {
+            // Look for potential struct type descriptor
+            let kind = data[offset] & 0x1f; // Lower 5 bits are the kind
+
+            if kind == KIND_STRUCT {
+                if let Some(type_info) =
+                    self.parse_go_struct_type(section.virtual_address + offset as u64, ptr_size)
+                {
+                    if !type_info.name.is_empty() && !type_info.fields.is_empty() {
+                        types.push(type_info);
+                    }
+                }
+            }
+            offset += ptr_size;
+        }
+
+        tracing::info!("[GoAnalyzer] Found {} Go struct types", types.len());
+        for ty in &types {
+            tracing::info!("  - {} with {} fields", ty.name, ty.fields.len());
+            for f in &ty.fields {
+                tracing::info!("    - {} : {} @ offset {}", f.name, f.type_name, f.offset);
+            }
+        }
+
+        types
+    }
+
+    fn parse_go_struct_type(&self, addr: u64, ptr_size: usize) -> Option<GoTypeInfo> {
+        // Go type structure (simplified):
+        // offset 0: kind (1 byte, masked with 0x1f)
+        // offset 1: align (1 byte)
+        // offset 2: fieldAlign (1 byte)
+        // offset 4: size (4 bytes for 32-bit, 8 for 64-bit - depends)
+        // After base type header, there's name pointer and more
+
+        let header_size = 8 + ptr_size * 4; // Approximate header size
+        let data = self.binary.get_bytes(addr, header_size + 256)?;
+
+        let size = if ptr_size == 8 {
+            u64::from_le_bytes([
+                data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+            ]) as u32
+        } else {
+            u32::from_le_bytes([data[4], data[5], data[6], data[7]])
+        };
+
+        // Try to find struct name - it's usually in a name pointer field
+        // The exact offset varies by Go version
+        let name_ptr_offset = if ptr_size == 8 { 48 } else { 24 };
+        if name_ptr_offset + ptr_size > data.len() {
+            return None;
+        }
+
+        let name_ptr = self.read_ptr(&data, name_ptr_offset, ptr_size);
+        let name = if name_ptr != 0 && name_ptr > self.binary.image_base {
+            self.read_go_name(name_ptr).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        // Parse struct fields
+        // structType has a fields slice after the base type
+        let fields = self.parse_go_struct_fields(addr, ptr_size);
+
+        Some(GoTypeInfo { name, size, fields })
+    }
+
+    fn parse_go_struct_fields(&self, struct_type_addr: u64, ptr_size: usize) -> Vec<GoFieldInfo> {
+        let mut fields = Vec::new();
+
+        // structType layout:
+        // - embedded type (rtype)
+        // - pkgPath name
+        // - fields slice (ptr, len, cap)
+
+        let header_size = if ptr_size == 8 { 96 } else { 48 }; // Approximate
+        let Some(header) = self.binary.get_bytes(struct_type_addr, header_size) else {
+            return fields;
+        };
+
+        // Fields slice is after pkgPath
+        let fields_ptr_offset = if ptr_size == 8 { 72 } else { 36 };
+        if fields_ptr_offset + ptr_size * 3 > header.len() {
+            return fields;
+        }
+
+        let fields_ptr = self.read_ptr(&header, fields_ptr_offset, ptr_size);
+        let fields_len = self.read_ptr(&header, fields_ptr_offset + ptr_size, ptr_size) as usize;
+
+        if fields_ptr == 0 || fields_len == 0 || fields_len > 100 {
+            return fields;
+        }
+
+        // Each structField is: name, typ, offset (3 pointers worth)
+        let field_size = ptr_size * 3;
+        let Some(fields_data) = self.binary.get_bytes(fields_ptr, fields_len * field_size) else {
+            return fields;
+        };
+
+        for i in 0..fields_len {
+            let base = i * field_size;
+            if base + field_size > fields_data.len() {
+                break;
+            }
+
+            let name_ptr = self.read_ptr(&fields_data, base, ptr_size);
+            let typ_ptr = self.read_ptr(&fields_data, base + ptr_size, ptr_size);
+            let offset_val = self.read_ptr(&fields_data, base + ptr_size * 2, ptr_size);
+
+            let name = if name_ptr != 0 {
+                self.read_go_name(name_ptr)
+                    .unwrap_or_else(|| format!("field_{}", i))
+            } else {
+                format!("field_{}", i)
+            };
+
+            let type_name = if typ_ptr != 0 {
+                self.get_go_type_name(typ_ptr)
+                    .unwrap_or_else(|| "unknown".to_string())
+            } else {
+                "unknown".to_string()
+            };
+
+            fields.push(GoFieldInfo {
+                name,
+                type_name,
+                offset: offset_val as u32,
+            });
+        }
+
+        fields
+    }
+
+    fn read_go_name(&self, addr: u64) -> Option<String> {
+        // Go names are prefixed with length bytes
+        let data = self.binary.get_bytes(addr, 256)?;
+        if data.is_empty() {
+            return None;
+        }
+
+        // First byte might be flags, second byte is length
+        let name_start = if data[0] & 0x04 != 0 { 3 } else { 1 };
+        let len = data[name_start - 1] as usize;
+
+        if name_start + len > data.len() || len == 0 {
+            return None;
+        }
+
+        Some(String::from_utf8_lossy(&data[name_start..name_start + len]).to_string())
+    }
+
+    fn get_go_type_name(&self, typ_ptr: u64) -> Option<String> {
+        // Read the type's kind to determine type name
+        let data = self.binary.get_bytes(typ_ptr, 64)?;
+        let kind = data[0] & 0x1f;
+
+        match kind {
+            1 => Some("bool".to_string()),
+            2 => Some("int".to_string()),
+            3 => Some("int8".to_string()),
+            4 => Some("int16".to_string()),
+            5 => Some("int32".to_string()),
+            6 => Some("int64".to_string()),
+            7 => Some("uint".to_string()),
+            8 => Some("uint8".to_string()),
+            9 => Some("uint16".to_string()),
+            10 => Some("uint32".to_string()),
+            11 => Some("uint64".to_string()),
+            12 => Some("uintptr".to_string()),
+            13 => Some("float32".to_string()),
+            14 => Some("float64".to_string()),
+            15 => Some("complex64".to_string()),
+            16 => Some("complex128".to_string()),
+            17 => Some("array".to_string()),
+            18 => Some("chan".to_string()),
+            19 => Some("func".to_string()),
+            20 => Some("interface".to_string()),
+            21 => Some("map".to_string()),
+            22 => Some("*ptr".to_string()),
+            23 => Some("slice".to_string()),
+            24 => Some("string".to_string()),
+            25 => Some("struct".to_string()),
+            26 => Some("unsafeptr".to_string()),
+            _ => None,
+        }
+    }
+}
+
+/// Go type information
+#[derive(Debug, Clone)]
+pub struct GoTypeInfo {
+    pub name: String,
+    pub size: u32,
+    pub fields: Vec<GoFieldInfo>,
+}
+
+/// Go struct field information
+#[derive(Debug, Clone)]
+pub struct GoFieldInfo {
+    pub name: String,
+    pub type_name: String,
+    pub offset: u32,
+}
+
+impl GoTypeInfo {
+    /// Convert to InferredTypeInfo for integration with decompiler
+    pub fn to_inferred_type(&self) -> crate::loader::types::InferredTypeInfo {
+        crate::loader::types::InferredTypeInfo {
+            name: self.name.clone(),
+            mangled_name: String::new(),
+            kind: "Struct".to_string(),
+            fields: self
+                .fields
+                .iter()
+                .map(|f| crate::loader::types::InferredFieldInfo {
+                    name: f.name.clone(),
+                    type_name: f.type_name.clone(),
+                    offset: f.offset,
+                    size: 0,
+                })
+                .collect(),
+            size: self.size,
+            metadata_address: 0,
+        }
+    }
 }

@@ -121,7 +121,7 @@ impl PostProcessor {
         // Also try to match array-style access: something[offset]
         // Pattern: baseVar._N_N_ (Ghidra's internal offset notation like local_38._8_8_)
         static GHIDRA_OFFSET_PATTERN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"(\w+)\._(\d+)_(\d+)_").unwrap());
+            Lazy::new(|| Regex::new(r"(\w+)\._([\d]+)_([\d]+)_").unwrap());
 
         result = GHIDRA_OFFSET_PATTERN
             .replace_all(&result, |caps: &regex::Captures| {
@@ -134,6 +134,86 @@ impl PostProcessor {
                 } else {
                     caps[0].to_string()
                 }
+            })
+            .to_string();
+
+        // Apply Swift accessor pattern recognition
+        result = self.recognize_swift_accessors(&result, &offset_map);
+
+        result
+    }
+
+    /// Recognize Swift accessor patterns and convert to field access
+    /// Swift uses VTable calls for property access:
+    /// getter: (**(ptr + 0x88))(buffer) -> ptr->get_fieldName()
+    /// setter: (**(ptr + 0x90))(value, buffer) -> ptr->set_fieldName(value)
+    fn recognize_swift_accessors(
+        &self,
+        code: &str,
+        offset_map: &std::collections::HashMap<u32, String>,
+    ) -> String {
+        let mut result = code.to_string();
+
+        // Pattern: (**(something*)(*base + 0xNN))(...) - Swift VTable accessor call
+        // The VTable offset doesn't directly correspond to field offset,
+        // but we can annotate it for clarity
+        static SWIFT_VTABLE_PATTERN: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"\(\*\*\([\w\s\*]+\)\(\*(\w+)\s*\+\s*(0x[0-9a-fA-F]+)\)\)").unwrap()
+        });
+
+        result = SWIFT_VTABLE_PATTERN
+            .replace_all(&result, |caps: &regex::Captures| {
+                let base = &caps[1];
+                let vtable_offset_str = &caps[2];
+
+                // Parse VTable offset
+                let vtable_offset: u32 = if vtable_offset_str.starts_with("0x") {
+                    u32::from_str_radix(&vtable_offset_str[2..], 16).unwrap_or(0)
+                } else {
+                    vtable_offset_str.parse().unwrap_or(0)
+                };
+
+                // Swift property access via VTable:
+                // Typically getters are at lower offsets (0x78, 0x80, 0x88...)
+                // The actual field accessed depends on the class layout
+                // We try to infer the property based on known patterns
+                let accessor_type = match vtable_offset & 0x0f {
+                    0x8 => "get",
+                    0x0 => "set",
+                    _ => "access",
+                };
+
+                // Try to find a corresponding field from our type info
+                // VTable slots typically start at offset 0x50 for the first property
+                // Each property has ~2 slots (getter, setter), each 8 bytes on 64-bit
+                let estimated_field_index = vtable_offset.saturating_sub(0x50) / 0x10;
+
+                // Look for field at similar position
+                let field_hint: String = self
+                    .inferred_types
+                    .iter()
+                    .flat_map(|t| t.fields.iter())
+                    .nth(estimated_field_index as usize)
+                    .map(|f| f.name.clone())
+                    .unwrap_or_else(|| format!("property_{}", estimated_field_index));
+
+                format!(
+                    "/* Swift {} {} via VTable@{} */(**(void**)(*{} + {}))",
+                    accessor_type, field_hint, vtable_offset_str, base, vtable_offset_str
+                )
+            })
+            .to_string();
+
+        // Pattern for Swift accessor return values: axVar3._8_8_
+        // These are often the actual value returned by the accessor
+        static SWIFT_ACCESSOR_RESULT: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"(axVar\d+)\._(8)_(8)_").unwrap());
+
+        result = SWIFT_ACCESSOR_RESULT
+            .replace_all(&result, |caps: &regex::Captures| {
+                let var = &caps[1];
+                // This is the returned value from a Swift accessor
+                format!("{}->value/* Swift property value */", var)
             })
             .to_string();
 
