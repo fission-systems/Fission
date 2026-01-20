@@ -7,6 +7,7 @@ use std::fs;
 use std::path::Path;
 
 pub mod demangle;
+pub mod dwarf;
 pub mod elf;
 pub mod golang;
 pub mod macho;
@@ -149,6 +150,33 @@ impl LoadedBinary {
                         };
                         binary.inner_mut().inferred_types.push(inferred);
                     }
+                }
+            }
+        }
+
+        // Go Type Analysis (works for any format with Go reflection data)
+        if detection.language().map_or(false, |d| d.name == "Go") {
+            let analyzer = golang::GoAnalyzer::new(&binary);
+            let go_types = analyzer.analyze_types();
+            for ty in go_types {
+                binary
+                    .inner_mut()
+                    .inferred_types
+                    .push(ty.to_inferred_type());
+            }
+        }
+
+        // DWARF Debug Information Analysis (works for ELF and Mach-O with debug info)
+        {
+            let dwarf_analyzer = dwarf::DwarfAnalyzer::new(&binary);
+            if dwarf_analyzer.has_debug_info() {
+                tracing::info!("[Loader] Found DWARF debug info, extracting types...");
+                let dwarf_types = dwarf_analyzer.analyze_types();
+                for ty in dwarf_types {
+                    binary
+                        .inner_mut()
+                        .inferred_types
+                        .push(ty.to_inferred_type());
                 }
             }
         }
