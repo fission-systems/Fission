@@ -305,6 +305,7 @@ pub enum Activity {
 pub enum EditorTab {
     Assembly(String),   // Function name or "Main"
     Decompiled(String), // Function name
+    Listing,            // Full binary listing view
     HexView,
     Welcome,
 }
@@ -314,6 +315,7 @@ impl EditorTab {
         match self {
             EditorTab::Assembly(name) => format!("Asm: {}", name),
             EditorTab::Decompiled(name) => format!("C: {}", name),
+            EditorTab::Listing => "📜 Listing".to_string(),
             EditorTab::HexView => "Hex View".to_string(),
             EditorTab::Welcome => "Welcome".to_string(),
         }

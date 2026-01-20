@@ -6,6 +6,28 @@ use fission_loader::loader::FunctionInfo;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
+/// Open the Listing View tab
+pub fn open_listing_tab(state: &mut AppState) {
+    let listing_tab = EditorTab::Listing;
+
+    // Open Listing tab if not already open
+    if !state.ui.open_tabs.contains(&listing_tab) {
+        state.ui.open_tabs.push(listing_tab.clone());
+    }
+
+    // Focus the Listing tab
+    if let Some(pos) = state
+        .ui
+        .open_tabs
+        .iter()
+        .position(|t| matches!(t, EditorTab::Listing))
+    {
+        state.ui.active_tab_index = Some(pos);
+    }
+
+    state.log("[*] Opened Listing View");
+}
+
 pub fn analyze_functions(state: &mut AppState) {
     // Clone the Arc first to avoid borrow checker issues
     let binary_opt = state.analysis.domain.loaded_binary.as_ref().cloned();

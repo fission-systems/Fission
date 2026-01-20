@@ -18,6 +18,8 @@ pub enum SideBarAction {
     DeepScanFunctions,
     /// User switched to a different binary in project
     SwitchBinary(std::sync::Arc<fission_loader::loader::LoadedBinary>),
+    /// User wants to open Listing View
+    OpenListing,
 }
 
 /// Render the side bar panel.
@@ -69,6 +71,25 @@ pub fn render(ctx: &egui::Context, state: &mut AppState) -> Option<SideBarAction
                         ui.separator();
                         ui.add_space(8.0);
                     }
+
+                    // Quick actions bar
+                    ui.horizontal(|ui| {
+                        ui.add_space(8.0);
+                        if ui
+                            .button(
+                                egui::RichText::new("📜 Listing")
+                                    .color(catppuccin::PEACH)
+                                    .small(),
+                            )
+                            .on_hover_text("Open full binary listing view")
+                            .clicked()
+                        {
+                            result = Some(SideBarAction::OpenListing);
+                        }
+                    });
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
 
                     // Use the existing functions panel logic but as part of this panel
                     if let Some(action) = functions::render_inside(ui, state) {

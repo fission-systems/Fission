@@ -8,6 +8,7 @@ pub mod bottom_tabs;
 pub mod decompile;
 pub mod editor;
 pub mod functions;
+pub mod listing;
 pub mod search;
 pub mod settings;
 pub mod side_bar;

@@ -6,7 +6,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::analysis::disasm::DisassembledInstruction;
+pub use crate::analysis::disasm::DisassembledInstruction;
+use fission_analysis::analysis::cfg::CfgSummary;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 
 // ============================================================================
@@ -82,7 +83,7 @@ pub struct AnalysisDomain {
     pub selected_binary_index: Option<usize>,
 
     /// Current CFG analysis result
-    pub cfg_analysis: Option<crate::ui::gui::panels::bottom_tabs::cfg::CfgAnalysisResult>,
+    pub cfg_analysis: Option<CfgSummary>,
 }
 
 /// Debug domain model - pure debugger state, no UI inputs
