@@ -338,6 +338,177 @@ impl<'a> AppleAnalyzer<'a> {
         Ok(functions)
     }
 
+    /// Analyze Objective-C classes and extract ivar (instance variable) information
+    pub fn analyze_objc_ivars(&self) -> Vec<ObjCClassInfo> {
+        let mut classes = Vec::new();
+
+        // Find __objc_classlist section
+        let Some(classlist_section) = self
+            .binary
+            .sections
+            .iter()
+            .find(|s| s.name == "__objc_classlist")
+        else {
+            return classes;
+        };
+
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+        let Some(data) = self.binary.get_bytes(
+            classlist_section.virtual_address,
+            classlist_section.virtual_size as usize,
+        ) else {
+            return classes;
+        };
+
+        for i in 0..(data.len() / ptr_size) {
+            let class_ptr = self.read_ptr(&data, i * ptr_size, ptr_size);
+            if let Some(class_info) = self.parse_objc_class_ivars(class_ptr) {
+                if !class_info.ivars.is_empty() {
+                    tracing::info!(
+                        "[ObjCAnalyzer] Found class: {} with {} ivars",
+                        class_info.name,
+                        class_info.ivars.len()
+                    );
+                    for ivar in &class_info.ivars {
+                        tracing::info!(
+                            "  - {} : {} @ offset {}",
+                            ivar.name,
+                            ivar.type_encoding,
+                            ivar.offset
+                        );
+                    }
+                    classes.push(class_info);
+                }
+            }
+        }
+
+        classes
+    }
+
+    fn parse_objc_class_ivars(&self, addr: u64) -> Option<ObjCClassInfo> {
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+
+        // class_t structure:
+        // 0: isa
+        // 8: superclass
+        // 16: cache
+        // 24: vtable
+        // 32: data (class_ro_t pointer)
+        let class_data = self.binary.get_bytes(addr, 40)?;
+        let ro_data_ptr = self.read_ptr(&class_data, 32, ptr_size);
+
+        // Mask off the Swift bit if present (lower bits of pointer)
+        let ro_data_ptr = ro_data_ptr & !0x7;
+
+        let ro_data = self.binary.get_bytes(ro_data_ptr, 80)?;
+
+        // class_ro_t structure (64-bit):
+        // 0: flags (4 bytes)
+        // 4: instanceStart (4 bytes)
+        // 8: instanceSize (4 bytes)
+        // 12: reserved (4 bytes)
+        // 16: ivarLayout
+        // 24: name
+        // 32: baseMethods
+        // 40: baseProtocols
+        // 48: ivars
+        // 56: weakIvarLayout
+        // 64: baseProperties
+
+        let class_name_ptr = self.read_ptr(&ro_data, 24, ptr_size);
+        let class_name = self.read_string(class_name_ptr)?;
+
+        let ivars_ptr = self.read_ptr(&ro_data, 48, ptr_size);
+
+        let ivars = if ivars_ptr != 0 {
+            self.parse_objc_ivar_list(ivars_ptr)
+        } else {
+            Vec::new()
+        };
+
+        Some(ObjCClassInfo {
+            name: class_name,
+            ivars,
+        })
+    }
+
+    fn parse_objc_ivar_list(&self, addr: u64) -> Vec<ObjCIvarInfo> {
+        let mut ivars = Vec::new();
+        let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+
+        // ivar_list_t structure:
+        // 0: entsize (4 bytes)
+        // 4: count (4 bytes)
+        // 8: first ivar
+        let header = self.binary.get_bytes(addr, 8);
+        let Some(header) = header else {
+            return ivars;
+        };
+
+        let entsize = u32::from_le_bytes([header[0], header[1], header[2], header[3]]) & 0xFFFC;
+        let count = u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
+
+        if count == 0 || count > 1000 || entsize < 8 {
+            return ivars;
+        }
+
+        let ivar_data = self
+            .binary
+            .get_bytes(addr + 8, (count as usize) * (entsize as usize));
+        let Some(ivar_data) = ivar_data else {
+            return ivars;
+        };
+
+        // ivar_t structure (64-bit):
+        // 0: offset (pointer to int32)
+        // 8: name (pointer to string)
+        // 16: type (pointer to type encoding string)
+        // 24: alignment_raw (uint32)
+        // 28: size (uint32)
+
+        for i in 0..count as usize {
+            let base = i * entsize as usize;
+            if base + 24 > ivar_data.len() {
+                break;
+            }
+
+            let offset_ptr = self.read_ptr(&ivar_data, base, ptr_size);
+            let name_ptr = self.read_ptr(&ivar_data, base + ptr_size, ptr_size);
+            let type_ptr = self.read_ptr(&ivar_data, base + ptr_size * 2, ptr_size);
+
+            // Read the actual offset value (it's a pointer to an int32)
+            let offset = if let Some(offset_bytes) = self.binary.get_bytes(offset_ptr, 4) {
+                u32::from_le_bytes([
+                    offset_bytes[0],
+                    offset_bytes[1],
+                    offset_bytes[2],
+                    offset_bytes[3],
+                ])
+            } else {
+                0
+            };
+
+            let name = self
+                .read_string(name_ptr)
+                .unwrap_or_else(|| format!("ivar_{}", i));
+            let type_encoding = self
+                .read_string(type_ptr)
+                .unwrap_or_else(|| "?".to_string());
+
+            // Decode type encoding to readable type name
+            let type_name = decode_objc_type(&type_encoding);
+
+            ivars.push(ObjCIvarInfo {
+                name,
+                type_encoding,
+                type_name,
+                offset,
+            });
+        }
+
+        ivars
+    }
+
     fn parse_objc_method_list(&self, addr: u64, class_name: &str) -> Result<Vec<FunctionInfo>> {
         let mut functions = Vec::new();
 
@@ -421,5 +592,100 @@ impl<'a> AppleAnalyzer<'a> {
             return None;
         }
         Some(String::from_utf8_lossy(&bytes[..len]).to_string())
+    }
+}
+
+/// Objective-C class information
+#[derive(Debug, Clone)]
+pub struct ObjCClassInfo {
+    pub name: String,
+    pub ivars: Vec<ObjCIvarInfo>,
+}
+
+/// Objective-C instance variable information
+#[derive(Debug, Clone)]
+pub struct ObjCIvarInfo {
+    pub name: String,
+    pub type_encoding: String,
+    pub type_name: String,
+    pub offset: u32,
+}
+
+/// Decode Objective-C type encoding to readable type name
+fn decode_objc_type(encoding: &str) -> String {
+    if encoding.is_empty() {
+        return "id".to_string();
+    }
+
+    let first_char = encoding.chars().next().unwrap();
+    match first_char {
+        'c' => "char".to_string(),
+        'i' => "int".to_string(),
+        's' => "short".to_string(),
+        'l' => "long".to_string(),
+        'q' => "long long".to_string(),
+        'C' => "unsigned char".to_string(),
+        'I' => "unsigned int".to_string(),
+        'S' => "unsigned short".to_string(),
+        'L' => "unsigned long".to_string(),
+        'Q' => "unsigned long long".to_string(),
+        'f' => "float".to_string(),
+        'd' => "double".to_string(),
+        'B' => "BOOL".to_string(),
+        'v' => "void".to_string(),
+        '*' => "char*".to_string(),
+        '@' => {
+            // Object type - try to extract class name
+            if encoding.len() > 2 && encoding.starts_with("@\"") {
+                let end = encoding[2..].find('"').unwrap_or(encoding.len() - 2);
+                encoding[2..2 + end].to_string() + "*"
+            } else {
+                "id".to_string()
+            }
+        }
+        '#' => "Class".to_string(),
+        ':' => "SEL".to_string(),
+        '^' => {
+            // Pointer type
+            if encoding.len() > 1 {
+                format!("{}*", decode_objc_type(&encoding[1..]))
+            } else {
+                "void*".to_string()
+            }
+        }
+        '{' => {
+            // Struct - extract name
+            if let Some(end) = encoding.find('=') {
+                encoding[1..end].to_string()
+            } else if let Some(end) = encoding.find('}') {
+                encoding[1..end].to_string()
+            } else {
+                "struct".to_string()
+            }
+        }
+        _ => encoding.to_string(),
+    }
+}
+
+impl ObjCClassInfo {
+    /// Convert to InferredTypeInfo for integration with decompiler
+    pub fn to_inferred_type(&self) -> crate::loader::types::InferredTypeInfo {
+        crate::loader::types::InferredTypeInfo {
+            name: self.name.clone(),
+            mangled_name: String::new(),
+            kind: "ObjCClass".to_string(),
+            fields: self
+                .ivars
+                .iter()
+                .map(|ivar| crate::loader::types::InferredFieldInfo {
+                    name: ivar.name.clone(),
+                    type_name: ivar.type_name.clone(),
+                    offset: ivar.offset,
+                    size: 0,
+                })
+                .collect(),
+            size: 0,
+            metadata_address: 0,
+        }
     }
 }

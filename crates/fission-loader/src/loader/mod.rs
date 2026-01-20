@@ -152,6 +152,18 @@ impl LoadedBinary {
                     }
                 }
             }
+
+            // Objective-C ivar analysis (separate scope)
+            {
+                let analyzer = macho::apple::AppleAnalyzer::new(&binary);
+                let objc_classes = analyzer.analyze_objc_ivars();
+                for class_info in objc_classes {
+                    binary
+                        .inner_mut()
+                        .inferred_types
+                        .push(class_info.to_inferred_type());
+                }
+            }
         }
 
         // Go Type Analysis (works for any format with Go reflection data)
