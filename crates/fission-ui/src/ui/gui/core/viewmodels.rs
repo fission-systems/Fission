@@ -138,6 +138,27 @@ impl StringXrefsViewModel {
     }
 }
 
+/// ViewModel for Listing View panel - continuous binary view
+#[derive(Default, Clone)]
+pub struct ListingViewModel {
+    /// Current scroll offset address
+    pub current_address: u64,
+    /// Number of instructions to display
+    pub display_count: usize,
+    /// Address input for Go To
+    pub goto_address_input: String,
+}
+
+impl ListingViewModel {
+    pub fn new() -> Self {
+        Self {
+            current_address: 0,
+            display_count: 100,
+            goto_address_input: String::new(),
+        }
+    }
+}
+
 // ============================================================================
 // Debug ViewModels
 // ============================================================================
@@ -287,6 +308,7 @@ pub struct ViewModelContainer {
     pub search: SearchViewModel,
     pub navigation: NavigationViewModel,
     pub decompile: DecompileViewModel,
+    pub listing: ListingViewModel,
 }
 
 impl ViewModelContainer {
@@ -301,6 +323,7 @@ impl ViewModelContainer {
             search: SearchViewModel::new(),
             navigation: NavigationViewModel::new(),
             decompile: DecompileViewModel::new(),
+            listing: ListingViewModel::new(),
         }
     }
 }

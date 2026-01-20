@@ -2,6 +2,80 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
+### Listing View - Full Binary Disassembly with Virtual Scroll (2026-01-20)
+
+**📜 New Feature: Listing View Panel**
+
+Implemented a new "Listing View" panel that provides a continuous, scrollable disassembly view of the entire binary, similar to IDA Pro, Ghidra, or x64dbg.
+
+- **Virtual Scroll Architecture**: Inspired by x64dbg's `AbstractTableView`, the scroll bar position maps directly to the binary's address space.
+  - Total virtual rows = `(max_addr - min_addr) / avg_instruction_size`
+  - On-demand disassembly: Only visible rows are disassembled, enabling smooth scrolling through multi-megabyte binaries.
+  - Implemented using `egui_extras::TableBuilder` with row virtualization.
+
+- **Real-time On-Demand Disassembly**:
+  - Disassembles code at the current scroll position dynamically.
+  - Instruction cache built around visible range for responsive scrolling.
+  - Automatically detects executable sections and skips non-code regions.
+
+- **Keyboard Navigation**:
+  - `↑/↓`: Move one instruction up/down.
+  - `Page Up/Page Down`: Jump by visible page size.
+  - `Home/End`: Jump to start/end of code section.
+
+- **Function & Section Boundary Visualization**:
+  - **▸** indicator marks function entry points (green).
+  - Address highlighting for the current selected address.
+  - Striped row alternation for better readability.
+
+- **Symbol Resolution**:
+  - Operand addresses are resolved to function names or IAT symbols.
+  - Double-click on an address to jump to that function.
+
+- **UI Integration**:
+  - New "📜 Listing" button in Explorer sidebar.
+  - `EditorTab::Listing` variant added to tab system.
+  - `ListingViewModel` for managing panel state (current address, goto input).
+  - Go-to address input with hex/decimal support.
+
+**Files Added/Modified:**
+
+- `crates/fission-ui/src/ui/gui/panels/listing.rs` (New)
+- `crates/fission-ui/src/ui/gui/panels/mod.rs` (Added module)
+- `crates/fission-ui/src/ui/gui/panels/editor.rs` (Added tab rendering)
+- `crates/fission-ui/src/ui/gui/panels/side_bar.rs` (Added Listing button)
+- `crates/fission-ui/src/ui/gui/core/state.rs` (Added EditorTab::Listing)
+- `crates/fission-ui/src/ui/gui/core/viewmodels.rs` (Added ListingViewModel)
+- `crates/fission-ui/src/ui/gui/core/domain.rs` (Re-exported DisassembledInstruction)
+- `crates/fission-ui/src/ui/gui/app/analysis_ops.rs` (Added open_listing_tab)
+- `crates/fission-ui/src/ui/gui/app/mod.rs` (Handler for OpenListing action)
+
+---
+
+### C++ RTTI Recovery & Advanced Arithmetic Idioms (2026-01-20)
+
+**🔄 C++ RTTI and Class Hierarchy Recovery**
+
+- **Multi-ABI RTTI Support**: Implemented C++ class hierarchy recovery for both Itanium (GCC/Clang) and MSVC (Windows).
+- **MSVC RTTI Analyzer**: Comprehensive support for Windows binaries (x86 & x64).
+  - **CompleteObjectLocator (COL)** detection via symbols or signature scanning in `.rdata`/`.data`.
+  - **TypeDescriptor** parsing: Extracts mangled names and demangles them using `msvc-demangler`.
+  - **ClassHierarchyDescriptor**: Reconstructs inheritance chains by parsing `BaseClassDescriptor` arrays.
+- **Itanium RTTI Analyzer**: Enhanced detection of single inheritance (`__si_class_type_info`) on non-Windows platforms.
+- **Inheritance Labeling**: Recovered classes are now displayed with their base class information (e.g., `Derived : public Base`) in the CLI `info` command and UI.
+
+**⚡ Advanced Arithmetic Idiom Recovery**
+
+- **Magic Division & Modulo**: Automatically simplifies compiler-optimized multiplication/shift sequences back into readable `/` and `%` operations.
+- **64-bit Split Optimization**: Recovered idioms for 64-bit absolute value and signed modulo 2 on 32-bit platforms.
+- **Sign Extraction**: Cleanup of `SIGN_EXTRACT` and `CONCAT44` sign-extension patterns common in optimized code.
+- **Regex Stability**: Refactored the `PostProcessor` regex engine to be safer and faster by removing unsupported backreferences, preventing panics during analysis.
+
+**🛠️ Loader & Core Utilities**
+
+- **Safe Pointer Access**: Added `read_ptr` to `LoadedBinary` for architecture-aware pointer reading.
+- **C++ Demangling Enhancements**: Improved symbol resolution by demangling `__ZTI` (Type Info) symbols for better base class naming.
+
 ### Refactored FID/GDT Path Management & Loop Detection (2026-01-13)
 
 **🔄 Centralized Path Configuration**

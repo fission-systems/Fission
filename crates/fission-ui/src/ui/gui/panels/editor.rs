@@ -1,6 +1,6 @@
 //! Editor area panel - Tabbed interface for assembly, decompiled code, etc.
 
-use super::{assembly, decompile};
+use super::{assembly, decompile, listing};
 use crate::ui::gui::core::state::{AppState, EditorTab};
 use crate::ui::gui::theme::catppuccin;
 use eframe::egui;
@@ -158,6 +158,9 @@ fn render_active_tab_content(ui: &mut egui::Ui, state: &mut AppState) {
         }
         EditorTab::Decompiled(_name) => {
             decompile::render_inside(ui, state);
+        }
+        EditorTab::Listing => {
+            listing::render(ui, state);
         }
         EditorTab::HexView => {
             ui.label("Hex View in Editor Tab - Coming Soon");

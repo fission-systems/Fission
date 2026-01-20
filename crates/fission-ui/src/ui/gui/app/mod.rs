@@ -309,7 +309,7 @@ impl eframe::App for FissionApp {
                             if !scanned_funcs.is_empty() {
                                 // Identify functions
                                 let matched = db.identify_functions_in_binary(
-                                    &binary.data,
+                                    binary.data.as_slice(),
                                     &scanned_funcs,
                                     binary.image_base,
                                 );
@@ -347,11 +347,13 @@ impl eframe::App for FissionApp {
                             self.state.analysis.domain.loaded_binary.as_ref(),
                             self.state.analysis.domain.xref_db.as_ref(),
                         ) {
-                            let call_graph = crate::analysis::callgraph::CallGraph::build_from_xrefs(
-                                &binary.functions,
-                                xref_db,
-                                crate::core::config::CONFIG.analysis.function_address_range as u64,
-                            );
+                            let call_graph =
+                                crate::analysis::callgraph::CallGraph::build_from_xrefs(
+                                    &binary.functions,
+                                    xref_db,
+                                    crate::core::config::CONFIG.analysis.function_address_range
+                                        as u64,
+                                );
                             self.state.analysis.domain.call_graph = Some(call_graph);
                             self.state.viewmodels.xrefs.clear();
                         }
@@ -392,6 +394,9 @@ impl eframe::App for FissionApp {
                         binary,
                         &self.decomp_request_tx,
                     );
+                }
+                side_bar::SideBarAction::OpenListing => {
+                    analysis_ops::open_listing_tab(&mut self.state);
                 }
             }
         }
@@ -496,7 +501,7 @@ impl FissionApp {
             MenuAction::ClearCache => {
                 let _ = self
                     .decomp_request_tx
-                .send(decomp_worker::WorkerRequest::clear_cache(String::new()));
+                    .send(decomp_worker::WorkerRequest::clear_cache(String::new()));
                 self.state.log("[*] Decompiler cache clear requested");
             }
             MenuAction::ShowAbout => {
