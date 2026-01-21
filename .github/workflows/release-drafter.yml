@@ -5,9 +5,6 @@ on:
     # branches to consider in the event; optional, defaults to all
     branches:
       - main
-  # pull_request event is required only for autolabeler
-  pull_request:
-    types: [opened, reopened, synchronized]
 
 permissions:
   contents: read
