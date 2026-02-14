@@ -17,6 +17,7 @@ std::string inline_strings(const std::string& code, const std::map<uint64_t, std
 
 // Apply function signatures
 std::string apply_function_signatures(const std::string& code);
+std::string normalize_mingw_printf_args(const std::string& code);
 
 
 // Smart constant replacement
@@ -58,6 +59,9 @@ std::string annotate_structure_offsets(const std::string& code);
 
 // Demangle C++ names and standardize 'this' pointer
 std::string demangle_cpp_names(const std::string& code);
+
+// Normalize noisy C++ indirect/vtable call patterns for readability
+std::string normalize_cpp_virtual_calls(const std::string& code);
 
 } // namespace processing
 } // namespace fission

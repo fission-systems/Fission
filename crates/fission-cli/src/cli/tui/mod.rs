@@ -40,7 +40,7 @@ pub fn run_tui() -> io::Result<()> {
     )
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let mut app = App::new(binary, binary_data);
+    let mut app = App::new(binary, binary_data, cli.compiler_id, cli.profile);
 
     // Setup terminal
     enable_raw_mode()?;

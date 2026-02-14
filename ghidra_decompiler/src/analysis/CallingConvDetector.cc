@@ -32,8 +32,11 @@ CallingConvDetector::~CallingConvDetector() {}
 bool CallingConvDetector::check_ms_x64(Funcdata* fd) {
     if (!is_64bit) return false;
     
-    // Check if RCX/RDX/R8/R9 are used as input parameters
-    std::set<std::string> regs_used;
+    // Check if MS x64 argument registers are used:
+    // - Integer/pointer args: RCX, RDX, R8, R9
+    // - FP args: XMM0, XMM1, XMM2, XMM3
+    std::set<std::string> gpr_regs_used;
+    std::set<std::string> xmm_regs_used;
     const Translate* trans = arch->translate;
     
     int total_ops = 0;
@@ -61,26 +64,39 @@ bool CallingConvDetector::check_ms_x64(Funcdata* fd) {
                       << " (offset=0x" << std::hex << vn->getOffset() 
                       << ", size=" << std::dec << vn->getSize() << ")" << std::endl;
             
-            // Check if it's an MS x64 arg register (RCX, RDX, R8, R9)
+            // Check if it's an MS x64 arg register (GPR or XMM)
             if (reg_name == "RCX" || reg_name == "RDX" || 
                 reg_name == "R8" || reg_name == "R9") {
-                regs_used.insert(reg_name);
-                fission::utils::log_stream() << "    -> MS x64 arg register!" << std::endl;
+                gpr_regs_used.insert(reg_name);
+                fission::utils::log_stream() << "    -> MS x64 GPR arg register!" << std::endl;
+            } else if (reg_name == "XMM0" || reg_name == "XMM1" ||
+                       reg_name == "XMM2" || reg_name == "XMM3") {
+                xmm_regs_used.insert(reg_name);
+                fission::utils::log_stream() << "    -> MS x64 XMM arg register!" << std::endl;
             }
         }
         
-        // Early exit if we found enough evidence
-        if (regs_used.size() >= 2) {
-            fission::utils::log_stream() << "[CallingConvDetector] MS x64 detected (" << regs_used.size() << " arg regs)" << std::endl;
+        // Early exit if we found enough evidence:
+        // - at least 2 GPR arg regs, OR
+        // - mixed integer/fp usage (>=1 GPR and >=1 XMM), OR
+        // - at least 2 XMM arg regs
+        if (gpr_regs_used.size() >= 2 ||
+            (gpr_regs_used.size() >= 1 && xmm_regs_used.size() >= 1) ||
+            xmm_regs_used.size() >= 2) {
+            fission::utils::log_stream() << "[CallingConvDetector] MS x64 detected (gpr="
+                      << gpr_regs_used.size() << ", xmm=" << xmm_regs_used.size() << ")" << std::endl;
             return true;
         }
     }
     
     fission::utils::log_stream() << "[CallingConvDetector] MS x64 check: total_ops=" << total_ops 
               << ", input_varnodes=" << input_varnodes 
-              << ", arg_regs=" << regs_used.size() << std::endl;
+              << ", gpr_arg_regs=" << gpr_regs_used.size()
+              << ", xmm_arg_regs=" << xmm_regs_used.size() << std::endl;
     
-    return regs_used.size() >= 2;
+    return gpr_regs_used.size() >= 2 ||
+           (gpr_regs_used.size() >= 1 && xmm_regs_used.size() >= 1) ||
+           xmm_regs_used.size() >= 2;
 }
 
 bool CallingConvDetector::check_sysv_x64(Funcdata* fd) {

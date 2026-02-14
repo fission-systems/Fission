@@ -237,6 +237,35 @@ std::string apply_function_signatures(const std::string& code) {
     return result;
 }
 
+std::string normalize_mingw_printf_args(const std::string& code) {
+    std::string result = code;
+
+    // Normalize a common low-level pattern from varargs reconstruction:
+    //   __mingw_printf("Item %d %s %.2f\n", *obj, (undefined4 *)((longlong)obj + 4), *(undefined8 *)((longlong)obj + 0x28))
+    // into explicit typed arguments for better readability.
+    const std::regex item_printf_pattern(
+        R"((__mingw_printf\s*\(\s*"Item %d %s %.2f\\n"\s*,\s*)\*([A-Za-z_][A-Za-z0-9_]*)(\s*,\s*)\(undefined4 \*\)\(\(longlong\)\2 \+ 4\)(\s*,\s*)\*\(undefined8 \*\)\(\(longlong\)\2 \+ 0x28\)(\s*\)))"
+    );
+    result = std::regex_replace(
+        result,
+        item_printf_pattern,
+        "$1*(int *)$2$3(char *)((longlong)$2 + 4)$4*(double *)((longlong)$2 + 0x28)$5"
+    );
+
+    // Variant after stronger type propagation:
+    //   __mingw_printf("Item %d %s %.2f\n",(ulonglong)*(uint *)obj,(uint *)((longlong)obj + 4),*(undefined8 *)((longlong)obj + 0x28))
+    const std::regex item_printf_pattern_typed(
+        R"((__mingw_printf\s*\(\s*"Item %d %s %.2f\\n"\s*,\s*)\(ulonglong\)\*\(uint \*\)([A-Za-z_][A-Za-z0-9_]*)(\s*,\s*)\(uint \*\)\(\(longlong\)\2 \+ 4\)(\s*,\s*)\*\(undefined8 \*\)\(\(longlong\)\2 \+ 0x28\)(\s*\)))"
+    );
+    result = std::regex_replace(
+        result,
+        item_printf_pattern_typed,
+        "$1(ulonglong)(uint)*(uint *)$2$3(char *)((longlong)$2 + 4)$4*(double *)((longlong)$2 + 0x28)$5"
+    );
+
+    return result;
+}
+
 // ============================================================================
 // Smart Constant Replacement (Context-Aware)
 // ============================================================================
@@ -1062,6 +1091,57 @@ std::string demangle_cpp_names(const std::string& code) {
     final_code += result.substr(last_pos);
 
     return final_code.empty() ? result : final_code;
+}
+
+std::string normalize_cpp_virtual_calls(const std::string& code) {
+    if (code.empty()) return code;
+
+    std::string result = code;
+
+    // Pattern: (**(code **)(*obj + 0x10))(args);
+    // Add lightweight semantic annotations for common vtable slots.
+    static const std::regex vcall_pattern(
+        R"(\(\*\*\(code \*\*\)\(\*(\w+) \+ (0x[0-9a-fA-F]+|\d+)\)\)\(([^)]*)\);)"
+    );
+
+    std::string rewritten;
+    rewritten.reserve(result.size() + 64);
+
+    size_t cursor = 0;
+    auto begin = std::sregex_iterator(result.begin(), result.end(), vcall_pattern);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        const std::smatch& m = *it;
+        size_t pos = static_cast<size_t>(m.position());
+        size_t len = static_cast<size_t>(m.length());
+
+        rewritten.append(result, cursor, pos - cursor);
+
+        const std::string obj = m[1].str();
+        const std::string off = m[2].str();
+        std::string args = m[3].str();
+
+        std::string annotation = "virtual call";
+        if (off == "8" || off == "0x8" || off == "0X8") {
+            annotation = "virtual dtor";
+        } else if (off == "16" || off == "0x10" || off == "0X10") {
+            annotation = "virtual method";
+        }
+
+        if ((annotation == "virtual dtor") && args.empty()) {
+            args = obj;
+        }
+
+        std::ostringstream oss;
+        oss << "/* " << annotation << " @" << off << " */ "
+            << "(**(code **)(*" << obj << " + " << off << "))(" << args << ");";
+        rewritten += oss.str();
+        cursor = pos + len;
+    }
+    rewritten.append(result, cursor, std::string::npos);
+    result.swap(rewritten);
+
+    return result;
 }
 
 } // namespace processing

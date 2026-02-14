@@ -29,7 +29,7 @@ pub(crate) fn handle_binary_load_for_worker(
     let is_64bit = detect_pe_is_64bit(&request.bytes);
     let mut dummy_binary = fission_loader::loader::LoadedBinaryBuilder::new(
         "dummy".to_string(),
-        request.bytes.clone(),
+        fission_loader::loader::DataBuffer::Heap(request.bytes.clone()),
     )
     .image_base(request.image_base)
     .is_64bit(is_64bit)
@@ -50,11 +50,18 @@ pub(crate) fn handle_binary_load_for_worker(
 
             // Try to detect compiler
             let detection = fission_loader::detect(&dummy_binary);
+            let is_pe = dummy_binary.format.to_ascii_uppercase().starts_with("PE");
             let compiler_id = detection
                 .compiler()
                 .map(|d| match d.name.to_lowercase().as_str() {
                     "microsoft visual c++" | "msvc" | "windows" => "windows",
-                    "gcc" | "mingw" => "gcc",
+                    "gcc" | "mingw" => {
+                        if is_pe {
+                            "windows"
+                        } else {
+                            "gcc"
+                        }
+                    }
                     "clang" => "clang",
                     _ => "default",
                 });

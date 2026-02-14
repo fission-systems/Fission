@@ -41,7 +41,7 @@ pub fn cmd_graph(state: &CliState, addr: Option<u64>) {
             addr
         );
 
-        match generate_pcode_graph(binary, addr, Some(&output_path), false) {
+        match generate_pcode_graph(binary, addr, Some(&output_path), false, None, None) {
             Ok(_) => {
                 println!("{} Graph saved to {}", "[+]".green(), filename);
                 println!(

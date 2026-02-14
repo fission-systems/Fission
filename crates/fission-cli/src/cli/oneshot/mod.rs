@@ -123,7 +123,14 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
     if let Some(addr) = cli.graph {
         #[cfg(feature = "native_decomp")]
         {
-            return graph::generate_pcode_graph(&binary, addr, cli.output.as_ref(), cli.verbose);
+            return graph::generate_pcode_graph(
+                &binary,
+                addr,
+                cli.output.as_ref(),
+                cli.verbose,
+                cli.compiler_id.as_deref(),
+                cli.profile.as_deref(),
+            );
         }
 
         #[cfg(not(feature = "native_decomp"))]
@@ -150,7 +157,15 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
                     }
                 }
             };
-            return analyze_cfg(&binary, addr, format, cli.output.as_ref(), cli.verbose);
+            return analyze_cfg(
+                &binary,
+                addr,
+                format,
+                cli.output.as_ref(),
+                cli.verbose,
+                cli.compiler_id.as_deref(),
+                cli.profile.as_deref(),
+            );
         }
 
         #[cfg(not(feature = "native_decomp"))]
@@ -213,6 +228,8 @@ fn print_help() {
     println!("  \x1b[1m-o\x1b[0m, --output <FILE> Write results to file");
     println!("  \x1b[1m-j\x1b[0m, --json          JSON output format");
     println!("  \x1b[1m-v\x1b[0m, --verbose       Show detailed progress");
+    println!("      --compiler-id <ID> Override compiler ABI hint (auto/windows/gcc/clang/default)");
+    println!("      --profile <P>     Decomp profile: balanced|quality|speed");
     println!();
     println!("\x1b[1;33m📚 Examples:\x1b[0m");
     println!("  fission app.exe -i                    \x1b[90m# Show binary info\x1b[0m");

@@ -157,6 +157,9 @@ std::string run_post_processing(
     // Step 9: Internal function naming improvement
     if (options.internal_names) {
         result = demangle_cpp_names(result);
+        result = normalize_cpp_virtual_calls(result);
+        result = apply_function_signatures(result);
+        result = normalize_mingw_printf_args(result);
         result = improve_internal_function_names(result);
     }
 

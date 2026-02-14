@@ -685,7 +685,10 @@ std::string DecompilationPipeline::handle_decompile(
     int64_t address = extract_json_int(input, "address");
     bool is_64bit = extract_json_bool(input, "is_64bit");
     std::string sla_dir = extract_json_string(input, "sla_dir");
-    std::string compiler_id = "windows";
+    std::string compiler_id = extract_json_string(input, "compiler_id");
+    if (compiler_id.empty()) {
+        compiler_id = "windows";
+    }
     
     if (sla_dir.empty()) {
         return "{\"status\":\"error\",\"message\":\"Missing sla_dir\"}";
@@ -911,7 +914,7 @@ std::string DecompilationPipeline::handle_decompile(
     arch->print->setOutputStream(&c_stream);
     arch->print->docFunction(fd);
     
-    fission::utils::log_stream() << "[fission_decomp] Step 6: Post-processing IAT calls" << std::endl;
+    fission::utils::log_stream() << "[fission_decomp] Step 6: Post-processing pipeline" << std::endl;
     std::string c_code = c_stream.str();
     
     // Inject inferred struct definitions
@@ -955,9 +958,15 @@ std::string DecompilationPipeline::handle_decompile(
     // Apply remaining post-processors
     c_code = recover_unicode_strings(c_code);
     c_code = replace_interlocked_patterns(c_code);
+    c_code = standardize_variable_names(c_code);
     c_code = replace_xunknown_types(c_code);
     c_code = cleanup_seh_boilerplate(c_code);
+    c_code = demangle_cpp_names(c_code);
+    c_code = normalize_cpp_virtual_calls(c_code);
+    c_code = apply_function_signatures(c_code);
+    c_code = normalize_mingw_printf_args(c_code);
     c_code = improve_internal_function_names(c_code);
+    c_code = annotate_structure_offsets(c_code);
     c_code = apply_fid_names(c_code, state.fid_function_names);
     c_code = PostProcessor::convert_integer_constants(c_code);
     
