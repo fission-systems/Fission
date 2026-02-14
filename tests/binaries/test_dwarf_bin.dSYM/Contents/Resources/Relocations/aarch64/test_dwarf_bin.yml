@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     'tests/binaries/test_dwarf_bin'
+relocations:     []
+...

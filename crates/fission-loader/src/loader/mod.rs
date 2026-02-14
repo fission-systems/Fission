@@ -3,64 +3,70 @@
 //! Parses PE/ELF/Mach-O executables using parsers.
 
 use crate::prelude::*;
-use std::fs;
 use std::path::Path;
 
+pub mod cpp;
 pub mod demangle;
 pub mod dwarf;
 pub mod elf;
 pub mod golang;
 pub mod macho;
 pub mod pe;
+pub mod rust;
 pub mod types;
 pub use types::*;
 
 impl LoadedBinary {
-    /// Load and parse a binary file
+    /// Load and parse a binary file using memory mapping
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path_str = path.as_ref().to_string_lossy().to_string();
-        let data = fs::read(&path)?;
-        Self::from_bytes(data, path_str)
+        let path_ref = path.as_ref();
+        let path_str = path_ref.to_string_lossy().to_string();
+
+        let file = std::fs::File::open(path_ref)?;
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        let data = DataBuffer::Mapped(mmap);
+
+        Self::auto_detect_and_parse(data, path_str)
     }
 
     /// Parse binary from bytes
     pub fn from_bytes(data: Vec<u8>, path: String) -> Result<Self> {
         // Auto-detect format and parse
-        Self::auto_detect_and_parse(data, path)
+        Self::auto_detect_and_parse(DataBuffer::Heap(data), path)
     }
 
     /// Parse binary from bytes (alias for compatibility)
-    /// Parse binary from bytes (alias for compatibility)
     pub fn from_bytes_dynamic(data: Vec<u8>, path: String) -> Result<Self> {
-        Self::auto_detect_and_parse(data, path)
+        Self::auto_detect_and_parse(DataBuffer::Heap(data), path)
     }
 
     /// Auto-detect binary format and parse
-    fn auto_detect_and_parse(data: Vec<u8>, path: String) -> Result<Self> {
+    fn auto_detect_and_parse(data: DataBuffer, path: String) -> Result<Self> {
+        let bytes = data.as_slice();
         // Try to detect format by magic bytes
-        if data.len() < 4 {
+        if bytes.len() < 4 {
             return Err(FissionError::loader("Binary too small"));
         }
 
-        let format = if data.len() > 0x3C + 4 {
+        let format = if bytes.len() > 0x3C + 4 {
             let pe_offset =
-                u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
-            if pe_offset < data.len() - 4 && &data[pe_offset..pe_offset + 2] == b"PE" {
+                u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
+            if pe_offset < bytes.len() - 4 && &bytes[pe_offset..pe_offset + 2] == b"PE" {
                 "PE"
-            } else if data.starts_with(b"\x7fELF") {
+            } else if bytes.starts_with(b"\x7fELF") {
                 "ELF"
             } else {
-                let magic = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
+                let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
                 if matches!(magic, 0xfeedface | 0xfeedfacf | 0xcefaedfe | 0xcffaedfe) {
                     "Mach-O"
                 } else {
                     "Unknown"
                 }
             }
-        } else if data.starts_with(b"\x7fELF") {
+        } else if bytes.starts_with(b"\x7fELF") {
             "ELF"
         } else {
-            let magic = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
+            let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
             if matches!(magic, 0xfeedface | 0xfeedfacf | 0xcefaedfe | 0xcffaedfe) {
                 "Mach-O"
             } else {
@@ -77,17 +83,27 @@ impl LoadedBinary {
 
         // Go Language Analysis
         let detection = crate::detector::detect(&binary);
+        if let Some(lang) = detection.language() {
+            tracing::info!(
+                "[Loader] Detected language: {} (confidence: {:?})",
+                lang.name,
+                lang.confidence
+            );
+        }
+
         if detection.language().map_or(false, |d| d.name == "Go") {
             let analyzer = golang::GoAnalyzer::new(&binary);
             if let Ok(go_functions) = analyzer.analyze() {
-                // Merge Go functions into binary
+                // Merge Go functions into binary using a map for O(N) performance
+                use std::collections::HashMap;
+                let mut addr_to_existing = HashMap::new();
+                for (idx, func) in binary.inner().functions.iter().enumerate() {
+                    addr_to_existing.insert(func.address, idx);
+                }
+
                 for go_func in go_functions {
-                    if let Some(existing) = binary
-                        .inner_mut()
-                        .functions
-                        .iter_mut()
-                        .find(|f| f.address == go_func.address)
-                    {
+                    if let Some(&idx) = addr_to_existing.get(&go_func.address) {
+                        let existing = &mut binary.inner_mut().functions[idx];
                         if existing.name.starts_with("FUN_")
                             || existing.name.starts_with("sub_")
                             || existing.name.is_empty()
@@ -178,6 +194,18 @@ impl LoadedBinary {
             }
         }
 
+        // Rust VTable Analysis
+        if detection.language().map_or(false, |d| d.name == "Rust") {
+            let analyzer = rust::RustAnalyzer::new(&binary);
+            let rust_vtables = analyzer.analyze_vtables();
+            for vtable in rust_vtables {
+                binary
+                    .inner_mut()
+                    .inferred_types
+                    .push(vtable.to_inferred_type());
+            }
+        }
+
         // DWARF Debug Information Analysis (works for ELF and Mach-O with debug info)
         {
             let dwarf_analyzer = dwarf::DwarfAnalyzer::new(&binary);
@@ -190,6 +218,15 @@ impl LoadedBinary {
                         .inferred_types
                         .push(ty.to_inferred_type());
                 }
+            }
+        }
+
+        // C++ RTTI Analysis
+        {
+            let analyzer = cpp::CppAnalyzer::new(&binary);
+            let cpp_types = analyzer.to_inferred_types();
+            for ty in cpp_types {
+                binary.inner_mut().inferred_types.push(ty);
             }
         }
 
@@ -248,28 +285,29 @@ mod tests {
 
     #[test]
     fn test_loaded_binary_builder() {
-        let builder = LoadedBinaryBuilder::new("test.bin".to_string(), vec![0x90; 100])
-            .format("RAW")
-            .entry_point(0x1000)
-            .image_base(0x1000)
-            .is_64bit(true)
-            .add_function(FunctionInfo {
-                name: "main".to_string(),
-                address: 0x1000,
-                size: 20,
-                is_export: true,
-                is_import: false,
-            })
-            .add_section(SectionInfo {
-                name: ".text".to_string(),
-                virtual_address: 0x1000,
-                virtual_size: 100,
-                file_offset: 0,
-                file_size: 100,
-                is_executable: true,
-                is_readable: true,
-                is_writable: false,
-            });
+        let builder =
+            LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(vec![0x90; 100]))
+                .format("RAW")
+                .entry_point(0x1000)
+                .image_base(0x1000)
+                .is_64bit(true)
+                .add_function(FunctionInfo {
+                    name: "main".to_string(),
+                    address: 0x1000,
+                    size: 20,
+                    is_export: true,
+                    is_import: false,
+                })
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x1000,
+                    virtual_size: 100,
+                    file_offset: 0,
+                    file_size: 100,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                });
 
         let binary = builder.build().expect("Failed to build LoadedBinary");
 
@@ -289,42 +327,43 @@ mod tests {
     #[test]
     fn test_function_lookup_o1() {
         // Test that O(1) function lookups work correctly
-        let builder = LoadedBinaryBuilder::new("test.bin".to_string(), vec![0x90; 1000])
-            .format("RAW")
-            .entry_point(0x1000)
-            .image_base(0x1000)
-            .is_64bit(true)
-            .add_function(FunctionInfo {
-                name: "func_a".to_string(),
-                address: 0x1000,
-                size: 50,
-                is_export: true,
-                is_import: false,
-            })
-            .add_function(FunctionInfo {
-                name: "func_b".to_string(),
-                address: 0x1100,
-                size: 100,
-                is_export: false,
-                is_import: false,
-            })
-            .add_function(FunctionInfo {
-                name: "func_c".to_string(),
-                address: 0x1200,
-                size: 0, // Unknown size
-                is_export: false,
-                is_import: true,
-            })
-            .add_section(SectionInfo {
-                name: ".text".to_string(),
-                virtual_address: 0x1000,
-                virtual_size: 1000,
-                file_offset: 0,
-                file_size: 1000,
-                is_executable: true,
-                is_readable: true,
-                is_writable: false,
-            });
+        let builder =
+            LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(vec![0x90; 1000]))
+                .format("RAW")
+                .entry_point(0x1000)
+                .image_base(0x1000)
+                .is_64bit(true)
+                .add_function(FunctionInfo {
+                    name: "func_a".to_string(),
+                    address: 0x1000,
+                    size: 50,
+                    is_export: true,
+                    is_import: false,
+                })
+                .add_function(FunctionInfo {
+                    name: "func_b".to_string(),
+                    address: 0x1100,
+                    size: 100,
+                    is_export: false,
+                    is_import: false,
+                })
+                .add_function(FunctionInfo {
+                    name: "func_c".to_string(),
+                    address: 0x1200,
+                    size: 0, // Unknown size
+                    is_export: false,
+                    is_import: true,
+                })
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x1000,
+                    virtual_size: 1000,
+                    file_offset: 0,
+                    file_size: 1000,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                });
 
         let binary = builder.build().expect("Failed to build LoadedBinary");
 

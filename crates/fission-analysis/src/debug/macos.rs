@@ -4,7 +4,7 @@
 //! Currently a stub implementation - Mach debugging requires special entitlements.
 
 use super::traits::Debugger;
-use super::types::{DebugState, DebugStatus, ProcessInfo, RegisterState};
+use super::types::{DebugState, ProcessInfo, RegisterState};
 
 /// macOS debugger implementation (stub)
 ///

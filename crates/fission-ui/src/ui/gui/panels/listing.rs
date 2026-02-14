@@ -73,6 +73,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
         || state.viewmodels.listing.current_address > max_addr
     {
         state.viewmodels.listing.current_address = binary.entry_point;
+        state.viewmodels.listing.pending_scroll_to_current = true;
     }
 
     // Calculate virtual row parameters
@@ -102,8 +103,13 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     );
 
     // Calculate current row index from address
-    let current_row = address_to_row(state.viewmodels.listing.current_address, min_addr);
-    let scroll_to_row = Some(current_row.saturating_sub(visible_rows / 2));
+    let scroll_to_row = if state.viewmodels.listing.pending_scroll_to_current {
+        state.viewmodels.listing.pending_scroll_to_current = false;
+        let current_row = address_to_row(state.viewmodels.listing.current_address, min_addr);
+        Some(current_row.saturating_sub(visible_rows / 2))
+    } else {
+        None
+    };
 
     // Render virtual scroll table
     render_virtual_table(
@@ -149,6 +155,7 @@ fn render_header(
         if goto_input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             if let Some(addr) = parse_address(&state.viewmodels.listing.goto_address_input) {
                 state.viewmodels.listing.current_address = addr.clamp(min_addr, max_addr);
+                state.viewmodels.listing.pending_scroll_to_current = true;
                 state.viewmodels.listing.goto_address_input.clear();
             }
         }
@@ -157,6 +164,7 @@ fn render_header(
         if ui.button("🏠").on_hover_text("Entry point").clicked() {
             if let Some(binary) = state.analysis.loaded_binary() {
                 state.viewmodels.listing.current_address = binary.entry_point;
+                state.viewmodels.listing.pending_scroll_to_current = true;
             }
         }
 
@@ -205,6 +213,7 @@ fn handle_keyboard_input(
             .current_address
             .saturating_sub(step)
             .max(min_addr);
+        state.viewmodels.listing.pending_scroll_to_current = true;
         ctx.request_repaint();
     }
 
@@ -215,6 +224,7 @@ fn handle_keyboard_input(
             .current_address
             .saturating_add(step)
             .min(max_addr);
+        state.viewmodels.listing.pending_scroll_to_current = true;
         ctx.request_repaint();
     }
 
@@ -225,6 +235,7 @@ fn handle_keyboard_input(
             .current_address
             .saturating_sub(page)
             .max(min_addr);
+        state.viewmodels.listing.pending_scroll_to_current = true;
         ctx.request_repaint();
     }
 
@@ -235,16 +246,19 @@ fn handle_keyboard_input(
             .current_address
             .saturating_add(page)
             .min(max_addr);
+        state.viewmodels.listing.pending_scroll_to_current = true;
         ctx.request_repaint();
     }
 
     if ctx.input(|i| i.key_pressed(egui::Key::Home)) {
         state.viewmodels.listing.current_address = min_addr;
+        state.viewmodels.listing.pending_scroll_to_current = true;
         ctx.request_repaint();
     }
 
     if ctx.input(|i| i.key_pressed(egui::Key::End)) {
         state.viewmodels.listing.current_address = max_addr.saturating_sub(page);
+        state.viewmodels.listing.pending_scroll_to_current = true;
         ctx.request_repaint();
     }
 }
@@ -420,6 +434,7 @@ fn render_virtual_table(
 
                     if resp.clicked() {
                         state.viewmodels.listing.current_address = row_addr;
+                        state.viewmodels.listing.pending_scroll_to_current = true;
                     }
                     if resp.double_clicked() {
                         state.ui.pending_jump = Some(row_addr);

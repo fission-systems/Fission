@@ -1,192 +1,87 @@
 # Fission Architecture Documentation
 
-## Module Structure
+## Workspace Structure (`crates/*`)
 
-### Core Modules
+Fission is a Cargo workspace with strict crate boundaries:
 
-#### `src/core/` - Core Infrastructure
-- `errors.rs` - Unified error handling with `FissionError` enum
-- `config.rs` - Configuration management
-- `logging.rs` - Logging infrastructure
-- `prelude.rs` - Common imports
+- `fission-core`: shared configuration, error types, common models, plugin trait types
+- `fission-loader`: binary loading/parsing (PE/ELF/Mach-O), symbol/language metadata extraction
+- `fission-disasm`: disassembly abstraction (iced-x86 based)
+- `fission-pcode`: P-code IR and optimizer pipeline
+- `fission-signatures`: API/signature and relation databases
+- `fission-ffi`: unsafe boundary to native decompiler and pcode C ABI
+- `fission-analysis`: analysis logic (CFG/xref/decomp wrapping/debug/unpacker/plugin/script)
+- `fission-ui`: egui GUI presentation and UI state/viewmodels
+- `fission-cli`: entrypoints, one-shot/interactive CLI, TUI binaries
 
-#### `src/analysis/` - Binary Analysis
-- `loader/` - Binary parsing (PE, ELF, Mach-O)
-- `disasm/` - Disassembly engine (iced-x86)
-- `decomp/` - Decompilation (FFI to Ghidra)
-- `signatures/` - Windows API signatures
-- `xrefs/` - Cross-reference analysis
+## Dependency Direction
 
-#### `src/ui/` - User Interfaces
-- `gui/` - egui-based GUI
-- `cli/` - Command-line REPL interface
+Primary dependency flow:
 
-### Analysis Pipeline
+`fission-core` -> (`fission-loader`, `fission-signatures`, `fission-disasm`) -> `fission-pcode` -> `fission-analysis` -> (`fission-ui`, `fission-cli`)
 
-#### Static Analysis Layer
-**`src/analysis/`** - Binary file analysis
-- `loader/` - Parses PE/ELF/Mach-O from **disk files**
-- `disasm/` - Static disassembly
-- `signatures/` - API signatures and patterns
+Native integration flow:
 
-#### Dynamic Analysis Layer  
-**`src/unpacker/`** - Runtime memory analysis (formerly `debug_engine`)
-- **Purpose**: IAT reconstruction, process dumping, PE fixing
-- **Input**: Running process memory
-- **Use Cases**: Unpacking, malware analysis, forensics
-- **NOT a debugger** - Focuses on memory extraction/reconstruction
+`ghidra_decompiler/src/*` <-> `fission-ffi` <-> `fission-analysis`
 
-#### Interactive Debugging Layer
-**`src/debug/`** - Live process debugging
-- **Purpose**: Interactive debugging (breakpoints, stepping, memory manipulation)
-- **Input*unpacker/` - Runtime Memory Analysis (ACTIVE)
-**Purpose**: Import reconstruction, process dumping, PE fixing
-**Status**: Active, Windows-only specialized tool
-**Platform**: Windows only
-**Key Features**:
-- IAT (Import Address Table) reconstruction from memory
-- Process dumping with PE fixing
-- Unpacking packed/obfuscated executables
+Notes:
 
-**Use Cases**:
-- Malware analysis
-- Unpacking commercial packers
-- Memory forensics
-- Executable reconstruction
+- `fission-ffi` owns unsafe/native boundary.
+- `fission-analysis` consumes `fission-ffi` through feature gates (`native_decomp`).
+- UI/CLI should remain consumers (presentation/orchestration), not business-logic owners.
 
-**Not a Debugger**: Despite using debug APIs for memory access, this module
-focuses on **extraction and reconstruction**, not interactive debugging.
+## Runtime Layers
 
-### ✅ Module Clarification (Updated)
+### 1) Static Analysis Layer
 
-**Previously Confusing**: `debug_engine` sounded like a debugger but was actually
-an unpacking/dumping tool.
+- Loader: parse binary bytes and construct `LoadedBinary`
+- Disassembly: instruction decoding and textual rendering
+- P-code/CFG/XRef: IR-based analysis and graph modeling
+- Signatures: API/function identification and relation checks
 
-**Now Clear**: 
-- `debug/` = Interactive debugging
-- `unpacker/` = Memory analysis & reconstruction
+### 2) Decompilation Layer
 
-No more type duplication issues - these are completely different tools with
-different purposes. Debugging in `ttd/`
+- Native decompiler integration is feature-gated (`native_decomp`)
+- `fission-analysis::analysis::decomp` provides safe high-level wrapper/cache
+- `fission-ffi` provides ABI + safe wrappers for Rust callers
 
-#### `src/debug_engine/` - Legacy TitanEngine (DEPRECATED)
-**Purpose**: Windows-only debugging engine
-**Status**: Legacy code, to be phased out
-**Platform**: Windows only
-**Key Types** (DUPLICATE):
-- `ProcessInfo` - Windows-specific process info with HANDLE
-- `Breakpoint` - Windows-specific breakpoint
-- `TitanEngine` - Main engine struct
+### 3) Dynamic Analysis Layer
 
-**Issues**:
-- Duplicates types from `src/debug/`
-- Windows-specific, not cross-platform
-- Tightly coupled to Windows APIs
-- No clear migration path
+Two distinct domains exist in `fission-analysis`:
 
-### ⚠️ CRITICAL: Type Duplication
+- `debug/`: interactive debugging (attach/step/register/memory/ttd scaffolding)
+- `unpacker/`: runtime memory extraction/reconstruction (IAT rebuild, dump/fix)
 
-**Problem**: Same type names in different modules
+`unpacker` is not a general interactive debugger; it is purpose-built for extraction and reconstruction workflows.
 
-| Type | `debug/types.rs` | `debug_engine/types.rs` | Status |
-|------|------------------|-------------------------|--------|
-| `ProcessInfo` | ✅ Cross-platform | ❌ Windows-only | Duplicate |
-| `Breakpoint` | ✅ Generic | ❌ Windows-specific | Duplicate |
+### 4) Presentation Layer
 
-**Impact**:
-- Confusing imports
-- Maintenance burden
-- Risk of using wrong type
-- Prevents clean migration
+- `fission-ui`: egui app, panels, viewmodels, GUI command routing
+- `fission-cli`: CLI arguments, one-shot analysis commands, interactive REPL/TUI
 
-## Planned Refactoring
+## Feature Gates
 
-### Phase 1: Immediate (✅ COMPLETED)
-1. ✅ Remove `unwrap()` calls throughout codebase
-2. ✅ Add FFI safety validation to `DecompilerNative`
-3. ✅ Improve error handling consistency
-4. ✅ Document architecture issues
+Important workspace-level features:
 
-### Phase 2: Type Consolidation (✅ RESOLVED)
+- `native_decomp`: enables native decompiler path (`fission-ffi` + analysis integration)
+- `python`: enables PyO3 bridge/script API
+- `gui` / `cli` / `tui`: binary/runtime surface selection
 
-**Resolution**: Modules clarified - no actual duplication.
+Use `#[cfg(feature = "native_decomp")]` for native decompiler dependent code paths.
 
-- `debug/` types are for **interactive debugging**
-- `unpacker/` types are for **memory analysis/dumping**
-- Different purposes, different contexts
-- No migration needed - intentional design
+## Error Handling Policy
 
-### Phase 3: Module Cleanup
-1. **Remove Dead Code**:
-   - `src/parser/` - Nearly empty, unused
-   - Unused FFI bindings
-   - Old commented-out code
+- Prefer `fission_core::errors::FissionError` and `fission_core::Result<T>`
+- Core and analysis logic should propagate errors (`?`) rather than panic
+- CLI/UI handlers should report/log errors instead of crashing
 
-2. **Reduce Lint Allowances**:
-   - Fix actual issues instead of silencing
-   - Remove `#![allow(dead_code)]`
-   - Remove `#![allow(unused_imports)]`
+## Concurrency & Performance
 
-3. **Improve Synchronization**:
-   - Document Arc<Mutex<>> usage
-   - Consider using channels instead of shared state
-   - Remove global static TOKIO_RUNTIME
+- Zero-copy and shared ownership patterns are used for large binary data (`DataBuffer`, `Arc`)
+- Caching used for decompilation and repeated analyses
+- `rayon` is available for CPU-bound analysis tasks
 
-### Phase 4: Testing
-1. Add unit tests for core modules
-2. Add integration tests for debugger
-3. Add FFI safety tests
-4. Add error handling tests
+## Native Code Boundary Rule
 
-## Design Principles
-
-### Error Handling
-- ✅ Use `Result<T>` for all fallible operations
-- ✅ Never use `unwrap()` in production code
-- ✅ Use `expect()` only for truly impossible cases
-- ✅ Propagate errors with `?` operator
-- ✅ Provide meaningful error messages
-
-### FFI Safety
-- ✅ Validate all inputs before FFI calls
-- ✅ Never pass null pointers from safe code
-- ✅ Check return values from C/C++
-- ✅ Use RAII for resource management
-- ✅ Track object validity to prevent use-after-free
-
-### Module Organization
-- Keep platform-specific code isolated
-- Use traits for cross-platform abstractions
-- Clear separation of concerns
-- Avoid circular dependencies
-
-### Concurrency
-- Prefer message passing over shared state
-- Document thread safety assumptions
-- Use appropriate sync primitives (Mutex vs RwLock vs channels)
-- Avoid global mutable state
-
-## Migration Checklist
-
-### ✅ Module Rename (COMPLETED)
-
-- [x] Rename `debug_engine/` to `unpacker/`
-- [x] Update module declaration in `src/lib.rs`
-- [x] Update imports in `titan_ops.rs`
-- [x] Update documentation with clear purpose
-- [x] Clarify that it's NOT a debugger
-- [x] Update ARCHITECTURE.md
-
-### parser Module Cleanup
-
-- [ ] Check if `parser/` is actually used
-- [ ] Move any used code to `analysis/loader`
-- [ ] Delete empty `parser/` module
-- [ ] Update `src/lib.rs` module exports
-
-## Notes
-
-- `debug/` is the future - modern, cross-platform, well-architected
-- `debug_engine/` is legacy - Windows-only, needs migration
-- Priority: Complete type consolidation before adding new features
-- Goal: Single source of truth for all types
+`ghidra_decompiler/decompile` is upstream source.  
+Modify wrappers/integration code under `ghidra_decompiler/src/*` and Rust crates, not upstream `decompile` internals.

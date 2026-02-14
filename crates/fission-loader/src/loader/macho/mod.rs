@@ -1,5 +1,5 @@
 use crate::loader::types::{
-    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
+    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
     extract_fixed_string,
 };
 use crate::prelude::*;
@@ -13,9 +13,10 @@ use schema::*;
 pub struct MachoLoader;
 
 impl MachoLoader {
-    pub fn parse(data: Vec<u8>, path: String) -> Result<LoadedBinary> {
+    pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         // Read Magic
-        let mut cursor = Cursor::new(&data);
+        let bytes = data.as_slice();
+        let mut cursor = Cursor::new(bytes);
         let magic =
             u32::read_be(&mut cursor).map_err(|e| err!(loader, "Invalid MachO Magic: {}", e))?;
 
@@ -46,8 +47,9 @@ impl MachoLoader {
         }
     }
 
-    fn parse_64(data: Vec<u8>, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
-        let mut reader = Cursor::new(&data);
+    fn parse_64(data: DataBuffer, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
+        let bytes = data.as_slice();
+        let mut reader = Cursor::new(bytes);
         let header = MachHeader64::read_options(&mut reader, endian, ())
             .map_err(|e| err!(loader, "MachO64 Header: {}", e))?;
 
@@ -129,7 +131,7 @@ impl MachoLoader {
                 symtab_info = Some(symtab.clone());
 
                 // Access Symbols (random access)
-                Self::parse_symbols_64(&data, &symtab, endian, &mut functions_info);
+                Self::parse_symbols_64(bytes, &symtab, endian, &mut functions_info);
             } else if cmd_header.cmd == LC_DYSYMTAB {
                 let dysymtab = DysymtabCommand::read_options(&mut reader, endian, ()).unwrap();
                 dysymtab_info = Some(dysymtab);
@@ -154,7 +156,7 @@ impl MachoLoader {
         let mut iat_symbols = std::collections::HashMap::new();
         if let (Some(symtab), Some(dysymtab)) = (symtab_info, dysymtab_info) {
             Self::parse_dynamic_symbols_64(
-                &data,
+                bytes,
                 &symtab,
                 &dysymtab,
                 &sections_info,
@@ -175,8 +177,9 @@ impl MachoLoader {
             .build()
     }
 
-    fn parse_32(data: Vec<u8>, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
-        let mut reader = Cursor::new(&data);
+    fn parse_32(data: DataBuffer, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
+        let bytes = data.as_slice();
+        let mut reader = Cursor::new(bytes);
         let header = MachHeader32::read_options(&mut reader, endian, ())
             .map_err(|e| err!(loader, "MachO32 Header: {}", e))?;
 

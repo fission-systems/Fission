@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -136,12 +135,12 @@ impl EventBus {
     where
         F: Fn(&FissionEvent) + Send + Sync + 'static,
     {
-        let mut id_guard = self.next_id.write().unwrap();
+        let mut id_guard = self.next_id.write().unwrap_or_else(|e| e.into_inner());
         let id = *id_guard;
         *id_guard += 1;
         drop(id_guard);
 
-        let mut subs = self.subscribers.write().unwrap();
+        let mut subs = self.subscribers.write().unwrap_or_else(|e| e.into_inner());
         subs.insert(id, Box::new(handler));
 
         id
@@ -149,13 +148,13 @@ impl EventBus {
 
     /// Unsubscribe a listener
     pub fn unsubscribe(&self, id: u64) {
-        let mut subs = self.subscribers.write().unwrap();
+        let mut subs = self.subscribers.write().unwrap_or_else(|e| e.into_inner());
         subs.remove(&id);
     }
 
     /// Publish an event to all subscribers
     pub fn publish(&self, event: FissionEvent) {
-        let subs = self.subscribers.read().unwrap();
+        let subs = self.subscribers.read().unwrap_or_else(|e| e.into_inner());
         for handler in subs.values() {
             handler(&event);
         }

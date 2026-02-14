@@ -25,6 +25,9 @@ pub fn open_listing_tab(state: &mut AppState) {
         state.ui.active_tab_index = Some(pos);
     }
 
+    // Scroll to current anchor once when opening the tab.
+    state.viewmodels.listing.pending_scroll_to_current = true;
+
     state.log("[*] Opened Listing View");
 }
 

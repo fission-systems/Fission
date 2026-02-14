@@ -86,7 +86,7 @@ pub fn handle_binary_loaded(
         .map(|f| (f.address, f.name.clone()))
         .collect();
     let matched_sigs =
-        sig_db.identify_functions_in_binary(&binary.data, &func_addrs, binary.image_base);
+        sig_db.identify_functions_in_binary(binary.data.as_slice(), &func_addrs, binary.image_base);
     if !matched_sigs.is_empty() {
         state.log(format!(
             "[*] CRT signatures matched: {} functions",
@@ -126,12 +126,12 @@ pub fn handle_binary_loaded(
 
     state.log(format!(
         "[*] Binary data: {} bytes (image_base: 0x{:x})",
-        binary.data.len(),
+        binary.data.as_slice().len(),
         binary.image_base
     ));
 
     let request = decomp_worker::WorkerRequest::load_binary(
-        binary.data.clone(),
+        binary.data.as_slice().to_vec(),
         binary.image_base,
         combined_symbols,
         binary.global_symbols.clone(),

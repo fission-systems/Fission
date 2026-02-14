@@ -28,9 +28,34 @@ pub fn cmd_info(state: &CliState) {
     );
     println!("  {} 0x{:016X}", "Entry Point:".bold(), binary.entry_point);
     println!("  {} 0x{:016X}", "Image Base:".bold(), binary.image_base);
-    println!("  {} {} bytes", "File Size:".bold(), binary.data.len());
+    println!(
+        "  {} {} bytes",
+        "File Size:".bold(),
+        binary.data.as_slice().len()
+    );
     println!("  {} {}", "Sections:".bold(), binary.sections.len());
     println!("  {} {}", "Functions:".bold(), binary.functions.len());
+    println!(
+        "  {} {}",
+        "Inferred Types:".bold(),
+        binary.inferred_types.len()
+    );
+
+    if !binary.inferred_types.is_empty() {
+        println!();
+        println!("{}", "Inferred Types".bold().underline());
+        for ty in &binary.inferred_types {
+            println!("  - {} ({})", ty.name.green(), ty.kind.cyan());
+            if !ty.fields.is_empty() {
+                for field in &ty.fields {
+                    println!(
+                        "    + 0x{:02x}: {} ({})",
+                        field.offset, field.name, field.type_name
+                    );
+                }
+            }
+        }
+    }
 
     println!();
 }

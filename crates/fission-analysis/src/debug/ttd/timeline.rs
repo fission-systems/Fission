@@ -4,7 +4,6 @@ use super::recorder::TTDRecorder;
 use super::snapshot::{ExecutionSnapshot, SnapshotStats};
 #[cfg(target_os = "linux")]
 use crate::debug::rr::RRDebugger;
-use crate::debug::traits::TimeTravelDebugger;
 
 /// Timeline navigation result
 #[derive(Debug, Clone)]

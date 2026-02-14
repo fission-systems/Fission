@@ -1,7 +1,6 @@
 use super::core::PluginManager;
-use super::types::HookCallback;
 use crate::app::events::{FissionEvent, FissionEventType};
-use crate::plugin::api::BinaryInfo;
+use crate::plugin::api::create_binary_info;
 use crate::plugin::{HookPriority, PluginContext, PluginHook};
 
 impl PluginManager {
@@ -56,7 +55,11 @@ impl PluginManager {
     pub fn emit_event(&self, event: &FissionEvent) {
         // 1. Dispatch to trait-based plugins
         if let Some(api) = &self.api {
-            let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
+            let extension = self
+                .event_bus
+                .clone()
+                .map(|arc| arc as std::sync::Arc<dyn std::any::Any + Send + Sync>);
+            let ctx = PluginContext::new(api.clone(), extension);
 
             for plugin in self.plugins.values() {
                 if !plugin.info.enabled {
@@ -66,7 +69,7 @@ impl PluginManager {
                 if let Some(instance) = &plugin.instance {
                     match event {
                         FissionEvent::BinaryLoaded(binary) => {
-                            let info = BinaryInfo::from(binary.as_ref());
+                            let info = create_binary_info(binary.as_ref());
                             instance.on_binary_loaded(&ctx, &info)
                         }
                         FissionEvent::DecompilationSuccess { address, code, .. } => {

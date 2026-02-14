@@ -7,6 +7,7 @@ use eframe::egui;
 use crate::ui::gui::components::widgets::empty_state_with_spacing;
 use crate::ui::gui::core::state::AppState;
 use crate::ui::gui::theme::catppuccin;
+use fission_analysis::analysis::cfg::CfgSummary;
 
 /// Actions that can be triggered from the CFG panel
 pub enum CfgAction {
@@ -92,7 +93,7 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) -> CfgAction {
 }
 
 /// Render CFG analysis content
-fn render_cfg_content(ui: &mut egui::Ui, cfg: &CfgAnalysisResult) {
+fn render_cfg_content(ui: &mut egui::Ui, cfg: &CfgSummary) {
     // Metrics section
     egui::CollapsingHeader::new(egui::RichText::new("Metrics").color(catppuccin::MAUVE))
         .default_open(true)
@@ -208,106 +209,29 @@ fn render_cfg_content(ui: &mut egui::Ui, cfg: &CfgAnalysisResult) {
 fn export_cfg_dot(state: &mut AppState) {
     if let Some(ref cfg_result) = state.analysis.domain.cfg_analysis {
         // Generate DOT content
-        let dot_content = &cfg_result.dot_content;
+        if let Some(dot_content) = &cfg_result.dot_content {
+            // Try to write to file
+            let filename = format!(
+                "cfg_{:x}.dot",
+                state
+                    .analysis
+                    .domain
+                    .selected_function
+                    .as_ref()
+                    .map(|f| f.address)
+                    .unwrap_or(0)
+            );
 
-        // Try to write to file
-        let filename = format!(
-            "cfg_{:x}.dot",
-            state
-                .analysis
-                .domain
-                .selected_function
-                .as_ref()
-                .map(|f| f.address)
-                .unwrap_or(0)
-        );
-
-        match std::fs::write(&filename, dot_content) {
-            Ok(_) => {
-                state.log(format!("[✓] CFG exported to: {}", filename));
+            match std::fs::write(&filename, dot_content) {
+                Ok(_) => {
+                    state.log(format!("[✓] CFG exported to: {}", filename));
+                }
+                Err(e) => {
+                    state.log(format!("[!] Failed to export CFG: {}", e));
+                }
             }
-            Err(e) => {
-                state.log(format!("[!] Failed to export CFG: {}", e));
-            }
-        }
-    }
-}
-
-/// CFG analysis result for display
-#[derive(Debug, Clone, Default)]
-pub struct CfgAnalysisResult {
-    pub block_count: usize,
-    pub edge_count: usize,
-    pub cyclomatic_complexity: usize,
-    pub max_nesting_depth: usize,
-    pub loops: Vec<LoopDisplayInfo>,
-    pub blocks: Vec<BlockDisplayInfo>,
-    pub dot_content: String,
-}
-
-/// Loop info for display
-#[derive(Debug, Clone)]
-pub struct LoopDisplayInfo {
-    pub header: usize,
-    pub kind: String,
-    pub body: Vec<usize>,
-}
-
-/// Block info for display
-#[derive(Debug, Clone)]
-pub struct BlockDisplayInfo {
-    pub index: usize,
-    pub address: String,
-    pub is_entry: bool,
-    pub is_exit: bool,
-    pub successors: Vec<usize>,
-}
-
-impl CfgAnalysisResult {
-    /// Create from CfgAnalysis
-    #[cfg(feature = "native_decomp")]
-    pub fn from_analysis(analysis: &fission_analysis::analysis::cfg::CfgAnalysis) -> Self {
-        use fission_analysis::analysis::cfg::{CfgVisualizer, DotOptions};
-
-        let loops: Vec<LoopDisplayInfo> = analysis
-            .loops
-            .iter()
-            .map(|l| LoopDisplayInfo {
-                header: l.header,
-                kind: format!("{:?}", l.kind),
-                body: l.body.iter().copied().collect(),
-            })
-            .collect();
-
-        let blocks: Vec<BlockDisplayInfo> = analysis
-            .cfg
-            .blocks
-            .iter()
-            .map(|b| BlockDisplayInfo {
-                index: b.index,
-                address: format!("0x{:x}", b.start_address),
-                is_entry: b.is_entry,
-                is_exit: b.is_exit,
-                successors: b.successors.iter().map(|e| e.target).collect(),
-            })
-            .collect();
-
-        let dot_options = DotOptions {
-            show_instructions: true,
-            show_addresses: true,
-            highlight_loops: true,
-            ..Default::default()
-        };
-        let dot_content = CfgVisualizer::to_dot(&analysis.cfg, &analysis.loops, &dot_options);
-
-        CfgAnalysisResult {
-            block_count: analysis.cfg.block_count(),
-            edge_count: analysis.cfg.edge_count(),
-            cyclomatic_complexity: analysis.metrics.cyclomatic_complexity,
-            max_nesting_depth: analysis.metrics.max_nesting_depth,
-            loops,
-            blocks,
-            dot_content,
+        } else {
+            state.log("[!] No DOT content available for this analysis");
         }
     }
 }

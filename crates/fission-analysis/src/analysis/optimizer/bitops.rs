@@ -105,7 +105,7 @@ fn try_simplify_or(left: &Expr, right: &Expr) -> Option<Expr> {
     // (x & mask1) | mask2 where mask1 is subset of mask2 → mask2
     if let Expr::BinOp {
         op: BinOpKind::And,
-        left: inner_left,
+        left: _inner_left,
         right: inner_right,
     } = left
     {

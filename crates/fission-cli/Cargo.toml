@@ -24,6 +24,7 @@ cli = ["dep:reedline", "dep:clap"]
 tui = ["dep:ratatui", "dep:crossterm", "dep:clap"]
 native_decomp = ["fission-analysis/native_decomp", "dep:fission-ffi"]
 python = ["fission-analysis/python"]
+tokio-console = ["dep:console-subscriber"]
 
 [dependencies]
 fission-core = { path = "../fission-core" }
@@ -42,6 +43,7 @@ iced-x86 = { version = "1.21", features = ["std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 libc = "0.2"
+console-subscriber = { version = "0.2", optional = true }
 
 [[bin]]
 name = "fission"

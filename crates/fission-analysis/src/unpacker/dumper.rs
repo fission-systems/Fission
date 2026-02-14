@@ -1,5 +1,6 @@
-use super::types::*;
+#[cfg(target_os = "windows")]
 use std::fs::File;
+#[cfg(target_os = "windows")]
 use std::io::Write;
 
 #[cfg(target_os = "windows")]

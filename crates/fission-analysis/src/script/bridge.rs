@@ -391,11 +391,17 @@ impl PythonBridge {
             // Create FissionAPI instance with shared state and add to globals
             let api = FissionAPI::with_state(state_clone);
             let globals = PyDict::new_bound(py);
-            globals
-                .set_item("FissionAPI", fission.getattr("FissionAPI").unwrap())
+            let fission_api_class = fission
+                .getattr("FissionAPI")
                 .map_err(|e| ScriptError::PythonError(e.to_string()))?;
             globals
-                .set_item("api", api.into_pyobject(py).unwrap())
+                .set_item("FissionAPI", fission_api_class)
+                .map_err(|e| ScriptError::PythonError(e.to_string()))?;
+            let api_object = api
+                .into_pyobject(py)
+                .map_err(|e| ScriptError::PythonError(e.to_string()))?;
+            globals
+                .set_item("api", api_object)
                 .map_err(|e| ScriptError::PythonError(e.to_string()))?;
 
             py.run_bound(code, Some(&globals), None)

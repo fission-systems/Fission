@@ -4,7 +4,9 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
+#[cfg(target_os = "linux")]
+use std::process::{Command, Stdio};
 
 use super::gdb_mi::{GdbMiParser, MiResponse, MiValue};
 use crate::debug::traits::TimeTravelDebugger;

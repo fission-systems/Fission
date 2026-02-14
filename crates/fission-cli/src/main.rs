@@ -83,6 +83,9 @@ struct Args {
 }
 
 fn main() -> fission_core::Result<()> {
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+
     // 1. Parse command line arguments
     let args = Args::parse();
 

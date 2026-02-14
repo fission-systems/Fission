@@ -13,6 +13,7 @@ mod dominator;
 mod graph;
 mod loops;
 mod metrics;
+mod summary;
 mod visualization;
 
 pub use basic_block::{BasicBlock, BlockEdge, EdgeKind};
@@ -20,9 +21,9 @@ pub use dominator::DominatorTree;
 pub use graph::{CfgBuilder, ControlFlowGraph};
 pub use loops::{Loop, LoopAnalyzer, LoopKind};
 pub use metrics::{CfgMetrics, ComplexityAnalyzer};
+pub use summary::*;
 pub use visualization::{CfgVisualizer, DotOptions};
-
-use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode};
+use fission_pcode::PcodeFunction;
 
 /// Error types for CFG analysis
 #[derive(Debug, Clone)]
@@ -145,6 +146,51 @@ impl CfgAnalysis {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use insta::assert_yaml_snapshot;
+
+    #[test]
+    fn test_cfg_summary_snapshot() {
+        let summary = CfgSummary {
+            function_address: "0x1000".into(),
+            block_count: 3,
+            edge_count: 2,
+            cyclomatic_complexity: 1,
+            max_nesting_depth: 0,
+            loops: vec![],
+            blocks: vec![
+                BlockSummary {
+                    index: 0,
+                    address: "0x1000".into(),
+                    is_entry: true,
+                    is_exit: false,
+                    successors: vec![1],
+                    predecessors: vec![],
+                    instruction_count: 5,
+                },
+                BlockSummary {
+                    index: 1,
+                    address: "0x1010".into(),
+                    is_entry: false,
+                    is_exit: false,
+                    successors: vec![2],
+                    predecessors: vec![0],
+                    instruction_count: 2,
+                },
+                BlockSummary {
+                    index: 2,
+                    address: "0x1020".into(),
+                    is_entry: false,
+                    is_exit: true,
+                    successors: vec![],
+                    predecessors: vec![1],
+                    instruction_count: 1,
+                },
+            ],
+            dot_content: Some("digraph { }".into()),
+        };
+
+        assert_yaml_snapshot!(summary);
+    }
 
     #[test]
     fn test_cfg_error_display() {

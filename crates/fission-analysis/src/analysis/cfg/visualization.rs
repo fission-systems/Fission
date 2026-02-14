@@ -180,7 +180,7 @@ impl CfgVisualizer {
         // Instructions
         if options.show_instructions && !block.operations.is_empty() {
             label.push_str("\\n---");
-            for (i, op) in block.operations.iter().take(10).enumerate() {
+            for op in block.operations.iter().take(10) {
                 if let Some(ref mnemonic) = op.asm_mnemonic {
                     label.push_str(&format!("\\n{}", mnemonic));
                 } else {
@@ -200,7 +200,7 @@ impl CfgVisualizer {
         block: &BasicBlock,
         loop_blocks: &HashSet<usize>,
         loop_headers: &HashSet<usize>,
-        cfg: &ControlFlowGraph,
+        _cfg: &ControlFlowGraph,
     ) -> String {
         let mut styles = Vec::new();
 

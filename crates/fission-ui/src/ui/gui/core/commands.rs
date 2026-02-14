@@ -214,14 +214,15 @@ impl Command for PatchBytesCommand {
         // Calculate file offset from virtual address
         let offset = va_to_file_offset(&binary.sections, self.address)?;
 
-        if offset as usize + self.new_bytes.len() > binary.data.len() {
+        if offset as usize + self.new_bytes.len() > binary.data.as_slice().len() {
             return Err("Patch out of bounds".to_string());
         }
 
         // Save old bytes if not set (first run)
         if self.old_bytes.is_empty() {
-            self.old_bytes =
-                binary.data[offset as usize..offset as usize + self.new_bytes.len()].to_vec();
+            self.old_bytes = binary.data.as_slice()
+                [offset as usize..offset as usize + self.new_bytes.len()]
+                .to_vec();
         }
 
         // Apply patch using COW-enabled method

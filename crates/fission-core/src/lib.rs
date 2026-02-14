@@ -2,7 +2,9 @@
 //!
 //! Foundational utilities shared across crates.
 
+pub mod common;
 pub mod core;
+pub mod plugin;
 
 pub use crate::core::config;
 pub use crate::core::config_store;

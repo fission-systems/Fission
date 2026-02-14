@@ -44,7 +44,7 @@ Fission is a next-generation decompiler and reverse engineering platform.
 | Objective-C | ✅ Method names | ✅ ivar parsing | ✅ ObjC2 runtime |
 | Go | ✅ pclntab | ✅ .rodata types | ✅ Struct fields |
 | C/C++ | ✅ DWARF symbols | ✅ Debug info | ✅ DWARF parsing |
-| Rust | ✅ Demangling | ⚠️ Partial | ⚠️ VTable |
+| Rust | ✅ Demangling | ✅ VTable/Trait | ✅ Automatic |
 
 ### Post-Processing
 
@@ -164,9 +164,8 @@ fission --cli <binary> functions
 ## 🔮 Known Limitations
 
 1. **Swift Accessors**: VTable-based property access not fully resolved
-2. **Rust Traits**: dyn Trait vtable parsing incomplete
-3. **PDB**: No native PDB parsing (uses GDT instead)
-4. **WASM**: Not supported yet
+2. **PDB**: No native PDB parsing (uses GDT instead)
+3. **WASM**: Not supported yet
 
 ---
 

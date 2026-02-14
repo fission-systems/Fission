@@ -3,7 +3,7 @@
 //! Combines string extraction with xref analysis to find which functions reference specific strings.
 
 use super::strings::{ExtractedString, StringType};
-use super::xrefs::{Xref, XrefDatabase, XrefType};
+use super::xrefs::{Xref, XrefDatabase};
 use fission_loader::loader::LoadedBinary;
 use std::collections::HashMap;
 
@@ -131,7 +131,7 @@ pub fn analyze_string_xrefs(binary: &LoadedBinary, min_length: usize) -> StringX
     for section in &binary.sections {
         let start = section.file_offset as usize;
         let end = start + section.file_size as usize;
-        if let Some(data) = binary.data.get(start..end) {
+        if let Some(data) = binary.data.as_slice().get(start..end) {
             let base_addr = section.virtual_address;
             let strings = super::strings::extract_strings(data, base_addr, min_length);
             all_strings.extend(strings);
