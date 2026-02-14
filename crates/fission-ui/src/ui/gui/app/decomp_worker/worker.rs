@@ -7,7 +7,9 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+use fission_analysis::analysis::cfg::{CfgAnalysis, CfgSummary};
 use fission_analysis::analysis::decomp::CachingDecompiler;
+use fission_pcode::PcodeFunction;
 
 use super::WorkerRequest;
 use super::native::{handle_binary_load_for_worker, handle_decompile_for_worker};
@@ -41,16 +43,26 @@ pub(crate) fn binary_worker_loop(
 
         match request {
             WorkerRequest::CfgAnalysis(req) => {
-                let _ = result_tx.send(AsyncMessage::CfgAnalysisResult {
-                    address: req.address,
-                    block_count: 0,
-                    edge_count: 0,
-                    cyclomatic_complexity: 0,
-                    max_nesting_depth: 0,
-                    loops: Vec::new(),
-                    blocks: Vec::new(),
-                    dot_content: String::new(),
-                });
+                let mut success = false;
+                if let Some(ref mut decomp) = native_decomp {
+                    if let Ok(json) = decomp.inner_mut().get_pcode(req.address) {
+                        if let Ok(func) = PcodeFunction::from_json(&json) {
+                            if let Ok(analysis) = CfgAnalysis::from_pcode(&func) {
+                                let summary =
+                                    CfgSummary::from_analysis(&analysis, Some(req.address), true);
+                                let _ = result_tx.send(AsyncMessage::CfgAnalysisResult(summary));
+                                success = true;
+                            }
+                        }
+                    }
+                }
+
+                if !success {
+                    let _ = result_tx.send(AsyncMessage::CfgAnalysisError {
+                        address: req.address,
+                        error: "Failed to generate CFG".to_string(),
+                    });
+                }
             }
             WorkerRequest::ClearCache(_) => {
                 if let Some(ref mut decomp) = native_decomp {

@@ -1,4 +1,6 @@
-use crate::loader::types::{LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring};
+use crate::loader::types::{
+    DataBuffer, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
+};
 use crate::prelude::*;
 use binrw::BinRead;
 use std::io::Cursor;
@@ -9,8 +11,9 @@ use schema::*;
 pub struct PeLoader;
 
 impl PeLoader {
-    pub fn parse(data: Vec<u8>, path: String) -> Result<LoadedBinary> {
-        let mut cursor = Cursor::new(&data);
+    pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
+        let bytes = data.as_slice();
+        let mut cursor = Cursor::new(bytes);
         let pe_file = PeFile::read_le(&mut cursor)
             .map_err(|e| err!(loader, "binrw PE parse error: {}", e))?;
 
@@ -20,19 +23,19 @@ impl PeLoader {
             OptionalHeader::Pe32Plus(_) => true,
         };
 
-        let (image_base, entry_point, _section_alignment) = match &pe_file.nt_headers.optional_header
-        {
-            OptionalHeader::Pe32(opt) => (
-                opt.image_base as u64,
-                opt.image_base as u64 + opt.address_of_entry_point as u64,
-                opt.section_alignment,
-            ),
-            OptionalHeader::Pe32Plus(opt) => (
-                opt.image_base,
-                opt.image_base + opt.address_of_entry_point as u64,
-                opt.section_alignment,
-            ),
-        };
+        let (image_base, entry_point, _section_alignment) =
+            match &pe_file.nt_headers.optional_header {
+                OptionalHeader::Pe32(opt) => (
+                    opt.image_base as u64,
+                    opt.image_base as u64 + opt.address_of_entry_point as u64,
+                    opt.section_alignment,
+                ),
+                OptionalHeader::Pe32Plus(opt) => (
+                    opt.image_base,
+                    opt.image_base + opt.address_of_entry_point as u64,
+                    opt.section_alignment,
+                ),
+            };
 
         let arch_spec = match pe_file.nt_headers.file_header.machine {
             0x8664 => "x86:LE:64:default", // AMD64
@@ -64,7 +67,7 @@ impl PeLoader {
 
         // Build the binary
         let loader = PeLoaderImpl {
-            data: &data,
+            data: bytes,
             sections: &sections_info,
             is_64bit,
         };

@@ -187,7 +187,7 @@ impl DieMatcher {
 
             SignatureRule::StringMatch { value } => {
                 // Search in binary data
-                Self::contains_string(&binary.data, value)
+                Self::contains_string(binary.data.as_slice(), value)
             }
 
             SignatureRule::EpPattern { arch, pattern } => {
@@ -219,7 +219,7 @@ impl DieMatcher {
             SignatureRule::RichHeader { present } => {
                 // Check for Rich header in PE
                 let has_rich = Self::contains_string(
-                    &binary.data[..std::cmp::min(4096, binary.data.len())],
+                    &binary.data.as_slice()[..std::cmp::min(4096, binary.data.as_slice().len())],
                     "Rich",
                 );
                 has_rich == *present
@@ -247,8 +247,8 @@ impl DieMatcher {
             .and_then(|s| {
                 let offset = (ep_rva - s.virtual_address) as usize;
                 let file_offset = s.file_offset as usize + offset;
-                if file_offset + 64 <= binary.data.len() {
-                    Some(&binary.data[file_offset..file_offset + 64])
+                if file_offset + 64 <= binary.data.as_slice().len() {
+                    Some(&binary.data.as_slice()[file_offset..file_offset + 64])
                 } else {
                     None
                 }

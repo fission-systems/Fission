@@ -4,9 +4,9 @@
 //! Supports ELF and Mach-O formats with debug info.
 
 use crate::loader::{LoadedBinary, types::InferredFieldInfo, types::InferredTypeInfo};
-use crate::prelude::*;
 
 /// DWARF section names for different platforms
+#[allow(dead_code)]
 const DWARF_SECTIONS: &[&str] = &[
     // ELF
     ".debug_info",
@@ -23,26 +23,26 @@ const DWARF_SECTIONS: &[&str] = &[
     "__debug_str_offs",
 ];
 
-/// DWARF tag constants
+#[allow(dead_code)]
 mod tag {
-    pub const DW_TAG_structure_type: u16 = 0x13;
-    pub const DW_TAG_class_type: u16 = 0x02;
-    pub const DW_TAG_member: u16 = 0x0d;
-    pub const DW_TAG_typedef: u16 = 0x16;
-    pub const DW_TAG_base_type: u16 = 0x24;
-    pub const DW_TAG_pointer_type: u16 = 0x0f;
-    pub const DW_TAG_array_type: u16 = 0x01;
-    pub const DW_TAG_union_type: u16 = 0x17;
-    pub const DW_TAG_enumeration_type: u16 = 0x04;
+    pub const DW_TAG_STRUCTURE_TYPE: u16 = 0x13;
+    pub const DW_TAG_CLASS_TYPE: u16 = 0x02;
+    pub const DW_TAG_MEMBER: u16 = 0x0d;
+    pub const DW_TAG_TYPEDEF: u16 = 0x16;
+    pub const DW_TAG_BASE_TYPE: u16 = 0x24;
+    pub const DW_TAG_POINTER_TYPE: u16 = 0x0f;
+    pub const DW_TAG_ARRAY_TYPE: u16 = 0x01;
+    pub const DW_TAG_UNION_TYPE: u16 = 0x17;
+    pub const DW_TAG_ENUMERATION_TYPE: u16 = 0x04;
 }
 
-/// DWARF attribute constants  
+#[allow(dead_code)]
 mod attr {
-    pub const DW_AT_name: u16 = 0x03;
-    pub const DW_AT_byte_size: u16 = 0x0b;
-    pub const DW_AT_data_member_location: u16 = 0x38;
-    pub const DW_AT_type: u16 = 0x49;
-    pub const DW_AT_sibling: u16 = 0x01;
+    pub const DW_AT_NAME: u16 = 0x03;
+    pub const DW_AT_BYTE_SIZE: u16 = 0x0b;
+    pub const DW_AT_DATA_MEMBER_LOCATION: u16 = 0x38;
+    pub const DW_AT_TYPE: u16 = 0x49;
+    pub const DW_AT_SIBLING: u16 = 0x01;
 }
 
 /// DWARF debug information analyzer
@@ -191,7 +191,7 @@ impl<'a> DwarfAnalyzer<'a> {
         data: &[u8],
         offset: usize,
         limit: usize,
-        abbrev: Option<&Vec<u8>>,
+        _abbrev: Option<&Vec<u8>>,
         str_section: Option<&Vec<u8>>,
     ) -> Option<(usize, Option<DwarfTypeInfo>)> {
         if offset >= limit {
@@ -200,7 +200,7 @@ impl<'a> DwarfAnalyzer<'a> {
 
         // Read abbreviation code (ULEB128)
         let (abbrev_code, code_len) = self.read_uleb128(data, offset)?;
-        let mut pos = offset + code_len;
+        let pos = offset + code_len;
 
         if abbrev_code == 0 {
             // Null DIE
@@ -217,9 +217,9 @@ impl<'a> DwarfAnalyzer<'a> {
 
         // Simplified: Look for name string reference and size
         let mut name = String::new();
-        let mut size: u32 = 0;
+        let size: u32 = 0;
         let mut kind = "unknown";
-        let mut members = Vec::new();
+        let members = Vec::new();
 
         // Scan ahead for potential attributes
         let scan_limit = (limit - pos).min(128);
@@ -355,8 +355,25 @@ mod tests {
 
     #[test]
     fn test_uleb128() {
+        // Create a dummy binary for testing
+        let binary = Box::leak(Box::new(LoadedBinary {
+            path: "test".to_string(),
+            data: Arc::new(Vec::new()),
+            format: "test".to_string(),
+            arch_spec: "test".to_string(),
+            entry_point: 0,
+            image_base: 0,
+            is_64bit: true,
+            sections: Vec::new(),
+            functions: Vec::new(),
+            iat_symbols: std::collections::HashMap::new(),
+            function_addr_index: std::collections::HashMap::new(),
+            function_name_index: std::collections::HashMap::new(),
+            inferred_types: Vec::new(),
+        }));
+
         let analyzer = DwarfAnalyzer {
-            binary: unsafe { std::mem::zeroed() }, // Note: only for testing read_uleb128
+            binary,
             debug_info: None,
             debug_abbrev: None,
             debug_str: None,

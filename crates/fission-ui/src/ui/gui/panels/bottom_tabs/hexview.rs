@@ -19,7 +19,7 @@ enum PatchAction {
 pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
     // Check if binary is loaded and get data length
     let (data_len, total_rows) = if let Some(ref binary) = state.analysis.domain.loaded_binary {
-        let len = binary.data.len() as u64;
+        let len = binary.data.as_slice().len() as u64;
         let rows = (len / 16) + if len.is_multiple_of(16) { 0 } else { 1 };
         (len, rows)
     } else {
@@ -316,8 +316,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     let start = row_offset as usize;
                     let end = (row_offset + 16).min(data_len) as usize;
 
-                    if start < binary.data.len() {
-                        let bytes = &binary.data[start..end.min(binary.data.len())];
+                    if start < binary.data.as_slice().len() {
+                        let bytes =
+                            &binary.data.as_slice()[start..end.min(binary.data.as_slice().len())];
                         for (i, byte) in bytes.iter().enumerate() {
                             use std::fmt::Write;
                             write!(hex_str, "{:02X} ", byte).unwrap();
@@ -346,8 +347,9 @@ pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
                     let start = row_offset as usize;
                     let end = (row_offset + 16).min(data_len) as usize;
 
-                    if start < binary.data.len() {
-                        let bytes = &binary.data[start..end.min(binary.data.len())];
+                    if start < binary.data.as_slice().len() {
+                        let bytes =
+                            &binary.data.as_slice()[start..end.min(binary.data.as_slice().len())];
                         for byte in bytes {
                             ascii_str.push(if *byte >= 0x20 && *byte <= 0x7E {
                                 *byte as char

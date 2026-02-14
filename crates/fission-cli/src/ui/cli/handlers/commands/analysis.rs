@@ -132,7 +132,7 @@ pub fn cmd_strings(state: &CliState, min_len: usize) {
 
     let min_len = min_len.max(1);
     // Pre-allocate with estimated capacity (heuristic: ~1 string per 1KB of data)
-    let estimated_strings = binary.data.len() / 1024;
+    let estimated_strings = binary.data.as_slice().len() / 1024;
     let mut strings: Vec<(usize, String)> = Vec::with_capacity(estimated_strings.max(100));
 
     // Simple ASCII string extraction
@@ -140,7 +140,7 @@ pub fn cmd_strings(state: &CliState, min_len: usize) {
     let mut current_bytes: Vec<u8> = Vec::with_capacity(256);
     let mut start_offset = 0usize;
 
-    for (i, &byte) in binary.data.iter().enumerate() {
+    for (i, &byte) in binary.data.as_slice().iter().enumerate() {
         if (0x20..=0x7E).contains(&byte) {
             if current_bytes.is_empty() {
                 start_offset = i;

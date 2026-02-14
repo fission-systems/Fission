@@ -147,6 +147,8 @@ pub struct ListingViewModel {
     pub display_count: usize,
     /// Address input for Go To
     pub goto_address_input: String,
+    /// One-shot auto-scroll to current address on next frame
+    pub pending_scroll_to_current: bool,
 }
 
 impl ListingViewModel {
@@ -155,6 +157,7 @@ impl ListingViewModel {
             current_address: 0,
             display_count: 100,
             goto_address_input: String::new(),
+            pending_scroll_to_current: false,
         }
     }
 }

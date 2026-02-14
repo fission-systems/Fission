@@ -1,6 +1,7 @@
 use crate::prelude::*;
 use fission_loader::loader::pe::PeLoader;
-use fission_loader::loader::types::LoadedBinary;
+use fission_loader::loader::types::{DataBuffer, LoadedBinary};
+use std::sync::Arc;
 
 /// OS Loader Simulator - Maps binaries as they would appear in process memory.
 ///
@@ -50,7 +51,7 @@ impl TitanLoader {
         }
 
         // Step 1: Parse PE file using PeLoader (static analysis)
-        let mut loaded_bin = PeLoader::parse(data.to_vec(), path.to_string())?;
+        let mut loaded_bin = PeLoader::parse(DataBuffer::Heap(data.to_vec()), path.to_string())?;
 
         // Step 2: Calculate memory size needed (SizeOfImage)
         let image_base = loaded_bin.image_base;
@@ -92,7 +93,7 @@ impl TitanLoader {
         }
 
         // Step 6: Replace file data with mapped memory
-        loaded_bin.data = mapped_data;
+        loaded_bin.inner_mut().data = Arc::new(DataBuffer::Heap(mapped_data));
         loaded_bin.rebuild_function_indices();
 
         crate::core::logging::info(&format!(

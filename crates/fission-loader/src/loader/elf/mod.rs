@@ -1,5 +1,5 @@
 use crate::loader::types::{
-    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
+    DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
 use binrw::BinRead;
@@ -11,13 +11,14 @@ use schema::*;
 pub struct ElfLoader;
 
 impl ElfLoader {
-    pub fn parse(data: Vec<u8>, path: String) -> Result<LoadedBinary> {
+    pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         // 1. Read Identification (first 16 bytes)
         // We use a temporary cursor here so the borrow of `data` ends immediately
         let ident = {
-            let mut cursor = Cursor::new(&data);
+            let bytes = data.as_slice();
+            let mut cursor = Cursor::new(bytes);
             ElfIdent::read_le(&mut cursor).map_err(|e| err!(loader, "Invalid ELF Ident: {}", e))?
-        }; // cursor dropped here, borrow of data ends
+        }; // cursor dropped here
 
         let is_64 = ident.class == 2;
         let is_little = ident.endian == 1; // 1=Little, 2=Big
@@ -46,8 +47,9 @@ impl ElfLoader {
         }
     }
 
-    fn parse_64(data: Vec<u8>, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
-        let mut reader = Cursor::new(&data);
+    fn parse_64(data: DataBuffer, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
+        let bytes = data.as_slice();
+        let mut reader = Cursor::new(bytes);
         // Read Header
         let header = Elf64Header::read_options(&mut reader, endian, ())
             .map_err(|e| err!(loader, "ELF64 Header: {}", e))?;
@@ -82,8 +84,8 @@ impl ElfLoader {
             let mut strtab_data = Vec::new();
             if strtab_idx < shdrs.len() {
                 let strtab_shdr = &shdrs[strtab_idx];
-                if strtab_shdr.sh_offset as usize + strtab_shdr.sh_size as usize <= data.len() {
-                    strtab_data = data[strtab_shdr.sh_offset as usize
+                if strtab_shdr.sh_offset as usize + strtab_shdr.sh_size as usize <= bytes.len() {
+                    strtab_data = bytes[strtab_shdr.sh_offset as usize
                         ..(strtab_shdr.sh_offset + strtab_shdr.sh_size) as usize]
                         .to_vec();
                 }
@@ -112,7 +114,7 @@ impl ElfLoader {
                 if shdr.sh_type == 2 || shdr.sh_type == 11 {
                     // SYMTAB or DYNSYM
                     Self::parse_symbols_64(
-                        &data,
+                        bytes,
                         shdr.sh_offset,
                         shdr.sh_size,
                         shdr.sh_entsize,
@@ -151,8 +153,9 @@ impl ElfLoader {
             .build()
     }
 
-    fn parse_32(data: Vec<u8>, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
-        let mut reader = Cursor::new(&data);
+    fn parse_32(data: DataBuffer, path: String, endian: binrw::Endian) -> Result<LoadedBinary> {
+        let bytes = data.as_slice();
+        let mut reader = Cursor::new(bytes);
         // Read Header
         let header = Elf32Header::read_options(&mut reader, endian, ())
             .map_err(|e| err!(loader, "ELF32 Header: {}", e))?;
@@ -186,8 +189,8 @@ impl ElfLoader {
             let mut strtab_data = Vec::new();
             if strtab_idx < shdrs.len() {
                 let strtab_shdr = &shdrs[strtab_idx];
-                if strtab_shdr.sh_offset as usize + strtab_shdr.sh_size as usize <= data.len() {
-                    strtab_data = data[strtab_shdr.sh_offset as usize
+                if strtab_shdr.sh_offset as usize + strtab_shdr.sh_size as usize <= bytes.len() {
+                    strtab_data = bytes[strtab_shdr.sh_offset as usize
                         ..(strtab_shdr.sh_offset + strtab_shdr.sh_size) as usize]
                         .to_vec();
                 }

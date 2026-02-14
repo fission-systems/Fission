@@ -57,7 +57,7 @@ impl<'a> GoAnalyzer<'a> {
             }
             let Some(data) = self
                 .binary
-                .get_bytes(section.virtual_address, section.virtual_size as usize)
+                .view_bytes(section.virtual_address, section.virtual_size as usize)
             else {
                 continue;
             };
@@ -100,10 +100,10 @@ impl<'a> GoAnalyzer<'a> {
             ptr_size * 2
         };
 
-        let mut functions = Vec::with_capacity(nfunc);
-        for i in 0..nfunc {
+        let mut functions = Vec::with_capacity(nfunc.min(100000)); // Sanity limit
+        for i in 0..nfunc.min(100000) {
             let entry_ptr = functab_addr + (i * entry_size) as u64;
-            let Some(ebytes) = self.binary.get_bytes(entry_ptr, entry_size) else {
+            let Some(ebytes) = self.binary.view_bytes(entry_ptr, entry_size) else {
                 break;
             };
 
@@ -125,7 +125,10 @@ impl<'a> GoAnalyzer<'a> {
             // or relative to the start of the pclntab depending on Go version and format.
             // We already confirmed that for Go 1.25 Mach-O, it's relative to functab_addr.
             let mut func_struct_addr = functab_addr + func_off;
-            let mut fbytes = self.binary.get_bytes(func_struct_addr, 16);
+            let mut fbytes = self
+                .binary
+                .view_bytes(func_struct_addr, 16)
+                .map(|b| b.to_vec());
 
             // Validation: First 4 bytes of _func should be entryOff (matching pc_off)
             if let Some(ref fb) = fbytes {
@@ -133,16 +136,17 @@ impl<'a> GoAnalyzer<'a> {
                 if struct_entry_off != pc_off && i > 0 {
                     // Try relative to addr
                     let alt_addr = addr + func_off;
-                    if let Some(alt_fb) = self.binary.get_bytes(alt_addr, 16) {
+                    if let Some(alt_fb) = self.binary.view_bytes(alt_addr, 16) {
                         let alt_entry_off =
                             u32::from_le_bytes([alt_fb[0], alt_fb[1], alt_fb[2], alt_fb[3]]) as u64;
                         if alt_entry_off == pc_off {
                             func_struct_addr = alt_addr;
-                            fbytes = Some(alt_fb);
+                            fbytes = Some(alt_fb.to_vec());
                         }
                     }
                 }
             }
+            let _ = func_struct_addr;
 
             if let Some(fb) = fbytes {
                 let name_off = u32::from_le_bytes([fb[4], fb[5], fb[6], fb[7]]) as u64;
@@ -254,7 +258,7 @@ impl<'a> GoAnalyzer<'a> {
         let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
         let Some(data) = self
             .binary
-            .get_bytes(section.virtual_address, section.virtual_size as usize)
+            .view_bytes(section.virtual_address, section.virtual_size as usize)
         else {
             return types;
         };
@@ -301,7 +305,9 @@ impl<'a> GoAnalyzer<'a> {
         // After base type header, there's name pointer and more
 
         let header_size = 8 + ptr_size * 4; // Approximate header size
-        let data = self.binary.get_bytes(addr, header_size + 256)?;
+        let Some(data) = self.binary.view_bytes(addr, header_size + 256) else {
+            return None;
+        };
 
         let size = if ptr_size == 8 {
             u64::from_le_bytes([
@@ -341,7 +347,7 @@ impl<'a> GoAnalyzer<'a> {
         // - fields slice (ptr, len, cap)
 
         let header_size = if ptr_size == 8 { 96 } else { 48 }; // Approximate
-        let Some(header) = self.binary.get_bytes(struct_type_addr, header_size) else {
+        let Some(header) = self.binary.view_bytes(struct_type_addr, header_size) else {
             return fields;
         };
 

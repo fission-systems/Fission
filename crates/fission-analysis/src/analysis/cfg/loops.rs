@@ -3,7 +3,9 @@
 //! Implements natural loop detection using dominator information.
 //! A natural loop has a single entry point (header) that dominates all blocks in the loop.
 
-use super::{ControlFlowGraph, DominatorTree, EdgeKind};
+use super::{ControlFlowGraph, DominatorTree};
+#[cfg(test)]
+use super::EdgeKind;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Kind of detected loop

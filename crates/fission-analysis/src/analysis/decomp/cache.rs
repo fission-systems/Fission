@@ -2,7 +2,7 @@ use fission_core::prelude::*;
 use lru::LruCache;
 use std::fs;
 use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::{debug, info};
 
 /// Decompiler Cache - Manages In-memory (L1) and Disk (L2) caching
@@ -32,7 +32,11 @@ impl DecompilerCache {
 
         info!("[*] Initialized decompiler cache at {:?}", cache_dir);
 
-        let l1_cap = NonZeroUsize::new(l1_size).unwrap_or(NonZeroUsize::new(100).unwrap());
+        let default_l1 = match NonZeroUsize::new(100) {
+            Some(v) => v,
+            None => NonZeroUsize::MIN,
+        };
+        let l1_cap = NonZeroUsize::new(l1_size).unwrap_or(default_l1);
 
         Ok(Self {
             l1: LruCache::new(l1_cap),

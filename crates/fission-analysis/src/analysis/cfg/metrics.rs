@@ -214,7 +214,7 @@ impl ComplexityAnalyzer {
 
     /// Calculate maintainability index (0-100 scale)
     /// Based on Halstead Volume, Cyclomatic Complexity, and Lines of Code
-    pub fn maintainability_index(cfg: &ControlFlowGraph, loops: &[Loop]) -> f64 {
+    pub fn maintainability_index(cfg: &ControlFlowGraph, _loops: &[Loop]) -> f64 {
         let cc = Self::cyclomatic_complexity(cfg) as f64;
         let loc: usize = cfg.blocks.iter().map(|b| b.instruction_count()).sum();
         let hv = Self::halstead_volume(cfg);

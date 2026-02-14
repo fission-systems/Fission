@@ -18,7 +18,11 @@ impl PluginManager {
 
         // Initialize plugin logic
         if let Some(api) = &self.api {
-            let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
+            let extension = self
+                .event_bus
+                .clone()
+                .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
+            let ctx = PluginContext::new(api.clone(), extension);
             if let Err(e) = plugin.on_load(&ctx) {
                 return Err(format!("Failed to load plugin '{}': {:?}", id, e));
             }
@@ -113,7 +117,11 @@ impl PluginManager {
             // Call on_unload if it's a native plugin
             if let Some(mut instance) = plugin.instance.take() {
                 if let Some(api) = &self.api {
-                    let ctx = PluginContext::new(api.clone(), self.event_bus.clone());
+                    let extension = self
+                        .event_bus
+                        .clone()
+                        .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
+                    let ctx = PluginContext::new(api.clone(), extension);
                     let _ = instance.on_unload(&ctx);
                 }
             }

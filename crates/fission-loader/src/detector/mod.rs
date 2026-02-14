@@ -10,7 +10,6 @@ pub mod die_engine;
 mod signatures;
 
 use crate::loader::LoadedBinary;
-use fission_core::config::CONFIG;
 
 /// Helper function to search for byte pattern in data.
 /// Uses sliding window search which is efficient for small patterns.
@@ -185,6 +184,7 @@ pub fn detect(binary: &LoadedBinary) -> DetectionResult {
     detect_by_imports(binary, &mut result);
     detect_by_strings(binary, &mut result);
     detect_by_entry_point(binary, &mut result);
+    detect_by_symbols(binary, &mut result);
 
     // Run DIE signature-based detection
     die_engine::detect_with_die(binary, &mut result);
@@ -371,11 +371,9 @@ fn detect_by_imports(binary: &LoadedBinary, result: &mut DetectionResult) {
 /// - Early exits once all patterns for a category are found
 fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
     // Search in configurable range for better detection
-    let search_limit = CONFIG
-        .analysis
-        .max_string_search_size
-        .min(binary.data.len());
-    let data = &binary.data[..search_limit];
+    let search_limit = (512 * 1024) // 512KB limit
+        .min(binary.data.as_slice().len());
+    let data = &binary.data.as_slice()[..search_limit];
 
     // Go detection
     let mut is_go =
@@ -594,6 +592,55 @@ fn matches_signature(bytes: &[u8], sig: &[u8], mask: Option<&[u8]>) -> bool {
         }
     }
     true
+}
+
+/// Detect by symbols
+fn detect_by_symbols(binary: &LoadedBinary, result: &mut DetectionResult) {
+    let mut has_rust = false;
+    let mut has_cpp = false;
+    let mut has_swift = false;
+
+    for func in &binary.functions {
+        let name = &func.name;
+        if name.starts_with("_R")
+            || name.starts_with("_ZN")
+            || name.starts_with("__R")
+            || name.starts_with("__ZN")
+        {
+            has_rust = true;
+        }
+        if (name.starts_with("_Z") || name.starts_with("__Z")) && !has_rust {
+            has_cpp = true;
+        }
+        if name.starts_with("_$s") || name.starts_with("_$S") || name.starts_with("__$s") {
+            has_swift = true;
+        }
+    }
+
+    if has_rust {
+        result.add(Detection::new(
+            DetectionType::Language,
+            "Rust",
+            None,
+            Confidence::High,
+        ));
+    }
+    if has_cpp {
+        result.add(Detection::new(
+            DetectionType::Language,
+            "C++",
+            None,
+            Confidence::Medium,
+        ));
+    }
+    if has_swift {
+        result.add(Detection::new(
+            DetectionType::Language,
+            "Swift",
+            None,
+            Confidence::High,
+        ));
+    }
 }
 
 #[cfg(test)]

@@ -4,7 +4,7 @@
 //! and provides methods to build it from Pcode functions.
 
 use super::{BasicBlock, BlockEdge, CfgError, CfgResult, EdgeKind};
-use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode::{PcodeFunction, PcodeOp, PcodeOpcode};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Control Flow Graph representation

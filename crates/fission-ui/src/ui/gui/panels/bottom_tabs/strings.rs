@@ -160,7 +160,7 @@ pub fn extract_strings_from_binary(state: &mut AppState) {
     };
 
     let min_len = CONFIG.analysis.min_string_length;
-    let data = &binary.data;
+    let data = binary.data.as_slice();
 
     // Pre-allocate with estimated capacity (heuristic: ~1 string per 1KB of data)
     let estimated_strings = data.len() / 1024;

@@ -1,5 +1,6 @@
+#[cfg(target_os = "windows")]
 use super::pe;
-use super::types::*;
+#[cfg(target_os = "windows")]
 use std::collections::HashMap;
 
 #[cfg(target_os = "windows")]

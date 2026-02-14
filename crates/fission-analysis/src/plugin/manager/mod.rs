@@ -12,6 +12,8 @@ mod tests {
     use crate::app::events::{EventBus, FissionEvent, FissionEventType};
     use crate::plugin::api::{BinaryInfo, PluginInfo};
     use crate::plugin::{FissionPlugin, HookPriority, PluginAPI, PluginContext};
+    use anyhow::Result;
+    use fission_core::common::types::FunctionInfo;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
     use types::LoadedPlugin;
@@ -28,7 +30,7 @@ mod tests {
         fn name(&self) -> &str {
             "Mock Plugin"
         }
-        fn on_load(&mut self, _ctx: &PluginContext) -> crate::prelude::Result<()> {
+        fn on_load(&mut self, _ctx: &PluginContext) -> Result<()> {
             self.load_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
@@ -110,8 +112,8 @@ mod tests {
         fn name(&self) -> &str {
             "EventBus Plugin"
         }
-        fn on_load(&mut self, ctx: &PluginContext) -> crate::prelude::Result<()> {
-            if let Some(bus) = &ctx.event_bus {
+        fn on_load(&mut self, ctx: &PluginContext) -> Result<()> {
+            if let Some(bus) = ctx.get_extension::<EventBus>() {
                 bus.publish(FissionEvent::LogMessage {
                     level: "info".into(),
                     message: "Plugin loaded".into(),
@@ -134,7 +136,7 @@ mod tests {
             fn get_binary(&self) -> Option<BinaryInfo> {
                 None
             }
-            fn get_functions(&self) -> Vec<fission_loader::loader::FunctionInfo> {
+            fn get_functions(&self) -> Vec<FunctionInfo> {
                 Vec::new()
             }
             fn read_binary_bytes(&self, _addr: u64, _size: usize) -> Option<Vec<u8>> {

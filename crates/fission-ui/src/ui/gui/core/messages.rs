@@ -3,6 +3,7 @@
 //! These messages are sent from background threads to the main UI thread.
 
 use crate::debug::types::DebugEvent;
+use fission_analysis::analysis::cfg::CfgSummary;
 use fission_loader::loader::LoadedBinary;
 use std::sync::Arc;
 
@@ -51,16 +52,8 @@ pub enum AsyncMessage {
     CfgAnalysisRequest { address: u64 },
 
     /// CFG analysis completed successfully
-    CfgAnalysisResult {
-        address: u64,
-        block_count: usize,
-        edge_count: usize,
-        cyclomatic_complexity: usize,
-        max_nesting_depth: usize,
-        loops: Vec<CfgLoopData>,
-        blocks: Vec<CfgBlockData>,
-        dot_content: String,
-    },
+    /// CFG analysis completed successfully
+    CfgAnalysisResult(CfgSummary),
 
     /// CFG analysis failed
     CfgAnalysisError { address: u64, error: String },
@@ -74,22 +67,4 @@ pub enum AsyncMessage {
 
     /// Worker thread health check (sent periodically)
     WorkerHeartbeat { worker_id: usize, is_alive: bool },
-}
-
-/// Loop data for CFG result transfer
-#[derive(Debug, Clone)]
-pub struct CfgLoopData {
-    pub header: usize,
-    pub kind: String,
-    pub body: Vec<usize>,
-}
-
-/// Block data for CFG result transfer
-#[derive(Debug, Clone)]
-pub struct CfgBlockData {
-    pub index: usize,
-    pub address: String,
-    pub is_entry: bool,
-    pub is_exit: bool,
-    pub successors: Vec<usize>,
 }
