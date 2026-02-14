@@ -7,7 +7,7 @@ use ratatui::widgets::ListState;
 use fission_ffi::DecompilerNative;
 
 #[cfg(feature = "native_decomp")]
-use crate::analysis::cfg::{CfgAnalysis, CfgVisualizer, DotOptions};
+use crate::analysis::cfg::CfgAnalysis;
 #[cfg(feature = "native_decomp")]
 use crate::analysis::pcode::PcodeFunction;
 
@@ -34,10 +34,19 @@ pub struct App {
     should_quit: bool,
     /// CFG analysis summary for selected function
     cfg_summary: Option<String>,
+    /// Optional compiler-id override for native decompiler
+    compiler_id_override: Option<String>,
+    /// Selected decompilation profile
+    profile: String,
 }
 
 impl App {
-    pub fn new(binary: LoadedBinary, binary_data: Vec<u8>) -> Self {
+    pub fn new(
+        binary: LoadedBinary,
+        binary_data: Vec<u8>,
+        compiler_id_override: Option<String>,
+        profile: Option<String>,
+    ) -> Self {
         let functions: Vec<FunctionInfo> = binary
             .functions
             .iter()
@@ -62,7 +71,44 @@ impl App {
             scroll: 0,
             should_quit: false,
             cfg_summary: None,
+            compiler_id_override,
+            profile: profile.unwrap_or_else(|| "balanced".to_string()),
         }
+    }
+
+    #[cfg(feature = "native_decomp")]
+    fn apply_profile(decomp: &mut DecompilerNative, profile: &str) {
+        match profile.to_ascii_lowercase().as_str() {
+            "quality" => {
+                decomp.set_feature("infer_pointers", true);
+                decomp.set_feature("analyze_loops", true);
+                decomp.set_feature("readonly_propagate", true);
+            }
+            "speed" => {
+                decomp.set_feature("infer_pointers", false);
+                decomp.set_feature("analyze_loops", false);
+                decomp.set_feature("readonly_propagate", false);
+            }
+            _ => {
+                decomp.set_feature("infer_pointers", true);
+                decomp.set_feature("analyze_loops", false);
+                decomp.set_feature("readonly_propagate", true);
+            }
+        }
+    }
+
+    fn resolve_compiler_id(&self) -> Option<String> {
+        if let Some(ref override_id) = self.compiler_id_override {
+            match override_id.to_ascii_lowercase().as_str() {
+                "windows" => return Some("windows".to_string()),
+                "gcc" => return Some("gcc".to_string()),
+                "clang" => return Some("clang".to_string()),
+                "default" => return Some("default".to_string()),
+                "auto" => {}
+                _ => {}
+            }
+        }
+        self.binary.get_ghidra_compiler_id()
     }
 
     // Getters
@@ -161,13 +207,15 @@ impl App {
 
             match DecompilerNative::new(&sla_dir) {
                 Ok(mut decomp) => {
+                    Self::apply_profile(&mut decomp, &self.profile);
+                    let compiler_id = self.resolve_compiler_id();
                     // Load binary
                     if let Err(e) = decomp.load_binary(
                         &self.binary_data,
                         self.binary.image_base,
                         self.binary.is_64bit,
                         Some(&self.binary.arch_spec),
-                        self.binary.get_ghidra_compiler_id().as_deref(),
+                        compiler_id.as_deref(),
                     ) {
                         self.decompiled_code = format!("// Error loading binary: {}", e);
                         self.status = "Error loading binary".to_string();
@@ -242,12 +290,14 @@ impl App {
 
             match DecompilerNative::new(&sla_dir) {
                 Ok(mut decomp) => {
+                    Self::apply_profile(&mut decomp, &self.profile);
+                    let compiler_id = self.resolve_compiler_id();
                     if let Err(e) = decomp.load_binary(
                         &self.binary_data,
                         self.binary.image_base,
                         self.binary.is_64bit,
                         Some(&self.binary.arch_spec),
-                        self.binary.get_ghidra_compiler_id().as_deref(),
+                        compiler_id.as_deref(),
                     ) {
                         self.cfg_summary = Some(format!("Error loading binary: {}", e));
                         self.status = "Error loading binary".to_string();

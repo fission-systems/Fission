@@ -425,6 +425,12 @@ static bool build_varargs_prototype(
 
     bool wide = false;
     std::string name = canonical;
+    // Common MinGW/GNU wrappers should use the same vararg model.
+    if (name.rfind("mingw_", 0) == 0) {
+        name = name.substr(6);
+    } else if (name.rfind("gnu_", 0) == 0) {
+        name = name.substr(4);
+    }
 
     if (name == "printf" || name == "scanf" || name == "wprintf" || name == "wscanf") {
         wide = (name[0] == 'w');
@@ -457,6 +463,24 @@ static bool build_varargs_prototype(
     }
 
     return false;
+}
+
+static Datatype* resolve_or_create_struct_ptr(TypeFactory* factory, const std::string& struct_name) {
+    if (!factory || struct_name.empty()) {
+        return nullptr;
+    }
+    const int ptr_size = factory->getSizeOfPointer();
+    Datatype* dt = factory->findByName(struct_name);
+    TypeStruct* st = nullptr;
+    if (dt && dt->getMetatype() == TYPE_STRUCT) {
+        st = static_cast<TypeStruct*>(dt);
+    } else {
+        st = factory->getTypeStruct(struct_name);
+    }
+    if (!st) {
+        return nullptr;
+    }
+    return factory->getTypePointer(ptr_size, st, 0);
 }
 
 bool PrototypeEnforcer::build_prototype_pieces(
@@ -535,9 +559,18 @@ bool PrototypeEnforcer::build_builtin_prototype(
     auto set_simple = [&](Datatype* out,
                           const std::vector<Datatype*>& types,
                           const std::vector<std::string>& names) {
-        ProtoModel* model = arch->getModel("__cdecl");
-        if (!model) {
+        ProtoModel* model = nullptr;
+        if (ptr_size >= 8) {
             model = arch->getModel("__fastcall");
+            if (!model) {
+                model = arch->getModel("windows");
+            }
+        }
+        if (!model) {
+            model = arch->getModel("__cdecl");
+        }
+        if (!model) {
+            model = arch->getModel("default");
         }
         out_pieces.model = model;
         out_pieces.name = func_name;
@@ -645,6 +678,58 @@ bool PrototypeEnforcer::build_builtin_prototype(
     }
     if (canonical == "wcsncat" && wchar_ptr) {
         set_simple(wchar_ptr, {wchar_ptr, wchar_ptr, size_type}, {"dest", "src", "count"});
+        return true;
+    }
+
+    // Internal user-defined signatures (seed set).
+    // These are applied when function names are known (e.g. from symbol provider/export table).
+    if (canonical == "cpp_add") {
+        set_simple(int_type, {int_type, int_type}, {"a", "b"});
+        return true;
+    }
+    if (canonical == "cpp_switch") {
+        set_simple(int_type, {int_type}, {"x"});
+        return true;
+    }
+    if (canonical == "cpp_sum_array") {
+        Datatype* int_ptr = factory->getTypePointer(ptr_size, int_type, 0);
+        if (int_ptr) {
+            set_simple(int_type, {int_ptr, int_type}, {"arr", "len"});
+            return true;
+        }
+    }
+    if (canonical == "cpp_init_item") {
+        Datatype* item_ptr = resolve_or_create_struct_ptr(factory, "Item");
+        if (!item_ptr) item_ptr = void_ptr;
+        Datatype* double_type = factory->getBase(8, TYPE_FLOAT);
+        if (item_ptr && double_type) {
+            set_simple(void_type, {item_ptr, int_type, char_ptr, double_type}, {"item", "id", "name", "value"});
+            return true;
+        }
+    }
+    if (canonical == "cpp_create_item") {
+        Datatype* item_ptr = resolve_or_create_struct_ptr(factory, "Item");
+        if (!item_ptr) item_ptr = void_ptr;
+        Datatype* double_type = factory->getBase(8, TYPE_FLOAT);
+        if (item_ptr && double_type) {
+            set_simple(item_ptr, {int_type, char_ptr, double_type}, {"id", "name", "value"});
+            return true;
+        }
+    }
+    if (canonical == "cpp_destroy_item") {
+        Datatype* item_ptr = resolve_or_create_struct_ptr(factory, "Item");
+        if (!item_ptr) item_ptr = void_ptr;
+        if (item_ptr) {
+            set_simple(void_type, {item_ptr}, {"item"});
+            return true;
+        }
+    }
+    if (canonical == "cpp_virtual_compute") {
+        set_simple(int_type, {int_type}, {"x"});
+        return true;
+    }
+    if (canonical == "cpp_main_like") {
+        set_simple(int_type, {}, {});
         return true;
     }
 

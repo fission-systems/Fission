@@ -12,11 +12,34 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 
+fn apply_profile(decomp: &mut fission_ffi::DecompilerNative, profile: Option<&str>) {
+    let selected = profile.unwrap_or("balanced").to_ascii_lowercase();
+    match selected.as_str() {
+        "quality" => {
+            decomp.set_feature("infer_pointers", true);
+            decomp.set_feature("analyze_loops", true);
+            decomp.set_feature("readonly_propagate", true);
+        }
+        "speed" => {
+            decomp.set_feature("infer_pointers", false);
+            decomp.set_feature("analyze_loops", false);
+            decomp.set_feature("readonly_propagate", false);
+        }
+        _ => {
+            decomp.set_feature("infer_pointers", true);
+            decomp.set_feature("analyze_loops", false);
+            decomp.set_feature("readonly_propagate", true);
+        }
+    }
+}
+
 pub fn generate_pcode_graph(
     binary: &LoadedBinary,
     addr: u64,
     output_path: Option<&PathBuf>,
     verbose: bool,
+    compiler_id_override: Option<&str>,
+    profile_override: Option<&str>,
 ) -> io::Result<()> {
     if verbose {
         eprintln!("[*] Generating Pcode graph for function at 0x{:X}", addr);
@@ -44,6 +67,7 @@ pub fn generate_pcode_graph(
             }
         }
     };
+    apply_profile(&mut decomp, profile_override);
 
     // Load binary
     // We need raw binary data. LoadedBinary doesn't store it?
@@ -65,16 +89,32 @@ pub fn generate_pcode_graph(
 
     {
         let _silencer = OutputSilencer::new_if(!verbose);
-        // Try to detect compiler
-        let detection = fission_loader::detect(binary);
-        let compiler_id = detection
-            .compiler()
-            .map(|d| match d.name.to_lowercase().as_str() {
-                "microsoft visual c++" | "msvc" => "windows",
-                "gcc" | "mingw" => "gcc",
+        let compiler_id = if let Some(user_compiler) = compiler_id_override {
+            Some(match user_compiler.to_ascii_lowercase().as_str() {
+                "windows" => "windows",
+                "gcc" => "gcc",
                 "clang" => "clang",
+                "default" => "default",
                 _ => "default",
-            });
+            })
+        } else {
+            let detection = fission_loader::detect(binary);
+            let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
+            detection
+                .compiler()
+                .map(|d| match d.name.to_lowercase().as_str() {
+                    "microsoft visual c++" | "msvc" => "windows",
+                    "gcc" | "mingw" => {
+                        if is_pe {
+                            "windows"
+                        } else {
+                            "gcc"
+                        }
+                    }
+                    "clang" => "clang",
+                    _ => "default",
+                })
+        };
 
         if let Err(e) = decomp.load_binary(
             &binary_data,

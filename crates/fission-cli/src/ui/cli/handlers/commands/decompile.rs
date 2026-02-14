@@ -87,17 +87,24 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
 
             // Try to detect compiler
             let detection = fission_loader::detect(&binary);
+            let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
             let compiler_id = detection
                 .compiler()
                 .map(|d| match d.name.to_lowercase().as_str() {
                     "microsoft visual c++" | "msvc" => "windows",
-                    "gcc" | "mingw" => "gcc",
+                    "gcc" | "mingw" => {
+                        if is_pe {
+                            "windows"
+                        } else {
+                            "gcc"
+                        }
+                    }
                     "clang" => "clang",
                     _ => "default",
                 });
 
             if let Err(e) = native.load_binary(
-                &binary.data,
+                binary.data.as_slice(),
                 binary.image_base,
                 binary.is_64bit,
                 Some(&binary.arch_spec),

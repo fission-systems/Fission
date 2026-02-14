@@ -78,6 +78,14 @@ pub struct OneShotArgs {
     #[arg(short = 'n', long, default_value = "20")]
     pub count: usize,
 
+    /// Override decompiler compiler ID (auto|windows|gcc|clang|default)
+    #[arg(long, value_name = "ID")]
+    pub compiler_id: Option<String>,
+
+    /// Decompilation profile (balanced|quality|speed)
+    #[arg(long, value_name = "PROFILE")]
+    pub profile: Option<String>,
+
     /// Output to file instead of stdout
     #[arg(short, long)]
     pub output: Option<PathBuf>,
@@ -100,4 +108,12 @@ pub struct OneShotArgs {
 pub struct TuiArgs {
     /// Path to the binary file to analyze
     pub binary: PathBuf,
+
+    /// Override decompiler compiler ID (auto|windows|gcc|clang|default)
+    #[arg(long, value_name = "ID")]
+    pub compiler_id: Option<String>,
+
+    /// Decompilation profile (balanced|quality|speed)
+    #[arg(long, value_name = "PROFILE")]
+    pub profile: Option<String>,
 }

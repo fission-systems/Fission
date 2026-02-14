@@ -5,12 +5,33 @@
 use crate::analysis::cfg::{CfgAnalysis, CfgVisualizer, DotOptions};
 use crate::analysis::pcode::PcodeFunction;
 use crate::cli::output::OutputSilencer;
+use fission_analysis::analysis::cfg::CfgSummary;
 use fission_loader::loader::LoadedBinary;
-use serde::Serialize;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
+
+fn apply_profile(decomp: &mut fission_ffi::DecompilerNative, profile: Option<&str>) {
+    let selected = profile.unwrap_or("balanced").to_ascii_lowercase();
+    match selected.as_str() {
+        "quality" => {
+            decomp.set_feature("infer_pointers", true);
+            decomp.set_feature("analyze_loops", true);
+            decomp.set_feature("readonly_propagate", true);
+        }
+        "speed" => {
+            decomp.set_feature("infer_pointers", false);
+            decomp.set_feature("analyze_loops", false);
+            decomp.set_feature("readonly_propagate", false);
+        }
+        _ => {
+            decomp.set_feature("infer_pointers", true);
+            decomp.set_feature("analyze_loops", false);
+            decomp.set_feature("readonly_propagate", true);
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CfgOutputFormat {
@@ -20,43 +41,14 @@ pub enum CfgOutputFormat {
     Json,
 }
 
-#[derive(Serialize)]
-struct CfgJsonOutput {
-    function_address: String,
-    block_count: usize,
-    edge_count: usize,
-    cyclomatic_complexity: usize,
-    max_nesting_depth: usize,
-    loop_count: usize,
-    loops: Vec<LoopInfo>,
-    blocks: Vec<BlockInfo>,
-}
-
-#[derive(Serialize)]
-struct LoopInfo {
-    header: usize,
-    kind: String,
-    body: Vec<usize>,
-    back_edges: Vec<(usize, usize)>,
-}
-
-#[derive(Serialize)]
-struct BlockInfo {
-    index: usize,
-    address: String,
-    is_entry: bool,
-    is_exit: bool,
-    successors: Vec<usize>,
-    predecessors: Vec<usize>,
-    instruction_count: usize,
-}
-
 pub fn analyze_cfg(
     binary: &LoadedBinary,
     addr: u64,
     format: CfgOutputFormat,
     output_path: Option<&PathBuf>,
     verbose: bool,
+    compiler_id_override: Option<&str>,
+    profile_override: Option<&str>,
 ) -> io::Result<()> {
     if verbose {
         eprintln!("[*] Analyzing CFG for function at 0x{:X}", addr);
@@ -64,7 +56,7 @@ pub fn analyze_cfg(
 
     // Initialize decompiler
     let sla_dir = std::env::current_dir()
-        .unwrap()
+        .map_err(|e| io::Error::other(format!("Failed to resolve current directory: {}", e)))?
         .join("ghidra_decompiler")
         .to_string_lossy()
         .into_owned();
@@ -83,6 +75,7 @@ pub fn analyze_cfg(
             }
         }
     };
+    apply_profile(&mut decomp, profile_override);
 
     // Load binary data
     let binary_path = PathBuf::from(&binary.path);
@@ -96,16 +89,32 @@ pub fn analyze_cfg(
 
     {
         let _silencer = OutputSilencer::new_if(!verbose);
-        // Try to detect compiler
-        let detection = fission_loader::detect(binary);
-        let compiler_id = detection
-            .compiler()
-            .map(|d| match d.name.to_lowercase().as_str() {
-                "microsoft visual c++" | "msvc" => "windows",
-                "gcc" | "mingw" => "gcc",
+        let compiler_id = if let Some(user_compiler) = compiler_id_override {
+            Some(match user_compiler.to_ascii_lowercase().as_str() {
+                "windows" => "windows",
+                "gcc" => "gcc",
                 "clang" => "clang",
+                "default" => "default",
                 _ => "default",
-            });
+            })
+        } else {
+            let detection = fission_loader::detect(binary);
+            let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
+            detection
+                .compiler()
+                .map(|d| match d.name.to_lowercase().as_str() {
+                    "microsoft visual c++" | "msvc" => "windows",
+                    "gcc" | "mingw" => {
+                        if is_pe {
+                            "windows"
+                        } else {
+                            "gcc"
+                        }
+                    }
+                    "clang" => "clang",
+                    _ => "default",
+                })
+        };
 
         if let Err(e) = decomp.load_binary(
             &binary_data,
@@ -215,8 +224,8 @@ pub fn analyze_cfg(
         }
         CfgOutputFormat::Ascii => CfgVisualizer::to_ascii(&analysis.cfg),
         CfgOutputFormat::Json => {
-            let json_output = build_json_output(&analysis, addr);
-            serde_json::to_string_pretty(&json_output).unwrap_or_default()
+            let summary = CfgSummary::from_analysis(&analysis, Some(addr), false);
+            serde_json::to_string_pretty(&summary).unwrap_or_default()
         }
     };
 
@@ -235,45 +244,6 @@ pub fn analyze_cfg(
     }
 
     Ok(())
-}
-
-fn build_json_output(analysis: &CfgAnalysis, addr: u64) -> CfgJsonOutput {
-    let loops: Vec<LoopInfo> = analysis
-        .loops
-        .iter()
-        .map(|l| LoopInfo {
-            header: l.header,
-            kind: format!("{:?}", l.kind),
-            body: l.body.iter().copied().collect(),
-            back_edges: l.back_edges.clone(),
-        })
-        .collect();
-
-    let blocks: Vec<BlockInfo> = analysis
-        .cfg
-        .blocks
-        .iter()
-        .map(|b| BlockInfo {
-            index: b.index,
-            address: format!("0x{:x}", b.start_address),
-            is_entry: b.is_entry,
-            is_exit: b.is_exit,
-            successors: b.successors.iter().map(|e| e.target).collect(),
-            predecessors: b.predecessors.clone(),
-            instruction_count: b.operations.len(),
-        })
-        .collect();
-
-    CfgJsonOutput {
-        function_address: format!("0x{:x}", addr),
-        block_count: analysis.cfg.block_count(),
-        edge_count: analysis.cfg.edge_count(),
-        cyclomatic_complexity: analysis.metrics.cyclomatic_complexity,
-        max_nesting_depth: analysis.metrics.max_nesting_depth,
-        loop_count: analysis.loops.len(),
-        loops,
-        blocks,
-    }
 }
 
 fn render_dot_to_png(dot_path: &PathBuf, verbose: bool) {

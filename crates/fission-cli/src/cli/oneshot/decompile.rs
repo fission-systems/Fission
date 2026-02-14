@@ -37,19 +37,117 @@ pub(super) fn run_decompilation(
         }
     };
 
+    // Apply one-shot profile before binary load/decompilation.
+    let selected_profile = cli.profile.as_deref().unwrap_or("balanced");
+    match selected_profile.to_ascii_lowercase().as_str() {
+        "quality" => {
+            decomp.set_feature("infer_pointers", true);
+            decomp.set_feature("analyze_loops", true);
+            decomp.set_feature("readonly_propagate", true);
+        }
+        "speed" => {
+            decomp.set_feature("infer_pointers", false);
+            decomp.set_feature("analyze_loops", false);
+            decomp.set_feature("readonly_propagate", false);
+        }
+        "balanced" => {
+            decomp.set_feature("infer_pointers", true);
+            decomp.set_feature("analyze_loops", false);
+            decomp.set_feature("readonly_propagate", true);
+        }
+        other => {
+            eprintln!(
+                "[!] Unknown --profile '{}', using balanced (quality|speed|balanced)",
+                other
+            );
+            decomp.set_feature("infer_pointers", true);
+            decomp.set_feature("analyze_loops", false);
+            decomp.set_feature("readonly_propagate", true);
+        }
+    }
+
+    if cli.verbose {
+        eprintln!("[*] Decompilation profile = {}", selected_profile);
+    }
+
     // Load binary
     {
         let _silencer = OutputSilencer::new_if(!cli.verbose);
-        // Try to detect compiler
-        let detection = fission_loader::detect(binary);
-        let compiler_id = detection
-            .compiler()
-            .map(|d| match d.name.to_lowercase().as_str() {
-                "microsoft visual c++" | "msvc" => "windows",
-                "gcc" | "mingw" => "gcc",
+        // Allow explicit compiler override for deterministic one-shot runs.
+        let compiler_id = if let Some(user_compiler) = cli.compiler_id.as_deref() {
+            Some(match user_compiler.to_ascii_lowercase().as_str() {
+                "windows" => "windows",
+                "gcc" => "gcc",
                 "clang" => "clang",
-                _ => "default",
-            });
+                "default" => "default",
+                "auto" => {
+                    let detection = fission_loader::detect(binary);
+                    let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
+                    detection
+                        .compiler()
+                        .map(|d| match d.name.to_lowercase().as_str() {
+                            "microsoft visual c++" | "msvc" => "windows",
+                            "gcc" | "mingw" => {
+                                if is_pe {
+                                    "windows"
+                                } else {
+                                    "gcc"
+                                }
+                            }
+                            "clang" => "clang",
+                            _ => "default",
+                        })
+                        .unwrap_or("default")
+                }
+                _ => {
+                    eprintln!(
+                        "[!] Unknown --compiler-id '{}', falling back to auto detection",
+                        user_compiler
+                    );
+                    let detection = fission_loader::detect(binary);
+                    let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
+                    detection
+                        .compiler()
+                        .map(|d| match d.name.to_lowercase().as_str() {
+                            "microsoft visual c++" | "msvc" => "windows",
+                            "gcc" | "mingw" => {
+                                if is_pe {
+                                    "windows"
+                                } else {
+                                    "gcc"
+                                }
+                            }
+                            "clang" => "clang",
+                            _ => "default",
+                        })
+                        .unwrap_or("default")
+                }
+            })
+        } else {
+            let detection = fission_loader::detect(binary);
+            let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
+            detection
+                .compiler()
+                .map(|d| match d.name.to_lowercase().as_str() {
+                    "microsoft visual c++" | "msvc" => "windows",
+                    "gcc" | "mingw" => {
+                        if is_pe {
+                            "windows"
+                        } else {
+                            "gcc"
+                        }
+                    }
+                    "clang" => "clang",
+                    _ => "default",
+                })
+        };
+
+        if cli.verbose {
+            eprintln!(
+                "[*] Decompiler compiler_id = {}",
+                compiler_id.unwrap_or("default")
+            );
+        }
 
         if let Err(e) = decomp.load_binary(
             binary_data,

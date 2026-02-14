@@ -9,34 +9,97 @@ use std::sync::Arc;
 // rkyv Wrappers for Arc<T> types (COW optimization)
 // ============================================================================
 
-/// Custom rkyv wrapper for `Arc<Vec<u8>>` that serializes as `Vec<u8>`.
+/// Unified buffer that can be either on the heap or memory-mapped from a file.
 ///
-/// This enables efficient cloning of LoadedBinary while maintaining
-/// compatibility with rkyv serialization (e.g., for snapshots).
-pub struct ArcVecWrapper;
+/// This allows Fission to handle multi-gigabyte binaries without loading
+/// them entirely into RAM, while still supporting in-memory buffers
+/// (e.g., from snapshots or unpacking).
+#[derive(Debug)]
+pub enum DataBuffer {
+    Heap(Vec<u8>),
+    Mapped(memmap2::Mmap),
+}
 
-impl rkyv::with::ArchiveWith<Arc<Vec<u8>>> for ArcVecWrapper {
+impl DataBuffer {
+    /// Get the content as a byte slice
+    #[inline]
+    pub fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Heap(v) => v.as_slice(),
+            Self::Mapped(m) => m,
+        }
+    }
+
+    /// Convert to a mutable Vec<u8> (triggers copy if mapped)
+    pub fn to_mut_vec(&mut self) -> &mut Vec<u8> {
+        if let Self::Mapped(_) = self {
+            let vec = self.as_slice().to_vec();
+            *self = Self::Heap(vec);
+        }
+        match self {
+            Self::Heap(v) => v,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Clone for DataBuffer {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Heap(v) => Self::Heap(v.clone()),
+            Self::Mapped(m) => Self::Heap(m.to_vec()),
+        }
+    }
+}
+
+impl rkyv::Archive for DataBuffer {
+    type Archived = ();
+    type Resolver = ();
+    #[inline]
+    unsafe fn resolve(&self, _pos: usize, _resolver: Self::Resolver, _out: *mut Self::Archived) {}
+}
+
+impl<S: rkyv::ser::Serializer + ?Sized> rkyv::Serialize<S> for DataBuffer {
+    #[inline]
+    fn serialize(&self, _serializer: &mut S) -> std::result::Result<Self::Resolver, S::Error> {
+        Ok(())
+    }
+}
+
+impl<D: rkyv::Fallible + ?Sized> rkyv::Deserialize<DataBuffer, D> for () {
+    #[inline]
+    fn deserialize(&self, _deserializer: &mut D) -> std::result::Result<DataBuffer, D::Error> {
+        unreachable!("DataBuffer should be deserialized via ArcDataWrapper")
+    }
+}
+
+/// Custom rkyv wrapper for `Arc<DataBuffer>` that serializes as `Vec<u8>`.
+pub struct ArcDataWrapper;
+
+impl rkyv::with::ArchiveWith<Arc<DataBuffer>> for ArcDataWrapper {
     type Archived = rkyv::vec::ArchivedVec<u8>;
     type Resolver = rkyv::vec::VecResolver;
 
     #[inline]
     unsafe fn resolve_with(
-        field: &Arc<Vec<u8>>,
+        field: &Arc<DataBuffer>,
         pos: usize,
         resolver: Self::Resolver,
         out: *mut Self::Archived,
     ) {
+        // SAFETY: The caller guarantees that out points to valid memory
         unsafe {
-            rkyv::vec::ArchivedVec::resolve_from_slice(field.as_slice(), pos, resolver, out);
+            let out_vec = &mut *out;
+            rkyv::vec::ArchivedVec::resolve_from_slice(field.as_slice(), pos, resolver, out_vec);
         }
     }
 }
 
 impl<S: rkyv::ser::Serializer + rkyv::ser::ScratchSpace + ?Sized>
-    rkyv::with::SerializeWith<Arc<Vec<u8>>, S> for ArcVecWrapper
+    rkyv::with::SerializeWith<Arc<DataBuffer>, S> for ArcDataWrapper
 {
     fn serialize_with(
-        field: &Arc<Vec<u8>>,
+        field: &Arc<DataBuffer>,
         serializer: &mut S,
     ) -> std::result::Result<Self::Resolver, S::Error> {
         rkyv::vec::ArchivedVec::serialize_from_slice(field.as_slice(), serializer)
@@ -44,14 +107,14 @@ impl<S: rkyv::ser::Serializer + rkyv::ser::ScratchSpace + ?Sized>
 }
 
 impl<D: rkyv::Fallible + ?Sized>
-    rkyv::with::DeserializeWith<rkyv::vec::ArchivedVec<u8>, Arc<Vec<u8>>, D> for ArcVecWrapper
+    rkyv::with::DeserializeWith<rkyv::vec::ArchivedVec<u8>, Arc<DataBuffer>, D> for ArcDataWrapper
 {
     fn deserialize_with(
         field: &rkyv::vec::ArchivedVec<u8>,
         _deserializer: &mut D,
-    ) -> std::result::Result<Arc<Vec<u8>>, D::Error> {
+    ) -> std::result::Result<Arc<DataBuffer>, D::Error> {
         let vec: Vec<u8> = field.as_slice().to_vec();
-        Ok(Arc::new(vec))
+        Ok(Arc::new(DataBuffer::Heap(vec)))
     }
 }
 
@@ -143,8 +206,9 @@ pub struct LoadedBinaryInner {
     pub path: String,
     /// Binary data hash (Blake3) for caching and identification
     pub hash: String,
-    /// Raw bytes of the file
-    pub data: Vec<u8>,
+    /// Raw bytes of the file (COW enabled ArcDataBuffer)
+    #[with(ArcDataWrapper)]
+    pub data: Arc<DataBuffer>,
     /// Detected architecture (e.g., "x86:LE:64:default")
     pub arch_spec: String,
     /// Entry point address
@@ -201,11 +265,18 @@ impl LoadedBinary {
     /// Get Ghidra-compatible compiler ID based on detections
     pub fn get_ghidra_compiler_id(&self) -> Option<String> {
         let detection = crate::detector::detect(self);
+        let is_pe = self.format.to_ascii_uppercase().starts_with("PE");
         detection
             .compiler()
             .map(|d| match d.name.to_lowercase().as_str() {
                 "microsoft visual c++" | "msvc" => "windows".to_string(),
-                "gcc" | "mingw" => "gcc".to_string(),
+                "gcc" | "mingw" => {
+                    if is_pe {
+                        "windows".to_string()
+                    } else {
+                        "gcc".to_string()
+                    }
+                }
                 "clang" => "clang".to_string(),
                 _ => "default".to_string(),
             })
@@ -247,7 +318,7 @@ impl std::ops::DerefMut for LoadedBinary {
 pub struct LoadedBinaryBuilder {
     path: String,
     hash: String,
-    data: Vec<u8>,
+    data: DataBuffer,
     arch_spec: String,
     entry_point: u64,
     image_base: u64,
@@ -260,13 +331,13 @@ pub struct LoadedBinaryBuilder {
 }
 
 impl LoadedBinaryBuilder {
-    pub fn new(path: String, data: Vec<u8>) -> Self {
-        let hash = blake3::hash(&data).to_hex().to_string();
+    pub fn new(path: String, data: DataBuffer) -> Self {
+        let hash = blake3::hash(data.as_slice()).to_hex().to_string();
         Self {
             path,
             hash,
             data,
-            arch_spec: "unknown".to_string(),
+            arch_spec: "x86:LE:64:default".to_string(), // Default
             entry_point: 0,
             image_base: 0,
             functions: Vec::new(),
@@ -380,7 +451,7 @@ impl LoadedBinaryBuilder {
         let inner = LoadedBinaryInner {
             path: self.path,
             hash: self.hash,
-            data: self.data,
+            data: Arc::new(self.data),
             arch_spec: self.arch_spec,
             entry_point: self.entry_point,
             image_base: self.image_base,
@@ -408,6 +479,11 @@ impl LoadedBinary {
 
     /// Get bytes at a given address using binary search for O(log N) lookup
     pub fn get_bytes(&self, address: u64, size: usize) -> Option<Vec<u8>> {
+        self.view_bytes(address, size).map(|s| s.to_vec())
+    }
+
+    /// Get a slice of bytes at a given address (zero-copy)
+    pub fn view_bytes(&self, address: u64, size: usize) -> Option<&[u8]> {
         // Binary search to find the section containing this address
         // Sections must be sorted by virtual_address (done during parsing)
         let idx = self.sections.binary_search_by(|section| {
@@ -423,15 +499,29 @@ impl LoadedBinary {
         if let Ok(idx) = idx {
             let section = &self.sections[idx];
             let offset_in_section = address - section.virtual_address;
-            let file_offset = section.file_offset + offset_in_section;
-            let end = (file_offset as usize + size).min(self.data.len());
-            let start = file_offset as usize;
+            let file_offset = section.file_offset as usize + offset_in_section as usize;
 
-            if start < self.data.len() {
-                return Some(self.data[start..end].to_vec());
+            if file_offset + size <= self.data.as_slice().len() {
+                return Some(&self.data.as_slice()[file_offset..file_offset + size]);
             }
         }
         None
+    }
+
+    /// Read a pointer at the given address
+    pub fn read_ptr(&self, address: u64) -> Result<u64> {
+        let size = if self.is_64bit { 8 } else { 4 };
+        let bytes = self.get_bytes(address, size).ok_or_else(|| {
+            FissionError::loader(format!("Could not read pointer at 0x{:x}", address))
+        })?;
+
+        let ptr = if self.is_64bit {
+            u64::from_le_bytes(bytes.try_into().unwrap_or([0; 8]))
+        } else {
+            u32::from_le_bytes(bytes.try_into().unwrap_or([0; 4])) as u64
+        };
+
+        Ok(ptr)
     }
 
     /// Get executable sections only
@@ -548,62 +638,27 @@ impl LoadedBinary {
         let max_va_end = self
             .sections
             .iter()
-            .map(|s| {
-                let size = if s.virtual_size > 0 {
-                    s.virtual_size
-                } else {
-                    s.file_size
-                };
-                s.virtual_address + size
-            })
+            .map(|s| s.virtual_address + s.virtual_size)
             .max()
-            .unwrap_or(self.image_base);
+            .unwrap_or(0);
 
-        // Calculate required buffer size (max_va relative to image_base)
-        let buffer_size = if max_va_end > self.image_base {
-            (max_va_end - self.image_base) as usize
-        } else {
-            0
-        };
+        let mut mapped = vec![0u8; (max_va_end - self.image_base) as usize];
+        let binary_data = self.inner().data.as_slice();
 
-        // Create zeroed buffer
-        let mut mapped = vec![0u8; buffer_size];
-
-        // IMPORTANT: Copy PE/ELF headers at offset 0
-        // The headers are NOT in a section but are needed for format detection.
-        // For PE, the first section typically starts at 0x1000 (after headers).
-        // We copy the raw file data from 0 up to the first section's file offset.
-        let first_section_offset = self
-            .sections
-            .iter()
-            .filter(|s| s.file_offset > 0)
-            .map(|s| s.file_offset as usize)
-            .min()
-            .unwrap_or(0x1000.min(self.data.len()));
-
-        // Copy headers to offset 0 in memory-mapped buffer
-        let header_copy_size = first_section_offset.min(self.data.len()).min(mapped.len());
-        if header_copy_size > 0 {
-            mapped[..header_copy_size].copy_from_slice(&self.data[..header_copy_size]);
-        }
-
-        // Map each section into the buffer at its RVA offset
         for section in &self.sections {
-            let rva = section.virtual_address.saturating_sub(self.image_base);
-            let file_start = section.file_offset as usize;
-            let file_end = (section.file_offset + section.file_size) as usize;
+            if section.file_size == 0 || section.file_offset as usize >= binary_data.len() {
+                continue;
+            }
 
-            if file_end <= self.data.len() {
-                let section_data = &self.data[file_start..file_end];
-                let dest_start = rva as usize;
-                let dest_end = dest_start + section_data.len();
+            let start = section.file_offset as usize;
+            let end = std::cmp::min(start + section.file_size as usize, binary_data.len());
+            let size = end - start;
 
-                if dest_end <= mapped.len() {
-                    mapped[dest_start..dest_end].copy_from_slice(section_data);
-                }
+            let dest_start = (section.virtual_address - self.image_base) as usize;
+            if dest_start + size <= mapped.len() {
+                mapped[dest_start..dest_start + size].copy_from_slice(&binary_data[start..end]);
             }
         }
-
         mapped
     }
 
@@ -647,10 +702,10 @@ impl LoadedBinary {
             // Get section bytes
             let start = section.file_offset as usize;
             let size = section.file_size as usize;
-            if start + size > self.data.len() {
+            if start + size > self.data.as_slice().len() {
                 continue;
             }
-            let bytes = &self.data[start..start + size];
+            let bytes = &self.data.as_slice()[start..start + size];
 
             // Discover call targets in this section
             let targets = engine.discover_call_targets(bytes, section.virtual_address);
@@ -734,11 +789,14 @@ impl LoadedBinary {
 
             let start = section.file_offset as usize;
             let end = (section.file_offset + section.file_size) as usize;
-            if end > self.data.len() {
+            if end > self.data.as_slice().len() {
                 continue;
             }
 
-            let data = &self.data[start..end];
+            // Limit search to a reasonable size to prevent excessive memory usage or hangs
+            let search_limit = (512 * 1024) // 512KB limit
+                .min(self.data.as_slice().len() - start);
+            let data = &self.data.as_slice()[start..start + search_limit];
             let va_start = section.virtual_address;
 
             for i in 0..data.len() {
@@ -844,15 +902,17 @@ impl LoadedBinary {
         let offset = offset as usize;
         let end = offset + new_bytes.len();
 
-        if end > self.data.len() {
+        if end > self.data.as_slice().len() {
             return None;
         }
 
         // Save original bytes
-        let original = self.data[offset..end].to_vec();
+        let original = self.data.as_slice()[offset..end].to_vec();
 
-        // Apply patch - DerefMut triggers COW at LoadedBinary level
-        self.data[offset..end].copy_from_slice(new_bytes);
+        // Apply patch - ensure we have a mutable Heap buffer (COW)
+        let data_mut = Arc::make_mut(&mut self.data);
+        let vec = data_mut.to_mut_vec();
+        vec[offset..end].copy_from_slice(new_bytes);
 
         Some(original)
     }
@@ -869,16 +929,16 @@ impl LoadedBinary {
         let offset = offset as usize;
         let end = offset + size;
 
-        if end > self.data.len() {
+        if end > self.data.as_slice().len() {
             return None;
         }
 
-        Some(self.data[offset..end].to_vec())
+        Some(self.data.as_slice()[offset..end].to_vec())
     }
 
     /// Save the (potentially patched) binary to a file
     pub fn save_as<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        std::fs::write(path, &self.data)?;
+        std::fs::write(path, self.data.as_slice())?;
         Ok(())
     }
 
