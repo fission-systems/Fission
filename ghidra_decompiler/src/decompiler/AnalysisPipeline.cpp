@@ -6,7 +6,12 @@
 #include "fission/analysis/GlobalDataAnalyzer.h"
 #include "fission/analysis/StackFrameAnalyzer.h"
 #include "fission/analysis/TypePropagator.h"
+#include "fission/analysis/CallGraphAnalyzer.h"
+#include "fission/analysis/TypeSharing.h"
 #include "fission/types/StructureAnalyzer.h"
+#include "fission/types/GlobalTypeRegistry.h"
+#include "fission/decompiler/PcodeOptimizationBridge.h"
+#include "fission/decompiler/PcodeExtractor.h"
 #include "fission/ffi/DecompContext.h"
 
 #include "libdecomp.hh"
@@ -14,6 +19,7 @@
 #include "funcdata.hh"
 #include "op.hh"
 #include "varnode.hh"
+#include "type.hh"
 
 #include <cctype>
 #include <iostream>
@@ -378,6 +384,64 @@ static void rerun_action(ghidra::Funcdata* fd, ghidra::Action* action) {
     }
 }
 
+static fission::types::FunctionSignature build_function_signature(ghidra::Funcdata* fd) {
+    using namespace fission::types;
+
+    FunctionSignature sig;
+    if (fd == nullptr) {
+        return sig;
+    }
+
+    sig.address = fd->getAddress().getOffset();
+    sig.return_type = nullptr;
+
+    const ghidra::FuncProto& proto = fd->getFuncProto();
+    ghidra::ProtoParameter* ret = proto.getOutput();
+    if (ret != nullptr && ret->getType() != nullptr) {
+        ghidra::Datatype* rt = ret->getType();
+        if (rt->getMetatype() == ghidra::TYPE_STRUCT) {
+            sig.return_type = dynamic_cast<ghidra::TypeStruct*>(rt);
+        }
+    }
+
+    int num = proto.numParams();
+    for (int i = 0; i < num; ++i) {
+        ghidra::ProtoParameter* param = proto.getParam(i);
+        if (param == nullptr || param->getType() == nullptr) {
+            continue;
+        }
+
+        ParamTypeInfo pinfo;
+        pinfo.param_index = i;
+        pinfo.struct_type = nullptr;
+
+        ghidra::Datatype* ptype = param->getType();
+        pinfo.type_name = ptype->getName();
+        pinfo.is_pointer = (ptype->getMetatype() == ghidra::TYPE_PTR);
+
+        if (ptype->getMetatype() == ghidra::TYPE_STRUCT) {
+            pinfo.struct_type = dynamic_cast<ghidra::TypeStruct*>(ptype);
+        } else if (pinfo.is_pointer) {
+            ghidra::Datatype* pointed = static_cast<ghidra::TypePointer*>(ptype)->getPtrTo();
+            if (pointed != nullptr && pointed->getMetatype() == ghidra::TYPE_STRUCT) {
+                pinfo.struct_type = dynamic_cast<ghidra::TypeStruct*>(pointed);
+            }
+        }
+
+        sig.params.push_back(pinfo);
+    }
+
+    return sig;
+}
+
+static void register_signature_from_func(fission::ffi::DecompContext* ctx, ghidra::Funcdata* fd) {
+    if (ctx == nullptr || fd == nullptr) {
+        return;
+    }
+    fission::types::FunctionSignature sig = build_function_signature(fd);
+    ctx->type_registry.register_function_types(sig.address, sig);
+}
+
 AnalysisArtifacts run_analysis_passes(
     fission::ffi::DecompContext* ctx,
     ghidra::Funcdata* fd,
@@ -499,6 +563,127 @@ AnalysisArtifacts run_analysis_passes(
                         rerun_for_struct_symbols = true;
                     }
                 }
+            }
+        }
+
+        // Call Graph Analysis & Type Registry
+        {
+            uint64_t func_addr_cg = fd->getAddress().getOffset();
+            register_signature_from_func(ctx, fd);
+
+            fission::analysis::CallGraphAnalyzer call_analyzer(&ctx->type_registry);
+            call_analyzer.extract_calls(fd);
+            int propagated = call_analyzer.propagate_types();
+            if (propagated > 0) {
+                fission::utils::log_stream() << "[DecompilerCore] CallGraph: propagated " << propagated
+                          << " type hints" << std::endl;
+            }
+
+            // Drain pending reanalysis queue and run a bounded reanalysis loop.
+            std::set<uint64_t> processed;
+            ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
+            const int max_rounds = 2;
+            int rounds = 0;
+            int reanalyzed = 0;
+
+            std::vector<uint64_t> pending = ctx->type_registry.consume_pending_reanalysis();
+            while (!pending.empty() && rounds < max_rounds && global_scope != nullptr) {
+                ++rounds;
+                for (uint64_t target_addr : pending) {
+                    if (processed.count(target_addr) != 0) {
+                        continue;
+                    }
+                    processed.insert(target_addr);
+
+                    if (!is_address_in_executable(ctx, target_addr)) {
+                        continue;
+                    }
+
+                    ghidra::Address func_addr(ctx->arch->getDefaultCodeSpace(), target_addr);
+                    ghidra::Funcdata* target_fd = global_scope->findFunction(func_addr);
+                    if (target_fd == nullptr) {
+                        ghidra::FunctionSymbol* sym = global_scope->addFunction(func_addr, "sub_" + std::to_string(target_addr));
+                        if (sym == nullptr) {
+                            continue;
+                        }
+                        target_fd = sym->getFunction();
+                    }
+                    if (target_fd == nullptr) {
+                        continue;
+                    }
+
+                    try {
+                        target_fd->clear();
+                        ghidra::Address end_addr = func_addr + 0x1000;
+                        target_fd->followFlow(func_addr, end_addr);
+                        action->reset(*target_fd);
+                        action->perform(*target_fd);
+                    } catch (const ghidra::LowlevelError&) {
+                        continue;
+                    } catch (...) {
+                        continue;
+                    }
+
+                    register_signature_from_func(ctx, target_fd);
+                    call_analyzer.extract_calls(target_fd);
+                    reanalyzed++;
+                }
+
+                int newly_propagated = call_analyzer.propagate_types();
+                if (newly_propagated <= 0) {
+                    break;
+                }
+                pending = ctx->type_registry.consume_pending_reanalysis();
+            }
+
+            if (reanalyzed > 0) {
+                fission::utils::log_stream() << "[DecompilerCore] CallGraph: reanalyzed "
+                          << reanalyzed << " pending functions" << std::endl;
+            }
+
+            if (reanalyzed > 0) {
+                rerun_action(fd, action);
+            }
+        }
+
+        // Cross-function Type Sharing
+        {
+            fission::analysis::TypeSharing type_sharing(ctx->arch.get());
+            std::vector<ghidra::Datatype*> param_types_ts;
+            const ghidra::FuncProto& proto_ts = fd->getFuncProto();
+            for (int i = 0; i < proto_ts.numParams(); ++i) {
+                ghidra::ProtoParameter* param = proto_ts.getParam(i);
+                if (param) param_types_ts.push_back(param->getType());
+            }
+            ghidra::ProtoParameter* ret_ts = proto_ts.getOutput();
+            ghidra::Datatype* ret_type_ts = (ret_ts ? ret_ts->getType() : nullptr);
+            uint64_t func_addr_ts = fd->getAddress().getOffset();
+            type_sharing.register_function_types(func_addr_ts, param_types_ts, ret_type_ts);
+            int shared = type_sharing.share_types();
+            if (shared > 0) {
+                fission::utils::log_stream() << "[DecompilerCore] TypeSharing: shared " << shared
+                          << " types" << std::endl;
+            }
+        }
+
+        // Pcode Optimization Bridge
+        if (fission::decompiler::PcodeOptimizationBridge::is_enabled()) {
+            try {
+                std::string optimized = fission::decompiler::PcodeOptimizationBridge::extract_and_optimize(fd);
+                if (!optimized.empty()) {
+                    fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization: extracted & optimized ("
+                              << optimized.size() << " bytes)" << std::endl;
+                    if (fission::decompiler::PcodeExtractor::inject_pcode(fd, optimized)) {
+                        fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization: injected optimized Pcode, re-running"
+                                  << std::endl;
+                        rerun_action(fd, action);
+                    }
+                }
+            } catch (const std::exception& e) {
+                fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization error: "
+                          << e.what() << std::endl;
+            } catch (...) {
+                fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization unknown error" << std::endl;
             }
         }
 

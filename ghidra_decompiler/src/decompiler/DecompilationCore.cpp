@@ -139,8 +139,9 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Failed to get function data");
     }
     
-    // If function is marked inline, warn and clear inline flag for standalone decompilation
-    if (fd->getFuncProto().isInline()) {
+    // By default we force standalone decompilation for inline-marked functions,
+    // but this can be relaxed via feature: allow_inline / inline.
+    if (fd->getFuncProto().isInline() && !ctx->allow_inline) {
         fission::utils::log_stream() << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec
                   << " is marked inline; forcing standalone decompilation" << std::endl;
         fd->getFuncProto().setInline(false);
@@ -222,6 +223,12 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
             }
         }
 
+        // Fallback to the actual function symbol name when the address is not in
+        // import/global maps (common for internal/user functions like cpp_*).
+        if (func_name.empty() && fd) {
+            func_name = fd->getName();
+        }
+
         if (!func_name.empty()) {
             proto_enforcer.enforce_single_prototype(ctx->arch.get(), addr, func_name);
         }
@@ -229,6 +236,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
 
     // CRITICAL: Reset action state for this function AFTER prototypes are applied
     fission::utils::log_stream() << "[DecompilerCore] Resetting action state..." << std::endl;
+    ctx->arch->clearAnalysis(fd);
     current_action->reset(*fd);
     
     fission::utils::log_stream() << "[DecompilerCore] Performing decompilation..." << std::endl;
@@ -238,7 +246,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         current_action->perform(*fd);
     } catch (const ghidra::LowlevelError& e) {
         std::string msg = e.explain;
-        if (msg.find("Function loaded for inlining") != std::string::npos) {
+        if (msg.find("Function loaded for inlining") != std::string::npos && !ctx->allow_inline) {
             fission::utils::log_stream() << "[DecompilerCore] WARNING: Inline-loaded function, clearing analysis and retrying"
                       << std::endl;
             if (ctx->arch) {

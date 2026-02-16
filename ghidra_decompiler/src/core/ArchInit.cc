@@ -2,6 +2,7 @@
 
 #include "fission/ffi/DecompContext.h"
 #include "fission/core/ArchPolicy.h"
+#include "fission/core/DataSymbolRegistry.h"
 #include "fission/core/SymbolProvider.h"
 #include "fission/types/TypeManager.h"
 #include "fission/types/GdtBinaryParser.h"
@@ -12,6 +13,8 @@
 #include "funcdata.hh"
 #include "flow.hh"
 #include "varnode.hh"
+#include "architecture.hh"
+#include "options.hh"
 
 #include <algorithm>
 #include <iostream>
@@ -19,13 +22,6 @@
 #include "fission/config/PathConfig.h"
 
 using namespace fission::config;
-
-// Forward declaration for data symbol registration
-namespace fission {
-namespace core {
-    void registerDataSectionSymbols(fission::ffi::DecompContext* ctx);
-}
-}
 
 namespace fission {
 namespace core {
@@ -130,6 +126,23 @@ static void apply_feature_flags(DecompContext* ctx) {
         ctx->arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
     } else {
         ctx->arch->flowoptions |= ghidra::FlowInfo::error_toomanyinstructions;
+    }
+
+    // Keep OptionDatabase in sync with flags (mirrors original options.cc toggles)
+    if (ctx->arch->options != nullptr) {
+        try {
+            ctx->arch->options->set(ghidra::ELEM_INFERCONSTPTR.getId(), ctx->infer_pointers ? "on" : "off", "", "");
+            ctx->arch->options->set(ghidra::ELEM_ANALYZEFORLOOPS.getId(), ctx->analyze_loops ? "on" : "off", "", "");
+            ctx->arch->options->set(ghidra::ELEM_READONLY.getId(), ctx->readonly_propagate ? "on" : "off", "", "");
+            ctx->arch->options->set(ghidra::ELEM_JUMPLOAD.getId(), ctx->record_jumploads ? "on" : "off", "", "");
+            ctx->arch->options->set(ghidra::ELEM_ERRORTOOMANYINSTRUCTIONS.getId(), ctx->disable_toomanyinstructions_error ? "off" : "on", "", "");
+            ctx->arch->options->set(ghidra::ELEM_INLINE.getId(), ctx->allow_inline ? "on" : "off", "", "");
+        } catch (const std::exception& e) {
+            fission::utils::log_stream() << "[DecompilerCore] apply_feature_flags: option sync failed: "
+                      << e.what() << std::endl;
+        } catch (...) {
+            fission::utils::log_stream() << "[DecompilerCore] apply_feature_flags: option sync failed (unknown)" << std::endl;
+        }
     }
 }
 
@@ -266,6 +279,18 @@ void initialize_architecture(DecompContext* ctx, const ArchInitOptions& options)
         bool readonly_props_set = apply_default_space(ctx);
 
         configure_arch(ctx->arch.get());
+
+        if (options.read_loader_symbols) {
+            try {
+                ctx->arch->readLoaderSymbols("::");
+            } catch (const std::exception& e) {
+                fission::utils::log_stream() << "[DecompilerCore] WARNING: readLoaderSymbols failed: "
+                          << e.what() << std::endl;
+            } catch (...) {
+                fission::utils::log_stream() << "[DecompilerCore] WARNING: readLoaderSymbols failed (unknown)"
+                          << std::endl;
+            }
+        }
 
         if (options.apply_feature_flags) {
             apply_feature_flags(ctx);

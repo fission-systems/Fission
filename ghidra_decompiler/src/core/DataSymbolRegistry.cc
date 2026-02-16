@@ -1,12 +1,11 @@
+#include "fission/core/DataSymbolRegistry.h"
 #include "fission/loaders/DataSectionScanner.h"
-#include "fission/core/ArchPolicy.h"
 #include "fission/ffi/DecompContext.h"
 #include "architecture.hh"
 #include "database.hh"
 #include "type.hh"
 #include <iostream>
 #include "fission/utils/logger.h"
-#include <iomanip>
 
 namespace fission {
 namespace core {
@@ -21,10 +20,87 @@ using namespace fission::loaders;
 /// This enables type propagation through memory loads.
 ///
 /// \param ctx Decompiler context with loaded binary
+int registerDataSymbolsInGlobalScope(
+    ghidra::Architecture* arch,
+    const std::vector<DataSymbol>& symbols,
+    const std::function<void(const DataSymbol&)>& on_scanned_symbol
+) {
+    if (arch == nullptr) {
+        return 0;
+    }
+
+    Scope* globalScope = arch->symboltab->getGlobalScope();
+    TypeFactory* types = arch->types;
+    AddrSpace* ramSpace = arch->getDefaultDataSpace();
+
+    if (globalScope == nullptr || types == nullptr || ramSpace == nullptr) {
+        fission::utils::log_stream() << "[DataSymbolRegistry] Missing required components" << std::endl;
+        return 0;
+    }
+
+    int registered_count = 0;
+    for (const auto& sym : symbols) {
+        if (on_scanned_symbol) {
+            on_scanned_symbol(sym);
+        }
+
+        try {
+            // Get or create appropriate type
+            Datatype* dt = nullptr;
+            if (sym.type_meta == 9) {  // TYPE_FLOAT
+                if (sym.size == 8) {
+                    dt = types->getBase(8, TYPE_FLOAT);  // double
+                } else if (sym.size == 4) {
+                    dt = types->getBase(4, TYPE_FLOAT);  // float
+                }
+            } else if (sym.type_meta == 11) {  // TYPE_ARRAY (for strings)
+                Datatype* charType = types->getBase(1, TYPE_INT);  // char is 1-byte integer
+                if (charType != nullptr) {
+                    dt = types->getTypeArray(sym.size, charType);
+                    fission::utils::log_stream() << "[DataSymbolRegistry] Creating char[" << sym.size
+                              << "] type for string at 0x" << std::hex << sym.address << std::dec << std::endl;
+                }
+            }
+
+            if (dt == nullptr) {
+                fission::utils::log_stream() << "[DataSymbolRegistry] Could not create type for symbol at 0x"
+                          << std::hex << sym.address << std::dec << std::endl;
+                continue;
+            }
+
+            // Create address
+            Address addr(ramSpace, sym.address);
+
+            // Check if symbol already exists
+            SymbolEntry* existing = globalScope->queryContainer(addr, 1, Address());
+            if (existing != nullptr) {
+                continue;
+            }
+
+            // Add new symbol
+            SymbolEntry* entry = globalScope->addSymbol(sym.name, dt, addr, Address());
+            if (entry != nullptr) {
+                registered_count++;
+                fission::utils::log_stream() << "[DataSymbolRegistry] Registered symbol: " << sym.name
+                          << " at 0x" << std::hex << sym.address
+                          << " type=" << dt->getName() << std::dec << std::endl;
+            }
+        } catch (const std::exception& e) {
+            fission::utils::log_stream() << "[DataSymbolRegistry] Exception while registering symbol at 0x"
+                      << std::hex << sym.address << ": " << e.what() << std::dec << std::endl;
+        } catch (...) {
+            fission::utils::log_stream() << "[DataSymbolRegistry] Unknown exception while registering symbol at 0x"
+                      << std::hex << sym.address << std::dec << std::endl;
+        }
+    }
+
+    return registered_count;
+}
+
 void registerDataSectionSymbols(fission::ffi::DecompContext* ctx) {
     fission::utils::log_stream() << "[DataSymbolRegistry] **CALLED** registerDataSectionSymbols" << std::endl;
     
-    if (!ctx || !ctx->arch) {
+    if (ctx == nullptr || !ctx->arch) {
         fission::utils::log_stream() << "[DataSymbolRegistry] ERROR: ctx or ctx->arch is null" << std::endl;
         return;
     }
@@ -33,11 +109,7 @@ void registerDataSectionSymbols(fission::ffi::DecompContext* ctx) {
     fission::utils::log_stream() << "[DataSymbolRegistry] memory_blocks.size() = " << ctx->memory_blocks.size() << std::endl;
     
     Architecture* arch = ctx->arch.get();
-    Scope* globalScope = arch->symboltab->getGlobalScope();
-    TypeFactory* types = arch->types;
-    AddrSpace* ramSpace = arch->getDefaultDataSpace();
-    
-    if (!globalScope || !types || !ramSpace) {
+    if (arch == nullptr) {
         fission::utils::log_stream() << "[DataSymbolRegistry] Missing required components" << std::endl;
         return;
     }
@@ -77,76 +149,7 @@ void registerDataSectionSymbols(fission::ffi::DecompContext* ctx) {
             block.file_size
         );
         
-        // Register each symbol
-        for (const auto& sym : symbols) {
-            try {
-                // Get or create appropriate type
-                Datatype* dt = nullptr;
-                if (sym.type_meta == 9) {  // TYPE_FLOAT
-                    if (sym.size == 8) {
-                        dt = types->getBase(8, TYPE_FLOAT);  // double
-                    } else if (sym.size == 4) {
-                        dt = types->getBase(4, TYPE_FLOAT);  // float
-                    }
-                } else if (sym.type_meta == 11) {  // TYPE_ARRAY (for strings)
-                    // Create char array type: char[size]
-                    Datatype* charType = types->getBase(1, TYPE_INT);  // char is 1-byte integer
-                    if (charType) {
-                        dt = types->getTypeArray(sym.size, charType);
-                        fission::utils::log_stream() << "[DataSymbolRegistry] Creating char[" << sym.size 
-                                  << "] type for string at 0x" << std::hex << sym.address << std::dec << std::endl;
-                    }
-                }
-                
-                if (!dt) {
-                    fission::utils::log_stream() << "[DataSymbolRegistry] Could not create type for symbol at 0x" 
-                              << std::hex << sym.address << std::endl;
-                    continue;
-                }
-                
-                // Create address
-                Address addr(ramSpace, sym.address);
-                
-                // Check if symbol already exists
-                SymbolEntry* existing = globalScope->queryContainer(addr, 1, Address());
-                if (existing != nullptr) {
-                    // Symbol already exists, optionally update type
-                    Symbol* existingSym = existing->getSymbol();
-                    if (existingSym && existingSym->getType()->getMetatype() == TYPE_UNKNOWN) {
-                        // Update unknown type to our better type
-                        fission::utils::log_stream() << "[DataSymbolRegistry] Updating type for existing symbol at 0x" 
-                                  << std::hex << sym.address << std::endl;
-                        // Note: Cannot directly update, Ghidra API limitation
-                    }
-                    continue;
-                }
-                
-                // Add new symbol
-                SymbolEntry* entry = globalScope->addSymbol(
-                    sym.name,
-                    dt,
-                    addr,
-                    Address()  // use point
-                );
-                
-                if (entry) {
-                    totalSymbols++;
-                    fission::utils::log_stream() << "[DataSymbolRegistry] Registered symbol: " << sym.name 
-                              << " at 0x" << std::hex << sym.address 
-                              << " type=" << dt->getName() << std::endl;
-                } else {
-                    fission::utils::log_stream() << "[DataSymbolRegistry] Failed to add symbol at 0x" 
-                              << std::hex << sym.address << std::endl;
-                }
-                
-            } catch (const std::exception& e) {
-                fission::utils::log_stream() << "[DataSymbolRegistry] Exception while registering symbol at 0x" 
-                          << std::hex << sym.address << ": " << e.what() << std::endl;
-            } catch (...) {
-                fission::utils::log_stream() << "[DataSymbolRegistry] Unknown exception while registering symbol at 0x" 
-                          << std::hex << sym.address << std::endl;
-            }
-        }
+        totalSymbols += registerDataSymbolsInGlobalScope(arch, symbols);
     }
     
     fission::utils::log_stream() << "[DataSymbolRegistry] Registered " << totalSymbols 

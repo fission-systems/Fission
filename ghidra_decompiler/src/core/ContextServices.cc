@@ -2,12 +2,15 @@
 
 #include "fission/loader/SectionAwareLoadImage.h"
 #include "fission/core/SymbolProvider.h"
+#include "fission/analysis/VTableAnalyzer.h"
+#include "fission/types/RttiAnalyzer.h"
 
 #include "libdecomp.hh"
 
 #include <iostream>
 #include "fission/utils/logger.h"
 #include <sstream>
+#include <set>
 
 namespace fission {
 namespace core {
@@ -24,6 +27,9 @@ void add_symbol(DecompContext* ctx, uint64_t addr, const char* name) {
 
     std::lock_guard<std::mutex> lock(ctx->mutex);
     ctx->symbols[addr] = name;
+    if (ctx->memory_image) {
+        ctx->memory_image->addLoaderSymbol(addr, name);
+    }
 }
 
 void clear_symbols(DecompContext* ctx) {
@@ -33,6 +39,9 @@ void clear_symbols(DecompContext* ctx) {
 
     std::lock_guard<std::mutex> lock(ctx->mutex);
     ctx->symbols.clear();
+    if (ctx->memory_image) {
+        ctx->memory_image->clearLoaderSymbols();
+    }
 }
 
 void add_global_symbol(DecompContext* ctx, uint64_t addr, const char* name) {
@@ -63,6 +72,9 @@ DecompError add_function(DecompContext* ctx, uint64_t addr, const char* name) {
     try {
         std::string func_name = name ? name : ("FUN_" + std::to_string(addr));
         ctx->symbols[addr] = func_name;
+        if (ctx->memory_image) {
+            ctx->memory_image->addLoaderSymbol(addr, func_name);
+        }
 
         if (ctx->arch && ctx->memory_image) {
             ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
@@ -150,6 +162,92 @@ DecompError load_binary(
         ctx->is_64bit = is_64bit;
         if (sleigh_id) ctx->sleigh_id = sleigh_id;
         if (compiler_id) ctx->compiler_id = compiler_id;
+
+        // Re-seed loader symbol records from currently known function symbols.
+        for (const auto& kv : ctx->symbols) {
+            ctx->memory_image->addLoaderSymbol(kv.first, kv.second);
+        }
+
+        // Build reusable virtual-call display maps for post-processing.
+        ctx->vtable_virtual_names.clear();
+        ctx->vcall_slot_name_hints.clear();
+        ctx->vcall_slot_target_hints.clear();
+
+        fission::analysis::VTableAnalyzer vtable_analyzer;
+        vtable_analyzer.scan_vtables(ctx->binary_data.data(), ctx->binary_data.size(), base_addr, is_64bit);
+
+        std::map<uint64_t, std::string> recovered_classes =
+            fission::types::RttiAnalyzer::recover_class_names(ctx->binary_data, base_addr, is_64bit);
+        if (!recovered_classes.empty()) {
+            vtable_analyzer.link_with_rtti(recovered_classes);
+        }
+
+        const int ptr_size = is_64bit ? 8 : 4;
+        std::set<int> ambiguous_slot_targets;
+        const auto is_unresolved_vname = [](const std::string& name) {
+            return name.empty() ||
+                   name.find("::vfunc_") != std::string::npos ||
+                   name.rfind("sub_", 0) == 0;
+        };
+        for (const auto& vt : vtable_analyzer.get_vtables()) {
+            for (size_t i = 0; i < vt.entries.size(); ++i) {
+                int slot_offset = static_cast<int>(i) * ptr_size;
+                std::string display_name =
+                    vtable_analyzer.get_virtual_call_name(vt.address, slot_offset, ptr_size);
+                uint64_t resolved_target =
+                    vtable_analyzer.resolve_virtual_call(vt.address, slot_offset, ptr_size);
+
+                if (resolved_target != 0) {
+                    if (!ambiguous_slot_targets.count(slot_offset)) {
+                        auto it_slot_target = ctx->vcall_slot_target_hints.find(slot_offset);
+                        if (it_slot_target == ctx->vcall_slot_target_hints.end()) {
+                            ctx->vcall_slot_target_hints[slot_offset] = resolved_target;
+                        } else if (it_slot_target->second != resolved_target) {
+                            ctx->vcall_slot_target_hints.erase(it_slot_target);
+                            ambiguous_slot_targets.insert(slot_offset);
+                        }
+                    }
+                }
+
+                // Fallback to resolved call target if class/slot name is generic.
+                if (is_unresolved_vname(display_name)) {
+                    if (resolved_target != 0) {
+                        auto it_sym = ctx->symbols.find(resolved_target);
+                        if (it_sym != ctx->symbols.end()) {
+                            display_name = it_sym->second;
+                        } else {
+                            auto it_g = ctx->global_symbols.find(resolved_target);
+                            if (it_g != ctx->global_symbols.end()) {
+                                display_name = it_g->second;
+                            } else {
+                                std::ostringstream ss;
+                                ss << "sub_" << std::hex << resolved_target;
+                                display_name = ss.str();
+                            }
+                        }
+                    }
+                }
+
+                if (display_name.empty()) {
+                    continue;
+                }
+
+                ctx->vtable_virtual_names[vt.address][slot_offset] = display_name;
+
+                // Prefer RTTI-linked class names over generic ::vfunc_N placeholders.
+                if (!is_unresolved_vname(display_name)) {
+                    if (!ctx->vcall_slot_name_hints.count(slot_offset)) {
+                        ctx->vcall_slot_name_hints[slot_offset] = display_name;
+                    }
+                }
+            }
+        }
+
+        fission::utils::log_stream() << "[ContextServices] Virtual-call naming map: "
+                  << ctx->vtable_virtual_names.size() << " vtables, "
+                  << ctx->vcall_slot_name_hints.size() << " slot hints, "
+                  << ctx->vcall_slot_target_hints.size() << " slot target hints" << std::endl;
+
         ctx->arch.release(); // WORKAROUND: Leak instead of crash
         return DECOMP_OK;
     } catch (const std::exception& e) {

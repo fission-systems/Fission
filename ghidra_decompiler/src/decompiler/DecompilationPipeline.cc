@@ -23,14 +23,21 @@
 #include "fission/analysis/CallingConvDetector.h"
 #include "fission/analysis/VTableAnalyzer.h"
 #include "fission/analysis/GlobalDataAnalyzer.h"
+#include "fission/analysis/CallGraphAnalyzer.h"
+#include "fission/analysis/TypeSharing.h"
+#include "fission/analysis/InternalMatcher.h"
 #include "fission/analysis/EmulationAnalyzer.h"
 #include "fission/config/PathConfig.h"
+#include "fission/core/DataSymbolRegistry.h"
+#include "fission/decompiler/PcodeOptimizationBridge.h"
+#include "fission/decompiler/PcodeExtractor.h"
 #include "libdecomp.hh"
 #include "database.hh"
 #include "type.hh"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <set>
 
 // Global struct registry - define here to avoid linker issues
 // This will be the primary definition for both executable and shared library
@@ -58,6 +65,69 @@ using namespace fission::config;
 // Helper: Get all available FID paths for a given architecture
 static std::vector<std::string> get_all_fid_paths_wrapper(bool is_64bit) {
     return ::fission::config::get_all_fid_paths(is_64bit);
+}
+
+static std::vector<std::string> collect_referenced_strings_near(
+    const std::vector<uint8_t>& bytes,
+    size_t func_off,
+    uint64_t image_base,
+    const std::map<uint64_t, std::string>& known_strings
+) {
+    std::vector<std::string> refs;
+    if (known_strings.empty() || func_off >= bytes.size()) {
+        return refs;
+    }
+
+    std::set<std::string> unique;
+    auto add_string_at = [&](uint64_t addr) {
+        auto it = known_strings.find(addr);
+        if (it != known_strings.end() && !it->second.empty()) {
+            unique.insert(it->second);
+        }
+    };
+
+    const size_t window_end = std::min(bytes.size(), func_off + 0x120);
+    for (size_t p = func_off; p + 6 < window_end; ++p) {
+        // x64 RIP-relative LEA/MOV forms:
+        // 48 8D/8B ?? disp32, 4C 8D/8B ?? disp32 with modrm=00 r/m=101 (0x05)
+        if ((bytes[p] == 0x48 || bytes[p] == 0x4C) &&
+            (bytes[p + 1] == 0x8D || bytes[p + 1] == 0x8B) &&
+            ((bytes[p + 2] & 0x07) == 0x05)) {
+            int32_t disp = 0;
+            std::memcpy(&disp, &bytes[p + 3], sizeof(disp));
+            uint64_t insn_end = image_base + static_cast<uint64_t>(p + 7);
+            uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(insn_end) + disp);
+            add_string_at(target);
+            continue;
+        }
+
+        // x86 absolute LEA: 8D 05 imm32
+        if (bytes[p] == 0x8D && bytes[p + 1] == 0x05) {
+            uint32_t imm = 0;
+            std::memcpy(&imm, &bytes[p + 2], sizeof(imm));
+            add_string_at(static_cast<uint64_t>(imm));
+            continue;
+        }
+
+        // push imm32 (often used for string arguments in x86)
+        if (bytes[p] == 0x68 && p + 4 < window_end) {
+            uint32_t imm = 0;
+            std::memcpy(&imm, &bytes[p + 1], sizeof(imm));
+            add_string_at(static_cast<uint64_t>(imm));
+            continue;
+        }
+
+        // mov r32, imm32 (B8..BF)
+        if (bytes[p] >= 0xB8 && bytes[p] <= 0xBF && p + 4 < window_end) {
+            uint32_t imm = 0;
+            std::memcpy(&imm, &bytes[p + 1], sizeof(imm));
+            add_string_at(static_cast<uint64_t>(imm));
+            continue;
+        }
+    }
+
+    refs.assign(unique.begin(), unique.end());
+    return refs;
 }
 
 
@@ -193,14 +263,78 @@ std::string DecompilationPipeline::handle_load_bin(
         if (!recovered_classes.empty()) {
             vtable_analyzer.link_with_rtti(recovered_classes);
         }
+
+        // Build reusable virtual-call display maps for per-function post-processing
+        state.vtable_virtual_names.clear();
+        state.vcall_slot_name_hints.clear();
+        state.vcall_slot_target_hints.clear();
+        const int ptr_size = bin_info.is_64bit ? 8 : 4;
+        std::set<int> ambiguous_slot_targets;
+        const auto is_unresolved_vname = [](const std::string& name) {
+            return name.empty() ||
+                   name.find("::vfunc_") != std::string::npos ||
+                   name.rfind("sub_", 0) == 0;
+        };
+        for (const auto& vt : vtable_analyzer.get_vtables()) {
+            for (size_t i = 0; i < vt.entries.size(); ++i) {
+                int slot_offset = static_cast<int>(i) * ptr_size;
+                std::string display_name = vtable_analyzer.get_virtual_call_name(vt.address, slot_offset, ptr_size);
+                uint64_t resolved_target = vtable_analyzer.resolve_virtual_call(vt.address, slot_offset, ptr_size);
+
+                if (resolved_target != 0) {
+                    if (!ambiguous_slot_targets.count(slot_offset)) {
+                        auto it_slot_target = state.vcall_slot_target_hints.find(slot_offset);
+                        if (it_slot_target == state.vcall_slot_target_hints.end()) {
+                            state.vcall_slot_target_hints[slot_offset] = resolved_target;
+                        } else if (it_slot_target->second != resolved_target) {
+                            state.vcall_slot_target_hints.erase(it_slot_target);
+                            ambiguous_slot_targets.insert(slot_offset);
+                        }
+                    }
+                }
+
+                // Fallback to resolved call target if class/slot name is generic.
+                if (is_unresolved_vname(display_name)) {
+                    if (resolved_target != 0) {
+                        auto it_iat = state.iat_symbols.find(resolved_target);
+                        if (it_iat != state.iat_symbols.end()) {
+                            display_name = it_iat->second;
+                        } else {
+                            std::ostringstream ss;
+                            ss << "sub_" << std::hex << resolved_target;
+                            display_name = ss.str();
+                        }
+                    }
+                }
+
+                if (display_name.empty()) {
+                    continue;
+                }
+
+                state.vtable_virtual_names[vt.address][slot_offset] = display_name;
+
+                // Prefer RTTI-linked class names over generic ::vfunc_N placeholders.
+                if (!is_unresolved_vname(display_name)) {
+                    if (!state.vcall_slot_name_hints.count(slot_offset)) {
+                        state.vcall_slot_name_hints[slot_offset] = display_name;
+                    }
+                }
+            }
+        }
+
         fission::utils::log_stream() << "[fission_decomp] VTable scan complete: " 
                   << vtable_analyzer.get_vtables().size() << " vtables found" << std::endl;
+        fission::utils::log_stream() << "[fission_decomp] Virtual-call naming map: "
+                  << state.vtable_virtual_names.size() << " vtables, "
+                  << state.vcall_slot_name_hints.size() << " slot hints" << std::endl;
         
         // Phase 5: Global Data Analyzer
         GlobalDataAnalyzer global_analyzer;
         uint64_t data_start = image_base + (bin_bytes.size() / 2);  // Rough estimate
         uint64_t data_end = image_base + bin_bytes.size();
         global_analyzer.set_data_section(data_start, data_end);
+        state.data_section_start = data_start;
+        state.data_section_end = data_end;
         
         // Phase 6: Pattern Matching
         fission::utils::log_stream() << "[fission_decomp] Debug: Loading Patterns..." << std::endl;
@@ -214,7 +348,17 @@ std::string DecompilationPipeline::handle_load_bin(
             state.iat_symbols.insert(matches.begin(), matches.end());
         }
         
-        // Phase 7: FID Analysis
+        // Phase 7: String Scanning (pre-scan for matcher + later substitutions)
+        fission::utils::log_stream() << "[fission_decomp] Debug: String Scanning..." << std::endl;
+        auto ascii_strings = StringScanner::scan_ascii_strings(bin_bytes, image_base);
+        auto unicode_strings = StringScanner::scan_unicode_strings(bin_bytes, image_base);
+        std::map<uint64_t, std::string> scanned_strings = ascii_strings;
+        scanned_strings.insert(unicode_strings.begin(), unicode_strings.end());
+
+        fission::utils::log_stream() << "[fission_decomp] Scanned " << ascii_strings.size()
+                  << " ASCII and " << unicode_strings.size() << " Unicode strings." << std::endl;
+
+        // Phase 8: FID Analysis + Internal matcher
         std::string fid_filename;
         if (is_pe) {
             fid_filename = TypePropagator::get_fid_filename(bin_info.is_64bit, compiler_id);
@@ -231,6 +375,9 @@ std::string DecompilationPipeline::handle_load_bin(
                     FidDatabase fid_db;
                     if (fid_db.load(fid_path)) {
                         int matches_found = 0;
+                        int internal_matches_found = 0;
+                        int internal_string_matches_found = 0;
+                        InternalMatcher internal_matcher;
                         // Scan for function prologues (enhanced pattern matching)
                         size_t step = 1;
                         for (size_t i = 0; i < bin_bytes.size() - 32; i += step) {
@@ -313,6 +460,39 @@ std::string DecompilationPipeline::handle_load_bin(
                             }
                             
                             if (possible_start) {
+                                uint64_t addr = image_base + i;
+
+                                // Internal signature matching (prologue-based)
+                                if (state.iat_symbols.find(addr) == state.iat_symbols.end()) {
+                                    int prologue_len = static_cast<int>(std::min<size_t>(16, bin_bytes.size() - i));
+                                    std::string internal_name = internal_matcher.match_by_prologue(
+                                        addr,
+                                        &bin_bytes[i],
+                                        prologue_len
+                                    );
+                                    if (!internal_name.empty()) {
+                                        state.iat_symbols[addr] = internal_name;
+                                        internal_matches_found++;
+                                        continue;
+                                    }
+
+                                    // Internal signature matching (referenced strings)
+                                    std::vector<std::string> local_refs = collect_referenced_strings_near(
+                                        bin_bytes,
+                                        i,
+                                        image_base,
+                                        scanned_strings
+                                    );
+                                    if (!local_refs.empty()) {
+                                        std::string by_strings = internal_matcher.match_by_strings(addr, local_refs);
+                                        if (!by_strings.empty()) {
+                                            state.iat_symbols[addr] = by_strings;
+                                            internal_string_matches_found++;
+                                            continue;
+                                        }
+                                    }
+                                }
+
                                 size_t len = std::min((size_t)64, bin_bytes.size() - i);
                                 uint64_t full_hash = FidHasher::calculate_full_hash(&bin_bytes[i], len);
                                 uint64_t specific_hash = FidHasher::calculate_specific_hash(&bin_bytes[i], len);
@@ -321,7 +501,6 @@ std::string DecompilationPipeline::handle_load_bin(
                                 auto names = fid_db.lookup_by_hashes(full_hash, specific_hash);
                                 
                                 if (!names.empty()) {
-                                    uint64_t addr = image_base + i;
                                     std::string name = names[0];
                                     
                                     // Skip if already identified or common symbol
@@ -340,18 +519,20 @@ std::string DecompilationPipeline::handle_load_bin(
                         }
                         fission::utils::log_stream() << "[fission_decomp] FID Analysis: Identified " 
                                  << matches_found << " functions." << std::endl;
+                        if (internal_matches_found > 0) {
+                            fission::utils::log_stream() << "[fission_decomp] InternalMatcher: Identified "
+                                      << internal_matches_found << " functions." << std::endl;
+                        }
+                        if (internal_string_matches_found > 0) {
+                            fission::utils::log_stream() << "[fission_decomp] InternalMatcher(strings): Identified "
+                                      << internal_string_matches_found << " functions." << std::endl;
+                        }
                     }
                 }
             }
         }
         
-        // Phase 8: String Scanning
-        fission::utils::log_stream() << "[fission_decomp] Debug: String Scanning..." << std::endl;
-        auto ascii_strings = StringScanner::scan_ascii_strings(bin_bytes, image_base);
-        auto unicode_strings = StringScanner::scan_unicode_strings(bin_bytes, image_base);
-        fission::utils::log_stream() << "[fission_decomp] Scanned " << ascii_strings.size() 
-                  << " ASCII and " << unicode_strings.size() << " Unicode strings." << std::endl;
-        
+        // Feed discovered strings into constant substitution maps
         state.enum_values.insert(ascii_strings.begin(), ascii_strings.end());
         state.enum_values.insert(unicode_strings.begin(), unicode_strings.end());
         
@@ -452,73 +633,17 @@ std::string DecompilationPipeline::handle_load_bin(
                 section.file_size
             );
             
-            // Register each symbol in global scope
-            ghidra::Scope* global_scope = state.arch_64bit->symboltab->getGlobalScope();
-            ghidra::TypeFactory* types = state.arch_64bit->types;
-            ghidra::AddrSpace* ram_space = state.arch_64bit->getDefaultDataSpace();
-            
-            if (!global_scope || !types || !ram_space) {
-                fission::utils::log_stream() << "[fission_decomp] Warning: Missing required components for symbol registration" << std::endl;
-                continue;
-            }
-            
-            for (const auto& sym : symbols) {
-                // Cache the symbol info
-                core::DecompilerContext::DataSymbolInfo info;
-                info.name = sym.name;
-                info.size = sym.size;
-                info.type_meta = sym.type_meta;
-                state.data_section_symbols[sym.address] = info;
-                
-                try {
-                    // Get or create appropriate type
-                    ghidra::Datatype* dt = nullptr;
-                    if (sym.type_meta == 9) {  // TYPE_FLOAT
-                        if (sym.size == 8) {
-                            dt = types->getBase(8, ghidra::TYPE_FLOAT);  // double
-                        } else if (sym.size == 4) {
-                            dt = types->getBase(4, ghidra::TYPE_FLOAT);  // float
-                        }
-                    }
-                    
-                    if (!dt) {
-                        fission::utils::log_stream() << "[fission_decomp] Could not create type for symbol at 0x" 
-                                  << std::hex << sym.address << std::endl;
-                        continue;
-                    }
-                    
-                    // Create address
-                    ghidra::Address addr(ram_space, sym.address);
-                    
-                    // Check if symbol already exists
-                    ghidra::SymbolEntry* existing = global_scope->queryContainer(addr, 1, ghidra::Address());
-                    if (existing != nullptr) {
-                        continue;
-                    }
-                    
-                    // Add new symbol
-                    ghidra::SymbolEntry* entry = global_scope->addSymbol(
-                        sym.name,
-                        dt,
-                        addr,
-                        ghidra::Address()  // use point
-                    );
-                    
-                    if (entry) {
-                        total_data_symbols++;
-                        fission::utils::log_stream() << "[fission_decomp] Registered data symbol: " << sym.name 
-                                  << " at 0x" << std::hex << sym.address 
-                                  << " type=" << dt->getName() << std::endl;
-                    }
-                    
-                } catch (const std::exception& e) {
-                    fission::utils::log_stream() << "[fission_decomp] Exception while registering symbol at 0x" 
-                              << std::hex << sym.address << ": " << e.what() << std::endl;
-                } catch (...) {
-                    fission::utils::log_stream() << "[fission_decomp] Unknown exception while registering symbol at 0x" 
-                              << std::hex << sym.address << std::endl;
+            total_data_symbols += core::registerDataSymbolsInGlobalScope(
+                state.arch_64bit,
+                symbols,
+                [&](const loaders::DataSymbol& sym) {
+                    core::DecompilerContext::DataSymbolInfo info;
+                    info.name = sym.name;
+                    info.size = sym.size;
+                    info.type_meta = sym.type_meta;
+                    state.data_section_symbols[sym.address] = info;
                 }
-            }
+            );
         }
         
         state.data_symbols_scanned = true;
@@ -735,43 +860,19 @@ std::string DecompilationPipeline::handle_decompile(
         fission::utils::log_stream() << "[fission_decomp] Re-registering " << state.data_section_symbols.size() 
                   << " cached data section symbols..." << std::endl;
         
-        ghidra::TypeFactory* types = arch->types;
-        ghidra::AddrSpace* ram_space = arch->getDefaultDataSpace();
-        int registered = 0;
-        
+        std::vector<loaders::DataSymbol> cached_symbols;
+        cached_symbols.reserve(state.data_section_symbols.size());
         for (const auto& pair : state.data_section_symbols) {
-            uint64_t addr_val = pair.first;
             const auto& info = pair.second;
-            
-            try {
-                // Get or create appropriate type
-                ghidra::Datatype* dt = nullptr;
-                if (info.type_meta == 9) {  // TYPE_FLOAT
-                    if (info.size == 8) {
-                        dt = types->getBase(8, ghidra::TYPE_FLOAT);  // double
-                    } else if (info.size == 4) {
-                        dt = types->getBase(4, ghidra::TYPE_FLOAT);  // float
-                    }
-                }
-                
-                if (!dt) continue;
-                
-                // Create address and add symbol
-                ghidra::Address addr(ram_space, addr_val);
-                ghidra::SymbolEntry* entry = global_scope->addSymbol(
-                    info.name,
-                    dt,
-                    addr,
-                    ghidra::Address()
-                );
-                
-                if (entry) {
-                    registered++;
-                }
-            } catch (...) {
-                // Silently ignore errors during re-registration
-            }
+            loaders::DataSymbol sym;
+            sym.address = pair.first;
+            sym.name = info.name;
+            sym.size = info.size;
+            sym.type_meta = info.type_meta;
+            cached_symbols.push_back(std::move(sym));
         }
+
+        int registered = core::registerDataSymbolsInGlobalScope(arch, cached_symbols);
         
         fission::utils::log_stream() << "[fission_decomp] Re-registered " << registered 
                   << " data section symbols" << std::endl;
@@ -813,6 +914,7 @@ std::string DecompilationPipeline::handle_decompile(
     }
     
     fission::utils::log_stream() << "[fission_decomp] Step 3: Resetting actions" << std::endl;
+    arch->clearAnalysis(fd);
     arch->allacts.getCurrent()->reset(*fd);
     
     // Step 3b: Enforce GDT prototypes
@@ -835,6 +937,7 @@ std::string DecompilationPipeline::handle_decompile(
     // Step 4b: Advanced Structure Recovery (Guarded)
     std::string inferred_struct_defs;
     std::map<unsigned long long, ghidra::TypeStruct*> captured_structs;
+    std::string optimized_pcode_json;
     
     size_t func_size = fd->getSize();
     if (func_size < MAX_FUNCTION_SIZE) {
@@ -897,6 +1000,254 @@ std::string DecompilationPipeline::handle_decompile(
             arch->allacts.getCurrent()->reset(*fd);
             arch->allacts.getCurrent()->perform(*fd);
         }
+
+        // Step 4b-3: Global data structure recovery
+        bool rerun_for_struct_symbols = false;
+        {
+            GlobalDataAnalyzer global_analyzer;
+            if (state.data_section_start < state.data_section_end) {
+                global_analyzer.set_data_section(state.data_section_start, state.data_section_end);
+            }
+            global_analyzer.analyze_function(fd);
+            global_analyzer.infer_structures();
+            int created = global_analyzer.create_types(arch->types, arch->types->getSizeOfPointer());
+            if (created > 0) {
+                fission::utils::log_stream() << "[fission_decomp] Step 4b-3: Global data structures created: "
+                          << created << std::endl;
+            }
+
+            ghidra::Scope* global_scope_gd = arch->symboltab->getGlobalScope();
+            ghidra::AddrSpace* data_space_gd = arch->getDefaultDataSpace();
+            if (global_scope_gd && data_space_gd) {
+                for (const auto& gs : global_analyzer.get_structures()) {
+                    if (gs.name.empty()) {
+                        continue;
+                    }
+                    ghidra::Datatype* dt = arch->types->findByName(gs.name);
+                    if (!dt || dt->getMetatype() != ghidra::TYPE_STRUCT) {
+                        continue;
+                    }
+                    ghidra::Address addr_gd(data_space_gd, gs.address);
+                    if (ghidra::SymbolEntry* entry = global_scope_gd->findAddr(addr_gd, fd->getAddress())) {
+                        ghidra::Symbol* sym = entry->getSymbol();
+                        if (sym) {
+                            try {
+                                global_scope_gd->retypeSymbol(sym, dt);
+                                global_scope_gd->setAttribute(sym, ghidra::Varnode::typelock);
+                                rerun_for_struct_symbols = true;
+                            } catch (const ghidra::RecovError&) {
+                                // ignore retype failures
+                            }
+                        }
+                        continue;
+                    }
+                    if (global_scope_gd->addSymbol(gs.name, dt, addr_gd, fd->getAddress())) {
+                        rerun_for_struct_symbols = true;
+                    }
+                }
+            }
+        }
+
+        if (rerun_for_struct_symbols) {
+            fission::utils::log_stream() << "[fission_decomp] Step 4b-3: Struct symbols applied, re-running..."
+                      << std::endl;
+            fd->clear();
+            arch->allacts.getCurrent()->reset(*fd);
+            arch->allacts.getCurrent()->perform(*fd);
+        }
+
+        // Step 4b-4: Call graph analysis + cross-function type registry
+        {
+            using namespace fission::types;
+            FunctionSignature sig;
+            uint64_t func_addr_cg = fd->getAddress().getOffset();
+            sig.address = func_addr_cg;
+            sig.return_type = nullptr;
+            const ghidra::FuncProto& proto_cg = fd->getFuncProto();
+            ghidra::ProtoParameter* ret_cg = proto_cg.getOutput();
+            if (ret_cg && ret_cg->getType()) {
+                ghidra::Datatype* rt = ret_cg->getType();
+                if (rt->getMetatype() == ghidra::TYPE_STRUCT) {
+                    sig.return_type = dynamic_cast<ghidra::TypeStruct*>(rt);
+                }
+            }
+            int num_pcg = proto_cg.numParams();
+            for (int i = 0; i < num_pcg; ++i) {
+                ghidra::ProtoParameter* param = proto_cg.getParam(i);
+                if (!param || !param->getType()) continue;
+                ParamTypeInfo pinfo;
+                pinfo.param_index = i;
+                pinfo.struct_type = nullptr;
+                ghidra::Datatype* ptype = param->getType();
+                pinfo.type_name = ptype->getName();
+                pinfo.is_pointer = (ptype->getMetatype() == ghidra::TYPE_PTR);
+                if (ptype->getMetatype() == ghidra::TYPE_STRUCT) {
+                    pinfo.struct_type = dynamic_cast<ghidra::TypeStruct*>(ptype);
+                } else if (pinfo.is_pointer) {
+                    ghidra::Datatype* pointed = static_cast<ghidra::TypePointer*>(ptype)->getPtrTo();
+                    if (pointed && pointed->getMetatype() == ghidra::TYPE_STRUCT) {
+                        pinfo.struct_type = dynamic_cast<ghidra::TypeStruct*>(pointed);
+                    }
+                }
+                sig.params.push_back(pinfo);
+            }
+
+            state.type_registry.register_function_types(func_addr_cg, sig);
+
+            fission::analysis::CallGraphAnalyzer call_analyzer(&state.type_registry);
+            call_analyzer.extract_calls(fd);
+            int propagated = call_analyzer.propagate_types();
+            if (propagated > 0) {
+                fission::utils::log_stream() << "[fission_decomp] Step 4b-4: CallGraph propagated "
+                          << propagated << " type hints" << std::endl;
+            }
+
+            // Consume pending queue and run bounded reanalysis for queued functions.
+            auto build_sig = [&](ghidra::Funcdata* target_fd) {
+                FunctionSignature target_sig;
+                if (target_fd == nullptr) {
+                    return target_sig;
+                }
+                target_sig.address = target_fd->getAddress().getOffset();
+                target_sig.return_type = nullptr;
+
+                const ghidra::FuncProto& proto_target = target_fd->getFuncProto();
+                ghidra::ProtoParameter* ret_target = proto_target.getOutput();
+                if (ret_target != nullptr && ret_target->getType() != nullptr) {
+                    ghidra::Datatype* rt = ret_target->getType();
+                    if (rt->getMetatype() == ghidra::TYPE_STRUCT) {
+                        target_sig.return_type = dynamic_cast<ghidra::TypeStruct*>(rt);
+                    }
+                }
+
+                int target_num = proto_target.numParams();
+                for (int p = 0; p < target_num; ++p) {
+                    ghidra::ProtoParameter* target_param = proto_target.getParam(p);
+                    if (target_param == nullptr || target_param->getType() == nullptr) {
+                        continue;
+                    }
+                    ParamTypeInfo target_info;
+                    target_info.param_index = p;
+                    target_info.struct_type = nullptr;
+                    ghidra::Datatype* target_type = target_param->getType();
+                    target_info.type_name = target_type->getName();
+                    target_info.is_pointer = (target_type->getMetatype() == ghidra::TYPE_PTR);
+                    if (target_type->getMetatype() == ghidra::TYPE_STRUCT) {
+                        target_info.struct_type = dynamic_cast<ghidra::TypeStruct*>(target_type);
+                    } else if (target_info.is_pointer) {
+                        ghidra::Datatype* pointed = static_cast<ghidra::TypePointer*>(target_type)->getPtrTo();
+                        if (pointed != nullptr && pointed->getMetatype() == ghidra::TYPE_STRUCT) {
+                            target_info.struct_type = dynamic_cast<ghidra::TypeStruct*>(pointed);
+                        }
+                    }
+                    target_sig.params.push_back(target_info);
+                }
+
+                return target_sig;
+            };
+
+            std::set<uint64_t> processed_pending;
+            int reanalyzed_pending = 0;
+            int rounds = 0;
+            const int max_rounds = 2;
+
+            std::vector<uint64_t> pending = state.type_registry.consume_pending_reanalysis();
+            ghidra::Scope* cg_scope = arch->symboltab->getGlobalScope();
+            while (!pending.empty() && rounds < max_rounds && cg_scope != nullptr) {
+                ++rounds;
+                for (uint64_t target_addr : pending) {
+                    if (processed_pending.count(target_addr) != 0) {
+                        continue;
+                    }
+                    processed_pending.insert(target_addr);
+
+                    ghidra::Address target_func_addr(arch->getDefaultCodeSpace(), target_addr);
+                    ghidra::Funcdata* target_fd = cg_scope->findFunction(target_func_addr);
+                    if (target_fd == nullptr) {
+                        ghidra::FunctionSymbol* sym = cg_scope->addFunction(target_func_addr, "sub_" + std::to_string(target_addr));
+                        if (sym == nullptr) {
+                            continue;
+                        }
+                        target_fd = sym->getFunction();
+                    }
+                    if (target_fd == nullptr) {
+                        continue;
+                    }
+
+                    try {
+                        target_fd->clear();
+                        ghidra::Address target_end = target_func_addr + 0x1000;
+                        target_fd->followFlow(target_func_addr, target_end);
+                        arch->allacts.getCurrent()->reset(*target_fd);
+                        arch->allacts.getCurrent()->perform(*target_fd);
+                    } catch (...) {
+                        continue;
+                    }
+
+                    FunctionSignature target_sig = build_sig(target_fd);
+                    state.type_registry.register_function_types(target_sig.address, target_sig);
+                    call_analyzer.extract_calls(target_fd);
+                    reanalyzed_pending++;
+                }
+
+                int newly_propagated = call_analyzer.propagate_types();
+                if (newly_propagated <= 0) {
+                    break;
+                }
+                pending = state.type_registry.consume_pending_reanalysis();
+            }
+
+            if (reanalyzed_pending > 0) {
+                fission::utils::log_stream() << "[fission_decomp] Step 4b-4: Reanalyzed "
+                          << reanalyzed_pending << " pending functions" << std::endl;
+                fd->clear();
+                arch->allacts.getCurrent()->reset(*fd);
+                arch->allacts.getCurrent()->perform(*fd);
+            }
+        }
+
+        // Step 4b-5: Cross-function type sharing
+        {
+            fission::analysis::TypeSharing type_sharing(arch);
+            std::vector<ghidra::Datatype*> param_types_ts;
+            const ghidra::FuncProto& proto_ts = fd->getFuncProto();
+            for (int i = 0; i < proto_ts.numParams(); ++i) {
+                ghidra::ProtoParameter* param = proto_ts.getParam(i);
+                if (param) param_types_ts.push_back(param->getType());
+            }
+            ghidra::ProtoParameter* ret_ts = proto_ts.getOutput();
+            ghidra::Datatype* ret_type_ts = (ret_ts ? ret_ts->getType() : nullptr);
+            uint64_t func_addr_ts = fd->getAddress().getOffset();
+            type_sharing.register_function_types(func_addr_ts, param_types_ts, ret_type_ts);
+            int shared = type_sharing.share_types();
+            if (shared > 0) {
+                fission::utils::log_stream() << "[fission_decomp] Step 4b-5: TypeSharing shared "
+                          << shared << " types" << std::endl;
+            }
+        }
+
+        // Step 4b-6: Pcode optimization bridge (attempt inject now; textual apply later)
+        if (fission::decompiler::PcodeOptimizationBridge::is_enabled()) {
+            try {
+                optimized_pcode_json = fission::decompiler::PcodeOptimizationBridge::extract_and_optimize(fd);
+                if (!optimized_pcode_json.empty()) {
+                    fission::utils::log_stream() << "[fission_decomp] Step 4b-6: Pcode optimized ("
+                              << optimized_pcode_json.size() << " bytes)" << std::endl;
+                    if (fission::decompiler::PcodeExtractor::inject_pcode(fd, optimized_pcode_json)) {
+                        fission::utils::log_stream() << "[fission_decomp] Step 4b-6: Injected optimized Pcode, re-running..."
+                                  << std::endl;
+                        fd->clear();
+                        arch->allacts.getCurrent()->reset(*fd);
+                        arch->allacts.getCurrent()->perform(*fd);
+                    }
+                }
+            } catch (const std::exception& e) {
+                fission::utils::log_stream() << "[fission_decomp] Step 4b-6: Pcode optimization error: "
+                          << e.what() << std::endl;
+            } catch (...) {
+                fission::utils::log_stream() << "[fission_decomp] Step 4b-6: Pcode optimization unknown error" << std::endl;
+            }
+        }
     } else {
         fission::utils::log_stream() << "[fission_decomp] Step 4b: Skipped (function too large: " 
                   << func_size << " bytes > " << MAX_FUNCTION_SIZE << " limit)" << std::endl;
@@ -916,6 +1267,14 @@ std::string DecompilationPipeline::handle_decompile(
     
     fission::utils::log_stream() << "[fission_decomp] Step 6: Post-processing pipeline" << std::endl;
     std::string c_code = c_stream.str();
+
+    if (!optimized_pcode_json.empty()) {
+        std::string transformed = fission::decompiler::PcodeExtractor::apply_optimized_pcode(fd, optimized_pcode_json);
+        if (!transformed.empty()) {
+            fission::utils::log_stream() << "[fission_decomp] Step 5b: Applied optimized Pcode textual transform" << std::endl;
+            c_code = transformed;
+        }
+    }
     
     // Inject inferred struct definitions
     if (!inferred_struct_defs.empty()) {
@@ -962,13 +1321,18 @@ std::string DecompilationPipeline::handle_decompile(
     c_code = replace_xunknown_types(c_code);
     c_code = cleanup_seh_boilerplate(c_code);
     c_code = demangle_cpp_names(c_code);
-    c_code = normalize_cpp_virtual_calls(c_code);
+    c_code = normalize_cpp_virtual_calls(
+        c_code,
+        state.vtable_virtual_names,
+        state.vcall_slot_name_hints,
+        state.vcall_slot_target_hints
+    );
     c_code = apply_function_signatures(c_code);
     c_code = normalize_mingw_printf_args(c_code);
     c_code = improve_internal_function_names(c_code);
     c_code = annotate_structure_offsets(c_code);
     c_code = apply_fid_names(c_code, state.fid_function_names);
-    c_code = PostProcessor::convert_integer_constants(c_code);
+    c_code = PostProcessor::process(c_code);
     
     fission::utils::log_stream() << "[fission_decomp] Step 7: Done!" << std::endl;
     return "{\"status\":\"ok\",\"code\":\"" + json_escape(c_code) + "\"}";

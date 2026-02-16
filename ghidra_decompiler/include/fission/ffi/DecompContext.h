@@ -29,6 +29,7 @@ namespace ghidra {
 #include "fission/analysis/FidDatabase.h"
 #include "fission/analysis/FunctionMatcher.h"
 #include "fission/ffi/SymbolProviderFfi.h"
+#include "fission/types/GlobalTypeRegistry.h"
 
 namespace fission {
 namespace ffi {
@@ -87,10 +88,23 @@ struct DecompContext {
     bool readonly_propagate = true;
     bool record_jumploads = true;
     bool disable_toomanyinstructions_error = true;
+    bool allow_inline = false;
     
     // FID Support - Multiple databases for better matching
     std::vector<std::unique_ptr<fission::analysis::FidDatabase>> fid_databases;
     std::unique_ptr<fission::analysis::FunctionMatcher> matcher;
+
+    // VTable virtual call display names
+    // key: vtable address, value: map(slot_offset -> display_name)
+    std::map<uint64_t, std::map<int, std::string>> vtable_virtual_names;
+
+    // Slot-only fallback hints derived from scanned vtables
+    // key: slot_offset, value: display_name
+    std::map<int, std::string> vcall_slot_name_hints;
+
+    // Slot-only fallback call targets derived from scanned vtables
+    // key: slot_offset, value: function address
+    std::map<int, uint64_t> vcall_slot_target_hints;
 
     // Struct type propagation across call sites
     std::map<uint64_t, std::map<int, std::string>> struct_registry;
@@ -100,6 +114,9 @@ struct DecompContext {
     
     // Parameter type hints (func_addr -> param_index -> struct_name)
     std::map<uint64_t, std::map<int, std::string>> param_type_hints;
+
+    // Cross-function type registry for call-graph propagation
+    fission::types::GlobalTypeRegistry type_registry;
     
     // Thread safety
     std::mutex mutex;
