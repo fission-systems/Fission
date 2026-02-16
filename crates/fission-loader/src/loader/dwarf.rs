@@ -352,25 +352,21 @@ impl DwarfTypeInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loader::types::{DataBuffer, LoadedBinaryBuilder};
 
     #[test]
     fn test_uleb128() {
         // Create a dummy binary for testing
-        let binary = Box::leak(Box::new(LoadedBinary {
-            path: "test".to_string(),
-            data: Arc::new(Vec::new()),
-            format: "test".to_string(),
-            arch_spec: "test".to_string(),
-            entry_point: 0,
-            image_base: 0,
-            is_64bit: true,
-            sections: Vec::new(),
-            functions: Vec::new(),
-            iat_symbols: std::collections::HashMap::new(),
-            function_addr_index: std::collections::HashMap::new(),
-            function_name_index: std::collections::HashMap::new(),
-            inferred_types: Vec::new(),
-        }));
+        let binary = Box::leak(Box::new(
+            LoadedBinaryBuilder::new("test".to_string(), DataBuffer::Heap(Vec::new()))
+                .format("test")
+                .arch_spec("test")
+                .entry_point(0)
+                .image_base(0)
+                .is_64bit(true)
+                .build()
+                .expect("failed to build test LoadedBinary"),
+        ));
 
         let analyzer = DwarfAnalyzer {
             binary,

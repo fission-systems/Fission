@@ -856,7 +856,7 @@ mod tests {
         data[section_offset + 39] = 0x60; // Executable | Readable (0x60000020)
 
         let path = "test.exe".to_string();
-        let result = PeLoader::parse(data, path);
+        let result = PeLoader::parse(DataBuffer::Heap(data), path);
 
         if let Err(e) = &result {
             println!("Parse error: {}", e);
