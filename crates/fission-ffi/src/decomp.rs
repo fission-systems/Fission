@@ -113,6 +113,7 @@ unsafe extern "C" {
     fn decomp_add_global_symbol(ctx: *mut DecompContext, addr: u64, name: *const c_char);
     fn decomp_clear_global_symbols(ctx: *mut DecompContext);
     fn decomp_set_symbol_provider(ctx: *mut DecompContext, provider: *const DecompSymbolProvider);
+    fn decomp_reset_symbol_provider(ctx: *mut DecompContext);
     fn decomp_add_function(ctx: *mut DecompContext, addr: u64, name: *const c_char) -> DecompError;
     fn decomp_add_memory_block(
         ctx: *mut DecompContext,
@@ -469,6 +470,24 @@ impl DecompilerNative {
 
         self.symbol_provider_state = Some(state);
         self.symbol_provider_callbacks = Some(provider);
+    }
+
+    /// Reset to the default map-backed symbol provider.
+    ///
+    /// This preserves currently registered symbol/global symbol maps in the
+    /// native context while dropping Rust-side callback state.
+    pub fn reset_symbol_provider(&mut self) {
+        if self.check_valid().is_err() {
+            return;
+        }
+
+        unsafe {
+            decomp_reset_symbol_provider(self.ctx);
+        }
+
+        // Drop callback-owned state so stale pointers cannot be reused.
+        self.symbol_provider_state = None;
+        self.symbol_provider_callbacks = None;
     }
 
     /// Clear all symbols

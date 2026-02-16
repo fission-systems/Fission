@@ -85,6 +85,8 @@ struct DecompContext {
     bool infer_pointers = true;
     bool analyze_loops = true;
     bool readonly_propagate = true;
+    bool record_jumploads = true;
+    bool disable_toomanyinstructions_error = true;
     
     // FID Support - Multiple databases for better matching
     std::vector<std::unique_ptr<fission::analysis::FidDatabase>> fid_databases;

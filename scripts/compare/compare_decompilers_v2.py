@@ -35,11 +35,11 @@ def detect_fission_cmd(project_root: Path) -> list[str]:
 def build_env(project_root: Path) -> dict:
     env = os.environ.copy()
     libdecomp_dir = project_root / "ghidra_decompiler" / "build"
+    libdecomp_str = str(libdecomp_dir)
     dyld = env.get("DYLD_LIBRARY_PATH", "")
-    if dyld:
-        env["DYLD_LIBRARY_PATH"] = f"{libdecomp_dir}:{dyld}"
-    else:
-        env["DYLD_LIBRARY_PATH"] = str(libdecomp_dir)
+    ld = env.get("LD_LIBRARY_PATH", "")
+    env["DYLD_LIBRARY_PATH"] = f"{libdecomp_str}:{dyld}" if dyld else libdecomp_str
+    env["LD_LIBRARY_PATH"] = f"{libdecomp_str}:{ld}" if ld else libdecomp_str
     return env
 
 

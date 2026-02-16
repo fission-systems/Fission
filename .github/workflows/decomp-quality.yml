@@ -1,0 +1,142 @@
+name: Decompilation Quality
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+  QUALITY_MIN_AVG_SIMILARITY: "50.0"
+  QUALITY_MIN_CPP_MAIN_LIKE: "15.0"
+
+jobs:
+  decomp-quality:
+    name: Quality Benchmark (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Java (for PyGhidra)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyghidra
+
+      - name: Build native decompiler
+        run: |
+          chmod +x scripts/build/build_decompiler.sh
+          ./scripts/build/build_decompiler.sh
+
+      - name: Build fission_cli
+        run: cargo build --bin fission_cli
+
+      - name: Build C++ benchmark binary
+        run: |
+          mkdir -p .artifacts/decomp-quality
+          g++ -std=c++17 -O0 -g -fno-omit-frame-pointer -fno-inline -no-pie \
+            examples/sources/comparison_test_cpp.cpp \
+            -o .artifacts/decomp-quality/comparison_test_cpp_elf
+
+      - name: Generate benchmark address file
+        run: |
+          BIN=".artifacts/decomp-quality/comparison_test_cpp_elf"
+          ADDR_FILE=".artifacts/decomp-quality/comparison_test_cpp_addrs.txt"
+          : > "$ADDR_FILE"
+          for sym in cpp_add cpp_switch cpp_sum_array cpp_init_item cpp_create_item cpp_virtual_compute cpp_main_like main; do
+            addr="$(nm -n "$BIN" | awk -v s="$sym" '$3==s {print $1; exit}')"
+            if [ -z "$addr" ]; then
+              echo "Missing symbol: $sym" >&2
+              exit 1
+            fi
+            echo "0x$addr $sym" >> "$ADDR_FILE"
+          done
+          echo "Address file generated:"
+          cat "$ADDR_FILE"
+
+      - name: Run decompiler quality comparison
+        env:
+          GHIDRA_INSTALL_DIR: ${{ github.workspace }}/vendor/ghidra/ghidra_11.4.2_PUBLIC
+        run: |
+          OUT_DIR=".artifacts/decomp-quality/results"
+          mkdir -p "$OUT_DIR"
+          python scripts/compare/compare_decompilers_v2.py \
+            -m \
+            ".artifacts/decomp-quality/comparison_test_cpp_elf" \
+            ".artifacts/decomp-quality/comparison_test_cpp_addrs.txt" \
+            "$OUT_DIR" \
+            -t 240
+
+      - name: Enforce quality gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import os
+          import sys
+
+          out_dir = Path(".artifacts/decomp-quality/results")
+          summary_path = out_dir / "summary.json"
+          if not summary_path.exists():
+              print(f"Missing summary: {summary_path}")
+              sys.exit(1)
+
+          summary = json.loads(summary_path.read_text(encoding="utf-8"))
+          avg = float(summary.get("average_similarity", 0.0))
+          min_avg = float(os.environ.get("QUALITY_MIN_AVG_SIMILARITY", "50.0"))
+          if avg < min_avg:
+              print(f"Average similarity gate failed: {avg:.2f} < {min_avg:.2f}")
+              sys.exit(1)
+
+          addr_map = {}
+          for line in Path(".artifacts/decomp-quality/comparison_test_cpp_addrs.txt").read_text(encoding="utf-8").splitlines():
+              line = line.strip()
+              if not line:
+                  continue
+              addr, name = line.split(maxsplit=1)
+              addr_map[name] = addr
+
+          target_name = "cpp_main_like"
+          target_addr = addr_map.get(target_name)
+          if not target_addr:
+              print(f"Missing address for {target_name}")
+              sys.exit(1)
+
+          target_json = out_dir / f"addr_{target_addr}.json"
+          if not target_json.exists():
+              print(f"Missing result file: {target_json}")
+              sys.exit(1)
+
+          target = json.loads(target_json.read_text(encoding="utf-8"))
+          target_score = float(target.get("comparison_info", {}).get("similarity", 0.0))
+          min_target = float(os.environ.get("QUALITY_MIN_CPP_MAIN_LIKE", "15.0"))
+          if target_score < min_target:
+              print(f"{target_name} gate failed: {target_score:.2f} < {min_target:.2f}")
+              sys.exit(1)
+
+          print(f"Quality gates passed: avg={avg:.2f}, {target_name}={target_score:.2f}")
+          PY
+
+      - name: Upload quality artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: decomp-quality-results
+          path: .artifacts/decomp-quality/results/

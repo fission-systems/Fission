@@ -10,6 +10,7 @@
 #include "libdecomp.hh"
 #include "address.hh"
 #include "funcdata.hh"
+#include "flow.hh"
 #include "varnode.hh"
 
 #include <algorithm>
@@ -118,6 +119,18 @@ static void apply_feature_flags(DecompContext* ctx) {
     ctx->arch->infer_pointers = ctx->infer_pointers;
     ctx->arch->analyze_for_loops = ctx->analyze_loops;
     ctx->arch->readonlypropagate = ctx->readonly_propagate;
+
+    if (ctx->record_jumploads) {
+        ctx->arch->flowoptions |= ghidra::FlowInfo::record_jumploads;
+    } else {
+        ctx->arch->flowoptions &= ~ghidra::FlowInfo::record_jumploads;
+    }
+
+    if (ctx->disable_toomanyinstructions_error) {
+        ctx->arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
+    } else {
+        ctx->arch->flowoptions |= ghidra::FlowInfo::error_toomanyinstructions;
+    }
 }
 
 static void register_functions_from_symbols(DecompContext* ctx) {
