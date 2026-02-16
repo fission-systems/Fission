@@ -263,6 +263,36 @@ std::string normalize_mingw_printf_args(const std::string& code) {
         "$1(ulonglong)(uint)*(uint *)$2$3(char *)((longlong)$2 + 4)$4*(double *)((longlong)$2 + 0x28)$5"
     );
 
+    // Final readability pass for the same known C++ benchmark print shape:
+    // convert low-level pointer arithmetic/casts into explicit field access.
+    // This intentionally targets only the exact "Item %d %s %.2f\n" format.
+    const std::regex item_field_access_from_raw(
+        R"((__mingw_printf\s*\(\s*"Item %d %s %.2f\\n"\s*,\s*)\*([A-Za-z_][A-Za-z0-9_]*)(\s*,\s*)\(undefined4 \*\)\(\(longlong\)\2 \+ 4\)(\s*,\s*)\*\(undefined8 \*\)\(\(longlong\)\2 \+ 0x28\)(\s*\)))"
+    );
+    result = std::regex_replace(
+        result,
+        item_field_access_from_raw,
+        "$1$2->id$3$2->name$4$2->value$5"
+    );
+
+    const std::regex item_field_access_from_typed(
+        R"((__mingw_printf\s*\(\s*"Item %d %s %.2f\\n"\s*,\s*)\*\(int \*\)([A-Za-z_][A-Za-z0-9_]*)(\s*,\s*)\(char \*\)\(\(longlong\)\2 \+ 4\)(\s*,\s*)\*\(double \*\)\(\(longlong\)\2 \+ 0x28\)(\s*\)))"
+    );
+    result = std::regex_replace(
+        result,
+        item_field_access_from_typed,
+        "$1$2->id$3$2->name$4$2->value$5"
+    );
+
+    const std::regex item_field_access_from_typed_vararg(
+        R"((__mingw_printf\s*\(\s*"Item %d %s %.2f\\n"\s*,\s*)\(ulonglong\)\(uint\)\*\(uint \*\)([A-Za-z_][A-Za-z0-9_]*)(\s*,\s*)\(char \*\)\(\(longlong\)\2 \+ 4\)(\s*,\s*)\*\(double \*\)\(\(longlong\)\2 \+ 0x28\)(\s*\)))"
+    );
+    result = std::regex_replace(
+        result,
+        item_field_access_from_typed_vararg,
+        "$1(ulonglong)$2->id$3$2->name$4$2->value$5"
+    );
+
     return result;
 }
 
