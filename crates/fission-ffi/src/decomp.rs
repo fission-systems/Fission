@@ -163,6 +163,35 @@ unsafe extern "C" {
         param_index: c_int,
         struct_name: *const c_char,
     ) -> DecompError;
+
+    // Per-function and prototype options (Ghidra OptionInline / OptionNoReturn / etc.)
+    fn decomp_set_function_inline(
+        ctx: *mut DecompContext,
+        addr: u64,
+        enabled: c_int,
+    ) -> DecompError;
+    fn decomp_set_function_noreturn(
+        ctx: *mut DecompContext,
+        addr: u64,
+        enabled: c_int,
+    ) -> DecompError;
+    fn decomp_set_function_extrapop(
+        ctx: *mut DecompContext,
+        addr: u64,
+        extrapop: i32,
+    ) -> DecompError;
+    fn decomp_set_default_prototype(
+        ctx: *mut DecompContext,
+        model_name: *const c_char,
+    ) -> DecompError;
+    fn decomp_set_protoeval_current(
+        ctx: *mut DecompContext,
+        model_name: *const c_char,
+    ) -> DecompError;
+    fn decomp_set_protoeval_called(
+        ctx: *mut DecompContext,
+        model_name: *const c_char,
+    ) -> DecompError;
 }
 
 // ============================================================================
@@ -642,6 +671,80 @@ impl DecompilerNative {
             unsafe {
                 decomp_set_feature(self.ctx, feat_cstr.as_ptr(), if enabled { 1 } else { 0 });
             }
+        }
+    }
+
+    /// Mark a function at the given address as inline (Ghidra OptionInline).
+    pub fn set_function_inline(&mut self, addr: u64, enabled: bool) -> Result<()> {
+        self.check_valid()?;
+        let result =
+            unsafe { decomp_set_function_inline(self.ctx, addr, if enabled { 1 } else { 0 }) };
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
+    /// Mark a function at the given address as noreturn (Ghidra OptionNoReturn).
+    pub fn set_function_noreturn(&mut self, addr: u64, enabled: bool) -> Result<()> {
+        self.check_valid()?;
+        let result =
+            unsafe { decomp_set_function_noreturn(self.ctx, addr, if enabled { 1 } else { 0 }) };
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
+    /// Set per-function stack cleanup (extrapop) in bytes (Ghidra OptionExtraPop).
+    pub fn set_function_extrapop(&mut self, addr: u64, extrapop: i32) -> Result<()> {
+        self.check_valid()?;
+        let result = unsafe { decomp_set_function_extrapop(self.ctx, addr, extrapop) };
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
+    /// Set the default prototype model (e.g. `"default"`, `"__cdecl"`, `"__fastcall"`).
+    pub fn set_default_prototype(&mut self, model_name: &str) -> Result<()> {
+        self.check_valid()?;
+        let cstr = CString::new(model_name)
+            .map_err(|_| FissionError::decompiler("Model name contains null byte"))?;
+        let result = unsafe { decomp_set_default_prototype(self.ctx, cstr.as_ptr()) };
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
+    /// Set prototype evaluation model for the current function (OptionProtoEval).
+    pub fn set_protoeval_current(&mut self, model_name: &str) -> Result<()> {
+        self.check_valid()?;
+        let cstr = CString::new(model_name)
+            .map_err(|_| FissionError::decompiler("Model name contains null byte"))?;
+        let result = unsafe { decomp_set_protoeval_current(self.ctx, cstr.as_ptr()) };
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
+        }
+    }
+
+    /// Set prototype evaluation model for called functions (OptionProtoEval).
+    pub fn set_protoeval_called(&mut self, model_name: &str) -> Result<()> {
+        self.check_valid()?;
+        let cstr = CString::new(model_name)
+            .map_err(|_| FissionError::decompiler("Model name contains null byte"))?;
+        let result = unsafe { decomp_set_protoeval_called(self.ctx, cstr.as_ptr()) };
+        if result.is_ok() {
+            Ok(())
+        } else {
+            Err(FissionError::decompiler(self.get_last_error()))
         }
     }
 
