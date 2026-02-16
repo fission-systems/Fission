@@ -312,7 +312,7 @@ mod tests {
         let binary = builder.build().expect("Failed to build LoadedBinary");
 
         assert_eq!(binary.path, "test.bin");
-        assert_eq!(binary.data.len(), 100);
+        assert_eq!(binary.data.as_slice().len(), 100);
         assert_eq!(binary.entry_point, 0x1000);
         assert_eq!(binary.format, "RAW");
         assert!(binary.is_64bit);
