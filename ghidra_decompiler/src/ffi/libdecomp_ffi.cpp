@@ -15,11 +15,58 @@
 
 // Ghidra types for type registration
 #include "type.hh"
+#include "address.hh"
+#include "funcdata.hh"
+#include "fspec.hh"
+#include "architecture.hh"
 
 #include <cstring>
 #include <iostream>
+#include <sstream>
 
 using namespace fission::ffi;
+
+static ghidra::Funcdata* get_or_create_function_for_option(DecompContext* ctx, uint64_t addr) {
+    if (ctx == nullptr) return nullptr;
+
+    ensure_architecture(ctx);
+    if (!ctx->arch || !ctx->arch->symboltab) {
+        return nullptr;
+    }
+
+    ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
+    ghidra::AddrSpace* code_space = ctx->arch->getDefaultCodeSpace();
+    if (global_scope == nullptr || code_space == nullptr) {
+        return nullptr;
+    }
+
+    ghidra::Address start_addr(code_space, addr);
+    ghidra::Funcdata* fd = global_scope->findFunction(start_addr);
+    if (fd != nullptr) {
+        return fd;
+    }
+
+    std::ostringstream name_ss;
+    name_ss << "sub_" << std::hex << addr;
+    ghidra::FunctionSymbol* sym = global_scope->addFunction(start_addr, name_ss.str());
+    return (sym != nullptr) ? sym->getFunction() : nullptr;
+}
+
+static ghidra::ProtoModel* resolve_proto_model(DecompContext* ctx, const char* model_name) {
+    if (ctx == nullptr || model_name == nullptr || model_name[0] == '\0') {
+        return nullptr;
+    }
+    ensure_architecture(ctx);
+    if (!ctx->arch) {
+        return nullptr;
+    }
+
+    std::string name(model_name);
+    if (name == "default") {
+        return ctx->arch->defaultfp;
+    }
+    return ctx->arch->getModel(name);
+}
 
 // ============================================================================
 // Lifecycle Management
@@ -223,6 +270,147 @@ extern "C" DECOMP_API void decomp_set_feature(
     int enabled
 ) {
     set_feature(ctx, feature, enabled != 0);
+}
+
+extern "C" DECOMP_API DecompError decomp_set_function_inline(
+    DecompContext* ctx,
+    uint64_t addr,
+    int enabled
+) {
+    if (ctx == nullptr) return DECOMP_ERR_INVALID_CONTEXT;
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    try {
+        ghidra::Funcdata* fd = get_or_create_function_for_option(ctx, addr);
+        if (fd == nullptr) {
+            ctx->last_error = "Failed to resolve function for inline option";
+            return DECOMP_ERR_INIT;
+        }
+
+        fd->getFuncProto().setInline(enabled != 0);
+        if (ctx->arch) {
+            ctx->arch->clearAnalysis(fd);
+        }
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Error setting inline option: ") + e.what();
+        return DECOMP_ERR_INIT;
+    }
+}
+
+extern "C" DECOMP_API DecompError decomp_set_function_noreturn(
+    DecompContext* ctx,
+    uint64_t addr,
+    int enabled
+) {
+    if (ctx == nullptr) return DECOMP_ERR_INVALID_CONTEXT;
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    try {
+        ghidra::Funcdata* fd = get_or_create_function_for_option(ctx, addr);
+        if (fd == nullptr) {
+            ctx->last_error = "Failed to resolve function for noreturn option";
+            return DECOMP_ERR_INIT;
+        }
+
+        fd->getFuncProto().setNoReturn(enabled != 0);
+        if (ctx->arch) {
+            ctx->arch->clearAnalysis(fd);
+        }
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Error setting noreturn option: ") + e.what();
+        return DECOMP_ERR_INIT;
+    }
+}
+
+extern "C" DECOMP_API DecompError decomp_set_function_extrapop(
+    DecompContext* ctx,
+    uint64_t addr,
+    int32_t extrapop
+) {
+    if (ctx == nullptr) return DECOMP_ERR_INVALID_CONTEXT;
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    try {
+        ghidra::Funcdata* fd = get_or_create_function_for_option(ctx, addr);
+        if (fd == nullptr) {
+            ctx->last_error = "Failed to resolve function for extrapop option";
+            return DECOMP_ERR_INIT;
+        }
+
+        fd->getFuncProto().setExtraPop(static_cast<int>(extrapop));
+        if (ctx->arch) {
+            ctx->arch->clearAnalysis(fd);
+        }
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Error setting extrapop option: ") + e.what();
+        return DECOMP_ERR_INIT;
+    }
+}
+
+extern "C" DECOMP_API DecompError decomp_set_default_prototype(
+    DecompContext* ctx,
+    const char* model_name
+) {
+    if (ctx == nullptr) return DECOMP_ERR_INVALID_CONTEXT;
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    try {
+        ghidra::ProtoModel* model = resolve_proto_model(ctx, model_name);
+        if (model == nullptr) {
+            ctx->last_error = std::string("Unknown prototype model: ") + (model_name ? model_name : "(null)");
+            return DECOMP_ERR_INIT;
+        }
+        ctx->arch->setDefaultModel(model);
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Error setting default prototype: ") + e.what();
+        return DECOMP_ERR_INIT;
+    }
+}
+
+extern "C" DECOMP_API DecompError decomp_set_protoeval_current(
+    DecompContext* ctx,
+    const char* model_name
+) {
+    if (ctx == nullptr) return DECOMP_ERR_INVALID_CONTEXT;
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    try {
+        ghidra::ProtoModel* model = resolve_proto_model(ctx, model_name);
+        if (model == nullptr) {
+            ctx->last_error = std::string("Unknown prototype model: ") + (model_name ? model_name : "(null)");
+            return DECOMP_ERR_INIT;
+        }
+        ctx->arch->evalfp_current = model;
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Error setting protoeval current: ") + e.what();
+        return DECOMP_ERR_INIT;
+    }
+}
+
+extern "C" DECOMP_API DecompError decomp_set_protoeval_called(
+    DecompContext* ctx,
+    const char* model_name
+) {
+    if (ctx == nullptr) return DECOMP_ERR_INVALID_CONTEXT;
+
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    try {
+        ghidra::ProtoModel* model = resolve_proto_model(ctx, model_name);
+        if (model == nullptr) {
+            ctx->last_error = std::string("Unknown prototype model: ") + (model_name ? model_name : "(null)");
+            return DECOMP_ERR_INIT;
+        }
+        ctx->arch->evalfp_called = model;
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Error setting protoeval called: ") + e.what();
+        return DECOMP_ERR_INIT;
+    }
 }
 
 // ============================================================================

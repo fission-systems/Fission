@@ -2,6 +2,48 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
+### Ghidra Parity Expansion: Function-Level Options, Proto Models, Loader Symbols (2026-02-16)
+
+**🔧 Function-level decompiler option controls (FFI)**
+
+- Added per-function option APIs to close key OptionDatabase gaps:
+  - `decomp_set_function_inline()`
+  - `decomp_set_function_noreturn()`
+  - `decomp_set_function_extrapop()`
+- Each API resolves/creates the target function symbol and applies `FuncProto` flags directly, then invalidates analysis for deterministic re-run behavior.
+
+**🧠 Prototype model controls (FFI)**
+
+- Added architecture-level prototype model APIs:
+  - `decomp_set_default_prototype()` (OptionDefaultPrototype-equivalent)
+  - `decomp_set_protoeval_current()` (OptionProtoEval for current function)
+  - `decomp_set_protoeval_called()` (called-function evaluation model)
+- Added model resolver behavior for named models and `"default"` alias.
+
+**📦 Loader symbol ingestion path implemented**
+
+- Implemented loader symbol iteration support in custom `LoadImage` classes:
+  - `openSymbols()` / `closeSymbols()` / `getNextSymbol()` now return real records.
+- Added symbol staging/upsert logic to avoid symbol loss before address space initialization and prevent duplicate-address symbol accumulation.
+- Wired context symbol lifecycle to loader symbol store:
+  - `add_symbol()`, `clear_symbols()`, `add_function()`, and `load_binary()` now synchronize loader symbol records.
+
+**🏗️ Architecture init parity update**
+
+- Added `ArchInitOptions::read_loader_symbols` (default enabled).
+- `initialize_architecture()` now invokes `readLoaderSymbols("::")` (best-effort with guarded error handling), improving parity with upstream loader-symbol import flow.
+
+**🧩 Data symbol registration refactor completion**
+
+- Completed unification of duplicated data-section symbol registration logic.
+- Batch and context-based paths now use shared registration APIs from `DataSymbolRegistry`.
+- Re-registration of cached data symbols after global-scope clear now uses the same common registration routine for consistent behavior.
+
+**✅ Validation**
+
+- Rebuilt native targets after each change set.
+- `fission_decomp`, `libdecomp.dylib`, and context service test targets built successfully.
+
 ### Listing View - Full Binary Disassembly with Virtual Scroll (2026-01-20)
 
 **📜 New Feature: Listing View Panel**

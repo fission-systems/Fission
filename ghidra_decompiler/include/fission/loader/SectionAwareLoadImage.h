@@ -43,9 +43,16 @@ struct SectionMapping {
  * using PE section information
  */
 class SectionAwareLoadImage : public ghidra::LoadImage {
+    struct LoaderSymbolRecord {
+        uint64_t addr;
+        std::string name;
+    };
+
     std::vector<uint8_t> file_data_;
     std::vector<SectionMapping> sections_;
     ghidra::AddrSpace* default_space_ = nullptr;
+    mutable std::vector<LoaderSymbolRecord> loader_symbols_;
+    mutable size_t loader_symbol_index_ = 0;
     
 public:
     explicit SectionAwareLoadImage(const std::vector<uint8_t>& file_data)
@@ -73,6 +80,24 @@ public:
 
     void setDefaultSpace(ghidra::AddrSpace* space) {
         default_space_ = space;
+    }
+
+    void addLoaderSymbol(uint64_t addr, const std::string& name) {
+        if (name.empty()) {
+            return;
+        }
+        for (auto& rec : loader_symbols_) {
+            if (rec.addr == addr) {
+                rec.name = name;
+                return;
+            }
+        }
+        loader_symbols_.push_back(LoaderSymbolRecord{addr, name});
+    }
+
+    void clearLoaderSymbols() {
+        loader_symbols_.clear();
+        loader_symbol_index_ = 0;
     }
     
     virtual void loadFill(ghidra::uint1* ptr, ghidra::int4 size, const ghidra::Address& addr) override {
@@ -134,6 +159,24 @@ public:
 
     virtual std::string getArchType(void) const override { return "section-aware"; }
     virtual void adjustVma(long adjust) override {}
+
+    virtual void openSymbols(void) const override {
+        loader_symbol_index_ = 0;
+    }
+
+    virtual void closeSymbols(void) const override {
+        loader_symbol_index_ = 0;
+    }
+
+    virtual bool getNextSymbol(ghidra::LoadImageFunc& record) const override {
+        if (default_space_ == nullptr || loader_symbol_index_ >= loader_symbols_.size()) {
+            return false;
+        }
+        const LoaderSymbolRecord& rec = loader_symbols_[loader_symbol_index_++];
+        record.address = ghidra::Address(default_space_, rec.addr);
+        record.name = rec.name;
+        return true;
+    }
 };
 
 } // namespace loader

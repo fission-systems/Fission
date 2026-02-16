@@ -22,6 +22,8 @@ using namespace ghidra;
 class MemoryLoadImage : public LoadImage {
     std::vector<uint8_t> data_;
     uint64_t base_addr_;
+    mutable std::vector<LoadImageFunc> loader_symbols_;
+    mutable size_t loader_symbol_index_ = 0;
     
 public:
     MemoryLoadImage(const std::vector<uint8_t>& d, uint64_t base)
@@ -33,6 +35,22 @@ public:
     void updateData(const std::vector<uint8_t>& d, uint64_t base) {
         data_ = d;
         base_addr_ = base;
+    }
+
+    void addLoaderSymbol(uint64_t addr, const std::string& name) {
+        if (name.empty()) {
+            return;
+        }
+        LoadImageFunc rec;
+        (void)addr;
+        rec.address = Address();
+        rec.name = name;
+        loader_symbols_.push_back(std::move(rec));
+    }
+
+    void clearLoaderSymbols() {
+        loader_symbols_.clear();
+        loader_symbol_index_ = 0;
     }
     
     virtual void loadFill(uint1* ptr, int4 size, const Address& addr) override {
@@ -57,6 +75,22 @@ public:
     
     virtual std::string getArchType(void) const override { return "memory"; }
     virtual void adjustVma(long adjust) override {}
+
+    virtual void openSymbols(void) const override {
+        loader_symbol_index_ = 0;
+    }
+
+    virtual void closeSymbols(void) const override {
+        loader_symbol_index_ = 0;
+    }
+
+    virtual bool getNextSymbol(LoadImageFunc& record) const override {
+        if (loader_symbol_index_ >= loader_symbols_.size()) {
+            return false;
+        }
+        record = loader_symbols_[loader_symbol_index_++];
+        return true;
+    }
 };
 
 } // namespace loader

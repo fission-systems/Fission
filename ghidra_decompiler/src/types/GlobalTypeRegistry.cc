@@ -76,6 +76,12 @@ std::vector<uint64_t> GlobalTypeRegistry::get_pending_reanalysis() const {
     return pending_reanalysis;
 }
 
+std::vector<uint64_t> GlobalTypeRegistry::consume_pending_reanalysis() {
+    std::vector<uint64_t> result = pending_reanalysis;
+    pending_reanalysis.clear();
+    return result;
+}
+
 void GlobalTypeRegistry::clear() {
     signatures.clear();
     call_sites.clear();

@@ -8,6 +8,9 @@
 #include <mutex>
 #include <string>
 #include "flow.hh"
+#include "architecture.hh"
+#include "options.hh"
+#include "fission/utils/logger.h"
 
 void fission::ffi::ensure_architecture(DecompContext* ctx) {
     fission::decompiler::ensure_architecture(ctx);
@@ -35,16 +38,22 @@ void fission::ffi::set_feature(DecompContext* ctx, const char* feature, bool ena
 
     std::string feat(feature);
 
-    if (feat == "infer_pointers") {
+    if (feat == "infer_pointers" || feat == "inferconstptr") {
         ctx->infer_pointers = enabled;
-    } else if (feat == "analyze_loops") {
+    } else if (feat == "analyze_loops" || feat == "analyzeforloops") {
         ctx->analyze_loops = enabled;
-    } else if (feat == "readonly_propagate") {
+    } else if (feat == "readonly_propagate" || feat == "readonly" || feat == "decompile.readonly") {
         ctx->readonly_propagate = enabled;
-    } else if (feat == "record_jumploads") {
+    } else if (feat == "record_jumploads" || feat == "jumpload") {
         ctx->record_jumploads = enabled;
     } else if (feat == "disable_toomanyinstructions_error") {
         ctx->disable_toomanyinstructions_error = enabled;
+    } else if (feat == "errortoomanyinstructions") {
+        // Original Ghidra option semantics: "on" means raise error.
+        // Fission flag semantics are inverse (disable_*).
+        ctx->disable_toomanyinstructions_error = !enabled;
+    } else if (feat == "allow_inline" || feat == "inline") {
+        ctx->allow_inline = enabled;
     } else {
         return;
     }
@@ -65,6 +74,22 @@ void fission::ffi::set_feature(DecompContext* ctx, const char* feature, bool ena
             ctx->arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
         } else {
             ctx->arch->flowoptions |= ghidra::FlowInfo::error_toomanyinstructions;
+        }
+
+        // Best-effort sync with original OptionDatabase toggles (from options.cc)
+        if (ctx->arch->options != nullptr) {
+            try {
+                ctx->arch->options->set(ghidra::ELEM_INFERCONSTPTR.getId(), ctx->infer_pointers ? "on" : "off", "", "");
+                ctx->arch->options->set(ghidra::ELEM_ANALYZEFORLOOPS.getId(), ctx->analyze_loops ? "on" : "off", "", "");
+                ctx->arch->options->set(ghidra::ELEM_READONLY.getId(), ctx->readonly_propagate ? "on" : "off", "", "");
+                ctx->arch->options->set(ghidra::ELEM_JUMPLOAD.getId(), ctx->record_jumploads ? "on" : "off", "", "");
+                ctx->arch->options->set(ghidra::ELEM_ERRORTOOMANYINSTRUCTIONS.getId(), ctx->disable_toomanyinstructions_error ? "off" : "on", "", "");
+                ctx->arch->options->set(ghidra::ELEM_INLINE.getId(), ctx->allow_inline ? "on" : "off", "", "");
+            } catch (const std::exception& e) {
+                fission::utils::log_stream() << "[DecompilerCore] set_feature: option sync failed: " << e.what() << std::endl;
+            } catch (...) {
+                fission::utils::log_stream() << "[DecompilerCore] set_feature: option sync failed (unknown)" << std::endl;
+            }
         }
     }
 }

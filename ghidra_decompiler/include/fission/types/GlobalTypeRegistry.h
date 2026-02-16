@@ -93,6 +93,11 @@ public:
      * Get functions marked for re-analysis
      */
     std::vector<uint64_t> get_pending_reanalysis() const;
+
+    /**
+     * Consume and clear functions marked for re-analysis
+     */
+    std::vector<uint64_t> consume_pending_reanalysis();
     
     /**
      * Clear all data

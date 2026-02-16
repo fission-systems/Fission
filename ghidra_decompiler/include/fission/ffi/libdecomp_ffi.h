@@ -301,6 +301,84 @@ DECOMP_API void decomp_set_feature(
     int enabled
 );
 
+/**
+ * Set per-function inline flag (OptionInline-like behavior).
+ *
+ * @param ctx Decompiler context
+ * @param addr Function start address
+ * @param enabled Non-zero to mark inline, zero to clear inline
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_set_function_inline(
+    DecompContext* ctx,
+    uint64_t addr,
+    int enabled
+);
+
+/**
+ * Set per-function noreturn flag (OptionNoReturn-like behavior).
+ *
+ * @param ctx Decompiler context
+ * @param addr Function start address
+ * @param enabled Non-zero to mark noreturn, zero to clear noreturn
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_set_function_noreturn(
+    DecompContext* ctx,
+    uint64_t addr,
+    int enabled
+);
+
+/**
+ * Set per-function extrapop value in bytes (OptionExtraPop-like behavior).
+ *
+ * @param ctx Decompiler context
+ * @param addr Function start address
+ * @param extrapop Stack cleanup bytes after call
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_set_function_extrapop(
+    DecompContext* ctx,
+    uint64_t addr,
+    int32_t extrapop
+);
+
+/**
+ * Set architecture default prototype model (OptionDefaultPrototype-like behavior).
+ *
+ * @param ctx Decompiler context
+ * @param model_name Prototype model name (e.g. "default", "__cdecl", "__fastcall")
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_set_default_prototype(
+    DecompContext* ctx,
+    const char* model_name
+);
+
+/**
+ * Set prototype evaluation model for current function analysis (OptionProtoEval-like behavior).
+ *
+ * @param ctx Decompiler context
+ * @param model_name Prototype model name, or "default"
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_set_protoeval_current(
+    DecompContext* ctx,
+    const char* model_name
+);
+
+/**
+ * Set prototype evaluation model for called function analysis.
+ *
+ * @param ctx Decompiler context
+ * @param model_name Prototype model name, or "default"
+ * @return DECOMP_OK on success, error code on failure
+ */
+DECOMP_API DecompError decomp_set_protoeval_called(
+    DecompContext* ctx,
+    const char* model_name
+);
+
 // ============================================================================
 // FID (Function ID) Analysis
 // ============================================================================
