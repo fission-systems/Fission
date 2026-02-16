@@ -8,14 +8,27 @@ import sys
 import os
 import shutil
 import tempfile
-import pyghidra
 import json
 from pathlib import Path
 
+def resolve_ghidra_install_dir() -> str:
+    # Prefer externally provided path (CI/local override).
+    env_path = os.environ.get("GHIDRA_INSTALL_DIR")
+    if env_path and Path(env_path).exists():
+        return env_path
+
+    # Fall back to vendored Ghidra relative to repository root.
+    script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parent.parent
+    candidate = project_root / "vendor" / "ghidra" / "ghidra_11.4.2_PUBLIC"
+    if candidate.exists():
+        return str(candidate)
+
+    return env_path or str(candidate)
+
 def decompile_batch(binary_path, address_file, output_dir):
-    # Set Ghidra installation path
-    ghidra_path = "/Users/sjkim1127/Fission/vendor/ghidra/ghidra_11.4.2_PUBLIC"
-    os.environ['GHIDRA_INSTALL_DIR'] = ghidra_path
+    os.environ["GHIDRA_INSTALL_DIR"] = resolve_ghidra_install_dir()
+    import pyghidra
     
     # Load addresses
     addresses = []

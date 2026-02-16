@@ -7,6 +7,7 @@
 
 #include <mutex>
 #include <string>
+#include "flow.hh"
 
 void fission::ffi::ensure_architecture(DecompContext* ctx) {
     fission::decompiler::ensure_architecture(ctx);
@@ -40,5 +41,30 @@ void fission::ffi::set_feature(DecompContext* ctx, const char* feature, bool ena
         ctx->analyze_loops = enabled;
     } else if (feat == "readonly_propagate") {
         ctx->readonly_propagate = enabled;
+    } else if (feat == "record_jumploads") {
+        ctx->record_jumploads = enabled;
+    } else if (feat == "disable_toomanyinstructions_error") {
+        ctx->disable_toomanyinstructions_error = enabled;
+    } else {
+        return;
+    }
+
+    // Keep runtime behavior consistent when toggled after architecture init.
+    if (ctx->arch) {
+        ctx->arch->infer_pointers = ctx->infer_pointers;
+        ctx->arch->analyze_for_loops = ctx->analyze_loops;
+        ctx->arch->readonlypropagate = ctx->readonly_propagate;
+
+        if (ctx->record_jumploads) {
+            ctx->arch->flowoptions |= ghidra::FlowInfo::record_jumploads;
+        } else {
+            ctx->arch->flowoptions &= ~ghidra::FlowInfo::record_jumploads;
+        }
+
+        if (ctx->disable_toomanyinstructions_error) {
+            ctx->arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
+        } else {
+            ctx->arch->flowoptions |= ghidra::FlowInfo::error_toomanyinstructions;
+        }
     }
 }

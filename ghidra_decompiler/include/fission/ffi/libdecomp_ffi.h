@@ -245,6 +245,16 @@ DECOMP_API DecompError decomp_add_memory_block(
 DECOMP_API char* decomp_function(DecompContext* ctx, uint64_t addr);
 
 /**
+ * Generate Pcode JSON for a function at the given address.
+ *
+ * @param ctx Decompiler context (must have binary loaded)
+ * @param addr Start address of the function
+ * @return Allocated C string with Pcode JSON, or NULL on error.
+ *         Caller must free with decomp_free_string().
+ */
+DECOMP_API char* decomp_function_pcode(DecompContext* ctx, uint64_t addr);
+
+/**
  * Get the last error message.
  * 
  * @param ctx Decompiler context
@@ -280,7 +290,9 @@ DECOMP_API DecompError decomp_set_gdt(DecompContext* ctx, const char* gdt_path);
  * Enable or disable specific analysis passes.
  * 
  * @param ctx Decompiler context
- * @param feature Feature name (e.g., "infer_pointers", "analyze_loops")
+ * @param feature Feature name (e.g., "infer_pointers", "analyze_loops",
+ *                "readonly_propagate", "record_jumploads",
+ *                "disable_toomanyinstructions_error")
  * @param enabled Non-zero to enable, zero to disable
  */
 DECOMP_API void decomp_set_feature(

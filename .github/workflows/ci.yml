@@ -24,8 +24,8 @@ jobs:
 
       - name: Build Decompiler
         run: |
-          chmod +x scripts/build_decompiler.sh
-          ./scripts/build_decompiler.sh
+          chmod +x scripts/build/build_decompiler.sh
+          ./scripts/build/build_decompiler.sh
 
       - name: Check Formatting
         run: cargo fmt -- --check

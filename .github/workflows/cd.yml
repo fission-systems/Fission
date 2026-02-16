@@ -47,8 +47,8 @@ jobs:
             - name: Build Decompiler (Unix)
               if: runner.os != 'Windows'
               run: |
-                  chmod +x scripts/build_decompiler.sh
-                  ./scripts/build_decompiler.sh
+                  chmod +x scripts/build/build_decompiler.sh
+                  ./scripts/build/build_decompiler.sh
 
             # [Windows] Build Decompiler with Vcpkg
             - name: Build Decompiler (Windows)
