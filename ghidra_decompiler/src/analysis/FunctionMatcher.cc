@@ -220,8 +220,8 @@ std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes
         return it->second;
     }
     
-    // Check if FID database is available
-    if (!fid_db || !fid_db->is_loaded()) {
+    // Check if any FID databases are available
+    if (fid_dbs_.empty() && (!fid_db || !fid_db->is_loaded())) {
         return "";
     }
     
@@ -246,19 +246,24 @@ std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes
         debug_hash_count++;
     }
     
-    // Lookup in FID database
-    std::vector<std::string> matches = fid_db->lookup_by_hash(hash);
-    
-    if (!matches.empty()) {
-        // Take first match (could implement scoring for multiple matches)
-        std::string name = matches[0];
-        matched_funcs[address] = name;
-        fission::utils::log_stream() << "[FunctionMatcher] FID MATCH! 0x" << std::hex << address 
-                  << " -> " << name << " (hash=0x" << hash << ")" << std::dec << std::endl;
-        return name;
+    // Search all loaded FID databases (multi-DB exhaustive lookup)
+    const auto& dbs_to_search = fid_dbs_.empty()
+        ? std::vector<const FidDatabase*>{fid_db}
+        : fid_dbs_;
+
+    for (const auto* db : dbs_to_search) {
+        if (!db || !db->is_loaded()) continue;
+        std::vector<std::string> matches = db->lookup_by_hash(hash);
+        if (!matches.empty()) {
+            std::string name = matches[0];
+            matched_funcs[address] = name;
+            fission::utils::log_stream() << "[FunctionMatcher] FID MATCH! 0x" << std::hex << address
+                      << " -> " << name << " (hash=0x" << hash << ")" << std::dec << std::endl;
+            return name;
+        }
     }
-    
-    return "";  // No match
+
+    return "";  // No match across all DBs
 }
 
 } // namespace analysis

@@ -358,180 +358,6 @@ std::string DecompilationPipeline::handle_load_bin(
         fission::utils::log_stream() << "[fission_decomp] Scanned " << ascii_strings.size()
                   << " ASCII and " << unicode_strings.size() << " Unicode strings." << std::endl;
 
-        // Phase 8: FID Analysis + Internal matcher
-        std::string fid_filename;
-        if (is_pe) {
-            fid_filename = TypePropagator::get_fid_filename(bin_info.is_64bit, compiler_id);
-        }
-        
-        if (!fid_filename.empty()) {
-            // Use centralized path finder
-            std::string fid_path = find_fid_file(fid_filename);
-            
-            if (!fid_path.empty()) {
-                if (file_exists(fid_path)) {
-
-                    fission::utils::log_stream() << "[fission_decomp] Loading FID database: " << fid_path << std::endl;
-                    FidDatabase fid_db;
-                    if (fid_db.load(fid_path)) {
-                        int matches_found = 0;
-                        int internal_matches_found = 0;
-                        int internal_string_matches_found = 0;
-                        InternalMatcher internal_matcher;
-                        // Scan for function prologues (enhanced pattern matching)
-                        size_t step = 1;
-                        for (size_t i = 0; i < bin_bytes.size() - 32; i += step) {
-                            bool possible_start = false;
-                            if (bin_info.is_64bit) {
-                                // x64 Prologues (comprehensive patterns)
-                                uint8_t b0 = bin_bytes[i];
-                                uint8_t b1 = (i+1 < bin_bytes.size()) ? bin_bytes[i+1] : 0;
-                                uint8_t b2 = (i+2 < bin_bytes.size()) ? bin_bytes[i+2] : 0;
-                                uint8_t b3 = (i+3 < bin_bytes.size()) ? bin_bytes[i+3] : 0;
-                                
-                                // Push register prologues (40 5x, 41 5x)
-                                if (b0 == 0x40 && (b1 >= 0x50 && b1 <= 0x57)) 
-                                    possible_start = true;
-                                if (b0 == 0x41 && (b1 >= 0x50 && b1 <= 0x57))
-                                    possible_start = true;
-                                
-                                // Stack frame setup: sub rsp, imm (48 83 EC xx, 48 81 EC xx xx xx xx)
-                                if (b0 == 0x48 && b1 == 0x83 && b2 == 0xEC) 
-                                    possible_start = true;
-                                if (b0 == 0x48 && b1 == 0x81 && b2 == 0xEC)
-                                    possible_start = true;
-                                
-                                // Frame pointer setup: mov [rsp+x], reg (48 89 xx, 4C 89 xx)
-                                if (b0 == 0x48 && b1 == 0x89) 
-                                    possible_start = true;
-                                if (b0 == 0x4C && b1 == 0x89)
-                                    possible_start = true;
-                                
-                                // Leaf functions: mov eax, imm (B8 xx xx xx xx)
-                                if (b0 >= 0xB8 && b0 <= 0xBF)
-                                    possible_start = true;
-                                
-                                // Simple return functions: xor eax, eax (31 C0 or 33 C0)
-                                if ((b0 == 0x31 || b0 == 0x33) && b1 == 0xC0)
-                                    possible_start = true;
-                                
-                                // Test/cmp patterns at function start
-                                if (b0 == 0x48 && b1 == 0x85 && (b2 >= 0xC0 && b2 <= 0xFF))  // test reg, reg
-                                    possible_start = true;
-                                
-                                // CRT/MinGW patterns: push rbp; mov rbp, rsp (55 48 89 E5)
-                                if (b0 == 0x55 && b1 == 0x48 && b2 == 0x89 && b3 == 0xE5)
-                                    possible_start = true;
-                                    
-                            } else {
-                                // x86 Prologues (comprehensive patterns)
-                                uint8_t b0 = bin_bytes[i];
-                                uint8_t b1 = (i+1 < bin_bytes.size()) ? bin_bytes[i+1] : 0;
-                                uint8_t b2 = (i+2 < bin_bytes.size()) ? bin_bytes[i+2] : 0;
-                                uint8_t b3 = (i+3 < bin_bytes.size()) ? bin_bytes[i+3] : 0;
-                                
-                                // Classic frame setup: push ebp; mov ebp, esp (55 8B EC or 55 89 E5)
-                                if (b0 == 0x55 && b1 == 0x8B && b2 == 0xEC) 
-                                    possible_start = true;
-                                if (b0 == 0x55 && b1 == 0x89 && b2 == 0xE5)
-                                    possible_start = true;
-                                
-                                // Stack allocation: sub esp, imm (83 EC xx, 81 EC xx xx xx xx)
-                                if (b0 == 0x83 && b1 == 0xEC) 
-                                    possible_start = true;
-                                if (b0 == 0x81 && b1 == 0xEC)
-                                    possible_start = true;
-                                
-                                // Push multiple registers: push edi/esi/ebx (57, 56, 53)
-                                if (b0 >= 0x50 && b0 <= 0x57)
-                                    possible_start = true;
-                                
-                                // Leaf functions: mov eax, imm (B8 xx xx xx xx)
-                                if (b0 >= 0xB8 && b0 <= 0xBF)
-                                    possible_start = true;
-                                
-                                // Simple return: xor eax, eax (31 C0 or 33 C0)
-                                if ((b0 == 0x31 || b0 == 0x33) && b1 == 0xC0)
-                                    possible_start = true;
-                                
-                                // __cdecl with stack check: mov eax, [esp+4] (8B 44 24 04)
-                                if (b0 == 0x8B && b1 == 0x44 && b2 == 0x24)
-                                    possible_start = true;
-                            }
-                            
-                            if (possible_start) {
-                                uint64_t addr = image_base + i;
-
-                                // Internal signature matching (prologue-based)
-                                if (state.iat_symbols.find(addr) == state.iat_symbols.end()) {
-                                    int prologue_len = static_cast<int>(std::min<size_t>(16, bin_bytes.size() - i));
-                                    std::string internal_name = internal_matcher.match_by_prologue(
-                                        addr,
-                                        &bin_bytes[i],
-                                        prologue_len
-                                    );
-                                    if (!internal_name.empty()) {
-                                        state.iat_symbols[addr] = internal_name;
-                                        internal_matches_found++;
-                                        continue;
-                                    }
-
-                                    // Internal signature matching (referenced strings)
-                                    std::vector<std::string> local_refs = collect_referenced_strings_near(
-                                        bin_bytes,
-                                        i,
-                                        image_base,
-                                        scanned_strings
-                                    );
-                                    if (!local_refs.empty()) {
-                                        std::string by_strings = internal_matcher.match_by_strings(addr, local_refs);
-                                        if (!by_strings.empty()) {
-                                            state.iat_symbols[addr] = by_strings;
-                                            internal_string_matches_found++;
-                                            continue;
-                                        }
-                                    }
-                                }
-
-                                size_t len = std::min((size_t)64, bin_bytes.size() - i);
-                                uint64_t full_hash = FidHasher::calculate_full_hash(&bin_bytes[i], len);
-                                uint64_t specific_hash = FidHasher::calculate_specific_hash(&bin_bytes[i], len);
-                                
-                                // Use combined hash matching (more accurate)
-                                auto names = fid_db.lookup_by_hashes(full_hash, specific_hash);
-                                
-                                if (!names.empty()) {
-                                    std::string name = names[0];
-                                    
-                                    // Skip if already identified or common symbol
-                                    if (state.iat_symbols.find(addr) == state.iat_symbols.end() && 
-                                        !fid_db.is_common_symbol(name)) {
-                                        state.iat_symbols[addr] = name;
-                                        matches_found++;
-                                        
-                                        if (matches_found <= 5) {
-                                            fission::utils::log_stream() << "[FID] Matched @ 0x" << std::hex << addr 
-                                                     << " -> " << name << std::dec << std::endl;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        fission::utils::log_stream() << "[fission_decomp] FID Analysis: Identified " 
-                                 << matches_found << " functions." << std::endl;
-                        if (internal_matches_found > 0) {
-                            fission::utils::log_stream() << "[fission_decomp] InternalMatcher: Identified "
-                                      << internal_matches_found << " functions." << std::endl;
-                        }
-                        if (internal_string_matches_found > 0) {
-                            fission::utils::log_stream() << "[fission_decomp] InternalMatcher(strings): Identified "
-                                      << internal_string_matches_found << " functions." << std::endl;
-                        }
-                    }
-                }
-            }
-        }
-        
         // Feed discovered strings into constant substitution maps
         state.enum_values.insert(ascii_strings.begin(), ascii_strings.end());
         state.enum_values.insert(unicode_strings.begin(), unicode_strings.end());
@@ -673,125 +499,168 @@ std::string DecompilationPipeline::handle_load_bin(
     // Inject IAT symbols for 32-bit
     state.arch_32bit->injectIatSymbols(iat_symbols);
     
-    // Phase 12: Load FID databases
+    // Phase 12: Unified prologue scan — InternalMatcher + multi-DB FID with RelationValidator
     {
-        // Use centralized path configuration
-        std::vector<std::string> fid_candidates = ::fission::config::get_all_fid_paths(bin_info.is_64bit);
-        
-        static FidDatabase fid_db;
-        static FunctionMatcher func_matcher;
-        static bool fid_initialized = false;
-        
-        if (!fid_initialized) {
-            for (const auto& path : fid_candidates) {
-                if (fid_db.load(path)) {
-                    fission::utils::log_stream() << "[fission_decomp] Loaded FID database: " << path 
-                              << " (" << fid_db.get_function_count() << " functions)" << std::endl;
-                    func_matcher.set_fid_database(&fid_db);
-                    break;
-                }
-            }
-            fid_initialized = true;
-        }
-        
-        // Load ALL available FID databases using centralized paths
-        static std::vector<FidDatabase> all_fid_dbs;
-        if (all_fid_dbs.empty()) {
+        // Load/reload per-context FID databases when arch changes (replaces static statics)
+        if (!state.batch_fid_dbs_loaded || state.batch_fid_dbs_is64bit != bin_info.is_64bit) {
+            state.batch_fid_dbs.clear();
             std::vector<std::string> all_fid_paths = ::fission::config::get_all_fid_paths(bin_info.is_64bit);
             for (const auto& path : all_fid_paths) {
                 FidDatabase db;
                 if (db.load(path)) {
-                    all_fid_dbs.push_back(std::move(db));
+                    state.batch_fid_dbs.push_back(std::move(db));
                 }
             }
-            fission::utils::log_stream() << "[fission_decomp] Loaded " << all_fid_dbs.size() 
+            state.batch_fid_dbs_loaded = true;
+            state.batch_fid_dbs_is64bit = bin_info.is_64bit;
+            fission::utils::log_stream() << "[fission_decomp] Loaded " << state.batch_fid_dbs.size()
                      << " FID databases total" << std::endl;
         }
 
-        // Improved function prologue detection with 2-pass Relation Validation
-        fission::utils::log_stream() << "[fission_decomp] Starting FID scan on " << bin_bytes.size() << " bytes..." << std::endl;
-        std::vector<uint64_t> prologues = PatternLoader::scan_function_prologues(bin_bytes, image_base);
-        size_t prologue_count = prologues.size();
-        fission::utils::log_stream() << "[fission_decomp] Found " << prologue_count << " prologues to evaluate." << std::endl;
-        
-        // Pass 1: Calculate hashes for all identified prologues
+        // Pass 1: step=1 prologue scan with comprehensive x86/x64 patterns
+        // Runs InternalMatcher (prologue-based) and pre-computes FID hashes per candidate
+        InternalMatcher internal_matcher;
+        int internal_matches_found = 0;
+        std::vector<uint64_t> prologue_candidates;
         std::map<uint64_t, uint64_t> addr_to_hash;
-        for (uint64_t addr : prologues) {
-            size_t offset = addr - image_base;
-            if (offset + 64 >= bin_bytes.size()) continue;
-            addr_to_hash[addr] = FidHasher::calculate_full_hash(&bin_bytes[offset], 64);
+
+        fission::utils::log_stream() << "[fission_decomp] Starting unified prologue scan on "
+                 << bin_bytes.size() << " bytes..." << std::endl;
+
+        for (size_t i = 0; i + 32 < bin_bytes.size(); ++i) {
+            const uint8_t b0 = bin_bytes[i];
+            const uint8_t b1 = bin_bytes[i + 1];
+            const uint8_t b2 = bin_bytes[i + 2];
+            const uint8_t b3 = bin_bytes[i + 3];
+            bool possible_start = false;
+
+            if (bin_info.is_64bit) {
+                // x64: REX push register prologues (40 5x, 41 5x)
+                if (b0 == 0x40 && b1 >= 0x50 && b1 <= 0x57) possible_start = true;
+                if (b0 == 0x41 && b1 >= 0x50 && b1 <= 0x57) possible_start = true;
+                // sub rsp, imm8/imm32 (48 83 EC xx, 48 81 EC xx xx xx xx)
+                if (b0 == 0x48 && b1 == 0x83 && b2 == 0xEC) possible_start = true;
+                if (b0 == 0x48 && b1 == 0x81 && b2 == 0xEC) possible_start = true;
+                // mov [rsp+x], reg64 (48 89 xx, 4C 89 xx)
+                if (b0 == 0x48 && b1 == 0x89) possible_start = true;
+                if (b0 == 0x4C && b1 == 0x89) possible_start = true;
+                // mov eax, imm (B8..BF) — leaf functions
+                if (b0 >= 0xB8 && b0 <= 0xBF) possible_start = true;
+                // xor eax,eax (31 C0 / 33 C0) — simple return stubs
+                if ((b0 == 0x31 || b0 == 0x33) && b1 == 0xC0) possible_start = true;
+                // test reg,reg (48 85 rr)
+                if (b0 == 0x48 && b1 == 0x85 && b2 >= 0xC0 && b2 <= 0xFF) possible_start = true;
+                // CRT/MinGW: push rbp; mov rbp,rsp (55 48 89 E5)
+                if (b0 == 0x55 && b1 == 0x48 && b2 == 0x89 && b3 == 0xE5) possible_start = true;
+            } else {
+                // x86: push ebp; mov ebp,esp (55 8B EC / 55 89 E5)
+                if (b0 == 0x55 && b1 == 0x8B && b2 == 0xEC) possible_start = true;
+                if (b0 == 0x55 && b1 == 0x89 && b2 == 0xE5) possible_start = true;
+                // sub esp, imm (83 EC xx, 81 EC xx xx xx xx)
+                if (b0 == 0x83 && b1 == 0xEC) possible_start = true;
+                if (b0 == 0x81 && b1 == 0xEC) possible_start = true;
+                // push general registers (50..57)
+                if (b0 >= 0x50 && b0 <= 0x57) possible_start = true;
+                // mov eax, imm (B8..BF) — leaf functions
+                if (b0 >= 0xB8 && b0 <= 0xBF) possible_start = true;
+                // xor eax,eax (31 C0 / 33 C0)
+                if ((b0 == 0x31 || b0 == 0x33) && b1 == 0xC0) possible_start = true;
+                // __cdecl arg access: mov eax,[esp+4] (8B 44 24)
+                if (b0 == 0x8B && b1 == 0x44 && b2 == 0x24) possible_start = true;
+            }
+
+            if (!possible_start) continue;
+
+            const uint64_t addr = image_base + i;
+            prologue_candidates.push_back(addr);
+
+            // Pre-compute full FID hash for this candidate
+            const size_t hash_len = std::min((size_t)64, bin_bytes.size() - i);
+            if (hash_len >= 8) {
+                addr_to_hash[addr] = FidHasher::calculate_full_hash(&bin_bytes[i], hash_len);
+            }
+
+            // InternalMatcher: prologue-based (runs after IAT symbols are set in Phase 10)
+            if (!state.iat_symbols.count(addr)) {
+                const int plen = static_cast<int>(std::min<size_t>(16, bin_bytes.size() - i));
+                const std::string iname = internal_matcher.match_by_prologue(addr, &bin_bytes[i], plen);
+                if (!iname.empty()) {
+                    state.iat_symbols[addr] = iname;
+                    ++internal_matches_found;
+                }
+            }
         }
 
-        // Pass 2: Match and Validate relations
-        size_t matched_count = 0;
-        for (uint64_t addr : prologues) {
-            uint64_t func_hash = addr_to_hash[addr];
-            if (func_hash == 0) continue;
+        fission::utils::log_stream() << "[fission_decomp] Found " << prologue_candidates.size()
+                 << " prologue candidates." << std::endl;
 
-            // Find all candidates across all loaded databases
+        // Pass 2: Multi-DB FID hash matching with RelationValidator disambiguation
+        size_t matched_count = 0;
+        for (const uint64_t addr : prologue_candidates) {
+            // Skip if already named by IAT symbols or InternalMatcher
+            if (state.iat_symbols.count(addr) || state.fid_function_names.count(addr)) continue;
+
+            const auto hit = addr_to_hash.find(addr);
+            if (hit == addr_to_hash.end() || hit->second == 0) continue;
+            const uint64_t func_hash = hit->second;
+
+            // Collect candidates across all loaded databases
             std::vector<const FidFunctionRecord*> all_candidates;
             FidDatabase* best_db = nullptr;
-            
-            for (auto& db : all_fid_dbs) {
-                std::vector<const FidFunctionRecord*> candidates = db.lookup_records_by_hash(func_hash);
-                if (!candidates.empty()) {
-                    all_candidates.insert(all_candidates.end(), candidates.begin(), candidates.end());
-                    if (!best_db) best_db = &db; // Keep track of a DB for the validator
+            for (auto& db : state.batch_fid_dbs) {
+                auto cands = db.lookup_records_by_hash(func_hash);
+                if (!cands.empty()) {
+                    all_candidates.insert(all_candidates.end(), cands.begin(), cands.end());
+                    if (!best_db) best_db = &db;
                 }
             }
 
             if (all_candidates.empty()) continue;
 
             if (all_candidates.size() == 1) {
-                // Unique match, apply immediately
                 state.fid_function_names[addr] = all_candidates[0]->name;
-                matched_count++;
+                ++matched_count;
             } else if (best_db) {
-                // Multiple candidates, use RelationValidator
-                RelationValidator validator(std::shared_ptr<FidDatabase>(best_db, [](FidDatabase*){})); // Quick wrap
-                
-                // Collect actual callee hashes (simple scan)
+                // Multiple candidates: use RelationValidator to pick the best match
+                RelationValidator validator(std::shared_ptr<FidDatabase>(best_db, [](FidDatabase*){}));
+
+                // Collect callee hashes from a small window of CALL rel32 instructions
                 std::vector<uint64_t> actual_callees;
-                size_t offset = addr - image_base;
-                // Limit scan to 0x100 for performance and to avoid getting stuck in loops
-                for (size_t i = 0; i < 0x100 && (offset + i + 5) < bin_bytes.size(); ++i) {
-                    if (bin_bytes[offset + i] == 0xE8) { // CALL rel32
-                        int32_t rel = *(int32_t*)&bin_bytes[offset + i + 1];
-                        uint64_t target = addr + i + 5 + rel;
-                        if (addr_to_hash.count(target)) {
-                            actual_callees.push_back(addr_to_hash[target]);
-                        }
+                const size_t off = addr - image_base;
+                for (size_t k = 0; k < 0x100 && (off + k + 5) < bin_bytes.size(); ++k) {
+                    if (bin_bytes[off + k] == 0xE8) {  // CALL rel32
+                        int32_t rel = 0;
+                        std::memcpy(&rel, &bin_bytes[off + k + 1], sizeof(rel));
+                        const uint64_t target = addr + k + 5 + static_cast<int64_t>(rel);
+                        const auto th = addr_to_hash.find(target);
+                        if (th != addr_to_hash.end()) actual_callees.push_back(th->second);
                     }
-                    if (bin_bytes[offset + i] == 0xC3) break; // RET
+                    if (bin_bytes[off + k] == 0xC3) break;  // RET — stop scanning
                 }
 
-                auto result = validator.find_best_match(all_candidates, actual_callees);
+                const auto result = validator.find_best_match(all_candidates, actual_callees);
                 if (!result.name.empty()) {
                     state.fid_function_names[addr] = result.name;
-                    matched_count++;
-                } else if (!all_candidates.empty()) {
-                     // Fallback to first candidate if validation didn't pick one but we have candidates
-                     // (This is what we did before, but now we're informed by the validator)
-                     state.fid_function_names[addr] = all_candidates[0]->name;
-                     matched_count++;
+                    ++matched_count;
+                } else {
+                    // Fallback to first candidate when validator cannot disambiguate
+                    state.fid_function_names[addr] = all_candidates[0]->name;
+                    ++matched_count;
                 }
             }
         }
-        
-        fission::utils::log_stream() << "[fission_decomp] Scanned " << prologue_count << " function prologues" << std::endl;
-        if (matched_count > 0) {
-            fission::utils::log_stream() << "[fission_decomp] FID matched " << matched_count 
-                     << " functions by hash" << std::endl;
-        }
-        
-        // Use centralized common symbols path configuration
+
+        fission::utils::log_stream() << "[fission_decomp] Unified scan complete: "
+                 << matched_count << " FID matches, "
+                 << internal_matches_found << " InternalMatcher matches" << std::endl;
+
+        // Load common symbol files (well-known address-to-name mappings)
         const auto symbol_files = ::fission::config::get_common_symbol_files();
-        
         for (const auto& path : symbol_files) {
             if (file_exists(path)) {
                 auto symbols = SymbolLoader::load_symbols_text(path);
-                for (const auto& [addr, name] : symbols) {
-                    state.fid_function_names[addr] = name;
+                for (const auto& [a, n] : symbols) {
+                    state.fid_function_names[a] = n;
                 }
                 fission::utils::log_stream() << "[fission_decomp] Loaded common symbols from: " << path << std::endl;
             }

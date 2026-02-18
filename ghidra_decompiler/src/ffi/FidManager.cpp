@@ -33,11 +33,8 @@ DecompError fission::ffi::load_fid_database(DecompContext* ctx, const char* db_p
         
         ctx->fid_databases.push_back(std::move(new_db));
         
-        // Update matcher with all databases (matcher will search through all of them)
-        // For now, set the first one. We'll improve lookup logic later.
-        if (!ctx->fid_databases.empty()) {
-            ctx->matcher->set_fid_database(ctx->fid_databases[0].get());
-        }
+        // Register the newly-loaded database with the matcher for multi-DB search
+        ctx->matcher->add_fid_database(ctx->fid_databases.back().get());
         
         return DECOMP_OK;
     } catch (const std::exception& e) {

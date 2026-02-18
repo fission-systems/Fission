@@ -29,7 +29,8 @@ class FunctionMatcher {
 private:
     std::vector<FunctionSignature> signatures;      ///< Loaded signatures
     std::map<uint64_t, std::string> matched_funcs;  ///< Address -> function name
-    const FidDatabase* fid_db = nullptr;            ///< FID database for hash lookups
+    const FidDatabase* fid_db = nullptr;            ///< FID database (legacy single-DB, kept for compat)
+    std::vector<const FidDatabase*> fid_dbs_;       ///< Multi-DB list for exhaustive search
 
     /// Load built-in MSVC x64 signatures
     void load_builtin_msvc_x64();
@@ -41,8 +42,22 @@ public:
     FunctionMatcher();
     ~FunctionMatcher();
 
-    /// Set FID database for hash-based matching
-    void set_fid_database(const FidDatabase* db) { fid_db = db; }
+    /// Set FID database (replaces all; clears multi-DB list and sets single DB)
+    void set_fid_database(const FidDatabase* db) {
+        fid_db = db;
+        fid_dbs_.clear();
+        if (db) fid_dbs_.push_back(db);
+    }
+
+    /// Add a FID database to the multi-DB search list
+    void add_fid_database(const FidDatabase* db) {
+        if (!db) return;
+        fid_dbs_.push_back(db);
+        fid_db = fid_dbs_.front();  // keep legacy pointer consistent
+    }
+
+    /// Clear all FID databases
+    void clear_fid_databases() { fid_db = nullptr; fid_dbs_.clear(); }
 
     /// Load signatures from JSON file
     bool load_signatures(const std::string& json_path);

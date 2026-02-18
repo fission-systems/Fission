@@ -7,6 +7,8 @@
 #include <cstdint>
 #include "fission/loader/MemoryImage.h"
 #include "fission/core/CliArchitecture.h"
+#include "fission/types/GlobalTypeRegistry.h"
+#include "fission/analysis/FidDatabase.h"
 
 namespace fission {
 namespace core {
@@ -36,6 +38,18 @@ public:
     
     // FID-resolved function names (address -> name)
     std::map<uint64_t, std::string> fid_function_names;
+
+    // VTable virtual call display names
+    // key: vtable address, value: map(slot_offset -> display_name)
+    std::map<uint64_t, std::map<int, std::string>> vtable_virtual_names;
+
+    // Slot-only fallback hints derived from scanned vtables
+    // key: slot_offset, value: display_name
+    std::map<int, std::string> vcall_slot_name_hints;
+
+    // Slot-only fallback call targets derived from scanned vtables
+    // key: slot_offset, value: function address
+    std::map<int, uint64_t> vcall_slot_target_hints;
     
     // FISSION IMPROVEMENT: Cached data section symbols (address -> (name, type_size, type_meta))
     struct DataSymbolInfo {
@@ -45,7 +59,19 @@ public:
     };
     std::map<uint64_t, DataSymbolInfo> data_section_symbols;
     bool data_symbols_scanned = false;
-    
+
+    // Data section range for GlobalDataAnalyzer (per-function analysis)
+    uint64_t data_section_start = 0;
+    uint64_t data_section_end = 0;
+
+    // Cross-function type registry for CallGraphAnalyzer
+    fission::types::GlobalTypeRegistry type_registry;
+
+    // Per-context FID databases for batch prologue scan (replaces static statics)
+    std::vector<fission::analysis::FidDatabase> batch_fid_dbs;
+    bool batch_fid_dbs_loaded = false;
+    bool batch_fid_dbs_is64bit = false;
+
     DecompilerContext();
     ~DecompilerContext();
     
