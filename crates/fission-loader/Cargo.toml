@@ -13,7 +13,7 @@ categories = ["development-tools", "parser-implementations"]
 fission-core = { path = "../fission-core" }
 fission-disasm = { path = "../fission-disasm" }
 object = "0.32"
-bytes = "1.5"
+bytes = "1.11"
 anyhow = "1.0"
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
