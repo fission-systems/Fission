@@ -4,6 +4,7 @@
 #include "architecture.hh"
 #include "database.hh"
 #include "type.hh"
+#include <cstring>
 #include <iostream>
 #include "fission/utils/logger.h"
 
@@ -96,6 +97,128 @@ int registerDataSymbolsInGlobalScope(
 
     return registered_count;
 }
+
+// ---------------------------------------------------------------------------
+// PE section parsing helper
+// ---------------------------------------------------------------------------
+
+std::vector<PeDataSection> extract_pe_data_sections(
+    const uint8_t* data,
+    size_t         size,
+    uint64_t       image_base
+) {
+    std::vector<PeDataSection> result;
+
+    // Minimum viable PE: DOS stub + PE header + at least one section entry
+    if (!data || size < 0x200) return result;
+
+    // DOS magic
+    if (data[0] != 'M' || data[1] != 'Z') return result;
+
+    uint32_t pe_offset = 0;
+    std::memcpy(&pe_offset, data + 0x3C, sizeof(uint32_t));
+
+    if (pe_offset + 0x180u > size) return result;
+
+    // PE magic
+    if (data[pe_offset] != 'P' || data[pe_offset + 1] != 'E') return result;
+
+    uint16_t num_sections      = 0;
+    uint16_t optional_hdr_size = 0;
+    std::memcpy(&num_sections,      data + pe_offset +  6, sizeof(uint16_t));
+    std::memcpy(&optional_hdr_size, data + pe_offset + 20, sizeof(uint16_t));
+
+    uint32_t section_table_off = pe_offset + 24 + optional_hdr_size;
+
+    fission::utils::log_stream() << "[DataSymbolRegistry] PE has " << num_sections
+                                 << " sections (table offset 0x" << std::hex << section_table_off
+                                 << ")" << std::dec << std::endl;
+
+    for (uint16_t i = 0; i < num_sections && i < 64; ++i) {
+        uint32_t entry_off = section_table_off + i * 40u;
+        if (entry_off + 40u > size) break;
+
+        char name_buf[9] = {};
+        std::memcpy(name_buf, data + entry_off, 8);
+        std::string sec_name(name_buf);
+
+        // Only data sections we care about
+        if (sec_name.find(".rdata") == std::string::npos &&
+            sec_name.find(".data")  == std::string::npos) {
+            continue;
+        }
+
+        uint32_t virtual_addr = 0;
+        uint32_t raw_size     = 0;
+        uint32_t raw_offset   = 0;
+        std::memcpy(&virtual_addr, data + entry_off + 12, sizeof(uint32_t));
+        std::memcpy(&raw_size,     data + entry_off + 16, sizeof(uint32_t));
+        std::memcpy(&raw_offset,   data + entry_off + 20, sizeof(uint32_t));
+
+        PeDataSection sec;
+        sec.name        = sec_name;
+        sec.va_addr     = image_base + virtual_addr;
+        sec.file_offset = raw_offset;
+        sec.file_size   = raw_size;
+        result.push_back(sec);
+
+        fission::utils::log_stream() << "[DataSymbolRegistry] Found data section: " << sec_name
+                                     << " VA=0x" << std::hex << sec.va_addr
+                                     << " file_offset=0x" << raw_offset
+                                     << " size=" << std::dec << raw_size << std::endl;
+    }
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Unified scanner: PE parsing + DataSectionScanner + symbol registration
+// ---------------------------------------------------------------------------
+
+int scanAndRegisterDataSymbols(
+    ghidra::Architecture*  arch,
+    const uint8_t*         data,
+    size_t                 size,
+    uint64_t               image_base,
+    const std::function<void(const fission::loaders::DataSymbol&)>& on_scanned_symbol
+) {
+    if (!arch || !data || size == 0) return 0;
+
+    auto sections = extract_pe_data_sections(data, size, image_base);
+    if (sections.empty()) {
+        fission::utils::log_stream() << "[DataSymbolRegistry] No .rdata/.data sections found." << std::endl;
+        return 0;
+    }
+
+    fission::loaders::DataSectionScanner scanner;
+    int total = 0;
+
+    for (const auto& sec : sections) {
+        size_t start_idx = sec.file_offset;
+        size_t end_idx   = start_idx + sec.file_size;
+
+        if (end_idx > size) {
+            fission::utils::log_stream() << "[DataSymbolRegistry] Warning: section '"
+                                         << sec.name << "' extends beyond binary data." << std::endl;
+            continue;
+        }
+
+        fission::utils::log_stream() << "[DataSymbolRegistry] Scanning section: " << sec.name
+                                     << " at 0x" << std::hex << sec.va_addr
+                                     << " size=" << std::dec << sec.file_size << std::endl;
+
+        auto symbols = scanner.scanDataSection(data + start_idx, sec.va_addr, sec.file_size);
+        total += registerDataSymbolsInGlobalScope(arch, symbols, on_scanned_symbol);
+    }
+
+    fission::utils::log_stream() << "[DataSymbolRegistry] scanAndRegisterDataSymbols: registered "
+                                 << total << " symbols." << std::endl;
+    return total;
+}
+
+// ---------------------------------------------------------------------------
+// FFI path — uses pre-parsed memory_blocks from Rust loader
+// ---------------------------------------------------------------------------
 
 void registerDataSectionSymbols(fission::ffi::DecompContext* ctx) {
     fission::utils::log_stream() << "[DataSymbolRegistry] **CALLED** registerDataSectionSymbols" << std::endl;

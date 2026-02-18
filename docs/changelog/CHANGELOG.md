@@ -2,7 +2,59 @@
 
 All notable changes to the Fission project (November 2025 - January 2026).
 
-### Ghidra Parity Expansion: Function-Level Options, Proto Models, Loader Symbols (2026-02-16)
+### Ghidra Decompiler Code-Path Unification — Analysis Pipeline & Data Section Scan (2026-02-17)
+
+**목표:** 배치(batch) 경로와 FFI 경로 사이에 중복 구현된 핵심 로직을 공통화하여 유지보수성을 향상시킨다.
+
+**🔗 Priority 4: 분석 단계 공통화 (Analysis Stage Unification)**
+
+이전까지 `DecompilationPipeline.cc` Step 4b에 StructureAnalyzer → TypePropagator → GlobalDataAnalyzer → CallGraphAnalyzer → TypeSharing → PcodeOptimizationBridge 순서의 ~300줄 코드가 FFI 경로(`AnalysisPipeline.cpp`)와 거의 동일하게 중복 존재했다.
+
+- `AnalysisPipeline.h`에 `BatchAnalysisContext` 어댑터 구조체를 추가:
+  - `arch`, `type_registry`, `symbols`, `struct_registry`, `executable_ranges`, `data_start/end` 포인터 보유
+  - `ffi::DecompContext*` 없이 배치 경로에서 공통 분석 함수를 호출할 수 있게 연결
+- `AnalysisPipeline.cpp`에 `run_analysis_passes(BatchAnalysisContext&, ...)` 오버로드 추가:
+  - FFI 경로 오버로드와 동일한 패스 순서
+  - `batch_is_addr_executable()` 정적 헬퍼로 실행 가능 여부 판단 (executable_ranges 기반)
+  - `rerun_action()` / `build_function_signature()` 정적 헬퍼는 두 오버로드가 공유
+- `DecompilationPipeline.cc` Step 4b (~300줄)를 `BatchAnalysisContext` 구성 + `run_analysis_passes()` 호출 (~20줄)로 교체
+
+**📂 Priority 5: 데이터 섹션 스캔 일원화 (Data Section Scan Unification)**
+
+이전까지 PE `.rdata`/`.data` 섹션을 찾는 코드가 두 군데에 분리 존재했다:
+- FFI 경로: `DataSymbolRegistry.cc::registerDataSectionSymbols()` — Rust 측에서 이미 파싱된 `memory_blocks` 사용
+- 배치 경로: `DecompilationPipeline.cc` Phase 9.5 — DOS/PE 매직 확인 → 섹션 테이블 순회 120줄 인라인 구현
+
+변경 사항:
+- `DataSymbolRegistry.h`에 두 가지 신규 공개 API 추가:
+  - `PeDataSection` 구조체 (name, va_addr, file_offset, file_size)
+  - `extract_pe_data_sections(data, size, image_base)` — raw 바이너리 바이트로 PE 파싱, `.rdata`/`.data` 반환
+  - `scanAndRegisterDataSymbols(arch, data, size, image_base, callback)` — PE 파싱 + DataSectionScanner + 심볼 등록 통합
+- `DataSymbolRegistry.cc`에 위 두 함수 구현 추가 (`<cstring>` 포함, `std::memcpy` 사용으로 UB-safe)
+- `DecompilationPipeline.cc` Phase 9.5 인라인 PE 파싱 블록 (~120줄)을 `scanAndRegisterDataSymbols()` 단일 호출로 교체
+- FFI 경로(`registerDataSectionSymbols`)는 Rust 로더가 이미 섹션 정보를 제공하므로 `memory_blocks` 경로 유지 (비-PE 포맷 호환성)
+
+**✅ 검증**
+
+- `fission_decomp`, `libdecomp.dylib`, `fission_context_services_test` 3개 타겟 모두 오류 없이 빌드 완료.
+
+---
+
+**진행 상황 요약 (우선순위 1–9 기준)**
+
+| # | 항목 | 상태 |
+|---|------|------|
+| 1 | FFI FID 다중 DB 조회 | ✅ 완료 (commit `75591b8`) |
+| 2 | Batch FID 정적 상태 제거 | ✅ 완료 (commit `75591b8`) |
+| 3 | 프롤로그 스캔 공통화 | ✅ 완료 (commit `75591b8`) |
+| 4 | 분석 단계 공통화 | ✅ 완료 (이번 커밋) |
+| 5 | 데이터 섹션 스캔 일원화 | ✅ 완료 (이번 커밋) |
+| 6 | 옵션 노출 확대 | ⬜ 미착수 |
+| 7 | 로더 심볼 개선 | ⬜ 미착수 |
+| 8 | 타입 전파 강화 | ⬜ 미착수 |
+| 9 | CFG/구조 분석 개선 | ⬜ 미착수 |
+
+
 
 **🔧 Function-level decompiler option controls (FFI)**
 
