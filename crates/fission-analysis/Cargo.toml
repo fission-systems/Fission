@@ -23,7 +23,7 @@ fission-signatures = { path = "../fission-signatures" }
 fission-ffi = { path = "../fission-ffi", optional = true }
 object = "0.32"
 iced-x86 = { version = "1.21", features = ["std"] }
-bytes = "1.5"
+bytes = "1.11"
 tokio = { version = "1.36", features = ["full", "rt-multi-thread"] }
 anyhow = "1.0"
 thiserror = "1.0"
