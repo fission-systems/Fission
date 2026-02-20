@@ -2,7 +2,12 @@
 #include "fission/decompiler/PcodeExtractor.h"
 #include <iostream>
 #include "fission/utils/logger.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 
 // Function pointer types for Rust FFI functions
 typedef char* (*FissionOptimizePcodeJson)(const char*, size_t);
@@ -27,6 +32,20 @@ static bool load_rust_ffi() {
     
     ffi_attempted = true;
     
+#ifdef _WIN32
+    // On Windows, use GetProcAddress to find symbols in the current process
+    HMODULE hModule = GetModuleHandleA(NULL);
+    if (hModule) {
+        rust_optimize_fn = (FissionOptimizePcodeJson)GetProcAddress(hModule, "fission_optimize_pcode_json");
+        rust_free_fn = (FissionFreeString)GetProcAddress(hModule, "fission_free_string");
+    }
+    
+    if (!rust_optimize_fn || !rust_free_fn) {
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Warning: Could not load Rust FFI functions" << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] GetLastError: " << GetLastError() << std::endl;
+        return false;
+    }
+#else
     // RTLD_DEFAULT searches in the main executable and all loaded libraries
     rust_optimize_fn = (FissionOptimizePcodeJson)dlsym(RTLD_DEFAULT, "fission_optimize_pcode_json");
     rust_free_fn = (FissionFreeString)dlsym(RTLD_DEFAULT, "fission_free_string");
@@ -36,6 +55,7 @@ static bool load_rust_ffi() {
         fission::utils::log_stream() << "[PcodeOptimizationBridge] dlsym error: " << dlerror() << std::endl;
         return false;
     }
+#endif
     
     fission::utils::log_stream() << "[PcodeOptimizationBridge] Rust FFI functions loaded successfully" << std::endl;
     return true;

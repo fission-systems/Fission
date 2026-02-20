@@ -63,6 +63,14 @@ std::string demangle_cpp_names(const std::string& code);
 // Normalize noisy C++ indirect/vtable call patterns for readability
 std::string normalize_cpp_virtual_calls(const std::string& code);
 
+// Overload with vtable context for richer naming
+std::string normalize_cpp_virtual_calls(
+    const std::string& code,
+    const std::map<uint64_t, std::map<int, std::string>>& vtable_virtual_names,
+    const std::map<int, std::string>& vcall_slot_name_hints,
+    const std::map<int, uint64_t>& vcall_slot_target_hints
+);
+
 } // namespace processing
 } // namespace fission
 

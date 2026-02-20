@@ -63,13 +63,17 @@
 
 pub mod breakpoint;
 pub mod context;
+#[cfg(feature = "unpacker_runtime")]
 pub mod dumper;
 pub mod engine;
+#[cfg(feature = "unpacker_runtime")]
 pub mod importer;
 pub mod loader;
 pub mod memory;
+#[cfg(feature = "unpacker_runtime")]
 pub mod pe;
 pub mod types;
 
 pub use engine::TitanEngine;
 pub use loader::TitanLoader;
+

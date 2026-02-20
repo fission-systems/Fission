@@ -11,7 +11,13 @@
 #include <cctype>
 #include <algorithm>
 #include <regex>
+#ifdef _MSC_VER
+#include <windows.h>
+#include <Dbghelp.h>
+#pragma comment(lib, "Dbghelp.lib")
+#else
 #include <cxxabi.h>
+#endif
 
 
 namespace fission {
@@ -1002,7 +1008,39 @@ std::string demangle_cpp_names(const std::string& code) {
     
     std::string result = code;
     
-    // 1. Demangle symbols starting with _Z
+    // 1. Demangle symbols starting with _Z (Itanium ABI) or ? (MSVC)
+#ifdef _MSC_VER
+    // MSVC: Demangle ?-prefixed symbols using UnDecorateSymbolName
+    std::regex mangled_regex(R"(\b(\?[a-zA-Z0-9_@$]+)\b)");
+    std::map<std::string, std::string> demangle_cache;
+    
+    auto words_begin = std::sregex_iterator(code.begin(), code.end(), mangled_regex);
+    auto words_end = std::sregex_iterator();
+
+    for (std::sregex_iterator i = words_begin; i != words_end; ++i) {
+        std::string mangled = i->str();
+        if (demangle_cache.count(mangled)) continue;
+
+        char demangled[1024];
+        DWORD result_len = UnDecorateSymbolName(
+            mangled.c_str(), demangled, sizeof(demangled),
+            UNDNAME_COMPLETE | UNDNAME_NO_ACCESS_SPECIFIERS
+        );
+        if (result_len > 0) {
+            std::string demangled_str(demangled);
+            
+            // Simplify: remove full signature for function name replacement
+            std::string simplified = demangled_str;
+            size_t paren = simplified.find('(');
+            if (paren != std::string::npos) {
+                simplified = simplified.substr(0, paren);
+            }
+            
+            demangle_cache[mangled] = simplified;
+        }
+    }
+#else
+    // GCC/Clang: Demangle _Z-prefixed symbols using __cxa_demangle
     std::regex mangled_regex(R"(\b(_Z[a-zA-Z0-9_]+)\b)");
     std::map<std::string, std::string> demangle_cache;
     
@@ -1030,6 +1068,7 @@ std::string demangle_cpp_names(const std::string& code) {
             free(demangled);
         }
     }
+#endif
 
     for (const auto& [mangled, demangled] : demangle_cache) {
         size_t pos = 0;
@@ -1172,6 +1211,54 @@ std::string normalize_cpp_virtual_calls(const std::string& code) {
     result.swap(rewritten);
 
     return result;
+}
+
+std::string normalize_cpp_virtual_calls(
+    const std::string& code,
+    const std::map<uint64_t, std::map<int, std::string>>& vtable_virtual_names,
+    const std::map<int, std::string>& vcall_slot_name_hints,
+    const std::map<int, uint64_t>& vcall_slot_target_hints
+) {
+    // First apply vtable-context-aware renaming using the slot hints
+    std::string result = code;
+
+    // For each known slot offset with a resolved name, annotate matching patterns
+    for (const auto& [slot_offset, name] : vcall_slot_name_hints) {
+        // Build hex representations of the slot offset
+        char hex_off[16];
+        snprintf(hex_off, sizeof(hex_off), "0x%x", slot_offset);
+
+        // Pattern: (**(code **)(*obj + OFFSET))(args);
+        // We look for the offset in the code and add the resolved name as a comment
+        std::string pattern = std::string("+ ") + hex_off + "))";
+        size_t pos = 0;
+        while ((pos = result.find(pattern, pos)) != std::string::npos) {
+            // Check if this is inside a virtual call pattern (look for "code **" before)
+            size_t check_start = (pos > 40) ? pos - 40 : 0;
+            std::string prefix = result.substr(check_start, pos - check_start);
+            if (prefix.find("code **") != std::string::npos) {
+                // Find the end of the call (the next semicolon)
+                size_t semi = result.find(';', pos);
+                if (semi != std::string::npos) {
+                    // Insert comment after the semicolon
+                    std::string comment = " /* " + name + " */";
+                    // Check if already annotated
+                    if (result.substr(semi + 1, 3) != " /*") {
+                        result.insert(semi + 1, comment);
+                        pos = semi + 1 + comment.length();
+                        continue;
+                    }
+                }
+            }
+            pos += pattern.length();
+        }
+    }
+
+    (void)vtable_virtual_names;     // Available for future use
+    (void)vcall_slot_target_hints;  // Available for future use
+
+    // Then apply the generic regex-based normalization
+    return normalize_cpp_virtual_calls(result);
 }
 
 } // namespace processing

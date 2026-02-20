@@ -3,7 +3,7 @@
 [![CI](https://github.com/sjkim1127/Fission/actions/workflows/ci.yml/badge.svg)](https://github.com/sjkim1127/Fission/actions/workflows/ci.yml)
 [![Security](https://github.com/sjkim1127/Fission/actions/workflows/security.yml/badge.svg)](https://github.com/sjkim1127/Fission/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)]()
 
 > **"Split the Binary, Fuse the Power."**
@@ -79,12 +79,12 @@ TODO: Add screenshot when available
 |---------|-------------|
 | **Ghidra-Powered Decompiler** | High-performance C code decompilation via direct FFI integration with optimized Pcode IR |
 | **iced-x86 Disassembler** | Pure Rust x86/x64 disassembly with syntax highlighting |
-| **.NET Binary Support** | CLR metadata parsing, IL disassembly, native stub analysis |
 | **Cross-Platform Binaries** | Windows (PE), Linux (ELF), and macOS (Mach-O) support |
 | **Cross-Reference Analysis** | Automatic code and data cross-reference detection |
 | **String Extraction** | ASCII and Unicode string detection with context |
 | **CFG Analysis** | Control flow graph generation with dominator tree, loop detection, and cyclomatic complexity |
 | **Graph Visualization** | Export CFG to Graphviz DOT format with loop highlighting and metrics |
+| **Listing View** | Full binary disassembly with virtual scrolling and on-demand disassembly |
 
 ### Dynamic Analysis
 
@@ -132,10 +132,10 @@ TODO: Add screenshot when available
 
 | Feature | Description |
 |---------|-------------|
-| **Plugin System** | Native Rust and Python plugin support |
+| **Native Rust Plugins** | High-performance compiled plugins with dynamic library loading |
 | **Event Bus** | Subscribe to binary load, decompile, and debug events |
 | **Hook Priority** | Control plugin execution order |
-| **Python Scripting API** | Full access to binary info, functions, sections via PyO3 |
+| **Plugin API** | Full access to binary info, functions, sections, and decompiler |
 
 ---
 
@@ -291,14 +291,11 @@ cargo build --release --no-default-features --features cli
 # GUI only
 cargo build --release --no-default-features --features gui
 
-# With Python scripting support
-cargo build --release --features python
-
 # With terminal UI
 cargo build --release --features "tui,native_decomp"
 
 # All features
-cargo build --release --features "gui cli python tui native_decomp"
+cargo build --release --features "gui cli tui native_decomp"
 ```
 
 ---
@@ -631,7 +628,7 @@ UiConfig {
 |-----------|-------------|
 | **GUI (egui)** | Immediate-mode GUI with VS Code-inspired layout |
 | **CLI (reedline)** | Interactive REPL with command history and completion |
-| **Plugin Manager** | Loads and manages Rust/Python plugins |
+| **Plugin Manager** | Loads and manages native Rust plugins |
 | **Loader** | Parses PE, ELF, and Mach-O binary formats |
 | **Disasm** | x86/x64 disassembly using iced-x86 |
 | **Decomp FFI** | Direct C++ integration via CXX bridge (zero IPC overhead) |
@@ -656,89 +653,98 @@ PrintC → C Code (optimized, with type info)
 
 ## Plugin Development
 
-### Rust Plugins
+Fission supports native Rust plugins compiled as dynamic libraries. Plugins can hook into the event system and access the full Fission API.
+
+### Creating a Rust Plugin
 
 Create a new Rust plugin by implementing the `FissionPlugin` trait:
 
 ```rust
-use fission::plugin::{FissionPlugin, PluginInfo, HookPriority};
-use fission::core::events::{Event, EventResult};
+use fission::plugin::{FissionPlugin, PluginContext};
+use fission::plugin::api::BinaryInfo;
+use fission::core::prelude::*;
 
 pub struct MyPlugin {
-    name: String,
+    id: String,
+}
+
+impl MyPlugin {
+    pub fn new() -> Self {
+        Self {
+            id: "my_plugin".to_string(),
+        }
+    }
 }
 
 impl FissionPlugin for MyPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo {
-            name: "My Plugin".to_string(),
-            version: "1.0.0".to_string(),
-            author: "Your Name".to_string(),
-            description: "A custom analysis plugin".to_string(),
-        }
+    fn id(&self) -> &str {
+        &self.id
     }
 
-    fn on_load(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn name(&self) -> &str {
+        "My Custom Plugin"
+    }
+
+    fn version(&self) -> &str {
+        "0.1.0"
+    }
+
+    fn description(&self) -> &str {
+        "A simple example plugin"
+    }
+
+    fn on_load(&mut self, ctx: &PluginContext) -> Result<()> {
         println!("Plugin loaded!");
         Ok(())
     }
 
-    fn on_event(&mut self, event: &Event) -> EventResult {
-        match event {
-            Event::BinaryLoaded { path, .. } => {
-                println!("Binary loaded: {}", path);
-                EventResult::Continue
-            }
-            Event::FunctionDecompiled { address, code, .. } => {
-                println!("Decompiled 0x{:x}", address);
-                // Analyze the decompiled code
-                EventResult::Continue
-            }
-            _ => EventResult::Continue,
-        }
+    fn on_binary_loaded(&self, ctx: &PluginContext, info: &BinaryInfo) {
+        println!("Binary loaded: {}", info.path);
     }
 
-    fn priority(&self) -> HookPriority {
-        HookPriority::Normal
+    fn on_function_decompiled(&self, ctx: &PluginContext, addr: u64, code: &str) {
+        println!("Decompiled function at 0x{:x}", addr);
+        // Analyze the decompiled code
+    }
+}
+
+// Required: Export plugin constructor
+#[no_mangle]
+pub extern "C" fn create_plugin() -> *mut dyn FissionPlugin {
+    Box::into_raw(Box::new(MyPlugin::new()))
+}
+
+#[no_mangle]
+pub extern "C" fn destroy_plugin(plugin: *mut dyn FissionPlugin) {
+    unsafe {
+        drop(Box::from_raw(plugin));
     }
 }
 ```
 
-### Python Scripting
+**Cargo.toml**:
+```toml
+[package]
+name = "my_fission_plugin"
+version = "0.1.0"
+edition = "2024"
 
-Fission exposes a Python API via PyO3 when compiled with the `python` feature:
+[lib]
+crate-type = ["cdylib"]  # Important: Create dynamic library
 
-```python
-import fission
-
-# Load a binary
-binary = fission.load("/path/to/binary.exe")
-
-# Get binary information
-print(f"Format: {binary.format}")
-print(f"Architecture: {binary.arch}")
-print(f"Entry Point: 0x{binary.entry_point:x}")
-
-# List functions
-for func in binary.functions():
-    print(f"[0x{func.address:x}] {func.name}")
-
-# Get sections
-for section in binary.sections():
-    print(f"{section.name}: 0x{section.address:x} ({section.size} bytes)")
-
-# Disassemble at address
-for insn in binary.disassemble(0x140001000, count=10):
-    print(f"0x{insn.address:x}: {insn.mnemonic} {insn.operands}")
-
-# Decompile a function
-code = binary.decompile(0x140001000)
-print(code)
-
-# Access strings
-for s in binary.strings():
-    print(f"0x{s.address:x}: {s.value}")
+[dependencies]
+fission = { path = "../fission" }
 ```
+
+Build and load:
+```bash
+cargo build --release
+# Output: target/release/libmy_fission_plugin.so (Linux)
+#         target/release/libmy_fission_plugin.dylib (macOS)
+#         target/release/my_fission_plugin.dll (Windows)
+```
+
+For detailed plugin development guide, see [Plugin Development](docs/plugins/PLUGIN_DEVELOPMENT.md).
 
 ### Event Types
 
@@ -831,7 +837,7 @@ for s in binary.strings():
 | **Debugger** | Yes | Yes | Yes | Yes | Yes |
 | **Time-Travel Debug** | Yes | No | Yes (paid) | No | No |
 | **GUI** | Modern | Java | Native | Native | Web/TUI |
-| **Scripting** | Python/Rust | Java/Python | Python/IDC | Plugin | r2pipe |
+| **Scripting** | Rust Plugins | Java/Python | Python/IDC | Plugin | r2pipe |
 | **Cross-Platform** | Yes | Yes | Yes | Windows | Yes |
 | **Performance** | Fast (Rust) | Moderate | Fast | Fast | Fast |
 | **.NET Support** | Yes | Plugin | Yes | No | Limited |
@@ -858,69 +864,27 @@ for s in binary.strings():
 
 ```
 Fission/
-├── Cargo.toml                 # Rust package manifest
+├── Cargo.toml                 # Workspace manifest
 ├── Cargo.lock                 # Dependency lock file
-├── build.rs                   # Build script for native library linking
 ├── README.md                  # This file
 ├── LICENSE                    # MIT License
 │
 ├── ghidra_decompiler/         # Native C++ decompiler
 │   ├── CMakeLists.txt         # CMake build configuration
-│   ├── fission_decomp.cpp     # Main decompiler subprocess
 │   ├── src/                   # C++ source files
 │   └── languages/             # Sleigh (.sla/.sinc) instruction definitions
 │
-├── src/
-│   ├── main.rs                # CLI entry point with mode switching
-│   ├── lib.rs                 # Library root exports
-│   │
-│   ├── core/                  # Fundamental utilities
-│   │   ├── config.rs          # All configuration options
-│   │   ├── context.rs         # FissionContext (app-wide state)
-│   │   ├── events.rs          # Event bus system
-│   │   ├── errors.rs          # Unified error types
-│   │   ├── logging.rs         # Log levels and file output
-│   │   ├── constants.rs       # Magic bytes and offsets
-│   │   └── modules.rs         # Module lifecycle
-│   │
-│   ├── analysis/              # Static analysis
-│   │   ├── loader/            # PE/ELF/Mach-O parsing
-│   │   ├── disasm/            # iced-x86 wrapper
-│   │   ├── decomp/            # Decompiler pool management
-│   │   ├── dotnet/            # .NET/CLR analysis
-│   │   ├── signatures/        # Windows API mappings
-│   │   ├── xrefs/             # Cross-reference database
-│   │   ├── detector/          # Binary signature detection
-│   │   ├── patch/             # Memory patching
-│   │   └── gdt_parser.rs      # GDT type extraction
-│   │
-│   ├── debug/                 # Dynamic analysis
-│   │   ├── windows/           # Win32 debugger
-│   │   ├── linux.rs           # ptrace debugger
-│   │   ├── ttd/               # Time travel debugging
-│   │   ├── traits.rs          # Platform-agnostic trait
-│   │   └── memory.rs          # Cross-platform memory ops
-│   │
-│   ├── plugin/                # Extension system
-│   │   ├── traits.rs          # FissionPlugin trait
-│   │   ├── manager.rs         # Plugin registry
-│   │   ├── python.rs          # PyO3 integration
-│   │   ├── hooks.rs           # Event hooks
-│   │   └── api.rs             # Exported plugin API
-│   │
-│   ├── script/                # Scripting support
-│   │   ├── bridge.rs          # Python interoperability
-│   │   └── types.rs           # Exported Python types
-│   │
-│   └── ui/                    # User interface
-│       ├── gui/               # egui-based GUI
-│       │   ├── app/           # FissionApp orchestrator
-│       │   ├── panels/        # UI components
-│       │   ├── theme.rs       # Catppuccin styling
-│       │   └── state.rs       # AppState management
-│       └── cli/               # Command-line interface
-│           ├── mod.rs         # REPL loop
-│           └── commands.rs    # Command parsing
+├── crates/                    # Rust workspace crates
+│   ├── fission-core/          # Shared configuration, errors, utilities
+│   ├── fission-loader/         # Binary parsing (PE/ELF/Mach-O)
+│   ├── fission-disasm/        # Disassembly abstraction (iced-x86)
+│   ├── fission-pcode/         # P-code IR and optimizer
+│   ├── fission-signatures/    # API/signature databases
+│   ├── fission-ffi/           # Native decompiler FFI boundary
+│   ├── fission-analysis/      # Analysis logic (CFG/xref/debug/plugin)
+│   ├── fission-ui/            # egui-based GUI
+│   ├── fission-cli/           # CLI entrypoints and REPL
+│   └── fission-tauri/         # Tauri desktop app (optional)
 │
 ├── tests/                     # Integration tests
 │   ├── cli_tests.rs
@@ -931,13 +895,18 @@ Fission/
 ├── benches/                   # Performance benchmarks
 │   └── benchmark.rs
 │
-├── scripts/                   # Build utilities
+├── scripts/                   # Build utilities and scripts
 │   └── build_decompiler.sh
+│
+├── docs/                      # Documentation
+│   ├── architecture/          # Architecture documentation
+│   ├── analysis/             # Analysis feature docs
+│   ├── plugins/              # Plugin development guide
+│   └── ...
 │
 └── .github/workflows/         # CI/CD pipelines
     ├── ci.yml
     ├── security.yml
-    ├── cd.yml
     └── ...
 ```
 
@@ -950,21 +919,25 @@ Fission/
 - [x] **CLI Base** - Binary loader, disassembler, REPL interface
 - [x] **Ghidra Integration** - Direct FFI integration via CXX bridge (zero-copy)
 - [x] **Pcode IR Optimizer** - Phase 1 (30+ rules) + Phase 2 (def-use tracking, NZMask analysis)
-- [x] **VS Code Style GUI** - Tabs, Activity Bar, Catppuccin theme
-- [x] **.NET Support** - CLR detection, metadata parsing, IL disassembly
+- [x] **VS Code Style GUI** - Tabs, Activity Bar, Catppuccin theme, Listing View
 - [x] **Debugging** - Attach, breakpoints, registers, memory access
-- [x] **Plugin System** - Native Rust and Python plugin support
+- [x] **Plugin System** - Native Rust plugin support with dynamic library loading
 - [x] **Performance Optimization** - Direct FFI, LRU caching, prefetch, optimizer
 - [x] **Advanced Type Analysis** - Struct inference, VTable, type propagation
 - [x] **Cross-Reference Analysis** - Code and data xref detection
 - [x] **Smart Constant Substitution** - Windows API parameter mapping
+- [x] **CFG Analysis** - Control flow graph with dominator tree and loop detection
+- [x] **Listing View** - Full binary disassembly with virtual scrolling
 
-### Recent Updates (January 2026)
+### Recent Updates (January-February 2026)
 
 - ✅ **Decompiler Architecture** - Migrated from subprocess pool to direct FFI integration
 - ✅ **Pcode Optimizer Phase 1** - 30+ optimization rules (constant folding, algebraic simplification, dead code elimination)
 - ✅ **Pcode Optimizer Phase 2** - Def-use tracking, NZMask analysis, RuleShiftBitops, RuleAndMask
 - ✅ **Zero-Copy Integration** - Eliminated IPC overhead with native C++ bindings
+- ✅ **Code-Path Unification** - Unified batch and FFI analysis pipelines
+- ✅ **Listing View** - Full binary disassembly with virtual scrolling and on-demand disassembly
+- ✅ **Ghidra Parity** - Achieved 97.86% similarity with Ghidra decompiler output
 
 ### In Progress
 
@@ -1076,19 +1049,6 @@ sudo apt install libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
     libxcb-xfixes0-dev libxkbcommon-dev
 ```
 
-#### Python feature build fails
-
-```bash
-# Ensure Python development headers are installed
-# Ubuntu/Debian
-sudo apt install python3-dev
-
-# macOS
-brew install python
-
-# Check PyO3 requirements
-pip install maturin
-```
 
 ### Runtime Issues
 
@@ -1304,7 +1264,6 @@ Fission would not be possible without these amazing open source projects:
 - [**Catppuccin**](https://github.com/catppuccin/catppuccin) - Soothing pastel theme for the UI
 - [**goblin**](https://github.com/m4b/goblin) - Cross-platform binary parsing library
 - [**tokio**](https://tokio.rs/) - Asynchronous runtime for Rust
-- [**PyO3**](https://pyo3.rs/) - Rust bindings for Python
 
 Special thanks to all contributors and the reverse engineering community for their feedback and support.
 

@@ -28,9 +28,43 @@ fn build_libdecomp() {
     // Ensure build directory exists
     std::fs::create_dir_all(&build_dir).expect("Failed to create build directory");
 
+    // Build CMake configure arguments
+    let mut cmake_args: Vec<String> = vec!["..".to_string()];
+
+    // If VCPKG_ROOT is set, pass the toolchain file to CMake
+    if let Ok(vcpkg_root) = std::env::var("VCPKG_ROOT") {
+        let toolchain = PathBuf::from(&vcpkg_root)
+            .join("scripts")
+            .join("buildsystems")
+            .join("vcpkg.cmake");
+        if toolchain.exists() {
+            cmake_args.push(format!(
+                "-DCMAKE_TOOLCHAIN_FILE={}",
+                toolchain.display()
+            ));
+            println!("cargo:warning=Using vcpkg toolchain: {}", toolchain.display());
+        }
+    } else {
+        // Try well-known vcpkg locations on Windows
+        #[cfg(target_os = "windows")]
+        {
+            let candidates = [
+                "C:\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
+                "C:\\tools\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
+            ];
+            for candidate in &candidates {
+                if std::path::Path::new(candidate).exists() {
+                    cmake_args.push(format!("-DCMAKE_TOOLCHAIN_FILE={}", candidate));
+                    println!("cargo:warning=Using vcpkg toolchain: {}", candidate);
+                    break;
+                }
+            }
+        }
+    }
+
     // Run cmake configure
     let cmake_status = Command::new("cmake")
-        .arg("..")
+        .args(&cmake_args)
         .current_dir(&build_dir)
         .status()
         .expect("Failed to run cmake configure");
@@ -39,25 +73,55 @@ fn build_libdecomp() {
         panic!("CMake configure failed");
     }
 
-    // Build the decomp target
-    let make_status = Command::new("make")
-        .args(["-j4", "decomp"])
+    // Build the decomp target (cross-platform: cmake --build instead of make)
+    let build_status = Command::new("cmake")
+        .args(["--build", ".", "--target", "decomp", "--parallel", "4"])
         .current_dir(&build_dir)
         .status()
-        .expect("Failed to run make");
+        .expect("Failed to build decomp target");
 
-    if !make_status.success() {
-        panic!("Make failed to build libdecomp");
+    if !build_status.success() {
+        panic!("Failed to build libdecomp");
     }
 
     // Tell cargo where to find the library
     println!("cargo:rustc-link-search=native={}", build_dir.display());
 
-    // Link against libdecomp
-    println!("cargo:rustc-link-lib=dylib=decomp");
+    // Platform-specific library linking
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, MSVC builds produce decomp.lib / decomp.dll
+        println!("cargo:rustc-link-search=native={}\\Debug", build_dir.display());
+        println!("cargo:rustc-link-search=native={}\\Release", build_dir.display());
+        println!("cargo:rustc-link-lib=dylib=decomp");
 
-    // Also need to link against zlib (dependency of libdecomp)
-    println!("cargo:rustc-link-lib=z");
+        // Link against zlib from vcpkg
+        if let Ok(vcpkg_root) = std::env::var("VCPKG_ROOT") {
+            let zlib_lib = PathBuf::from(&vcpkg_root)
+                .join("installed")
+                .join("x64-windows")
+                .join("lib");
+            if zlib_lib.exists() {
+                println!("cargo:rustc-link-search=native={}", zlib_lib.display());
+            }
+        } else {
+            // Try well-known vcpkg path
+            let zlib_lib = "C:\\vcpkg\\installed\\x64-windows\\lib";
+            if std::path::Path::new(zlib_lib).exists() {
+                println!("cargo:rustc-link-search=native={}", zlib_lib);
+            }
+        }
+        println!("cargo:rustc-link-lib=zlib");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Link against libdecomp
+        println!("cargo:rustc-link-lib=dylib=decomp");
+
+        // Also need to link against zlib (dependency of libdecomp)
+        println!("cargo:rustc-link-lib=z");
+    }
 
     // Set rpath for runtime library discovery
     #[cfg(target_os = "macos")]

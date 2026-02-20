@@ -1,0 +1,32 @@
+[package]
+name = "fission-tauri"
+version = "0.1.0"
+description = "Fission - Tauri GUI"
+authors = ["Fission Dev Team"]
+edition = "2021"
+
+[lib]
+name = "fission_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+iced-x86 = { version = "1.21", features = ["std"] }
+
+# Fission crates
+fission-core = { path = "../../fission-core" }
+fission-loader = { path = "../../fission-loader" }
+fission-analysis = { path = "../../fission-analysis", optional = true }
+fission-ffi = { path = "../../fission-ffi", optional = true }
+
+[features]
+default = ["native_decomp"]
+native_decomp = ["dep:fission-analysis", "fission-analysis/native_decomp", "dep:fission-ffi"]

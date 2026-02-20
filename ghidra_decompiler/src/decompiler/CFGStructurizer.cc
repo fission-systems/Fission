@@ -78,7 +78,7 @@ std::vector<CFGStructurizer::Label> CFGStructurizer::find_labels(const std::stri
     std::vector<Label> labels;
     // Match labels that appear at start of line or after whitespace
     // But exclude "case" and "default" labels
-    std::regex label_pattern(R"((?:^|\n)\s*((?!case\b|default\b)[A-Za-z_]\w*)\s*:(?!\s*:))", std::regex::multiline);
+    std::regex label_pattern(R"((?:^|\n)\s*((?!case\b|default\b)[A-Za-z_]\w*)\s*:(?!\s*:))");
     
     std::string::const_iterator search_start = c_code.cbegin();
     std::smatch match;

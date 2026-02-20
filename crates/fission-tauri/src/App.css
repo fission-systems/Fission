@@ -1,0 +1,553 @@
+/* =====================================================================
+   Fission — VSCode-style Layout
+   ===================================================================== */
+
+/* Reset */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: var(--font-size-base);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+}
+
+/* =====================================================================
+   Main Grid Layout
+   ===================================================================== */
+.app-layout {
+    display: grid;
+    grid-template-columns: var(--activity-bar-width) var(--sidebar-width) 1fr;
+    grid-template-rows: 1fr var(--status-bar-height);
+    grid-template-areas:
+        "activity sidebar main"
+        "status   status  status";
+    height: 100vh;
+    width: 100vw;
+}
+
+/* =====================================================================
+   Activity Bar (leftmost icon column)
+   ===================================================================== */
+.activity-bar {
+    grid-area: activity;
+    background: var(--bg-tertiary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 4px;
+    border-right: 1px solid var(--border-color);
+    z-index: 10;
+}
+
+.activity-bar__item {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-left: 2px solid transparent;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
+    position: relative;
+}
+
+.activity-bar__item:hover {
+    color: var(--text-primary);
+}
+
+.activity-bar__item--active {
+    color: var(--text-primary);
+    border-left-color: var(--accent-primary);
+}
+
+.activity-bar__item svg {
+    width: 24px;
+    height: 24px;
+}
+
+.activity-bar__spacer {
+    flex: 1;
+}
+
+/* =====================================================================
+   Sidebar
+   ===================================================================== */
+.sidebar {
+    grid-area: sidebar;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sidebar__header {
+    height: var(--tab-height);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar__content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Scrollbar styling */
+.sidebar__content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar__content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar__content::-webkit-scrollbar-thumb {
+    background: var(--ctp-surface2);
+    border-radius: 3px;
+}
+
+.sidebar__content::-webkit-scrollbar-thumb:hover {
+    background: var(--ctp-overlay0);
+}
+
+/* =====================================================================
+   Main Area (Editor + Bottom Panel)
+   ===================================================================== */
+.main-area {
+    grid-area: main;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-primary);
+}
+
+/* Editor tabs bar */
+.editor-tabs {
+    height: var(--tab-height);
+    display: flex;
+    align-items: stretch;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.editor-tabs::-webkit-scrollbar {
+    height: 3px;
+}
+
+.editor-tabs::-webkit-scrollbar-thumb {
+    background: var(--ctp-surface2);
+}
+
+.editor-tab {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 8px;
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    border-right: 1px solid var(--border-color);
+    white-space: nowrap;
+    min-width: 0;
+    transition: color var(--transition-fast), background var(--transition-fast);
+    position: relative;
+}
+
+.editor-tab:hover {
+    color: var(--text-primary);
+}
+
+.editor-tab--active {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.editor-tab--active::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--accent-primary);
+}
+
+.editor-tab__close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity var(--transition-fast), background var(--transition-fast);
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1;
+}
+
+.editor-tab:hover .editor-tab__close,
+.editor-tab--active .editor-tab__close {
+    opacity: 1;
+}
+
+.editor-tab__close:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+}
+
+.editor-tab__icon {
+    font-size: 14px;
+}
+
+/* Editor content area */
+.editor-content {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+/* =====================================================================
+   Resize handle (between editor and bottom panel)
+   ===================================================================== */
+.resize-handle {
+    height: var(--resize-handle);
+    cursor: ns-resize;
+    background: transparent;
+    transition: background var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.resize-handle:hover,
+.resize-handle--dragging {
+    background: var(--accent-primary);
+}
+
+/* =====================================================================
+   Bottom Panel
+   ===================================================================== */
+.bottom-panel {
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.bottom-panel__tabs {
+    height: var(--tab-height);
+    display: flex;
+    align-items: stretch;
+    padding: 0 8px;
+    gap: 2px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.bottom-panel__tab {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+    transition: color var(--transition-fast);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 500;
+}
+
+.bottom-panel__tab:hover {
+    color: var(--text-primary);
+}
+
+.bottom-panel__tab--active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent-primary);
+}
+
+.bottom-panel__content {
+    flex: 1;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    padding: 8px 12px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.bottom-panel__content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.bottom-panel__content::-webkit-scrollbar-thumb {
+    background: var(--ctp-surface2);
+    border-radius: 3px;
+}
+
+/* =====================================================================
+   Status Bar
+   ===================================================================== */
+.status-bar {
+    grid-area: status;
+    height: var(--status-bar-height);
+    background: var(--accent-primary);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 12px;
+    color: var(--bg-primary);
+    font-weight: 500;
+    gap: 16px;
+    z-index: 10;
+}
+
+.status-bar__section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-bar__spacer {
+    flex: 1;
+}
+
+/* =====================================================================
+   Welcome Screen
+   ===================================================================== */
+.welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 24px;
+    color: var(--text-muted);
+}
+
+.welcome__title {
+    font-size: 28px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    letter-spacing: -0.5px;
+}
+
+.welcome__subtitle {
+    font-size: var(--font-size-base);
+    color: var(--text-muted);
+}
+
+.welcome__action {
+    margin-top: 16px;
+    padding: 8px 24px;
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    transition: opacity var(--transition-fast);
+}
+
+.welcome__action:hover {
+    opacity: 0.9;
+}
+
+/* =====================================================================
+   Function List
+   ===================================================================== */
+.function-list__search {
+    padding: 8px 12px;
+    flex-shrink: 0;
+}
+
+.function-list__search input {
+    width: 100%;
+    padding: 4px 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-ui);
+    outline: none;
+    transition: border-color var(--transition-fast);
+}
+
+.function-list__search input:focus {
+    border-color: var(--accent-primary);
+}
+
+.function-list__search input::placeholder {
+    color: var(--text-disabled);
+}
+
+.function-list__items {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.function-list__items::-webkit-scrollbar {
+    width: 6px;
+}
+
+.function-list__items::-webkit-scrollbar-thumb {
+    background: var(--ctp-surface2);
+    border-radius: 3px;
+}
+
+.function-list__item {
+    display: flex;
+    align-items: center;
+    padding: 3px 12px 3px 20px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
+    color: var(--text-secondary);
+    transition: background var(--transition-fast);
+    gap: 8px;
+}
+
+.function-list__item:hover {
+    background: var(--bg-surface);
+}
+
+.function-list__item--selected {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.function-list__addr {
+    color: var(--ctp-overlay1);
+    font-size: 11px;
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.function-list__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ctp-blue);
+}
+
+.function-list__size {
+    color: var(--ctp-overlay0);
+    font-size: 11px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.function-list__count {
+    padding: 4px 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+/* =====================================================================
+   String table
+   ===================================================================== */
+.string-table {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+}
+
+.string-table__row {
+    display: flex;
+    padding: 2px 0;
+    gap: 16px;
+}
+
+.string-table__row:hover {
+    background: var(--bg-surface);
+}
+
+.string-table__offset {
+    color: var(--ctp-overlay1);
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.string-table__value {
+    color: var(--ctp-green);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.string-table__encoding {
+    color: var(--ctp-overlay0);
+    min-width: 50px;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+/* =====================================================================
+   Loading / Empty states
+   ===================================================================== */
+.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    gap: 8px;
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+    gap: 8px;
+}

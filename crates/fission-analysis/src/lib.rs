@@ -41,6 +41,7 @@ pub mod script;
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
+#[cfg(feature = "unpacker_runtime")]
 pub mod unpacker;
 
 pub use fission_core as core;

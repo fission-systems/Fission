@@ -1,6 +1,50 @@
 # Changelog
 
-All notable changes to the Fission project (November 2025 - January 2026).
+All notable changes to the Fission project (November 2025 - February 2026).
+
+### Windows/MSVC Build Compatibility & Tauri Integration (2026-02-20)
+
+**🔧 Windows (MSVC) 빌드 호환성 확보**
+
+네이티브 디컴파일러(`native_decomp`)가 Windows/MSVC 환경에서 정상 빌드 및 실행되도록 전체 빌드 체인을 수정했다.
+
+**C++ MSVC 호환성 (5건)**
+
+- `PcodeOptimizationBridge.cc`: POSIX `dlfcn.h` (`dlsym`/`dlerror`) → Windows `GetModuleHandleA` + `GetProcAddress`로 교체
+- `PostProcessors.cc`: GCC 전용 `cxxabi.h`/`__cxa_demangle` → MSVC `Dbghelp.h`/`UnDecorateSymbolName`로 교체
+- `PostProcessors.h/.cc`: `normalize_cpp_virtual_calls` 4인자 오버로드 추가 (vtable context map 지원)
+- `BinaryDetector.cc`: GCC 내장함수 `__builtin_bswap32` → MSVC `_byteswap_ulong`로 교체
+- `CFGStructurizer.cc`: MSVC에서 미지원하는 `std::regex::multiline` 플래그 제거
+
+**Rust 빌드 시스템 개선**
+
+- `fission-analysis/build.rs`: Unix `make` → `cmake --build` 크로스플랫폼 빌드, vcpkg 툴체인 자동 탐색 (`VCPKG_ROOT` 및 기본 경로), MSVC 링크 경로 (Debug/Release) 및 zlib 라이브러리 네이밍 처리
+- `fission-ffi/build.rs`: MSVC `Debug/`/`Release/` 하위 디렉토리 링크 검색 경로 추가, 빌드 시 DLL 자동 복사 (`decomp.dll`, `zlibd1.dll` → `target/debug/`)
+- `fission-analysis/src/lib.rs`: `unpacker` 모듈을 `unpacker_runtime` feature flag로 격리 (`windows` crate v0.54 API 비호환 대응)
+- `fission-analysis/src/debug/platform/mod.rs`: `MemoryProtection` re-export 누락 수정
+
+**Tauri 통합**
+
+- `fission-tauri/src-tauri/Cargo.toml`: `native_decomp` 기본 feature로 재활성화
+- `fission-tauri/src-tauri/src/commands.rs`: `load_binary` API 호출 인자 수정 (`data`, `base_addr`, `is_64bit`, `sleigh_id`, `compiler_id`)
+
+**파일 목록:**
+
+| 파일 | 변경 |
+|------|------|
+| `ghidra_decompiler/src/decompiler/PcodeOptimizationBridge.cc` | `dlfcn.h` → `GetProcAddress` |
+| `ghidra_decompiler/src/processing/PostProcessors.cc` | `cxxabi.h` → `Dbghelp.h`, 디맹글링 분기 |
+| `ghidra_decompiler/include/fission/processing/PostProcessors.h` | 4인자 오버로드 선언 추가 |
+| `ghidra_decompiler/src/loader/BinaryDetector.cc` | `__builtin_bswap32` → `_byteswap_ulong` |
+| `ghidra_decompiler/src/decompiler/CFGStructurizer.cc` | `std::regex::multiline` 제거 |
+| `crates/fission-analysis/build.rs` | Windows cmake + vcpkg 빌드 |
+| `crates/fission-ffi/build.rs` | MSVC 링크 경로 + DLL 자동 복사 |
+| `crates/fission-analysis/src/lib.rs` | `unpacker` feature gate |
+| `crates/fission-analysis/src/debug/platform/mod.rs` | `MemoryProtection` re-export |
+| `crates/fission-tauri/src-tauri/Cargo.toml` | `native_decomp` 기본 활성화 |
+| `crates/fission-tauri/src-tauri/src/commands.rs` | `load_binary` 인자 수정 |
+
+---
 
 ### Ghidra Decompiler Code-Path Unification — Analysis Pipeline & Data Section Scan (2026-02-17)
 
@@ -22,10 +66,12 @@ All notable changes to the Fission project (November 2025 - January 2026).
 **📂 Priority 5: 데이터 섹션 스캔 일원화 (Data Section Scan Unification)**
 
 이전까지 PE `.rdata`/`.data` 섹션을 찾는 코드가 두 군데에 분리 존재했다:
+
 - FFI 경로: `DataSymbolRegistry.cc::registerDataSectionSymbols()` — Rust 측에서 이미 파싱된 `memory_blocks` 사용
 - 배치 경로: `DecompilationPipeline.cc` Phase 9.5 — DOS/PE 매직 확인 → 섹션 테이블 순회 120줄 인라인 구현
 
 변경 사항:
+
 - `DataSymbolRegistry.h`에 두 가지 신규 공개 API 추가:
   - `PeDataSection` 구조체 (name, va_addr, file_offset, file_size)
   - `extract_pe_data_sections(data, size, image_base)` — raw 바이너리 바이트로 PE 파싱, `.rdata`/`.data` 반환
@@ -53,8 +99,6 @@ All notable changes to the Fission project (November 2025 - January 2026).
 | 7 | 로더 심볼 개선 | ⬜ 미착수 |
 | 8 | 타입 전파 강화 | ⬜ 미착수 |
 | 9 | CFG/구조 분석 개선 | ⬜ 미착수 |
-
-
 
 **🔧 Function-level decompiler option controls (FFI)**
 

@@ -9,6 +9,7 @@ members = [
     "crates/fission-ui",
     "crates/fission-cli",
     "crates/fission-ffi",
+    "crates/fission-tauri/src-tauri",
 ]
 
 [profile.release]

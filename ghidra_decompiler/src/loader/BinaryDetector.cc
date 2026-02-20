@@ -185,7 +185,11 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
     // CPU type at offset 4
     uint32_t cputype = *(const uint32_t*)(data + 4);
     if (is_big_endian) {
+#ifdef _MSC_VER
+        cputype = _byteswap_ulong(cputype);
+#else
         cputype = __builtin_bswap32(cputype);
+#endif
     }
     
     // CPU_TYPE constants
