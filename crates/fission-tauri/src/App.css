@@ -856,42 +856,7 @@ body,
     color: var(--accent);
 }
 
-/* --- Phase 6: Analysis toolbar + category filter --- */
-.functions-list__toolbar {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 6px;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-}
-
-.functions-list__tool-btn {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    background: none;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    padding: 2px 8px;
-    cursor: pointer;
-    font-size: 11px;
-    color: var(--text-muted);
-    transition: all var(--transition);
-    white-space: nowrap;
-}
-
-.functions-list__tool-btn:hover:not(:disabled) {
-    background: var(--hover-bg);
-    color: var(--text-primary);
-    border-color: var(--accent);
-}
-
-.functions-list__tool-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-}
-
+/* --- Category filter --- */
 .functions-list__cats {
     display: flex;
     border-bottom: 1px solid var(--border-color);
@@ -996,15 +961,56 @@ body,
 }
 
 .console-output {
+    flex: 1;
+    overflow: auto;
     padding: 4px 0;
     font-family: var(--font-mono);
     font-size: var(--font-size-sm);
+}
+
+.console-output-wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
 }
 
 .console-line {
     padding: 1px 12px;
     line-height: 1.6;
     color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* Console CLI input */
+.console-cli {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-surface);
+    flex-shrink: 0;
+}
+
+.console-cli__prompt {
+    color: var(--ctp-green);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    user-select: none;
+}
+
+.console-cli__input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    outline: none;
+    padding: 2px 0;
 }
 
 /* Data tables (strings, imports, bookmarks) */
@@ -1261,6 +1267,12 @@ body,
     color: var(--ctp-crust);
 }
 
+.context-menu__separator {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}
+
 /* ============================================================================
    Hex View (Phase 2)
    ============================================================================ */
@@ -1270,7 +1282,162 @@ body,
     font-size: var(--font-size-sm);
     overflow: auto;
     height: 100%;
+    display: flex;
+    flex-direction: column;
 }
+
+/* Hex navbar (standalone/editor mode) */
+.hex-view__navbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.hex-view__goto-input {
+    padding: 3px 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    outline: none;
+    width: 160px;
+    transition: border-color var(--transition);
+}
+
+.hex-view__goto-input:focus {
+    border-color: var(--accent);
+}
+
+.hex-view__btn {
+    padding: 3px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.hex-view__btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+}
+
+.hex-view__btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.hex-view__offset-label {
+    color: var(--ctp-overlay2);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-mono);
+}
+
+.hex-view__size-label {
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    margin-left: auto;
+}
+
+/* Hex patch controls */
+.hex-patch__bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.hex-patch__input {
+    padding: 3px 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    outline: none;
+    transition: border-color var(--transition);
+}
+
+.hex-patch__input:focus {
+    border-color: var(--accent);
+}
+
+.hex-patch__select {
+    padding: 3px 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    outline: none;
+}
+
+.hex-patch__btn {
+    padding: 3px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.hex-patch__btn--apply {
+    background: var(--ctp-green);
+    color: var(--ctp-crust);
+    border-color: var(--ctp-green);
+    font-weight: 600;
+}
+
+.hex-patch__btn--apply:hover {
+    opacity: 0.85;
+}
+
+.hex-patch__btn--save {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.hex-patch__btn--save:hover {
+    background: var(--bg-hover);
+}
+
+.hex-patch__status {
+    font-size: var(--font-size-xs);
+    color: var(--ctp-overlay2);
+    font-family: var(--font-mono);
+    max-width: 350px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hex-byte--gap {
+    width: 8px;
+    flex-shrink: 0;
+}
+
+.hex-view__body {
+    flex: 1;
+    overflow: auto;
+}
+
 
 .hex-view--empty {
     display: flex;

@@ -33,6 +33,7 @@ import CommentDialog from "./components/CommentDialog";
 import FunctionsList from "./panels/FunctionsList";
 import DecompileView from "./panels/DecompileView";
 import AssemblyView from "./panels/AssemblyView";
+import HexView from "./panels/HexView";
 import SettingsPanel from "./panels/SettingsPanel";
 import SectionsPanel from "./panels/SectionsPanel";
 import AboutDialog from "./components/AboutDialog";
@@ -53,8 +54,6 @@ function App() {
     const [hexData, setHexData] = useState<HexViewData | null>(null);
     const [xrefs, setXrefs] = useState<XrefDto[]>([]);
     const [loading, setLoading] = useState(false);
-    const [analyzing, setAnalyzing] = useState(false);
-    const [deepScanning, setDeepScanning] = useState(false);
     const [sections, setSections] = useState<SectionDto[]>([]);
     const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
     const [aboutOpen, setAboutOpen] = useState(false);
@@ -82,6 +81,16 @@ function App() {
     const [renameTarget, setRenameTarget] = useState({ address: "", name: "" });
     const [commentOpen, setCommentOpen] = useState(false);
     const [commentTarget, setCommentTarget] = useState({ address: "", comment: "" });
+
+    // Undo/Redo stacks
+    interface UndoableAction {
+        type: "rename" | "comment";
+        address: string;
+        previousValue: string;
+        newValue: string;
+    }
+    const undoStack = useRef<UndoableAction[]>([]);
+    const redoStack = useRef<UndoableAction[]>([]);
 
     const log = useCallback((msg: string) => {
         setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -180,37 +189,6 @@ function App() {
         log("Decompile & assembly cache cleared.");
     }, [log]);
 
-    // --- Phase 6: Analyze / Deep Scan ---
-    const handleAnalyzeFunctions = useCallback(async () => {
-        if (!binaryInfo) return;
-        setAnalyzing(true);
-        log("Analyzing functions (CALL target scan)...");
-        try {
-            const funcs = await invoke<FunctionDto[]>("analyze_functions");
-            setFunctions(funcs);
-            log(`  Analysis complete — ${funcs.length} functions found.`);
-        } catch (err) {
-            log(`Analyze error: ${err}`);
-        } finally {
-            setAnalyzing(false);
-        }
-    }, [binaryInfo, log]);
-
-    const handleDeepScanFunctions = useCallback(async () => {
-        if (!binaryInfo) return;
-        setDeepScanning(true);
-        log("Deep scanning functions (prologue pattern scan)...");
-        try {
-            const funcs = await invoke<FunctionDto[]>("deep_scan_functions");
-            setFunctions(funcs);
-            log(`  Deep scan complete — ${funcs.length} functions found.`);
-        } catch (err) {
-            log(`Deep scan error: ${err}`);
-        } finally {
-            setDeepScanning(false);
-        }
-    }, [binaryInfo, log]);
-
     // --- Open Listing Tab ---
     const handleOpenListingTab = useCallback(() => {
         if (!binaryInfo) return;
@@ -225,6 +203,26 @@ function App() {
                     type: "listing" as const,
                     address: "0x0",
                     functionName: "Listing",
+                },
+            ];
+        });
+        setActiveTabId(tabId);
+    }, [binaryInfo]);
+
+    // --- Open Hex Editor Tab ---
+    const handleOpenHexTab = useCallback((func: FunctionDto) => {
+        if (!binaryInfo) return;
+        const tabId = `hex-${func.address}`;
+        setTabs((prev) => {
+            if (prev.find((t) => t.id === tabId)) return prev;
+            return [
+                ...prev,
+                {
+                    id: tabId,
+                    title: `${func.name} [HEX]`,
+                    type: "hexview" as const,
+                    address: func.address,
+                    functionName: func.name,
                 },
             ];
         });
@@ -446,8 +444,15 @@ function App() {
         async (address: string, newName: string) => {
             try {
                 const addr = parseInt(address, 16) || parseInt(address);
+                // Record previous name for undo
+                const prevFunc = functions.find((f) => f.address.toLowerCase() === address.toLowerCase());
+                const prevName = prevFunc?.name ?? "";
                 await invoke("rename_function", { address: addr, newName });
                 log(`Renamed: ${address} → ${newName || "(reverted)"}`);
+
+                // Push to undo stack
+                undoStack.current.push({ type: "rename", address, previousValue: prevName, newValue: newName });
+                redoStack.current = [];
 
                 // Refresh functions
                 const funcs = await invoke<FunctionDto[]>("get_functions");
@@ -472,7 +477,7 @@ function App() {
                 log(`Rename error: ${err}`);
             }
         },
-        [log],
+        [log, functions],
     );
 
     // --- Comment ---
@@ -482,6 +487,10 @@ function App() {
                 const addr = parseInt(address, 16) || parseInt(address);
                 await invoke("add_comment", { address: addr, text });
                 log(`Comment at ${address}: ${text || "(removed)"}`);
+
+                // Push to undo stack
+                undoStack.current.push({ type: "comment", address, previousValue: "", newValue: text });
+                redoStack.current = [];
 
                 // Refresh assembly for all tabs that might show this address
                 // (simplified: invalidate all asm caches)
@@ -493,7 +502,62 @@ function App() {
         [log],
     );
 
-    // --- Bookmark ---
+    // --- Undo / Redo ---
+    const handleUndo = useCallback(async () => {
+        const action = undoStack.current.pop();
+        if (!action) { log("Nothing to undo."); return; }
+        try {
+            if (action.type === "rename") {
+                const addr = parseInt(action.address, 16) || parseInt(action.address);
+                await invoke("rename_function", { address: addr, newName: action.previousValue });
+                const funcs = await invoke<FunctionDto[]>("get_functions");
+                setFunctions(funcs);
+                setTabs((prev) => prev.map((t) =>
+                    t.address === action.address
+                        ? { ...t, title: t.type === "assembly" ? `${action.previousValue} [ASM]` : action.previousValue, functionName: action.previousValue }
+                        : t
+                ));
+                log(`Undo rename: ${action.address} → ${action.previousValue}`);
+            } else if (action.type === "comment") {
+                const addr = parseInt(action.address, 16) || parseInt(action.address);
+                await invoke("add_comment", { address: addr, text: action.previousValue });
+                setAsmCache({});
+                log(`Undo comment at ${action.address}`);
+            }
+            redoStack.current.push(action);
+        } catch (err) {
+            log(`Undo error: ${err}`);
+        }
+    }, [log]);
+
+    const handleRedo = useCallback(async () => {
+        const action = redoStack.current.pop();
+        if (!action) { log("Nothing to redo."); return; }
+        try {
+            if (action.type === "rename") {
+                const addr = parseInt(action.address, 16) || parseInt(action.address);
+                await invoke("rename_function", { address: addr, newName: action.newValue });
+                const funcs = await invoke<FunctionDto[]>("get_functions");
+                setFunctions(funcs);
+                setTabs((prev) => prev.map((t) =>
+                    t.address === action.address
+                        ? { ...t, title: t.type === "assembly" ? `${action.newValue} [ASM]` : action.newValue, functionName: action.newValue }
+                        : t
+                ));
+                log(`Redo rename: ${action.address} → ${action.newValue}`);
+            } else if (action.type === "comment") {
+                const addr = parseInt(action.address, 16) || parseInt(action.address);
+                await invoke("add_comment", { address: addr, text: action.newValue });
+                setAsmCache({});
+                log(`Redo comment at ${action.address}`);
+            }
+            undoStack.current.push(action);
+        } catch (err) {
+            log(`Redo error: ${err}`);
+        }
+    }, [log]);
+
+    // --- Bookmark (active tab) ---
     const handleToggleBookmark = useCallback(async () => {
         const tab = tabs.find((t) => t.id === activeTabId);
         if (!tab) return;
@@ -511,6 +575,18 @@ function App() {
             log(`Bookmark error: ${err}`);
         }
     }, [tabs, activeTabId, log]);
+
+    // --- Bookmark at specific address (from context menus) ---
+    const handleToggleBookmarkAt = useCallback(async (address: string, label: string) => {
+        try {
+            const added = await invoke<boolean>("toggle_bookmark", { address, label });
+            log(`Bookmark ${added ? "added" : "removed"}: ${address}`);
+            const bms = await invoke<BookmarkDto[]>("get_bookmarks");
+            setBookmarks(bms);
+        } catch (err) {
+            log(`Bookmark error: ${err}`);
+        }
+    }, [log]);
 
     // --- Tab management ---
     const handleTabClick = useCallback((tabId: string) => {
@@ -573,6 +649,20 @@ function App() {
                 return;
             }
 
+            // Ctrl+Z: Undo
+            if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
+                e.preventDefault();
+                handleUndo();
+                return;
+            }
+
+            // Ctrl+Y or Ctrl+Shift+Z: Redo
+            if ((e.ctrlKey && e.key === "y") || (e.ctrlKey && e.shiftKey && e.key === "z")) {
+                e.preventDefault();
+                handleRedo();
+                return;
+            }
+
             // N: Rename
             if (e.key === "n" && !e.ctrlKey && !e.altKey) {
                 e.preventDefault();
@@ -622,25 +712,11 @@ function App() {
                 setBottomPanelVisible((v) => !v);
                 return;
             }
-
-            // F5: Analyze functions
-            if (e.key === "F5" && !e.ctrlKey && !e.altKey && binaryInfo) {
-                e.preventDefault();
-                handleAnalyzeFunctions();
-                return;
-            }
-
-            // F6: Deep scan functions
-            if (e.key === "F6" && !e.ctrlKey && !e.altKey && binaryInfo) {
-                e.preventDefault();
-                handleDeepScanFunctions();
-                return;
-            }
         };
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [handleOpenFile, handleToggleBookmark, goBack, goForward, binaryInfo, tabs, activeTabId, handleAnalyzeFunctions, handleDeepScanFunctions]);
+    }, [handleOpenFile, handleToggleBookmark, handleUndo, handleRedo, goBack, goForward, binaryInfo, tabs, activeTabId]);
 
     // --- Drag & Drop ---
     useEffect(() => {
@@ -734,8 +810,6 @@ function App() {
                 onToggleBottomPanel={handleToggleBottomPanel}
                 bottomPanelVisible={bottomPanelVisible}
                 onAbout={() => setAboutOpen(true)}
-                onAnalyzeFunctions={handleAnalyzeFunctions}
-                onDeepScanFunctions={handleDeepScanFunctions}
             />
 
             <div className="app-body">
@@ -755,10 +829,15 @@ function App() {
                                 onFunctionClick={handleFunctionClick}
                                 onOpenFile={handleOpenFile}
                                 selectedAddress={activeTab?.address ?? null}
-                                onAnalyze={handleAnalyzeFunctions}
-                                onDeepScan={handleDeepScanFunctions}
-                                analyzing={analyzing}
-                                deepScanning={deepScanning}
+                                onRenameFunc={(func) => {
+                                    setRenameTarget({ address: func.address, name: func.name });
+                                    setRenameOpen(true);
+                                }}
+                                onToggleBookmarkFunc={(func) =>
+                                    handleToggleBookmarkAt(func.address, func.name)
+                                }
+                                onCopyAddress={(addr) => log(`Copied: ${addr}`)}
+                                onOpenHex={handleOpenHexTab}
                             />
                             <SectionsPanel sections={sections} />
                         </>
@@ -803,9 +882,29 @@ function App() {
                                 <DecompileView
                                     code={decompileCache[activeTab.id] ?? null}
                                     functionName={activeTab.functionName}
-                                    onSymbolClick={(sym) => log(`Symbol: ${sym}`)}
+                                    onSymbolClick={(sym) => {
+                                        // Try to navigate to matching function by name
+                                        const matchByName = functions.find(
+                                            (f) => f.name.toLowerCase() === sym.toLowerCase()
+                                        );
+                                        if (matchByName) {
+                                            handleFunctionClick(matchByName);
+                                            return;
+                                        }
+                                        // Try as hex address
+                                        if (/^[0-9a-fA-F]{6,}$/.test(sym)) {
+                                            handleNavigateToAddress(`0x${sym}`);
+                                            return;
+                                        }
+                                        log(`Symbol: ${sym}`);
+                                    }}
                                     onRename={(sym) => {
-                                        setRenameTarget({ address: activeTab.address, name: sym });
+                                        // Find address of the symbol
+                                        const matchByName = functions.find(
+                                            (f) => f.name.toLowerCase() === sym.toLowerCase()
+                                        );
+                                        const targetAddr = matchByName?.address ?? activeTab.address;
+                                        setRenameTarget({ address: targetAddr, name: sym });
                                         setRenameOpen(true);
                                     }}
                                 />
@@ -817,6 +916,21 @@ function App() {
                                         setCommentTarget({ address: addr, comment });
                                         setCommentOpen(true);
                                     }}
+                                    onRename={(addr, currentName) => {
+                                        setRenameTarget({ address: addr, name: currentName });
+                                        setRenameOpen(true);
+                                    }}
+                                    onToggleBookmark={(addr) =>
+                                        handleToggleBookmarkAt(addr, activeTab.functionName)
+                                    }
+                                    functionName={activeTab.functionName}
+                                    selectedAddress={null}
+                                />
+                            ) : activeTab.type === "hexview" ? (
+                                <HexView
+                                    binaryLoaded={!!binaryInfo}
+                                    initialAddress={activeTab.address}
+                                    onLog={log}
                                 />
                             ) : activeTab.type === "listing" ? (
                                 <ListingView
@@ -877,6 +991,8 @@ function App() {
                         onSearchResultClick={handleNavigateToAddress}
                         onXrefClick={handleNavigateToAddress}
                         onLog={log}
+                        functions={functions}
+                        onGotoAddress={handleNavigateToAddress}
                     />
                         </>
                     )}

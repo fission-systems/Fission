@@ -16,9 +16,6 @@ interface MenuBarProps {
     onToggleBottomPanel: () => void;
     bottomPanelVisible: boolean;
     onAbout: () => void;
-    // Phase 6: Analysis
-    onAnalyzeFunctions: () => void;
-    onDeepScanFunctions: () => void;
 }
 
 interface MenuItem {
@@ -49,8 +46,6 @@ export default function MenuBar({
     onToggleBottomPanel,
     bottomPanelVisible,
     onAbout,
-    onAnalyzeFunctions,
-    onDeepScanFunctions,
 }: MenuBarProps) {
     const [openMenu, setOpenMenu] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -91,9 +86,6 @@ export default function MenuBar({
         {
             label: "Tools",
             items: [
-                { label: "Analyze Functions", shortcut: "F5", action: onAnalyzeFunctions, disabled: !binaryLoaded },
-                { label: "Deep Scan Functions", shortcut: "F6", action: onDeepScanFunctions, disabled: !binaryLoaded },
-                { separator: true, label: "" },
                 { label: "Batch Decompile", disabled: true },
                 { label: "Export Results...", disabled: true },
             ],

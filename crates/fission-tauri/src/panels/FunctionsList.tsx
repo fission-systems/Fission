@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { FunctionDto } from "../types";
 
 type CategoryFilter = "all" | "import" | "export" | "internal";
@@ -9,10 +9,10 @@ interface FunctionsListProps {
     onFunctionClick: (func: FunctionDto) => void;
     onOpenFile: () => void;
     selectedAddress: string | null;
-    onAnalyze?: () => void;
-    onDeepScan?: () => void;
-    analyzing?: boolean;
-    deepScanning?: boolean;
+    onRenameFunc?: (func: FunctionDto) => void;
+    onToggleBookmarkFunc?: (func: FunctionDto) => void;
+    onCopyAddress?: (address: string) => void;
+    onOpenHex?: (func: FunctionDto) => void;
 }
 
 export default function FunctionsList({
@@ -21,13 +21,36 @@ export default function FunctionsList({
     onFunctionClick,
     onOpenFile,
     selectedAddress,
-    onAnalyze,
-    onDeepScan,
-    analyzing = false,
-    deepScanning = false,
+    onRenameFunc,
+    onToggleBookmarkFunc,
+    onCopyAddress,
+    onOpenHex,
 }: FunctionsListProps) {
     const [filter, setFilter] = useState("");
     const [category, setCategory] = useState<CategoryFilter>("all");
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; func: FunctionDto } | null>(null);
+    const contextMenuRef = useRef<HTMLDivElement>(null);
+
+    const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+    const handleContextMenu = useCallback((e: React.MouseEvent, func: FunctionDto) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setContextMenu({ x: e.clientX, y: e.clientY, func });
+    }, []);
+
+    // Close context menu on outside click or Escape key
+    useEffect(() => {
+        if (!contextMenu) return;
+        const handleClick = () => closeContextMenu();
+        const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeContextMenu(); };
+        document.addEventListener("click", handleClick);
+        document.addEventListener("keydown", handleKey);
+        return () => {
+            document.removeEventListener("click", handleClick);
+            document.removeEventListener("keydown", handleKey);
+        };
+    }, [contextMenu, closeContextMenu]);
 
     const counts = useMemo(() => ({
         all: functions.length,
@@ -62,28 +85,6 @@ export default function FunctionsList({
 
     return (
         <div className="functions-list">
-            {/* Analyse toolbar */}
-            {functions.length > 0 && (
-                <div className="functions-list__toolbar">
-                    <button
-                        className="functions-list__tool-btn"
-                        title="Analyze: discover internal functions via CALL targets"
-                        onClick={onAnalyze}
-                        disabled={analyzing || deepScanning}
-                    >
-                        {analyzing ? "…" : "🔍"} Analyze
-                    </button>
-                    <button
-                        className="functions-list__tool-btn"
-                        title="Deep Scan: discover functions via prologue pattern matching"
-                        onClick={onDeepScan}
-                        disabled={analyzing || deepScanning}
-                    >
-                        {deepScanning ? "…" : "🕵"} Deep Scan
-                    </button>
-                </div>
-            )}
-
             {/* Category filter */}
             {functions.length > 0 && (
                 <div className="functions-list__cats">
@@ -118,6 +119,7 @@ export default function FunctionsList({
                         key={f.address}
                         className={`functions-list__item ${selectedAddress === f.address ? "functions-list__item--selected" : ""}`}
                         onClick={() => onFunctionClick(f)}
+                        onContextMenu={(e) => handleContextMenu(e, f)}
                     >
                         <span className="functions-list__item-addr">{f.address}</span>
                         <span className="functions-list__item-name">{f.name}</span>
@@ -130,6 +132,64 @@ export default function FunctionsList({
                     </div>
                 ))}
             </div>
+
+            {/* Right-click context menu */}
+            {contextMenu && (
+                <div
+                    ref={contextMenuRef}
+                    className="context-menu"
+                    style={{ left: contextMenu.x, top: contextMenu.y }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div
+                        className="context-menu__item"
+                        onClick={() => {
+                            onFunctionClick(contextMenu.func);
+                            closeContextMenu();
+                        }}
+                    >
+                        🔍 Open / Decompile
+                    </div>
+                    <div
+                        className="context-menu__item"
+                        onClick={() => {
+                            onOpenHex?.(contextMenu.func);
+                            closeContextMenu();
+                        }}
+                    >
+                        🔢 Open in Hex Editor
+                    </div>
+                    <div
+                        className="context-menu__item"
+                        onClick={() => {
+                            onRenameFunc?.(contextMenu.func);
+                            closeContextMenu();
+                        }}
+                    >
+                        🏷️ Rename
+                    </div>
+                    <div
+                        className="context-menu__item"
+                        onClick={() => {
+                            onToggleBookmarkFunc?.(contextMenu.func);
+                            closeContextMenu();
+                        }}
+                    >
+                        📌 Add Bookmark
+                    </div>
+                    <div className="context-menu__separator" />
+                    <div
+                        className="context-menu__item"
+                        onClick={() => {
+                            onCopyAddress?.(contextMenu.func.address);
+                            navigator.clipboard.writeText(contextMenu.func.address).catch(() => {});
+                            closeContextMenu();
+                        }}
+                    >
+                        📋 Copy Address
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

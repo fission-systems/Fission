@@ -29,14 +29,20 @@ interface AssemblyViewProps {
     instructions: AsmInstructionDto[] | null;
     onAddressClick?: (address: string) => void;
     onCommentEdit?: (address: string, currentComment: string) => void;
+    onRename?: (address: string, currentName: string) => void;
+    onToggleBookmark?: (address: string) => void;
     selectedAddress?: string | null;
+    functionName?: string;
 }
 
 export default function AssemblyView({
     instructions,
     onAddressClick,
     onCommentEdit,
+    onRename,
+    onToggleBookmark,
     selectedAddress,
+    functionName,
 }: AssemblyViewProps) {
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; address: string; comment: string } | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -126,8 +132,27 @@ export default function AssemblyView({
                             closeContext();
                         }}
                     >
-                        Add/Edit Comment
+                        ✏️ Add/Edit Comment
                     </div>
+                    <div
+                        className="context-menu__item"
+                        onClick={() => {
+                            onRename?.(contextMenu.address, functionName || "");
+                            closeContext();
+                        }}
+                    >
+                        🏷️ Rename Label
+                    </div>
+                    <div
+                        className="context-menu__item"
+                        onClick={() => {
+                            onToggleBookmark?.(contextMenu.address);
+                            closeContext();
+                        }}
+                    >
+                        📌 Add Bookmark
+                    </div>
+                    <div className="context-menu__separator" />
                     <div
                         className="context-menu__item"
                         onClick={() => {
@@ -135,7 +160,16 @@ export default function AssemblyView({
                             closeContext();
                         }}
                     >
-                        Go to Address
+                        🔍 Go to Address
+                    </div>
+                    <div
+                        className="context-menu__item"
+                        onClick={() => {
+                            navigator.clipboard.writeText(contextMenu.address).catch(() => {});
+                            closeContext();
+                        }}
+                    >
+                        📋 Copy Address
                     </div>
                 </div>
             )}

@@ -30,6 +30,8 @@ pub fn run() {
             commands::goto_address,
             // Phase 2: hex / search / xrefs
             commands::get_hex_view,
+            commands::patch_bytes,
+            commands::save_patched_binary,
             commands::search_binary,
             commands::get_xrefs,
             // Phase 1b: project save/load + settings

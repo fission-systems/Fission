@@ -17,10 +17,17 @@ use tauri::Manager as _;
 /// Open and parse a binary file.
 #[tauri::command]
 pub async fn open_file(path: String, state: State<'_, AppState>) -> Result<BinaryInfo, String> {
-    let binary = tokio::task::spawn_blocking(move || LoadedBinary::from_file(&path))
-        .await
-        .map_err(|e| format!("Task failed: {e}"))?
-        .map_err(|e| format!("Failed to load binary: {e}"))?;
+    let binary = tokio::task::spawn_blocking(move || {
+        let mut binary = LoadedBinary::from_file(&path)
+            .map_err(|e| format!("Failed to load binary: {e}"))?;
+        // Automatic multi-pass function discovery (runs in the worker thread)
+        binary.discover_internal_functions();    // Pass 1: CALL target scan
+        binary.discover_functions_by_prologue(); // Pass 2: prologue pattern scan
+        Ok::<LoadedBinary, String>(binary)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {e}"))?
+    ?;
 
     let info = BinaryInfo {
         name: std::path::Path::new(&binary.path)
@@ -653,6 +660,51 @@ pub async fn get_hex_view(
     }
 
     Ok(HexViewData { rows, total_size })
+}
+
+// ============================================================================
+// Hex Patch (Phase 8)
+// ============================================================================
+
+/// Patch bytes at a virtual address.
+/// Returns the original bytes that were replaced.
+#[tauri::command]
+pub async fn patch_bytes(
+    address: u64,
+    bytes: Vec<u8>,
+    state: State<'_, AppState>,
+) -> Result<Vec<u8>, String> {
+    let mut inner = state.inner.lock().await;
+    let mut binary = inner
+        .loaded_binary
+        .as_ref()
+        .ok_or_else(|| "No binary loaded".to_string())?
+        .as_ref()
+        .clone();
+
+    let original = binary
+        .patch_bytes_va(address, &bytes)
+        .ok_or_else(|| format!("Patch failed: address 0x{:x} out of range", address))?;
+
+    inner.loaded_binary = Some(std::sync::Arc::new(binary));
+    Ok(original)
+}
+
+/// Save the (potentially patched) binary to a new file path.
+#[tauri::command]
+pub async fn save_patched_binary(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let inner = state.inner.lock().await;
+    let binary = inner
+        .loaded_binary
+        .as_ref()
+        .ok_or_else(|| "No binary loaded".to_string())?;
+
+    binary
+        .save_as(&path)
+        .map_err(|e| format!("Save failed: {e}"))
 }
 
 /// Search functions, strings, and addresses.
