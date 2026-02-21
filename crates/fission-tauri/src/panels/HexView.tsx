@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import type { HexRow, HexViewData } from "../types";
+import type { HexRow, HexViewData, PatchRecord } from "../types";
 
 // Quick patch presets
 const QUICK_PATCHES: { label: string; bytes: number[] }[] = [
@@ -19,11 +19,15 @@ interface HexViewProps {
     /** Controlled mode: display this data (bottom panel) */
     data?: HexViewData | null;
     highlightAddress?: string | null;
+    /** Controlled mode: optional click-to-navigate callback */
+    onAddressClick?: (address: string) => void;
     /** Standalone mode: binary is loaded, component fetches its own data */
     binaryLoaded?: boolean;
     /** Initial address to focus on (hex string like "0x401000") */
     initialAddress?: string | null;
     onLog?: (msg: string) => void;
+    /** Called when a patch is successfully applied so the caller can record it */
+    onPatchApplied?: (rec: PatchRecord) => void;
 }
 
 const BYTES_PER_PAGE = 512; // 32 rows × 16 bytes
@@ -31,9 +35,11 @@ const BYTES_PER_PAGE = 512; // 32 rows × 16 bytes
 export default function HexView({
     data: propData,
     highlightAddress,
+    onAddressClick,
     binaryLoaded,
     initialAddress,
     onLog,
+    onPatchApplied,
 }: HexViewProps) {
     const isStandalone = binaryLoaded !== undefined;
 
@@ -113,8 +119,12 @@ export default function HexView({
             const hexOrig = original.map((b) => b.toString(16).padStart(2, "0")).join(" ");
             const hexNew = byteArr.map((b) => b.toString(16).padStart(2, "0")).join(" ");
             setPatchStatus(`✓ Patched at 0x${addr.toString(16)}: [${hexOrig}] → [${hexNew}]`);
-            log(`Patch at 0x${addr.toString(16)}: ${hexNew}`);
-            await loadAt(currentAddress);
+            log(`Patch at 0x${addr.toString(16)}: ${hexNew}`);            onPatchApplied?.({
+                address: addr,
+                label: `0x${addr.toString(16)}`,
+                original,
+                patched: [...byteArr],
+            });            await loadAt(currentAddress);
         } catch (e) {
             setPatchStatus(`Error: ${e}`);
         }
@@ -242,8 +252,11 @@ export default function HexView({
                         <div
                             key={row.offset}
                             className={`hex-row ${isHighlighted ? "hex-row--highlight" : ""}`}
-                            onClick={() => isStandalone && setPatchOffset(row.offset)}
-                            title={isStandalone ? "Click to set patch offset" : undefined}
+                            onClick={() => {
+                                if (isStandalone) setPatchOffset(row.offset);
+                                else onAddressClick?.(row.offset);
+                            }}
+                            title={isStandalone ? "Click to set patch offset" : (onAddressClick ? "Click to navigate" : undefined)}
                         >
                             <span className="hex-row__offset">{row.offset}</span>
                             <span className="hex-row__bytes">

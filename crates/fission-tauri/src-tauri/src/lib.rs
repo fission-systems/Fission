@@ -21,6 +21,7 @@ pub fn run() {
             commands::get_binary_info,
             // Phase 1: new commands
             commands::get_imports,
+            commands::get_exports,
             commands::get_sections,
             commands::rename_function,
             commands::add_comment,

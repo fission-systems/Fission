@@ -1089,6 +1089,14 @@ body,
     font-size: var(--font-size-xs);
 }
 
+/* Generic empty-state for panels */
+.panel-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+}
+
 /* ============================================================================
    Status Bar
    ============================================================================ */

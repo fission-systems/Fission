@@ -404,6 +404,37 @@ pub async fn get_imports(state: State<'_, AppState>) -> Result<Vec<ImportDto>, S
     Ok(imports)
 }
 
+/// Get export table entries (functions flagged as export).
+#[tauri::command]
+pub async fn get_exports(state: State<'_, AppState>) -> Result<Vec<ExportDto>, String> {
+    let inner = state.inner.lock().await;
+    let binary = inner
+        .loaded_binary
+        .as_ref()
+        .ok_or_else(|| "No binary loaded".to_string())?;
+
+    let exports: Vec<ExportDto> = binary
+        .functions
+        .iter()
+        .filter(|f| f.is_export)
+        .map(|f| {
+            let display_name = inner
+                .renamed_functions
+                .get(&f.address)
+                .cloned()
+                .unwrap_or_else(|| f.name.clone());
+            ExportDto {
+                address: format!("0x{:x}", f.address),
+                name: display_name,
+                ordinal: None,
+                forwarder: None,
+            }
+        })
+        .collect();
+
+    Ok(exports)
+}
+
 /// Get section information.
 #[tauri::command]
 pub async fn get_sections(state: State<'_, AppState>) -> Result<Vec<SectionDto>, String> {

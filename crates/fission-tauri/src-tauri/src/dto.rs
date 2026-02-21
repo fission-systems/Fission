@@ -61,6 +61,15 @@ pub struct ImportDto {
     pub ordinal: Option<u32>,
 }
 
+/// Export table entry.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportDto {
+    pub address: String,
+    pub name: String,
+    pub ordinal: Option<u32>,
+    pub forwarder: Option<String>,
+}
+
 /// Section information.
 #[derive(Debug, Clone, Serialize)]
 pub struct SectionDto {

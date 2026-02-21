@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import type { BottomTab, StringDto, ImportDto, BookmarkDto, HexViewData, XrefDto, FunctionDto } from "../types";
+import type { BottomTab, StringDto, ImportDto, BookmarkDto, HexViewData, XrefDto, FunctionDto, PatchRecord } from "../types";
 import { invoke } from "@tauri-apps/api/core";
 import HexView from "../panels/HexView";
 import SearchPanel from "../panels/SearchPanel";
@@ -7,6 +7,9 @@ import XrefsPanel from "../panels/XrefsPanel";
 import CfgPanel from "../panels/CfgPanel";
 import { DebugTab } from "../panels/DebugTab";
 import { StringXrefsPanel } from "../panels/StringXrefsPanel";
+import ExportsPanel from "../panels/ExportsPanel";
+import PatchesPanel from "../panels/PatchesPanel";
+import { NotesPanel } from "../panels/NotesPanel";
 
 interface BottomPanelProps {
     activeTab: BottomTab;
@@ -30,8 +33,18 @@ interface BottomPanelProps {
     onLog: (msg: string) => void;
     /** Functions list — used by console `funcs` command */
     functions?: FunctionDto[];
-    /** Navigate to address — used by console `goto` command */
+    /** Navigate to address — used by console goto/hexclick */
     onGotoAddress?: (addr: string) => void;
+    /** Clears the console log array — wired to Edit > Clear Console */
+    onClearConsole?: () => void;
+    /** List of patches applied to the binary */
+    patches?: PatchRecord[];
+    /** Revert a patch back to its original bytes */
+    onRevertPatch?: (rec: PatchRecord) => void;
+    /** Export entry clicked — navigate to address */
+    onExportClick?: (address: string) => void;
+    /** Note entry clicked — navigate to address */
+    onNoteClick?: (address: string) => void;
 }
 
 const TABS: { id: BottomTab; label: string }[] = [
@@ -39,12 +52,15 @@ const TABS: { id: BottomTab; label: string }[] = [
     { id: "strings", label: "Strings" },
     { id: "hex", label: "Hex" },
     { id: "imports", label: "Imports" },
+    { id: "exports", label: "Exports" },
     { id: "bookmarks", label: "Bookmarks" },
     { id: "xrefs", label: "XRefs" },
     { id: "search", label: "Search" },
     { id: "cfg", label: "CFG" },
     { id: "debug", label: "Debug" },
     { id: "string-xrefs", label: "StrXRefs" },
+    { id: "patches", label: "Patches" },
+    { id: "notes", label: "Notes" },
 ];
 
 export default function BottomPanel({
@@ -68,6 +84,11 @@ export default function BottomPanel({
     onLog,
     functions,
     onGotoAddress,
+    onClearConsole,
+    patches = [],
+    onRevertPatch,
+    onExportClick,
+    onNoteClick,
 }: BottomPanelProps) {
     const [cmdInput, setCmdInput] = useState("");
     const [cmdHistory, setCmdHistory] = useState<string[]>([]);
@@ -96,9 +117,11 @@ export default function BottomPanel({
                 }
                 break;
             case "clear":
-                // Dispatch a synthetic clear — we can't clear logs from here directly,
-                // so just note it in the log
-                onLog("[clear not available from CLI — use Edit > Clear Console]");
+                if (onClearConsole) {
+                    onClearConsole();
+                } else {
+                    onLog("[Console cleared]");
+                }
                 break;
             case "goto":
                 if (!args[0]) { onLog("Usage: goto <address>"); break; }
@@ -128,7 +151,7 @@ export default function BottomPanel({
                 onLog(`Unknown command: ${verb}. Type 'help' for a list.`);
         }
         setCmdInput("");
-    }, [functions, onGotoAddress, onLog]);
+    }, [functions, onGotoAddress, onLog, onClearConsole]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === "Enter") {
@@ -216,7 +239,7 @@ export default function BottomPanel({
                 )}
 
                 {activeTab === "hex" && (
-                    <HexView data={hexData} />
+                    <HexView data={hexData} onAddressClick={onGotoAddress} />
                 )}
 
                 {activeTab === "imports" && (
@@ -303,6 +326,27 @@ export default function BottomPanel({
                     <StringXrefsPanel
                         binaryLoaded={binaryLoaded}
                         onLog={onLog}
+                    />
+                )}
+
+                {activeTab === "exports" && (
+                    <ExportsPanel
+                        binaryLoaded={binaryLoaded}
+                        onExportClick={onExportClick}
+                    />
+                )}
+
+                {activeTab === "patches" && (
+                    <PatchesPanel
+                        patches={patches}
+                        onRevert={onRevertPatch}
+                    />
+                )}
+
+                {activeTab === "notes" && (
+                    <NotesPanel
+                        binaryLoaded={binaryLoaded}
+                        onNoteClick={onNoteClick}
                     />
                 )}
             </div>

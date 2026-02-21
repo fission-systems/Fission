@@ -103,7 +103,23 @@ export interface EditorTab {
 export type ActivityView = "explorer" | "search" | "debug" | "settings";
 
 // Bottom panel tab
-export type BottomTab = "console" | "strings" | "hex" | "imports" | "bookmarks" | "xrefs" | "search" | "cfg" | "debug" | "string-xrefs";
+export type BottomTab = "console" | "strings" | "hex" | "imports" | "exports" | "bookmarks" | "xrefs" | "search" | "cfg" | "debug" | "string-xrefs" | "patches" | "notes";
+
+// Export table entry (PE exports, ELF/Mach-O functions flagged as export)
+export interface ExportDto {
+    address: string;
+    name: string;
+    ordinal: number | null;
+    forwarder: string | null;
+}
+
+// Record of a byte patch applied to the in-memory binary
+export interface PatchRecord {
+    address: number;
+    label: string;
+    original: number[];
+    patched: number[];
+}
 
 // ── Phase 5: String XRefs ────────────────────────────────────────────────────
 

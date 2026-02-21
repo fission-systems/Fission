@@ -18,6 +18,7 @@ import type {
     XrefDto,
     AppSettings,
     SectionDto,
+    PatchRecord,
 } from "./types";
 import { ListingView } from "./panels/ListingView";
 import { DebugSidebar } from "./panels/DebugSidebar";
@@ -37,6 +38,7 @@ import HexView from "./panels/HexView";
 import SettingsPanel from "./panels/SettingsPanel";
 import SectionsPanel from "./panels/SectionsPanel";
 import AboutDialog from "./components/AboutDialog";
+import SearchPanel from "./panels/SearchPanel";
 
 function App() {
     // --- State ---
@@ -57,6 +59,7 @@ function App() {
     const [sections, setSections] = useState<SectionDto[]>([]);
     const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
     const [aboutOpen, setAboutOpen] = useState(false);
+    const [patches, setPatches] = useState<PatchRecord[]>([]);
 
     // Caches
     const [decompileCache, setDecompileCache] = useState<Record<string, string>>({});
@@ -588,6 +591,21 @@ function App() {
         }
     }, [log]);
 
+    // --- Patch management ---
+    const handleRecordPatch = useCallback((rec: PatchRecord) => {
+        setPatches((prev) => [...prev, rec]);
+    }, []);
+
+    const handleRevertPatch = useCallback(async (rec: PatchRecord) => {
+        try {
+            await invoke<number[]>("patch_bytes", { address: rec.address, bytes: rec.original });
+            setPatches((prev) => prev.filter((p) => p !== rec));
+            log(`Reverted patch at 0x${rec.address.toString(16)}`);
+        } catch (err) {
+            log(`Revert error: ${err}`);
+        }
+    }, [log]);
+
     // --- Tab management ---
     const handleTabClick = useCallback((tabId: string) => {
         setActiveTabId(tabId);
@@ -851,10 +869,10 @@ function App() {
                         />
                     )}
                     {activeView === "search" && (
-                        <div className="sidebar-placeholder">
-                            <div className="sidebar-placeholder__icon">🔍</div>
-                            <div className="sidebar-placeholder__text">Use the Search tab in the bottom panel</div>
-                        </div>
+                        <SearchPanel
+                            binaryLoaded={!!binaryInfo}
+                            onResultClick={handleNavigateToAddress}
+                        />
                     )}
                     {activeView === "debug" && (
                         <DebugSidebar
@@ -931,6 +949,7 @@ function App() {
                                     binaryLoaded={!!binaryInfo}
                                     initialAddress={activeTab.address}
                                     onLog={log}
+                                    onPatchApplied={handleRecordPatch}
                                 />
                             ) : activeTab.type === "listing" ? (
                                 <ListingView
@@ -993,6 +1012,11 @@ function App() {
                         onLog={log}
                         functions={functions}
                         onGotoAddress={handleNavigateToAddress}
+                        onClearConsole={handleClearConsole}
+                        patches={patches}
+                        onRevertPatch={handleRevertPatch}
+                        onExportClick={handleNavigateToAddress}
+                        onNoteClick={handleNavigateToAddress}
                     />
                         </>
                     )}
