@@ -84,13 +84,6 @@ export default function MenuBar({
             ],
         },
         {
-            label: "Tools",
-            items: [
-                { label: "Batch Decompile", disabled: true },
-                { label: "Export Results...", disabled: true },
-            ],
-        },
-        {
             label: "Help",
             items: [
                 { label: "About Fission", action: onAbout },
