@@ -2,6 +2,110 @@
 
 All notable changes to the Fission project (November 2025 - February 2026).
 
+---
+
+### Tauri GUI — Phase 6: Analyze Functions / Deep Scan + Bug Fixes (2026-02-21)
+
+**🔍 Phase 6: 함수 분석 기능 추가**
+
+Egui ↔ Tauri 기능 비교에서 누락된 13개 항목 중 첫 번째 그룹(Phase 6)으로, 바이너리 로드 후 추가적인 내부 함수를 자동으로 발굴하는 두 가지 분석 명령을 구현했다.
+
+**Rust 백엔드 (`crates/fission-tauri/src-tauri/`)**
+
+- `commands.rs`: `analyze_functions` 커맨드 추가
+  - `LoadedBinary::discover_internal_functions()` 호출 (CALL 타깃 스캔)
+  - `Arc<LoadedBinary>` clone → mutate → 재저장 패턴 적용
+  - 분석 후 갱신된 `Vec<FunctionDto>` 반환
+- `commands.rs`: `deep_scan_functions` 커맨드 추가
+  - `LoadedBinary::discover_functions_by_prologue()` 호출 (프롤로그 패턴 스캔)
+  - 동일 mutation 패턴, 발견 함수 수 반환
+- `lib.rs`: `analyze_functions`, `deep_scan_functions` 핸들러 등록
+
+**프론트엔드 (`crates/fission-tauri/src/`)**
+
+- `panels/FunctionsList.tsx`: 카테고리 필터 (All / Imp / Exp / Int + 카운트 뱃지), Analyze 🔍 · Deep Scan 🕵 툴바 버튼, `analyzing` / `deepScanning` 로딩 상태 prop 추가
+- `components/MenuBar.tsx`: **Tools** 메뉴 신설 (View와 Help 사이)
+  - "Analyze Functions" (F5), "Deep Scan Functions" (F6)
+  - "Batch Decompile", "Export Results..." (비활성 플레이스홀더)
+- `App.tsx`: `analyzing` / `deepScanning` boolean 상태, `handleAnalyzeFunctions` / `handleDeepScanFunctions` 콜백, F5 / F6 키보드 단축키, FunctionsList·MenuBar에 새 props 전달
+- `App.css`: `.functions-list__toolbar`, `.functions-list__tool-btn`, `.functions-list__cats`, `.functions-list__cat-btn`, `.functions-list__cat-btn--active` 스타일 추가
+
+**🐛 버그 수정 4건**
+
+| # | 위치 | 내용 |
+|---|------|------|
+| 1 | `panels/DebugTab.tsx` | `doAddBp` / `doRemoveBp` — `BigInt` → `parseInt(addr, 16)` 변환으로 JSON 직렬화 오류 수정 |
+| 2 | `App.tsx` – `handleLoadProject` | 프로젝트 로드 후 `get_functions()` 호출을 추가하여 함수 목록(이름 변경 포함) 즉시 갱신 |
+| 3 | `App.tsx` – `cfgAddress` | `activeTab.type === "decompile"`일 때만 주소 전달, 나머지 탭(Listing, Hex 등)은 `null` |
+| 4 | `panels/ListingView.tsx` | `bootstrap`→`loadChunk` 선언 순서 교정, 의존성 배열을 `[loadChunk, onLog]`로 명시, `bootstrapRef`를 도입해 binaryLoaded effect가 stable ref를 통해 최신 클로저를 호출하도록 정리 |
+
+---
+
+### Tauri GUI — Phase 1–5: 핵심 UI 및 사이드바/패널 완전 구현 (2026-02-20)
+
+**🖥️ 전체 아키텍처**
+
+Egui 기반 GUI를 Tauri 2.x + React 19 / TypeScript로 전면 재구현했다. 모든 IPC는 `invoke()` 기반이며, 이전 Egui 코드는 레퍼런스로 유지.
+
+**신규 파일 (Untracked → 추가)**
+
+| 파일 | 설명 |
+|------|------|
+| `components/MenuBar.tsx` | File / Edit / View / Tools / Help 풀다운 메뉴 |
+| `components/AboutDialog.tsx` | 버전·라이선스 모달 |
+| `components/GotoDialog.tsx` | 주소 이동 대화상자 |
+| `components/RenameDialog.tsx` | 심볼 이름 변경 대화상자 |
+| `components/CommentDialog.tsx` | 주소 주석 대화상자 |
+| `panels/ListingView.tsx` | 가상 스크롤 Listing 뷰 (`get_listing_info` / `get_listing_chunk`) |
+| `panels/CfgPanel.tsx` | CFG 탭 (`get_cfg` 연동, SVG 렌더링) |
+| `panels/XrefsPanel.tsx` | Cross-Reference 탭 |
+| `panels/StringXrefsPanel.tsx` | 문자열 참조 탭 (`get_string_xrefs`) |
+| `panels/HexView.tsx` | Hex 뷰어 탭 |
+| `panels/SearchPanel.tsx` | 함수/심볼 검색 탭 |
+| `panels/SectionsPanel.tsx` | 섹션 목록 사이드바 패널 |
+| `panels/SettingsPanel.tsx` | 설정 패널 (디컴파일러 옵션 등) |
+| `panels/DebugTab.tsx` | 디버거 하단 탭 (attach/detach, step, breakpoint) |
+| `panels/DebugSidebar.tsx` | 디버거 사이드바 (레지스터·스택) |
+
+**수정 파일 (Modified)**
+
+- `src-tauri/src/commands.rs`: 전체 IPC 커맨드 구현
+  - `open_file`, `get_functions`, `get_strings`, `get_imports`, `get_sections`
+  - `decompile_function`, `get_asm`, `get_hex`
+  - `get_xrefs`, `get_string_xrefs`, `get_cfg`
+  - `get_listing_info`, `get_listing_chunk`
+  - `save_project`, `load_project`, `clear_decompiler_cache`
+  - `rename_function`, `add_comment`, `add_bookmark`, `remove_bookmark`, `get_bookmarks`
+  - `debug_attach`, `debug_detach`, `debug_continue`, `debug_step`, `debug_get_state`
+  - `debug_add_breakpoint`, `debug_remove_breakpoint`
+- `src-tauri/src/dto.rs`: `FunctionDto`, `StringDto`, `ImportDto`, `SectionDto`, `HexViewData`, `XrefDto`, `CfgDto`, `BookmarkDto`, `BreakpointInfoDto`, `DebugStateDto`, `ListingInfo`, `ListingRow` 정의
+- `src-tauri/src/state.rs`: `InnerState` (loaded_binary, renamed_functions, comments, bookmarks, debug_state)
+- `src-tauri/src/lib.rs`: 전체 커맨드 핸들러 등록
+- `src/App.tsx`: 애플리케이션 루트 — 탭 관리, 내비게이션 히스토리, 키보드 단축키, Drag & Drop 오픈, 전체 상태 조율
+- `src/App.css`: VSCode 스타일 다크 테마 (`--bg-primary`, `--accent`, `--border-color` 등), 모든 컴포넌트 레이아웃
+- `src/components/ActivityBar.tsx`: Explorer / Search / Debug / Settings 4-뷰 아이콘 바
+- `src/components/BottomPanel.tsx`: Console / Strings / Hex / Imports / Bookmarks / Xrefs / Search / CFG / Debug / StrXrefs 10개 탭
+- `src/components/EditorTabs.tsx`: 멀티 탭 에디터 (decompile + listing)
+- `src/components/Sidebar.tsx`: 컨텍스트 사이드바 컨테이너
+- `src/components/StatusBar.tsx`: 바이너리 메타 정보 표시
+- `src/panels/AssemblyView.tsx`: 어셈블리 뷰 패널
+- `src/panels/DecompileView.tsx`: 디컴파일 코드 패널
+- `src/panels/FunctionsList.tsx`: 함수 목록 (카테고리 필터, 검색)
+- `src/types/index.ts`: 모든 TypeScript DTO 타입 정의
+- `Cargo.toml`: fission-tauri workspace 멤버 추가
+- `README.md`: Tauri GUI 빌드/실행 가이드 추가
+
+**주요 기능**
+
+- 프로젝트 저장/로드 (`.fprj` JSON — 주석·이름 변경·북마크 보존)
+- 함수 이름 변경, 주소 주석, 북마크
+- Ctrl+O 파일 열기, Alt+←/→ 내비게이션, G/N/; 단축키
+- Listing 가상 스크롤 (IntersectionObserver 기반 지연 청크 로딩)
+- CFG SVG 렌더링
+- 디버거 UI (Windows 전용 백엔드 연동)
+
+---
+
 ### Windows/MSVC Build Compatibility & Tauri Integration (2026-02-20)
 
 **🔧 Windows (MSVC) 빌드 호환성 확보**

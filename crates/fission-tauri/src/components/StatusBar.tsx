@@ -1,33 +1,24 @@
 import type { BinaryInfo } from "../types";
 
-interface Props {
+interface StatusBarProps {
     binaryInfo: BinaryInfo | null;
     functionCount: number;
 }
 
-export default function StatusBar({ binaryInfo, functionCount }: Props) {
+export default function StatusBar({ binaryInfo, functionCount }: StatusBarProps) {
     return (
         <div className="status-bar">
-            <div className="status-bar__section">
-                🔬 Fission
-            </div>
-            {binaryInfo && (
+            {binaryInfo ? (
                 <>
-                    <div className="status-bar__section">
-                        {binaryInfo.format} / {binaryInfo.arch}
-                    </div>
-                    <div className="status-bar__section">
-                        Functions: {functionCount}
-                    </div>
-                    <div className="status-bar__section">
-                        Entry: {binaryInfo.entry_point}
-                    </div>
+                    <span className="status-bar__item">📄 {binaryInfo.name}</span>
+                    <span className="status-bar__item">{binaryInfo.format} · {binaryInfo.arch}</span>
+                    <span className="status-bar__item">Entry: {binaryInfo.entry_point}</span>
+                    <span className="status-bar__item">Functions: {functionCount}</span>
+                    <span className="status-bar__item">Sections: {binaryInfo.section_count}</span>
                 </>
+            ) : (
+                <span className="status-bar__item">No binary loaded</span>
             )}
-            <div className="status-bar__spacer" />
-            <div className="status-bar__section">
-                Phase 1
-            </div>
         </div>
     );
 }

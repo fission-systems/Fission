@@ -285,11 +285,11 @@ Fission supports optional features that can be enabled/disabled at compile time:
 # Default build (GUI + CLI)
 cargo build --release
 
-# CLI only (smaller binary, no GUI dependencies)
-cargo build --release --no-default-features --features cli
+# CLI only (smaller binary, no GUI dependencies; builds fission_cli)
+cargo build --release --bin fission_cli --no-default-features --features cli
 
-# GUI only
-cargo build --release --no-default-features --features gui
+# GUI (default fission binary requires both gui and cli)
+cargo build --release
 
 # With terminal UI
 cargo build --release --features "tui,native_decomp"
@@ -557,11 +557,10 @@ max_log_entries = 1000       # Console history limit
 ### Decompiler Settings
 
 ```rust
-// Settings in src/core/config.rs
+// Settings in fission-core crate: crates/fission-core/src/core/config.rs
 
 DecompilerConfig {
-    mode: DecompilerMode::Pool,   // Single (memory efficient) or Pool (parallel)
-    num_workers: 0,               // 0 = auto (CPU cores, max 8)
+    num_workers: 1,               // 1 = single FFI process; 0 = auto (CPU cores, capped by max_workers)
     max_workers: 8,               // Cap on auto-detected workers
     default_function_size: 4096,  // 4KB default function size
     max_function_size: 65536,     // 64KB max function size
@@ -569,11 +568,11 @@ DecompilerConfig {
     timeout_ms: 30000,            // 30 second timeout
     enable_prefetch: true,        // Pre-decompile adjacent functions
     prefetch_count: 3,            // Number of functions to prefetch
-    requests_before_restart: 500, // Restart subprocess to reclaim memory
+    sla_dir: String::new(),       // Override Sleigh dir; empty = auto from FISSION_SLA_DIR or ghidra_decompiler/languages
 }
 
 AnalysisConfig {
-    max_string_search_size: 262144, // 256KB for string extraction
+    max_string_search_size: 2097152, // 2MB for string extraction
     min_string_length: 4,           // Minimum 4 bytes for strings
     auto_xref_analysis: true,       // Auto cross-reference on load
     decompile_cache_size: 100,      // LRU cache entries
@@ -871,7 +870,8 @@ Fission/
 │
 ├── ghidra_decompiler/         # Native C++ decompiler
 │   ├── CMakeLists.txt         # CMake build configuration
-│   ├── src/                   # C++ source files
+│   ├── decompile/             # Upstream Ghidra decompiler core (do not modify)
+│   ├── src/                   # Fission integration and wrappers
 │   └── languages/             # Sleigh (.sla/.sinc) instruction definitions
 │
 ├── crates/                    # Rust workspace crates
@@ -881,7 +881,7 @@ Fission/
 │   ├── fission-pcode/         # P-code IR and optimizer
 │   ├── fission-signatures/    # API/signature databases
 │   ├── fission-ffi/           # Native decompiler FFI boundary
-│   ├── fission-analysis/      # Analysis logic (CFG/xref/debug/plugin)
+│   ├── fission-analysis/      # Analysis logic (CFG/xref/debug/plugin); benches in benches/
 │   ├── fission-ui/            # egui-based GUI
 │   ├── fission-cli/           # CLI entrypoints and REPL
 │   └── fission-tauri/         # Tauri desktop app (optional)
@@ -891,9 +891,6 @@ Fission/
 │   ├── decompiler_tests.rs
 │   ├── loader_tests.rs
 │   └── advanced_tests.rs
-│
-├── benches/                   # Performance benchmarks
-│   └── benchmark.rs
 │
 ├── scripts/                   # Build utilities and scripts
 │   └── build_decompiler.sh

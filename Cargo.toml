@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/fission-core",
+    "crates/fission-disasm",
     "crates/fission-loader",
     "crates/fission-pcode",
     "crates/fission-signatures",

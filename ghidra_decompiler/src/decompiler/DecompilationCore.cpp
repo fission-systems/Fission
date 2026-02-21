@@ -163,21 +163,42 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     try {
         ctx->memory_image->loadFill(&test_byte, 1, start_addr);
         fission::utils::log_stream() << "[DecompilerCore] Successfully read first byte at 0x" << std::hex << addr << ": 0x" << (int)test_byte << std::dec << std::endl;
+        // If first byte is 0x00, the address is likely not mapped properly
+        if (test_byte == 0x00) {
+            fission::utils::log_stream() << "[DecompilerCore] WARNING: First byte is 0x00 at 0x" << std::hex << addr << std::dec << ", address may be unmapped" << std::endl;
+        }
     } catch (const std::exception& e) {
         fission::utils::log_stream() << "[DecompilerCore] ERROR: Cannot read memory at 0x" << std::hex << addr << std::dec << ": " << e.what() << std::endl;
+        return "// Error: Cannot read memory at address 0x" + ([&]() {
+            std::ostringstream s; s << std::hex << addr; return s.str();
+        })() + "\n// " + e.what() + "\n";
     }
     
     // CRITICAL: Follow control flow to discover instructions
     // Higher range (32KB) to handle large functions. 
     // Ghidra's followFlow will stop at returns anyway.
     ghidra::Address end_addr = start_addr + 0x8000;
+    bool follow_flow_ok = false;
     try {
         fd->followFlow(start_addr, end_addr);
         fission::utils::log_stream() << "[DecompilerCore] Control flow analysis complete" << std::endl;
+        follow_flow_ok = true;
     } catch (const std::exception& e) {
         fission::utils::log_stream() << "[DecompilerCore] ERROR in followFlow: " << e.what() << std::endl;
     } catch (...) {
         fission::utils::log_stream() << "[DecompilerCore] ERROR: Unknown exception in followFlow" << std::endl;
+    }
+
+    // If control flow analysis failed, do NOT proceed to decompilation
+    // (action->perform on empty function data causes hangs)
+    if (!follow_flow_ok) {
+        std::ostringstream err;
+        err << "// Decompilation failed: control flow analysis error\n"
+            << "// Function: " << fd->getName() << "\n"
+            << "// Address: 0x" << std::hex << addr << "\n"
+            << "// The function at this address could not be analyzed.\n"
+            << "// Possible causes: unmapped memory, invalid entry point, or corrupted code.\n";
+        return err.str();
     }
 
     // TAIL-CALL OVERRIDE REMOVED: It was causing recursive stubs for correctly followed functions.

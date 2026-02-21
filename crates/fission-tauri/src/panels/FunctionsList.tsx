@@ -1,12 +1,18 @@
 import { useState, useMemo } from "react";
 import type { FunctionDto } from "../types";
 
-interface Props {
+type CategoryFilter = "all" | "import" | "export" | "internal";
+
+interface FunctionsListProps {
     functions: FunctionDto[];
     loading: boolean;
     onFunctionClick: (func: FunctionDto) => void;
     onOpenFile: () => void;
     selectedAddress: string | null;
+    onAnalyze?: () => void;
+    onDeepScan?: () => void;
+    analyzing?: boolean;
+    deepScanning?: boolean;
 }
 
 export default function FunctionsList({
@@ -15,69 +21,116 @@ export default function FunctionsList({
     onFunctionClick,
     onOpenFile,
     selectedAddress,
-}: Props) {
+    onAnalyze,
+    onDeepScan,
+    analyzing = false,
+    deepScanning = false,
+}: FunctionsListProps) {
     const [filter, setFilter] = useState("");
+    const [category, setCategory] = useState<CategoryFilter>("all");
+
+    const counts = useMemo(() => ({
+        all: functions.length,
+        import: functions.filter((f) => f.category === "import").length,
+        export: functions.filter((f) => f.category === "export").length,
+        internal: functions.filter((f) => f.category === "internal").length,
+    }), [functions]);
 
     const filtered = useMemo(() => {
-        if (!filter) return functions;
-        const lower = filter.toLowerCase();
-        return functions.filter(
-            (f) =>
-                f.name.toLowerCase().includes(lower) ||
-                f.address.toLowerCase().includes(lower),
-        );
-    }, [functions, filter]);
+        let list = functions;
+        if (category !== "all") list = list.filter((f) => f.category === category);
+        if (filter) {
+            const lc = filter.toLowerCase();
+            list = list.filter(
+                (f) =>
+                    f.name.toLowerCase().includes(lc) ||
+                    f.address.toLowerCase().includes(lc),
+            );
+        }
+        return list;
+    }, [functions, filter, category]);
 
-    if (loading) {
+    if (functions.length === 0 && !loading) {
         return (
-            <div className="loading">
-                <div className="spinner" />
-                Loading...
-            </div>
-        );
-    }
-
-    if (functions.length === 0) {
-        return (
-            <div className="empty-state">
-                <div>No binary loaded</div>
-                <button className="welcome__action" onClick={onOpenFile} style={{ fontSize: 12, padding: "4px 16px" }}>
-                    Open File
-                </button>
+            <div className="functions-list">
+                <div className="functions-list__open-btn" onClick={onOpenFile}>
+                    📂 Open Binary File
+                </div>
             </div>
         );
     }
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-            <div className="function-list__search">
+        <div className="functions-list">
+            {/* Analyse toolbar */}
+            {functions.length > 0 && (
+                <div className="functions-list__toolbar">
+                    <button
+                        className="functions-list__tool-btn"
+                        title="Analyze: discover internal functions via CALL targets"
+                        onClick={onAnalyze}
+                        disabled={analyzing || deepScanning}
+                    >
+                        {analyzing ? "…" : "🔍"} Analyze
+                    </button>
+                    <button
+                        className="functions-list__tool-btn"
+                        title="Deep Scan: discover functions via prologue pattern matching"
+                        onClick={onDeepScan}
+                        disabled={analyzing || deepScanning}
+                    >
+                        {deepScanning ? "…" : "🕵"} Deep Scan
+                    </button>
+                </div>
+            )}
+
+            {/* Category filter */}
+            {functions.length > 0 && (
+                <div className="functions-list__cats">
+                    {(["all", "import", "export", "internal"] as CategoryFilter[]).map((cat) => (
+                        <button
+                            key={cat}
+                            className={`functions-list__cat-btn ${category === cat ? "functions-list__cat-btn--active" : ""}`}
+                            onClick={() => setCategory(cat)}
+                        >
+                            {cat === "all" ? "All" : cat === "import" ? "Imp" : cat === "export" ? "Exp" : "Int"}
+                            <span className="functions-list__cat-count">{counts[cat]}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+
+            {/* Search */}
+            <div className="functions-list__search">
                 <input
                     type="text"
-                    placeholder="Filter functions... (name or address)"
+                    placeholder="Filter functions..."
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
+                    spellCheck={false}
                 />
             </div>
 
-            <div className="function-list__items">
-                {filtered.map((func) => (
+            <div className="functions-list__items">
+                {loading && <div style={{ padding: 12, color: "var(--text-muted)" }}>Loading...</div>}
+                {filtered.map((f) => (
                     <div
-                        key={func.address}
-                        className={`function-list__item ${func.address === selectedAddress ? "function-list__item--selected" : ""}`}
-                        onClick={() => onFunctionClick(func)}
+                        key={f.address}
+                        className={`functions-list__item ${selectedAddress === f.address ? "functions-list__item--selected" : ""}`}
+                        onClick={() => onFunctionClick(f)}
                     >
-                        <span className="function-list__addr">{func.address}</span>
-                        <span className="function-list__name">{func.name}</span>
-                        {func.size > 0 && <span className="function-list__size">{func.size}B</span>}
+                        <span className="functions-list__item-addr">{f.address}</span>
+                        <span className="functions-list__item-name">{f.name}</span>
+                        {f.category === "import" && (
+                            <span className="functions-list__item-badge functions-list__item-badge--import">IMP</span>
+                        )}
+                        {f.category === "export" && (
+                            <span className="functions-list__item-badge functions-list__item-badge--export">EXP</span>
+                        )}
                     </div>
                 ))}
-            </div>
-
-            <div className="function-list__count">
-                {filtered.length === functions.length
-                    ? `${functions.length} functions`
-                    : `${filtered.length} / ${functions.length} functions`}
             </div>
         </div>
     );
 }
+

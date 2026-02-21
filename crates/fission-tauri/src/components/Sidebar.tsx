@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
-interface Props {
+interface SidebarProps {
     title: string;
     children: ReactNode;
 }
 
-export default function Sidebar({ title, children }: Props) {
+export default function Sidebar({ title, children }: SidebarProps) {
     return (
         <div className="sidebar">
             <div className="sidebar__header">{title}</div>

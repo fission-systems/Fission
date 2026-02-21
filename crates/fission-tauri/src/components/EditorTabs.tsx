@@ -1,38 +1,76 @@
 import type { EditorTab } from "../types";
 
-interface Props {
+interface EditorTabsProps {
     tabs: EditorTab[];
     activeTabId: string | null;
     onTabClick: (id: string) => void;
     onTabClose: (id: string) => void;
+    canGoBack: boolean;
+    canGoForward: boolean;
+    onGoBack: () => void;
+    onGoForward: () => void;
 }
 
-export default function EditorTabs({ tabs, activeTabId, onTabClick, onTabClose }: Props) {
-    if (tabs.length === 0) return <div className="editor-tabs" />;
+function tabIcon(type: EditorTab["type"]): string {
+    switch (type) {
+        case "decompile": return "{ }";
+        case "assembly": return "≡";
+        case "listing": return "☰";
+        case "hexview": return "⬡";
+    }
+}
 
+export default function EditorTabs({
+    tabs,
+    activeTabId,
+    onTabClick,
+    onTabClose,
+    canGoBack,
+    canGoForward,
+    onGoBack,
+    onGoForward,
+}: EditorTabsProps) {
     return (
         <div className="editor-tabs">
-            {tabs.map((tab) => (
-                <div
-                    key={tab.id}
-                    className={`editor-tab ${tab.id === activeTabId ? "editor-tab--active" : ""}`}
-                    onClick={() => onTabClick(tab.id)}
+            <div className="editor-tabs__nav">
+                <button
+                    className="editor-tabs__nav-btn"
+                    disabled={!canGoBack}
+                    onClick={onGoBack}
+                    title="Go Back (Alt+←)"
                 >
-                    <span className="editor-tab__icon">
-                        {tab.type === "decompile" ? "{ }" : "⚙"}
-                    </span>
-                    <span>{tab.title}</span>
-                    <span
-                        className="editor-tab__close"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onTabClose(tab.id);
-                        }}
+                    ◀
+                </button>
+                <button
+                    className="editor-tabs__nav-btn"
+                    disabled={!canGoForward}
+                    onClick={onGoForward}
+                    title="Go Forward (Alt+→)"
+                >
+                    ▶
+                </button>
+            </div>
+            <div className="editor-tabs__list">
+                {tabs.map((tab) => (
+                    <div
+                        key={tab.id}
+                        className={`editor-tab ${activeTabId === tab.id ? "editor-tab--active" : ""}`}
+                        onClick={() => onTabClick(tab.id)}
                     >
-                        ×
-                    </span>
-                </div>
-            ))}
+                        <span className="editor-tab__icon">{tabIcon(tab.type)}</span>
+                        <span className="editor-tab__title">{tab.title}</span>
+                        <button
+                            className="editor-tab__close"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onTabClose(tab.id);
+                            }}
+                        >
+                            ×
+                        </button>
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }
