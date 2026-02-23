@@ -1,5 +1,8 @@
 # Fission - Feature Documentation
 
+> ℹ️ **Note:** 상위 수준 기능 개요와 최신 상태는 루트 `README.md`를 기준으로 합니다.  
+> 이 문서는 세부 기능/서브시스템(분석 모듈, GUI 세부 기능 등)을 좀 더 자세히 설명하는 **보조 문서**입니다.
+
 ## 🎯 Overview
 
 Fission is a next-generation decompiler and reverse engineering platform.

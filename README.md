@@ -596,57 +596,10 @@ UiConfig {
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                         Fission (Rust)                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
-│  │  GUI (egui)  │  │  CLI (repl)  │  │   Plugin Manager       │  │
-│  └──────┬───────┘  └──────┬───────┘  └───────────┬────────────┘  │
-│         │                 │                      │               │
-│         └─────────────────┴──────────────────────┘               │
-│                           │                                       │
-│  ┌────────────────────────┴────────────────────────────────────┐ │
-│  │                    Analysis Core                             │ │
-│  │  ┌─────────┐  ┌──────────┐  ┌─────────┐  ┌───────────────┐  │ │
-│  │  │ Loader  │  │ Disasm   │  │ Decomp  │  │ Debug Engine  │  │ │
-│  │  │ PE/ELF  │  │ iced-x86 │  │  FFI    │  │ Win32/ptrace  │  │ │
-│  │  └─────────┘  └──────────┘  └────┬────┘  └───────────────┘  │ │
-│  └──────────────────────────────────┼──────────────────────────┘ │
-└─────────────────────────────────────┼────────────────────────────┘
-                                      │ Direct FFI (zero-copy)
-              ┌───────────────────────┴───────────────────────┐
-              │          Ghidra Engine (C++)                  │
-              │  SleighArch → Funcdata → Pcode Optimizer →   │
-              │  → PrintC → C Code (via CXX bridge)          │
-              └───────────────────────────────────────────────┘
-```
+For a complete architectural overview and up‑to‑date diagrams, see:
 
-### Component Overview
-
-| Component | Description |
-|-----------|-------------|
-| **GUI (egui)** | Immediate-mode GUI with VS Code-inspired layout |
-| **CLI (reedline)** | Interactive REPL with command history and completion |
-| **Plugin Manager** | Loads and manages native Rust plugins |
-| **Loader** | Parses PE, ELF, and Mach-O binary formats |
-| **Disasm** | x86/x64 disassembly using iced-x86 |
-| **Decomp FFI** | Direct C++ integration via CXX bridge (zero IPC overhead) |
-| **Pcode Optimizer** | 32+ optimization rules with def-use tracking and NZMask analysis |
-| **Debug Engine** | Platform-specific debugging (Win32/ptrace) |
-| **Ghidra Engine** | Native C++ decompiler with optimized Pcode IR |
-
-### Decompilation Pipeline
-
-```
-Binary → SleighArch → Raw Pcode → Optimizer (32+ rules) → Optimized Pcode
-  ↓                                    ↓
-Entry        Phase 1: Constant folding, algebraic simplification
-Point        Phase 2: Def-use tracking, NZMask, shift-bitops, AND-mask
-  ↓                                    ↓
-Funcdata ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ↓
-  ↓
-PrintC → C Code (optimized, with type info)
-```
+- `docs/architecture/ARCHITECTURE.md` — high‑level components and data flow
+- `docs/RUST_CPP_BRIDGE.md` — Rust ↔ C++ FFI boundary and responsibilities
 
 ---
 
@@ -876,15 +829,25 @@ Fission/
 │
 ├── crates/                    # Rust workspace crates
 │   ├── fission-core/          # Shared configuration, errors, utilities
-│   ├── fission-loader/         # Binary parsing (PE/ELF/Mach-O)
+│   ├── fission-loader/        # Binary parsing (PE/ELF/Mach-O)
 │   ├── fission-disasm/        # Disassembly abstraction (iced-x86)
 │   ├── fission-pcode/         # P-code IR and optimizer
 │   ├── fission-signatures/    # API/signature databases
 │   ├── fission-ffi/           # Native decompiler FFI boundary
 │   ├── fission-analysis/      # Analysis logic (CFG/xref/debug/plugin); benches in benches/
-│   ├── fission-ui/            # egui-based GUI
+│   ├── fission-ui/            # GUI shared layer (Tauri + egui backend)
 │   ├── fission-cli/           # CLI entrypoints and REPL
-│   └── fission-tauri/         # Tauri desktop app (optional)
+│   └── fission-tauri/         # Tauri desktop app
+│       ├── src/               #   React/TypeScript frontend
+│       └── src-tauri/         #   ← Cargo workspace member (Rust build root)
+│           ├── Cargo.toml     #     registered in root Cargo.toml as workspace member
+│           └── src/           #     Tauri commands, state, event handlers
+│
+├── utils/                     # Shared data assets (not a Rust crate)
+│   └── signatures/            # Type/API signature databases (DIE rules, FID, etc.)
+│                              # ⚠  Some crates reference these via root-relative paths
+│                              #    (e.g. "../../utils/signatures/…") — always build
+│                              #    from the repository root so these paths resolve.
 │
 ├── tests/                     # Integration tests
 │   ├── cli_tests.rs
@@ -956,24 +919,12 @@ The following items are either not fully implemented yet or need explicit verifi
 
 ## Roadmap
 
-### Ultimate Goal: Project Restoration
+The high‑level roadmap (decompiler quality, Tauri GUI migration, debugging, FFI sync 등)는 다음 문서를 기준으로 관리합니다.
 
-> Transform binaries back into original source projects. Even with different variable names and ordering, if functionality is identical, the programs are equivalent.
+- `docs/ROADMAP.md`
 
-### Three AI Agents (Future)
-
-| Agent | Role | Technology |
-|-------|------|------------|
-| **Observer** | Static Analysis | Decompilation, type inference, data flow, pattern recognition |
-| **Executor** | Dynamic Analysis | Runtime tracing, memory snapshots, I/O monitoring, coverage |
-| **Author** | Code Generation | Inference-verification-correction loop, test generation, build verification |
-
-### Planned Phases
-
-1. **AI Integration** - LLM API connection (OpenAI, Claude, Local models)
-2. **Dynamic Analysis AI** - Execution trace analysis and I/O pattern detection
-3. **Code Generation** - AI-powered source code reconstruction
-4. **Full Restoration** - Complete project recovery including build systems
+이 문서에는 장기적인 비전과 아이디어(예: AI 보조 분석/코드 복원)도 포함되어 있으며,  
+실제 구현 우선순위는 위 로드맵 문서를 우선 참조하는 것을 권장합니다.
 
 ---
 

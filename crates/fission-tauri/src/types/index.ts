@@ -100,10 +100,24 @@ export interface EditorTab {
 }
 
 // Activity bar item
-export type ActivityView = "explorer" | "search" | "debug" | "settings";
+export type ActivityView = "explorer" | "search" | "debug" | "settings" | "plugins";
 
 // Bottom panel tab
-export type BottomTab = "console" | "strings" | "hex" | "imports" | "exports" | "bookmarks" | "xrefs" | "search" | "cfg" | "debug" | "string-xrefs" | "patches" | "notes";
+export type BottomTab = "console" | "strings" | "hex" | "imports" | "exports" | "bookmarks" | "xrefs" | "search" | "cfg" | "debug" | "string-xrefs" | "patches" | "notes" | "timeline";
+
+// Plugin type
+export type PluginType = "native" | "unknown";
+
+// Plugin metadata
+export interface PluginInfoDto {
+    id: string;
+    name: string;
+    version: string;
+    author: string;
+    description: string;
+    plugin_type: PluginType;
+    enabled: boolean;
+}
 
 // Export table entry (PE exports, ELF/Mach-O functions flagged as export)
 export interface ExportDto {
@@ -163,6 +177,12 @@ export interface CfgDto {
     function_address: string;
     nodes: CfgNode[];
     edges: CfgEdge[];
+    /** Number of basic blocks */
+    block_count: number;
+    /** Number of CFG edges */
+    edge_count: number;
+    /** McCabe cyclomatic complexity V(G) = E – N + 2 */
+    cyclomatic_complexity: number;
 }
 
 export interface ListingRow {
@@ -180,6 +200,20 @@ export interface ListingInfo {
     first_addr: string;
     last_addr: string;
     total_exec_bytes: number;
+}
+
+// ──────────────────────────────────────────────── Function Identification ──────
+
+export interface FidMatchDto {
+    address: string;
+    name: string;
+    previous_name: string;
+}
+
+export interface FidResultDto {
+    matched: number;
+    total_scanned: number;
+    matches: FidMatchDto[];
 }
 
 // ──────────────────────────────────────────────────────────────── Debug ──────
@@ -211,4 +245,24 @@ export interface DebugStateDto {
     registers: RegisterStateDto | null;
     last_event: string | null;
     events: string[];
+}
+
+// ──────────────────────────────────────────────────────── TTD (Time Travel) ──
+
+export interface TtdSnapshotDto {
+    step: number;
+    thread_id: number;
+    rip: string;
+    rax: number; rbx: number; rcx: number; rdx: number;
+    rsp: number; rbp: number; rsi: number; rdi: number;
+    rflags: number;
+}
+
+export interface TtdStateDto {
+    is_recording: boolean;
+    snapshot_count: number;
+    /** [min_step, max_step] or null when no snapshots */
+    step_range: [number, number] | null;
+    current_step: number | null;
+    current_snapshot: TtdSnapshotDto | null;
 }

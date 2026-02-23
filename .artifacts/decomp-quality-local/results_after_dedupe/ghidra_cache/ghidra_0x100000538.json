@@ -1,0 +1,6 @@
+{
+  "name": "cpp_add",
+  "address": "0x100000538",
+  "code": "\n/* WARNING: Unknown calling convention */\n\nint cpp_add(int a,int b)\n\n{\n  int in_w0;\n  int in_w1;\n  \n  return in_w0 + in_w1;\n}\n\n",
+  "asm": "  0x100000538      sub      sp, sp, #0x10\n  0x10000053C      str      w0, [sp, #0xc]\n  0x100000540      str      w1, [sp, #0x8]\n  0x100000544      ldr      w8, [sp, #0xc]\n  0x100000548      ldr      w9, [sp, #0x8]\n  0x10000054C      add      w0, w8, w9\n  0x100000550      add      sp, sp, #0x10\n  0x100000554      ret      \n"
+}

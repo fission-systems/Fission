@@ -1,5 +1,6 @@
 //! Application state and logic
 
+use fission_core::find_sla_dir;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use ratatui::widgets::ListState;
 
@@ -282,11 +283,7 @@ impl App {
 
         // Initialize decompiler if needed
         if self.decompiler.is_none() {
-            let sla_dir = std::env::current_dir()
-                .unwrap()
-                .join("ghidra_decompiler")
-                .to_string_lossy()
-                .into_owned();
+            let sla_dir = find_sla_dir();
 
             match DecompilerNative::new(&sla_dir) {
                 Ok(mut decomp) => {

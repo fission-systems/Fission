@@ -55,9 +55,8 @@ impl PluginManager {
 
         // Determine plugin type from extension
         let plugin_type = match path.extension().and_then(|e| e.to_str()) {
-            Some("py") => PluginType::Python,
-            Some("lua") => PluginType::Lua,
             Some("so") | Some("dll") | Some("dylib") => PluginType::Native,
+            Some(ext) => return Err(format!("Unsupported plugin type: .{ext}")),
             _ => return Err("Unknown plugin type".into()),
         };
 
@@ -73,29 +72,14 @@ impl PluginManager {
             return Err(format!("Plugin '{}' already loaded", plugin_id));
         }
 
-        let info = if plugin_type == PluginType::Python {
-            #[cfg(feature = "python")]
-            {
-                // Load into Python runtime
-                self.python_runtime
-                    .load_plugin(path, &plugin_id)
-                    .map_err(|e| format!("Python load error: {}", e))?
-            }
-            #[cfg(not(feature = "python"))]
-            {
-                return Err("Python support disabled".into());
-            }
-        } else {
-            // Create basic plugin info for other types
-            PluginInfo {
-                id: plugin_id.clone(),
-                name: plugin_id.clone(),
-                version: "0.1.0".into(),
-                author: "Unknown".into(),
-                description: format!("Loaded from {:?}", path),
-                plugin_type,
-                enabled: true,
-            }
+        let info = PluginInfo {
+            id: plugin_id.clone(),
+            name: plugin_id.clone(),
+            version: "0.1.0".into(),
+            author: "Unknown".into(),
+            description: format!("Loaded from {:?}", path),
+            plugin_type,
+            enabled: true,
         };
 
         // Create loaded plugin entry

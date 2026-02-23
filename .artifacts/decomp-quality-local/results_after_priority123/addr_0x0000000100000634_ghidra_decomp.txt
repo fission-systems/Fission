@@ -1,0 +1,17 @@
+/* WARNING: Variable defined which should be unmapped: id_local */
+/* WARNING: Variable defined which should be unmapped: item_local */
+
+void cpp_init_item(Item *item,int id,char *name,double value)
+
+{
+  int id_local;
+  Item *item_local;
+  
+  if (item != (Item *)0x0) {
+    item->id = id;
+    _strncpy(item->name,name,0x1f);
+    item->name[0x1f] = '\0';
+    item->value = value;
+  }
+  return;
+}

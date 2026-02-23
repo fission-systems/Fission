@@ -2,6 +2,7 @@
 
 mod commands;
 mod dto;
+pub(crate) mod error;
 mod state;
 
 use state::AppState;
@@ -60,6 +61,29 @@ pub fn run() {
             // Phase 6: Analyze / Deep Scan
             commands::analyze_functions,
             commands::deep_scan_functions,
+            // Plugin system
+            commands::load_plugin,
+            commands::unload_plugin,
+            commands::list_plugins,
+            commands::enable_plugin,
+            commands::disable_plugin,
+            // Snapshot
+            commands::save_snapshot,
+            commands::load_snapshot,
+            // System utilities
+            commands::get_git_branch,
+            // Phase 3: Function Identification (FID)
+            commands::run_fid,
+            // Phase 8: Analysis JSON Export
+            commands::export_analysis_json,
+            // Phase 4: Debug Memory Dump
+            commands::debug_read_memory,
+            // Phase 5: TTD (Time Travel Debugging)
+            commands::ttd_start,
+            commands::ttd_stop,
+            commands::ttd_status,
+            commands::ttd_seek,
+            commands::ttd_step,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

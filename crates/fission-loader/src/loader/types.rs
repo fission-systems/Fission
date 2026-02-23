@@ -529,6 +529,16 @@ impl LoadedBinary {
         self.sections.iter().filter(|s| s.is_executable).collect()
     }
 
+    /// Iterate over imported functions.
+    pub fn imports(&self) -> impl Iterator<Item = &FunctionInfo> {
+        self.functions.iter().filter(|f| f.is_import)
+    }
+
+    /// Iterate over exported functions.
+    pub fn exports(&self) -> impl Iterator<Item = &FunctionInfo> {
+        self.functions.iter().filter(|f| f.is_export)
+    }
+
     /// Get functions sorted by address
     ///
     /// Performance: Returns references to already-sorted functions when possible.

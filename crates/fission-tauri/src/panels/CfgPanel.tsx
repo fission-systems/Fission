@@ -84,6 +84,53 @@ export default function CfgPanel({ address, binaryLoaded, onLog }: CfgPanelProps
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const panelRef = useRef<HTMLDivElement>(null);
+    const canvasRef = useRef<HTMLDivElement>(null);
+
+    // Pan/zoom transform state
+    const [scale, setScale] = useState(1.0);
+    const [tx, setTx] = useState(0);
+    const [ty, setTy] = useState(0);
+    const dragRef = useRef<{ startX: number; startY: number; startTx: number; startTy: number } | null>(null);
+
+    // Reset transform when a new function is loaded
+    const resetTransform = useCallback(() => {
+        setScale(1.0);
+        setTx(0);
+        setTy(0);
+    }, []);
+
+    const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+        setScale((s) => {
+            const newScale = Math.min(5.0, Math.max(0.15, s * factor));
+            const sd = newScale / s;
+            setTx((t) => mouseX - sd * (mouseX - t));
+            setTy((t) => mouseY - sd * (mouseY - t));
+            return newScale;
+        });
+    }, []);
+
+    const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (e.button !== 0) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        dragRef.current = { startX: e.clientX, startY: e.clientY, startTx: tx, startTy: ty };
+    }, [tx, ty]);
+
+    const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+        if (!dragRef.current) return;
+        const dx = e.clientX - dragRef.current.startX;
+        const dy = e.clientY - dragRef.current.startY;
+        setTx(dragRef.current.startTx + dx);
+        setTy(dragRef.current.startTy + dy);
+    }, []);
+
+    const handlePointerUp = useCallback(() => {
+        dragRef.current = null;
+    }, []);
 
     const fetchCfg = useCallback(
         async (addr: string) => {
@@ -107,12 +154,13 @@ export default function CfgPanel({ address, binaryLoaded, onLog }: CfgPanelProps
 
     useEffect(() => {
         if (address && binaryLoaded) {
+            resetTransform();
             fetchCfg(address);
         } else {
             setCfg(null);
             setError(null);
         }
-    }, [address, binaryLoaded, fetchCfg]);
+    }, [address, binaryLoaded, fetchCfg, resetTransform]);
 
     const handleExportDot = useCallback(async () => {
         if (!address || !cfg) return;
@@ -171,8 +219,25 @@ export default function CfgPanel({ address, binaryLoaded, onLog }: CfgPanelProps
             <div className="cfg-panel__toolbar">
                 <span className="cfg-panel__fn-name">{cfg.function_name}</span>
                 <span className="cfg-panel__meta">
-                    {cfg.nodes.length}&nbsp;blocks · {cfg.edges.length}&nbsp;edges
+                    {cfg.block_count}&nbsp;blocks · {cfg.edge_count}&nbsp;edges · V(G)={cfg.cyclomatic_complexity}
                 </span>
+                <div className="cfg-panel__zoom-controls">
+                    <button
+                        className="cfg-panel__btn cfg-panel__btn--icon"
+                        onClick={() => setScale((s) => Math.min(5.0, s * 1.2))}
+                        title="Zoom in"
+                    >＋</button>
+                    <button
+                        className="cfg-panel__btn cfg-panel__btn--icon cfg-panel__zoom-level"
+                        onClick={resetTransform}
+                        title="Reset zoom"
+                    >{Math.round(scale * 100)}%</button>
+                    <button
+                        className="cfg-panel__btn cfg-panel__btn--icon"
+                        onClick={() => setScale((s) => Math.max(0.15, s / 1.2))}
+                        title="Zoom out"
+                    >－</button>
+                </div>
                 <button
                     className="cfg-panel__btn"
                     onClick={() => fetchCfg(address)}
@@ -189,8 +254,24 @@ export default function CfgPanel({ address, binaryLoaded, onLog }: CfgPanelProps
                 </button>
             </div>
 
-            {/* SVG canvas */}
-            <div className="cfg-panel__canvas">
+            {/* SVG canvas — supports drag-to-pan and wheel-to-zoom */}
+            <div
+                ref={canvasRef}
+                className="cfg-panel__canvas"
+                onWheel={handleWheel}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerLeave={handlePointerUp}
+                style={{ cursor: dragRef.current ? "grabbing" : "grab" }}
+            >
+                <div
+                    style={{
+                        transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
+                        transformOrigin: "0 0",
+                        willChange: "transform",
+                    }}
+                >
                 <svg
                     width={svgW}
                     height={svgH}
@@ -314,7 +395,8 @@ export default function CfgPanel({ address, binaryLoaded, onLog }: CfgPanelProps
                         );
                     })}
                 </svg>
-            </div>
+                </div>{/* end transform wrapper */}
+            </div>{/* end .cfg-panel__canvas */}
         </div>
     );
 }

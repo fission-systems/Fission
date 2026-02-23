@@ -1,0 +1,23 @@
+{
+  "ghidra": {
+    "count": 0,
+    "avg": 0.0,
+    "median": 0.0,
+    "min": 0.0,
+    "max": 0.0
+  },
+  "fission": {
+    "count": 8,
+    "avg": 0.524,
+    "median": 0.523,
+    "min": 0.516,
+    "max": 0.538
+  },
+  "faster_counts": {
+    "ghidra": 0,
+    "fission": 0,
+    "tie": 0
+  },
+  "average_similarity": 40.52,
+  "total_functions": 8
+}

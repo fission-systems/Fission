@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
-import type { BottomTab, StringDto, ImportDto, BookmarkDto, HexViewData, XrefDto, FunctionDto, PatchRecord } from "../types";
+import type { BottomTab, StringDto, ImportDto, BookmarkDto, HexViewData, XrefDto, FunctionDto, PatchRecord, DebugStateDto } from "../types";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import HexView from "../panels/HexView";
 import SearchPanel from "../panels/SearchPanel";
 import XrefsPanel from "../panels/XrefsPanel";
@@ -10,6 +11,7 @@ import { StringXrefsPanel } from "../panels/StringXrefsPanel";
 import ExportsPanel from "../panels/ExportsPanel";
 import PatchesPanel from "../panels/PatchesPanel";
 import { NotesPanel } from "../panels/NotesPanel";
+import { TimelinePanel } from "../panels/TimelinePanel";
 
 interface BottomPanelProps {
     activeTab: BottomTab;
@@ -45,9 +47,23 @@ interface BottomPanelProps {
     onExportClick?: (address: string) => void;
     /** Note entry clicked — navigate to address */
     onNoteClick?: (address: string) => void;
+    /** Dynamic mode controls Timeline visibility */
+    dynamicMode?: boolean;
+    /** Address click in String XRefs panel — navigate to address */
+    onAddressClick?: (address: string) => void;
+    /** Debug state for Timeline panel */
+    debugState?: DebugStateDto | null;
+    /** Undo last action */
+    onUndo?: () => void;
+    /** Redo last undone action */
+    onRedo?: () => void;
+    /** Exit the application */
+    onExit?: () => void;
+    /** Load a binary by path (from console load command) */
+    onLoadBinary?: (path: string) => void;
 }
 
-const TABS: { id: BottomTab; label: string }[] = [
+const BASE_TABS: { id: BottomTab; label: string }[] = [
     { id: "console", label: "Console" },
     { id: "strings", label: "Strings" },
     { id: "hex", label: "Hex" },
@@ -57,11 +73,23 @@ const TABS: { id: BottomTab; label: string }[] = [
     { id: "xrefs", label: "XRefs" },
     { id: "search", label: "Search" },
     { id: "cfg", label: "CFG" },
-    { id: "debug", label: "Debug" },
     { id: "string-xrefs", label: "StrXRefs" },
     { id: "patches", label: "Patches" },
     { id: "notes", label: "Notes" },
 ];
+
+const DYNAMIC_TABS: { id: BottomTab; label: string }[] = [
+    { id: "debug", label: "Debug" },
+    { id: "timeline", label: "Timeline" },
+];
+
+// Log-line CSS class based on prefix
+function logLineClass(line: string): string {
+    if (line.startsWith("[!") || line.toLowerCase().includes("error")) return "console-line--error";
+    if (line.startsWith("[✓") || line.startsWith("[OK") || line.startsWith("[*")) return "console-line--success";
+    if (line.startsWith(">")) return "console-line--cmd";
+    return "";
+}
 
 export default function BottomPanel({
     activeTab,
@@ -89,6 +117,13 @@ export default function BottomPanel({
     onRevertPatch,
     onExportClick,
     onNoteClick,
+    dynamicMode = false,
+    debugState = null,
+    onAddressClick,
+    onUndo,
+    onRedo,
+    onExit,
+    onLoadBinary,
 }: BottomPanelProps) {
     const [cmdInput, setCmdInput] = useState("");
     const [cmdHistory, setCmdHistory] = useState<string[]>([]);
@@ -105,7 +140,20 @@ export default function BottomPanel({
         const [verb, ...args] = cmd.split(/\s+/);
         switch (verb.toLowerCase()) {
             case "help":
-                onLog("Commands: help | funcs | clear | goto <addr> | rename <addr> <name> | comment <addr> <text>");
+                onLog("Commands:");
+                onLog("  help                         — show this help");
+                onLog("  funcs                        — list loaded functions");
+                onLog("  clear                        — clear console");
+                onLog("  goto <addr>                  — navigate to address");
+                onLog("  rename <addr> <name>         — rename function");
+                onLog("  comment <addr> <text>        — set comment");
+                onLog("  load <path>                  — load binary from path");
+                onLog("  patch <addr> <byte> [bytes]  — patch bytes (hex)");
+                onLog("  plugin load <path>           — load a Rust plugin");
+                onLog("  plugin list                  — list loaded plugins");
+                onLog("  undo                         — undo last action");
+                onLog("  redo                         — redo last undone action");
+                onLog("  exit                         — quit Fission");
                 break;
             case "funcs":
                 if (!functions || functions.length === 0) {
@@ -133,8 +181,8 @@ export default function BottomPanel({
                     try {
                         const addr = parseInt(args[0], 16) || parseInt(args[0]);
                         await invoke("rename_function", { address: addr, newName: args.slice(1).join(" ") });
-                        onLog(`Renamed ${args[0]} -> ${args.slice(1).join(" ")}`);
-                    } catch (e) { onLog(`Error: ${e}`); }
+                        onLog(`[✓] Renamed ${args[0]} → ${args.slice(1).join(" ")}`);
+                    } catch (e) { onLog(`[!] Error: ${e}`); }
                 })();
                 break;
             case "comment":
@@ -143,15 +191,73 @@ export default function BottomPanel({
                     try {
                         const addr = parseInt(args[0], 16) || parseInt(args[0]);
                         await invoke("add_comment", { address: addr, text: args.slice(1).join(" ") });
-                        onLog(`Comment set at ${args[0]}`);
-                    } catch (e) { onLog(`Error: ${e}`); }
+                        onLog(`[✓] Comment set at ${args[0]}`);
+                    } catch (e) { onLog(`[!] Error: ${e}`); }
                 })();
+                break;
+            case "load":
+                if (!args[0]) { onLog("Usage: load <path>"); break; }
+                if (onLoadBinary) {
+                    onLoadBinary(args.join(" "));
+                } else {
+                    onLog("[!] load handler not connected");
+                }
+                break;
+            case "patch":
+                if (!args[0] || !args[1]) { onLog("Usage: patch <address> <hex_byte> [hex_byte...]"); break; }
+                (async () => {
+                    try {
+                        const addr = parseInt(args[0], 16) || parseInt(args[0]);
+                        const bytes = args.slice(1).map((b) => parseInt(b, 16));
+                        if (bytes.some(isNaN)) { onLog("[!] Invalid hex byte(s)"); return; }
+                        await invoke("patch_bytes", { address: addr, bytes });
+                        onLog(`[✓] Patched ${bytes.length} byte(s) at ${args[0]}`);
+                    } catch (e) { onLog(`[!] Error: ${e}`); }
+                })();
+                break;
+            case "plugin":
+                if (args[0] === "load") {
+                    const path = args.slice(1).join(" ");
+                    if (!path) { onLog("Usage: plugin load <path>"); break; }
+                    (async () => {
+                        try {
+                            const info = await invoke<{ name: string; version: string }>("load_plugin", { path });
+                            onLog(`[✓] Plugin loaded: ${info.name} v${info.version}`);
+                        } catch (e) { onLog(`[!] Plugin load failed: ${e}`); }
+                    })();
+                } else if (args[0] === "list") {
+                    (async () => {
+                        try {
+                            const plugins = await invoke<{ id: string; name: string; version: string; enabled: boolean }[]>("list_plugins");
+                            if (plugins.length === 0) { onLog("No plugins loaded."); }
+                            else {
+                                onLog(`${plugins.length} plugin(s):`);
+                                plugins.forEach((p) => onLog(`  ${p.enabled ? "[✓]" : "[ ]"} ${p.name} (${p.id}) v${p.version}`));
+                            }
+                        } catch (e) { onLog(`[!] ${e}`); }
+                    })();
+                } else {
+                    onLog("Usage: plugin load <path> | plugin list");
+                }
+                break;
+            case "undo":
+                if (onUndo) onUndo();
+                else onLog("[!] Undo not available");
+                break;
+            case "redo":
+                if (onRedo) onRedo();
+                else onLog("[!] Redo not available");
+                break;
+            case "exit":
+            case "quit":
+                if (onExit) onExit();
+                else getCurrentWindow().close();
                 break;
             default:
                 onLog(`Unknown command: ${verb}. Type 'help' for a list.`);
         }
         setCmdInput("");
-    }, [functions, onGotoAddress, onLog, onClearConsole]);
+    }, [functions, onGotoAddress, onLog, onClearConsole, onUndo, onRedo, onExit, onLoadBinary]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === "Enter") {
@@ -172,7 +278,7 @@ export default function BottomPanel({
     return (
         <div className="bottom-panel" style={{ height }}>
             <div className="bottom-panel__tabs">
-                {TABS.map((tab) => (
+                {[...BASE_TABS, ...(dynamicMode ? DYNAMIC_TABS : [])].map((tab) => (
                     <button
                         key={tab.id}
                         className={`bottom-panel__tab ${activeTab === tab.id ? "bottom-panel__tab--active" : ""}`}
@@ -191,9 +297,18 @@ export default function BottomPanel({
                     <div className="console-output-wrap">
                         <div className="console-output">
                             {logs.map((line, i) => (
-                                <div key={i} className="console-line">{line}</div>
+                                <div key={i} className={`console-line ${logLineClass(line)}`}>{line}</div>
                             ))}
                             <div ref={consoleEndRef} />
+                        </div>
+                        <div className="console-toolbar">
+                            <button
+                                className="console-copy-btn"
+                                title="Copy all console output"
+                                onClick={() => navigator.clipboard.writeText(logs.join("\n"))}
+                            >
+                                ⧅ Copy All
+                            </button>
                         </div>
                         <div className="console-cli">
                             <span className="console-cli__prompt">&gt;</span>
@@ -203,7 +318,7 @@ export default function BottomPanel({
                                 value={cmdInput}
                                 onChange={(e) => setCmdInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                placeholder="Type a command (help, funcs, goto, rename, comment)"
+                                placeholder="Type a command (help for list)"
                                 spellCheck={false}
                                 autoComplete="off"
                             />
@@ -318,14 +433,11 @@ export default function BottomPanel({
                     />
                 )}
 
-                {activeTab === "debug" && (
-                    <DebugTab onLog={onLog} />
-                )}
-
                 {activeTab === "string-xrefs" && (
                     <StringXrefsPanel
                         binaryLoaded={binaryLoaded}
                         onLog={onLog}
+                        onAddressClick={onAddressClick}
                     />
                 )}
 
@@ -348,6 +460,23 @@ export default function BottomPanel({
                         binaryLoaded={binaryLoaded}
                         onNoteClick={onNoteClick}
                     />
+                )}
+
+                {(activeTab === "debug" || activeTab === "timeline") && !dynamicMode && (
+                    <div className="timeline-panel timeline-panel--static">
+                        <p>Debug / Timeline requires Dynamic mode.</p>
+                        <p className="timeline-panel__hint">
+                            Enable Dynamic mode from the Debug menu or Status Bar.
+                        </p>
+                    </div>
+                )}
+
+                {activeTab === "debug" && dynamicMode && (
+                    <DebugTab onLog={onLog} />
+                )}
+
+                {activeTab === "timeline" && (
+                    <TimelinePanel debugState={debugState} dynamicMode={dynamicMode} />
                 )}
             </div>
         </div>

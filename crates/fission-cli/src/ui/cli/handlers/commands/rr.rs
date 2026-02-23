@@ -4,6 +4,7 @@ use crate::ui::cli::handlers::CliState;
 use colored::Colorize;
 use fission_analysis::debug::TimeTravelDebugger;
 use fission_analysis::debug::rr::RRDebugger;
+use tracing::warn;
 
 /// Handle 'rr record' command
 pub fn cmd_rr_record(binary: &str, args: &[String]) {
@@ -59,7 +60,10 @@ pub fn cmd_rr_replay(_state: &mut CliState, trace_path: Option<String>) {
         "{}",
         "Commands: reverse-step (rs), reverse-continue (rc), seek <N>".dimmed()
     );
-    // TODO: Enter a sub-REPL or integrate with main state for continued debugging
-    // For now, we just disconnect to show it works
-    rr.stop_recording().ok(); // Actually just disconnects/stops replay
+    // Sub-REPL for continued RR debugging is not yet implemented.
+    // When implemented: enter a loop reading 'rs / rc / seek N / quit' commands,
+    // forwarding them to `rr` via the GDB/MI connection and printing results.
+    // For now, disconnect cleanly to confirm the trace loaded successfully.
+    warn!("rr sub-REPL not yet implemented; disconnecting after trace load");
+    rr.stop_recording().ok(); // disconnects / stops replay
 }

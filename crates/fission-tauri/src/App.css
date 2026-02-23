@@ -125,12 +125,13 @@ body,
 .menubar {
     display: flex;
     align-items: center;
-    height: 30px;
+    height: 35px;
     background: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-color);
     padding: 0 4px;
     font-size: var(--font-size-sm);
     -webkit-app-region: drag;
+    flex-shrink: 0;
 }
 
 .menubar__brand {
@@ -139,11 +140,14 @@ body,
     color: var(--ctp-blue);
     font-size: var(--font-size);
     -webkit-app-region: no-drag;
+    line-height: 35px;
 }
 
 .menubar__item {
     position: relative;
-    padding: 4px 10px;
+    padding: 0 10px;
+    height: 35px;
+    line-height: 35px;
     cursor: pointer;
     color: var(--text-secondary);
     border-radius: var(--radius-sm);
@@ -164,10 +168,10 @@ body,
     min-width: 220px;
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius);
+    border-radius: 4px;
     padding: 4px 0;
     z-index: 1000;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
     animation: menuFadeIn 100ms ease;
 }
 
@@ -231,42 +235,54 @@ body,
     background: var(--bg-tertiary);
     border-right: 1px solid var(--border-color);
     align-items: center;
-    padding-top: 8px;
-    gap: 4px;
+    justify-content: space-between;
+    padding: 0;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.activity-bar__top,
+.activity-bar__bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
 }
 
 .activity-bar__icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius);
+    width: 48px;
+    height: 48px;
+    border-radius: 0;
     cursor: pointer;
     color: var(--text-muted);
-    font-size: 18px;
-    transition: color var(--transition), background var(--transition);
+    font-size: var(--activity-bar-icon-size, 24px);
+    transition: color 80ms ease, background 80ms ease;
     position: relative;
+    border: none;
+    outline: none;
 }
 
 .activity-bar__icon:hover {
     color: var(--text-primary);
-    background: var(--bg-hover);
+    background: var(--bg-surface);
 }
 
 .activity-bar__icon--active {
-    color: var(--accent);
+    color: var(--text-primary);
 }
 
 .activity-bar__icon--active::before {
     content: '';
     position: absolute;
     left: 0;
-    top: 25%;
-    height: 50%;
+    top: 0;
+    height: 100%;
     width: 2px;
     background: var(--accent);
-    border-radius: 1px;
+    border-radius: 0 1px 1px 0;
 }
 
 /* ============================================================================
@@ -284,15 +300,16 @@ body,
 
 .sidebar__header {
     padding: 10px 12px;
-    font-size: var(--font-size-sm);
+    font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-color);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex-shrink: 0;
 }
 
 .sidebar__content {
@@ -307,9 +324,10 @@ body,
 .editor-tabs {
     display: flex;
     align-items: center;
-    height: 36px;
+    height: var(--tab-height, 35px);
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .editor-tabs__nav {
@@ -319,6 +337,7 @@ body,
     border-right: 1px solid var(--border-color);
     height: 100%;
     align-items: center;
+    flex-shrink: 0;
 }
 
 .editor-tabs__nav-btn {
@@ -326,14 +345,14 @@ body,
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-sm);
     font-size: 10px;
-    transition: all var(--transition);
+    transition: all 80ms ease;
 }
 
 .editor-tabs__nav-btn:hover:not(:disabled) {
@@ -357,24 +376,39 @@ body,
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 12px;
+    padding: 0 10px;
     cursor: pointer;
     color: var(--text-muted);
     font-size: var(--font-size-sm);
     border-right: 1px solid var(--border-color);
     white-space: nowrap;
-    transition: color var(--transition), background var(--transition);
+    transition: color 80ms ease, background 80ms ease;
     height: 100%;
+    position: relative;
+    user-select: none;
 }
 
 .editor-tab:hover {
     color: var(--text-primary);
+    background: var(--bg-surface);
 }
 
 .editor-tab--active {
     color: var(--text-primary);
     background: var(--bg-primary);
-    border-bottom: 2px solid var(--accent);
+    border-bottom: 1px solid var(--accent);
+}
+
+/* VSCode-style top indicator for active tab */
+.editor-tab--active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--accent);
+    opacity: 0.6;
 }
 
 .editor-tab__icon {
@@ -509,10 +543,28 @@ body,
    ============================================================================ */
 
 .asm-view {
+    display: flex;
+    flex-direction: column;
     height: 100%;
-    overflow: auto;
     font-family: var(--font-mono);
     font-size: var(--font-size-sm);
+    position: relative;
+}
+
+.asm-view__scroller {
+    height: 100%;
+    overflow: auto;
+}
+
+.asm-load-more-row td {
+    text-align: center;
+    padding: 8px;
+}
+
+.asm-load-more {
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    font-style: italic;
 }
 
 .asm-view--empty {
@@ -747,6 +799,42 @@ body,
 }
 
 /* ============================================================================
+   Explorer Action Bar (FID button, etc.)
+   ============================================================================ */
+
+.explorer__action-bar {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-color, #3c3c3c);
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.explorer__action-btn {
+    flex: 1;
+    padding: 4px 8px;
+    font-size: 11px;
+    background: var(--button-bg, #2d4a7a);
+    color: var(--text-primary, #d4d4d4);
+    border: 1px solid var(--button-border, #3c6db0);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.15s;
+}
+
+.explorer__action-btn:hover:not(:disabled) {
+    background: var(--button-hover-bg, #3a5d99);
+}
+
+.explorer__action-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+/* ============================================================================
    Functions List
    ============================================================================ */
 
@@ -908,9 +996,10 @@ body,
 
 .bottom-panel__tabs {
     display: flex;
-    height: 30px;
+    height: var(--panel-tab-height, 35px);
     border-bottom: 1px solid var(--border-color);
     gap: 0;
+    flex-shrink: 0;
 }
 
 .bottom-panel__tab {
@@ -924,11 +1013,13 @@ body,
     display: flex;
     align-items: center;
     gap: 6px;
-    transition: color var(--transition);
+    transition: color 80ms ease;
+    white-space: nowrap;
 }
 
 .bottom-panel__tab:hover {
     color: var(--text-primary);
+    background: var(--bg-surface);
 }
 
 .bottom-panel__tab--active {
@@ -938,12 +1029,12 @@ body,
 .bottom-panel__tab--active::after {
     content: '';
     position: absolute;
-    bottom: 0;
+    top: 0;
     left: 8px;
     right: 8px;
     height: 2px;
     background: var(--accent);
-    border-radius: 1px 1px 0 0;
+    border-radius: 0 0 2px 2px;
 }
 
 .bottom-panel__badge {
@@ -1102,19 +1193,47 @@ body,
    ============================================================================ */
 
 .status-bar {
-    height: 24px;
+    height: 22px;
+    min-height: 22px;
     display: flex;
-    align-items: center;
-    padding: 0 12px;
+    align-items: stretch;
+    padding: 0;
     background: var(--ctp-blue);
     color: var(--ctp-crust);
-    font-size: var(--font-size-xs);
-    gap: 16px;
+    font-size: 12px;
     font-weight: 500;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.status-bar__left {
+    display: flex;
+    align-items: center;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.status-bar__right {
+    display: flex;
+    align-items: center;
+    flex-direction: row-reverse;
+    flex-shrink: 0;
 }
 
 .status-bar__item {
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    height: 100%;
+    line-height: 22px;
     white-space: nowrap;
+    cursor: pointer;
+    transition: background 80ms ease;
+    font-variant-numeric: tabular-nums;
+}
+
+.status-bar__item:hover {
+    background: rgba(0, 0, 0, 0.15);
 }
 
 /* ============================================================================
@@ -1711,6 +1830,28 @@ body,
     font-size: var(--font-size-xs);
 }
 
+.xrefs-panel__count-bar {
+    padding: 4px 8px;
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.xrefs-panel__fn-count {
+    text-align: center;
+    min-width: 28px;
+}
+
+.xrefs-panel__badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 10px;
+    background: var(--ctp-surface1, #313244);
+    color: var(--ctp-lavender, #b4befe);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+}
+
 /* ============================================================
    Settings Panel
    ============================================================ */
@@ -1949,10 +2090,33 @@ body,
 
 .cfg-panel__canvas {
     flex: 1;
-    overflow: auto;
-    padding: 12px;
-    cursor: default;
+    overflow: hidden;
+    padding: 0;
+    cursor: grab;
     user-select: none;
+}
+
+.cfg-panel__canvas:active {
+    cursor: grabbing;
+}
+
+.cfg-panel__zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}
+
+.cfg-panel__btn--icon {
+    padding: 2px 6px;
+    font-size: 13px;
+    line-height: 1;
+}
+
+.cfg-panel__zoom-level {
+    min-width: 44px;
+    text-align: center;
+    font-size: var(--font-size-xs);
 }
 
 /* ============================================================
@@ -2459,8 +2623,104 @@ body,
     word-break: break-word;
 }
 
-/* ============================================================= */
-/* Phase 5 — Sections Panel (sidebar widget)                     */
+/* ── Phase 4: Memory Dump ── */
+.debug-sidebar__mem-row {
+    display: flex;
+    gap: 4px;
+    padding: 4px 8px;
+}
+
+.debug-sidebar__input--addr {
+    flex: 1;
+    min-width: 0;
+}
+
+.debug-sidebar__select {
+    background: var(--input-bg, #2d2d2d);
+    color: var(--text-primary, #d4d4d4);
+    border: 1px solid var(--border-color, #3e3e3e);
+    border-radius: 3px;
+    font-size: 11px;
+    padding: 2px 4px;
+}
+
+.debug-sidebar__btn--read {
+    margin: 0 8px 4px;
+    width: calc(100% - 16px);
+    background: var(--button-bg, #2d4a7a);
+    border-color: var(--button-border, #3c6db0);
+}
+
+.debug-sidebar__hex-dump {
+    margin: 0 8px 8px;
+    padding: 6px;
+    font-size: 10px;
+    font-family: "Cascadia Code", monospace;
+    background: var(--panel-bg, #1e1e1e);
+    border: 1px solid var(--border-color, #3e3e3e);
+    border-radius: 3px;
+    overflow-x: auto;
+    max-height: 200px;
+    white-space: pre;
+    color: var(--text-primary, #d4d4d4);
+}
+
+/* ── Phase 5: TTD Timeline ── */
+.debug-sidebar__ttd-count {
+    font-weight: normal;
+    color: var(--text-muted, #858585);
+}
+
+.debug-sidebar__ttd-controls {
+    padding: 4px 8px;
+    display: flex;
+    gap: 4px;
+}
+
+.debug-sidebar__btn--ttd {
+    flex: 1;
+    background: var(--button-bg, #2d4a7a);
+    border-color: var(--button-border, #3c6db0);
+}
+
+.debug-sidebar__ttd-seek {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+}
+
+.debug-sidebar__input--step {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+}
+
+.debug-sidebar__btn--icon {
+    padding: 2px 6px;
+    font-size: 13px;
+    background: var(--button-bg, #2d4a7a);
+    border-color: var(--button-border, #3c6db0);
+    min-width: 28px;
+}
+
+.debug-sidebar__ttd-range {
+    padding: 2px 12px;
+    font-size: 10px;
+    color: var(--text-muted, #858585);
+}
+
+.debug-sidebar__ttd-regs {
+    padding: 4px 12px;
+    font-family: "Cascadia Code", monospace;
+    font-size: 10px;
+    color: #9cdcfe;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+
 /* ============================================================= */
 
 .sections-panel {
@@ -2780,4 +3040,347 @@ body,
 
 .about-dialog__body {
     margin-bottom: 16px;
+}
+
+/* =====================================================
+   Plugins Panel
+   ===================================================== */
+.plugins-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.plugins-panel__toolbar {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.plugins-panel__load-btn,
+.plugins-panel__refresh-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.plugins-panel__load-btn:hover {
+    background: var(--bg-surface-hover);
+    border-color: var(--accent-primary);
+}
+
+.plugins-panel__refresh-btn:hover {
+    background: var(--bg-surface-hover);
+}
+
+.plugins-panel__body {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.plugins-panel__empty {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+}
+
+.plugins-panel__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.plugins-panel__item {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    transition: background var(--transition-fast);
+}
+
+.plugins-panel__item:hover {
+    background: var(--bg-surface-hover);
+}
+
+.plugins-panel__item--disabled {
+    opacity: 0.5;
+}
+
+.plugins-panel__item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.plugins-panel__item-name {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.plugins-panel__item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.plugins-panel__item-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.plugins-panel__item-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.plugins-panel__toggle-btn,
+.plugins-panel__unload-btn {
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: transparent;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.plugins-panel__toggle-btn--enabled {
+    color: var(--accent-success);
+    border-color: var(--accent-success);
+}
+
+.plugins-panel__toggle-btn--enabled:hover {
+    background: var(--accent-success);
+    color: var(--bg-primary);
+}
+
+.plugins-panel__toggle-btn--disabled {
+    color: var(--text-muted);
+}
+
+.plugins-panel__toggle-btn--disabled:hover {
+    background: var(--bg-surface-active);
+}
+
+.plugins-panel__unload-btn {
+    color: var(--accent-error);
+    border-color: var(--accent-error);
+}
+
+.plugins-panel__unload-btn:hover {
+    background: var(--accent-error);
+    color: var(--bg-primary);
+}
+
+/* =====================================================
+   Timeline Panel
+   ===================================================== */
+.timeline-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 8px 12px;
+    overflow-y: auto;
+    font-size: var(--font-size-sm);
+}
+
+.timeline-panel--static {
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.timeline-panel--static p {
+    margin: 4px 0;
+}
+
+.timeline-panel__header {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.timeline-panel__events {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.timeline-panel__event {
+    display: flex;
+    gap: 10px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border-color);
+    align-items: baseline;
+}
+
+.timeline-panel__event:last-child {
+    border-bottom: none;
+}
+
+.timeline-panel__event-idx {
+    font-size: 11px;
+    color: var(--text-disabled);
+    min-width: 28px;
+    font-family: var(--font-mono);
+}
+
+.timeline-panel__event-text {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    word-break: break-all;
+}
+
+.timeline-panel__empty {
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 12px 0;
+}
+
+/* =====================================================
+   StatusBar extensions (dynamic mode, progress, mode btn)
+   ===================================================== */
+
+/* button elements used as .status-bar__item need reset */
+button.status-bar__item {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    font-family: inherit;
+}
+
+.status-bar__item--muted {
+    opacity: 0.75;
+    cursor: default;
+}
+
+.status-bar--dynamic {
+    background-color: var(--ctp-maroon) !important;
+    color: var(--ctp-base) !important;
+}
+
+.status-bar--dynamic .status-bar__item {
+    color: var(--ctp-base);
+}
+
+.status-bar--dynamic .status-bar__item:hover {
+    background: rgba(0, 0, 0, 0.2);
+}
+
+/* Progress area (also a status-bar__item, so inherits padding/height) */
+.status-bar__progress-area {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    cursor: default;
+}
+
+.status-bar__progress-area:hover {
+    background: transparent !important;
+}
+
+.status-bar__progress-bar {
+    width: 72px;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.status-bar__progress-fill {
+    height: 100%;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}
+
+.status-bar__progress-pct {
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+.status-bar__progress-msg {
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    opacity: 0.9;
+}
+
+/* Mode button */
+.status-bar__mode-btn--dynamic {
+    font-weight: 600;
+}
+
+/* Git branch */
+.status-bar__git {
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+/* =====================================================
+   Console UX improvements
+   ===================================================== */
+.console-line--error {
+    color: var(--accent-error);
+}
+
+.console-line--success {
+    color: var(--accent-success);
+}
+
+.console-line--cmd {
+    color: var(--accent-secondary);
+    font-style: italic;
+}
+
+.console-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 2px 8px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.console-copy-btn {
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.console-copy-btn:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
 }

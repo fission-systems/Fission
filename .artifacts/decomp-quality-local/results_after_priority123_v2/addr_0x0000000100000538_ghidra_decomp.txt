@@ -1,0 +1,10 @@
+/* WARNING: Unknown calling convention */
+
+int cpp_add(int a,int b)
+
+{
+  int in_w0;
+  int in_w1;
+  
+  return in_w0 + in_w1;
+}

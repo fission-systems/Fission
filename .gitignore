@@ -74,6 +74,15 @@ ghidra_decompiler/fission_decomp
 /examples/binaries/**/*.exe_ghidra/
 /examples/binaries/**/*.exe
 
+# Script run outputs (result dirs, benchmarks, temp comparison runs)
+scripts/result/
+scripts/result*/
+scripts/out/
+
+# Python cache in scripts
+scripts/**/__pycache__/
+scripts/**/*.pyc
+
 # Backup artifacts
 *.backup
 *.cache/

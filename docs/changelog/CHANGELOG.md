@@ -4,6 +4,107 @@ All notable changes to the Fission project (November 2025 - February 2026).
 
 ---
 
+### Tauri GUI — Phase 1–9 완전 이관 + egui 제거 (2026-02-23)
+
+**🎯 요약**
+
+Egui 기반 데스크탑 GUI(`fission-ui`)를 Tauri 2.x + React 19 / TypeScript로 완전 이관했다.
+누락된 모든 기능을 9개 Phase에 걸쳐 구현하고, `fission-ui` 크레이트를 제거해 의존성 트리를 정리했다.
+
+---
+
+#### Phase 1 · Quick Wins — 6가지 UX 개선
+
+- **문자열 탐색 (`StringXrefsPanel`)**: 결과 클릭 시 해당 함수가 에디터 탭으로 열리며 주소로 이동
+- **어셈블리 복사 버튼**: 각 명령줄 우측에 `[복사]` 버튼 추가, 클릭 시 클립보드에 `addr\tmnemonic operands` 복사
+- **Cmd+←/→ 탭 순환**: macOS 표준 단축키로 에디터 탭 간 이동
+- **StringXrefs 정규식 필터**: 검색창에서 `/regex/` 문법 지원 (이전: 단순 부분 문자열만)
+- **XrefsPanel 카운트 뱃지**: 교차 참조 패널 헤더에 `N xrefs` 뱃지 표시
+- **CFG V(G) 복잡도 지표**: CFG 툴바에 McCabe Cyclomatic Complexity `V(G) = E − N + 2` 표시
+
+#### Phase 2 · 어셈블리 가상 스크롤
+
+- `@tanstack/react-virtual` 도입 (`useVirtualizer`, 고정 행 높이 22 px)
+- `AssemblyView.tsx` 전면 재작성: `div.asm-view__scroller` 스크롤 컨테이너, paddingTop/Bottom 스페이서 패턴
+- 초기 로드 5,000개 명령, 스크롤 끝 도달 시 `onLoadMore` → 추가 5,000개 fetch (무한 스크롤)
+- `App.tsx`: `asmHasMore` / `asmLoadingMore` 상태, `handleAsmLoadMore` 콜백 추가
+
+#### Phase 3 · FID — 시그니처 기반 함수 자동 식별
+
+- **Rust 백엔드**: `run_fid` Tauri 커맨드 추가
+  - `fission-signatures` 크레이트 의존성 등록
+  - `SignatureDatabase::identify_functions_in_binary()` 호출 (blocking thread)
+  - 식별 결과를 `InnerState::renamed_functions`에 적용 후 `FidResultDto` 반환
+  - borrow-checker 해결: `binary` 참조를 블록으로 제한하고 `prev_names` 미리 수집
+- **DTO**: `FidMatchDto`, `FidResultDto` 추가 (`dto.rs`)
+- **프론트엔드**: 탐색기 사이드바 상단에 "🔍 함수 식별 (FID)" 버튼
+  - `fidRunning` 상태, 식별 완료 후 함수 목록 갱신 + 어셈블리 캐시 무효화
+- `types/index.ts`: `FidMatchDto`, `FidResultDto` 인터페이스 추가
+
+#### Phase 4 · 디버그 메모리 덤프
+
+- **Rust 백엔드**: `debug_read_memory(address, size)` 커맨드 추가
+  - Windows: `Debugger::read_memory()` 호출 → 16바이트 단위 hex dump 포맷 문자열 반환
+  - 비-Windows: 즉시 `Err` 반환 (graceful degradation)
+  - 최대 4,096 바이트 제한
+- **프론트엔드**: `DebugSidebar.tsx` — 주소 입력, 크기 선택(64/128/256/512/1024 B), "📋 Read Memory" 버튼, `<pre>` hex dump 뷰 추가
+
+#### Phase 5 · TTD (Time Travel Debugging) 타임라인
+
+- **Rust 백엔드**:
+  - `AppState`에 `timeline: Mutex<Timeline>` 추가 (`state.rs`)
+  - TTD 커맨드 5개 추가: `ttd_start`, `ttd_stop`, `ttd_status`, `ttd_seek`, `ttd_step`
+  - Windows 디버거 이벤트 루프(`drain_events_into_state`)에서 `SingleStep` 이벤트를 `timeline.record_step_internal()`로 자동 저장
+  - `TtdSnapshotDto`, `TtdStateDto` DTO 추가 (`dto.rs`)
+- **프론트엔드**: `DebugSidebar.tsx`에 TTD 섹션 추가
+  - ⏺ Record / ⏹ Stop 토글 버튼
+  - ⏮ / ⏭ 스텝 버튼, 스텝 번호 직접 입력 → `ttd_seek`
+  - 현재 스냅샷의 RIP / RAX / RSP 레지스터 표시
+
+#### Phase 6 · UTF-16 LE 문자열 + StringXrefs 가상 스크롤
+
+- **Rust 백엔드** (`commands.rs`):
+  - `get_strings`: ASCII 패스 이후 UTF-16 LE 패스 추가 (최대 10,000개, offset 기준 정렬)
+  - `get_string_xrefs`: 섹션별 UTF-16 LE 스캔 추가
+- **프론트엔드**: `StringXrefsPanel.tsx` — `useVirtualizer` + `measureElement` 도입
+  - 아코디언 항목이 펼칠 때 가변 높이 측정 (`position: absolute; transform: translateY`)
+  - 2,000개 DOM 렌더링 한계 제거
+
+#### Phase 7 · CFG 팬/줌 + UI 스케일 슬라이더
+
+- **CFG 팬/줌** (`CfgPanel.tsx`):
+  - `scale`, `tx`, `ty` 상태 + `handleWheel` (마우스 위치 기준 줌), `handlePointer*` (드래그 팬)
+  - SVG를 `<div style={{ transform: translate+scale }}>` 래퍼로 감쌈
+  - 함수 변경 시 `resetTransform()` 자동 호출
+  - 툴바에 `＋ / % / －` 줌 컨트롤 버튼
+- **UI 스케일** (`SettingsPanel.tsx`):
+  - 슬라이더 50%–200% (step 5%), `localStorage["fission.uiScale"]` 영속
+  - `document.documentElement.style.zoom` 적용
+
+#### Phase 8 · 분석 결과 JSON 내보내기
+
+- **Rust 백엔드**: `export_analysis_json(path)` 커맨드 추가
+  - `AnalysisExportDto` 구성: `version`, `exported_at`(Unix timestamp), `binary_name`/`path`/`fingerprint`, 함수 목록(현재 이름 적용), 코멘트, 북마크
+  - `ExportedFunctionDto` (`address`, `name`, `is_renamed`) DTO 추가
+  - `serde_json::to_string_pretty` → `std::fs::write`
+- **프론트엔드**: MenuBar File 메뉴에 "Export Analysis JSON..." 항목 추가
+  - `tauri-plugin-dialog`의 `save()` → `invoke("export_analysis_json", { path })`
+  - `handleExportJson` 콜백 (App.tsx)
+
+#### Phase 9 · egui/fission-ui 완전 제거
+
+- **`crates/fission-ui/` 폴더 삭제** (~6,000 LOC, egui 0.29 기반 레거시 GUI 전체)
+- **`Cargo.toml` (workspace)**: `"crates/fission-ui"` 멤버 제거
+- **`fission-cli/Cargo.toml`**:
+  - `default` 피처에서 `"gui"` 제거 → `["cli", "native_decomp"]`
+  - `gui = [...]` 피처 라인 삭제
+  - `fission-ui`, `eframe`, `egui` optional 의존성 삭제
+  - `[[bin]] fission` `required-features` → `["cli"]`
+- **`fission-cli/src/main.rs`**: `use fission_ui::gui;` 제거, GUI 분기 블록을 "Tauri 앱 사용" 안내 메시지로 대체
+- **`fission-cli/src/lib.rs`**: `pub use fission_analysis::unpacker;` 제거 (잠재 버그 — `unpacker_runtime` 피처 게이트 없이 unconditional re-export였음)
+
+---
+
 ### Tauri GUI — Phase 6: Analyze Functions / Deep Scan + Bug Fixes (2026-02-21)
 
 **🔍 Phase 6: 함수 분석 기능 추가**
@@ -1475,8 +1576,8 @@ Fission now produces decompilation output that is functionally equivalent to Ghi
 **Testing & Validation:**
 
 - **PyGhidra Integration** - Created automated comparison framework
-  - `scripts/pyghidra_decompile.py`: Python wrapper for Ghidra decompilation
-  - `scripts/compare_decompilers.sh`: Side-by-side comparison script with assembly listing
+  - `scripts/ghidra/pyghidra_decompile.py`: Python wrapper for Ghidra decompilation
+  - `scripts/compare/compare_decompilers.sh`: Side-by-side comparison script with assembly listing
   - Supports PE, ELF, and Mach-O formats
   - Displays Ghidra assembly + decompiled code, Fission disassembly + decompiled code
   - PyGhidra 2.2.0 compatibility with Ghidra 11.4.2

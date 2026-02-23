@@ -22,24 +22,60 @@
 | 스크립트 | 설명 | 사용 목적 |
 |---------|------|----------|
 | `build/build_decompiler.sh` | Ghidra 디컴파일러 C++ 컴포넌트 빌드 | 네이티브 디컴파일 기능 활성화 |
-| `compare/compare_decompilers.sh` | Ghidra vs Fission 디컴파일 결과 비교 (배치 모드 지원) | 성능 및 품질 비교 분석, HTML 리포트 |
-| `compare/compare_decompilers_v2.sh` | 단일 함수 비교 + 텍스트 추출 | 원문 텍스트 파일 생성 (어셈블리/디컴파일) |
+| `build/build_all_tests.sh` | x86 테스트 바이너리 빌드 (MinGW) | 테스트 케이스 준비 |
+| `build/dev-tools.sh` | 프로파일링·퍼징·ASAN 등 개발 도구 | 개발/디버그용 |
+| `compare/compare_decompilers.sh` | Ghidra vs Fission 단일 함수 비교 | 성능·품질 비교 |
+| `compare/compare_decompilers_v2.sh` | 단일 함수 비교 + 텍스트 추출 | 원문 텍스트 파일 생성 |
+| `compare/compare_decompilers_v2.py` | v2 Python 구현 (v2 쉘에서 호출) | 배치·HTML 리포트 |
+| `compare/extract_functions.sh` | 테스트 바이너리에서 함수 주소 추출 | 비교 준비 |
+| `compare/fix_addresses.py` | RVA에 ImageBase 가산 | 주소 변환 |
 | `ghidra/pyghidra_decompile.py` | PyGhidra를 이용한 함수 디컴파일 | Python 환경에서 Ghidra 활용 |
-| `ghidra_decompile.py` | Ghidra 독립 실행 스크립트 | 순수 Ghidra API 활용 |
+| `ghidra/pyghidra_decompile_batch.py` | PyGhidra 배치 디컴파일 | 다수 함수 일괄 처리 |
+| `ghidra/convert_fidb_batch.sh` | FIDB → FIDf 배치 변환 | 함수 식별 DB 변환 |
 | `test/test_fid.sh` | FID 데이터베이스 로딩 테스트 | 함수 식별 데이터베이스 검증 |
-| `lint/cppcheck.sh` | Cppcheck (C++) | 코어/FFI/디컴파일 파이프라인 기본 점검 |
+| `test/run_tests.sh` | 테스트 바이너리 실행 검증 | 빌드 아티팩트 동작 확인 |
+| `test/run_complex_tests.py` | 복합 디컴파일 테스트 자동화 | 회귀 테스트 및 HTML 리포트 |
+| `test/test_cfg_structurizer.py` | CFG 구조화 알고리즘 단위 테스트 | CFG 분석 검증 |
+| `test/test_postprocessor.py` | 후처리기 단위 테스트 | 디컴파일 후처리 검증 |
+| `lint/cppcheck.sh` | Cppcheck (C++) | 코어/FFI/디컴파일 파이프라인 점검 |
+
+> 📄 **상세 문서**
+> - 복합 테스트 실행: [`docs/RUN_COMPLEX_TESTS.md`](../docs/RUN_COMPLEX_TESTS.md)
+> - 테스트 아키텍처: [`docs/TESTING_ARCHITECTURE.md`](../docs/TESTING_ARCHITECTURE.md)
 
 ---
 
 ## Directory layout
 
-- `build/`: build helpers
-- `compare/`: comparison scripts and data
-- `ghidra/`: Ghidra/PyGhidra helpers
-- `lint/`: linters
-- `test/`: test helpers
+```
+scripts/
+├── build/           # 빌드 헬퍼 (decompiler 빌드, 테스트 바이너리 빌드, dev-tools)
+├── compare/         # 비교 스크립트 및 주소 데이터
+├── ghidra/          # Ghidra / PyGhidra 헬퍼
+├── lint/            # 린터 (cppcheck 등)
+└── test/            # 테스트 헬퍼 (unit tests, 실행 검증, 복합 테스트)
+```
 
-(Top-level wrappers have been removed to reduce duplication. Please use the scripts in their respective subdirectories.)
+> 결과 파일은 `scripts/` 내부가 아닌 `examples/results/` 또는 로컬 `scripts/result/`(gitignore됨)에 저장됩니다.
+
+---
+
+## utils/ 와 크레이트 참조
+
+`utils/` 는 서명·타입 정보 등 공용 데이터 디렉터리입니다.
+
+```
+utils/
+└── signatures/           # DIE 규칙, FID 데이터베이스, Windows API 서명 등
+    ├── die/              # Detect-It-Easy 엔진 스크립트
+    └── ...
+```
+
+일부 크레이트(`fission-loader`, `fission-signatures` 등)가 빌드 시 저장소 루트 기준
+상대 경로(`../../utils/signatures/die/…`)로 `utils/` 를 참조합니다.
+
+> ⚠️ **항상 저장소 루트에서 `cargo build` / `cargo test` 를 실행**하세요.
+> 하위 디렉터리에서 빌드하면 위 상대 경로가 깨져 컴파일·런타임 오류가 발생합니다.
 
 ---
 
@@ -78,7 +114,7 @@ brew install jq  # macOS
 sudo apt-get install jq  # Linux
 ```
 
-#### ghidra_decompile.py
+#### ghidra/pyghidra_decompile.py
 
 - Ghidra 11.4.2+ 설치 필요
 - `GHIDRA_INSTALL_DIR` 환경 변수 설정
@@ -179,7 +215,7 @@ scripts/result/
 
 ```bash
 # 실행
-./scripts/compare_decompilers_v2.sh test.exe 0x140001450 results/add.json
+./scripts/compare/compare_decompilers_v2.sh test.exe 0x140001450 results/add.json
 
 # Ghidra 디컴파일 보기
 cat results/add_ghidra_decomp.txt
@@ -378,13 +414,13 @@ undefined8 main(void) {
 순수 Ghidra API를 사용하는 독립 실행형 Python 스크립트입니다.
 
 ```bash
-python3 scripts/ghidra_decompile.py <binary> <address>
+python3 scripts/ghidra/pyghidra_decompile.py <binary> <address>
 ```
 
 **PyGhidra와의 차이점:**
 
 - PyGhidra: Python 패키지로 설치, 간편한 API
-- ghidra_decompile.py: Ghidra 설치 필요, 저수준 API 접근
+- ghidra/pyghidra_decompile.py: Ghidra 설치 필요, 저수준 API 접근
 
 ---
 
@@ -548,22 +584,30 @@ python3 scripts/ghidra/pyghidra_decompile.py test.exe 0x401000
 
 ```
 scripts/
-├── README.md                   # 이 문서
-├── ghidra_decompile.py         # helper
+├── README.md
 ├── build/
-│   └── build_decompiler.sh
+│   ├── build_decompiler.sh
+│   ├── build_all_tests.sh
+│   └── dev-tools.sh
 ├── compare/
 │   ├── compare_decompilers.sh
 │   ├── compare_decompilers_v2.sh
 │   ├── compare_decompilers_v2.py
+│   ├── extract_functions.sh
+│   ├── fix_addresses.py
 │   └── example_addresses.txt
 ├── ghidra/
-│   └── pyghidra_decompile.py
+│   ├── pyghidra_decompile.py
+│   ├── pyghidra_decompile_batch.py
+│   └── convert_fidb_batch.sh
 ├── lint/
 │   └── cppcheck.sh
-├── test/
-│   └── test_fid.sh
-└── result/
+└── test/
+    ├── test_fid.sh
+    ├── run_tests.sh
+    ├── run_complex_tests.py
+    ├── test_cfg_structurizer.py
+    └── test_postprocessor.py
 ```
 
 ---
@@ -575,7 +619,7 @@ scripts/
 ```bash
 # 100개 함수 비교
 for addr in $(seq 0x401000 0x401640 100); do
-    ./scripts/compare_decompilers_v2.sh test.exe $(printf "0x%X" $addr) \
+    ./scripts/compare/compare_decompilers_v2.sh test.exe $(printf "0x%X" $addr) \
         "results/func_$(printf "%X" $addr).json"
 done
 ```
@@ -586,7 +630,7 @@ done
 # GitHub Actions example
 - name: Compare Decompilers
   run: |
-    ./scripts/compare_decompilers_v2.sh examples/binary 0x401000 results/comparison.json
+    ./scripts/compare/compare_decompilers_v2.sh examples/binary 0x401000 results/comparison.json
     cat results/comparison.json | jq .
 ```
 

@@ -2,6 +2,8 @@
 //!
 //! Defines CLI commands and parsing logic
 
+use fission_core::parse_address;
+
 /// Available commands in the CLI
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -60,16 +62,16 @@ pub fn parse_command(input: &str) -> Command {
         "info" | "i" => Command::Info,
         "functions" | "funcs" | "f" => Command::Functions,
         "disasm" | "d" => {
-            let address = parts.get(1).and_then(|s| parse_addr(s).ok());
+            let address = parts.get(1).and_then(|s| parse_address(s));
             let count = parts.get(2).and_then(|s| s.parse().ok());
             Command::Disasm { address, count }
         }
         "decompile" | "dec" => {
-            let address = parts.get(1).and_then(|s| parse_addr(s).ok());
+            let address = parts.get(1).and_then(|s| parse_address(s));
             Command::Decompile { address }
         }
         "graph" | "g" => {
-            let address = parts.get(1).and_then(|s| parse_addr(s).ok());
+            let address = parts.get(1).and_then(|s| parse_address(s));
             Command::Graph { address }
         }
         "strings" | "str" => Command::Strings,
@@ -77,7 +79,7 @@ pub fn parse_command(input: &str) -> Command {
         "analyze" | "anal" | "aa" | "a" => Command::Analyze,
         "xrefs" => {
             if let Some(addr_str) = parts.get(1) {
-                if let Ok(addr) = parse_addr(addr_str) {
+                if let Some(addr) = parse_address(addr_str) {
                     Command::Xrefs { address: addr }
                 } else {
                     Command::Unknown("xrefs requires a valid address".to_string())
@@ -125,13 +127,5 @@ pub fn parse_command(input: &str) -> Command {
         "clear" | "cls" => Command::Clear,
         "exit" | "quit" | "q" => Command::Exit,
         _ => Command::Unknown(input.to_string()),
-    }
-}
-
-fn parse_addr(s: &str) -> Result<u64, std::num::ParseIntError> {
-    if let Some(hex) = s.strip_prefix("0x") {
-        u64::from_str_radix(hex, 16)
-    } else {
-        s.parse()
     }
 }

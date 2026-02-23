@@ -1,0 +1,25 @@
+0x1000005D0      sub      sp, sp, #0x20
+  0x1000005D4      str      x0, [sp, #0x18]
+  0x1000005D8      str      w1, [sp, #0x14]
+  0x1000005DC      str      wzr, [sp, #0x10]
+  0x1000005E0      str      wzr, [sp, #0xc]
+  0x1000005E4      b        0x1000005e8
+  0x1000005E8      ldr      w8, [sp, #0xc]
+  0x1000005EC      ldr      w9, [sp, #0x14]
+  0x1000005F0      subs     w8, w8, w9
+  0x1000005F4      b.ge     0x100000628
+  0x1000005F8      b        0x1000005fc
+  0x1000005FC      ldr      x8, [sp, #0x18]
+  0x100000600      ldrsw    x9, [sp, #0xc]
+  0x100000604      ldr      w9, [x8, x9, LSL #0x2]
+  0x100000608      ldr      w8, [sp, #0x10]
+  0x10000060C      add      w8, w8, w9
+  0x100000610      str      w8, [sp, #0x10]
+  0x100000614      b        0x100000618
+  0x100000618      ldr      w8, [sp, #0xc]
+  0x10000061C      add      w8, w8, #0x1
+  0x100000620      str      w8, [sp, #0xc]
+  0x100000624      b        0x1000005e8
+  0x100000628      ldr      w0, [sp, #0x10]
+  0x10000062C      add      sp, sp, #0x20
+  0x100000630      ret

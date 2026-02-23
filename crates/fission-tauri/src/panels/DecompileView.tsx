@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 
 interface DecompileViewProps {
     code: string | null;
@@ -137,6 +137,17 @@ export default function DecompileView({
     onRename,
 }: DecompileViewProps) {
     const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
+    const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const handleCopy = useCallback(() => {
+        if (!code) return;
+        navigator.clipboard.writeText(code).then(() => {
+            setCopied(true);
+            if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+            copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
+        });
+    }, [code]);
 
     const lines = useMemo(() => {
         if (!code) return [];
@@ -173,6 +184,13 @@ export default function DecompileView({
             {functionName && (
                 <div className="decomp-view__header">
                     <span className="decomp-view__func-name">{functionName}</span>
+                    <button
+                        className="decomp-view__copy-btn"
+                        onClick={handleCopy}
+                        title="Copy decompiled code"
+                    >
+                        {copied ? "✓ Copied" : "📋 Copy"}
+                    </button>
                 </div>
             )}
             <div className="decomp-view__code">

@@ -1,9 +1,21 @@
 use crate::cli::args::OneShotArgs;
 use crate::cli::output::OutputSilencer;
+use fission_core::find_sla_dir;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
+use tracing::warn;
+
+fn prefer_function_name(candidate: &str, current: &str) -> bool {
+    let candidate_is_sub = candidate.starts_with("sub_");
+    let current_is_sub = current.starts_with("sub_");
+    if candidate_is_sub != current_is_sub {
+        return !candidate_is_sub;
+    }
+    candidate.len() > current.len()
+}
 
 pub(super) fn run_decompilation(
     cli: &OneShotArgs,
@@ -11,16 +23,7 @@ pub(super) fn run_decompilation(
     binary_data: &[u8],
 ) -> io::Result<()> {
     // Initialize decompiler
-    let sla_dir = std::env::current_dir()
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to get current directory: {}", e),
-            )
-        })?
-        .join("ghidra_decompiler")
-        .to_string_lossy()
-        .into_owned();
+    let sla_dir = find_sla_dir();
 
     if cli.verbose {
         eprintln!("[*] Initializing native decompiler...");
@@ -56,10 +59,9 @@ pub(super) fn run_decompilation(
             decomp.set_feature("readonly_propagate", true);
         }
         other => {
-            eprintln!(
-                "[!] Unknown --profile '{}', using balanced (quality|speed|balanced)",
-                other
-            );
+            // Show inline so user always sees it, even without RUST_LOG set
+            eprintln!("[!] Unknown --profile '{}', using balanced (quality|speed|balanced)", other);
+            warn!(profile = other, "unknown decompilation profile, using balanced");
             decomp.set_feature("infer_pointers", true);
             decomp.set_feature("analyze_loops", false);
             decomp.set_feature("readonly_propagate", true);
@@ -100,10 +102,8 @@ pub(super) fn run_decompilation(
                         .unwrap_or("default")
                 }
                 _ => {
-                    eprintln!(
-                        "[!] Unknown --compiler-id '{}', falling back to auto detection",
-                        user_compiler
-                    );
+                    eprintln!("[!] Unknown --compiler-id '{}', falling back to auto detection", user_compiler);
+                    warn!(compiler_id = user_compiler, "unknown compiler-id, falling back to auto detection");
                     let detection = fission_loader::detect(binary);
                     let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
                     detection
@@ -202,7 +202,24 @@ pub(super) fn run_decompilation(
 
     {
         let _silencer = OutputSilencer::new_if(!cli.verbose);
+        let mut by_addr: BTreeMap<u64, &FunctionInfo> = BTreeMap::new();
         for func in &binary.functions {
+            if func.address == 0 || func.name.is_empty() {
+                continue;
+            }
+            match by_addr.get(&func.address) {
+                None => {
+                    by_addr.insert(func.address, func);
+                }
+                Some(current) => {
+                    if prefer_function_name(&func.name, &current.name) {
+                        by_addr.insert(func.address, func);
+                    }
+                }
+            }
+        }
+
+        for func in by_addr.values() {
             if func.address != 0
                 && !func.name.is_empty()
                 && let Err(e) = decomp.add_function(func.address, Some(&func.name))
@@ -274,15 +291,41 @@ pub(super) fn run_decompilation(
         eprintln!("[✓] Decompiler ready");
     }
 
-    // Collect functions to decompile
+    // Collect functions to decompile and deduplicate by address.
+    // Some loaders may expose multiple aliases for a single address
+    // (e.g., sub_xxx + exported symbol), which can trigger duplicate
+    // decompile attempts and noisy recursive-guard errors.
     let functions: Vec<&FunctionInfo> = if let Some(addr) = cli.address {
-        binary
-            .functions
-            .iter()
-            .filter(|f| f.address == addr)
-            .collect()
+        let mut best: Option<&FunctionInfo> = None;
+        for func in &binary.functions {
+            if func.address != addr {
+                continue;
+            }
+            match best {
+                None => best = Some(func),
+                Some(current) => {
+                    if prefer_function_name(&func.name, &current.name) {
+                        best = Some(func);
+                    }
+                }
+            }
+        }
+        best.into_iter().collect()
     } else if cli.all {
-        binary.functions.iter().filter(|f| !f.is_import).collect()
+        let mut by_addr: BTreeMap<u64, &FunctionInfo> = BTreeMap::new();
+        for func in binary.functions.iter().filter(|f| !f.is_import) {
+            match by_addr.get(&func.address) {
+                None => {
+                    by_addr.insert(func.address, func);
+                }
+                Some(current) => {
+                    if prefer_function_name(&func.name, &current.name) {
+                        by_addr.insert(func.address, func);
+                    }
+                }
+            }
+        }
+        by_addr.into_values().collect()
     } else {
         vec![]
     };

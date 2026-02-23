@@ -1,0 +1,38 @@
+/* WARNING: Variable defined which should be unmapped: arr */
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+/* WARNING: Unknown calling convention */
+
+int cpp_main_like(void)
+
+{
+  int iVar1;
+  Item *pIVar2;
+  long lVar3;
+  int score;
+  Item *item;
+  undefined8 in_stack_ffffffffffffff98;
+  undefined8 in_stack_ffffffffffffffa0;
+  int *in_stack_ffffffffffffffa8;
+  int sum;
+  int arr [5];
+  
+  iVar1 = (int)((ulong)in_stack_ffffffffffffffa0 >> 0x20);
+  lVar3 = *(long *)PTR____stack_chk_guard_100004020;
+  _puts("=== C++ decompiler benchmark ===");
+  cpp_sum_array(in_stack_ffffffffffffffa8,iVar1);
+  pIVar2 = cpp_create_item(0x7ea,"CppItem",12.5);
+  cpp_switch((int)in_stack_ffffffffffffff98);
+  cpp_add((int)((ulong)in_stack_ffffffffffffff98 >> 0x20),(int)in_stack_ffffffffffffff98);
+  cpp_virtual_compute(7);
+  iVar1 = cpp_add((int)((ulong)in_stack_ffffffffffffff98 >> 0x20),(int)in_stack_ffffffffffffff98);
+  if (pIVar2 != (Item *)0x0) {
+    pIVar2 = (Item *)pIVar2->name;
+    _printf("Item %d %s %.2f\n");
+    cpp_destroy_item(pIVar2);
+  }
+  if (*(long *)PTR____stack_chk_guard_100004020 - lVar3 != 0) {
+                    /* WARNING: Subroutine does not return */
+    ___stack_chk_fail(*(long *)PTR____stack_chk_guard_100004020 - lVar3);
+  }
+  return iVar1;
+}

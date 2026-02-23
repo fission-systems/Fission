@@ -19,6 +19,7 @@ import type {
     AppSettings,
     SectionDto,
     PatchRecord,
+    FidResultDto,
 } from "./types";
 import { ListingView } from "./panels/ListingView";
 import { DebugSidebar } from "./panels/DebugSidebar";
@@ -39,6 +40,7 @@ import SettingsPanel from "./panels/SettingsPanel";
 import SectionsPanel from "./panels/SectionsPanel";
 import AboutDialog from "./components/AboutDialog";
 import SearchPanel from "./panels/SearchPanel";
+import PluginsPanel from "./panels/PluginsPanel";
 
 function App() {
     // --- State ---
@@ -61,9 +63,18 @@ function App() {
     const [aboutOpen, setAboutOpen] = useState(false);
     const [patches, setPatches] = useState<PatchRecord[]>([]);
 
+    // Extended UI state
+    const [dynamicMode, setDynamicMode] = useState(false);
+    const [progress, setProgress] = useState<{ value: number; message: string } | null>(null);
+    const [gitBranch, setGitBranch] = useState<string>("—");
+    const [sidebarVisible, setSidebarVisible] = useState(true);
+
     // Caches
     const [decompileCache, setDecompileCache] = useState<Record<string, string>>({});
     const [asmCache, setAsmCache] = useState<Record<string, AsmInstructionDto[]>>({});
+    const [asmHasMore, setAsmHasMore] = useState<Record<string, boolean>>({});
+    const [asmLoadingMore, setAsmLoadingMore] = useState<Record<string, boolean>>({});
+    const [fidRunning, setFidRunning] = useState(false);
 
     // Navigation history
     const historyStack = useRef<string[]>([]);
@@ -112,6 +123,22 @@ function App() {
             log(`Project saved: ${path}`);
         } catch (err) {
             log(`Save project error: ${err}`);
+        }
+    }, [binaryInfo, log]);
+
+    // --- Phase 8: Export Analysis JSON ---
+    const handleExportJson = useCallback(async () => {
+        if (!binaryInfo) return;
+        try {
+            const path = await save({
+                filters: [{ name: "JSON", extensions: ["json"] }],
+                defaultPath: `${binaryInfo.name}_analysis.json`,
+            });
+            if (!path) return;
+            await invoke("export_analysis_json", { path });
+            log(`Analysis exported: ${path}`);
+        } catch (err) {
+            log(`Export JSON error: ${err}`);
         }
     }, [binaryInfo, log]);
 
@@ -269,6 +296,10 @@ function App() {
         invoke<AppSettings>("get_settings")
             .then(setSettings)
             .catch((e) => console.warn("get_settings failed:", e));
+        // Fetch git branch
+        invoke<string>("get_git_branch")
+            .then(setGitBranch)
+            .catch(() => {});
     }, []);
 
     // --- File Open ---
@@ -381,11 +412,13 @@ function App() {
             const asmPromise = (async () => {
                 if (asmCache[asmTabId]) return;
                 try {
+                    const ASM_PAGE = 5000;
                     const instructions = await invoke<AsmInstructionDto[]>("get_assembly", {
                         address: addr,
-                        count: 200,
+                        count: ASM_PAGE,
                     });
                     setAsmCache((prev) => ({ ...prev, [asmTabId]: instructions }));
+                    setAsmHasMore((prev) => ({ ...prev, [asmTabId]: instructions.length === ASM_PAGE }));
                 } catch (err) {
                     log(`Assembly error: ${err}`);
                 }
@@ -409,6 +442,50 @@ function App() {
         },
         [decompileCache, asmCache, log, pushHistory],
     );
+
+    // --- Load more assembly rows when scrolled near the bottom ---
+    const handleAsmLoadMore = useCallback(
+        async (tabId: string, address: string) => {
+            if (asmLoadingMore[tabId] || !asmHasMore[tabId]) return;
+            setAsmLoadingMore((prev) => ({ ...prev, [tabId]: true }));
+            try {
+                const ASM_PAGE = 5000;
+                const currentCount = asmCache[tabId]?.length ?? 0;
+                const instructions = await invoke<AsmInstructionDto[]>("get_assembly", {
+                    address,
+                    count: currentCount + ASM_PAGE,
+                });
+                setAsmCache((prev) => ({ ...prev, [tabId]: instructions }));
+                setAsmHasMore((prev) => ({
+                    ...prev,
+                    [tabId]: instructions.length === currentCount + ASM_PAGE,
+                }));
+            } catch (err) {
+                log(`Assembly load-more error: ${err}`);
+            } finally {
+                setAsmLoadingMore((prev) => ({ ...prev, [tabId]: false }));
+            }
+        },
+        [asmCache, asmHasMore, asmLoadingMore, log],
+    );
+
+    // --- FID: identify functions via signature matching ---
+    const handleRunFid = useCallback(async () => {
+        setFidRunning(true);
+        try {
+            const result = await invoke<FidResultDto>("run_fid");
+            log(`FID: ${result.matched} / ${result.total_scanned} 함수 식별 완료`);
+            // 함수 목록 갱신 (이름이 바뀐 함수 반영)
+            const funcs = await invoke<FunctionDto[]>("get_functions");
+            setFunctions(funcs);
+            // 어셈블리 캐시 무효화 (코멘트/심볼 변경 반영)
+            setAsmCache({});
+        } catch (e) {
+            log(`FID 오류: ${e}`);
+        } finally {
+            setFidRunning(false);
+        }
+    }, [log]);
 
     // --- Navigate to address (from assembly click, goto, bookmark) ---
     const handleNavigateToAddress = useCallback(
@@ -504,6 +581,105 @@ function App() {
         },
         [log],
     );
+
+    // --- Save Snapshot ---
+    const handleSaveSnapshot = useCallback(async () => {
+        try {
+            const path = await save({
+                filters: [{ name: "Fission Snapshot", extensions: ["fsnap"] }],
+                defaultPath: "snapshot.fsnap",
+            });
+            if (!path) return;
+            await invoke("save_snapshot", { path });
+            log(`Snapshot saved: ${path}`);
+        } catch (err) {
+            log(`Save snapshot error: ${err}`);
+        }
+    }, [log]);
+
+    // --- Load Snapshot ---
+    const handleLoadSnapshot = useCallback(async () => {
+        try {
+            const selected = await open({
+                multiple: false,
+                filters: [{ name: "Fission Snapshot", extensions: ["fsnap"] }],
+            });
+            if (!selected) return;
+            const path = Array.isArray(selected) ? selected[0] : selected;
+            await invoke("load_snapshot", { path });
+            invoke<BookmarkDto[]>("get_bookmarks").then(setBookmarks);
+            invoke<FunctionDto[]>("get_functions").then(setFunctions);
+            log(`Snapshot loaded from: ${path}`);
+        } catch (err) {
+            log(`Load snapshot error: ${err}`);
+        }
+    }, [log]);
+
+    // --- Toggle Dynamic Mode ---
+    const handleToggleDynamicMode = useCallback(() => {
+        setDynamicMode((v) => {
+            const next = !v;
+            log(next ? "Switched to Dynamic (Debug) mode." : "Switched to Static Analysis mode.");
+            return next;
+        });
+    }, [log]);
+
+    // --- Toggle Sidebar ---
+    const handleToggleSidebar = useCallback(() => {
+        setSidebarVisible((v) => !v);
+    }, []);
+
+    // --- Open Assembly / Decompile view from menu ---
+    const handleOpenAssemblyView = useCallback(() => {
+        const tab = tabs.find((t) => t.id === activeTabId);
+        if (!tab || !binaryInfo) return;
+        const tabId = `asm-${tab.address}`;
+        setTabs((prev) => {
+            if (prev.find((t) => t.id === tabId)) return prev;
+            return [...prev, { id: tabId, title: `${tab.functionName} [ASM]`, type: "assembly" as const, address: tab.address, functionName: tab.functionName }];
+        });
+        setActiveTabId(tabId);
+    }, [tabs, activeTabId, binaryInfo]);
+
+    const handleOpenDecompileView = useCallback(() => {
+        const tab = tabs.find((t) => t.id === activeTabId);
+        if (!tab || !binaryInfo) return;
+        const tabId = `dec-${tab.address}`;
+        setTabs((prev) => {
+            if (prev.find((t) => t.id === tabId)) return prev;
+            return [...prev, { id: tabId, title: tab.functionName, type: "decompile" as const, address: tab.address, functionName: tab.functionName }];
+        });
+        setActiveTabId(tabId);
+    }, [tabs, activeTabId, binaryInfo]);
+
+    // --- Load Binary by path (from console 'load' command) ---
+    const handleLoadBinary = useCallback(async (path: string) => {
+        setLoading(true);
+        setProgress({ value: 0.1, message: `Loading ${path}...` });
+        try {
+            const info = await invoke<BinaryInfo>("open_file", { path });
+            setBinaryInfo(info);
+            log(`Loaded: ${info.name} (${info.format} / ${info.arch})`);
+            setProgress({ value: 0.5, message: "Loading functions..." });
+            const funcs = await invoke<FunctionDto[]>("get_functions");
+            setFunctions(funcs);
+            setTabs([]);
+            setActiveTabId(null);
+            setDecompileCache({});
+            setAsmCache({});
+            historyStack.current = [];
+            historyIndex.current = -1;
+            setProgress({ value: 0.9, message: "Loading metadata..." });
+            invoke<StringDto[]>("get_strings").then(setStrings);
+            invoke<ImportDto[]>("get_imports").then(setImports);
+            invoke<SectionDto[]>("get_sections").then(setSections);
+        } catch (err) {
+            log(`Load binary error: ${err}`);
+        } finally {
+            setLoading(false);
+            setProgress(null);
+        }
+    }, [log]);
 
     // --- Undo / Redo ---
     const handleUndo = useCallback(async () => {
@@ -724,6 +900,20 @@ function App() {
                 return;
             }
 
+            // Cmd+Left (macOS): Back
+            if (e.metaKey && e.key === "ArrowLeft") {
+                e.preventDefault();
+                goBack();
+                return;
+            }
+
+            // Cmd+Right (macOS): Forward
+            if (e.metaKey && e.key === "ArrowRight") {
+                e.preventDefault();
+                goForward();
+                return;
+            }
+
             // Ctrl+J: Toggle bottom panel
             if (e.ctrlKey && e.key === "j") {
                 e.preventDefault();
@@ -828,19 +1018,42 @@ function App() {
                 onToggleBottomPanel={handleToggleBottomPanel}
                 bottomPanelVisible={bottomPanelVisible}
                 onAbout={() => setAboutOpen(true)}
+                onSaveSnapshot={handleSaveSnapshot}
+                onLoadSnapshot={handleLoadSnapshot}
+                onToggleDynamicMode={handleToggleDynamicMode}
+                dynamicMode={dynamicMode}
+                onToggleSidebar={handleToggleSidebar}
+                sidebarVisible={sidebarVisible}
+                onOpenAssemblyView={handleOpenAssemblyView}
+                onOpenDecompileView={handleOpenDecompileView}
+                onExportJson={handleExportJson}
             />
 
             <div className="app-body">
                 <ActivityBar activeView={activeView} onViewChange={setActiveView} />
 
+                {sidebarVisible && (
                 <Sidebar title={
                     activeView === "settings" ? "Settings" :
                     activeView === "debug" ? "Debug" :
                     activeView === "search" ? "Search" :
+                    activeView === "plugins" ? "Plugins" :
                     binaryInfo ? binaryInfo.name : "Explorer"
                 }>
                     {activeView === "explorer" && (
                         <>
+                            {binaryInfo && (
+                                <div className="explorer__action-bar">
+                                    <button
+                                        className="explorer__action-btn"
+                                        onClick={handleRunFid}
+                                        disabled={fidRunning}
+                                        title="시그니처 DB를 사용해 라이브러리 함수를 자동 식별합니다"
+                                    >
+                                        {fidRunning ? "식별 중…" : "🔍 함수 식별 (FID)"}
+                                    </button>
+                                </div>
+                            )}
                             <FunctionsList
                                 functions={functions}
                                 loading={loading}
@@ -880,7 +1093,11 @@ function App() {
                             onLog={log}
                         />
                     )}
+                    {activeView === "plugins" && (
+                        <PluginsPanel onLog={log} />
+                    )}
                 </Sidebar>
+                )}
 
                 <div className="main-area">
                     <EditorTabs
@@ -943,6 +1160,9 @@ function App() {
                                     }
                                     functionName={activeTab.functionName}
                                     selectedAddress={null}
+                                    hasMore={asmHasMore[activeTab.id] ?? false}
+                                    loadingMore={asmLoadingMore[activeTab.id] ?? false}
+                                    onLoadMore={() => handleAsmLoadMore(activeTab.id, activeTab.address)}
                                 />
                             ) : activeTab.type === "hexview" ? (
                                 <HexView
@@ -1006,7 +1226,7 @@ function App() {
                         binaryLoaded={!!binaryInfo}
                         onBookmarkClick={handleNavigateToAddress}
                         onImportClick={handleNavigateToAddress}
-                        onStringClick={(offset) => log(`String at ${offset}`)}
+                        onStringClick={handleNavigateToAddress}
                         onSearchResultClick={handleNavigateToAddress}
                         onXrefClick={handleNavigateToAddress}
                         onLog={log}
@@ -1017,13 +1237,26 @@ function App() {
                         onRevertPatch={handleRevertPatch}
                         onExportClick={handleNavigateToAddress}
                         onNoteClick={handleNavigateToAddress}
+                        dynamicMode={dynamicMode}
+                        onAddressClick={handleNavigateToAddress}
+                        onUndo={handleUndo}
+                        onRedo={handleRedo}
+                        onExit={handleExit}
+                        onLoadBinary={handleLoadBinary}
                     />
                         </>
                     )}
                 </div>
             </div>
 
-            <StatusBar binaryInfo={binaryInfo} functionCount={functions.length} />
+            <StatusBar
+                binaryInfo={binaryInfo}
+                functionCount={functions.length}
+                gitBranch={gitBranch}
+                progress={progress}
+                dynamicMode={dynamicMode}
+                onToggleDynamicMode={handleToggleDynamicMode}
+            />
 
             {/* Dialogs */}
             <GotoDialog

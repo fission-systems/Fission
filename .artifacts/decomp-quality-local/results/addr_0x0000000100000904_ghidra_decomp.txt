@@ -1,0 +1,10 @@
+/* WARNING: Unknown calling convention */
+
+int main(void)
+
+{
+  int iVar1;
+  
+  iVar1 = cpp_main_like();
+  return iVar1;
+}

@@ -12,6 +12,7 @@ use super::gdb_mi::{GdbMiParser, MiResponse, MiValue};
 use crate::debug::traits::TimeTravelDebugger;
 use crate::debug::ttd::ExecutionSnapshot;
 use crate::debug::types::RegisterState;
+use fission_core::{FissionError, Result as FissionResult};
 
 /// RR debugger state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -372,12 +373,14 @@ impl Drop for RRDebugger {
 }
 
 impl TimeTravelDebugger for RRDebugger {
-    fn start_recording(&mut self) -> Result<(), String> {
-        Err("Use RRDebugger::record() static method to record a new trace".to_string())
+    fn start_recording(&mut self) -> FissionResult<()> {
+        Err(FissionError::debug(
+            "Use RRDebugger::record() static method to record a new trace",
+        ))
     }
 
-    fn stop_recording(&mut self) -> Result<(), String> {
-        Err("Recording is handled externally by rr".to_string())
+    fn stop_recording(&mut self) -> FissionResult<()> {
+        Err(FissionError::debug("Recording is handled externally by rr"))
     }
 
     fn is_recording(&self) -> bool {
@@ -388,9 +391,9 @@ impl TimeTravelDebugger for RRDebugger {
         matches!(self.state, RRState::Replaying | RRState::Paused)
     }
 
-    fn seek_to(&mut self, position: u64) -> Result<ExecutionSnapshot, String> {
+    fn seek_to(&mut self, position: u64) -> FissionResult<ExecutionSnapshot> {
         if !self.is_replay_mode() {
-            return Err("Not in replay mode".to_string());
+            return Err(FissionError::debug("Not in replay mode"));
         }
 
         // Use rr's "when" command to get current event, and "run <N>" to seek
@@ -410,9 +413,9 @@ impl TimeTravelDebugger for RRDebugger {
         ))
     }
 
-    fn reverse_step(&mut self) -> Result<ExecutionSnapshot, String> {
+    fn reverse_step(&mut self) -> FissionResult<ExecutionSnapshot> {
         if !self.is_replay_mode() {
-            return Err("Not in replay mode".to_string());
+            return Err(FissionError::debug("Not in replay mode"));
         }
 
         let _responses = self.send_command("reverse-stepi")?;
@@ -427,9 +430,9 @@ impl TimeTravelDebugger for RRDebugger {
         ))
     }
 
-    fn reverse_continue(&mut self) -> Result<ExecutionSnapshot, String> {
+    fn reverse_continue(&mut self) -> FissionResult<ExecutionSnapshot> {
         if !self.is_replay_mode() {
-            return Err("Not in replay mode".to_string());
+            return Err(FissionError::debug("Not in replay mode"));
         }
 
         let _responses = self.send_command("reverse-continue")?;
@@ -444,9 +447,9 @@ impl TimeTravelDebugger for RRDebugger {
         ))
     }
 
-    fn forward_step(&mut self) -> Result<ExecutionSnapshot, String> {
+    fn forward_step(&mut self) -> FissionResult<ExecutionSnapshot> {
         if !self.is_replay_mode() {
-            return Err("Not in replay mode".to_string());
+            return Err(FissionError::debug("Not in replay mode"));
         }
 
         let _responses = self.send_command("-exec-step-instruction")?;
@@ -461,9 +464,9 @@ impl TimeTravelDebugger for RRDebugger {
         ))
     }
 
-    fn forward_continue(&mut self) -> Result<ExecutionSnapshot, String> {
+    fn forward_continue(&mut self) -> FissionResult<ExecutionSnapshot> {
         if !self.is_replay_mode() {
-            return Err("Not in replay mode".to_string());
+            return Err(FissionError::debug("Not in replay mode"));
         }
 
         let _responses = self.send_command("-exec-continue")?;

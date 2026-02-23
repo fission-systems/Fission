@@ -5,7 +5,16 @@ use criterion::{Criterion, black_box, criterion_group, criterion_main};
 fn cfg_analysis_benchmark(c: &mut Criterion) {
     c.bench_function("cfg_analysis_dummy", |b| {
         b.iter(|| {
-            // TODO: Load a LoadedBinary mock and perform CfgAnalysis
+            // FIXME: Replace with a real fixture once the bench harness is wired up.
+            //
+            // Suggested pattern:
+            //   let elf_bytes = include_bytes!(concat!(
+            //       env!("CARGO_MANIFEST_DIR"), "/../../tests/binaries/comparison_test_x64"
+            //   ));
+            //   let binary = fission_loader::load_bytes(elf_bytes).unwrap();
+            //   let arc  = Arc::new(binary);
+            //   let cfg  = CfgAnalysis::new(arc);
+            //   black_box(cfg.run());
             black_box(1 + 1);
         })
     });

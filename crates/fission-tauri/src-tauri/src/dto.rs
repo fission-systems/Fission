@@ -213,6 +213,12 @@ pub struct CfgDto {
     pub function_address: String,
     pub nodes: Vec<CfgNode>,
     pub edges: Vec<CfgEdge>,
+    /// Number of basic blocks (= nodes.len())
+    pub block_count: usize,
+    /// Number of CFG edges (= edges.len())
+    pub edge_count: usize,
+    /// McCabe cyclomatic complexity V(G) = E – N + 2
+    pub cyclomatic_complexity: usize,
 }
 
 // ============================================================================
@@ -308,6 +314,28 @@ pub struct DebugStateDto {
     pub events: Vec<String>,
 }
 
+// ── Plugin System ────────────────────────────────────────────────────────────
+
+/// Plugin type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginTypeDto {
+    Native,
+    Unknown,
+}
+
+/// Plugin metadata sent to the frontend.
+#[derive(Debug, Clone, Serialize)]
+pub struct PluginInfoDto {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub plugin_type: PluginTypeDto,
+    pub enabled: bool,
+}
+
 // ── Phase 5: String XRefs ────────────────────────────────────────────────────
 
 /// A single code location that references a string.
@@ -324,4 +352,105 @@ pub struct StringXrefDto {
     pub string_address: String,
     pub string_value: String,
     pub refs: Vec<StringXrefCallsiteDto>,
+}
+
+// ============================================================================
+// Phase 8: Analysis Export
+// ============================================================================
+
+/// A single function entry in the exported analysis JSON.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportedFunctionDto {
+    pub address: String,
+    pub name: String,
+    pub is_renamed: bool,
+}
+
+/// Root document written to the exported `.json` file.
+#[derive(Debug, Clone, Serialize)]
+pub struct AnalysisExportDto {
+    /// Format version — bump on breaking schema changes.
+    pub version: u32,
+    /// Unix timestamp (seconds) when the export was created.
+    pub exported_at: u64,
+    /// Binary file name (basename).
+    pub binary_name: String,
+    /// Absolute path to the binary.
+    pub binary_path: String,
+    /// Simple fingerprint: `"bytes:<size>"`.
+    pub binary_fingerprint: String,
+    /// All detected functions with current names applied.
+    pub functions: Vec<ExportedFunctionDto>,
+    /// User comments keyed by hex address (e.g. `"0x401000"`).
+    pub comments: std::collections::HashMap<String, String>,
+    /// User bookmarks.
+    pub bookmarks: Vec<BookmarkDto>,
+}
+
+// ============================================================================
+// Phase 5: TTD (Time Travel Debugging)
+// ============================================================================
+
+/// Register state at a single recorded TTD step (x64 subset).
+#[derive(Debug, Clone, Serialize)]
+pub struct TtdSnapshotDto {
+    pub step: u64,
+    pub thread_id: u32,
+    pub rip: String,
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsp: u64,
+    pub rbp: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rflags: u64,
+}
+
+/// Current state of the TTD timeline, returned by `ttd_status` and `ttd_seek`.
+#[derive(Debug, Clone, Serialize)]
+pub struct TtdStateDto {
+    pub is_recording: bool,
+    pub snapshot_count: usize,
+    /// `[min_step, max_step]` or `null` when no snapshots exist.
+    pub step_range: Option<[u64; 2]>,
+    /// Current seek position (null when not in replay mode).
+    pub current_step: Option<u64>,
+    /// Register state at the current seek position (null when no snapshot).
+    pub current_snapshot: Option<TtdSnapshotDto>,
+}
+
+// ============================================================================
+// FID (Function Identification)
+// ============================================================================
+
+/// A single function matched by the FID signature scanner.
+#[derive(Debug, Clone, Serialize)]
+pub struct FidMatchDto {
+    pub address: String,
+    pub name: String,
+    pub previous_name: String,
+}
+
+/// Result returned by `run_fid`.
+#[derive(Debug, Clone, Serialize)]
+pub struct FidResultDto {
+    pub matched: usize,
+    pub total_scanned: usize,
+    pub matches: Vec<FidMatchDto>,
+}
+
+// ── Debug conversions ─────────────────────────────────────────────────────────
+
+impl From<fission_analysis::debug::types::RegisterState> for RegisterStateDto {
+    fn from(r: fission_analysis::debug::types::RegisterState) -> Self {
+        Self {
+            rax: r.rax, rbx: r.rbx, rcx: r.rcx, rdx: r.rdx,
+            rsi: r.rsi, rdi: r.rdi, rbp: r.rbp, rsp: r.rsp,
+            r8:  r.r8,  r9:  r.r9,  r10: r.r10, r11: r.r11,
+            r12: r.r12, r13: r.r13, r14: r.r14, r15: r.r15,
+            rip: r.rip, rflags: r.rflags,
+        }
+    }
 }

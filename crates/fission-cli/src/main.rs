@@ -5,7 +5,6 @@
 
 use clap::Parser;
 use fission_cli::cli;
-use fission_ui::gui;
 use std::path::PathBuf;
 
 /// Fission: Hybrid Dynamic Analysis Platform
@@ -161,39 +160,10 @@ fn main() -> fission_core::Result<()> {
         })
         .map_err(|e| fission_core::errors::FissionError::Other(e.to_string()))?;
     } else {
-        // GUI mode: Run GUI in main thread
-        println!("╔══════════════════════════════════════════════════════════╗");
-        println!(
-            "║  🔬 Fission v{} - GUI Mode               ║",
-            env!("CARGO_PKG_VERSION")
-        );
-        println!("╚══════════════════════════════════════════════════════════╝");
-        println!();
-        println!("🚀 Launching graphical interface...");
-
-        // Run GUI main loop (wgpu/eframe)
-        let native_options = eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_inner_size([1280.0, 720.0])
-                .with_min_inner_size([800.0, 600.0])
-                .with_title("Fission - Hybrid Analysis Platform"),
-            // Disable persistence to avoid restoring stale state from previous sessions
-            // This prevents issues with restored function tabs triggering decompilation
-            // when no binary is loaded
-            persistence_path: None,
-            ..Default::default()
-        };
-
-        eframe::run_native(
-            "Fission",
-            native_options,
-            Box::new(|cc| {
-                // Enable dark mode by default
-                cc.egui_ctx.set_visuals(egui::Visuals::dark());
-                Ok(Box::new(gui::FissionApp::default()))
-            }),
-        )
-        .map_err(|e| fission_core::errors::FissionError::Ui(e.to_string()))?;
+        // GUI has moved to the Tauri app (fission-tauri).
+        eprintln!("GUI mode has been moved to the Fission Tauri desktop app.");
+        eprintln!("Use --cli or --headless flag to run in CLI mode.");
+        std::process::exit(1);
     }
 
     Ok(())

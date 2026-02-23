@@ -152,6 +152,67 @@ pub const PAGE_SIZE: usize = 4096;
 /// Maximum supported binary size (1 GB)
 pub const MAX_BINARY_SIZE: usize = GB;
 
+// ============================================================================
+// Application / Config
+// ============================================================================
+
+/// Default configuration filename
+pub const CONFIG_FILENAME: &str = "fission.toml";
+
+/// Application data directory name
+pub const APP_DIR_NAME: &str = "fission";
+
+/// Decompiler disk-cache sub-directory
+pub const DECOMP_CACHE_DIR_NAME: &str = "decomp";
+
+/// Settings filename stored in the OS app-data directory (Tauri)
+pub const SETTINGS_FILENAME: &str = "settings.json";
+
+/// Default plugin search directory (relative)
+pub const PLUGIN_DIR_NAME: &str = "plugins";
+
+// ============================================================================
+// Decompiler Defaults
+// ============================================================================
+
+/// Default decompilation timeout in milliseconds (30 s)
+pub const DEFAULT_DECOMP_TIMEOUT_MS: u64 = 30_000;
+
+/// Default in-memory (L1) LRU cache entry count for decompiler results
+pub const DEFAULT_L1_CACHE_SIZE: usize = 100;
+
+/// Default decompiler memory limit passed to native engine (10 MB)
+pub const DEFAULT_DECOMP_MEMORY_LIMIT: usize = 10 * MB;
+
+// ============================================================================
+// Scan / Decode Limits
+// ============================================================================
+
+/// Maximum bytes read for hex-view / instruction decode per request
+pub const MAX_HEX_READ: usize = 4_096;
+
+/// Maximum bytes scanned per section (e.g., string search, 256 KB)
+pub const MAX_SCAN_PER_SECTION: usize = 256 * KB;
+
+/// Maximum function body bytes decoded for CFG / xref outgoing scan (64 KB)
+pub const MAX_XREF_DECODE: usize = 65_536;
+
+/// Maximum incoming cross-reference results returned per query
+pub const MAX_XREF_INCOMING: usize = 2_000;
+
+/// Maximum outgoing cross-reference results returned per query
+pub const MAX_XREF_OUTGOING: usize = 4_000;
+
+// ============================================================================
+// Fallback Strings
+// ============================================================================
+
+/// Fallback library name when an import's owning DLL is unknown
+pub const UNKNOWN_LIBRARY: &str = "unknown";
+
+/// Fallback compiler/format identifier
+pub const DEFAULT_COMPILER_ID: &str = "default";
+
 #[cfg(test)]
 mod tests {
     use super::*;

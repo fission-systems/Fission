@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 import json
+import time
 from pathlib import Path
 
 def resolve_ghidra_install_dir() -> str:
@@ -133,7 +134,9 @@ def decompile_batch(binary_path, address_file, output_dir):
                     except Exception as e:
                         asm_listing = f"Error capturing assembly: {e}"
 
+                    t0 = time.perf_counter()
                     results = decompiler.decompileFunction(function, 30, monitor)
+                    decomp_elapsed = time.perf_counter() - t0
                     if results.decompileCompleted():
                         decomp_source = results.getDecompiledFunction()
                         code = decomp_source.getC() if decomp_source else "// Error: Null decompilation"
@@ -143,7 +146,8 @@ def decompile_batch(binary_path, address_file, output_dir):
                             "name": function.getName(),
                             "address": addr_hex,
                             "code": code,
-                            "asm": asm_listing
+                            "asm": asm_listing,
+                            "decomp_sec": round(decomp_elapsed, 6),
                         }
                         with open(output_path / f"ghidra_{addr_hex}.json", "w", encoding="utf-8") as out:
                             json.dump(res_obj, out, indent=2)

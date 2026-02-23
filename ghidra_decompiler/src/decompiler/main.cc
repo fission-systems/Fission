@@ -1,45 +1,48 @@
 /**
  * Fission Decompiler CLI
- * 
+ *
  * Standalone subprocess decompiler that reads JSON from stdin and outputs C code to stdout.
- * 
- * Modes:
- *   - Single-shot (default): Process one request and exit
- *   - Server (--server): Keep running and process multiple requests (line-delimited JSON)
- * 
- * Input (stdin): {"bytes":"BASE64_ENCODED_BYTES","address":12345,"is_64bit":true,"sla_dir":"/path"}
+ * Reads one JSON request from stdin, processes it, writes response to stdout, and exits.
+ *
+ * Input (stdin):  {"bytes":"BASE64","address":12345,"is_64bit":true,"sla_dir":"/path"}
  * Output (stdout): {"status":"ok","code":"..."} or {"status":"error","message":"..."}
  */
 
-#include <cstring>
+#include <cstdlib>
+#include <iostream>
 #include <map>
 #include <cstdint>
-#include <cstdlib>
-#include "fission/decompiler/ServerMode.h"
+#include <sstream>
+#include <string>
+#include "fission/decompiler/DecompilationPipeline.h"
+#include "fission/core/DecompilerContext.h"
 #include "fission/utils/logger.h"
 
 // Global Structure Registry - declared extern, defined in DecompilationPipeline.cc
 extern std::map<uint64_t, std::map<int, std::string>> global_struct_registry;
 
-int main(int argc, char** argv) {
-    // Check for --server flag
-    bool server_mode = false;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--server") == 0 || strcmp(argv[i], "-s") == 0) {
-            server_mode = true;
-            break;
-        }
-    }
-
-    // Initialize logger
+int main(int /*argc*/, char** /*argv*/) {
+    // Initialize logger (optional file sink)
     const char* log_file = std::getenv("FISSION_LOG_FILE");
     if (log_file) {
         fission::utils::Logger::initialize(log_file);
     }
-    
-    if (server_mode) {
-        return fission::decompiler::ServerMode::run_server();
-    } else {
-        return fission::decompiler::ServerMode::run_single();
+
+    std::cout.setf(std::ios::unitbuf);
+
+    // Read all of stdin
+    std::stringstream buffer;
+    buffer << std::cin.rdbuf();
+    std::string input = buffer.str();
+
+    if (input.empty()) {
+        std::cout << "{\"status\":\"error\",\"message\":\"No input provided\"}" << std::endl;
+        return 1;
     }
+
+    fission::core::DecompilerContext state;
+    std::string response = fission::decompiler::DecompilationPipeline::process_request(state, input);
+    std::cout << response << std::endl;
+    std::cout.flush();
+    _exit(0);  // Skip cleanup to avoid Ghidra memory corruption crash
 }

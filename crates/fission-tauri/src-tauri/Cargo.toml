@@ -24,9 +24,12 @@ iced-x86 = { version = "1.21", features = ["std"] }
 # Fission crates
 fission-core = { path = "../../fission-core" }
 fission-loader = { path = "../../fission-loader" }
-fission-analysis = { path = "../../fission-analysis", optional = true }
+fission-analysis = { path = "../../fission-analysis" }  # always needed for plugin system
+fission-signatures = { path = "../../fission-signatures" }
 fission-ffi = { path = "../../fission-ffi", optional = true }
+tracing = "0.1"
+crossbeam-channel = "0.5"
 
 [features]
 default = ["native_decomp"]
-native_decomp = ["dep:fission-analysis", "fission-analysis/native_decomp", "dep:fission-ffi"]
+native_decomp = ["fission-analysis/native_decomp", "dep:fission-ffi"]

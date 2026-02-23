@@ -3,6 +3,8 @@
 //! Uses PyO3 to embed Python interpreter for scripting support.
 //! This module is only available when the "python" feature is enabled.
 
+use fission_core::Result as FissionResult;
+
 #[cfg(feature = "python")]
 pub mod bridge;
 #[cfg(feature = "python")]
@@ -20,11 +22,15 @@ impl PythonBridge {
     pub fn new() -> Self {
         Self
     }
-    pub fn initialize(&mut self) -> Result<(), String> {
-        Err("Python support not compiled. Enable 'python' feature.".into())
+    pub fn initialize(&mut self) -> FissionResult<()> {
+        Err(fission_core::FissionError::script(
+            "Python support not compiled. Enable 'python' feature.",
+        ))
     }
-    pub fn execute(&self, _code: &str) -> Result<String, String> {
-        Err("Python support not compiled".into())
+    pub fn execute(&self, _code: &str) -> FissionResult<String> {
+        Err(fission_core::FissionError::script(
+            "Python support not compiled",
+        ))
     }
 }
 

@@ -6,11 +6,13 @@ use crate::analysis::pcode::PcodeFunction;
 use crate::analysis::pcode::graph::PcodeGraph;
 use crate::analysis::pcode::optimizer::{DefUseTracker, PcodeOptimizer, PcodeOptimizerConfig};
 use crate::cli::output::OutputSilencer;
+use fission_core::find_sla_dir;
 use fission_loader::loader::LoadedBinary;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
+use tracing::{debug, warn};
 
 fn apply_profile(decomp: &mut fission_ffi::DecompilerNative, profile: Option<&str>) {
     let selected = profile.unwrap_or("balanced").to_ascii_lowercase();
@@ -43,18 +45,18 @@ pub fn generate_pcode_graph(
 ) -> io::Result<()> {
     if verbose {
         eprintln!("[*] Generating Pcode graph for function at 0x{:X}", addr);
+    } else {
+        debug!(addr = format_args!("0x{:X}", addr), "generating pcode graph");
     }
 
     // 1. Decompile to get Pcode
     // Initialize decompiler
-    let sla_dir = std::env::current_dir()
-        .unwrap()
-        .join("ghidra_decompiler")
-        .to_string_lossy()
-        .into_owned();
+    let sla_dir = find_sla_dir();
 
     if verbose {
         eprintln!("[*] Initializing native decompiler...");
+    } else {
+        debug!("initializing native decompiler");
     }
 
     let mut decomp = {
@@ -141,7 +143,7 @@ pub fn generate_pcode_graph(
                 section.is_executable,
                 section.is_writable,
             ) {
-                eprintln!("Warning: Failed to add section {}: {}", section.name, e);
+                warn!(section = %section.name, error = %e, "failed to add section to decompiler");
             }
         }
     }
@@ -161,6 +163,8 @@ pub fn generate_pcode_graph(
 
     if verbose {
         eprintln!("[*] Retrieving Pcode for function at 0x{:X}...", addr);
+    } else {
+        debug!(addr = format_args!("0x{:X}", addr), "retrieving pcode");
     }
 
     let pcode_json = {
@@ -245,14 +249,15 @@ pub fn generate_pcode_graph(
                     "Warning: 'dot' command failed: {}",
                     String::from_utf8_lossy(&output.stderr)
                 );
+            } else {
+                warn!(stderr = %String::from_utf8_lossy(&output.stderr), "'dot' render failed");
             }
         }
         Err(e) => {
             if verbose {
-                eprintln!(
-                    "Warning: Could not run 'dot' command (is Graphviz installed?): {}",
-                    e
-                );
+                eprintln!("Warning: Could not run 'dot' command (is Graphviz installed?): {}", e);
+            } else {
+                warn!(error = %e, "could not run 'dot' (is Graphviz installed?)");
             }
         }
     }

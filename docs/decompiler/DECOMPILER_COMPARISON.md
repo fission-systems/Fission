@@ -312,8 +312,8 @@ clang -g -O0 examples/struct_test.c -o examples/struct_test
 ```
 
 ### Comparison Script
-- **Tool:** `scripts/compare_decompilers.sh`
-- **Ghidra Wrapper:** `scripts/pyghidra_decompile.py`
+- **Tool:** `scripts/compare/compare_decompilers.sh`
+- **Ghidra Wrapper:** `scripts/ghidra/pyghidra_decompile.py`
 - **Output:** Side-by-side decompilation comparison
 
 ---

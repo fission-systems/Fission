@@ -14,7 +14,7 @@
 //! └── macos.rs    - macOS implementation (Mach API stub)
 //! ```
 
-use super::memory::{MemoryError, MemoryProtection, MemoryRegion};
+use super::memory::{MemoryError, MemoryRegion};
 
 // Platform-specific modules
 #[cfg(target_os = "windows")]

@@ -17,8 +17,8 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
                 "image_base": format!("0x{:x}", binary.image_base),
                 "sections": binary.sections.len(),
                 "functions": binary.functions.len(),
-                "imports": binary.functions.iter().filter(|f| f.is_import).count(),
-                "exports": binary.functions.iter().filter(|f| f.is_export).count(),
+                "imports": binary.imports().count(),
+                "exports": binary.exports().count(),
             }))
             .unwrap()
         )?;
@@ -81,8 +81,8 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
         writeln!(
             stdout,
             "║ Imports:    {:<10} Exports:   {:<24} ║",
-            binary.functions.iter().filter(|f| f.is_import).count(),
-            binary.functions.iter().filter(|f| f.is_export).count()
+            binary.imports().count(),
+            binary.exports().count()
         )?;
         writeln!(
             stdout,
@@ -156,7 +156,7 @@ pub(super) fn print_sections(binary: &LoadedBinary, json: bool) -> io::Result<()
 
 pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    let imports: Vec<&FunctionInfo> = binary.functions.iter().filter(|f| f.is_import).collect();
+    let imports: Vec<&FunctionInfo> = binary.imports().collect();
 
     if json {
         let funcs: Vec<serde_json::Value> = imports
@@ -182,7 +182,7 @@ pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()>
 
 pub(super) fn print_exports(binary: &LoadedBinary, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
-    let exports: Vec<&FunctionInfo> = binary.functions.iter().filter(|f| f.is_export).collect();
+    let exports: Vec<&FunctionInfo> = binary.exports().collect();
 
     if json {
         let funcs: Vec<serde_json::Value> = exports

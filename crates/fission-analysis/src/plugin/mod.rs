@@ -1,7 +1,7 @@
 //! Plugin System - Extensible plugin architecture for Fission.
 //!
 //! Provides a plugin API and event hooks for extending Fission functionality
-//! with Python scripts (via PyO3) or native Rust plugins.
+//! with native Rust plugins (dynamic libraries).
 //!
 //! Plugins can subscribe to `FissionEvent` for system-wide events.
 
@@ -9,8 +9,6 @@ pub mod api;
 pub mod hooks;
 pub mod manager;
 pub mod module;
-#[cfg(feature = "python")]
-pub mod python;
 pub mod traits;
 
 pub use api::PluginAPI;

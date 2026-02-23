@@ -1,0 +1,22 @@
+/* WARNING: Unknown calling convention */
+
+int cpp_switch(int x)
+
+{
+  int in_w0;
+  undefined4 local_4;
+  
+  if (in_w0 == 0) {
+    local_4 = 10;
+  }
+  else if (in_w0 == 1) {
+    local_4 = 0x14;
+  }
+  else if (in_w0 == 2) {
+    local_4 = 0x1e;
+  }
+  else {
+    local_4 = in_w0 + 100;
+  }
+  return local_4;
+}

@@ -6,6 +6,7 @@ use crate::analysis::cfg::{CfgAnalysis, CfgVisualizer, DotOptions};
 use crate::analysis::pcode::PcodeFunction;
 use crate::cli::output::OutputSilencer;
 use fission_analysis::analysis::cfg::CfgSummary;
+use fission_core::find_sla_dir;
 use fission_loader::loader::LoadedBinary;
 use std::fs;
 use std::io::{self, Write};
@@ -55,11 +56,7 @@ pub fn analyze_cfg(
     }
 
     // Initialize decompiler
-    let sla_dir = std::env::current_dir()
-        .map_err(|e| io::Error::other(format!("Failed to resolve current directory: {}", e)))?
-        .join("ghidra_decompiler")
-        .to_string_lossy()
-        .into_owned();
+    let sla_dir = find_sla_dir();
 
     if verbose {
         eprintln!("[*] Initializing native decompiler...");

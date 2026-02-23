@@ -10,6 +10,8 @@ use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::constants::{CONFIG_FILENAME, DEFAULT_DECOMP_TIMEOUT_MS, DEFAULT_L1_CACHE_SIZE, MAX_HEX_READ, MAX_SCAN_PER_SECTION, MB};
+
 use crate::core::config::{
     AnalysisConfig, Config, DebugConfig, DecompilerConfig, LogConfig, LogLevel, UiConfig,
 };
@@ -70,7 +72,7 @@ impl Default for TomlDecompilerConfig {
             default_function_size: 4096,
             max_function_size: 64 * 1024,
             min_function_size: 16,
-            timeout_ms: 30000,
+            timeout_ms: DEFAULT_DECOMP_TIMEOUT_MS,
             enable_prefetch: true,
             prefetch_count: 3,
             sla_dir: String::new(),
@@ -91,11 +93,11 @@ pub struct TomlAnalysisConfig {
 impl Default for TomlAnalysisConfig {
     fn default() -> Self {
         Self {
-            max_string_search_size: 256 * 1024,
+            max_string_search_size: MAX_SCAN_PER_SECTION,
             min_string_length: 4,
             auto_xref_analysis: true,
-            decompile_cache_size: 100,
-            function_address_range: 4096,
+            decompile_cache_size: DEFAULT_L1_CACHE_SIZE,
+            function_address_range: MAX_HEX_READ,
         }
     }
 }
@@ -189,14 +191,14 @@ impl TomlConfig {
         }
 
         // 2. Current directory
-        let cwd_config = PathBuf::from("fission.toml");
+        let cwd_config = PathBuf::from(CONFIG_FILENAME);
         if cwd_config.exists() {
             return Some(cwd_config);
         }
 
         // 3. User config directory
         if let Some(config_dir) = dirs::config_dir() {
-            let user_config = config_dir.join("fission").join("fission.toml");
+            let user_config = config_dir.join("fission").join(CONFIG_FILENAME);
             if user_config.exists() {
                 return Some(user_config);
             }
@@ -206,7 +208,7 @@ impl TomlConfig {
         if let Ok(cwd) = std::env::current_dir() {
             let mut current = cwd.as_path();
             for _ in 0..5 {
-                let candidate = current.join("fission.toml");
+                let candidate = current.join(CONFIG_FILENAME);
                 if candidate.exists() {
                     return Some(candidate);
                 }
@@ -269,7 +271,7 @@ impl From<TomlConfig> for Config {
                 file_enabled: false, // Will be set based on file_path
                 include_timestamp: toml.logging.include_timestamp,
                 include_target: toml.logging.include_target,
-                max_file_size: 10 * 1024 * 1024,
+                max_file_size: 10 * MB,
                 max_rotated_files: 3,
             },
         }
@@ -284,7 +286,7 @@ mod tests {
     fn test_default_toml_config() {
         let config = TomlConfig::default();
         assert_eq!(config.logging.level, "info");
-        assert_eq!(config.decompiler.timeout_ms, 30000);
+        assert_eq!(config.decompiler.timeout_ms, DEFAULT_DECOMP_TIMEOUT_MS);
     }
 
     #[test]

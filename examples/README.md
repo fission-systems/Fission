@@ -2,6 +2,31 @@
 
 이 디렉토리는 Fission 디컴파일러의 고급 기능을 테스트하기 위한 복잡한 테스트 케이스들을 포함합니다.
 
+## 📂 디렉토리 구조 및 역할 구분
+
+`examples/` 는 **소스(source)** 와 **결과물(artifact)** 이 함께 존재합니다.
+혼동을 막기 위해 아래 규칙을 따릅니다.
+
+```
+examples/
+├── sources/               # ← C/C++ 원본 소스 파일 (빌드 입력)
+├── control_flow/          # ← 카테고리별 소스 (기능 테스트용 C/C++)
+├── data_structures/
+├── pointers/
+├── cpp_features/
+├── optimization/          # ← 최적화 변형 소스
+├── mixed_complex/         # ← 혼합 복잡도 소스
+├── binaries/              # ← 컴파일된 테스트 바이너리 (빌드 출력, 버전관리 포함)
+├── addresses/             # ← 함수 주소 목록 텍스트 (빌드 출력, 버전관리 포함)
+└── results/               # ← 실행 결과·HTML 리포트·비교 출력 (gitignore 대상)
+```
+
+> **규칙**
+> - `*.dSYM/`, `*.pdb` 등 디버그 심볼 디렉터리나 임시 바이너리는 저장소 루트가 아닌
+>   `results/` 하위에 두거나 `.gitignore` 처리하세요.
+> - 스크립트가 생성하는 모든 출력물은 `results/` 에 저장됩니다
+>   (`scripts/` 의 결과도 동일하게 `examples/results/` 를 사용합니다).
+
 ## 📁 테스트 카테고리
 
 ### 1. Control Flow (`control_flow/`)

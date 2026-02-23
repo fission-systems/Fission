@@ -1,0 +1,27 @@
+Function: _cpp_main_like at 0x1000007d4 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x0001000007d4  ff c3                     inc ebx
+  0x0001000007d6  01 d1                     add ecx,edx
+  0x0001000007d8  fd                        std
+  0x0001000007d9  7b 06                     jnp short 00000001000007E1h
+  0x0001000007db  a9 fd 83 01 91            test eax,910183FDh
+  0x0001000007e0  28 00                     sub [rax],al
+  0x0001000007e2  00 90 08 11 40 f9         add [rax-6BFEEF8h],dl
+  0x0001000007e8  08 01                     or [rcx],al
+  0x0001000007ea  40 f9                     stc
+  0x0001000007ec  a8 83                     test al,83h
+  0x0001000007ee  1f f8                     (bad)
+  0x0001000007f0  00 00                     add [rax],al
+  0x0001000007f2  00 90 00 00 2d 91         add [rax-6ED30000h],dl
+  0x0001000007f8  c6 00 00                  mov byte ptr [rax],0
+  0x0001000007fb  94                        xchg esp,eax
+  0x0001000007fc  08 00                     or [rax],al
+  0x0001000007fe  00 90 08 f1 2d 91         add [rax-6ED20EF8h],dl
+  0x000100000804  00 01                     add [rcx],al
+  0x000100000806  c0 3d a0 83 00 d1 a0      sar byte ptr [0D1008BADh],0A0h
+  0x00010000080d  03 9e 3c 08 11 40         add ebx,[rsi+4011083Ch]
+  0x000100000813  b9 a8 03 1f b8            mov ecx,0B81F03A8h
+  0x000100000818  a1 00 80 52 6d ff ff 97 a0  mov eax,[0A097FFFF6D528000h]
+  0x000100000821  c3                        ret
+Total instructions: 23

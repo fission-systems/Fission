@@ -249,7 +249,13 @@ def summarize_results(results: list[dict]) -> dict:
     }
 
 
-def compare_single(binary: Path, address: str, output_json: Path, timeout: int) -> dict:
+def compare_single(
+    binary: Path,
+    address: str,
+    output_json: Path,
+    timeout: int,
+    use_ghidra_cache: bool = False,
+) -> dict:
     script_dir = Path(__file__).resolve().parent
     scripts_dir = script_dir.parent
     project_root = scripts_dir.parent
@@ -262,15 +268,16 @@ def compare_single(binary: Path, address: str, output_json: Path, timeout: int) 
     addr_val = int(address, 16) if address.startswith("0x") else int(address)
     norm_addr = f"0x{addr_val:x}"
     
-    # Check for pre-generated Ghidra results in batch mode
+    # Optional cache path for pre-generated Ghidra results (non end-to-end mode)
     ghidra_cached_json = output_json.parent / "ghidra_cache" / f"ghidra_{norm_addr}.json"
     ghidra_full = ""
     ghidra_sec = 0.0
     
-    if ghidra_cached_json.exists():
+    if use_ghidra_cache and ghidra_cached_json.exists():
         with open(ghidra_cached_json, "r") as f:
             cached = json.load(f)
             ghidra_full = cached.get("code", "")
+            ghidra_sec = float(cached.get("decomp_sec", 0.0) or 0.0)
             # If batch script saved assembly separately, use it
             cached_asm = cached.get("asm", "")
             if cached_asm:
@@ -455,6 +462,11 @@ def main() -> int:
     parser.add_argument("-m", "--batch", action="store_true", help="Batch mode")
     parser.add_argument("-h", "--html", action="store_true", help="Generate HTML report (batch mode)")
     parser.add_argument("-t", "--timeout", type=int, default=600, help="Timeout seconds")
+    parser.add_argument(
+        "--use-ghidra-cache",
+        action="store_true",
+        help="Use pre-generated Ghidra batch cache (faster, but not end-to-end timing)",
+    )
     args = parser.parse_args()
 
     if not args.binary or not args.address_or_file:
@@ -475,23 +487,36 @@ def main() -> int:
         output_dir.mkdir(parents=True, exist_ok=True)
         addr_file = Path(args.address_or_file).expanduser()
         
-        # Performance optimization: Run Ghidra batch decompilation ONCE for all addresses
-        ghidra_cache = output_dir / "ghidra_cache"
-        if not ghidra_cache.exists():
-            print(f"[*] Running Ghidra batch decompilation for performance...")
-            python_bin = detect_python()
-            batch_script = scripts_dir / "ghidra" / "pyghidra_decompile_batch.py"
-            batch_cmd = [python_bin, str(batch_script), str(binary), str(addr_file), str(ghidra_cache)]
-            # Don't capture output so run_complex_tests.py can see the start/end markers
-            subprocess.run(batch_cmd, cwd=str(project_root), check=False)
-            print(f"[*] Ghidra batch decompilation complete.")
+        if args.use_ghidra_cache:
+            # Optional performance optimization:
+            # Run Ghidra batch decompilation ONCE and reuse per-function cache files.
+            # NOTE: This is not end-to-end timing for Ghidra.
+            ghidra_cache = output_dir / "ghidra_cache"
+            if not ghidra_cache.exists():
+                print("[*] Running Ghidra batch decompilation (cache mode)...")
+                python_bin = detect_python()
+                batch_script = scripts_dir / "ghidra" / "pyghidra_decompile_batch.py"
+                batch_cmd = [python_bin, str(batch_script), str(binary), str(addr_file), str(ghidra_cache)]
+                # Don't capture output so run_complex_tests.py can see the start/end markers
+                subprocess.run(batch_cmd, cwd=str(project_root), check=False)
+                print("[*] Ghidra batch decompilation cache complete.")
+        else:
+            print("[*] End-to-end timing mode: Ghidra runs per function (no cache).")
 
         entries = parse_address_file(addr_file)
         results: list[dict] = []
         for addr, _name in entries:
             output_json = output_dir / f"addr_{addr}.json"
             print(f"== {addr} ==")
-            results.append(compare_single(binary, addr, output_json, args.timeout))
+            results.append(
+                compare_single(
+                    binary,
+                    addr,
+                    output_json,
+                    args.timeout,
+                    use_ghidra_cache=args.use_ghidra_cache,
+                )
+            )
         summary = summarize_results(results)
         summary_path = output_dir / "summary.json"
         summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -526,7 +551,13 @@ def main() -> int:
         result_dir.mkdir(parents=True, exist_ok=True)
         output_json = result_dir / "comparison.json"
 
-    result = compare_single(binary, args.address_or_file, output_json, args.timeout)
+    result = compare_single(
+        binary,
+        args.address_or_file,
+        output_json,
+        args.timeout,
+        use_ghidra_cache=args.use_ghidra_cache,
+    )
     info = result.get("comparison_info", {})
     metrics = info.get("metrics", {})
     similarity = info.get("similarity", 0.0)

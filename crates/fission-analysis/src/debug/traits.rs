@@ -26,6 +26,7 @@
 //! dbg.continue_execution()?;
 //! ```
 
+use fission_core::Result as FissionResult;
 use super::types::{ProcessInfo, RegisterState};
 
 /// Platform-agnostic debugger trait
@@ -39,10 +40,10 @@ pub trait Debugger: Send {
         Self: Sized;
 
     /// Attach to a process by PID
-    fn attach(&mut self, pid: u32) -> Result<(), String>;
+    fn attach(&mut self, pid: u32) -> FissionResult<()>;
 
     /// Detach from the current process
-    fn detach(&mut self) -> Result<(), String>;
+    fn detach(&mut self) -> FissionResult<()>;
 
     /// Check if currently attached to a process
     fn is_attached(&self) -> bool;
@@ -51,25 +52,25 @@ pub trait Debugger: Send {
     fn attached_pid(&self) -> Option<u32>;
 
     /// Continue execution after a debug event
-    fn continue_execution(&mut self) -> Result<(), String>;
+    fn continue_execution(&mut self) -> FissionResult<()>;
 
     /// Single step one instruction
-    fn single_step(&mut self) -> Result<(), String>;
+    fn single_step(&mut self) -> FissionResult<()>;
 
     /// Set a software breakpoint at the given address
-    fn set_sw_breakpoint(&mut self, address: u64) -> Result<(), String>;
+    fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()>;
 
     /// Remove a software breakpoint at the given address
-    fn remove_sw_breakpoint(&mut self, address: u64) -> Result<(), String>;
+    fn remove_sw_breakpoint(&mut self, address: u64) -> FissionResult<()>;
 
     /// Read memory from the target process
-    fn read_memory(&self, address: u64, size: usize) -> Result<Vec<u8>, String>;
+    fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>>;
 
     /// Write memory to the target process
-    fn write_memory(&mut self, address: u64, data: &[u8]) -> Result<(), String>;
+    fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()>;
 
     /// Fetch CPU registers for a thread
-    fn fetch_registers(&mut self, thread_id: u32) -> Result<RegisterState, String>;
+    fn fetch_registers(&mut self, thread_id: u32) -> FissionResult<RegisterState>;
 }
 
 // ============================================================================
@@ -103,10 +104,10 @@ use super::ttd::ExecutionSnapshot;
 /// ```
 pub trait TimeTravelDebugger: Send {
     /// Start recording execution
-    fn start_recording(&mut self) -> Result<(), String>;
+    fn start_recording(&mut self) -> FissionResult<()>;
 
     /// Stop recording execution
-    fn stop_recording(&mut self) -> Result<(), String>;
+    fn stop_recording(&mut self) -> FissionResult<()>;
 
     /// Check if currently recording
     fn is_recording(&self) -> bool;
@@ -115,19 +116,19 @@ pub trait TimeTravelDebugger: Send {
     fn is_replay_mode(&self) -> bool;
 
     /// Seek to a specific step/position in the timeline
-    fn seek_to(&mut self, position: u64) -> Result<ExecutionSnapshot, String>;
+    fn seek_to(&mut self, position: u64) -> FissionResult<ExecutionSnapshot>;
 
     /// Step backwards one instruction
-    fn reverse_step(&mut self) -> Result<ExecutionSnapshot, String>;
+    fn reverse_step(&mut self) -> FissionResult<ExecutionSnapshot>;
 
     /// Continue backwards until next breakpoint
-    fn reverse_continue(&mut self) -> Result<ExecutionSnapshot, String>;
+    fn reverse_continue(&mut self) -> FissionResult<ExecutionSnapshot>;
 
     /// Step forwards one instruction (in replay mode)
-    fn forward_step(&mut self) -> Result<ExecutionSnapshot, String>;
+    fn forward_step(&mut self) -> FissionResult<ExecutionSnapshot>;
 
     /// Continue forwards until next breakpoint (in replay mode)
-    fn forward_continue(&mut self) -> Result<ExecutionSnapshot, String>;
+    fn forward_continue(&mut self) -> FissionResult<ExecutionSnapshot>;
 
     /// Get current position in timeline
     fn current_position(&self) -> Option<u64>;

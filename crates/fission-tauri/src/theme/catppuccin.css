@@ -54,10 +54,12 @@
 
   /* Sizing */
   --activity-bar-width: 48px;
+  --activity-bar-icon-size: 24px;
   --sidebar-width: 280px;
   --bottom-panel-height: 200px;
-  --status-bar-height: 24px;
-  --tab-height: 36px;
+  --status-bar-height: 22px;
+  --tab-height: 35px;
+  --panel-tab-height: 35px;
   --resize-handle: 4px;
 
   /* Typography */

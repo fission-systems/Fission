@@ -3,6 +3,7 @@
 use crate::cli::output::OutputSilencer;
 use crate::ui::cli::handlers::CliState;
 use colored::Colorize;
+use fission_core::{find_sla_dir, DEFAULT_DECOMP_MEMORY_LIMIT};
 use fission_loader::loader::LoadedBinary;
 
 pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
@@ -51,17 +52,7 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
         println!("{} Initializing native decompiler...", "[*]".blue());
 
         // Get SLA directory
-        let sla_dir = match std::env::current_dir() {
-            Ok(dir) => dir
-                .join("ghidra_decompiler")
-                .join("languages")
-                .to_string_lossy()
-                .into_owned(),
-            Err(e) => {
-                println!("{} Failed to get current directory: {}", "[!]".red(), e);
-                return;
-            }
-        };
+        let sla_dir = find_sla_dir();
 
         let suppress_native_logs = std::env::var("FISSION_SUPPRESS_NATIVE_LOGS")
             .ok()
@@ -70,8 +61,8 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
 
         let mut decompiler = {
             let _silencer = OutputSilencer::new_if(suppress_native_logs);
-            // Default cache size 10MB
-            match RecommendedDecompiler::new(binary, &sla_dir, 10 * 1024 * 1024) {
+            // Default cache size per DEFAULT_DECOMP_MEMORY_LIMIT
+            match RecommendedDecompiler::new(binary, &sla_dir, DEFAULT_DECOMP_MEMORY_LIMIT) {
                 Ok(d) => d,
                 Err(e) => {
                     println!("{} Failed to start decompiler: {}", "[!]".red(), e);

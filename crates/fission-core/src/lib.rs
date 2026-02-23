@@ -18,3 +18,13 @@ pub use crate::core::settings;
 
 pub use crate::core::config::{LogConfig, LogLevel};
 pub use crate::core::{CONFIG, FissionError, PATHS, Result};
+
+// Commonly used standalone utilities
+pub use crate::core::path_config::find_sla_dir;
+pub use crate::core::utils::{format_addr, parse_address};
+pub use crate::core::constants::{
+    APP_DIR_NAME, CONFIG_FILENAME, DECOMP_CACHE_DIR_NAME, DEFAULT_COMPILER_ID,
+    DEFAULT_DECOMP_MEMORY_LIMIT, DEFAULT_DECOMP_TIMEOUT_MS, DEFAULT_L1_CACHE_SIZE,
+    MAX_HEX_READ, MAX_SCAN_PER_SECTION, MAX_XREF_DECODE, MAX_XREF_INCOMING,
+    MAX_XREF_OUTGOING, PLUGIN_DIR_NAME, SETTINGS_FILENAME, UNKNOWN_LIBRARY,
+};

@@ -1,0 +1,14 @@
+Function: _main at 0x100000904 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000100000904  ff 83 00 d1 fd 7b         inc dword ptr [rbx+7BFDD100h]
+  0x00010000090a  01 a9 fd 43 00 91         add [rcx-6EFFBC03h],ebp
+  0x000100000910  bf c3 1f b8 b0            mov edi,0B0B81FC3h
+  0x000100000915  ff ff                     (bad)
+  0x000100000917  97                        xchg edi,eax
+  0x000100000918  fd                        std
+  0x000100000919  7b 41                     jnp short 000000010000095Ch
+  0x00010000091b  a9 ff 83 00 91            test eax,910083FFh
+  0x000100000920  c0 03 5f                  rol byte ptr [rbx],5Fh
+  0x000100000923  d6                        (bad)
+Total instructions: 10

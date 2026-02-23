@@ -1,0 +1,35 @@
+Function: _cpp_sum_array at 0x1000005d0 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x0001000005d0  ff 83 00 d1 e0 0f         inc dword ptr [rbx+0FE0D100h]
+  0x0001000005d6  00 f9                     add cl,bh
+  0x0001000005d8  e1 17                     loope 00000001000005F1h
+  0x0001000005da  00 b9 ff 13 00 b9         add [rcx-46FFEC01h],bh
+  0x0001000005e0  ff 0f                     dec dword ptr [rdi]
+  0x0001000005e2  00 b9 01 00 00 14         add [rcx+14000001h],bh
+  0x0001000005e8  e8 0f 40 b9 e9            call 00000000E9B945FCh
+  0x0001000005ed  17 40                     (bad)
+  0x0001000005ef  b9 08 01 09 6b            mov ecx,6B090108h
+  0x0001000005f4  aa                        stosb [rdi]
+  0x0001000005f5  01 00                     add [rax],eax
+  0x0001000005f7  54                        push rsp
+  0x0001000005f8  01 00                     add [rax],eax
+  0x0001000005fa  00 14 e8                  add [rax+rbp*8],dl
+  0x0001000005fd  0f 40 f9                  cmovo edi,ecx
+  0x000100000600  e9 0f 80 b9 09            jmp 0000000109B98614h
+  0x000100000605  79 69                     jns short 0000000100000670h
+  0x000100000607  b8 e8 13 40 b9            mov eax,0B94013E8h
+  0x00010000060c  08 01                     or [rcx],al
+  0x00010000060e  09 0b                     or [rbx],ecx
+  0x000100000610  e8 13 00 b9 01            call 0000000101B90628h
+  0x000100000615  00 00                     add [rax],al
+  0x000100000617  14 e8                     adc al,0E8h
+  0x000100000619  0f 40 b9 08 05 00 11      cmovo edi,[rcx+11000508h]
+  0x000100000620  e8 0f 00 b9 f1            call 00000000F1B90634h
+  0x000100000625  ff ff                     (bad)
+  0x000100000627  17 e0                     (bad)
+  0x000100000629  13 40 b9                  adc eax,[rax-47h]
+  0x00010000062c  ff 83 00 91 c0 03         inc dword ptr [rbx+3C09100h]
+  0x000100000632  5f                        pop rdi
+  0x000100000633  d6                        (bad)
+Total instructions: 31

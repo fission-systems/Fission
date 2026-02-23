@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { AsmInstructionDto } from "../types";
 
 // Mnemonic color categories
@@ -33,7 +34,16 @@ interface AssemblyViewProps {
     onToggleBookmark?: (address: string) => void;
     selectedAddress?: string | null;
     functionName?: string;
+    /** Called when the user scrolls near the bottom to load more rows */
+    onLoadMore?: () => void;
+    /** Whether more rows are available to load */
+    hasMore?: boolean;
+    /** Whether a load-more fetch is in progress */
+    loadingMore?: boolean;
 }
+
+const ROW_HEIGHT = 22; // px — fixed height for virtualizer estimate
+const OVERSCAN = 20;   // extra rows rendered above/below viewport
 
 export default function AssemblyView({
     instructions,
@@ -43,9 +53,12 @@ export default function AssemblyView({
     onToggleBookmark,
     selectedAddress,
     functionName,
+    onLoadMore,
+    hasMore = false,
+    loadingMore = false,
 }: AssemblyViewProps) {
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; address: string; comment: string } | null>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
 
     const handleContextMenu = useCallback((e: React.MouseEvent, addr: string, comment: string) => {
         e.preventDefault();
@@ -53,6 +66,26 @@ export default function AssemblyView({
     }, []);
 
     const closeContext = useCallback(() => setContextMenu(null), []);
+
+    const rowVirtualizer = useVirtualizer({
+        count: instructions?.length ?? 0,
+        getScrollElement: () => scrollRef.current,
+        estimateSize: () => ROW_HEIGHT,
+        overscan: OVERSCAN,
+    });
+
+    // Trigger load-more when scrolled within 200px of the bottom
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el || !onLoadMore || !hasMore) return;
+        const onScroll = () => {
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
+                onLoadMore();
+            }
+        };
+        el.addEventListener("scroll", onScroll, { passive: true });
+        return () => el.removeEventListener("scroll", onScroll);
+    }, [onLoadMore, hasMore]);
 
     if (!instructions) {
         return (
@@ -82,42 +115,76 @@ export default function AssemblyView({
         });
     };
 
+    const virtualItems = rowVirtualizer.getVirtualItems();
+    const totalSize = rowVirtualizer.getTotalSize();
+    const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+    const paddingBottom = virtualItems.length > 0
+        ? totalSize - virtualItems[virtualItems.length - 1].end
+        : totalSize;
+
     return (
-        <div className="asm-view" ref={containerRef} onClick={closeContext}>
-            <table className="asm-table">
-                <thead>
-                    <tr>
-                        <th className="asm-col-addr">Address</th>
-                        <th className="asm-col-bytes">Bytes</th>
-                        <th className="asm-col-mnemonic">Mnemonic</th>
-                        <th className="asm-col-operands">Operands</th>
-                        <th className="asm-col-comment">Comment</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {instructions.map((insn) => (
-                        <tr
-                            key={insn.address}
-                            className={`asm-row ${selectedAddress === insn.address ? "asm-row--selected" : ""}`}
-                            onContextMenu={(e) => handleContextMenu(e, insn.address, insn.comment || "")}
-                        >
-                            <td className="asm-addr">{insn.address}</td>
-                            <td className="asm-bytes">{insn.bytes}</td>
-                            <td className={`asm-mnemonic ${getMnemonicClass(insn.mnemonic)}`}>
-                                {insn.mnemonic}
-                            </td>
-                            <td className="asm-operands">{renderOperands(insn.operands)}</td>
-                            <td
-                                className="asm-comment"
-                                onDoubleClick={() => onCommentEdit?.(insn.address, insn.comment || "")}
-                                title="Double-click or press ; to edit"
-                            >
-                                {insn.comment && <span className="asm-comment-text">; {insn.comment}</span>}
-                            </td>
+        <div className="asm-view" onClick={closeContext}>
+            {/* Scrollable container — virtualizer scrolls here */}
+            <div ref={scrollRef} className="asm-view__scroller">
+                <table className="asm-table">
+                    <thead>
+                        <tr>
+                            <th className="asm-col-addr">Address</th>
+                            <th className="asm-col-bytes">Bytes</th>
+                            <th className="asm-col-mnemonic">Mnemonic</th>
+                            <th className="asm-col-operands">Operands</th>
+                            <th className="asm-col-comment">Comment</th>
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {/* Top spacer */}
+                        {paddingTop > 0 && (
+                            <tr><td style={{ height: paddingTop }} colSpan={5} /></tr>
+                        )}
+
+                        {virtualItems.map((vRow) => {
+                            const insn = instructions[vRow.index];
+                            return (
+                                <tr
+                                    key={vRow.key}
+                                    data-index={vRow.index}
+                                    ref={rowVirtualizer.measureElement}
+                                    className={`asm-row ${selectedAddress === insn.address ? "asm-row--selected" : ""}`}
+                                    onContextMenu={(e) => handleContextMenu(e, insn.address, insn.comment || "")}
+                                >
+                                    <td className="asm-addr">{insn.address}</td>
+                                    <td className="asm-bytes">{insn.bytes}</td>
+                                    <td className={`asm-mnemonic ${getMnemonicClass(insn.mnemonic)}`}>
+                                        {insn.mnemonic}
+                                    </td>
+                                    <td className="asm-operands">{renderOperands(insn.operands)}</td>
+                                    <td
+                                        className="asm-comment"
+                                        onDoubleClick={() => onCommentEdit?.(insn.address, insn.comment || "")}
+                                        title="Double-click to edit comment"
+                                    >
+                                        {insn.comment && <span className="asm-comment-text">; {insn.comment}</span>}
+                                    </td>
+                                </tr>
+                            );
+                        })}
+
+                        {/* Bottom spacer */}
+                        {paddingBottom > 0 && (
+                            <tr><td style={{ height: paddingBottom }} colSpan={5} /></tr>
+                        )}
+
+                        {/* Load-more indicator */}
+                        {hasMore && (
+                            <tr className="asm-load-more-row">
+                                <td colSpan={5} className="asm-load-more">
+                                    {loadingMore ? "Loading…" : "Scroll down to load more"}
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
 
             {contextMenu && (
                 <div

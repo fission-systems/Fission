@@ -30,6 +30,18 @@ impl LinuxMemory {
         self.target_pid.ok_or(MemoryError::NoProcess)
     }
 
+    /// Build the `/proc/{pid}/maps` path for the given process
+    #[inline]
+    fn proc_maps_path(pid: u32) -> String {
+        format!("/proc/{}/maps", pid)
+    }
+
+    /// Build the `/proc/{pid}/mem` path for the given process
+    #[inline]
+    fn proc_mem_path(pid: u32) -> String {
+        format!("/proc/{}/mem", pid)
+    }
+
     /// Parse a line from /proc/{pid}/maps
     ///
     /// Format: address-address perms offset dev inode pathname
@@ -83,7 +95,7 @@ impl PlatformMemory for LinuxMemory {
     fn open_process(&mut self, pid: u32) -> Result<(), MemoryError> {
         // On Linux, we just store the PID and access /proc/{pid}/mem on demand
         // Could add validation that the process exists here
-        let maps_path = format!("/proc/{}/maps", pid);
+        let maps_path = Self::proc_maps_path(pid);
         if std::path::Path::new(&maps_path).exists() {
             self.target_pid = Some(pid);
             Ok(())
@@ -97,7 +109,7 @@ impl PlatformMemory for LinuxMemory {
 
     fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<usize, MemoryError> {
         let pid = self.get_pid()?;
-        let mem_path = format!("/proc/{}/mem", pid);
+        let mem_path = Self::proc_mem_path(pid);
 
         let mut file = File::open(&mem_path).map_err(|e| MemoryError::ReadFailed {
             address,
@@ -120,7 +132,7 @@ impl PlatformMemory for LinuxMemory {
 
     fn write(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {
         let pid = self.get_pid()?;
-        let mem_path = format!("/proc/{}/mem", pid);
+        let mem_path = Self::proc_mem_path(pid);
 
         let mut file = OpenOptions::new()
             .write(true)
@@ -146,7 +158,7 @@ impl PlatformMemory for LinuxMemory {
 
     fn query_regions(&self) -> Result<Vec<MemoryRegion>, MemoryError> {
         let pid = self.get_pid()?;
-        let maps_path = format!("/proc/{}/maps", pid);
+        let maps_path = Self::proc_maps_path(pid);
 
         let content = std::fs::read_to_string(&maps_path).map_err(|e| MemoryError::ReadFailed {
             address: 0,

@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/.artifacts/decomp-quality-local/comparison_test_cpp_elf",
+    "address": "0x00000001000005d0",
+    "timestamp": "2026-02-16T01:36:12.218537Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 18,
+        "chars": 349,
+        "functions": 5,
+        "branches": 1
+      },
+      "fission": {
+        "lines": 19,
+        "chars": 386,
+        "functions": 6,
+        "branches": 1
+      }
+    },
+    "similarity": 38.46
+  },
+  "timings": {
+    "ghidra_sec": 0.002,
+    "fission_asm_sec": 0.026,
+    "fission_decomp_sec": 0.546
+  },
+  "ghidra_assembly": "0x1000005D0      sub      sp, sp, #0x20\n  0x1000005D4      str      x0, [sp, #0x18]\n  0x1000005D8      str      w1, [sp, #0x14]\n  0x1000005DC      str      wzr, [sp, #0x10]\n  0x1000005E0      str      wzr, [sp, #0xc]\n  0x1000005E4      b        0x1000005e8\n  0x1000005E8      ldr      w8, [sp, #0xc]\n  0x1000005EC      ldr      w9, [sp, #0x14]\n  0x1000005F0      subs     w8, w8, w9\n  0x1000005F4      b.ge     0x100000628\n  0x1000005F8      b        0x1000005fc\n  0x1000005FC      ldr      x8, [sp, #0x18]\n  0x100000600      ldrsw    x9, [sp, #0xc]\n  0x100000604      ldr      w9, [x8, x9, LSL #0x2]\n  0x100000608      ldr      w8, [sp, #0x10]\n  0x10000060C      add      w8, w8, w9\n  0x100000610      str      w8, [sp, #0x10]\n  0x100000614      b        0x100000618\n  0x100000618      ldr      w8, [sp, #0xc]\n  0x10000061C      add      w8, w8, #0x1\n  0x100000620      str      w8, [sp, #0xc]\n  0x100000624      b        0x1000005e8\n  0x100000628      ldr      w0, [sp, #0x10]\n  0x10000062C      add      sp, sp, #0x20\n  0x100000630      ret",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nint cpp_sum_array(int *arr,int size)\n\n{\n  long in_x0;\n  int in_w1;\n  int i;\n  int sum;\n  undefined4 local_14;\n  undefined4 local_10;\n  \n  local_10 = 0;\n  for (local_14 = 0; local_14 < in_w1; local_14 = local_14 + 1) {\n    local_10 = local_10 + *(int *)(in_x0 + (long)local_14 * 4);\n  }\n  return local_10;\n}",
+  "fission_assembly": "Function: _cpp_sum_array at 0x1000005d0 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x0001000005d0  ff 83 00 d1 e0 0f         inc dword ptr [rbx+0FE0D100h]\n  0x0001000005d6  00 f9                     add cl,bh\n  0x0001000005d8  e1 17                     loope 00000001000005F1h\n  0x0001000005da  00 b9 ff 13 00 b9         add [rcx-46FFEC01h],bh\n  0x0001000005e0  ff 0f                     dec dword ptr [rdi]\n  0x0001000005e2  00 b9 01 00 00 14         add [rcx+14000001h],bh\n  0x0001000005e8  e8 0f 40 b9 e9            call 00000000E9B945FCh\n  0x0001000005ed  17 40                     (bad)\n  0x0001000005ef  b9 08 01 09 6b            mov ecx,6B090108h\n  0x0001000005f4  aa                        stosb [rdi]\n  0x0001000005f5  01 00                     add [rax],eax\n  0x0001000005f7  54                        push rsp\n  0x0001000005f8  01 00                     add [rax],eax\n  0x0001000005fa  00 14 e8                  add [rax+rbp*8],dl\n  0x0001000005fd  0f 40 f9                  cmovo edi,ecx\n  0x000100000600  e9 0f 80 b9 09            jmp 0000000109B98614h\n  0x000100000605  79 69                     jns short 0000000100000670h\n  0x000100000607  b8 e8 13 40 b9            mov eax,0B94013E8h\n  0x00010000060c  08 01                     or [rcx],al\n  0x00010000060e  09 0b                     or [rbx],ecx\n  0x000100000610  e8 13 00 b9 01            call 0000000101B90628h\n  0x000100000615  00 00                     add [rax],al\n  0x000100000617  14 e8                     adc al,0E8h\n  0x000100000619  0f 40 b9 08 05 00 11      cmovo edi,[rcx+11000508h]\n  0x000100000620  e8 0f 00 b9 f1            call 00000000F1B90634h\n  0x000100000625  ff ff                     (bad)\n  0x000100000627  17 e0                     (bad)\n  0x000100000629  13 40 b9                  adc eax,[rax-47h]\n  0x00010000062c  ff 83 00 91 c0 03         inc dword ptr [rbx+3C09100h]\n  0x000100000632  5f                        pop rdi\n  0x000100000633  d6                        (bad)\nTotal instructions: 31",
+  "fission_decompilation": "// ============================================\n// Function: _cpp_sum_array @ 0x1000005d0\n// ============================================\n\n\nint _cpp_sum_array(int *arr,int len)\n\n{\n  undefined4 local_14;\n  undefined4 result;\n  \n  result = 0;\n  local_14 = 0;\n  while (local_14 < len) {\n    result += *(int *)((longlong)arr + (longlong)local_14 * 4);\n    local_14++;\n  }\n  return result;\n}"
+}

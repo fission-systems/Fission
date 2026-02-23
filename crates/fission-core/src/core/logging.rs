@@ -1,18 +1,33 @@
 //! Fission Logging Utilities
 //!
-//! Provides level-based logging using `tracing` ecosystem.
-//! Integrates with stdout and file output.
+//! Provides level-based logging using the `tracing` ecosystem.
 //!
-//! Note: This module wraps `tracing` macros in functions to maintain
-//! backward compatibility with the existing codebase which uses
-//! `logging::info(&format!(...))` patterns.
+//! ## Recommended usage
+//!
+//! Prefer `tracing` macros directly — they support lazy evaluation (format
+//! strings are only evaluated when the level is enabled) and structured fields:
+//!
+//! ```rust,ignore
+//! use tracing::{debug, error, info, warn};
+//!
+//! info!(addr = %addr, "function decompiled");           // structured field
+//! warn!(error = %e, file = %path, "load failed");       // multiple fields
+//! debug!("decompiler cache cleared");                   // simple message
+//! ```
+//!
+//! Add `tracing = "0.1"` to the crate's `Cargo.toml` to use the macros
+//! directly.
+//!
+//! ## Legacy usage (backward-compatible)
+//!
+//! The function wrappers below (`logging::info`, `logging::warn`, …) are kept
+//! for backward compatibility.  They always format the message string **before**
+//! calling into tracing, even when the log level is disabled — prefer the
+//! macro style for hot paths.
 
 use crate::config::LogConfig;
 
 pub use tracing::Level as LogLevel;
-pub use tracing::{
-    debug as _debug, error as _error, info as _info, trace as _trace, warn as _warn,
-};
 
 /// Initialize the logger with a minimum log level
 pub fn init(level: LogLevel) {
@@ -61,8 +76,10 @@ pub fn disable_file_logging() {
     // No-op
 }
 
-// Function wrappers for tracing macros
-// This allows `logging::info(&format!(...))` to work without changing call sites to macros.
+// ── Legacy function wrappers ─────────────────────────────────────────────────
+// These always evaluate the message string before calling tracing, even when
+// the log level is disabled.  Prefer `tracing::{debug!, info!, warn!, error!}`
+// macros in new code.
 
 #[track_caller]
 pub fn trace(message: &str) {
@@ -89,39 +106,13 @@ pub fn error(message: &str) {
     tracing::error!("{}", message);
 }
 
-/// Convenience macros for logging (optional, if we want to support macro style too)
-#[macro_export]
-macro_rules! log_trace {
-    ($($arg:tt)*) => { tracing::trace!($($arg)*) };
-}
-
-#[macro_export]
-macro_rules! log_debug {
-    ($($arg:tt)*) => { tracing::debug!($($arg)*) };
-}
-
-#[macro_export]
-macro_rules! log_info {
-    ($($arg:tt)*) => { tracing::info!($($arg)*) };
-}
-
-#[macro_export]
-macro_rules! log_warn {
-    ($($arg:tt)*) => { tracing::warn!($($arg)*) };
-}
-
-#[macro_export]
-macro_rules! log_error {
-    ($($arg:tt)*) => { tracing::error!($($arg)*) };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_log_wrapper() {
-        // Just verify it compiles and runs
+        // Just verify the function wrappers compile and dispatch to tracing
         info("Test info log");
         warn(&format!("Test warn log {}", 123));
     }

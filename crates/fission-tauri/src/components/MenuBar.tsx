@@ -11,11 +11,21 @@ interface MenuBarProps {
     onRename: () => void;
     onComment: () => void;
     binaryLoaded: boolean;
-    // Phase 5 additions
     onExit: () => void;
     onToggleBottomPanel: () => void;
     bottomPanelVisible: boolean;
     onAbout: () => void;
+    // Phase extensions
+    onSaveSnapshot: () => void;
+    onLoadSnapshot: () => void;
+    onToggleDynamicMode: () => void;
+    dynamicMode: boolean;
+    onToggleSidebar: () => void;
+    sidebarVisible: boolean;
+    onOpenAssemblyView: () => void;
+    onOpenDecompileView: () => void;
+    // Phase 8: Export
+    onExportJson: () => void;
 }
 
 interface MenuItem {
@@ -46,6 +56,15 @@ export default function MenuBar({
     onToggleBottomPanel,
     bottomPanelVisible,
     onAbout,
+    onSaveSnapshot,
+    onLoadSnapshot,
+    onToggleDynamicMode,
+    dynamicMode,
+    onToggleSidebar,
+    sidebarVisible,
+    onOpenAssemblyView,
+    onOpenDecompileView,
+    onExportJson,
 }: MenuBarProps) {
     const [openMenu, setOpenMenu] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -58,6 +77,11 @@ export default function MenuBar({
                 { separator: true, label: "" },
                 { label: "Save Project", shortcut: "Ctrl+S", action: onSaveProject, disabled: !binaryLoaded },
                 { label: "Load Project...", shortcut: "Ctrl+Shift+O", action: onLoadProject },
+                { separator: true, label: "" },
+                { label: "Save Snapshot...", action: onSaveSnapshot },
+                { label: "Load Snapshot...", action: onLoadSnapshot },
+                { separator: true, label: "" },
+                { label: "Export Analysis JSON...", action: onExportJson, disabled: !binaryLoaded },
                 { separator: true, label: "" },
                 { label: "Clear Console", action: onClearConsole },
                 { label: "Clear Decompile Cache", action: onClearCache, disabled: !binaryLoaded },
@@ -74,13 +98,34 @@ export default function MenuBar({
             ],
         },
         {
+            label: "Debug",
+            items: [
+                {
+                    label: dynamicMode
+                        ? "✓ Dynamic Mode  (switch to Static)"
+                        : "Switch to Dynamic Mode",
+                    shortcut: "F5",
+                    action: onToggleDynamicMode,
+                },
+            ],
+        },
+        {
             label: "View",
             items: [
-                { label: "Assembly View", disabled: !binaryLoaded },
-                { label: "Decompile View", disabled: !binaryLoaded },
+                { label: "Assembly View", action: onOpenAssemblyView, disabled: !binaryLoaded },
+                { label: "Decompile View", action: onOpenDecompileView, disabled: !binaryLoaded },
                 { label: "Listing View", action: onOpenListing, disabled: !binaryLoaded },
                 { separator: true, label: "" },
-                { label: `${bottomPanelVisible ? "✓ " : ""}Toggle Bottom Panel`, shortcut: "Ctrl+J", action: onToggleBottomPanel },
+                {
+                    label: `${sidebarVisible ? "✓ " : ""}Toggle Side Bar`,
+                    shortcut: "Ctrl+B",
+                    action: onToggleSidebar,
+                },
+                {
+                    label: `${bottomPanelVisible ? "✓ " : ""}Toggle Bottom Panel`,
+                    shortcut: "Ctrl+J",
+                    action: onToggleBottomPanel,
+                },
             ],
         },
         {
@@ -144,3 +189,4 @@ export default function MenuBar({
         </div>
     );
 }
+

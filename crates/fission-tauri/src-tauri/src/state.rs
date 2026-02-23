@@ -2,6 +2,8 @@
 
 use crate::dto::BookmarkDto;
 use crate::dto::DebugStateDto;
+use fission_analysis::debug::ttd::Timeline;
+use fission_analysis::plugin::PluginManager;
 use fission_loader::loader::LoadedBinary;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,6 +11,11 @@ use tokio::sync::Mutex;
 
 #[cfg(feature = "native_decomp")]
 use fission_analysis::analysis::decomp::CachingDecompiler;
+
+#[cfg(target_os = "windows")]
+use fission_analysis::debug::{types::DebugEvent, windows::WindowsDebugger};
+#[cfg(target_os = "windows")]
+use crossbeam_channel::{Receiver, Sender};
 
 /// Inner mutable state behind a Mutex.
 /// Does NOT contain the decompiler — that lives in its own Mutex to
@@ -55,6 +62,26 @@ pub struct AppState {
 
     /// Debugger session state — separate lock to avoid blocking other commands
     pub debug_state: Mutex<DebugStateDto>,
+
+    /// Active Windows debugger instance (None when not attached).
+    /// Uses tokio::sync::Mutex so async commands can await without blocking the executor.
+    #[cfg(target_os = "windows")]
+    pub debugger: Mutex<Option<WindowsDebugger>>,
+
+    /// Receives OS debug events produced by `start_event_loop`.
+    /// Uses std::sync::Mutex because try_recv() is non-blocking and lock is held briefly.
+    #[cfg(target_os = "windows")]
+    pub debug_event_rx: std::sync::Mutex<Option<Receiver<DebugEvent>>>,
+
+    /// Send `()` on this channel to stop the background event-loop thread.
+    #[cfg(target_os = "windows")]
+    pub debug_stop_tx: std::sync::Mutex<Option<Sender<()>>>,
+
+    /// Plugin manager — separate lock, always available
+    pub plugin_manager: Mutex<PluginManager>,
+
+    /// TTD (Time Travel Debugging) timeline — separate lock
+    pub timeline: Mutex<Timeline>,
 }
 
 impl Default for AppState {
@@ -64,6 +91,14 @@ impl Default for AppState {
             #[cfg(feature = "native_decomp")]
             decompiler: Mutex::new(None),
             debug_state: Mutex::new(DebugStateDto::default()),
+            #[cfg(target_os = "windows")]
+            debugger: Mutex::new(None),
+            #[cfg(target_os = "windows")]
+            debug_event_rx: std::sync::Mutex::new(None),
+            #[cfg(target_os = "windows")]
+            debug_stop_tx: std::sync::Mutex::new(None),
+            plugin_manager: Mutex::new(PluginManager::new()),
+            timeline: Mutex::new(Timeline::new()),
         }
     }
 }

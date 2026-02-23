@@ -4,10 +4,11 @@
 //! Uses reedline for readline-style input with history and completion.
 
 use colored::Colorize;
+use fission_core::parse_address;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use std::path::PathBuf;
 
-use crate::core::errors::Result;
+use crate::core::errors::{FissionError, Result};
 
 pub mod commands_parser;
 pub mod handlers;
@@ -31,15 +32,10 @@ pub struct CliRunArgs {
 }
 
 /// Parse address from string (supports 0x prefix and decimal)
-pub fn parse_address(addr_str: &str) -> Result<u64> {
-    if let Some(hex) = addr_str.strip_prefix("0x") {
-        u64::from_str_radix(hex, 16)
-    } else if let Some(hex) = addr_str.strip_prefix("0X") {
-        u64::from_str_radix(hex, 16)
-    } else {
-        addr_str.parse::<u64>()
-    }
-    .map_err(|_| crate::core::errors::FissionError::Other("Invalid address format".to_string()))
+/// Convenience wrapper that converts Option → Result for ? operator.
+fn parse_address_result(addr_str: &str) -> Result<u64> {
+    parse_address(addr_str)
+        .ok_or_else(|| FissionError::Other("Invalid address format".to_string()))
 }
 
 /// Print section header with title
@@ -110,7 +106,7 @@ pub fn run_cli_with_args(args: CliRunArgs) -> Result<()> {
         }
 
         if let Some(ref addr_str) = show_xrefs {
-            let address = parse_address(addr_str)?;
+            let address = parse_address_result(addr_str)?;;
             print_section_header(&format!("Cross-References for: 0x{:x}", address));
             handlers::cmd_xrefs(&state, address);
             return Ok(());
@@ -128,7 +124,7 @@ pub fn run_cli_with_args(args: CliRunArgs) -> Result<()> {
 
     // If address is provided, do decompilation/disassembly
     if let Some(addr_str) = address {
-        let address = parse_address(&addr_str)?;
+        let address = parse_address_result(&addr_str)?;
         println!();
 
         // Show assembly if requested

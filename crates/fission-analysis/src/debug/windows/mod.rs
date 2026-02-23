@@ -4,6 +4,7 @@ mod process;
 
 pub use process::enumerate_processes;
 
+use fission_core::{FissionError, Result as FissionResult};
 use super::traits::Debugger;
 use super::ttd::Timeline;
 use super::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
@@ -77,14 +78,14 @@ impl WindowsDebugger {
     }
 
     /// Ensure process handle is available
-    fn ensure_process_handle(&mut self) -> Result<HANDLE, String> {
+    fn ensure_process_handle(&mut self) -> FissionResult<HANDLE> {
         if let Some(h) = self.process_handle {
             return Ok(h);
         }
-        let pid = self.state.attached_pid.ok_or("Not attached")?;
+        let pid = self.state.attached_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
         unsafe {
             let h = OpenProcess(PROCESS_ALL_ACCESS, false, pid)
-                .map_err(|e| format!("OpenProcess failed: {:?}", e))?;
+                .map_err(|e| FissionError::debug(format!("OpenProcess failed: {:?}", e)))?;
             self.process_handle = Some(h);
             Ok(h)
         }
@@ -179,17 +180,21 @@ impl Default for WindowsDebugger {
     }
 }
 
+// SAFETY: Windows HANDLE values are system-wide references (kernel objects) that are safe
+// to pass between threads; the debugger is protected by an external Mutex in AppState.
+unsafe impl Send for WindowsDebugger {}
+
 impl Debugger for WindowsDebugger {
     fn enumerate_processes() -> Vec<ProcessInfo> {
         process::enumerate_processes()
     }
 
-    fn attach(&mut self, pid: u32) -> Result<(), String> {
+    fn attach(&mut self, pid: u32) -> FissionResult<()> {
         self.state.status = DebugStatus::Attaching;
 
         unsafe {
             DebugActiveProcess(pid)
-                .map_err(|e| format!("Failed to attach to process {}: {:?}", pid, e))?;
+                .map_err(|e| FissionError::debug(format!("Failed to attach to process {}: {:?}", pid, e)))?;
         }
 
         self.state.attached_pid = Some(pid);
@@ -202,15 +207,15 @@ impl Debugger for WindowsDebugger {
         Ok(())
     }
 
-    fn detach(&mut self) -> Result<(), String> {
+    fn detach(&mut self) -> FissionResult<()> {
         let pid = self
             .state
             .attached_pid
-            .ok_or_else(|| "Not attached to any process".to_string())?;
+            .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
 
         unsafe {
             DebugActiveProcessStop(pid)
-                .map_err(|e| format!("Failed to detach from process {}: {:?}", pid, e))?;
+                .map_err(|e| FissionError::debug(format!("Failed to detach from process {}: {:?}", pid, e)))?;
         }
 
         if let Some(h) = self.process_handle.take() {
@@ -236,36 +241,36 @@ impl Debugger for WindowsDebugger {
         self.state.attached_pid
     }
 
-    fn continue_execution(&mut self) -> Result<(), String> {
-        let pid = self.state.attached_pid.ok_or("Not attached")?;
+    fn continue_execution(&mut self) -> FissionResult<()> {
+        let pid = self.state.attached_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
         let tid = self
             .state
             .last_thread_id
             .or(self.state.main_thread_id)
-            .ok_or("No thread id")?;
+            .ok_or_else(|| FissionError::debug("No thread id"))?;
 
         unsafe {
             ContinueDebugEvent(pid, tid, DBG_CONTINUE)
-                .map_err(|e| format!("Continue failed: {:?}", e))?;
+                .map_err(|e| FissionError::debug(format!("Continue failed: {:?}", e)))?;
         }
         self.state.status = DebugStatus::Running;
         Ok(())
     }
 
-    fn single_step(&mut self) -> Result<(), String> {
+    fn single_step(&mut self) -> FissionResult<()> {
         let tid = self
             .state
             .last_thread_id
             .or(self.state.main_thread_id)
-            .ok_or("No thread id")?;
+            .ok_or_else(|| FissionError::debug("No thread id"))?;
         unsafe {
             let h_thread = OpenThread(THREAD_ALL_ACCESS, false, tid)
-                .map_err(|e| format!("OpenThread failed: {:?}", e))?;
+                .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?;
 
             let mut ctx: CONTEXT = std::mem::zeroed();
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
             GetThreadContext(h_thread, &mut ctx)
-                .map_err(|e| format!("GetThreadContext failed: {:?}", e))?;
+                .map_err(|e| FissionError::debug(format!("GetThreadContext failed: {:?}", e)))?;
 
             // Record TTD snapshot before step (if recording is active)
             let registers = super::types::RegisterState {
@@ -293,32 +298,32 @@ impl Debugger for WindowsDebugger {
             ctx.EFlags |= 0x100; // Set Trap Flag
 
             SetThreadContext(h_thread, &ctx)
-                .map_err(|e| format!("SetThreadContext failed: {:?}", e))?;
+                .map_err(|e| FissionError::debug(format!("SetThreadContext failed: {:?}", e)))?;
 
             let _ = CloseHandle(h_thread);
         }
 
         // Continue to let the CPU execute one instruction and hit the trap
-        let pid = self.state.attached_pid.ok_or("Not attached")?;
+        let pid = self.state.attached_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
         let tid = self
             .state
             .last_thread_id
             .or(self.state.main_thread_id)
-            .ok_or("No thread id")?;
+            .ok_or_else(|| FissionError::debug("No thread id"))?;
         unsafe {
             ContinueDebugEvent(pid, tid, DBG_CONTINUE)
-                .map_err(|e| format!("Continue for step failed: {:?}", e))?;
+                .map_err(|e| FissionError::debug(format!("Continue for step failed: {:?}", e)))?;
         }
 
         self.state.status = DebugStatus::Running;
         Ok(())
     }
 
-    fn set_sw_breakpoint(&mut self, address: u64) -> Result<(), String> {
+    fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
         // Read original byte
         let original_byte = self.read_memory(address, 1)?[0];
         if original_byte == 0xCC {
-            return Err("Breakpoint already exists at this address".into());
+            return Err(FissionError::debug("Breakpoint already exists at this address"));
         }
 
         // Patch with INT3 (0xCC)
@@ -334,12 +339,12 @@ impl Debugger for WindowsDebugger {
         Ok(())
     }
 
-    fn remove_sw_breakpoint(&mut self, address: u64) -> Result<(), String> {
+    fn remove_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
         let bp = self
             .state
             .breakpoints
             .get(&address)
-            .ok_or("Breakpoint not found")?;
+            .ok_or_else(|| FissionError::debug("Breakpoint not found"))?;
 
         // Restore original byte
         self.write_memory(address, &[bp.original_byte])?;
@@ -349,8 +354,8 @@ impl Debugger for WindowsDebugger {
         Ok(())
     }
 
-    fn read_memory(&self, address: u64, size: usize) -> Result<Vec<u8>, String> {
-        let h_process = self.process_handle.ok_or("Process handle not available")?;
+    fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+        let h_process = self.process_handle.ok_or_else(|| FissionError::debug("Process handle not available"))?;
         unsafe {
             let mut buffer = vec![0u8; size];
             let mut bytes_read = 0;
@@ -363,14 +368,14 @@ impl Debugger for WindowsDebugger {
                 Some(&mut bytes_read),
             );
 
-            res.map_err(|e| format!("ReadProcessMemory failed at 0x{:x}: {:?}", address, e))?;
+            res.map_err(|e| FissionError::debug(format!("ReadProcessMemory failed at 0x{:x}: {:?}", address, e)))?;
 
             buffer.truncate(bytes_read);
             Ok(buffer)
         }
     }
 
-    fn write_memory(&mut self, address: u64, data: &[u8]) -> Result<(), String> {
+    fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
         let h_process = self.ensure_process_handle()?;
         unsafe {
             // Change protection to allow writing
@@ -382,7 +387,7 @@ impl Debugger for WindowsDebugger {
                 PAGE_EXECUTE_READWRITE,
                 &mut old_protect,
             )
-            .map_err(|e| format!("VirtualProtectEx failed: {:?}", e))?;
+            .map_err(|e| FissionError::debug(format!("VirtualProtectEx failed: {:?}", e)))?;
 
             let mut bytes_written = 0;
             let res = WriteProcessMemory(
@@ -403,25 +408,25 @@ impl Debugger for WindowsDebugger {
                 &mut _unused,
             );
 
-            res.map_err(|e| format!("WriteProcessMemory failed at 0x{:x}: {:?}", address, e))?;
+            res.map_err(|e| FissionError::debug(format!("WriteProcessMemory failed at 0x{:x}: {:?}", address, e)))?;
 
             if bytes_written != data.len() {
-                return Err(format!(
+                return Err(FissionError::debug(format!(
                     "Incomplete write at 0x{:x}: {}/{}",
                     address,
                     bytes_written,
                     data.len()
-                ));
+                )));
             }
 
             Ok(())
         }
     }
 
-    fn fetch_registers(&mut self, thread_id: u32) -> Result<super::types::RegisterState, String> {
+    fn fetch_registers(&mut self, thread_id: u32) -> FissionResult<super::types::RegisterState> {
         unsafe {
             let h_thread = OpenThread(THREAD_ALL_ACCESS, false, thread_id)
-                .map_err(|e| format!("OpenThread failed: {:?}", e))?;
+                .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?;
 
             let mut ctx: CONTEXT = std::mem::zeroed();
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
@@ -429,7 +434,7 @@ impl Debugger for WindowsDebugger {
             let res = GetThreadContext(h_thread, &mut ctx);
             let _ = CloseHandle(h_thread);
 
-            res.map_err(|e| format!("GetThreadContext failed: {:?}", e))?;
+            res.map_err(|e| FissionError::debug(format!("GetThreadContext failed: {:?}", e)))?;
 
             // Map Windows CONTEXT to our RegisterState (x64)
             Ok(super::types::RegisterState {

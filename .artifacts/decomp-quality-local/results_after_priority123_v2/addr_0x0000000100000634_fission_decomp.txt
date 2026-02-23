@@ -1,0 +1,25 @@
+// ============================================
+// Function: _cpp_init_item @ 0x100000634
+// ============================================
+
+// Inferred Structure Definitions
+typedef struct f_100000634_arg_4000 {
+    longlong field_0; // Offset 0
+    char field_4; // Offset 4
+    char field_23; // Offset 23
+    char field_28; // Offset 28
+} f_100000634_arg_4000;
+
+
+
+void _cpp_init_item(Item *item,int id,char *name,double value)
+
+{
+  if (item != (Item *)0x0) {
+    item->id = id;
+    _strncpy(item->name,name,0x1f);
+    item->name[0x1f] = 0;
+    item->value = value;
+  }
+  return;
+}

@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use fission_core::{APP_DIR_NAME, PLUGIN_DIR_NAME};
+
 use super::super::api::PluginAPI;
 use super::super::hooks::PluginHook;
 use super::types::{HookCallback, LoadedPlugin};
@@ -23,26 +25,25 @@ pub struct PluginManager {
     pub(super) api: Option<Arc<dyn PluginAPI>>,
     /// System-wide Event Bus
     pub(super) event_bus: Option<Arc<EventBus>>,
-    /// Python runtime (if enabled)
-    #[cfg(feature = "python")]
-    pub(super) python_runtime: super::super::python::PythonRuntime,
 }
 
 impl PluginManager {
     /// Create a new plugin manager
     pub fn new() -> Self {
+        // Build search paths: relative "plugins/" dir, then user's home config dir
+        let mut search_paths = vec![PathBuf::from(PLUGIN_DIR_NAME)];
+        if let Some(home) = dirs::home_dir() {
+            // ~/.fission/plugins (properly expanded – PathBuf does NOT auto-expand ~)
+            search_paths.push(home.join(format!(".{}", APP_DIR_NAME)).join(PLUGIN_DIR_NAME));
+        }
+
         Self {
             plugins: HashMap::new(),
             hooks: HashMap::new(),
             next_hook_id: 1,
-            search_paths: vec![
-                PathBuf::from("plugins"),
-                PathBuf::from("~/.fission/plugins"),
-            ],
+            search_paths,
             api: None,
             event_bus: None,
-            #[cfg(feature = "python")]
-            python_runtime: super::super::python::PythonRuntime::default(),
         }
     }
 

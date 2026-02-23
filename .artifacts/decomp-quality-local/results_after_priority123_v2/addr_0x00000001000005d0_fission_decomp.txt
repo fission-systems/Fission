@@ -1,0 +1,19 @@
+// ============================================
+// Function: _cpp_sum_array @ 0x1000005d0
+// ============================================
+
+
+int _cpp_sum_array(int *arr,int len)
+
+{
+  undefined4 local_14;
+  undefined4 result;
+  
+  result = 0;
+  local_14 = 0;
+  while (local_14 < len) {
+    result += *(int *)((longlong)arr + (longlong)local_14 * 4);
+    local_14++;
+  }
+  return result;
+}

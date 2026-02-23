@@ -1,5 +1,9 @@
 # Rust ↔ C++ Bridge: Duplications and Gaps
 
+> ℹ️ **Status:** 이 문서는 Rust↔C++ FFI 경계에서 과거에 존재하던 **중복/미구현 항목의 작업 메모**입니다.  
+> 현재 설계 관점에서의 전체 구조는 `docs/architecture/ARCHITECTURE.md`와 `docs/ROADMAP.md`를 우선 참고하고,  
+> 여기 내용은 “어디에서 무엇이 중복되었는지”를 추적하는 **역사적/세부 참고 자료**로 사용하는 것을 권장합니다.
+
 This document lists **duplicated logic** (same concept implemented in both Rust and C++) and **unimplemented or incomplete** parts on either side of the FFI boundary.
 
 ---

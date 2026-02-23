@@ -1,0 +1,13 @@
+Function: _cpp_add at 0x100000538 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x000100000538  ff 43 00                  inc dword ptr [rbx]
+  0x00010000053b  d1 e0                     shl eax,1
+  0x00010000053d  0f 00 b9                  (bad)
+  0x000100000540  e1 0b                     loope 000000010000054Dh
+  0x000100000542  00 b9 e8 0f 40 b9         add [rcx-46BFF018h],bh
+  0x000100000548  e9 0b 40 b9 00            jmp 0000000100B94558h
+  0x00010000054d  01 09                     add [rcx],ecx
+  0x00010000054f  0b ff                     or edi,edi
+  0x000100000551  43 00 91 c0 03 5f d6      add [r9-29A0FC40h],dl
+Total instructions: 9

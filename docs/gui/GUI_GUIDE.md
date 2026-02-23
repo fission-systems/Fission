@@ -1,5 +1,9 @@
 # GUI User Guide
 
+> ⚠️ **Legacy Notice:** 이 문서는 **egui 기반 GUI**를 기준으로 작성되었습니다.  
+> 현재 데스크톱 앱의 주 UI는 **Tauri + React**로 전환 중이며,  
+> 최신 UI 플로우는 Tauri 코드(`crates/fission-tauri`)와 `docs/ROADMAP.md`를 함께 참고하는 것을 권장합니다.
+
 ## Overview
 
 Fission features a modern, VS Code-inspired graphical interface built with egui. This guide covers all GUI features, keyboard shortcuts, and workflows.

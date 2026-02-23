@@ -1,0 +1,31 @@
+{
+  "comparison_info": {
+    "binary": "/Users/sjkim1127/Fission/.artifacts/decomp-quality-local/comparison_test_cpp_elf",
+    "address": "0x0000000100000904",
+    "timestamp": "2026-02-16T01:36:15.085708Z",
+    "metrics": {
+      "ghidra": {
+        "lines": 10,
+        "chars": 121,
+        "functions": 2,
+        "branches": 0
+      },
+      "fission": {
+        "lines": 13,
+        "chars": 241,
+        "functions": 2,
+        "branches": 0
+      }
+    },
+    "similarity": 66.67
+  },
+  "timings": {
+    "ghidra_sec": 0.001,
+    "fission_asm_sec": 0.026,
+    "fission_decomp_sec": 0.542
+  },
+  "ghidra_assembly": "0x100000904      sub      sp, sp, #0x20\n  0x100000908      stp      x29, x30, [sp, #0x10]\n  0x10000090C      add      x29, sp, #0x10\n  0x100000910      stur     wzr, [x29, #-0x4]\n  0x100000914      bl       0x1000007d4\n  0x100000918      ldp      x29, x30, [sp, #0x10]\n  0x10000091C      add      sp, sp, #0x20\n  0x100000920      ret",
+  "ghidra_decompilation": "/* WARNING: Unknown calling convention */\n\nint main(void)\n\n{\n  int iVar1;\n  \n  iVar1 = cpp_main_like();\n  return iVar1;\n}",
+  "fission_assembly": "Function: _main at 0x100000904 (size: auto-detected)\n           Address  Bytes                     Instruction\n──────────────────────────────────────────────────────────────────────\n  0x000100000904  ff 83 00 d1 fd 7b         inc dword ptr [rbx+7BFDD100h]\n  0x00010000090a  01 a9 fd 43 00 91         add [rcx-6EFFBC03h],ebp\n  0x000100000910  bf c3 1f b8 b0            mov edi,0B0B81FC3h\n  0x000100000915  ff ff                     (bad)\n  0x000100000917  97                        xchg edi,eax\n  0x000100000918  fd                        std\n  0x000100000919  7b 41                     jnp short 000000010000095Ch\n  0x00010000091b  a9 ff 83 00 91            test eax,910083FFh\n  0x000100000920  c0 03 5f                  rol byte ptr [rbx],5Fh\n  0x000100000923  d6                        (bad)\nTotal instructions: 10",
+  "fission_decompilation": "// ============================================\n// Function: _main @ 0x100000904\n// ============================================\n\n\nint _main(int _Argc,char **_Argv,char **_Env)\n\n{\n  int iVar1;\n  \n  iVar1 = _cpp_main_like();\n  return iVar1;\n}"
+}

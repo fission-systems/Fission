@@ -326,6 +326,55 @@ impl PathConfig {
     }
 }
 
+/// Find the Sleigh specification directory for the Ghidra decompiler.
+///
+/// Search order:
+/// 1. `FISSION_SLA_DIR` environment variable
+/// 2. CWD / `ghidra_decompiler/languages` (and `../` parent)
+/// 3. Executable parent dir / same relative candidates  
+/// 4. Falls back to the literal string `"ghidra_decompiler/languages"`
+pub fn find_sla_dir() -> String {
+    const RELATIVE_CANDIDATES: &[&str] = &[
+        "ghidra_decompiler/languages",
+        "../ghidra_decompiler/languages",
+        "../../ghidra_decompiler/languages",
+        "../../../ghidra_decompiler/languages",
+    ];
+
+    // 1. Environment variable
+    if let Ok(env_path) = std::env::var("FISSION_SLA_DIR") {
+        let p = Path::new(&env_path);
+        if p.is_dir() {
+            return env_path;
+        }
+    }
+
+    // 2. CWD-relative
+    if let Ok(cwd) = std::env::current_dir() {
+        for candidate in RELATIVE_CANDIDATES {
+            let path = cwd.join(candidate);
+            if path.is_dir() {
+                return path.to_string_lossy().into_owned();
+            }
+        }
+    }
+
+    // 3. Exe-relative
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            for candidate in RELATIVE_CANDIDATES {
+                let path = exe_dir.join(candidate);
+                if path.is_dir() {
+                    return path.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+
+    // 4. Fallback
+    RELATIVE_CANDIDATES[0].to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

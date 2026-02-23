@@ -1,0 +1,36 @@
+Function: _cpp_create_item at 0x1000006a4 (size: auto-detected)
+           Address  Bytes                     Instruction
+──────────────────────────────────────────────────────────────────────
+  0x0001000006a4  ff c3                     inc ebx
+  0x0001000006a6  00 d1                     add cl,dl
+  0x0001000006a8  fd                        std
+  0x0001000006a9  7b 02                     jnp short 00000001000006ADh
+  0x0001000006ab  a9 fd 83 00 91            test eax,910083FDh
+  0x0001000006b0  a0 c3 1f b8 e1 0b 00 f9 e0  mov al,[0E0F9000BE1B81FC3h]
+  0x0001000006b9  07 00                     (bad)
+  0x0001000006bb  fd                        std
+  0x0001000006bc  00 06                     add [rsi],al
+  0x0001000006be  80 d2 0b                  adc dl,0Bh
+  0x0001000006c1  01 00                     add [rax],eax
+  0x0001000006c3  94                        xchg esp,eax
+  0x0001000006c4  e0 03                     loopne 00000001000006C9h
+  0x0001000006c6  00 f9                     add cl,bh
+  0x0001000006c8  e8 03 40 f9 08            call 0000000108F946D0h
+  0x0001000006cd  01 00                     add [rax],eax
+  0x0001000006cf  b4 01                     mov ah,1
+  0x0001000006d1  00 00                     add [rax],al
+  0x0001000006d3  14 e0                     adc al,0E0h
+  0x0001000006d5  03 40 f9                  add eax,[rax-7]
+  0x0001000006d8  a1 c3 5f b8 e2 0b 40 f9 e0  mov eax,[0E0F9400BE2B85FC3h]
+  0x0001000006e1  07 40                     (bad)
+  0x0001000006e3  fd                        std
+  0x0001000006e4  d4 ff                     (bad)
+  0x0001000006e6  ff 97 01 00 00 14         call qword ptr [rdi+14000001h]
+  0x0001000006ec  e0 03                     loopne 00000001000006F1h
+  0x0001000006ee  40 f9                     stc
+  0x0001000006f0  fd                        std
+  0x0001000006f1  7b 42                     jnp short 0000000100000735h
+  0x0001000006f3  a9 ff c3 00 91            test eax,9100C3FFh
+  0x0001000006f8  c0 03 5f                  rol byte ptr [rbx],5Fh
+  0x0001000006fb  d6                        (bad)
+Total instructions: 32

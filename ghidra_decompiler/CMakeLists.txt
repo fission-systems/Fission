@@ -101,7 +101,6 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/decompiler/AnalysisPipeline.cpp
     ${FISSION_MODULES_DIR}/decompiler/DecompilationCore.cpp
     ${FISSION_MODULES_DIR}/decompiler/DecompilationPipeline.cc
-    ${FISSION_MODULES_DIR}/decompiler/ServerMode.cc
     ${FISSION_MODULES_DIR}/decompiler/PcodeExtractor.cc
     ${FISSION_MODULES_DIR}/decompiler/PcodeOptimizationBridge.cc
     # MemoryImage is header-only

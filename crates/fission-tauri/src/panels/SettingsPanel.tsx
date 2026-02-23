@@ -1,6 +1,21 @@
-import { useCallback } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppSettings } from "../types";
+
+/** Apply UI scale by setting `zoom` on the root element. */
+function applyUiScale(scale: number) {
+    document.documentElement.style.setProperty("--ui-scale", String(scale));
+    // CSS zoom is the most universal approach; fall back gracefully on unsupported browsers
+    (document.documentElement.style as CSSStyleDeclaration & { zoom?: string }).zoom = `${scale}`;
+}
+
+const UI_SCALE_KEY = "fission.uiScale";
+
+function readUiScale(): number {
+    const raw = localStorage.getItem(UI_SCALE_KEY);
+    const v = raw ? parseFloat(raw) : 1.0;
+    return isNaN(v) ? 1.0 : Math.min(2.0, Math.max(0.5, v));
+}
 
 interface SettingsPanelProps {
     settings: AppSettings;
@@ -10,6 +25,19 @@ interface SettingsPanelProps {
 }
 
 export default function SettingsPanel({ settings, onSettingsChange, onLog, onClearCache }: SettingsPanelProps) {
+    const [uiScale, setUiScale] = useState<number>(readUiScale);
+
+    // Apply scale on mount
+    useEffect(() => {
+        applyUiScale(uiScale);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const handleUiScaleChange = useCallback((value: number) => {
+        setUiScale(value);
+        applyUiScale(value);
+        localStorage.setItem(UI_SCALE_KEY, String(value));
+    }, []);
+
     const update = useCallback(
         (partial: Partial<AppSettings>) => {
             const next = { ...settings, ...partial };
@@ -64,6 +92,24 @@ export default function SettingsPanel({ settings, onSettingsChange, onLog, onCle
                         value={settings.font_size}
                         onChange={(e) => update({ font_size: Number(e.target.value) })}
                     />
+                </div>
+
+                <div className="settings-panel__row">
+                    <label className="settings-panel__label">
+                        UI Scale&nbsp;<span className="settings-panel__value">{Math.round(uiScale * 100)}%</span>
+                    </label>
+                    <input
+                        type="range"
+                        className="settings-panel__slider"
+                        min={0.5}
+                        max={2.0}
+                        step={0.05}
+                        value={uiScale}
+                        onChange={(e) => handleUiScaleChange(Number(e.target.value))}
+                    />
+                    <div className="settings-panel__hint">
+                        50% – 200% · resets on app restart if not saved
+                    </div>
                 </div>
             </div>
 

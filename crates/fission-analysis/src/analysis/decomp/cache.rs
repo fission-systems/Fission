@@ -1,4 +1,5 @@
 use fission_core::prelude::*;
+use fission_core::{APP_DIR_NAME, DECOMP_CACHE_DIR_NAME, DEFAULT_L1_CACHE_SIZE};
 use lru::LruCache;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -20,8 +21,8 @@ impl DecompilerCache {
     pub fn new(binary_hash: &str, l1_size: usize) -> Result<Self> {
         let cache_dir = dirs::cache_dir()
             .ok_or_else(|| FissionError::other("Could not determine cache directory"))?
-            .join("fission")
-            .join("decomp")
+            .join(APP_DIR_NAME)
+            .join(DECOMP_CACHE_DIR_NAME)
             .join(binary_hash);
 
         if !cache_dir.exists() {
@@ -32,7 +33,7 @@ impl DecompilerCache {
 
         info!("[*] Initialized decompiler cache at {:?}", cache_dir);
 
-        let default_l1 = match NonZeroUsize::new(100) {
+        let default_l1 = match NonZeroUsize::new(DEFAULT_L1_CACHE_SIZE) {
             Some(v) => v,
             None => NonZeroUsize::MIN,
         };

@@ -69,6 +69,7 @@ impl MachoLoader {
         };
 
         let mut sections_info = Vec::new();
+        let mut section_exec_map: Vec<bool> = Vec::new(); // 1-based n_sect -> is_executable
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
         let mut entry_point = 0u64;
@@ -108,6 +109,8 @@ impl MachoLoader {
                     // S_ATTR_PURE_INSTRUCTIONS = 0x80000000
                     // S_ATTR_SOME_INSTRUCTIONS = 0x00000400
                     let sect_has_instructions = (sect.flags & 0x80000400) != 0;
+                    let is_executable = seg_is_executable || sect_has_instructions;
+                    section_exec_map.push(is_executable);
 
                     sections_info.push(SectionInfo {
                         name: extract_fixed_string(&sect.sectname),
@@ -115,7 +118,7 @@ impl MachoLoader {
                         virtual_size: sect.size,
                         file_offset: sect.offset as u64,
                         file_size: sect.size,
-                        is_executable: seg_is_executable || sect_has_instructions,
+                        is_executable,
                         is_readable: true,
                         is_writable: (seg.initprot & 0x02) != 0, // VM_PROT_WRITE = 0x02
                     });
@@ -129,9 +132,6 @@ impl MachoLoader {
             } else if cmd_header.cmd == LC_SYMTAB {
                 let symtab = SymtabCommand::read_options(&mut reader, endian, ()).unwrap();
                 symtab_info = Some(symtab.clone());
-
-                // Access Symbols (random access)
-                Self::parse_symbols_64(bytes, &symtab, endian, &mut functions_info);
             } else if cmd_header.cmd == LC_DYSYMTAB {
                 let dysymtab = DysymtabCommand::read_options(&mut reader, endian, ()).unwrap();
                 dysymtab_info = Some(dysymtab);
@@ -152,15 +152,35 @@ impl MachoLoader {
             image_base = 0;
         }
 
+        // Parse symbols after all sections are collected so n_sect can be filtered
+        // against executable sections. This avoids treating data symbols as functions.
+        if let Some(symtab) = symtab_info.as_ref() {
+            Self::parse_symbols_64(
+                bytes,
+                symtab,
+                endian,
+                &section_exec_map,
+                &mut functions_info,
+            );
+        }
+
         // Parse dynamic symbols to get external function imports
         let mut iat_symbols = std::collections::HashMap::new();
         if let (Some(symtab), Some(dysymtab)) = (symtab_info, dysymtab_info) {
+            // __stubs entry size differs by architecture:
+            // - x86_64: 6 bytes
+            // - arm64: 12 bytes
+            let stub_size = match cputype {
+                0x100000C | 0xC => 12u64, // ARM64
+                _ => 6u64,                // x86_64 and default fallback
+            };
             Self::parse_dynamic_symbols_64(
                 bytes,
                 &symtab,
                 &dysymtab,
                 &sections_info,
                 endian,
+                stub_size,
                 &mut iat_symbols,
             );
         }
@@ -215,6 +235,7 @@ impl MachoLoader {
         data: &[u8],
         symtab: &SymtabCommand,
         endian: binrw::Endian,
+        section_exec_map: &[bool],
         out: &mut Vec<FunctionInfo>,
     ) {
         let sym_off = symtab.symoff as u64;
@@ -236,6 +257,16 @@ impl MachoLoader {
                 // (n_type & N_TYPE) == N_SECT (0x0e)
                 let n_type = nlist.n_type & 0x0e;
                 if n_type == 0x0e && nlist.n_value != 0 {
+                    // Only keep symbols that belong to executable sections.
+                    // n_sect is 1-based across all sections in Mach-O.
+                    let sect_index = nlist.n_sect as usize;
+                    if sect_index == 0 || sect_index > section_exec_map.len() {
+                        continue;
+                    }
+                    if !section_exec_map[sect_index - 1] {
+                        continue;
+                    }
+
                     // Extract name using shared utility function
                     // Use checked_add to prevent potential overflow
                     let name_offset = (str_off as usize).checked_add(nlist.n_strx as usize);
@@ -271,6 +302,7 @@ impl MachoLoader {
         dysymtab: &DysymtabCommand,
         sections: &[SectionInfo],
         endian: binrw::Endian,
+        stub_size: u64,
         iat_symbols: &mut std::collections::HashMap<u64, String>,
     ) {
         // Find __stubs and __got sections
@@ -290,7 +322,6 @@ impl MachoLoader {
 
         // Parse __stubs section
         if let Some(stubs) = stubs_section {
-            let stub_size = 6; // Standard stub size on x86_64: jmp *offset(%rip) = 6 bytes
             let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
 
             for i in 0..num_stubs {
@@ -316,7 +347,7 @@ impl MachoLoader {
 
             // GOT entries come after stubs in indirect symbol table
             let stubs_count = if let Some(stubs) = stubs_section {
-                (stubs.virtual_size / 6) as u32
+                (stubs.virtual_size / stub_size) as u32
             } else {
                 0
             };

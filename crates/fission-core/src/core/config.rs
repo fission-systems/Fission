@@ -5,6 +5,8 @@
 
 use std::sync::LazyLock;
 
+use super::constants::{DEFAULT_L1_CACHE_SIZE, MAX_HEX_READ, MB};
+
 /// Global configuration instance
 pub static CONFIG: LazyLock<Config> = LazyLock::new(Config::load);
 
@@ -188,7 +190,7 @@ impl Default for LogConfig {
             file_enabled,
             include_timestamp: true,
             include_target: false,
-            max_file_size: 10 * 1024 * 1024, // 10MB
+            max_file_size: 10 * MB, // 10MB
             max_rotated_files: 3,
         }
     }
@@ -312,11 +314,11 @@ impl DecompilerConfig {
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
-            max_string_search_size: 2 * 1024 * 1024, // 2MB
+            max_string_search_size: 2 * MB, // 2MB
             min_string_length: 4,
             auto_xref_analysis: true,
-            decompile_cache_size: 100,
-            function_address_range: 4096, // 4KB range for function matching
+            decompile_cache_size: DEFAULT_L1_CACHE_SIZE,
+            function_address_range: MAX_HEX_READ, // 4KB range for function matching
         }
     }
 }

@@ -1,0 +1,29 @@
+// ============================================
+// Function: sub_100000558 @ 0x100000558
+// ============================================
+
+
+int _cpp_switch(int x)
+
+{
+  undefined4 result;
+  
+  if (!x) {
+    result = 10;
+  }
+  else if (x == 1) {
+    result = 0x14;
+  }
+  else if (x == 2) {
+    result = 0x1e;
+  }
+  else {
+    result = x + 100;
+  }
+  return result;
+}
+
+
+// Error decompiling sub_100000558 (0x100000558): Decompiler error: Error: Function is already being decompiled (recursive decompilation detected)
+
+// Error decompiling _cpp_switch (0x100000558): Decompiler error: Error: Function is already being decompiled (recursive decompilation detected)

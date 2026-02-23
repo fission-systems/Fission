@@ -1,8 +1,11 @@
 # Known Issues (Analysis)
 
+> ℹ️ **Note:** 이 문서는 **현재 기준으로 열려 있는 분석 관련 Known Issue**를 추적하기 위한 용도입니다.  
+> 이미 해결된 이슈는 요약만 남기고, 상세 내용과 변경 사항은 `docs/changelog/CHANGELOG.md`를 참고하세요.
+
 ## ~~TypePropagator STORE/CALL High-Type Logging~~ [RESOLVED]
 
-### Status: **RESOLVED** (2026-01-08)
+### Status: **RESOLVED** (2026-01-08, see also: `docs/changelog/CHANGELOG.md`)
 
 ### Original Symptoms
 - `compare_decompilers_v2.py` runs complete, but no `[TypePropagator] STORE/CALL` logs appear in the
@@ -48,24 +51,10 @@ python3 scripts/compare/compare_decompilers_v2.py examples/comparison_test_x64.e
 
 ---
 
-## Server Mode SIGSEGV (Pending Investigation)
+## ~~Server Mode SIGSEGV~~ [OBSOLETE]
 
-### Status: **OPEN**
+### Status: **REMOVED** (see also: `docs/changelog/CHANGELOG.md`)
 
-### Symptoms
-- Server mode (`fission_decomp --server`) crashes with SIGSEGV when processing
-  `load_bin` followed by `decompile` commands.
-
-### Reproduction
-```bash
-ghidra_decompiler/build/fission_decomp --server < scripts/result/fission_decomp_server_input.txt
-```
-
-### Impact
-- Cannot use server mode for persistent decompilation sessions
-- Single-shot mode works correctly after the TypePropagator fixes
-
-### Next Steps
-1. Validate JSON parsing for `load_bin` and `decompile` commands
-2. Audit memory lifecycle for `DecompilerContext` between requests
-3. Check for use-after-free or double-free issues
+Server mode (`fission_decomp --server`) has been removed. The decompiler now operates
+in single-shot mode only (`main.cc` inlines the request pipeline directly).
+`ServerMode.cc` / `ServerMode.h` have been deleted.

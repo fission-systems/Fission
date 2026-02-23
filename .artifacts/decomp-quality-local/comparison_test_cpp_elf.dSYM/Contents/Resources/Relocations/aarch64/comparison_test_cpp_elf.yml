@@ -1,0 +1,5 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '.artifacts/decomp-quality-local/comparison_test_cpp_elf'
+relocations:     []
+...

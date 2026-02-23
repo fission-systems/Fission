@@ -11,6 +11,7 @@ use std::os::raw::{c_char, c_int};
 use std::ptr;
 
 use fission_core::prelude::*;
+use tracing::warn;
 
 // ============================================================================
 // FFI Type Definitions
@@ -319,14 +320,14 @@ impl DecompilerNative {
             // This helps catch threading issues during development
             let current = std::thread::current().id();
             if self.creation_thread != current {
-                // Log warning only once globally to avoid spam
+                            // Log warning only once globally to avoid spam
                 use std::sync::Once;
                 static WARN_ONCE: Once = Once::new();
                 WARN_ONCE.call_once(|| {
-                    eprintln!(
-                        "[fission-ffi] NOTE: DecompilerNative instances are being used across threads. \
-                         This is expected when using per-binary worker threads. \
-                         Each worker has its own isolated DecompilerNative instance."
+                    warn!(
+                        "DecompilerNative used across threads: \
+                         this is expected with per-binary worker threads; \
+                         each worker has its own isolated DecompilerNative instance"
                     );
                 });
             }

@@ -2,6 +2,8 @@
 #include "libdecomp.hh"
 #include "fission/core/ArchPolicy.h"
 #include "sleigh_arch.hh"
+#include "architecture.hh"
+#include "options.hh"
 #include "fission/types/TypeManager.h"
 #include "fission/types/GdtBinaryParser.h"
 #include "fission/utils/file_utils.h"
@@ -37,16 +39,24 @@ static void load_gdt_for_arch(ghidra::Architecture* arch, bool is_64bit) {
 
 // Helper function to configure architecture
 static void configure_arch(ghidra::Architecture* arch) {
-    // Ghidra 11.x API change: setOptionDefault is not available directly on OptionDatabase
-    // We should use arch->options->put(...) or similar if needed, but for now let's comment out
-    // or use the correct API if we can find it.
-    // Assuming these were intended to set default analysis options.
-    
-    // arch->options->setOptionDefault("allowcontextset", "true");
-    // arch->options->setOptionDefault("analyze.aggregates", "true");
-    // arch->options->setOptionDefault("decompile.unreachable", "true");
-    // arch->options->setOptionDefault("decompile.readonly", "true");
-    // arch->options->setOptionDefault("proto.eval", "true");
+    if (arch == nullptr || arch->options == nullptr) {
+        return;
+    }
+
+    try {
+        // Match practical defaults already used in FFI path.
+        arch->options->set(ghidra::ELEM_INFERCONSTPTR.getId(), "on", "", "");
+        arch->options->set(ghidra::ELEM_ANALYZEFORLOOPS.getId(), "on", "", "");
+        arch->options->set(ghidra::ELEM_READONLY.getId(), "on", "", "");
+        arch->options->set(ghidra::ELEM_JUMPLOAD.getId(), "on", "", "");
+        arch->options->set(ghidra::ELEM_ERRORTOOMANYINSTRUCTIONS.getId(), "off", "", "");
+        arch->options->set(ghidra::ELEM_INLINE.getId(), "off", "", "");
+    } catch (const std::exception& e) {
+        fission::utils::log_stream() << "[DecompilerContext] configure_arch option sync failed: "
+                  << e.what() << std::endl;
+    } catch (...) {
+        fission::utils::log_stream() << "[DecompilerContext] configure_arch option sync failed (unknown)" << std::endl;
+    }
 }
 
 DecompilerContext::DecompilerContext() = default;
