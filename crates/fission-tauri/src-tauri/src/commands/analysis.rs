@@ -129,6 +129,28 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
     }
 
     let matched = matches.len();
+
+    // Release inner lock before acquiring the decompiler lock to prevent
+    // priority-inversion with other commands that may hold locks in the
+    // opposite order.
+    drop(inner);
+
+    // Feed FID-identified names into the Ghidra decompiler so that future
+    // decompilations use the resolved function names at call sites.
+    #[cfg(feature = "native_decomp")]
+    {
+        let fid_symbols: std::collections::HashMap<u64, String> =
+            identified.iter().map(|(a, n)| (*a, n.clone())).collect();
+
+        if !fid_symbols.is_empty() {
+            let mut decomp_lock = state.decompiler.lock().await;
+            if let Some(decomp) = decomp_lock.as_mut() {
+                let native = decomp.inner_mut();
+                native.add_symbols(&fid_symbols);
+                native.add_global_symbols(&fid_symbols);
+            }
+        }
+    }
     Ok(FidResultDto {
         matched,
         total_scanned,

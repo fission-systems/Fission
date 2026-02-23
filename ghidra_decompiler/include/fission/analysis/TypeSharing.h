@@ -30,14 +30,14 @@ private:
     std::map<uint64_t, std::vector<ghidra::Datatype*>> func_param_types;
     std::map<uint64_t, ghidra::Datatype*> func_return_types;
     
-    /// Build call graph from all functions
+    /// Build call graph from all registered functions
     void build_call_graph();
     
-    /// Propagate types from callee to caller (backwards)
-    void propagate_to_callers(uint64_t callee_addr);
+    /// Propagate types from callee to caller (backwards); returns propagation count
+    int propagate_to_callers(uint64_t callee_addr);
     
-    /// Propagate types from caller to callee (forwards)
-    void propagate_to_callees(uint64_t caller_addr);
+    /// Propagate types from caller to callee (forwards); returns propagation count
+    int propagate_to_callees(uint64_t caller_addr);
 
 public:
     TypeSharing(ghidra::Architecture* arch);

@@ -26,12 +26,12 @@ static bool ffi_attempted = false;
 
 // Try to load Rust FFI functions from the main executable
 static bool load_rust_ffi() {
-    if (ffi_attempted) {
-        return (rust_optimize_fn != nullptr);
+    if (ffi_attempted && rust_optimize_fn != nullptr) {
+        return true; // Already successfully loaded
     }
-    
+
     ffi_attempted = true;
-    
+
 #ifdef _WIN32
     // On Windows, use GetProcAddress to find symbols in the current process
     HMODULE hModule = GetModuleHandleA(NULL);
@@ -39,24 +39,63 @@ static bool load_rust_ffi() {
         rust_optimize_fn = (FissionOptimizePcodeJson)GetProcAddress(hModule, "fission_optimize_pcode_json");
         rust_free_fn = (FissionFreeString)GetProcAddress(hModule, "fission_free_string");
     }
-    
+
     if (!rust_optimize_fn || !rust_free_fn) {
         fission::utils::log_stream() << "[PcodeOptimizationBridge] Warning: Could not load Rust FFI functions" << std::endl;
         fission::utils::log_stream() << "[PcodeOptimizationBridge] GetLastError: " << GetLastError() << std::endl;
+        rust_optimize_fn = nullptr;
+        rust_free_fn = nullptr;
+        ffi_attempted = false; // Allow retry on next call
         return false;
     }
 #else
-    // RTLD_DEFAULT searches in the main executable and all loaded libraries
+    // Clear any stale error state before calling dlsym.
+    (void)dlerror();
+
+    // RTLD_DEFAULT searches the main executable and every library currently
+    // loaded with RTLD_GLOBAL — covers the common case where the Rust binary
+    // has linked the fission_* symbols into its own image.
     rust_optimize_fn = (FissionOptimizePcodeJson)dlsym(RTLD_DEFAULT, "fission_optimize_pcode_json");
-    rust_free_fn = (FissionFreeString)dlsym(RTLD_DEFAULT, "fission_free_string");
-    
+    const char* err1 = dlerror();
+
+    if (!rust_optimize_fn) {
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] RTLD_DEFAULT dlsym failed"
+                                     << (err1 ? std::string(": ") + err1 : "") << std::endl;
+
+        // Second attempt: RTLD_NEXT searches libraries loaded after the C
+        // decompiler library itself, which helps when the Rust library is
+        // loaded as a plugin after the C++ shared object.
+        (void)dlerror();
+        rust_optimize_fn = (FissionOptimizePcodeJson)dlsym(RTLD_NEXT, "fission_optimize_pcode_json");
+        const char* err2 = dlerror();
+        if (!rust_optimize_fn) {
+            fission::utils::log_stream() << "[PcodeOptimizationBridge] RTLD_NEXT dlsym also failed"
+                                         << (err2 ? std::string(": ") + err2 : "") << std::endl;
+        }
+    }
+
+    if (rust_optimize_fn) {
+        // Load the companion free function from the same search scope.
+        (void)dlerror();
+        rust_free_fn = (FissionFreeString)dlsym(RTLD_DEFAULT, "fission_free_string");
+        if (!rust_free_fn) {
+            (void)dlerror();
+            rust_free_fn = (FissionFreeString)dlsym(RTLD_NEXT, "fission_free_string");
+        }
+    }
+
     if (!rust_optimize_fn || !rust_free_fn) {
-        fission::utils::log_stream() << "[PcodeOptimizationBridge] Warning: Could not load Rust FFI functions" << std::endl;
-        fission::utils::log_stream() << "[PcodeOptimizationBridge] dlsym error: " << dlerror() << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Warning: Rust FFI unavailable — "
+                                        "Pcode optimization disabled for this session" << std::endl;
+        rust_optimize_fn = nullptr;
+        rust_free_fn = nullptr;
+        // Keep ffi_attempted = true so we don't spam the log on every call,
+        // but re-enable retries by clearing the flag only when the symbol
+        // was simply not found yet (as opposed to a hard link error).
         return false;
     }
 #endif
-    
+
     fission::utils::log_stream() << "[PcodeOptimizationBridge] Rust FFI functions loaded successfully" << std::endl;
     return true;
 }
