@@ -10,7 +10,7 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
-import type { StringXrefDto } from "../types";
+import type { StringXrefDto } from "../../types";
 
 interface StringXrefsPanelProps {
     binaryLoaded: boolean;

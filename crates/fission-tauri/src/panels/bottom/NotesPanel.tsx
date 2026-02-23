@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { BookmarkDto } from "../types";
+import type { BookmarkDto } from "../../types";
 
 interface NotesEntry {
     address: string;

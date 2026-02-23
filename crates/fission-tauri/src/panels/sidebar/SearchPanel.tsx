@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { SearchResultDto } from "../types";
+import type { SearchResultDto } from "../../types";
 
 interface SearchPanelProps {
     onResultClick?: (address: string) => void;

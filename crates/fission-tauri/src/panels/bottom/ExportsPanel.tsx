@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ExportDto } from "../types";
+import type { ExportDto } from "../../types";
 
 interface ExportsPanelProps {
     binaryLoaded: boolean;

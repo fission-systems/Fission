@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { AppSettings } from "../types";
+import type { AppSettings } from "../../types";
 
 /** Apply UI scale by setting `zoom` on the root element. */
 function applyUiScale(scale: number) {

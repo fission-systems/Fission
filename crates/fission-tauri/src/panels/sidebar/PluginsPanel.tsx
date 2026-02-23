@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { PluginInfoDto } from "../types";
+import type { PluginInfoDto } from "../../types";
 
 interface PluginsPanelProps {
     onLog: (msg: string) => void;

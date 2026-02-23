@@ -1,7 +1,7 @@
 // Fission — Sections explorer panel (sidebar widget).
 // Displays the list of binary sections returned by `get_sections`.
 
-import type { SectionDto } from "../types";
+import type { SectionDto } from "../../types";
 
 interface SectionsPanelProps {
     sections: SectionDto[];

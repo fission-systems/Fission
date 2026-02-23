@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import type { HexRow, HexViewData, PatchRecord } from "../types";
+import type { HexRow, HexViewData, PatchRecord } from "../../types";
+import { parseAddress } from "../../utils/address";
 
 // Quick patch presets
 const QUICK_PATCHES: { label: string; bytes: number[] }[] = [
@@ -80,7 +81,7 @@ export default function HexView({
     useEffect(() => {
         if (!isStandalone || !binaryLoaded) return;
         const addr = initialAddress
-            ? parseInt(initialAddress, 16) || parseInt(initialAddress)
+            ? parseAddress(initialAddress)
             : 0;
         loadAt(addr);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,7 +100,7 @@ export default function HexView({
     const handleApplyPatch = async () => {
         const addrStr = patchOffset.trim();
         if (!addrStr) { setPatchStatus("Enter an offset/address"); return; }
-        const addr = parseInt(addrStr, 16) || parseInt(addrStr);
+        const addr = parseAddress(addrStr);
         if (isNaN(addr)) { setPatchStatus("Invalid address"); return; }
 
         let byteArr: number[];

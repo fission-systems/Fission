@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { DebugStateDto, DebugStatusDto, TtdStateDto } from "../types";
+import { DebugStateDto, DebugStatusDto, TtdStateDto } from "../../types";
 
 interface Props {
     onOpenDebugTab: () => void;

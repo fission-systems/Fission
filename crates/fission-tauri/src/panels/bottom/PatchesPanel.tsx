@@ -1,4 +1,4 @@
-import type { PatchRecord } from "../types";
+import type { PatchRecord } from "../../types";
 
 interface PatchesPanelProps {
     patches: PatchRecord[];

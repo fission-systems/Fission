@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { XrefDto } from "../types";
+import type { XrefDto } from "../../types";
 
 interface XrefsPanelProps {
     xrefs: XrefDto[];

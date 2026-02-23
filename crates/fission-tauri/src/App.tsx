@@ -3,83 +3,88 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
-    BinaryInfo,
     FunctionDto,
-    EditorTab,
     ActivityView,
     BottomTab,
-    DecompileResult,
-    AsmInstructionDto,
-    StringDto,
-    ImportDto,
     BookmarkDto,
     GotoResult,
-    HexViewData,
-    XrefDto,
     AppSettings,
-    SectionDto,
-    PatchRecord,
-    FidResultDto,
+    UndoableAction,
+    FissionProject,
 } from "./types";
-import { ListingView } from "./panels/ListingView";
-import { DebugSidebar } from "./panels/DebugSidebar";
+import { ListingView } from "./panels/editor/ListingView";
+import { DebugSidebar } from "./panels/sidebar/DebugSidebar";
 import MenuBar from "./components/MenuBar";
 import ActivityBar from "./components/ActivityBar";
 import Sidebar from "./components/Sidebar";
 import EditorTabs from "./components/EditorTabs";
 import StatusBar from "./components/StatusBar";
 import BottomPanel from "./components/BottomPanel";
-import GotoDialog from "./components/GotoDialog";
-import RenameDialog from "./components/RenameDialog";
-import CommentDialog from "./components/CommentDialog";
-import FunctionsList from "./panels/FunctionsList";
-import DecompileView from "./panels/DecompileView";
-import AssemblyView from "./panels/AssemblyView";
-import HexView from "./panels/HexView";
-import SettingsPanel from "./panels/SettingsPanel";
-import SectionsPanel from "./panels/SectionsPanel";
-import AboutDialog from "./components/AboutDialog";
-import SearchPanel from "./panels/SearchPanel";
-import PluginsPanel from "./panels/PluginsPanel";
+import GotoDialog from "./panels/dialogs/GotoDialog";
+import RenameDialog from "./panels/dialogs/RenameDialog";
+import CommentDialog from "./panels/dialogs/CommentDialog";
+import FunctionsList from "./panels/sidebar/FunctionsList";
+import DecompileView from "./panels/editor/DecompileView";
+import AssemblyView from "./panels/editor/AssemblyView";
+import HexView from "./panels/editor/HexView";
+import SettingsPanel from "./panels/sidebar/SettingsPanel";
+import SectionsPanel from "./panels/sidebar/SectionsPanel";
+import AboutDialog from "./panels/dialogs/AboutDialog";
+import SearchPanel from "./panels/sidebar/SearchPanel";
+import PluginsPanel from "./panels/sidebar/PluginsPanel";
+import { useEditorTabs } from "./hooks/useEditorTabs";
+import { useBinary } from "./hooks/useBinary";
+import { useDebug } from "./hooks/useDebug";
+import { useDialogs } from "./hooks/useDialogs";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useDragAndDrop } from "./hooks/useDragAndDrop";
+import { parseAddress } from "./utils/address";
 
 function App() {
-    // --- State ---
-    const [binaryInfo, setBinaryInfo] = useState<BinaryInfo | null>(null);
-    const [functions, setFunctions] = useState<FunctionDto[]>([]);
+    // --- Hooks ---
+    const {
+        tabs, activeTabId,
+        canGoBack, canGoForward, goBack, goForward,
+        handleTabClick, handleCloseTab,
+        openFunctionTabs, openListingTab, openHexTab,
+        openAssemblyTab, openDecompileTabFromActive,
+        resetTabs, updateTabNames,
+    } = useEditorTabs();
+
+    // log is defined before useBinary because useBinary needs it as a callback
+    const [logs, setLogs] = useState<string[]>(["[Fission] Ready."]);
+    const log = useCallback((msg: string) => {
+        setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+    }, []);
+
+    const bin = useBinary({
+        log,
+        onOpenTabs: openFunctionTabs,
+        onResetTabs: resetTabs,
+    });
+    const {
+        binaryInfo,
+        functions, setFunctions,
+        sections, strings, imports, bookmarks, setBookmarks,
+        patches, hexData, xrefs,
+        loading, progress, fidRunning,
+        decompileCache, asmCache, asmHasMore, asmLoadingMore,
+        handleOpenFile, handleLoadBinary, handleRunFid,
+        handleFunctionClick, handleAsmLoadMore,
+        handleToggleBookmark: handleToggleBookmarkAt,
+        handleRecordPatch, handleRevertPatch,
+        handleClearCache: handleClearDecompileCache,
+        clearAsmCache,
+    } = bin;
+
+    const { dynamicMode, gitBranch, handleToggleDynamicMode } = useDebug({ log });
+
+    // --- UI State ---
     const [activeView, setActiveView] = useState<ActivityView>("explorer");
-    const [tabs, setTabs] = useState<EditorTab[]>([]);
-    const [activeTabId, setActiveTabId] = useState<string | null>(null);
     const [bottomTab, setBottomTab] = useState<BottomTab>("console");
     const [bottomPanelHeight, setBottomPanelHeight] = useState(200);
-    const [logs, setLogs] = useState<string[]>(["[Fission] Ready."]);
-    const [strings, setStrings] = useState<StringDto[]>([]);
-    const [imports, setImports] = useState<ImportDto[]>([]);
-    const [bookmarks, setBookmarks] = useState<BookmarkDto[]>([]);
-    const [hexData, setHexData] = useState<HexViewData | null>(null);
-    const [xrefs, setXrefs] = useState<XrefDto[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [sections, setSections] = useState<SectionDto[]>([]);
     const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
-    const [aboutOpen, setAboutOpen] = useState(false);
-    const [patches, setPatches] = useState<PatchRecord[]>([]);
-
-    // Extended UI state
-    const [dynamicMode, setDynamicMode] = useState(false);
-    const [progress, setProgress] = useState<{ value: number; message: string } | null>(null);
-    const [gitBranch, setGitBranch] = useState<string>("—");
     const [sidebarVisible, setSidebarVisible] = useState(true);
-
-    // Caches
-    const [decompileCache, setDecompileCache] = useState<Record<string, string>>({});
-    const [asmCache, setAsmCache] = useState<Record<string, AsmInstructionDto[]>>({});
-    const [asmHasMore, setAsmHasMore] = useState<Record<string, boolean>>({});
-    const [asmLoadingMore, setAsmLoadingMore] = useState<Record<string, boolean>>({});
-    const [fidRunning, setFidRunning] = useState(false);
-
-    // Navigation history
-    const historyStack = useRef<string[]>([]);
-    const historyIndex = useRef(-1);
-    const navigatingRef = useRef(false); // prevent push during back/forward
 
     // Settings
     const [settings, setSettings] = useState<AppSettings>({
@@ -90,25 +95,16 @@ function App() {
     });
 
     // Dialog state
-    const [gotoOpen, setGotoOpen] = useState(false);
-    const [renameOpen, setRenameOpen] = useState(false);
-    const [renameTarget, setRenameTarget] = useState({ address: "", name: "" });
-    const [commentOpen, setCommentOpen] = useState(false);
-    const [commentTarget, setCommentTarget] = useState({ address: "", comment: "" });
+    const {
+        gotoOpen, setGotoOpen,
+        renameOpen, setRenameOpen, renameTarget, openRename,
+        commentOpen, setCommentOpen, commentTarget, openComment,
+        aboutOpen, setAboutOpen,
+    } = useDialogs();
 
     // Undo/Redo stacks
-    interface UndoableAction {
-        type: "rename" | "comment";
-        address: string;
-        previousValue: string;
-        newValue: string;
-    }
     const undoStack = useRef<UndoableAction[]>([]);
     const redoStack = useRef<UndoableAction[]>([]);
-
-    const log = useCallback((msg: string) => {
-        setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
-    }, []);
 
     // --- Project Save ---
     const handleSaveProject = useCallback(async () => {
@@ -152,49 +148,21 @@ function App() {
             if (!selected) return;
             const path = selected == null ? null : Array.isArray(selected) ? selected[0] : selected;
             if (!path) return;
-            interface FissionProject {
-                binary_path: string;
-                comments: Record<string, string>;
-                renames: Record<string, string>;
-                bookmarks: BookmarkDto[];
-            }
             const project = await invoke<FissionProject>("load_project", { path });
             log(`Project loaded from: ${path}`);
 
-            // If a binary is already loaded and paths differ, reload it
             if (!binaryInfo || binaryInfo.path !== project.binary_path) {
                 log(`Reloading binary: ${project.binary_path}`);
-                setLoading(true);
-                setTabs([]);
-                setActiveTabId(null);
-                setDecompileCache({});
-                setAsmCache({});
-                historyStack.current = [];
-                historyIndex.current = -1;
-                try {
-                    const info = await invoke<BinaryInfo>("open_file", { path: project.binary_path });
-                    setBinaryInfo(info);
-                    log(`Loaded: ${info.name} (${info.format} / ${info.arch})`);
-                    const funcs = await invoke<FunctionDto[]>("get_functions");
-                    setFunctions(funcs);
-                    invoke<StringDto[]>("get_strings").then(setStrings);
-                    invoke<ImportDto[]>("get_imports").then(setImports);
-                    invoke<SectionDto[]>("get_sections").then(setSections);
-                } catch (binErr) {
-                    log(`Binary reload error: ${binErr}`);
-                } finally {
-                    setLoading(false);
-                }
+                await handleLoadBinary(project.binary_path);
             }
 
-            // Reload bookmarks and function list from restored state
             invoke<BookmarkDto[]>("get_bookmarks").then(setBookmarks);
             invoke<FunctionDto[]>("get_functions").then(setFunctions);
             log("Annotations restored (comments, renames, bookmarks).");
         } catch (err) {
             log(`Load project error: ${err}`);
         }
-    }, [binaryInfo, log]);
+    }, [binaryInfo, log, handleLoadBinary, setBookmarks, setFunctions]);
 
     // --- Clear Console ---
     const handleClearConsole = useCallback(() => {
@@ -211,281 +179,24 @@ function App() {
         setBottomPanelVisible((v) => !v);
     }, []);
 
-    // --- Clear Decompile Cache ---
-    const handleClearDecompileCache = useCallback(async () => {
-        setDecompileCache({});
-        setAsmCache({});
-        await invoke("clear_decompiler_cache").catch(() => {});
-        log("Decompile & assembly cache cleared.");
-    }, [log]);
-
     // --- Open Listing Tab ---
     const handleOpenListingTab = useCallback(() => {
-        if (!binaryInfo) return;
-        const tabId = "listing-main";
-        setTabs((prev) => {
-            if (prev.find((t) => t.id === tabId)) return prev;
-            return [
-                ...prev,
-                {
-                    id: tabId,
-                    title: "Listing",
-                    type: "listing" as const,
-                    address: "0x0",
-                    functionName: "Listing",
-                },
-            ];
-        });
-        setActiveTabId(tabId);
-    }, [binaryInfo]);
+        openListingTab(binaryInfo);
+    }, [binaryInfo, openListingTab]);
 
     // --- Open Hex Editor Tab ---
     const handleOpenHexTab = useCallback((func: FunctionDto) => {
-        if (!binaryInfo) return;
-        const tabId = `hex-${func.address}`;
-        setTabs((prev) => {
-            if (prev.find((t) => t.id === tabId)) return prev;
-            return [
-                ...prev,
-                {
-                    id: tabId,
-                    title: `${func.name} [HEX]`,
-                    type: "hexview" as const,
-                    address: func.address,
-                    functionName: func.name,
-                },
-            ];
-        });
-        setActiveTabId(tabId);
-    }, [binaryInfo]);
-
-    // --- Navigation helpers ---
-    const pushHistory = useCallback((tabId: string) => {
-        if (navigatingRef.current) return;
-        const stack = historyStack.current;
-        const idx = historyIndex.current;
-        // Trim forward history
-        historyStack.current = stack.slice(0, idx + 1);
-        historyStack.current.push(tabId);
-        historyIndex.current = historyStack.current.length - 1;
-    }, []);
-
-    const canGoBack = historyIndex.current > 0;
-    const canGoForward = historyIndex.current < historyStack.current.length - 1;
-
-    const goBack = useCallback(() => {
-        if (historyIndex.current > 0) {
-            navigatingRef.current = true;
-            historyIndex.current--;
-            setActiveTabId(historyStack.current[historyIndex.current]);
-            navigatingRef.current = false;
-        }
-    }, []);
-
-    const goForward = useCallback(() => {
-        if (historyIndex.current < historyStack.current.length - 1) {
-            navigatingRef.current = true;
-            historyIndex.current++;
-            setActiveTabId(historyStack.current[historyIndex.current]);
-            navigatingRef.current = false;
-        }
-    }, []);
+        openHexTab(func, binaryInfo);
+    }, [binaryInfo, openHexTab]);
 
     // --- Load settings on startup ---
     useEffect(() => {
         invoke<AppSettings>("get_settings")
             .then(setSettings)
             .catch((e) => console.warn("get_settings failed:", e));
-        // Fetch git branch
-        invoke<string>("get_git_branch")
-            .then(setGitBranch)
-            .catch(() => {});
     }, []);
 
-    // --- File Open ---
-    const handleOpenFile = useCallback(async () => {
-        try {
-            const selected = await open({
-                multiple: false,
-                filters: [
-                    { name: "Executables", extensions: ["exe", "dll", "elf", "so", "dylib", "bin", "o"] },
-                    { name: "All Files", extensions: ["*"] },
-                ],
-            });
-            if (!selected) return;
-
-            const path = typeof selected === "string" ? selected : selected;
-            setLoading(true);
-            log(`Loading: ${path}`);
-
-            // Reset state
-            setTabs([]);
-            setActiveTabId(null);
-            setDecompileCache({});
-            setAsmCache({});
-            historyStack.current = [];
-            historyIndex.current = -1;
-
-            const info = await invoke<BinaryInfo>("open_file", { path });
-            setBinaryInfo(info);
-            log(`Loaded: ${info.name} (${info.format} / ${info.arch})`);
-            log(`  Functions: ${info.function_count}, Sections: ${info.section_count}`);
-
-            const funcs = await invoke<FunctionDto[]>("get_functions");
-            setFunctions(funcs);
-            log(`  Found ${funcs.length} functions`);
-
-            // Load strings and imports in background
-            invoke<StringDto[]>("get_strings").then((s) => {
-                setStrings(s);
-                log(`  Extracted ${s.length} strings`);
-            });
-            invoke<ImportDto[]>("get_imports").then((imp) => {
-                setImports(imp);
-                log(`  Found ${imp.length} imports`);
-            });
-            invoke<SectionDto[]>("get_sections").then(setSections);
-
-            // Load bookmarks
-            invoke<BookmarkDto[]>("get_bookmarks").then(setBookmarks);
-        } catch (err) {
-            log(`Error: ${err}`);
-        } finally {
-            setLoading(false);
-        }
-    }, [log]);
-
-    // --- Function Click → Open tabs ---
-    const handleFunctionClick = useCallback(
-        async (func: FunctionDto) => {
-            const decompTabId = `decomp-${func.address}`;
-            const asmTabId = `asm-${func.address}`;
-
-            setTabs((prev) => {
-                const existing = prev.find((t) => t.id === decompTabId);
-                if (existing) return prev;
-                return [
-                    ...prev,
-                    {
-                        id: decompTabId,
-                        title: func.name,
-                        type: "decompile" as const,
-                        address: func.address,
-                        functionName: func.name,
-                    },
-                    {
-                        id: asmTabId,
-                        title: `${func.name} [ASM]`,
-                        type: "assembly" as const,
-                        address: func.address,
-                        functionName: func.name,
-                    },
-                ];
-            });
-            setActiveTabId(decompTabId);
-            pushHistory(decompTabId);
-
-            const addr = parseInt(func.address, 16) || parseInt(func.address);
-
-            // Launch all loads in PARALLEL so one hanging doesn't block others
-            const decompPromise = (async () => {
-                if (decompileCache[decompTabId]) return;
-                try {
-                    log(`Decompiling ${func.name}...`);
-                    // Race against a 30s timeout to prevent indefinite hangs
-                    const timeout = new Promise<never>((_, reject) =>
-                        setTimeout(() => reject(new Error("Decompile timeout (30s)")), 30000),
-                    );
-                    const result = await Promise.race([
-                        invoke<DecompileResult>("decompile_function", { address: addr }),
-                        timeout,
-                    ]);
-                    setDecompileCache((prev) => ({ ...prev, [decompTabId]: result.code }));
-                    log(`Decompiled ${func.name} ✓`);
-                } catch (err) {
-                    const errMsg = `// Error decompiling ${func.name}: ${err}`;
-                    setDecompileCache((prev) => ({ ...prev, [decompTabId]: errMsg }));
-                    log(`Decompile error: ${err}`);
-                }
-            })();
-
-            const asmPromise = (async () => {
-                if (asmCache[asmTabId]) return;
-                try {
-                    const ASM_PAGE = 5000;
-                    const instructions = await invoke<AsmInstructionDto[]>("get_assembly", {
-                        address: addr,
-                        count: ASM_PAGE,
-                    });
-                    setAsmCache((prev) => ({ ...prev, [asmTabId]: instructions }));
-                    setAsmHasMore((prev) => ({ ...prev, [asmTabId]: instructions.length === ASM_PAGE }));
-                } catch (err) {
-                    log(`Assembly error: ${err}`);
-                }
-            })();
-
-            const hexPromise = (async () => {
-                try {
-                    const hex = await invoke<HexViewData>("get_hex_view", { address: addr, length: 256 });
-                    setHexData(hex);
-                } catch (_) { /* ignore hex errors */ }
-            })();
-
-            const xrefPromise = (async () => {
-                try {
-                    const refs = await invoke<XrefDto[]>("get_xrefs", { address: addr });
-                    setXrefs(refs);
-                } catch (_) { /* ignore xref errors */ }
-            })();
-
-            await Promise.allSettled([decompPromise, asmPromise, hexPromise, xrefPromise]);
-        },
-        [decompileCache, asmCache, log, pushHistory],
-    );
-
-    // --- Load more assembly rows when scrolled near the bottom ---
-    const handleAsmLoadMore = useCallback(
-        async (tabId: string, address: string) => {
-            if (asmLoadingMore[tabId] || !asmHasMore[tabId]) return;
-            setAsmLoadingMore((prev) => ({ ...prev, [tabId]: true }));
-            try {
-                const ASM_PAGE = 5000;
-                const currentCount = asmCache[tabId]?.length ?? 0;
-                const instructions = await invoke<AsmInstructionDto[]>("get_assembly", {
-                    address,
-                    count: currentCount + ASM_PAGE,
-                });
-                setAsmCache((prev) => ({ ...prev, [tabId]: instructions }));
-                setAsmHasMore((prev) => ({
-                    ...prev,
-                    [tabId]: instructions.length === currentCount + ASM_PAGE,
-                }));
-            } catch (err) {
-                log(`Assembly load-more error: ${err}`);
-            } finally {
-                setAsmLoadingMore((prev) => ({ ...prev, [tabId]: false }));
-            }
-        },
-        [asmCache, asmHasMore, asmLoadingMore, log],
-    );
-
-    // --- FID: identify functions via signature matching ---
-    const handleRunFid = useCallback(async () => {
-        setFidRunning(true);
-        try {
-            const result = await invoke<FidResultDto>("run_fid");
-            log(`FID: ${result.matched} / ${result.total_scanned} 함수 식별 완료`);
-            // 함수 목록 갱신 (이름이 바뀐 함수 반영)
-            const funcs = await invoke<FunctionDto[]>("get_functions");
-            setFunctions(funcs);
-            // 어셈블리 캐시 무효화 (코멘트/심볼 변경 반영)
-            setAsmCache({});
-        } catch (e) {
-            log(`FID 오류: ${e}`);
-        } finally {
-            setFidRunning(false);
-        }
-    }, [log]);
+    // --- File Open, FunctionClick, AsmLoadMore, FID → moved to useBinary hook ---
 
     // --- Navigate to address (from assembly click, goto, bookmark) ---
     const handleNavigateToAddress = useCallback(
@@ -519,67 +230,42 @@ function App() {
         [functions, handleFunctionClick, log],
     );
 
-    // --- Rename ---
+    // --- Rename (with undo tracking) ---
     const handleRename = useCallback(
         async (address: string, newName: string) => {
             try {
-                const addr = parseInt(address, 16) || parseInt(address);
-                // Record previous name for undo
+                const addr = parseAddress(address);
                 const prevFunc = functions.find((f) => f.address.toLowerCase() === address.toLowerCase());
                 const prevName = prevFunc?.name ?? "";
                 await invoke("rename_function", { address: addr, newName });
                 log(`Renamed: ${address} → ${newName || "(reverted)"}`);
-
-                // Push to undo stack
                 undoStack.current.push({ type: "rename", address, previousValue: prevName, newValue: newName });
                 redoStack.current = [];
-
-                // Refresh functions
                 const funcs = await invoke<FunctionDto[]>("get_functions");
                 setFunctions(funcs);
-
-                // Update tabs with new name
-                if (newName) {
-                    setTabs((prev) =>
-                        prev.map((t) => {
-                            if (t.address === address) {
-                                return {
-                                    ...t,
-                                    title: t.type === "assembly" ? `${newName} [ASM]` : newName,
-                                    functionName: newName,
-                                };
-                            }
-                            return t;
-                        }),
-                    );
-                }
+                if (newName) updateTabNames(address, newName);
             } catch (err) {
                 log(`Rename error: ${err}`);
             }
         },
-        [log, functions],
+        [log, functions, setFunctions, updateTabNames],
     );
 
-    // --- Comment ---
+    // --- Comment (with undo tracking) ---
     const handleAddComment = useCallback(
         async (address: string, text: string) => {
             try {
-                const addr = parseInt(address, 16) || parseInt(address);
+                const addr = parseAddress(address);
                 await invoke("add_comment", { address: addr, text });
                 log(`Comment at ${address}: ${text || "(removed)"}`);
-
-                // Push to undo stack
                 undoStack.current.push({ type: "comment", address, previousValue: "", newValue: text });
                 redoStack.current = [];
-
-                // Refresh assembly for all tabs that might show this address
-                // (simplified: invalidate all asm caches)
-                setAsmCache({});
+                clearAsmCache();
             } catch (err) {
                 log(`Comment error: ${err}`);
             }
         },
-        [log],
+        [log, clearAsmCache],
     );
 
     // --- Save Snapshot ---
@@ -615,15 +301,6 @@ function App() {
         }
     }, [log]);
 
-    // --- Toggle Dynamic Mode ---
-    const handleToggleDynamicMode = useCallback(() => {
-        setDynamicMode((v) => {
-            const next = !v;
-            log(next ? "Switched to Dynamic (Debug) mode." : "Switched to Static Analysis mode.");
-            return next;
-        });
-    }, [log]);
-
     // --- Toggle Sidebar ---
     const handleToggleSidebar = useCallback(() => {
         setSidebarVisible((v) => !v);
@@ -631,55 +308,14 @@ function App() {
 
     // --- Open Assembly / Decompile view from menu ---
     const handleOpenAssemblyView = useCallback(() => {
-        const tab = tabs.find((t) => t.id === activeTabId);
-        if (!tab || !binaryInfo) return;
-        const tabId = `asm-${tab.address}`;
-        setTabs((prev) => {
-            if (prev.find((t) => t.id === tabId)) return prev;
-            return [...prev, { id: tabId, title: `${tab.functionName} [ASM]`, type: "assembly" as const, address: tab.address, functionName: tab.functionName }];
-        });
-        setActiveTabId(tabId);
-    }, [tabs, activeTabId, binaryInfo]);
+        const tab = tabs.find((t) => t.id === activeTabId) ?? null;
+        openAssemblyTab(tab, binaryInfo);
+    }, [tabs, activeTabId, binaryInfo, openAssemblyTab]);
 
     const handleOpenDecompileView = useCallback(() => {
-        const tab = tabs.find((t) => t.id === activeTabId);
-        if (!tab || !binaryInfo) return;
-        const tabId = `dec-${tab.address}`;
-        setTabs((prev) => {
-            if (prev.find((t) => t.id === tabId)) return prev;
-            return [...prev, { id: tabId, title: tab.functionName, type: "decompile" as const, address: tab.address, functionName: tab.functionName }];
-        });
-        setActiveTabId(tabId);
-    }, [tabs, activeTabId, binaryInfo]);
-
-    // --- Load Binary by path (from console 'load' command) ---
-    const handleLoadBinary = useCallback(async (path: string) => {
-        setLoading(true);
-        setProgress({ value: 0.1, message: `Loading ${path}...` });
-        try {
-            const info = await invoke<BinaryInfo>("open_file", { path });
-            setBinaryInfo(info);
-            log(`Loaded: ${info.name} (${info.format} / ${info.arch})`);
-            setProgress({ value: 0.5, message: "Loading functions..." });
-            const funcs = await invoke<FunctionDto[]>("get_functions");
-            setFunctions(funcs);
-            setTabs([]);
-            setActiveTabId(null);
-            setDecompileCache({});
-            setAsmCache({});
-            historyStack.current = [];
-            historyIndex.current = -1;
-            setProgress({ value: 0.9, message: "Loading metadata..." });
-            invoke<StringDto[]>("get_strings").then(setStrings);
-            invoke<ImportDto[]>("get_imports").then(setImports);
-            invoke<SectionDto[]>("get_sections").then(setSections);
-        } catch (err) {
-            log(`Load binary error: ${err}`);
-        } finally {
-            setLoading(false);
-            setProgress(null);
-        }
-    }, [log]);
+        const tab = tabs.find((t) => t.id === activeTabId) ?? null;
+        openDecompileTabFromActive(tab, binaryInfo);
+    }, [tabs, activeTabId, binaryInfo, openDecompileTabFromActive]);
 
     // --- Undo / Redo ---
     const handleUndo = useCallback(async () => {
@@ -687,119 +323,53 @@ function App() {
         if (!action) { log("Nothing to undo."); return; }
         try {
             if (action.type === "rename") {
-                const addr = parseInt(action.address, 16) || parseInt(action.address);
+                const addr = parseAddress(action.address);
                 await invoke("rename_function", { address: addr, newName: action.previousValue });
                 const funcs = await invoke<FunctionDto[]>("get_functions");
                 setFunctions(funcs);
-                setTabs((prev) => prev.map((t) =>
-                    t.address === action.address
-                        ? { ...t, title: t.type === "assembly" ? `${action.previousValue} [ASM]` : action.previousValue, functionName: action.previousValue }
-                        : t
-                ));
+                updateTabNames(action.address, action.previousValue);
                 log(`Undo rename: ${action.address} → ${action.previousValue}`);
             } else if (action.type === "comment") {
-                const addr = parseInt(action.address, 16) || parseInt(action.address);
+                const addr = parseAddress(action.address);
                 await invoke("add_comment", { address: addr, text: action.previousValue });
-                setAsmCache({});
+                clearAsmCache();
                 log(`Undo comment at ${action.address}`);
             }
             redoStack.current.push(action);
         } catch (err) {
             log(`Undo error: ${err}`);
         }
-    }, [log]);
+    }, [log, setFunctions, updateTabNames, clearAsmCache]);
 
     const handleRedo = useCallback(async () => {
         const action = redoStack.current.pop();
         if (!action) { log("Nothing to redo."); return; }
         try {
             if (action.type === "rename") {
-                const addr = parseInt(action.address, 16) || parseInt(action.address);
+                const addr = parseAddress(action.address);
                 await invoke("rename_function", { address: addr, newName: action.newValue });
                 const funcs = await invoke<FunctionDto[]>("get_functions");
                 setFunctions(funcs);
-                setTabs((prev) => prev.map((t) =>
-                    t.address === action.address
-                        ? { ...t, title: t.type === "assembly" ? `${action.newValue} [ASM]` : action.newValue, functionName: action.newValue }
-                        : t
-                ));
+                updateTabNames(action.address, action.newValue);
                 log(`Redo rename: ${action.address} → ${action.newValue}`);
             } else if (action.type === "comment") {
-                const addr = parseInt(action.address, 16) || parseInt(action.address);
+                const addr = parseAddress(action.address);
                 await invoke("add_comment", { address: addr, text: action.newValue });
-                setAsmCache({});
+                clearAsmCache();
                 log(`Redo comment at ${action.address}`);
             }
             undoStack.current.push(action);
         } catch (err) {
             log(`Redo error: ${err}`);
         }
-    }, [log]);
+    }, [log, setFunctions, updateTabNames, clearAsmCache]);
 
     // --- Bookmark (active tab) ---
-    const handleToggleBookmark = useCallback(async () => {
+    const handleToggleBookmark = useCallback(() => {
         const tab = tabs.find((t) => t.id === activeTabId);
         if (!tab) return;
-
-        try {
-            const added = await invoke<boolean>("toggle_bookmark", {
-                address: tab.address,
-                label: tab.functionName,
-            });
-            log(`Bookmark ${added ? "added" : "removed"}: ${tab.address}`);
-
-            const bms = await invoke<BookmarkDto[]>("get_bookmarks");
-            setBookmarks(bms);
-        } catch (err) {
-            log(`Bookmark error: ${err}`);
-        }
-    }, [tabs, activeTabId, log]);
-
-    // --- Bookmark at specific address (from context menus) ---
-    const handleToggleBookmarkAt = useCallback(async (address: string, label: string) => {
-        try {
-            const added = await invoke<boolean>("toggle_bookmark", { address, label });
-            log(`Bookmark ${added ? "added" : "removed"}: ${address}`);
-            const bms = await invoke<BookmarkDto[]>("get_bookmarks");
-            setBookmarks(bms);
-        } catch (err) {
-            log(`Bookmark error: ${err}`);
-        }
-    }, [log]);
-
-    // --- Patch management ---
-    const handleRecordPatch = useCallback((rec: PatchRecord) => {
-        setPatches((prev) => [...prev, rec]);
-    }, []);
-
-    const handleRevertPatch = useCallback(async (rec: PatchRecord) => {
-        try {
-            await invoke<number[]>("patch_bytes", { address: rec.address, bytes: rec.original });
-            setPatches((prev) => prev.filter((p) => p !== rec));
-            log(`Reverted patch at 0x${rec.address.toString(16)}`);
-        } catch (err) {
-            log(`Revert error: ${err}`);
-        }
-    }, [log]);
-
-    // --- Tab management ---
-    const handleTabClick = useCallback((tabId: string) => {
-        setActiveTabId(tabId);
-        pushHistory(tabId);
-    }, [pushHistory]);
-
-    const handleCloseTab = useCallback(
-        (tabId: string) => {
-            setTabs((prev) => {
-                const remaining = prev.filter((t) => t.id !== tabId);
-                if (activeTabId === tabId) {
-                    setActiveTabId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
-                }
-                return remaining;
-            });
-        },
-        [activeTabId],
-    );
+        handleToggleBookmarkAt(tab.address, tab.functionName);
+    }, [tabs, activeTabId, handleToggleBookmarkAt]);
 
     // --- Resize bottom panel ---
     const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -825,165 +395,24 @@ function App() {
     );
 
     // --- Keyboard shortcuts ---
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            // Ignore when typing in an input
-            if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA") return;
-
-            if (e.ctrlKey && e.key === "o") {
-                e.preventDefault();
-                handleOpenFile();
-                return;
-            }
-
-            // G: Go to address
-            if (e.key === "g" && !e.ctrlKey && !e.altKey && binaryInfo) {
-                e.preventDefault();
-                setGotoOpen(true);
-                return;
-            }
-
-            // Ctrl+Z: Undo
-            if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
-                e.preventDefault();
-                handleUndo();
-                return;
-            }
-
-            // Ctrl+Y or Ctrl+Shift+Z: Redo
-            if ((e.ctrlKey && e.key === "y") || (e.ctrlKey && e.shiftKey && e.key === "z")) {
-                e.preventDefault();
-                handleRedo();
-                return;
-            }
-
-            // N: Rename
-            if (e.key === "n" && !e.ctrlKey && !e.altKey) {
-                e.preventDefault();
-                const tab = tabs.find((t) => t.id === activeTabId);
-                if (tab) {
-                    setRenameTarget({ address: tab.address, name: tab.functionName });
-                    setRenameOpen(true);
-                }
-                return;
-            }
-
-            // ;: Comment
-            if (e.key === ";" && !e.ctrlKey && !e.altKey) {
-                e.preventDefault();
-                const tab = tabs.find((t) => t.id === activeTabId);
-                if (tab) {
-                    setCommentTarget({ address: tab.address, comment: "" });
-                    setCommentOpen(true);
-                }
-                return;
-            }
-
-            // F2: Bookmark
-            if (e.key === "F2") {
-                e.preventDefault();
-                handleToggleBookmark();
-                return;
-            }
-
-            // Alt+Left: Back
-            if (e.altKey && e.key === "ArrowLeft") {
-                e.preventDefault();
-                goBack();
-                return;
-            }
-
-            // Alt+Right: Forward
-            if (e.altKey && e.key === "ArrowRight") {
-                e.preventDefault();
-                goForward();
-                return;
-            }
-
-            // Cmd+Left (macOS): Back
-            if (e.metaKey && e.key === "ArrowLeft") {
-                e.preventDefault();
-                goBack();
-                return;
-            }
-
-            // Cmd+Right (macOS): Forward
-            if (e.metaKey && e.key === "ArrowRight") {
-                e.preventDefault();
-                goForward();
-                return;
-            }
-
-            // Ctrl+J: Toggle bottom panel
-            if (e.ctrlKey && e.key === "j") {
-                e.preventDefault();
-                setBottomPanelVisible((v) => !v);
-                return;
-            }
-        };
-
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [handleOpenFile, handleToggleBookmark, handleUndo, handleRedo, goBack, goForward, binaryInfo, tabs, activeTabId]);
+    useKeyboardShortcuts({
+        binaryInfo,
+        tabs,
+        activeTabId,
+        onOpenFile: handleOpenFile,
+        onToggleBookmark: handleToggleBookmark,
+        onUndo: handleUndo,
+        onRedo: handleRedo,
+        onGoBack: goBack,
+        onGoForward: goForward,
+        onOpenGoto: () => setGotoOpen(true),
+        onOpenRename: openRename,
+        onOpenComment: openComment,
+        onToggleBottomPanel: handleToggleBottomPanel,
+    });
 
     // --- Drag & Drop ---
-    useEffect(() => {
-        const handleDragOver = (e: DragEvent) => {
-            e.preventDefault();
-            e.stopPropagation();
-        };
-
-        const handleDrop = async (e: DragEvent) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const files = e.dataTransfer?.files;
-            if (files && files.length > 0) {
-                const path = (files[0] as any).path;
-                if (path) {
-                    setLoading(true);
-                    log(`Loading (dropped): ${path}`);
-                    try {
-                        setTabs([]);
-                        setActiveTabId(null);
-                        setDecompileCache({});
-                        setAsmCache({});
-                        historyStack.current = [];
-                        historyIndex.current = -1;
-
-                        const info = await invoke<BinaryInfo>("open_file", { path });
-                        setBinaryInfo(info);
-                        log(`Loaded: ${info.name} (${info.format} / ${info.arch})`);
-
-                        const funcs = await invoke<FunctionDto[]>("get_functions");
-                        setFunctions(funcs);
-                        log(`  Found ${funcs.length} functions`);
-
-                        invoke<StringDto[]>("get_strings").then((s) => {
-                            setStrings(s);
-                            log(`  Extracted ${s.length} strings`);
-                        });
-                        invoke<ImportDto[]>("get_imports").then((imp) => {
-                            setImports(imp);
-                            log(`  Found ${imp.length} imports`);
-                        });
-                        invoke<BookmarkDto[]>("get_bookmarks").then(setBookmarks);
-                    } catch (err) {
-                        log(`Error: ${err}`);
-                    } finally {
-                        setLoading(false);
-                    }
-                }
-            }
-        };
-
-        document.addEventListener("dragover", handleDragOver);
-        document.addEventListener("drop", handleDrop);
-        return () => {
-            document.removeEventListener("dragover", handleDragOver);
-            document.removeEventListener("drop", handleDrop);
-        };
-    }, [log]);
+    useDragAndDrop({ log, onLoadBinary: handleLoadBinary });
 
     // --- Active tab ---
     const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
@@ -1001,17 +430,11 @@ function App() {
                 onGotoAddress={() => binaryInfo && setGotoOpen(true)}
                 onRename={() => {
                     const tab = tabs.find((t) => t.id === activeTabId);
-                    if (tab) {
-                        setRenameTarget({ address: tab.address, name: tab.functionName });
-                        setRenameOpen(true);
-                    }
+                    if (tab) openRename(tab.address, tab.functionName);
                 }}
                 onComment={() => {
                     const tab = tabs.find((t) => t.id === activeTabId);
-                    if (tab) {
-                        setCommentTarget({ address: tab.address, comment: "" });
-                        setCommentOpen(true);
-                    }
+                    if (tab) openComment(tab.address, "");
                 }}
                 binaryLoaded={!!binaryInfo}
                 onExit={handleExit}
@@ -1061,8 +484,7 @@ function App() {
                                 onOpenFile={handleOpenFile}
                                 selectedAddress={activeTab?.address ?? null}
                                 onRenameFunc={(func) => {
-                                    setRenameTarget({ address: func.address, name: func.name });
-                                    setRenameOpen(true);
+                                    openRename(func.address, func.name);
                                 }}
                                 onToggleBookmarkFunc={(func) =>
                                     handleToggleBookmarkAt(func.address, func.name)
@@ -1139,8 +561,7 @@ function App() {
                                             (f) => f.name.toLowerCase() === sym.toLowerCase()
                                         );
                                         const targetAddr = matchByName?.address ?? activeTab.address;
-                                        setRenameTarget({ address: targetAddr, name: sym });
-                                        setRenameOpen(true);
+                                        openRename(targetAddr, sym);
                                     }}
                                 />
                             ) : activeTab.type === "assembly" ? (
@@ -1148,12 +569,10 @@ function App() {
                                     instructions={asmCache[activeTab.id] ?? null}
                                     onAddressClick={handleNavigateToAddress}
                                     onCommentEdit={(addr, comment) => {
-                                        setCommentTarget({ address: addr, comment });
-                                        setCommentOpen(true);
+                                        openComment(addr, comment);
                                     }}
                                     onRename={(addr, currentName) => {
-                                        setRenameTarget({ address: addr, name: currentName });
-                                        setRenameOpen(true);
+                                        openRename(addr, currentName);
                                     }}
                                     onToggleBookmark={(addr) =>
                                         handleToggleBookmarkAt(addr, activeTab.functionName)
@@ -1224,21 +643,13 @@ function App() {
                         xrefAddress={activeTab?.address ?? null}
                         cfgAddress={activeTab?.type === "decompile" ? activeTab.address : null}
                         binaryLoaded={!!binaryInfo}
-                        onBookmarkClick={handleNavigateToAddress}
-                        onImportClick={handleNavigateToAddress}
-                        onStringClick={handleNavigateToAddress}
-                        onSearchResultClick={handleNavigateToAddress}
-                        onXrefClick={handleNavigateToAddress}
+                        onNavigate={handleNavigateToAddress}
                         onLog={log}
                         functions={functions}
-                        onGotoAddress={handleNavigateToAddress}
                         onClearConsole={handleClearConsole}
                         patches={patches}
                         onRevertPatch={handleRevertPatch}
-                        onExportClick={handleNavigateToAddress}
-                        onNoteClick={handleNavigateToAddress}
                         dynamicMode={dynamicMode}
-                        onAddressClick={handleNavigateToAddress}
                         onUndo={handleUndo}
                         onRedo={handleRedo}
                         onExit={handleExit}

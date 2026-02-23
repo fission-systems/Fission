@@ -2,16 +2,18 @@ import { useState, useCallback, useRef } from "react";
 import type { BottomTab, StringDto, ImportDto, BookmarkDto, HexViewData, XrefDto, FunctionDto, PatchRecord, DebugStateDto } from "../types";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import HexView from "../panels/HexView";
-import SearchPanel from "../panels/SearchPanel";
-import XrefsPanel from "../panels/XrefsPanel";
-import CfgPanel from "../panels/CfgPanel";
-import { DebugTab } from "../panels/DebugTab";
-import { StringXrefsPanel } from "../panels/StringXrefsPanel";
-import ExportsPanel from "../panels/ExportsPanel";
-import PatchesPanel from "../panels/PatchesPanel";
-import { NotesPanel } from "../panels/NotesPanel";
-import { TimelinePanel } from "../panels/TimelinePanel";
+import { parseAddress } from "../utils/address";
+import { MAX_CONSOLE_FUNCS } from "../utils/constants";
+import HexView from "../panels/editor/HexView";
+import SearchPanel from "../panels/sidebar/SearchPanel";
+import XrefsPanel from "../panels/bottom/XrefsPanel";
+import CfgPanel from "../panels/bottom/CfgPanel";
+import { DebugTab } from "../panels/bottom/DebugTab";
+import { StringXrefsPanel } from "../panels/bottom/StringXrefsPanel";
+import ExportsPanel from "../panels/bottom/ExportsPanel";
+import PatchesPanel from "../panels/bottom/PatchesPanel";
+import { NotesPanel } from "../panels/bottom/NotesPanel";
+import { TimelinePanel } from "../panels/bottom/TimelinePanel";
 
 interface BottomPanelProps {
     activeTab: BottomTab;
@@ -27,30 +29,19 @@ interface BottomPanelProps {
     /** Address of the currently selected function — used by CFG panel */
     cfgAddress: string | null;
     binaryLoaded: boolean;
-    onBookmarkClick?: (address: string) => void;
-    onImportClick?: (address: string) => void;
-    onStringClick?: (offset: string) => void;
-    onSearchResultClick?: (address: string) => void;
-    onXrefClick?: (address: string) => void;
+    /** Single navigation callback — replaces all per-panel address callbacks */
+    onNavigate?: (address: string) => void;
     onLog: (msg: string) => void;
     /** Functions list — used by console `funcs` command */
     functions?: FunctionDto[];
-    /** Navigate to address — used by console goto/hexclick */
-    onGotoAddress?: (addr: string) => void;
     /** Clears the console log array — wired to Edit > Clear Console */
     onClearConsole?: () => void;
     /** List of patches applied to the binary */
     patches?: PatchRecord[];
     /** Revert a patch back to its original bytes */
     onRevertPatch?: (rec: PatchRecord) => void;
-    /** Export entry clicked — navigate to address */
-    onExportClick?: (address: string) => void;
-    /** Note entry clicked — navigate to address */
-    onNoteClick?: (address: string) => void;
     /** Dynamic mode controls Timeline visibility */
     dynamicMode?: boolean;
-    /** Address click in String XRefs panel — navigate to address */
-    onAddressClick?: (address: string) => void;
     /** Debug state for Timeline panel */
     debugState?: DebugStateDto | null;
     /** Undo last action */
@@ -104,22 +95,14 @@ export default function BottomPanel({
     xrefAddress,
     cfgAddress,
     binaryLoaded,
-    onBookmarkClick,
-    onImportClick,
-    onStringClick,
-    onSearchResultClick,
-    onXrefClick,
+    onNavigate,
     onLog,
     functions,
-    onGotoAddress,
     onClearConsole,
     patches = [],
     onRevertPatch,
-    onExportClick,
-    onNoteClick,
     dynamicMode = false,
     debugState = null,
-    onAddressClick,
     onUndo,
     onRedo,
     onExit,
@@ -160,8 +143,8 @@ export default function BottomPanel({
                     onLog("No functions loaded.");
                 } else {
                     onLog(`${functions.length} functions:`);
-                    functions.slice(0, 50).forEach((f) => onLog(`  ${f.address}  ${f.name}`));
-                    if (functions.length > 50) onLog(`  ... (${functions.length - 50} more)`);
+                    functions.slice(0, MAX_CONSOLE_FUNCS).forEach((f) => onLog(`  ${f.address}  ${f.name}`));
+                    if (functions.length > MAX_CONSOLE_FUNCS) onLog(`  ... (${functions.length - MAX_CONSOLE_FUNCS} more)`);
                 }
                 break;
             case "clear":
@@ -173,13 +156,13 @@ export default function BottomPanel({
                 break;
             case "goto":
                 if (!args[0]) { onLog("Usage: goto <address>"); break; }
-                onGotoAddress?.(args[0]);
+                onNavigate?.(args[0]);
                 break;
             case "rename":
                 if (!args[0] || !args[1]) { onLog("Usage: rename <address> <new_name>"); break; }
                 (async () => {
                     try {
-                        const addr = parseInt(args[0], 16) || parseInt(args[0]);
+                        const addr = parseAddress(args[0]);
                         await invoke("rename_function", { address: addr, newName: args.slice(1).join(" ") });
                         onLog(`[✓] Renamed ${args[0]} → ${args.slice(1).join(" ")}`);
                     } catch (e) { onLog(`[!] Error: ${e}`); }
@@ -189,7 +172,7 @@ export default function BottomPanel({
                 if (!args[0]) { onLog("Usage: comment <address> <text>"); break; }
                 (async () => {
                     try {
-                        const addr = parseInt(args[0], 16) || parseInt(args[0]);
+                        const addr = parseAddress(args[0]);
                         await invoke("add_comment", { address: addr, text: args.slice(1).join(" ") });
                         onLog(`[✓] Comment set at ${args[0]}`);
                     } catch (e) { onLog(`[!] Error: ${e}`); }
@@ -207,7 +190,7 @@ export default function BottomPanel({
                 if (!args[0] || !args[1]) { onLog("Usage: patch <address> <hex_byte> [hex_byte...]"); break; }
                 (async () => {
                     try {
-                        const addr = parseInt(args[0], 16) || parseInt(args[0]);
+                        const addr = parseAddress(args[0]);
                         const bytes = args.slice(1).map((b) => parseInt(b, 16));
                         if (bytes.some(isNaN)) { onLog("[!] Invalid hex byte(s)"); return; }
                         await invoke("patch_bytes", { address: addr, bytes });
@@ -257,7 +240,7 @@ export default function BottomPanel({
                 onLog(`Unknown command: ${verb}. Type 'help' for a list.`);
         }
         setCmdInput("");
-    }, [functions, onGotoAddress, onLog, onClearConsole, onUndo, onRedo, onExit, onLoadBinary]);
+    }, [functions, onNavigate, onLog, onClearConsole, onUndo, onRedo, onExit, onLoadBinary]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === "Enter") {
@@ -341,7 +324,7 @@ export default function BottomPanel({
                                     <tr
                                         key={i}
                                         className="data-table__row"
-                                        onClick={() => onStringClick?.(s.offset)}
+                                        onClick={() => onNavigate?.(s.offset)}
                                     >
                                         <td className="data-table__addr">{s.offset}</td>
                                         <td className="data-table__enc">{s.encoding}</td>
@@ -354,7 +337,7 @@ export default function BottomPanel({
                 )}
 
                 {activeTab === "hex" && (
-                    <HexView data={hexData} onAddressClick={onGotoAddress} />
+                    <HexView data={hexData} onAddressClick={onNavigate} />
                 )}
 
                 {activeTab === "imports" && (
@@ -372,7 +355,7 @@ export default function BottomPanel({
                                     <tr
                                         key={i}
                                         className="data-table__row"
-                                        onClick={() => onImportClick?.(imp.address)}
+                                        onClick={() => onNavigate?.(imp.address)}
                                     >
                                         <td className="data-table__addr">{imp.address}</td>
                                         <td className="data-table__lib">{imp.library}</td>
@@ -404,7 +387,7 @@ export default function BottomPanel({
                                         <tr
                                             key={i}
                                             className="data-table__row"
-                                            onClick={() => onBookmarkClick?.(bm.address)}
+                                            onClick={() => onNavigate?.(bm.address)}
                                         >
                                             <td className="data-table__addr">{bm.address}</td>
                                             <td>{bm.label}</td>
@@ -418,11 +401,11 @@ export default function BottomPanel({
                 )}
 
                 {activeTab === "xrefs" && (
-                    <XrefsPanel xrefs={xrefs} address={xrefAddress} onXrefClick={onXrefClick} />
+                    <XrefsPanel xrefs={xrefs} address={xrefAddress} onXrefClick={onNavigate} />
                 )}
 
                 {activeTab === "search" && (
-                    <SearchPanel binaryLoaded={binaryLoaded} onResultClick={onSearchResultClick} />
+                    <SearchPanel binaryLoaded={binaryLoaded} onResultClick={onNavigate} />
                 )}
 
                 {activeTab === "cfg" && (
@@ -437,14 +420,14 @@ export default function BottomPanel({
                     <StringXrefsPanel
                         binaryLoaded={binaryLoaded}
                         onLog={onLog}
-                        onAddressClick={onAddressClick}
+                        onAddressClick={onNavigate}
                     />
                 )}
 
                 {activeTab === "exports" && (
                     <ExportsPanel
                         binaryLoaded={binaryLoaded}
-                        onExportClick={onExportClick}
+                        onExportClick={onNavigate}
                     />
                 )}
 
@@ -458,7 +441,7 @@ export default function BottomPanel({
                 {activeTab === "notes" && (
                     <NotesPanel
                         binaryLoaded={binaryLoaded}
-                        onNoteClick={onNoteClick}
+                        onNoteClick={onNavigate}
                     />
                 )}
 

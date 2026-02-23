@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { BreakpointInfoDto, DebugStateDto, DebugStatusDto, RegisterStateDto } from "../types";
+import { BreakpointInfoDto, DebugStateDto, DebugStatusDto, RegisterStateDto } from "../../types";
 
 interface Props {
     onLog: (msg: string) => void;

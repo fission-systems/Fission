@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import type { FunctionDto } from "../types";
+import type { FunctionDto } from "../../types";
 
 type CategoryFilter = "all" | "import" | "export" | "internal";
 

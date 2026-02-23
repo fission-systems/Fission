@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { AsmInstructionDto } from "../types";
+import type { AsmInstructionDto } from "../../types";
 
 // Mnemonic color categories
 const BRANCH_MNEMONICS = new Set(["jmp", "je", "jne", "jz", "jnz", "jg", "jge", "jl", "jle", "ja", "jae", "jb", "jbe", "jo", "jno", "js", "jns", "jp", "jnp", "jcxz", "jecxz", "jrcxz", "loop", "loope", "loopne"]);

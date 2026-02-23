@@ -266,3 +266,21 @@ export interface TtdStateDto {
     current_step: number | null;
     current_snapshot: TtdSnapshotDto | null;
 }
+
+// ──────────────────────────────────────────────────────── App-level types ──
+
+/** Represents a single undoable / redoable annotation action */
+export interface UndoableAction {
+    type: "rename" | "comment";
+    address: string;
+    previousValue: string;
+    newValue: string;
+}
+
+/** Serialised project file (*.fprj) */
+export interface FissionProject {
+    binary_path: string;
+    comments: Record<string, string>;
+    renames: Record<string, string>;
+    bookmarks: BookmarkDto[];
+}

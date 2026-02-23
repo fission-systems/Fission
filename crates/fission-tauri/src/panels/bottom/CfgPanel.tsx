@@ -7,7 +7,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { CfgDto, CfgNode, CfgEdge } from "../types";
+import type { CfgDto, CfgNode, CfgEdge } from "../../types";
 
 interface CfgPanelProps {
     /** Hex address of the currently selected function (e.g. `"0x401000"`). */

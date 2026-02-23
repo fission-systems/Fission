@@ -1,4 +1,4 @@
-import type { DebugStateDto } from "../types";
+import type { DebugStateDto } from "../../types";
 
 interface TimelinePanelProps {
     debugState: DebugStateDto | null;

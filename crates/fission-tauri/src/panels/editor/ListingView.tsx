@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ListingInfo, ListingRow } from "../types";
+import { ListingInfo, ListingRow } from "../../types";
 
 interface Props {
     binaryLoaded: boolean;
