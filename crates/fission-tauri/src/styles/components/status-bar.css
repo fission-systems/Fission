@@ -1,0 +1,133 @@
+/* ============================================================================
+   Status Bar
+   ============================================================================ */
+
+.status-bar {
+    height: 22px;
+    min-height: 22px;
+    display: flex;
+    align-items: stretch;
+    padding: 0;
+    background: var(--ctp-blue);
+    color: var(--ctp-crust);
+    font-size: 12px;
+    font-weight: 500;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.status-bar__left {
+    display: flex;
+    align-items: center;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.status-bar__right {
+    display: flex;
+    align-items: center;
+    flex-direction: row-reverse;
+    flex-shrink: 0;
+}
+
+.status-bar__item {
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    height: 100%;
+    line-height: 22px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 80ms ease;
+    font-variant-numeric: tabular-nums;
+}
+
+.status-bar__item:hover {
+    background: rgba(0, 0, 0, 0.15);
+}
+
+/* =====================================================
+   StatusBar extensions (dynamic mode, progress, mode btn)
+   ===================================================== */
+
+/* button elements used as .status-bar__item need reset */
+button.status-bar__item {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    font-family: inherit;
+}
+
+.status-bar__item--muted {
+    opacity: 0.75;
+    cursor: default;
+}
+
+.status-bar--dynamic {
+    background-color: var(--ctp-maroon) !important;
+    color: var(--ctp-base) !important;
+}
+
+.status-bar--dynamic .status-bar__item {
+    color: var(--ctp-base);
+}
+
+.status-bar--dynamic .status-bar__item:hover {
+    background: rgba(0, 0, 0, 0.2);
+}
+
+/* Progress area (also a status-bar__item, so inherits padding/height) */
+.status-bar__progress-area {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    cursor: default;
+}
+
+.status-bar__progress-area:hover {
+    background: transparent !important;
+}
+
+.status-bar__progress-bar {
+    width: 72px;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.status-bar__progress-fill {
+    height: 100%;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}
+
+.status-bar__progress-pct {
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+.status-bar__progress-msg {
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    opacity: 0.9;
+}
+
+/* Mode button */
+.status-bar__mode-btn--dynamic {
+    font-weight: 600;
+}
+
+/* Git branch */
+.status-bar__git {
+    font-family: var(--font-mono);
+    font-size: 11px;
+}

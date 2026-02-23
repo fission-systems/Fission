@@ -1,0 +1,245 @@
+/* ============================================================================
+   Bottom Panel
+   ============================================================================ */
+
+.bottom-panel {
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.bottom-panel__tabs {
+    display: flex;
+    height: var(--panel-tab-height, 35px);
+    border-bottom: 1px solid var(--border-color);
+    gap: 0;
+    flex-shrink: 0;
+}
+
+.bottom-panel__tab {
+    padding: 0 14px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: color 80ms ease;
+    white-space: nowrap;
+}
+
+.bottom-panel__tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+}
+
+.bottom-panel__tab--active {
+    color: var(--text-primary);
+}
+
+.bottom-panel__tab--active::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 8px;
+    right: 8px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 0 0 2px 2px;
+}
+
+.bottom-panel__badge {
+    font-size: var(--font-size-xs);
+    background: var(--accent);
+    color: var(--ctp-crust);
+    padding: 0 5px;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+.bottom-panel__content {
+    flex: 1;
+    overflow: auto;
+}
+
+.console-output {
+    flex: 1;
+    overflow: auto;
+    padding: 4px 0;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+}
+
+.console-output-wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.console-line {
+    padding: 1px 12px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* Console CLI input */
+.console-cli {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-surface);
+    flex-shrink: 0;
+}
+
+.console-cli__prompt {
+    color: var(--ctp-green);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    user-select: none;
+}
+
+.console-cli__input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    outline: none;
+    padding: 2px 0;
+}
+
+/* Data tables (strings, imports, bookmarks) */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+}
+
+.data-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    text-align: left;
+    padding: 4px 12px;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border-color);
+    z-index: 1;
+}
+
+.data-table__row {
+    cursor: pointer;
+    transition: background var(--transition);
+}
+
+.data-table__row:hover {
+    background: var(--bg-hover);
+}
+
+.data-table__row td {
+    padding: 3px 12px;
+    white-space: nowrap;
+}
+
+.data-table__addr {
+    color: var(--ctp-overlay2);
+}
+
+.data-table__val {
+    color: var(--ctp-green);
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.data-table__lib {
+    color: var(--ctp-peach);
+}
+
+.data-table__name {
+    color: var(--text-primary);
+}
+
+.data-table__enc {
+    color: var(--ctp-overlay1);
+}
+
+.bookmarks-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.bookmarks-empty kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+}
+
+/* Generic empty-state for panels */
+.panel-empty {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+}
+
+/* =====================================================
+   Console UX improvements
+   ===================================================== */
+.console-line--error {
+    color: var(--accent-error);
+}
+
+.console-line--success {
+    color: var(--accent-success);
+}
+
+.console-line--cmd {
+    color: var(--accent-secondary);
+    font-style: italic;
+}
+
+.console-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 2px 8px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.console-copy-btn {
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.console-copy-btn:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+}

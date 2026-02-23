@@ -1,0 +1,183 @@
+/* ============================================================================
+   Explorer Action Bar (FID button, etc.)
+   ============================================================================ */
+
+.explorer__action-bar {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-color, #3c3c3c);
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.explorer__action-btn {
+    flex: 1;
+    padding: 4px 8px;
+    font-size: 11px;
+    background: var(--button-bg, #2d4a7a);
+    color: var(--text-primary, #d4d4d4);
+    border: 1px solid var(--button-border, #3c6db0);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.15s;
+}
+
+.explorer__action-btn:hover:not(:disabled) {
+    background: var(--button-hover-bg, #3a5d99);
+}
+
+.explorer__action-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+/* ============================================================================
+   Functions List
+   ============================================================================ */
+
+.functions-list {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.functions-list__search {
+    padding: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.functions-list__search input {
+    width: 100%;
+    padding: 6px 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    outline: none;
+    transition: border-color var(--transition);
+}
+
+.functions-list__search input:focus {
+    border-color: var(--accent);
+}
+
+.functions-list__items {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.functions-list__item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    transition: background var(--transition), color var(--transition);
+}
+
+.functions-list__item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.functions-list__item--selected {
+    background: rgba(137, 180, 250, 0.1);
+    color: var(--text-primary);
+}
+
+.functions-list__item-addr {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--ctp-overlay2);
+    min-width: 80px;
+}
+
+.functions-list__item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+}
+
+.functions-list__item-badge {
+    font-size: var(--font-size-xs);
+    padding: 1px 5px;
+    border-radius: 8px;
+    font-weight: 500;
+}
+
+.functions-list__item-badge--import {
+    background: rgba(243, 139, 168, 0.15);
+    color: var(--ctp-red);
+}
+
+.functions-list__item-badge--export {
+    background: rgba(166, 227, 161, 0.15);
+    color: var(--ctp-green);
+}
+
+.functions-list__open-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin: 8px;
+    padding: 8px;
+    background: var(--bg-surface);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius);
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+    transition: all var(--transition);
+}
+
+.functions-list__open-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* --- Category filter --- */
+.functions-list__cats {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.functions-list__cat-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    padding: 3px 0;
+    cursor: pointer;
+    font-size: 10px;
+    color: var(--text-muted);
+    transition: color var(--transition), background var(--transition);
+    white-space: nowrap;
+}
+
+.functions-list__cat-btn:hover {
+    color: var(--text-primary);
+    background: var(--hover-bg);
+}
+
+.functions-list__cat-btn--active {
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+    font-weight: 600;
+}
+
+.functions-list__cat-count {
+    font-size: 9px;
+    opacity: 0.7;
+}

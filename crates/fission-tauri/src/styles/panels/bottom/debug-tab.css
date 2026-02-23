@@ -1,0 +1,207 @@
+/* ============================================================
+   Debug Tab (bottom panel)
+   ============================================================ */
+
+.debug-tab {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-family: var(--font-mono);
+}
+
+.debug-tab__bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: var(--surface1);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.debug-tab__status {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.debug-tab__pid {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.debug-tab__last-event {
+    font-size: 11px;
+    color: #ddb06c;
+    font-style: italic;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.debug-tab__spacer {
+    flex: 1;
+}
+
+.debug-tab__input {
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--base);
+    color: var(--fg);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    outline: none;
+}
+
+.debug-tab__input:focus {
+    border-color: var(--accent);
+}
+
+.debug-tab__btn {
+    padding: 2px 8px;
+    font-size: 12px;
+    background: var(--surface0);
+    color: var(--fg);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.debug-tab__btn:hover:not(:disabled) {
+    background: var(--surface1);
+}
+
+.debug-tab__btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.debug-tab__btn--attach {
+    color: #4ec94e;
+    border-color: #4ec94e44;
+}
+
+.debug-tab__btn--detach {
+    color: #f44747;
+    border-color: #f4474744;
+}
+
+.debug-tab__body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.debug-tab__section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border-color);
+    overflow: hidden;
+    min-width: 0;
+}
+
+.debug-tab__section:last-child {
+    border-right: none;
+}
+
+.debug-tab__section--events {
+    flex: 1.5;
+}
+
+.debug-tab__section-title {
+    padding: 3px 8px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: var(--surface0);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.debug-tab__reg-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    overflow-y: auto;
+}
+
+.debug-tab__reg-name {
+    width: 60px;
+    padding: 1px 8px;
+    color: var(--text-muted);
+}
+
+.debug-tab__reg-val {
+    padding: 1px 8px;
+    color: #569cd6;
+    font-family: var(--font-mono);
+}
+
+.debug-tab__bp-add {
+    display: flex;
+    gap: 4px;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.debug-tab__bp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    overflow-y: auto;
+}
+
+.debug-tab__bp-row:hover {
+    background: var(--surface1);
+}
+
+.debug-tab__bp-addr {
+    padding: 2px 8px;
+    color: #ddb06c;
+}
+
+.debug-tab__bp-en {
+    color: #f44747;
+    text-align: center;
+}
+
+.debug-tab__bp-del {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 4px;
+}
+
+.debug-tab__bp-del:hover {
+    color: #f44747;
+}
+
+.debug-tab__events {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px;
+}
+
+.debug-tab__event {
+    font-size: 11.5px;
+    color: var(--fg);
+    padding: 1px 0;
+    white-space: nowrap;
+}
+
+.debug-tab__empty {
+    padding: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+}

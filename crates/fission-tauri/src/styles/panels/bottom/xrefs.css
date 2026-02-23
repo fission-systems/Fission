@@ -1,0 +1,50 @@
+/* ============================================================================
+   XRefs Panel (Phase 2)
+   ============================================================================ */
+
+.xrefs-panel {
+    height: 100%;
+    overflow: auto;
+}
+
+.xrefs-panel--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+}
+
+.xref-incoming {
+    color: var(--ctp-green);
+    font-weight: 600;
+    font-size: var(--font-size-xs);
+}
+
+.xref-outgoing {
+    color: var(--ctp-peach);
+    font-weight: 600;
+    font-size: var(--font-size-xs);
+}
+
+.xrefs-panel__count-bar {
+    padding: 4px 8px;
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.xrefs-panel__fn-count {
+    text-align: center;
+    min-width: 28px;
+}
+
+.xrefs-panel__badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 10px;
+    background: var(--ctp-surface1, #313244);
+    color: var(--ctp-lavender, #b4befe);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+}

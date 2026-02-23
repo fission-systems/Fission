@@ -1,0 +1,150 @@
+/* ============================================================================
+   Assembly View
+   ============================================================================ */
+
+.asm-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    position: relative;
+}
+
+.asm-view__scroller {
+    height: 100%;
+    overflow: auto;
+}
+
+.asm-load-more-row td {
+    text-align: center;
+    padding: 8px;
+}
+
+.asm-load-more {
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    font-style: italic;
+}
+
+.asm-view--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.asm-view__placeholder {
+    color: var(--text-muted);
+}
+
+.asm-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.asm-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    text-align: left;
+    padding: 4px 8px;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border-color);
+    z-index: 1;
+}
+
+.asm-row {
+    transition: background var(--transition);
+}
+
+.asm-row:hover {
+    background: var(--bg-hover);
+}
+
+.asm-row--selected {
+    background: rgba(137, 180, 250, 0.1);
+}
+
+.asm-addr {
+    padding: 2px 8px;
+    color: var(--ctp-overlay2);
+    white-space: nowrap;
+}
+
+.asm-bytes {
+    padding: 2px 8px;
+    color: var(--ctp-surface2);
+    white-space: nowrap;
+    font-size: var(--font-size-xs);
+}
+
+.asm-mnemonic {
+    padding: 2px 8px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.asm-operands {
+    padding: 2px 8px;
+    color: var(--ctp-subtext1);
+}
+
+.asm-comment {
+    padding: 2px 8px;
+    cursor: pointer;
+    min-width: 120px;
+}
+
+.asm-comment-text {
+    color: var(--ctp-green);
+    font-style: italic;
+}
+
+/* Mnemonic color classes */
+.asm-call {
+    color: var(--ctp-blue);
+}
+
+.asm-branch {
+    color: var(--ctp-mauve);
+}
+
+.asm-ret {
+    color: var(--ctp-red);
+}
+
+.asm-stack {
+    color: var(--ctp-peach);
+}
+
+.asm-nop {
+    color: var(--ctp-surface2);
+}
+
+.asm-mov {
+    color: var(--ctp-teal);
+}
+
+.asm-cmp {
+    color: var(--ctp-yellow);
+}
+
+.asm-default {
+    color: var(--ctp-text);
+}
+
+.asm-address-link {
+    color: var(--ctp-sapphire);
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    transition: text-decoration-color var(--transition);
+}
+
+.asm-address-link:hover {
+    text-decoration-color: var(--ctp-sapphire);
+}

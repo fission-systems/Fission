@@ -1,0 +1,183 @@
+/* ============================================================
+   Listing / HexView Placeholder tabs
+   ============================================================ */
+
+.listing-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    height: 100%;
+    padding: 40px;
+    text-align: center;
+}
+
+.listing-placeholder__icon {
+    font-size: 48px;
+    opacity: 0.3;
+}
+
+.listing-placeholder__title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.listing-placeholder__sub {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+/* ============================================================
+   Listing View
+   ============================================================ */
+
+.listing-view {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--base);
+    font-family: var(--font-mono);
+}
+
+.listing-view__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    background: var(--surface1);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.listing-view__meta {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    flex: 1;
+}
+
+.listing-view__jump {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.listing-view__jump-input {
+    width: 180px;
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    background: var(--base);
+    color: var(--fg);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    outline: none;
+}
+
+.listing-view__jump-input:focus {
+    border-color: var(--accent);
+}
+
+.listing-view__jump-btn {
+    padding: 2px 10px;
+    font-size: var(--font-size-sm);
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.listing-view__jump-btn:hover {
+    opacity: 0.85;
+}
+
+.listing-view__body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+}
+
+.listing-view__table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+
+/* Label rows (function entry points) */
+.listing-row--label td {
+    padding: 6px 8px 2px;
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 12px;
+    user-select: text;
+    white-space: nowrap;
+}
+
+/* Instruction rows */
+.listing-row--insn:hover {
+    background: var(--surface1);
+}
+
+.listing-row--insn td {
+    padding: 0 6px;
+    white-space: nowrap;
+    user-select: text;
+}
+
+.listing-row__addr {
+    color: var(--text-muted);
+    min-width: 90px;
+}
+
+.listing-row__bytes {
+    color: #6a9fb5;
+    min-width: 160px;
+}
+
+.listing-row__mnem {
+    color: #ac4142;
+    min-width: 80px;
+}
+
+.listing-row__ops {
+    color: var(--fg);
+}
+
+.listing-row__comment {
+    color: #90a959;
+    font-style: italic;
+}
+
+.listing-view__sentinel {
+    padding: 8px 0;
+    text-align: center;
+}
+
+.listing-view__loading,
+.listing-view__end {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+}
+
+.listing-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 8px;
+    color: var(--text-muted);
+}
+
+.listing-empty__icon {
+    font-size: 32px;
+}
+
+.listing-empty--error {
+    color: #ac4142;
+}

@@ -1,0 +1,239 @@
+/* ============================================================
+   Debug Sidebar
+   ============================================================ */
+
+.debug-sidebar {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.debug-sidebar__header {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.debug-sidebar__status {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+}
+
+.debug-sidebar__status-icon {
+    font-size: 14px;
+}
+
+.debug-sidebar__pid {
+    font-weight: normal;
+    color: var(--text-muted);
+}
+
+.debug-sidebar__attach {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.debug-sidebar__input {
+    width: 100%;
+    padding: 4px 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--base);
+    color: var(--fg);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.debug-sidebar__input:focus {
+    border-color: var(--accent);
+}
+
+.debug-sidebar__btn {
+    padding: 4px 10px;
+    font-size: 12px;
+    background: var(--surface1);
+    color: var(--fg);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    cursor: pointer;
+    text-align: center;
+}
+
+.debug-sidebar__btn:hover:not(:disabled) {
+    background: var(--surface0);
+}
+
+.debug-sidebar__btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.debug-sidebar__btn--attach {
+    color: #4ec94e;
+    border-color: #4ec94e44;
+}
+
+.debug-sidebar__btn--detach {
+    color: #f44747;
+    border-color: #f4474744;
+}
+
+.debug-sidebar__btn--open {
+    margin-top: 4px;
+    color: var(--accent);
+    border-color: var(--accent);
+    font-size: 11px;
+}
+
+.debug-sidebar__section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+}
+
+.debug-sidebar__bp-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.debug-sidebar__bp-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #ddb06c;
+}
+
+.debug-sidebar__bp-dot {
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.debug-sidebar__bp-dot--on {
+    color: #f44747;
+}
+
+.debug-sidebar__empty {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.debug-sidebar__last-event {
+    font-size: 11px;
+    color: #ddb06c;
+    font-style: italic;
+    word-break: break-word;
+}
+
+/* ── Phase 4: Memory Dump ── */
+.debug-sidebar__mem-row {
+    display: flex;
+    gap: 4px;
+    padding: 4px 8px;
+}
+
+.debug-sidebar__input--addr {
+    flex: 1;
+    min-width: 0;
+}
+
+.debug-sidebar__select {
+    background: var(--input-bg, #2d2d2d);
+    color: var(--text-primary, #d4d4d4);
+    border: 1px solid var(--border-color, #3e3e3e);
+    border-radius: 3px;
+    font-size: 11px;
+    padding: 2px 4px;
+}
+
+.debug-sidebar__btn--read {
+    margin: 0 8px 4px;
+    width: calc(100% - 16px);
+    background: var(--button-bg, #2d4a7a);
+    border-color: var(--button-border, #3c6db0);
+}
+
+.debug-sidebar__hex-dump {
+    margin: 0 8px 8px;
+    padding: 6px;
+    font-size: 10px;
+    font-family: "Cascadia Code", monospace;
+    background: var(--panel-bg, #1e1e1e);
+    border: 1px solid var(--border-color, #3e3e3e);
+    border-radius: 3px;
+    overflow-x: auto;
+    max-height: 200px;
+    white-space: pre;
+    color: var(--text-primary, #d4d4d4);
+}
+
+/* ── Phase 5: TTD Timeline ── */
+.debug-sidebar__ttd-count {
+    font-weight: normal;
+    color: var(--text-muted, #858585);
+}
+
+.debug-sidebar__ttd-controls {
+    padding: 4px 8px;
+    display: flex;
+    gap: 4px;
+}
+
+.debug-sidebar__btn--ttd {
+    flex: 1;
+    background: var(--button-bg, #2d4a7a);
+    border-color: var(--button-border, #3c6db0);
+}
+
+.debug-sidebar__ttd-seek {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+}
+
+.debug-sidebar__input--step {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+}
+
+.debug-sidebar__btn--icon {
+    padding: 2px 6px;
+    font-size: 13px;
+    background: var(--button-bg, #2d4a7a);
+    border-color: var(--button-border, #3c6db0);
+    min-width: 28px;
+}
+
+.debug-sidebar__ttd-range {
+    padding: 2px 12px;
+    font-size: 10px;
+    color: var(--text-muted, #858585);
+}
+
+.debug-sidebar__ttd-regs {
+    padding: 4px 12px;
+    font-family: "Cascadia Code", monospace;
+    font-size: 10px;
+    color: #9cdcfe;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}

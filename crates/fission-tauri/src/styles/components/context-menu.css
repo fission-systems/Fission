@@ -1,0 +1,33 @@
+/* ============================================================================
+   Context Menu
+   ============================================================================ */
+
+.context-menu {
+    position: fixed;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 4px 0;
+    min-width: 180px;
+    z-index: 9999;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.context-menu__item {
+    padding: 6px 16px;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+    transition: background var(--transition);
+}
+
+.context-menu__item:hover {
+    background: var(--accent);
+    color: var(--ctp-crust);
+}
+
+.context-menu__separator {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}
