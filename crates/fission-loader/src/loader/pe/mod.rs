@@ -193,6 +193,38 @@ impl PeLoader {
             }
         }
 
+        // Linear sweep: if we only found the entry point (stripped binary with no
+        // COFF symbols, no PDATA, no exports), scan executable sections for function
+        // prologues so the decompiler has something to work with.
+        let non_import_count = functions_info.iter().filter(|f| !f.is_import).count();
+        if non_import_count <= 1 {
+            let known_addrs: std::collections::HashSet<u64> =
+                functions_info.iter().map(|f| f.address).collect();
+
+            for section in &sections_info {
+                if !section.is_executable {
+                    continue;
+                }
+                let file_start = section.file_offset as usize;
+                let file_end = (section.file_offset + section.file_size) as usize;
+                if file_end > bytes.len() || file_start >= file_end {
+                    continue;
+                }
+                let sec_bytes = &bytes[file_start..file_end];
+                let sec_va = section.virtual_address;
+
+                let swept = scan_prologue_functions(
+                    sec_bytes,
+                    sec_va,
+                    is_64bit,
+                    &known_addrs,
+                );
+                for func in swept {
+                    functions_info.push(func);
+                }
+            }
+        }
+
         LoadedBinaryBuilder::new(path, data)
             .format("PE (binrw)")
             .arch_spec(arch_spec)
@@ -205,6 +237,118 @@ impl PeLoader {
             .add_global_symbols(global_symbols)
             .build()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Linear-sweep function prologue detection
+// ---------------------------------------------------------------------------
+
+/// x86 (32-bit) function prologue byte patterns.
+/// Each entry is (pattern_bytes, description).
+/// Sorted from most-specific (longest) to least-specific to reduce false positives.
+const X86_PROLOGUES: &[(&[u8], &str)] = &[
+    // ---- 4-byte patterns (MSVC callee-save variants) ----
+    (&[0x55, 0x57, 0x8B, 0xEC], "push ebp; push edi; mov ebp,esp"),
+    (&[0x55, 0x56, 0x8B, 0xEC], "push ebp; push esi; mov ebp,esp"),
+    (&[0x55, 0x53, 0x8B, 0xEC], "push ebp; push ebx; mov ebp,esp"),
+    (&[0x57, 0x55, 0x8B, 0xEC], "push edi; push ebp; mov ebp,esp"),
+    (&[0x56, 0x55, 0x8B, 0xEC], "push esi; push ebp; mov ebp,esp"),
+    (&[0x53, 0x55, 0x8B, 0xEC], "push ebx; push ebp; mov ebp,esp"),
+    // ---- 3-byte patterns (baseline MSVC/GCC) ----
+    (&[0x55, 0x8B, 0xEC], "push ebp; mov ebp,esp (MSVC)"),
+    (&[0x55, 0x89, 0xE5], "push ebp; mov ebp,esp (GCC)"),
+];
+
+/// x86-64 function prologue byte patterns.
+const X64_PROLOGUES: &[(&[u8], &str)] = &[
+    // MSVC shadow-store variants (most common in MSVC x64 output)
+    (&[0x48, 0x89, 0x5C, 0x24], "mov [rsp+N],rbx"),
+    (&[0x48, 0x89, 0x4C, 0x24], "mov [rsp+N],rcx"),
+    (&[0x48, 0x89, 0x54, 0x24], "mov [rsp+N],rdx"),
+    (&[0x48, 0x89, 0x44, 0x24], "mov [rsp+N],rax"),
+    // push rbp variants (REX prefix)
+    (&[0x40, 0x55], "REX push rbp"),
+    (&[0x48, 0x55], "REX.W push rbp"),
+    // sub rsp variants  
+    (&[0x48, 0x83, 0xEC], "sub rsp,imm8"),
+    (&[0x48, 0x81, 0xEC], "sub rsp,imm32"),
+    // non-REX push rbp  
+    (&[0x55, 0x48, 0x8B, 0xEC], "push rbp; mov rbp,rsp"),
+    (&[0x55, 0x48, 0x89, 0xE5], "push rbp; mov rbp,rsp (GCC)"),
+];
+
+/// Scan a raw section byte slice for function prologues.
+///
+/// Returns a list of `FunctionInfo` for each hit whose VA is not already
+/// in `known_addrs`.  Named `sub_{va:08x}` (Ghidra convention).
+fn scan_prologue_functions(
+    sec_bytes: &[u8],
+    sec_va: u64,
+    is_64bit: bool,
+    known_addrs: &std::collections::HashSet<u64>,
+) -> Vec<crate::loader::types::FunctionInfo> {
+    let prologues: &[(&[u8], &str)] = if is_64bit {
+        X64_PROLOGUES
+    } else {
+        X86_PROLOGUES
+    };
+
+    // Minimum prologue length needed (used to avoid out-of-bounds)
+    let min_pat_len = prologues.iter().map(|(p, _)| p.len()).min().unwrap_or(2);
+
+    let mut results = Vec::new();
+    // Build a dedup set for this batch as we go
+    let mut seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
+
+    // Walk every byte; restrict to 4-byte-aligned offsets for x86 (MSVC aligns
+    // most functions to 16 bytes, but 4-byte alignment catches everything without
+    // being too slow on a 10MB section).
+    let step = if is_64bit { 1 } else { 4 };
+
+    let len = sec_bytes.len();
+    if len < min_pat_len {
+        return results;
+    }
+
+    // Pre-build a zero page for quick skip
+    let zero_block = [0u8; 512];
+
+    let mut i = 0usize;
+    while i + min_pat_len <= len {
+        // Skip 512-byte zero blocks (common in padding areas)
+        if i + 512 <= len && sec_bytes[i..i + 512] == zero_block[..] {
+            i += 512;
+            continue;
+        }
+
+        // Try each prologue pattern at this offset
+        let mut matched = false;
+        for (pat, _desc) in prologues {
+            let pat_len = pat.len();
+            if i + pat_len > len {
+                continue;
+            }
+            if sec_bytes[i..i + pat_len] == **pat {
+                let va = sec_va + i as u64;
+                if !known_addrs.contains(&va) && seen.insert(va) {
+                    results.push(crate::loader::types::FunctionInfo {
+                        name: format!("sub_{:08x}", va),
+                        address: va,
+                        size: 0,
+                        is_export: false,
+                        is_import: false,
+                    });
+                }
+                matched = true;
+                break; // one pattern per offset is enough
+            }
+        }
+
+        // After a match, advance by 4 to catch adjacent (unlikely but safe)
+        i += if matched { 4 } else { step };
+    }
+
+    results
 }
 
 pub fn detect_pe_is_64bit(bytes: &[u8]) -> bool {
