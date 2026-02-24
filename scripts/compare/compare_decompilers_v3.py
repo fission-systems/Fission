@@ -235,6 +235,16 @@ def normalize_for_similarity(text: str) -> str:
     for pat in (r"\blocal_[0-9a-f]+\b", r"\buVar[0-9]+\b", r"\biVar[0-9]+\b",
                 r"\bpVar[0-9]+\b", r"\bdVar[0-9]+\b"):
         text = re.sub(pat, "VAR", text)
+    # x86/x64 ABI normalizations:
+    #  1. Calling-convention annotations (__cdecl, __fastcall, etc.) carry no
+    #     structural meaning for scoring purposes.
+    text = re.sub(r"\b__(?:cdecl|fastcall|stdcall|thiscall)\b\s*", "", text)
+    #  2. Ghidra uses address-based names (sub_XXXXXX) for functions it cannot
+    #     resolve; Fission uses the COFF symbol name — normalise both to FUNC.
+    text = re.sub(r"\bsub_[0-9a-fA-F]+\b", "FUNC", text)
+    #  3. x86 cdecl prepends '_' to C symbols; strip it so 'add' and '_add'
+    #     compare equal (single underscore prefix only, not __ reserved names).
+    text = re.sub(r"\b_([a-zA-Z]\w*)\b", r"\1", text)
     # Normalize Fission rename-pass variable names to match Ghidra's VAR tokens
     for pat in (r"\bresult\b", r"\bretval\b"):
         text = re.sub(pat, "VAR", text)

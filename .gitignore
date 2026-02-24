@@ -72,13 +72,17 @@ ghidra_decompiler/fission_decomp
 /examples/results/
 /examples/binaries/**/*.exe_ghidra/
 /examples/binaries/**/*.exe
+# Keep benchmark test binaries tracked
+!examples/binaries/comparison_test_x64.exe
+!examples/binaries/comparison_test_x86.exe
 
 # Script run outputs (result dirs, benchmarks, temp comparison runs)
 # Use ** (not trailing /) so specific files can be un-ignored below
 scripts/result/**
 scripts/result*/**
-# Keep committed baseline for regression checks
+# Keep committed baselines for regression checks
 !scripts/result/baseline_summary.json
+!scripts/result/baseline_x86_summary.json
 scripts/out/
 
 # Python cache in scripts
