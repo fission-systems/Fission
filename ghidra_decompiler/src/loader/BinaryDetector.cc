@@ -14,6 +14,8 @@ static const uint32_t MACHO_MAGIC_32 = 0xFEEDFACE;
 static const uint32_t MACHO_MAGIC_64 = 0xFEEDFACF;
 static const uint32_t MACHO_CIGAM_32 = 0xCEFAEDFE;  // Byte-swapped
 static const uint32_t MACHO_CIGAM_64 = 0xCFFAEDFE;
+// D-1: Universal / Fat Binary (fields are big-endian in file)
+static const uint32_t FAT_CIGAM = 0xBEBAFECA;  // 0xCAFEBABE read on LE system
 
 BinaryInfo BinaryDetector::detect(const uint8_t* data, size_t size) {
     BinaryInfo info;
@@ -53,8 +55,10 @@ bool BinaryDetector::is_elf(const uint8_t* data, size_t size) {
 bool BinaryDetector::is_macho(const uint8_t* data, size_t size) {
     if (size < 4) return false;
     uint32_t magic = *(const uint32_t*)data;
+    // D-1: Also recognise Universal (Fat) binaries
     return magic == MACHO_MAGIC_32 || magic == MACHO_MAGIC_64 ||
-           magic == MACHO_CIGAM_32 || magic == MACHO_CIGAM_64;
+           magic == MACHO_CIGAM_32 || magic == MACHO_CIGAM_64 ||
+           magic == FAT_CIGAM;
 }
 
 bool BinaryDetector::is_valid_executable(const uint8_t* data, size_t size) {
@@ -175,13 +179,72 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
     BinaryInfo info;
     info.format = BinaryFormat::MACHO;
     info.compiler_id = "clang";  // Assume Clang for macOS
-    
+
     if (size < 32) return info;
-    
+
     uint32_t magic = *(const uint32_t*)data;
+
+    // -----------------------------------------------------------------------
+    // D-1: Handle Universal (Fat) Binary
+    // fat_header fields are big-endian regardless of host architecture.
+    // On LE systems, 0xCAFEBABE is read as 0xBEBAFECA (FAT_CIGAM).
+    // -----------------------------------------------------------------------
+    if (magic == FAT_CIGAM) {
+        // fat_header: { uint32 magic; uint32 nfat_arch; }
+        // fat_arch:   { int32 cputype; int32 cpusubtype; uint32 offset; uint32 size; uint32 align; }
+        // All fields are big-endian in file.
+        if (size < 8) return info;
+
+#ifdef _MSC_VER
+#define BSWAP32(x) _byteswap_ulong(x)
+#else
+#define BSWAP32(x) __builtin_bswap32(x)
+#endif
+        uint32_t nfat_arch = BSWAP32(*(const uint32_t*)(data + 4));
+
+        const uint32_t CPU_TYPE_ARM64_BE = BSWAP32(0x0100000C); // as stored in file
+        const uint32_t CPU_TYPE_X86_64_BE = BSWAP32(0x01000007);
+
+        // Prefer ARM64 slice; fall back to x86_64
+        uint32_t chosen_offset = 0, chosen_size = 0;
+        uint32_t x86_64_offset = 0, x86_64_size = 0;
+
+        for (uint32_t i = 0; i < nfat_arch && i < 16; ++i) {
+            size_t arch_off = 8 + (size_t)i * 20;
+            if (arch_off + 20 > size) break;
+
+            uint32_t cputype_raw = *(const uint32_t*)(data + arch_off);
+            uint32_t slice_offset = BSWAP32(*(const uint32_t*)(data + arch_off + 8));
+            uint32_t slice_size   = BSWAP32(*(const uint32_t*)(data + arch_off + 12));
+
+            if (cputype_raw == CPU_TYPE_ARM64_BE) {
+                chosen_offset = slice_offset;
+                chosen_size   = slice_size;
+                break; // ARM64 preferred
+            } else if (cputype_raw == CPU_TYPE_X86_64_BE) {
+                x86_64_offset = slice_offset;
+                x86_64_size   = slice_size;
+            }
+        }
+
+        if (chosen_offset == 0) {
+            // No ARM64; try x86_64
+            chosen_offset = x86_64_offset;
+            chosen_size   = x86_64_size;
+        }
+#undef BSWAP32
+
+        if (chosen_offset != 0 && chosen_offset + chosen_size <= size) {
+            // Recurse on the selected slice
+            return parse_macho(data + chosen_offset, chosen_size);
+        }
+        // Fallback: parse the file header as-is (shouldn't happen)
+        return info;
+    }
+
     bool is_big_endian = (magic == MACHO_CIGAM_32 || magic == MACHO_CIGAM_64);
     info.is_64bit = (magic == MACHO_MAGIC_64 || magic == MACHO_CIGAM_64);
-    
+
     // CPU type at offset 4
     uint32_t cputype = *(const uint32_t*)(data + 4);
     if (is_big_endian) {
@@ -191,13 +254,13 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
         cputype = __builtin_bswap32(cputype);
 #endif
     }
-    
+
     // CPU_TYPE constants
-    const uint32_t CPU_TYPE_X86 = 0x7;
+    const uint32_t CPU_TYPE_X86   = 0x7;
     const uint32_t CPU_TYPE_X86_64 = 0x01000007;
-    const uint32_t CPU_TYPE_ARM = 0xC;
-    const uint32_t CPU_TYPE_ARM64 = 0x0100000C;
-    
+    const uint32_t CPU_TYPE_ARM    = 0xC;
+    const uint32_t CPU_TYPE_ARM64  = 0x0100000C;
+
     switch (cputype) {
         case CPU_TYPE_X86:
             info.arch = ArchType::X86;
@@ -214,16 +277,100 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
         case CPU_TYPE_ARM64:
             info.arch = ArchType::ARM64;
             info.sleigh_id = "AARCH64:LE:64:v8A";
+            info.is_64bit = true;
+            // D-3: encode arch in compiler_id so PathConfig can select correct FID
+            info.compiler_id = "clang-aarch64";
             break;
         default:
             info.arch = ArchType::UNKNOWN;
             info.sleigh_id = "AARCH64:LE:64:v8A";  // fallback for modern Macs
             break;
     }
-    
+
+    // -----------------------------------------------------------------------
+    // D-2: Parse load commands to find __TEXT vmaddr (= image_base)
+    // Mach-O 64-bit header size = 32 bytes; 32-bit = 28 bytes
+    // LC_SEGMENT_64 (cmd=0x19) / LC_SEGMENT (cmd=0x1) contains vmaddr
+    // -----------------------------------------------------------------------
+    const uint32_t LC_SEGMENT    = 0x1;
+    const uint32_t LC_SEGMENT_64 = 0x19;
+
+    size_t hdr_size = info.is_64bit ? 32 : 28;
+    if (size <= hdr_size + 8) {
+        fission::utils::log_stream() << "[BinaryDetector] Mach-O: " << (info.is_64bit ? "64-bit" : "32-bit")
+                  << " Arch=" << info.sleigh_id << std::endl;
+        return info;
+    }
+
+    uint32_t ncmds      = *(const uint32_t*)(data + 16);
+    uint32_t sizeofcmds = *(const uint32_t*)(data + 20);
+    if (is_big_endian) {
+#ifdef _MSC_VER
+        ncmds      = _byteswap_ulong(ncmds);
+        sizeofcmds = _byteswap_ulong(sizeofcmds);
+#else
+        ncmds      = __builtin_bswap32(ncmds);
+        sizeofcmds = __builtin_bswap32(sizeofcmds);
+#endif
+    }
+
+    size_t lc_start = hdr_size;
+    size_t lc_end   = lc_start + sizeofcmds;
+    if (lc_end > size) lc_end = size;
+
+    size_t lc_off = lc_start;
+    for (uint32_t ci = 0; ci < ncmds && lc_off + 8 <= lc_end; ++ci) {
+        uint32_t cmd     = *(const uint32_t*)(data + lc_off);
+        uint32_t cmdsize = *(const uint32_t*)(data + lc_off + 4);
+        if (is_big_endian) {
+#ifdef _MSC_VER
+            cmd     = _byteswap_ulong(cmd);
+            cmdsize = _byteswap_ulong(cmdsize);
+#else
+            cmd     = __builtin_bswap32(cmd);
+            cmdsize = __builtin_bswap32(cmdsize);
+#endif
+        }
+        if (cmdsize < 8 || lc_off + cmdsize > lc_end) break;
+
+        if (cmd == LC_SEGMENT_64 && lc_off + 64 <= lc_end) {
+            // segment_command_64: cmd(4) cmdsize(4) segname[16] vmaddr(8) ...
+            const char* segname = (const char*)(data + lc_off + 8);
+            if (std::strncmp(segname, "__TEXT", 6) == 0) {
+                uint64_t vmaddr = *(const uint64_t*)(data + lc_off + 24);
+                if (is_big_endian) {
+#ifdef _MSC_VER
+                    vmaddr = _byteswap_uint64(vmaddr);
+#else
+                    vmaddr = __builtin_bswap64(vmaddr);
+#endif
+                }
+                info.image_base = vmaddr;
+                break;
+            }
+        } else if (cmd == LC_SEGMENT && lc_off + 56 <= lc_end) {
+            // segment_command (32-bit): cmd(4) cmdsize(4) segname[16] vmaddr(4) ...
+            const char* segname = (const char*)(data + lc_off + 8);
+            if (std::strncmp(segname, "__TEXT", 6) == 0) {
+                uint32_t vmaddr32 = *(const uint32_t*)(data + lc_off + 24);
+                if (is_big_endian) {
+#ifdef _MSC_VER
+                    vmaddr32 = _byteswap_ulong(vmaddr32);
+#else
+                    vmaddr32 = __builtin_bswap32(vmaddr32);
+#endif
+                }
+                info.image_base = (uint64_t)vmaddr32;
+                break;
+            }
+        }
+
+        lc_off += cmdsize;
+    }
+
     fission::utils::log_stream() << "[BinaryDetector] Mach-O: " << (info.is_64bit ? "64-bit" : "32-bit")
-              << " Arch=" << info.sleigh_id << std::endl;
-    
+              << " Arch=" << info.sleigh_id
+              << " ImageBase=0x" << std::hex << info.image_base << std::dec << std::endl;
     return info;
 }
 

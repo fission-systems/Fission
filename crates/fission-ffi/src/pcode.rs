@@ -10,26 +10,41 @@ use std::os::raw::c_char;
 /// Optimize Pcode JSON (called from C++)
 ///
 /// # Safety
-/// - `pcode_json` must be a valid null-terminated C string
+/// - `pcode_json` must be a valid pointer to `json_len` bytes of UTF-8 JSON
+/// - If `json_len == 0`, falls back to treating `pcode_json` as null-terminated
 /// - Caller must free the returned pointer using `fission_free_string`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fission_optimize_pcode_json(
     pcode_json: *const c_char,
-    _json_len: usize,
+    json_len: usize,
 ) -> *mut c_char {
     if pcode_json.is_null() {
         eprintln!("[fission_optimize_pcode_json] Error: null input");
         return std::ptr::null_mut();
     }
 
-    // Convert C string to Rust string
-    let json_str = match unsafe { CStr::from_ptr(pcode_json) }.to_str() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[fission_optimize_pcode_json] UTF-8 error: {}", e);
-            return std::ptr::null_mut();
+    // C-1: Use json_len when provided to avoid relying solely on null termination.
+    // Useful for inputs with embedded nulls or non-null-terminated buffers from C++.
+    let json_owned: String = if json_len > 0 {
+        let slice = unsafe { std::slice::from_raw_parts(pcode_json as *const u8, json_len) };
+        match std::str::from_utf8(slice) {
+            Ok(s) => s.to_owned(),
+            Err(e) => {
+                eprintln!("[fission_optimize_pcode_json] UTF-8 error (len-based): {}", e);
+                return std::ptr::null_mut();
+            }
+        }
+    } else {
+        // json_len == 0: fall back to null-terminated CStr
+        match unsafe { CStr::from_ptr(pcode_json) }.to_str() {
+            Ok(s) => s.to_owned(),
+            Err(e) => {
+                eprintln!("[fission_optimize_pcode_json] UTF-8 error: {}", e);
+                return std::ptr::null_mut();
+            }
         }
     };
+    let json_str = json_owned.as_str();
 
     // Parse Pcode
     let mut pcode = match PcodeFunction::from_json(json_str) {

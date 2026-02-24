@@ -94,9 +94,15 @@ std::string get_fid_filename(bool is_64bit, const std::string& compiler_id) {
     else if (compiler_id.find("vs2012") != std::string::npos) 
         fid_filename = "vs2012" + suffix;
     else if (compiler_id.find("gcc") != std::string::npos || compiler_id.find("clang") != std::string::npos) {
-        // Basic mapping for GCC/Clang if specific version checking is needed later
-         if (is_64bit && !GCC_FID_FILES_X64.empty()) return GCC_FID_FILES_X64[0];
-         if (!is_64bit && !GCC_FID_FILES_X86.empty()) return GCC_FID_FILES_X86[0];
+        // D-3: distinguish x86_64 vs AARCH64 based on compiler_id
+        // BinaryDetector sets compiler_id = "clang-aarch64" for ARM64 Mach-O.
+        bool is_aarch64 = (compiler_id.find("aarch64") != std::string::npos ||
+                           compiler_id.find("arm64")   != std::string::npos);
+        if (is_aarch64) {
+            return "gcc-AARCH64.LE.64.v8A.fidbf"; // AARCH64 FID (shared for gcc/clang)
+        }
+        if (is_64bit && !GCC_FID_FILES_X64.empty()) return GCC_FID_FILES_X64[0];
+        if (!is_64bit && !GCC_FID_FILES_X86.empty()) return GCC_FID_FILES_X86[0];
     }
     
     return fid_filename;

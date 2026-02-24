@@ -18,11 +18,13 @@ void VTableAnalyzer::clear() {
 
 bool VTableAnalyzer::looks_like_function_ptr(uint64_t addr, uint64_t image_base, size_t binary_size) const {
     // Function pointers should:
-    // 1. Be within the binary's code section (roughly image_base to image_base + size)
+    // 1. Be within the binary's code section (image_base to image_base + size)
     // 2. Not be zero or obviously invalid
+    // 3. Be at least 4-byte aligned (all function addresses are)
     if (addr == 0) return false;
     if (addr < image_base) return false;
-    if (addr > image_base + binary_size + 0x100000) return false; // Some leeway
+    if (addr > image_base + binary_size) return false;
+    if (addr % 4 != 0) return false; // B-3: functions are always aligned
     return true;
 }
 
@@ -30,6 +32,22 @@ bool VTableAnalyzer::scan_vtable_at(const uint8_t* data, size_t offset, size_t m
                                      uint64_t image_base, size_t binary_size, int ptr_size, VTable& out) {
     out.entries.clear();
     out.address = image_base + offset;
+
+    // B-3: Check the meta-pointer slot before the vtable.
+    // MSVC: vtable[-ptr_size] = CompleteObjectLocator pointer (a data address, NOT a code ptr)
+    // Itanium: vtable[-2*ptr_size] = 0 (offset-to-top), vtable[-ptr_size] = type_info ptr
+    // If vtable[-ptr_size] itself looks like a function pointer, this is probably NOT a vtable.
+    if (offset >= (size_t)ptr_size) {
+        uint64_t meta_ptr = 0;
+        if (ptr_size == 8) meta_ptr = *(const uint64_t*)(data + offset - 8);
+        else               meta_ptr = *(const uint32_t*)(data + offset - 4);
+        // Allow: 0 (Itanium primary, or null), or a data-section address
+        // Reject: if meta_ptr itself look like a function (we'd double-count)
+        // Heuristic: real COL/type_info pointers are > image_base but different from
+        // the range we'd expect for code.  Just require ptr != 0 XOR looks_like_fn.
+        // Simpler: if out.address == meta_ptr, reject (self-referential garbage).
+        if (meta_ptr == out.address) return false;
+    }
     
     size_t pos = offset;
     int slot = 0;
@@ -64,8 +82,10 @@ bool VTableAnalyzer::scan_vtable_at(const uint8_t* data, size_t offset, size_t m
         slot++;
     }
     
-    // Require at least 2 entries to be considered a vtable
-    return out.entries.size() >= 2;
+    // B-3: Require at least 3 entries to reduce false positives from random
+    // pointer pairs in .rdata / string data.  Real vtables have >= 3 slots
+    // in practice (destructor + at least two methods).
+    return out.entries.size() >= 3;
 }
 
 void VTableAnalyzer::scan_vtables(const uint8_t* data, size_t size, uint64_t image_base, bool is_64bit) {
@@ -134,32 +154,31 @@ void VTableAnalyzer::scan_vtables(const uint8_t* data, size_t size, uint64_t ima
 
 void VTableAnalyzer::link_with_rtti(const std::map<uint64_t, std::string>& rtti_classes) {
     if (rtti_classes.empty()) return;
-    
+
     int linked = 0;
-    
+
     for (auto& vt : vtables) {
-        // RTTI type info is typically just before the vtable
-        // Check a few offsets before the vtable address
-        for (int off = 0; off <= 16; off += 8) {
-            uint64_t check_addr = vt.address - off;
-            auto it = rtti_classes.find(check_addr);
-            if (it != rtti_classes.end()) {
-                vt.class_name = it->second;
-                vt.has_rtti = true;
-                vt.rtti_pointer = check_addr;
-                linked++;
-                break;
+        // B-2: RttiAnalyzer now returns vtable_va -> class_name directly
+        // (via CompleteObjectLocator chain for MSVC, or type_info chain for Itanium)
+        // so we can do a simple direct lookup.
+        auto it = rtti_classes.find(vt.address);
+        if (it != rtti_classes.end()) {
+            vt.class_name = it->second;
+            vt.has_rtti = true;
+            vt.rtti_pointer = vt.address; // vtable itself is the key
+            ++linked;
+
+            // Rename placeholder slot names using class name
+            for (auto& entry : vt.entries) {
+                std::stringstream ss;
+                ss << vt.class_name << "::vfunc_" << entry.slot_index;
+                entry.name = ss.str();
             }
         }
-        
-        // Also check if any vtable entry matches a recovered class
-        for (auto& entry : vt.entries) {
-            // For inherited vtables, the entry might already have a class association
-            // This is a simplification - real RTTI linking is more complex
-        }
     }
-    
-    fission::utils::log_stream() << "[VTableAnalyzer] Linked " << linked << " vtables with RTTI class names" << std::endl;
+
+    fission::utils::log_stream() << "[VTableAnalyzer] Linked " << linked
+                                  << " vtables with RTTI class names" << std::endl;
 }
 
 const VTable* VTableAnalyzer::get_vtable(uint64_t addr) const {
@@ -183,10 +202,17 @@ uint64_t VTableAnalyzer::resolve_virtual_call(uint64_t vtable_addr, int slot_off
 std::string VTableAnalyzer::get_virtual_call_name(uint64_t vtable_addr, int slot_offset, int ptr_size) const {
     const VTable* vt = get_vtable(vtable_addr);
     if (!vt) return "";
-    
+
     int slot_index = slot_offset / ptr_size;
     if (slot_index < 0 || slot_index >= (int)vt->entries.size()) return "";
-    
+
+    // B-2: If the entry already has a resolved name (set by link_with_rtti), use it.
+    const VirtualFunction& entry = vt->entries[slot_index];
+    if (!entry.name.empty() && entry.name.find("vfunc_") == std::string::npos) {
+        return entry.name; // already a resolved class::method name
+    }
+
+    // Fallback: class_name::vfunc_N  (or vtable_XXXX::vfunc_N if no RTTI)
     std::stringstream ss;
     ss << vt->class_name << "::vfunc_" << slot_index;
     return ss.str();
