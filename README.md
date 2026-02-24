@@ -8,66 +8,53 @@
 
 > **"Split the Binary, Fuse the Power."**
 
-A next-generation hybrid dynamic analysis platform that unifies the best features of x64dbg, Frida, Radare2, and Ghidra into a single high-performance Rust-powered binary.
-
-<!--
-TODO: Add screenshot when available
-![Fission Screenshot](docs/screenshot.png)
--->
+A next-generation binary analysis platform unifying decompilation, disassembly, dynamic debugging,
+and time-travel debugging in a single high-performance Rust-powered tool.
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Target Users](#target-users)
 - [Features](#features)
-- [Screenshots](#screenshots)
+- [Decompiler Quality](#decompiler-quality)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Usage](#usage)
+- [GUI — Tauri Desktop App](#gui--tauri-desktop-app)
+- [CLI Reference](#cli-reference)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
 - [Plugin Development](#plugin-development)
 - [Tech Stack](#tech-stack)
-- [Performance](#performance)
 - [Comparison with Other Tools](#comparison-with-other-tools)
 - [Project Structure](#project-structure)
 - [Development Status](#development-status)
-- [Implementation Notes](#implementation-notes)
-- [Roadmap](#roadmap)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
-- [FAQ](#faq)
 - [Contributing](#contributing)
-- [Security](#security)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
-- [Documentation](#documentation)
 
 ---
 
 ## Overview
 
-**Fission** is a comprehensive reverse engineering and binary analysis platform built entirely in Rust. It combines static analysis capabilities (disassembly, decompilation) with dynamic analysis features (debugging, time-travel debugging) in a single, unified tool.
+**Fission** is a comprehensive reverse engineering platform built in Rust, combining:
+
+- **Static Analysis** — Ghidra-powered decompiler via direct C++ FFI, pure-Rust disassembler, CFG analysis, RTTI recovery
+- **Dynamic Analysis** — Process debugging, breakpoints, memory inspection, time-travel debugging (Windows)
+- **Smart Post-Processing** — 32+ Pcode IR optimization rules, context-aware constant substitution (100+ Windows API mappings), type propagation, x86 `double` synthesis
 
 ### Why Fission?
 
-- **Unified Experience**: No need to switch between multiple tools - disassembly, decompilation, and debugging in one place
-- **High Performance**: Rust-powered core with multi-process decompiler pool and intelligent caching
-- **Cross-Platform**: Native support for Windows (PE), Linux (ELF), and macOS (Mach-O) binaries
-- **Extensible**: Plugin system supporting both Rust and Python for custom analysis workflows
-- **Modern UI**: VS Code-inspired interface with Catppuccin theming
-
----
-
-## Target Users
-
-- **Malware Analysts** - Analyze suspicious binaries with static and dynamic analysis
-- **Vulnerability Researchers** - Find and understand security vulnerabilities in binaries
-- **Reverse Engineers** - Understand proprietary software, recover algorithms, and analyze protocols
-- **CTF Players** - Solve reverse engineering challenges efficiently
-- **Security Auditors** - Audit compiled applications for security issues
+| | |
+|-|-|
+| **Decompiler quality** | x64 **98.8%** · x86 **92.6%** vs Ghidra baseline |
+| **Integration** | Static + dynamic analysis in one binary |
+| **Performance** | Rust core, zero-copy Ghidra FFI, LRU cache |
+| **GUI** | Tauri 2.x + React 19 desktop app |
+| **Platforms** | Windows PE · Linux ELF · macOS Mach-O |
+| **Extensible** | Native Rust plugin system |
 
 ---
 
@@ -77,76 +64,92 @@ TODO: Add screenshot when available
 
 | Feature | Description |
 |---------|-------------|
-| **Ghidra-Powered Decompiler** | High-performance C code decompilation via direct FFI integration with optimized Pcode IR |
+| **Ghidra-Powered Decompiler** | Zero-copy C decompilation via direct C++ FFI |
 | **iced-x86 Disassembler** | Pure Rust x86/x64 disassembly with syntax highlighting |
-| **Cross-Platform Binaries** | Windows (PE), Linux (ELF), and macOS (Mach-O) support |
-| **Cross-Reference Analysis** | Automatic code and data cross-reference detection |
-| **String Extraction** | ASCII and Unicode string detection with context |
-| **CFG Analysis** | Control flow graph generation with dominator tree, loop detection, and cyclomatic complexity |
-| **Graph Visualization** | Export CFG to Graphviz DOT format with loop highlighting and metrics |
-| **Listing View** | Full binary disassembly with virtual scrolling and on-demand disassembly |
+| **Cross-Platform Loaders** | Windows PE, Linux ELF, macOS Mach-O |
+| **Cross-Reference Analysis** | Code and data xref detection |
+| **String Extraction** | ASCII + UTF-16 LE scanning with context |
+| **CFG Analysis** | Dominator tree, loop detection, cyclomatic complexity |
+| **Listing View** | Full binary disassembly with virtual scrolling |
+| **C++ RTTI Recovery** | VTable parsing, type_descriptor, virtual dispatch resolution |
+
+### Smart Decompilation Post-Processing
+
+| Feature | Description |
+|---------|-------------|
+| **Context-Aware Constant Substitution** | PAGE_PROTECT, MEM_ALLOC, GENERIC_ACCESS, etc. |
+| **100+ Windows API Mappings** | 9 DLLs: kernel32, user32, ntdll, advapi32, ws2_32, winhttp, wininet, shell32, bcrypt |
+| **Dynamic Flag Resolution** | e.g., `0x3000` → `MEM_COMMIT | MEM_RESERVE` |
+| **GDT Type Loading** | 5,700+ structures and 6,500+ typedefs from Ghidra data |
+| **Pcode IR Optimizer** | 32+ rules: constant folding, CSE, DCE, pointer arithmetic, NZMask |
+| **x86 Double Synthesis** | Merges two 4-byte cdecl stack pushes into a single `double` |
+| **Type Propagation** | Propagates callee type info back to callers |
+| **Smart String Recovery** | Converts hex constants into readable string literals |
 
 ### Dynamic Analysis
 
 | Feature | Description |
 |---------|-------------|
-| **Process Debugging** | Attach/detach to running processes with full control |
-| **Breakpoints** | Software breakpoints with hit counting and conditions |
-| **Register/Memory Access** | View and modify CPU registers and process memory |
-| **Time Travel Debugging** | Execution timeline with snapshot navigation and replay |
+| **Process Debugging** | Attach/detach with register & memory access |
+| **Breakpoints** | Software breakpoints with hit counting |
+| **Time Travel Debugging** | Execution timeline + snapshot navigation (Windows) |
 | **Live Memory Patching** | Modify running process memory in real-time |
 
-### Smart Decompilation
+### GUI (Tauri 2.x + React 19)
 
 | Feature | Description |
 |---------|-------------|
-| **Context-Aware Constant Substitution** | Replaces magic numbers with symbolic names based on API parameter context |
-| **16 Enum Groups** | PAGE_PROTECT, MEM_ALLOC, GENERIC_ACCESS, HKEY_ROOT, AF_FAMILY, and more |
-| **100+ API Mappings** | Coverage for 9 DLLs (kernel32, user32, ntdll, advapi32, ws2_32, winhttp, wininet, shell32, bcrypt) |
-| **Dynamic Flag Resolution** | Automatically detects OR combinations (e.g., `0x3000` → `MEM_COMMIT \| MEM_RESERVE`) |
-| **GDT Type Loading** | 5,700+ structures and 6,500+ typedefs from Ghidra data |
-| **Advanced Pcode Optimization** | Def-Use chains, CSE, Dead Code Elimination, and pointer arithmetic simplification |
-
-### Advanced Type Analysis
-
-| Feature | Description |
-|---------|-------------|
-| **Auto-Inferred Structures** | Automatically detects structure layouts and generates C `typedef` definitions |
-| **Reverse Type Propagation** | Propagates inferred types from callees back to callers for better variable typing |
-| **Smart String Recovery** | Converts hex constants (`0x6d65...`) into readable string literals (`"TestItem"`) |
-| **VTable Analysis** | Recovers C++ virtual tables and resolves indirect calls (`call [rax+0x10]` → `Class::method`) |
-| **Precise Field Typing** | Distinguishes `float`/`double` fields via FPU instruction analysis |
-
-### Performance Optimization
-
-| Feature | Description |
-|---------|-------------|
-| **Direct FFI Integration** | Zero-copy decompilation via native C++ bindings (no IPC overhead) |
-| **Pcode IR Optimizer** | 32+ optimization rules with def-use tracking and NZMask analysis |
-| **Architecture Caching** | Reuses Ghidra objects across requests |
-| **LRU Result Cache** | Configurable cache with automatic eviction (default: 100 entries) |
-| **Advanced Optimizations** | Constant folding, dead code elimination, shift-bitops, AND-mask optimization |
-| **Background Prefetching** | Pre-decompiles adjacent functions for faster navigation |
-
-### Extensibility
-
-| Feature | Description |
-|---------|-------------|
-| **Native Rust Plugins** | High-performance compiled plugins with dynamic library loading |
-| **Event Bus** | Subscribe to binary load, decompile, and debug events |
-| **Hook Priority** | Control plugin execution order |
-| **Plugin API** | Full access to binary info, functions, sections, and decompiler |
+| **VS Code-Style Layout** | Activity Bar, tabbed editor, bottom panel |
+| **Virtual Scrolling** | `@tanstack/react-virtual` — 5,000+ assembly lines |
+| **CFG Visualization** | SVG-rendered CFG with pan/zoom and UI scale slider |
+| **Function Explorer** | Filter (All / Imports / Exports / Internal), search, FID IDs |
+| **String XRefs** | UTF-16 LE aware, virtual scroll, click-to-navigate |
+| **Debug Panel** | Registers, memory hex dump (up to 4 KB), TTD timeline |
+| **Analysis Export** | JSON export of full analysis results |
+| **Project Save/Load** | `.fprj` JSON project files |
 
 ---
 
-## Screenshots
+## Decompiler Quality
 
-> Screenshots coming soon. The GUI features a VS Code-inspired layout with:
->
-> - Left sidebar with function explorer and search
-> - Center editor with tabbed Assembly and Decompiled C views
-> - Bottom panel with Console, Debug, Hex View, and Timeline tabs
-> - Catppuccin theme for comfortable viewing
+Measured by `scripts/compare/compare_decompilers_v3.py` against Ghidra 11.x on Windows PE binaries.
+
+### x64 — **98.8%** (Feb 2026)
+
+| Function | Score |
+|----------|-------|
+| `add` | 100% |
+| `multiply` | 100% |
+| `print_message` | 100% |
+| `init_item` | 100% |
+| `create_item` | 100% |
+| `calculate_discount` | 100% |
+| `sum_array` | 94.4% |
+| `main` | 96.6% |
+| **Average** | **98.8%** |
+
+### x86 MinGW (-O1) — **92.6%** (Feb 2026)
+
+| Function | Score |
+|----------|-------|
+| `add` | 100% |
+| `multiply` | 100% |
+| `print_message` | 100% |
+| `init_item` | 100% |
+| `create_item` | 100% |
+| `calculate_discount` | 92.9% |
+| `sum_array` | 88.2% |
+| `main` | 60.0% |
+| **Average** | **92.6%** |
+
+**Milestone history:**
+
+| Date | x64 | x86 | Key Change |
+|------|-----|-----|------------|
+| 2026-02-15 | 98.8% | — | MinGW TypePropagator, integer-cast stripping |
+| 2026-02-14 | — | 80.0% | x86 benchmark suite created |
+| 2026-02-24 | — | 90.1% | Track 2/3/4 + Normalizer A-1~A-6 |
+| **2026-02-25** | — | **92.6%** | x86 double synthesis + VAR normalization fix |
 
 ---
 
@@ -156,627 +159,290 @@ TODO: Add screenshot when available
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Rust | 1.85+ | Install via [rustup](https://rustup.rs/) |
-| CMake | 3.16+ | For building Ghidra decompiler |
-| C++ Compiler | See below | Platform-specific |
-| vcpkg | Latest | Windows only, for ZLIB |
+| Rust | 1.85+ | [rustup.rs](https://rustup.rs/) |
+| CMake | 3.16+ | Ghidra decompiler build |
+| C++ Compiler | GCC 12+ / Clang 15+ / MSVC 2022 | Platform-specific |
+| Node.js | 20+ | Tauri GUI only |
+| vcpkg | Latest | Windows only (ZLIB) |
 
-### Windows
+### macOS
 
-```powershell
-# 1. Install Visual Studio 2022 with C++ workload
-#    - Download from https://visualstudio.microsoft.com/
-#    - Select "Desktop development with C++" workload
+```bash
+xcode-select --install
+brew install cmake pkg-config zlib node
 
-# 2. Install Rust
-winget install Rustlang.Rustup
-# Or download from https://rustup.rs/
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
 
-# 3. Install CMake
-winget install Kitware.CMake
-# Or download from https://cmake.org/download/
+git clone https://github.com/sjkim1127/Fission.git && cd Fission
 
-# 4. Install vcpkg and ZLIB
-git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
-C:\vcpkg\bootstrap-vcpkg.bat
-C:\vcpkg\vcpkg install zlib:x64-windows
-
-# 5. Set environment variable
-$env:VCPKG_ROOT = "C:\vcpkg"
-# Add to system environment variables for persistence
-
-# 6. Clone and build Fission
-git clone https://github.com/sjkim1127/Fission.git
-cd Fission
-
-# 7. Build Ghidra decompiler
 cd ghidra_decompiler
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
-cmake --build build --config Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
 cd ..
 
-# 8. Build and run Fission
-cargo build --release
-cargo run --release
+cargo build --release --bin fission_cli
 ```
 
 ### Linux (Ubuntu/Debian)
 
 ```bash
-# 1. Install dependencies
-sudo apt update
 sudo apt install -y build-essential cmake pkg-config zlib1g-dev libssl-dev \
-    libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-    libxkbcommon-dev libfontconfig1-dev
+    libgtk-3-dev libwebkit2gtk-4.1-dev nodejs npm
 
-# 2. Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
-# 3. Clone and build Fission
-git clone https://github.com/sjkim1127/Fission.git
-cd Fission
-
-# 4. Build Ghidra decompiler
-cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cd ..
-
-# 5. Build and run Fission
-cargo build --release
-cargo run --release
-```
-
-### Linux (Fedora/RHEL)
-
-```bash
-# 1. Install dependencies
-sudo dnf install -y gcc gcc-c++ cmake pkg-config zlib-devel openssl-devel \
-    gtk3-devel libxcb-devel libxkbcommon-devel fontconfig-devel
-
-# 2. Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# 3. Clone and build (same as Ubuntu)
-git clone https://github.com/sjkim1127/Fission.git
-cd Fission
+git clone https://github.com/sjkim1127/Fission.git && cd Fission
 cd ghidra_decompiler && cmake -B build && cmake --build build && cd ..
-cargo build --release
+cargo build --release --bin fission_cli
 ```
 
-### macOS
+### Windows
 
-```bash
-# 1. Install Xcode Command Line Tools
-xcode-select --install
+```powershell
+winget install Rustlang.Rustup Kitware.CMake OpenJS.NodeJS
 
-# 2. Install Homebrew (if not installed)
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+C:\vcpkg\bootstrap-vcpkg.bat
+C:\vcpkg\vcpkg install zlib:x64-windows
+$env:VCPKG_ROOT = "C:\vcpkg"
 
-# 3. Install dependencies
-brew install cmake pkg-config zlib
-
-# 4. Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-
-# 5. Clone and build Fission
-git clone https://github.com/sjkim1127/Fission.git
-cd Fission
-
-# 6. Build Ghidra decompiler
+git clone https://github.com/sjkim1127/Fission.git; cd Fission
 cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Release
 cd ..
-
-# 7. Build and run Fission
-cargo build --release
-cargo run --release
+cargo build --release --bin fission_cli
 ```
 
 ### Feature Flags
 
-Fission supports optional features that can be enabled/disabled at compile time:
-
 ```bash
-# Default build (GUI + CLI)
-cargo build --release
-
-# CLI only (smaller binary, no GUI dependencies; builds fission_cli)
-cargo build --release --bin fission_cli --no-default-features --features cli
-
-# GUI (default fission binary requires both gui and cli)
-cargo build --release
-
-# With terminal UI
-cargo build --release --features "tui,native_decomp"
-
-# All features
-cargo build --release --features "gui cli tui native_decomp"
+cargo build --release --bin fission_cli              # CLI only
+cargo build --release --bin fission_cli --features tui  # + terminal UI
+cargo build --release --features "cli tui native_decomp" # all
 ```
 
 ---
 
 ## Quick Start
 
-### GUI Mode (Default)
+### CLI
 
 ```bash
-# Launch the GUI
-cargo run --release
+# Decompile a function (add --verbose to see C++ debug output)
+fission_cli --decomp 0x401000 binary.exe
+fission_cli --decomp 0x401000 --verbose binary.exe
 
-# Or run the compiled binary directly
-./target/release/fission
+# Other quick flags
+fission_cli --info binary.exe
+fission_cli --funcs binary.exe
+fission_cli --strings binary.exe
+fission_cli --cfg 0x401000 --cfg-format dot -o cfg.dot binary.exe
+
+# Interactive REPL
+fission_cli binary.exe
 ```
 
-1. **Open a Binary**: File → Open Binary (or drag and drop)
-2. **Browse Functions**: Use the Explorer panel on the left
-3. **View Disassembly**: Double-click a function to see Assembly
-4. **View Decompiled Code**: Switch to the "Decompiled" tab
-5. **Debug**: Use the Debug panel to attach to a process
-
-### CLI Mode (Headless)
+### GUI (Tauri)
 
 ```bash
-# Launch in headless/CLI mode
-cargo run --release -- --cli <binary_path>
-
-# Or run the compiled binary directly
-./target/release/fission --cli <binary_path>
-
-# Quick analysis without entering REPL
-./target/release/fission --cli binary.exe --info
-./target/release/fission --cli binary.exe --sections
-./target/release/fission --cli binary.exe --strings
-./target/release/fission --cli binary.exe --xrefs 0x140001000
-
-# With increased verbosity
-cargo run --release -- --cli binary.exe -vvv
+cd crates/fission-ui
+npm install
+npm run tauri dev    # dev (hot reload)
+npm run tauri build  # production
 ```
 
-### TUI Mode (Terminal UI)
-
-```bash
-# Build and launch the terminal UI
-cargo run --release --bin fission_tui --features "tui,native_decomp" -- <binary_path>
-
-# Example
-cargo run --release --bin fission_tui --features "tui,native_decomp" -- examples/comparison_test_x64.exe
-```
+1. **Open Binary**: File → Open (or drag-and-drop)
+2. **Browse Functions**: Explorer sidebar → filter by category
+3. **Decompile**: Click function → switch to **Decompiled** tab
+4. **CFG**: Click **CFG** → pan/zoom; scale with right-side slider
+5. **Analyze**: Toolbar → Analyze 🔍 (CALL scan) or Deep Scan 🕵
+6. **Debug** (Windows): Attach process, set breakpoints, inspect registers, TTD timeline
+7. **Export**: File → Export Analysis JSON
 
 ---
 
-## Usage
+## GUI — Tauri Desktop App
 
-### GUI Mode Workflow
+Built with **Tauri 2.x** (Rust backend) + **React 19 / TypeScript** frontend.
+The previous egui-based `fission-ui` crate has been fully removed.
 
-#### 1. Loading a Binary
+### Key IPC Commands
 
-- **File → Open Binary**: Opens a file dialog
-- **Drag and Drop**: Drop a file onto the main window
-- **Recent Files**: Access recently opened binaries from File menu
+| Command | Description |
+|---------|-------------|
+| `open_file` | Load binary |
+| `decompile_function` | Decompile at address |
+| `get_cfg` | CFG JSON for SVG render |
+| `get_strings` | List strings |
+| `get_xrefs` | Cross-references |
+| `analyze_functions` | CALL-scan function discovery |
+| `deep_scan_functions` | Prologue-pattern discovery |
+| `run_fid` | FID signature identification |
+| `debug_attach / detach` | Process attach/detach |
+| `debug_read_memory` | Hex dump up to 4 KB |
+| `export_analysis_json` | Full analysis JSON export |
+| `save_project / load_project` | `.fprj` project persistence |
 
-#### 2. Function Explorer
+### Keyboard Shortcuts
 
-The left sidebar shows all discovered functions:
+| Shortcut | Action |
+|----------|--------|
+| Cmd/Ctrl + ←/→ | Cycle tabs |
+| F5 | Analyze Functions |
+| F6 | Deep Scan Functions |
+| Cmd/Ctrl + O | Open Binary |
+| Cmd/Ctrl + S | Save Project |
 
-- **Imports**: Functions imported from external libraries
-- **Exports**: Functions exported by the binary
-- **Internal**: Functions discovered through analysis
-- Use the search box to filter functions by name or address
+---
 
-#### 3. Disassembly View
+## CLI Reference
 
-- Double-click a function to open it in the editor
-- Assembly tab shows x86/x64 disassembly with syntax highlighting
-- Click on addresses to navigate to referenced locations
-- Right-click for context menu options
+### REPL Commands
 
-#### 4. Decompilation View
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `load <path>` | `open`, `o` | Load a binary |
+| `info` | `i` | Format, arch, entry point |
+| `funcs` | `functions`, `f` | List all functions |
+| `sections` | `sec` | Section table |
+| `strings` | `str` | Extract strings |
+| `analyze` | `anal`, `a` | Function discovery |
+| `disasm <addr> [n]` | `dis`, `d` | Disassemble |
+| `decompile <addr>` | `dec`, `decomp` | Decompile function |
+| `xrefs <addr>` | `x` | Cross-references |
+| `help` | `?`, `h` | Show commands |
+| `quit` | `exit`, `q` | Exit |
 
-- Switch to "Decompiled" tab to see C-like code
-- Magic numbers are automatically replaced with symbolic constants
-- Hover over variables for type information
-- Right-click to rename variables or add comments
+### Direct Flags
 
-#### 5. Debugging
-
-1. **Attach to Process**: Debug → Attach to Process
-2. **Set Breakpoints**: Click in the gutter or use F9
-3. **Control Execution**: F5 (Continue), F10 (Step Over), F11 (Step Into)
-4. **Inspect State**: View registers, memory, and stack in Debug panel
-
-#### 6. Time Travel Debugging
-
-1. Enable TTD recording from Debug menu
-2. Execute the program
-3. Use Timeline panel to navigate execution history
-4. Click on any point to restore program state
-
-### CLI Mode Commands
-
-| Command | Aliases | Syntax | Description |
-|---------|---------|--------|-------------|
-| `load` | `open`, `o` | `load <path>` | Load a binary file |
-| `info` | `i` | `info` | Display binary information (format, architecture, entry point) |
-| `funcs` | `functions`, `f` | `funcs` | List all discovered functions |
-| `sections` | `sec` | `sections` | Show section table with permissions |
-| `strings` | `str` | `strings` | Extract printable strings (min 4 chars) |
-| `analyze` | `anal`, `a` | `analyze` | Run function discovery analysis |
-| `disasm` | `dis`, `d` | `disasm <addr> [count]` | Disassemble instructions at address |
-| `decompile` | `dec`, `decomp` | `decompile <addr>` | Decompile function at address |
-| `xrefs` | `x` | `xrefs <addr>` | Show cross-references to address |
-| `clear` | `cls` | `clear` | Clear the screen |
-| `help` | `?`, `h` | `help` | Show available commands |
-| `quit` | `exit`, `q` | `quit` | Exit the program |
-
-**Direct Analysis Flags** (skip REPL, run once and exit):
-
-- `--info` - Display binary information and exit
-- `--sections` - Show section table and exit
-- `--strings` - Extract strings and exit
-- `--xrefs <addr>` - Show cross-references and exit
-- `--count` - Show counts of functions, strings, sections, and imports
-
-**Address Formats Supported:**
-
-- Hexadecimal: `0x1000`, `0x140001000`
-- Decimal: `4096`, `5368713216`
-- Without prefix: `1000` (interpreted as hex if valid)
-
-### CLI Examples
-
-```bash
-# Load a binary in REPL mode
-$ fission --cli /path/to/binary.exe
-fission> info
-Format:      PE64
-Architecture: x86_64
-Entry Point: 0x140001000
-Sections:    5
-
-# Direct analysis (one-shot commands)
-$ fission --cli binary.exe --info
-Format:      PE64
-Architecture: x86_64
-Entry Point: 0x140001000
-...
-
-$ fission --cli binary.exe --sections
-[.text]     0x1000 - 0x5000 (RX)
-[.rdata]    0x6000 - 0x8000 (R)
-[.data]     0x9000 - 0xA000 (RW)
-...
-
-$ fission --cli binary.exe --strings
-[0x402000] "Hello World"
-[0x402010] "config.txt"
-[0x402020] "Error: Failed to initialize"
-...
-
-$ fission --cli binary.exe --xrefs 0x140001234
-References to 0x140001234:
-  0x140001100: call 0x140001234
-  0x140001500: jmp 0x140001234
-...
-
-# REPL mode commands
-fission> funcs
-[0x140001000] entry
-[0x140001234] sub_140001234
-[0x140001500] malloc
-...
-
-fission> disasm 0x140001000 20
-0x140001000: push rbp
-0x140001001: mov rbp, rsp
-0x140001004: sub rsp, 0x20
-...
-
-fission> decompile 0x140001234
-int sub_140001234(void) {
-    HANDLE hFile;
-    hFile = CreateFileA("config.txt", GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
-    ...
-}
-
-# CFG Analysis
-$ fission --cli binary.exe --cfg 0x140001000
-=== CFG Analysis Summary ===
-Basic Blocks: 15
-Edges: 20
-Entry Block: 0
-Exit Blocks: [14]
-
-=== Metrics ===
-Cyclomatic Complexity: 6 (Moderate)
-Max Nesting Depth: 2
-Number of Loops: 1
-
-$ fission --cli binary.exe --cfg 0x140001000 --cfg-format dot -o function.dot
-[✓] CFG analysis saved to: function.dot
-[✓] Graph rendered to: function.png
-
-$ fission --cli binary.exe --cfg 0x140001000 --cfg-format json
-{
-  "function_address": "0x140001000",
-  "block_count": 15,
-  "cyclomatic_complexity": 6,
-  "loops": [ ... ]
-}
-```
+| Flag | Description |
+|------|-------------|
+| `--info` | Binary info |
+| `--sections` | Section table |
+| `--strings` | String extraction |
+| `--funcs` | Function list |
+| `--xrefs <addr>` | Cross-references |
+| `--decomp <addr>` | Decompile function |
+| `--cfg <addr>` | CFG analysis |
+| `--cfg-format dot\|json` | CFG output format |
+| `--no-header` | Suppress function banner |
+| `--verbose` | Show C++ debug output |
 
 ---
 
 ## Configuration
 
-### Configuration File
-
-Fission stores its configuration in `~/.config/fission/config.toml` (Linux/macOS) or `%APPDATA%\fission\config.toml` (Windows).
+`~/.config/fission/config.toml` (Linux/macOS) or `%APPDATA%\fission\config.toml` (Windows):
 
 ```toml
-# Example configuration file
-
 [decompiler]
-mode = "ffi"            # Direct FFI integration (default)
-timeout_ms = 30000      # Decompilation timeout in milliseconds
-enable_prefetch = true  # Pre-decompile adjacent functions
-prefetch_count = 3      # Number of functions to prefetch
-enable_optimizer = true # Enable Pcode IR optimizer (Phase 1 + Phase 2 rules)
-optimizer_max_passes = 10  # Maximum optimization iterations
+timeout_ms = 30000
+enable_prefetch = true
+prefetch_count = 3
+enable_optimizer = true
+optimizer_max_passes = 10
 
 [analysis]
-max_string_length = 262144   # Max bytes to search for strings
-min_string_length = 4        # Minimum string length
-auto_xref_analysis = true    # Auto cross-reference on load
-cache_size = 100             # LRU cache entries
+min_string_length = 4
+auto_xref_analysis = true
+cache_size = 100
 
 [debug]
-max_snapshots = 10000        # TTD snapshot limit
-max_process_ids = 4096       # Process enumeration limit
+max_snapshots = 10000
 
 [ui]
-theme = "catppuccin"         # Theme name
-show_performance = false     # Show performance metrics
-auto_scroll_entry = true     # Auto-scroll to entry on load
-max_log_entries = 1000       # Console history limit
+theme = "catppuccin"
+auto_scroll_entry = true
+max_log_entries = 1000
 ```
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FISSION_DECOMP_PATH` | Path to `fission_decomp` binary | `./ghidra_decompiler/build/fission_decomp` |
-| `FISSION_CONFIG_DIR` | Configuration directory | `~/.config/fission` |
-| `FISSION_LOG_LEVEL` | Log level (error, warn, info, debug, trace) | `info` |
-| `FISSION_CACHE_DIR` | Cache directory for temporary files | `~/.cache/fission` |
-
-### Decompiler Settings
-
-```rust
-// Settings in fission-core crate: crates/fission-core/src/core/config.rs
-
-DecompilerConfig {
-    num_workers: 1,               // 1 = single FFI process; 0 = auto (CPU cores, capped by max_workers)
-    max_workers: 8,               // Cap on auto-detected workers
-    default_function_size: 4096,  // 4KB default function size
-    max_function_size: 65536,     // 64KB max function size
-    min_function_size: 16,        // 16 bytes minimum
-    timeout_ms: 30000,            // 30 second timeout
-    enable_prefetch: true,        // Pre-decompile adjacent functions
-    prefetch_count: 3,            // Number of functions to prefetch
-    sla_dir: String::new(),       // Override Sleigh dir; empty = auto from FISSION_SLA_DIR or ghidra_decompiler/languages
-}
-
-AnalysisConfig {
-    max_string_search_size: 2097152, // 2MB for string extraction
-    min_string_length: 4,           // Minimum 4 bytes for strings
-    auto_xref_analysis: true,       // Auto cross-reference on load
-    decompile_cache_size: 100,      // LRU cache entries
-    function_address_range: 4096,   // 4KB range for function matching
-}
-
-DebugConfig {
-    max_snapshots: 10000,   // Time travel debugging snapshots
-    max_process_ids: 4096,  // Max processes to enumerate
-}
-
-UiConfig {
-    show_performance: false,   // Performance metrics display
-    auto_scroll_entry: true,   // Auto-scroll to entry point on load
-    max_log_entries: 1000,     // Console history limit
-    hex_rows_per_page: 64,     // Hex viewer pagination
-}
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FISSION_DECOMP_PATH` | `./ghidra_decompiler/build/fission_decomp` | Native decompiler path |
+| `FISSION_SLA_DIR` | `ghidra_decompiler/languages` | Sleigh definitions |
+| `FISSION_LOG_LEVEL` | `info` | error/warn/info/debug/trace |
 
 ---
 
 ## Architecture
 
-For a complete architectural overview and up‑to‑date diagrams, see:
+```
+┌─────────────────────────────────────────────────────┐
+│                  Fission Platform                   │
+├──────────────┬──────────────────────────────────────┤
+│  Tauri GUI   │         fission_cli                  │
+│ (React 19 /  │    (REPL + direct flags)              │
+│  TypeScript) │                                      │
+├──────────────┴──────────────────────────────────────┤
+│              fission-analysis (Rust)                │
+│  CFG · XRef · Debug · Plugin · FID · Type Prop      │
+├─────────────────────────────────────────────────────┤
+│  fission-ffi  │  fission-loader  │  fission-disasm  │
+│  (C++ FFI)    │  (PE/ELF/Mach-O) │  (iced-x86)      │
+├───────────────┴──────────────────┴──────────────────┤
+│       ghidra_decompiler/  (C++, CMake)              │
+│   Ghidra PCode Engine  ·  Sleigh ISA defs           │
+│   TypePropagator  ·  AnalysisPipeline               │
+│   PostProcessors  ·  CFGStructurizer                │
+└─────────────────────────────────────────────────────┘
+```
 
-- `docs/architecture/ARCHITECTURE.md` — high‑level components and data flow
-- `docs/RUST_CPP_BRIDGE.md` — Rust ↔ C++ FFI boundary and responsibilities
+See [docs/architecture/](docs/architecture/) and [docs/RUST_CPP_BRIDGE.md](docs/RUST_CPP_BRIDGE.md).
 
 ---
 
 ## Plugin Development
 
-Fission supports native Rust plugins compiled as dynamic libraries. Plugins can hook into the event system and access the full Fission API.
-
-### Creating a Rust Plugin
-
-Create a new Rust plugin by implementing the `FissionPlugin` trait:
-
 ```rust
 use fission::plugin::{FissionPlugin, PluginContext};
-use fission::plugin::api::BinaryInfo;
-use fission::core::prelude::*;
 
-pub struct MyPlugin {
-    id: String,
-}
-
-impl MyPlugin {
-    pub fn new() -> Self {
-        Self {
-            id: "my_plugin".to_string(),
-        }
-    }
-}
+pub struct MyPlugin;
 
 impl FissionPlugin for MyPlugin {
-    fn id(&self) -> &str {
-        &self.id
-    }
+    fn id(&self) -> &str { "my_plugin" }
+    fn name(&self) -> &str { "My Plugin" }
+    fn version(&self) -> &str { "0.1.0" }
+    fn description(&self) -> &str { "Example" }
 
-    fn name(&self) -> &str {
-        "My Custom Plugin"
+    fn on_binary_loaded(&self, _: &PluginContext, info: &fission::plugin::api::BinaryInfo) {
+        println!("Loaded: {}", info.path);
     }
-
-    fn version(&self) -> &str {
-        "0.1.0"
-    }
-
-    fn description(&self) -> &str {
-        "A simple example plugin"
-    }
-
-    fn on_load(&mut self, ctx: &PluginContext) -> Result<()> {
-        println!("Plugin loaded!");
-        Ok(())
-    }
-
-    fn on_binary_loaded(&self, ctx: &PluginContext, info: &BinaryInfo) {
-        println!("Binary loaded: {}", info.path);
-    }
-
-    fn on_function_decompiled(&self, ctx: &PluginContext, addr: u64, code: &str) {
-        println!("Decompiled function at 0x{:x}", addr);
-        // Analyze the decompiled code
-    }
-}
-
-// Required: Export plugin constructor
-#[no_mangle]
-pub extern "C" fn create_plugin() -> *mut dyn FissionPlugin {
-    Box::into_raw(Box::new(MyPlugin::new()))
 }
 
 #[no_mangle]
-pub extern "C" fn destroy_plugin(plugin: *mut dyn FissionPlugin) {
-    unsafe {
-        drop(Box::from_raw(plugin));
-    }
+pub extern "C" fn create_plugin() -> *mut dyn FissionPlugin {
+    Box::into_raw(Box::new(MyPlugin))
+}
+#[no_mangle]
+pub extern "C" fn destroy_plugin(p: *mut dyn FissionPlugin) {
+    unsafe { drop(Box::from_raw(p)); }
 }
 ```
 
-**Cargo.toml**:
-```toml
-[package]
-name = "my_fission_plugin"
-version = "0.1.0"
-edition = "2024"
-
-[lib]
-crate-type = ["cdylib"]  # Important: Create dynamic library
-
-[dependencies]
-fission = { path = "../fission" }
-```
-
-Build and load:
-```bash
-cargo build --release
-# Output: target/release/libmy_fission_plugin.so (Linux)
-#         target/release/libmy_fission_plugin.dylib (macOS)
-#         target/release/my_fission_plugin.dll (Windows)
-```
-
-For detailed plugin development guide, see [Plugin Development](docs/plugins/PLUGIN_DEVELOPMENT.md).
-
-### Event Types
-
-| Event | Description | Data |
-|-------|-------------|------|
-| `BinaryLoaded` | Fired when a binary is loaded | path, format, arch |
-| `FunctionDecompiled` | Fired after decompilation | address, code, function_name |
-| `BreakpointHit` | Fired when a breakpoint triggers | address, hit_count |
-| `DebugEvent` | General debug events | event_type, data |
-| `Custom` | User-defined events | name, payload |
+Set `crate-type = ["cdylib"]` in `Cargo.toml`. See [docs/plugins/](docs/plugins/) for the full API.
 
 ---
 
 ## Tech Stack
 
-| Component | Technology | Version | Purpose |
-|-----------|------------|---------|---------|
-| **Core Language** | Rust | 2021 Edition | Performance and safety |
-| **GUI Framework** | egui + eframe | 0.29 | Immediate-mode UI |
-| **Theme** | Catppuccin | - | Soothing color palette |
-| **Disassembler** | iced-x86 | 1.21 | Pure Rust x86/x64 disassembly |
-| **Decompiler** | Ghidra (C++) | - | C code generation |
-| **PE/ELF Parsing** | goblin + object | 0.8 / 0.32 | Binary format parsing |
-| **.NET Parsing** | Custom Rust | - | CLR metadata and IL |
-| **Windows Debug** | windows crate | 0.54 | Win32 debug API |
-| **Linux Debug** | nix | 0.28 | ptrace interface |
-| **Scripting** | PyO3 | 0.24 | Python bindings |
-| **Async Runtime** | Tokio | 1.36 | Async I/O and threading |
-| **Caching** | lru | 0.12 | LRU result cache |
-| **CLI** | reedline + clap | 0.30 / 4.5 | Command-line interface |
-| **Serialization** | serde + serde_json | 1.0 | Data serialization |
-
----
-
-## Performance
-
-### Benchmark Results
-
-> Note: Benchmarks performed on AMD Ryzen 9 5900X, 32GB RAM, NVMe SSD
-
-| Operation | Single Mode | Pool Mode (8 workers) |
-|-----------|-------------|----------------------|
-| Load PE (1MB) | 12ms | 12ms |
-| Function Discovery | 45ms | 45ms |
-| Decompile (small func) | 150ms | 150ms |
-| Decompile (100 funcs) | 15s | 2.1s |
-| String Extraction | 8ms | 8ms |
-
-### Optimization Tips
-
-1. **Use Pool Mode for Large Binaries**
-
-   ```toml
-   [decompiler]
-   mode = "pool"
-   num_workers = 0  # Auto-detect
-   ```
-
-2. **Increase Cache Size for Repeated Analysis**
-
-   ```toml
-   [analysis]
-   cache_size = 500  # More cache entries
-   ```
-
-3. **Enable Prefetching for Sequential Navigation**
-
-   ```toml
-   [decompiler]
-   enable_prefetch = true
-   prefetch_count = 5
-   ```
-
-4. **Reduce Memory Usage**
-
-   ```toml
-   [decompiler]
-   mode = "single"  # Single process mode
-   requests_before_restart = 100  # Restart more frequently
-   ```
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| Core | Rust 2021 | Performance and safety |
+| GUI Framework | Tauri 2.x + React 19 | Desktop app with web frontend |
+| Disassembler | iced-x86 | Pure Rust x86/x64 |
+| Decompiler | Ghidra (C++) | C code generation |
+| Binary Parsing | goblin + object | PE / ELF / Mach-O |
+| Windows Debug | windows crate | Win32 debug API |
+| Linux Debug | nix (ptrace) | POSIX debug |
+| Scripting | PyO3 | Python bindings |
+| Async | Tokio | I/O and threading |
+| CLI | reedline + clap | REPL and flags |
+| Serialization | serde + serde_json | Data exchange |
+| Virtual Scroll | @tanstack/react-virtual | GUI listing |
 
 ---
 
@@ -784,31 +450,13 @@ For detailed plugin development guide, see [Plugin Development](docs/plugins/PLU
 
 | Feature | Fission | Ghidra | IDA Pro | x64dbg | radare2 |
 |---------|---------|--------|---------|--------|---------|
-| **Price** | Free | Free | $$$$ | Free | Free |
-| **Decompiler** | Yes (Ghidra) | Yes | Yes | No | Yes (r2ghidra) |
-| **Debugger** | Yes | Yes | Yes | Yes | Yes |
-| **Time-Travel Debug** | Yes | No | Yes (paid) | No | No |
-| **GUI** | Modern | Java | Native | Native | Web/TUI |
-| **Scripting** | Rust Plugins | Java/Python | Python/IDC | Plugin | r2pipe |
-| **Cross-Platform** | Yes | Yes | Yes | Windows | Yes |
-| **Performance** | Fast (Rust) | Moderate | Fast | Fast | Fast |
-| **.NET Support** | Yes | Plugin | Yes | No | Limited |
-| **Unified Tool** | Yes | No | Partial | No | Yes |
-
-### When to Use Fission
-
-- **Single tool for everything**: Want static and dynamic analysis in one place
-- **Performance matters**: Need fast analysis of large binaries
-- **Modern UX**: Prefer VS Code-style interface over older designs
-- **Extensibility**: Want to write plugins in Rust or Python
-- **Free and Open Source**: Need a capable tool without licensing costs
-
-### When to Use Others
-
-- **IDA Pro**: Need the most mature decompiler for complex binaries
-- **Ghidra**: Want extensive collaboration features and scripting
-- **x64dbg**: Need advanced Windows debugging features
-- **radare2**: Prefer command-line workflow with scripting
+| Price | Free | Free | $$$$ | Free | Free |
+| Decompiler | ✅ 98.8% / 92.6% | Baseline | High | ❌ | ✅ variable |
+| Debugger | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Time-Travel Debug | ✅ (Windows) | ❌ | ✅ (paid) | ❌ | ❌ |
+| GUI | Tauri/React | Java | Native | Native | Web/TUI |
+| Cross-Platform | ✅ | ✅ | ✅ | Windows | ✅ |
+| Scripting | Rust plugins | Java/Python | Python/IDC | C++ | r2pipe |
 
 ---
 
@@ -816,422 +464,165 @@ For detailed plugin development guide, see [Plugin Development](docs/plugins/PLU
 
 ```
 Fission/
-├── Cargo.toml                 # Workspace manifest
-├── Cargo.lock                 # Dependency lock file
-├── README.md                  # This file
-├── LICENSE                    # MIT License
-│
-├── ghidra_decompiler/         # Native C++ decompiler
-│   ├── CMakeLists.txt         # CMake build configuration
-│   ├── decompile/             # Upstream Ghidra decompiler core (do not modify)
-│   ├── src/                   # Fission integration and wrappers
-│   └── languages/             # Sleigh (.sla/.sinc) instruction definitions
-│
-├── crates/                    # Rust workspace crates
-│   ├── fission-core/          # Shared configuration, errors, utilities
-│   ├── fission-loader/        # Binary parsing (PE/ELF/Mach-O)
-│   ├── fission-disasm/        # Disassembly abstraction (iced-x86)
-│   ├── fission-pcode/         # P-code IR and optimizer
-│   ├── fission-signatures/    # API/signature databases
-│   ├── fission-ffi/           # Native decompiler FFI boundary
-│   ├── fission-analysis/      # Analysis logic (CFG/xref/debug/plugin); benches in benches/
-│   ├── fission-ui/            # GUI shared layer (Tauri + egui backend)
-│   ├── fission-cli/           # CLI entrypoints and REPL
-│   └── fission-tauri/         # Tauri desktop app
-│       ├── src/               #   React/TypeScript frontend
-│       └── src-tauri/         #   ← Cargo workspace member (Rust build root)
-│           ├── Cargo.toml     #     registered in root Cargo.toml as workspace member
-│           └── src/           #     Tauri commands, state, event handlers
-│
-├── utils/                     # Shared data assets (not a Rust crate)
-│   └── signatures/            # Type/API signature databases (DIE rules, FID, etc.)
-│                              # ⚠  Some crates reference these via root-relative paths
-│                              #    (e.g. "../../utils/signatures/…") — always build
-│                              #    from the repository root so these paths resolve.
-│
+├── Cargo.toml
+├── README.md
+├── ghidra_decompiler/         # Native C++ decompiler layer
+│   ├── CMakeLists.txt
+│   ├── decompile/             # Upstream Ghidra core (do not modify)
+│   ├── src/
+│   │   ├── analysis/          # TypePropagator, PostProcessors, …
+│   │   └── decompiler/        # AnalysisPipeline, DecompilationPipeline, …
+│   └── languages/             # Sleigh (.sla/.sinc) ISA definitions
+├── crates/
+│   ├── fission-core/          # Config, errors, utilities
+│   ├── fission-loader/        # Binary parsing
+│   ├── fission-disasm/        # Disassembly abstraction
+│   ├── fission-pcode/         # Pcode IR types
+│   ├── fission-signatures/    # API/FID signature DBs
+│   ├── fission-ffi/           # Rust ↔ C++ FFI boundary
+│   ├── fission-analysis/      # CFG, XRef, debug, plugins (+ benches/)
+│   ├── fission-ui/            # Tauri desktop app (React + Rust backend)
+│   └── fission-cli/           # CLI binary (fission_cli)
+├── utils/signatures/          # GDT type DBs, DIE rules, FID sigs
 ├── tests/                     # Integration tests
-│   ├── cli_tests.rs
-│   ├── decompiler_tests.rs
-│   ├── loader_tests.rs
-│   └── advanced_tests.rs
-│
-├── scripts/                   # Build utilities and scripts
-│   └── build_decompiler.sh
-│
-├── docs/                      # Documentation
-│   ├── architecture/          # Architecture documentation
-│   ├── analysis/             # Analysis feature docs
-│   ├── plugins/              # Plugin development guide
-│   └── ...
-│
-└── .github/workflows/         # CI/CD pipelines
-    ├── ci.yml
-    ├── security.yml
-    └── ...
+├── scripts/
+│   └── compare/               # Benchmark scripts & YAML suites
+├── docs/
+│   ├── architecture/
+│   ├── analysis/
+│   ├── changelog/CHANGELOG.md
+│   └── …
+└── examples/
+    ├── comparison_test_x64
+    └── binaries/
 ```
 
 ---
 
 ## Development Status
 
-### Completed Features
+### Completed
 
-- [x] **CLI Base** - Binary loader, disassembler, REPL interface
-- [x] **Ghidra Integration** - Direct FFI integration via CXX bridge (zero-copy)
-- [x] **Pcode IR Optimizer** - Phase 1 (30+ rules) + Phase 2 (def-use tracking, NZMask analysis)
-- [x] **VS Code Style GUI** - Tabs, Activity Bar, Catppuccin theme, Listing View
-- [x] **Debugging** - Attach, breakpoints, registers, memory access
-- [x] **Plugin System** - Native Rust plugin support with dynamic library loading
-- [x] **Performance Optimization** - Direct FFI, LRU caching, prefetch, optimizer
-- [x] **Advanced Type Analysis** - Struct inference, VTable, type propagation
-- [x] **Cross-Reference Analysis** - Code and data xref detection
-- [x] **Smart Constant Substitution** - Windows API parameter mapping
-- [x] **CFG Analysis** - Control flow graph with dominator tree and loop detection
-- [x] **Listing View** - Full binary disassembly with virtual scrolling
+- [x] CLI REPL + direct flag interface
+- [x] Ghidra FFI (zero-copy direct C++ binding)
+- [x] Pcode IR Optimizer (32+ rules, def-use tracking, NZMask)
+- [x] Context-aware constant substitution (100+ Windows API mappings)
+- [x] Type propagation + smart string recovery + VTable analysis
+- [x] x86 `double` synthesis (`merge_split_double_args`)
+- [x] CFG analysis (dominator tree, loop detection, cyclomatic complexity)
+- [x] Listing view with virtual scrolling
+- [x] C++ RTTI recovery
+- [x] Tauri 2.x + React 19 GUI (30+ IPC commands)
+- [x] FID signature identification
+- [x] Time Travel Debugging (Windows)
+- [x] Native Rust plugin system
+- [x] Linear sweep function discovery for stripped PE
 
-### Recent Updates (January-February 2026)
+### Roadmap
 
-- ✅ **Decompiler Architecture** - Migrated from subprocess pool to direct FFI integration
-- ✅ **Pcode Optimizer Phase 1** - 30+ optimization rules (constant folding, algebraic simplification, dead code elimination)
-- ✅ **Pcode Optimizer Phase 2** - Def-use tracking, NZMask analysis, RuleShiftBitops, RuleAndMask
-- ✅ **Zero-Copy Integration** - Eliminated IPC overhead with native C++ bindings
-- ✅ **Code-Path Unification** - Unified batch and FFI analysis pipelines
-- ✅ **Listing View** - Full binary disassembly with virtual scrolling and on-demand disassembly
-- ✅ **Ghidra Parity** - Achieved 97.86% similarity with Ghidra decompiler output
-
-### In Progress
-
-- [ ] **Pcode Optimizer Phase 3** - CSE, RulePullSubIndirect, pointer arithmetic optimizations
-- [ ] **Advanced TTD** - Full time travel debugging with complete state replay
-- [ ] **Remote Debugging** - Network-based debug sessions
-
----
-
-## Implementation Notes
-
-The following items are either not fully implemented yet or need explicit verification:
-
-- **Multi-process decompiler pool**: The README mentions a pool, but the current implementation uses in-process FFI; the pool is deprecated.
-- **macOS debugging**: Attach/breakpoints/memory access are stubbed and require entitlements; only process listing is functional.
-- **TTD replay**: Timeline/recording exists, but full deterministic replay across platforms is not yet verified (see Advanced TTD in progress).
-
----
-
-## Roadmap
-
-The high‑level roadmap (decompiler quality, Tauri GUI migration, debugging, FFI sync 등)는 다음 문서를 기준으로 관리합니다.
-
-- `docs/ROADMAP.md`
-
-이 문서에는 장기적인 비전과 아이디어(예: AI 보조 분석/코드 복원)도 포함되어 있으며,  
-실제 구현 우선순위는 위 로드맵 문서를 우선 참조하는 것을 권장합니다.
+- [ ] DWARF debug info import
+- [ ] Python scripting (PyO3 API stabilization)  
+- [ ] Windows ARM64 support
+- [ ] DWARF-based variable naming
+- [ ] Collaborative annotation sharing
 
 ---
 
 ## Testing
 
-### Running Tests
-
 ```bash
-# Run all tests
+# Unit + integration tests
 cargo test
-
-# Run specific test file
-cargo test --test loader_tests
 cargo test --test decompiler_tests
 cargo test --test cli_tests
-cargo test --test advanced_tests
 
-# Run with verbose output
-cargo test -- --nocapture
+# Benchmarks
+cargo bench -p fission-analysis
 
-# Run tests with specific name pattern
-cargo test function_discovery
+# Decompiler quality benchmark
+python3 scripts/compare/compare_decompilers_v3.py \
+    --suite scripts/compare/suite_example.yaml   # x64
+python3 scripts/compare/compare_decompilers_v3.py \
+    --suite scripts/compare/suite_x86.yaml       # x86
 
-# Run benchmarks
-cargo bench
+# Build test binaries
+bash scripts/build_all_tests.sh
 ```
-
-### Test Coverage
-
-```bash
-# Using cargo-tarpaulin
-cargo install cargo-tarpaulin
-cargo tarpaulin --out Html
-```
-
-### Continuous Integration
-
-The project uses GitHub Actions for CI/CD with the following pipelines:
-
-| Pipeline | Trigger | Purpose |
-|----------|---------|---------|
-| `ci.yml` | Push/PR | Build and test on Ubuntu/macOS/Windows |
-| `security.yml` | Push/PR | CodeQL analysis and Trivy scanning |
-| `audit.yml` | Daily/Push | Dependency security audit |
-| `benchmark.yml` | Push to main | Performance regression detection |
-| `coverage.yml` | Push/PR | Code coverage tracking |
-| `fuzz.yml` | Weekly | Fuzzing for crash detection |
 
 ---
 
 ## Troubleshooting
 
-### Build Issues
+### C++ debug output not appearing
 
-#### CMake not finding ZLIB (Windows)
-
-```powershell
-# Ensure vcpkg is installed and ZLIB is available
-C:\vcpkg\vcpkg install zlib:x64-windows
-
-# Set the toolchain file
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
-```
-
-#### Linker errors on Linux
+Pass `--verbose` — without it, `OutputSilencer` redirects stderr to `/dev/null`.
 
 ```bash
-# Install missing development libraries
-sudo apt install libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev \
-    libxcb-xfixes0-dev libxkbcommon-dev
+fission_cli --decomp 0x401000 --verbose binary.exe
 ```
 
+### `libdecomp.dylib` / `decomp.dll` not found
 
-### Runtime Issues
-
-#### Decompiler not found
+Build the Ghidra decompiler:
 
 ```bash
-# Check if fission_decomp exists
-ls -la ghidra_decompiler/build/fission_decomp
-
-# Set the path explicitly
-export FISSION_DECOMP_PATH=/path/to/fission_decomp
+cd ghidra_decompiler && cmake -B build && cmake --build build
 ```
 
-#### Decompilation timeout
+Set `FISSION_DECOMP_PATH` if the binary is in a non-standard location.
 
-```toml
-# Increase timeout in config.toml
-[decompiler]
-timeout_ms = 60000  # 60 seconds
-```
-
-#### High memory usage
-
-```toml
-# Use single mode and restart workers frequently
-[decompiler]
-mode = "single"
-requests_before_restart = 50
-```
-
-#### GUI not starting
+### Tauri GUI build fails on Linux
 
 ```bash
-# Check for display issues (Linux)
-echo $DISPLAY
-
-# Try software rendering
-export LIBGL_ALWAYS_SOFTWARE=1
-cargo run --release
+sudo apt install libwebkit2gtk-4.1-dev
 ```
 
-### Debug Issues
+### x86 shows split `double` arguments
 
-#### Cannot attach to process (Windows)
-
-- Run Fission as Administrator
-- Check if the target process is protected
-- Disable anti-debugging in target if legitimate
-
-#### ptrace fails (Linux)
-
-```bash
-# Check ptrace permissions
-cat /proc/sys/kernel/yama/ptrace_scope
-
-# Temporarily allow (requires root)
-echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope
-
-# Or run as root
-sudo ./target/release/fission
-```
-
----
-
-## FAQ
-
-### General
-
-**Q: Is Fission free to use?**
-A: Yes, Fission is free and open source under the MIT license. You can use it for personal, educational, and commercial purposes.
-
-**Q: Which platforms are supported?**
-A: Fission runs on Windows, Linux, and macOS. It can analyze binaries from all three platforms regardless of the host OS.
-
-**Q: Do I need Ghidra installed?**
-A: No. Fission includes its own native decompiler built from Ghidra's open-source components. You don't need to install Ghidra separately.
-
-### Technical
-
-**Q: Why is decompilation slow?**
-A: First-time decompilation requires architecture initialization. Subsequent decompilations use cached objects and are much faster. Enable pool mode for parallel processing.
-
-**Q: Can I analyze packed/obfuscated binaries?**
-A: Fission can load and disassemble packed binaries, but decompilation may produce poor results. Use the debugger to unpack at runtime, then analyze the unpacked code.
-
-**Q: How do I add support for a new binary format?**
-A: Implement the `BinaryLoader` trait in `src/analysis/loader/` and register it in the loader factory. See existing PE/ELF implementations for reference.
-
-**Q: Can I use Fission for malware analysis?**
-A: Yes, Fission is designed with malware analysis in mind. Use appropriate isolation (VMs, sandboxes) when analyzing potentially malicious samples.
-
-### Comparison
-
-**Q: How does Fission compare to IDA Pro?**
-A: IDA Pro has a more mature decompiler and larger plugin ecosystem. Fission offers a modern UI, is completely free, and provides integrated debugging with time-travel capabilities.
-
-**Q: Should I use Fission or Ghidra?**
-A: Ghidra is excellent for collaborative analysis and has more features. Fission offers better performance, a more modern UI, and integrated debugging in a single tool.
+Ensure you are using the latest `ghidra_decompiler` build (commit `e80b18432` or newer) which
+includes the `FuncCallSpecs`-based fix in `merge_split_double_args`.
 
 ---
 
 ## Contributing
 
-We welcome contributions! Here's how to get started:
-
-### Development Setup
+See [CONTRIBUTING.md](CONTRIBUTING.md). Quick workflow:
 
 ```bash
-# Fork and clone the repository
-git clone https://github.com/YOUR_USERNAME/Fission.git
-cd Fission
-
-# Create a feature branch
-git checkout -b feature/your-feature-name
-
-# Build in debug mode for faster compilation
-cargo build
-
-# Run tests
-cargo test
+git checkout -b feat/my-feature
+# make changes
+cargo test && cargo clippy
+git commit -m "feat: describe change"
+git push origin feat/my-feature
+# open Pull Request
 ```
-
-### Code Style
-
-- Follow Rust standard formatting: `cargo fmt`
-- Pass all clippy lints: `cargo clippy -- -D warnings`
-- Add tests for new functionality
-- Update documentation for API changes
-
-### Pull Request Process
-
-1. Ensure all tests pass
-2. Update README.md if adding user-facing features
-3. Add a clear description of changes
-4. Reference any related issues
-5. Request review from maintainers
-
-### Areas Needing Help
-
-- [ ] Additional binary format support (Mach-O improvements)
-- [ ] More Windows API signatures
-- [ ] Plugin examples and documentation
-- [ ] Performance optimizations
-- [ ] GUI improvements and accessibility
-
----
-
-## Security
-
-### Reporting Vulnerabilities
-
-If you discover a security vulnerability, please:
-
-1. **Do NOT** open a public issue
-2. Email security concerns to the maintainers
-3. Include detailed reproduction steps
-4. Allow reasonable time for a fix before disclosure
-
-### Security Features
-
-- Sandboxed subprocess execution for decompilation
-- Input validation for binary parsing
-- Memory-safe Rust implementation
-- Regular dependency auditing via `cargo audit`
-
-### Security Considerations
-
-When analyzing untrusted binaries:
-
-- Use a virtual machine or isolated environment
-- Be cautious with dynamic analysis features
-- The decompiler runs in a subprocess to limit potential exploits
 
 ---
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
-
-```
-MIT License
-
-Copyright (c) 2024 Fission Dev Team
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+MIT — see [LICENSE](LICENSE).
 
 ---
 
 ## Acknowledgments
 
-Fission would not be possible without these amazing open source projects:
-
-- [**Ghidra**](https://ghidra-sre.org/) - NSA's software reverse engineering framework, providing the decompiler engine
-- [**iced-x86**](https://github.com/icedland/iced) - High-performance x86/x64 disassembler written in Rust
-- [**egui**](https://github.com/emilk/egui) - Easy-to-use immediate mode GUI library for Rust
-- [**Catppuccin**](https://github.com/catppuccin/catppuccin) - Soothing pastel theme for the UI
-- [**goblin**](https://github.com/m4b/goblin) - Cross-platform binary parsing library
-- [**tokio**](https://tokio.rs/) - Asynchronous runtime for Rust
-
-Special thanks to all contributors and the reverse engineering community for their feedback and support.
+- [Ghidra](https://ghidra-sre.org/) — NSA decompiler engine (Apache 2.0)
+- [iced-x86](https://github.com/icedland/iced) — Pure Rust x86/x64 disassembler
+- [Tauri](https://tauri.app/) — Desktop app framework
+- [React](https://react.dev/) — Frontend framework
+- [goblin](https://github.com/m4b/goblin) — Rust binary parsing
+- [Tokio](https://tokio.rs/) — Async runtime
+- [Catppuccin](https://catppuccin.com/) — Color palette
 
 ---
 
 ## Documentation
 
-For detailed information about Fission:
-
-- **[Architecture Guide](docs/architecture/ARCHITECTURE.md)** - Module structure, design principles, analysis pipeline
-- **[Build Guide](docs/build/BUILD.md)** - Build instructions and dependencies
-- **[GUI Guide](docs/gui/GUI_GUIDE.md)** - UI usage and workflows
-- **[CLI One-shot Mode](docs/cli/CLI_ONE_SHOT_MODE.md)** - CLI usage for batch/oneshot analysis
-- **[Decompiler Comparison](docs/decompiler/DECOMPILER_COMPARISON.md)** - Ghidra vs Fission comparison workflow
-- **[Plugin Development](docs/plugins/PLUGIN_DEVELOPMENT.md)** - Extend Fission with plugins
-- **[Constant Substitution](docs/analysis/CONSTANT_SUBSTITUTION.md)** - Analysis details
-- **[GCC FID Implementation](docs/analysis/GCC_FID_IMPLEMENTATION.md)** - Function ID implementation notes
-
----
-
-<p align="center">
-  Made with Rust
-</p>
+| Document | Description |
+|----------|-------------|
+| [docs/RUST_CPP_BRIDGE.md](docs/RUST_CPP_BRIDGE.md) | Rust ↔ C++ FFI design |
+| [docs/architecture/](docs/architecture/) | Component diagrams |
+| [docs/analysis/](docs/analysis/) | Analysis feature deep dives |
+| [docs/changelog/CHANGELOG.md](docs/changelog/CHANGELOG.md) | Full changelog |
+| [docs/plugins/](docs/plugins/) | Plugin development guide |
