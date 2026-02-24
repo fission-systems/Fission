@@ -7,6 +7,74 @@
 namespace fission {
 namespace loader {
 
+// ============================================================================
+// A-4: ELF compiler detection helper
+//
+// Most Clang-produced ELFs contain "clang version" in the .comment section.
+// We parse ELF section headers to locate .comment, then scan its content.
+// Falls back to "gcc" if the section is absent or unrecognised.
+// ============================================================================
+static std::string elf_detect_compiler(const uint8_t* data, size_t size) {
+    if (size < 64) return "gcc";
+
+    bool is64 = (data[4] == 2);  // ELFCLASS64
+    bool isle = (data[5] == 1);  // ELFDATA2LSB (little-endian)
+
+    auto rd16 = [&](size_t off) -> uint16_t {
+        if (off + 2 > size) return 0;
+        return isle ? (uint16_t)(data[off] | (data[off+1] << 8))
+                    : (uint16_t)((data[off] << 8) | data[off+1]);
+    };
+    auto rd32 = [&](size_t off) -> uint32_t {
+        if (off + 4 > size) return 0;
+        if (isle) return (uint32_t)(data[off] | (data[off+1]<<8) | (data[off+2]<<16) | (data[off+3]<<24));
+        return (uint32_t)((data[off]<<24)|(data[off+1]<<16)|(data[off+2]<<8)|data[off+3]);
+    };
+    auto rd64 = [&](size_t off) -> uint64_t {
+        if (off + 8 > size) return 0;
+        uint64_t lo = rd32(off), hi = rd32(off + 4);
+        return isle ? lo | (hi << 32) : (lo << 32) | hi;
+    };
+
+    // ELF section header table info
+    uint64_t shoff    = is64 ? rd64(40)  : rd32(32);
+    uint16_t shentsize= is64 ? rd16(58)  : rd16(46);
+    uint16_t shnum    = is64 ? rd16(60)  : rd16(48);
+    uint16_t shstrndx = is64 ? rd16(62)  : rd16(50);
+
+    if (shoff == 0 || shentsize == 0 || shnum == 0 ||
+        shstrndx >= shnum || shoff + (uint64_t)shnum * shentsize > size)
+        return "gcc";
+
+    // Locate section name string table
+    size_t strtab_shdr = (size_t)(shoff + (uint64_t)shstrndx * shentsize);
+    uint64_t strtab_off  = is64 ? rd64(strtab_shdr + 24) : rd32(strtab_shdr + 16);
+    uint64_t strtab_size = is64 ? rd64(strtab_shdr + 32) : rd32(strtab_shdr + 20);
+    if (strtab_off + strtab_size > size) return "gcc";
+
+    // Scan section headers for .comment
+    for (uint16_t i = 0; i < shnum; ++i) {
+        size_t shdr = (size_t)(shoff + (uint64_t)i * shentsize);
+        uint32_t sh_name      = rd32(shdr);
+        uint64_t sh_data_off  = is64 ? rd64(shdr + 24) : rd32(shdr + 16);
+        uint64_t sh_data_size = is64 ? rd64(shdr + 32) : rd32(shdr + 20);
+
+        uint64_t name_off = strtab_off + sh_name;
+        if (name_off >= size) continue;
+        if (std::strncmp((const char*)(data + name_off), ".comment", 8) != 0) continue;
+
+        // Found .comment — scan for "clang version" marker
+        if (sh_data_off + sh_data_size > size) break;
+        const char* comment = (const char*)(data + sh_data_off);
+        const char* CLANG_MARKER = "clang version ";
+        for (size_t j = 0; j + 14 <= (size_t)sh_data_size; ++j) {
+            if (std::memcmp(comment + j, CLANG_MARKER, 14) == 0) return "clang";
+        }
+        break;
+    }
+    return "gcc";
+}
+
 // Magic bytes
 static const uint8_t PE_MAGIC[] = { 0x4D, 0x5A };  // "MZ"
 static const uint8_t ELF_MAGIC[] = { 0x7F, 0x45, 0x4C, 0x46 };  // "\x7FELF"
@@ -86,23 +154,23 @@ BinaryInfo BinaryDetector::parse_pe(const uint8_t* data, size_t size) {
         case 0x014C:  // IMAGE_FILE_MACHINE_I386
             info.arch = ArchType::X86;
             info.is_64bit = false;
-            info.sleigh_id = "x86:LE:32:default";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case 0x8664:  // IMAGE_FILE_MACHINE_AMD64
             info.arch = ArchType::X86_64;
             info.is_64bit = true;
-            info.sleigh_id = "x86:LE:64:default";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case 0xAA64:  // IMAGE_FILE_MACHINE_ARM64
             info.arch = ArchType::ARM64;
             info.is_64bit = true;
-            info.sleigh_id = "AARCH64:LE:64:v8A";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case 0x01C0:  // IMAGE_FILE_MACHINE_ARM
         case 0x01C4:  // IMAGE_FILE_MACHINE_ARMNT
             info.arch = ArchType::ARM;
             info.is_64bit = false;
-            info.sleigh_id = "ARM:LE:32:v7";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         default:
             info.arch = ArchType::UNKNOWN;
@@ -128,8 +196,10 @@ BinaryInfo BinaryDetector::parse_pe(const uint8_t* data, size_t size) {
 BinaryInfo BinaryDetector::parse_elf(const uint8_t* data, size_t size) {
     BinaryInfo info;
     info.format = BinaryFormat::ELF;
-    info.compiler_id = "gcc";  // Assume GCC for Linux
-    
+    // A-4: Detect GCC vs Clang by scanning the .comment ELF section.
+    // "clang version X.Y.Z" appears there for Clang-compiled binaries.
+    info.compiler_id = elf_detect_compiler(data, size);
+
     if (size < 64) return info;
     
     // ELF class (32/64 bit) at offset 4
@@ -142,23 +212,23 @@ BinaryInfo BinaryDetector::parse_elf(const uint8_t* data, size_t size) {
     switch (machine) {
         case 0x03:  // EM_386
             info.arch = ArchType::X86;
-            info.sleigh_id = "x86:LE:32:default";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case 0x3E:  // EM_X86_64
             info.arch = ArchType::X86_64;
-            info.sleigh_id = "x86:LE:64:default";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case 0x28:  // EM_ARM
             info.arch = ArchType::ARM;
-            info.sleigh_id = "ARM:LE:32:v7";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case 0xB7:  // EM_AARCH64
             info.arch = ArchType::ARM64;
-            info.sleigh_id = "AARCH64:LE:64:v8A";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         default:
             info.arch = ArchType::UNKNOWN;
-            info.sleigh_id = "x86:LE:64:default";  // fallback
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);  // fallback
             break;
     }
     
@@ -264,26 +334,27 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
     switch (cputype) {
         case CPU_TYPE_X86:
             info.arch = ArchType::X86;
-            info.sleigh_id = "x86:LE:32:default";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case CPU_TYPE_X86_64:
             info.arch = ArchType::X86_64;
-            info.sleigh_id = "x86:LE:64:default";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case CPU_TYPE_ARM:
             info.arch = ArchType::ARM;
-            info.sleigh_id = "ARM:LE:32:v7";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             break;
         case CPU_TYPE_ARM64:
             info.arch = ArchType::ARM64;
-            info.sleigh_id = "AARCH64:LE:64:v8A";
+            info.sleigh_id = get_sleigh_id(info.format, info.arch);
             info.is_64bit = true;
             // D-3: encode arch in compiler_id so PathConfig can select correct FID
             info.compiler_id = "clang-aarch64";
             break;
         default:
             info.arch = ArchType::UNKNOWN;
-            info.sleigh_id = "AARCH64:LE:64:v8A";  // fallback for modern Macs
+            // Mach-O unknown arch: modern Macs are predominantly ARM64
+            info.sleigh_id = get_sleigh_id(info.format, ArchType::ARM64);  // fallback for modern Macs
             break;
     }
 

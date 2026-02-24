@@ -348,9 +348,13 @@ static bool infer_callee_pointer_returns(
             ghidra::Address start(func_addr);
             ghidra::Address end = start + 0x1000;
             callee->followFlow(start, end);
-        } catch (const ghidra::LowlevelError&) {
+        } catch (const ghidra::LowlevelError& e) {
+            fission::utils::log_stream() << "[AnalysisPipeline] followFlow LowlevelError at 0x"
+                << std::hex << addr << ": " << e.explain << std::endl;
             flow_ok = false;
         } catch (...) {
+            fission::utils::log_stream() << "[AnalysisPipeline] followFlow unknown error at 0x"
+                << std::hex << addr << std::endl;
             flow_ok = false;
         }
         if (!flow_ok) {
@@ -618,9 +622,17 @@ AnalysisArtifacts run_analysis_passes(
                         target_fd->followFlow(func_addr, end_addr);
                         action->reset(*target_fd);
                         action->perform(*target_fd);
-                    } catch (const ghidra::LowlevelError&) {
+                    } catch (const ghidra::LowlevelError& e) {
+                        fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: LowlevelError at 0x"
+                            << std::hex << target_addr << ": " << e.explain << std::endl;
+                        continue;
+                    } catch (const std::exception& e) {
+                        fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: error at 0x"
+                            << std::hex << target_addr << ": " << e.what() << std::endl;
                         continue;
                     } catch (...) {
+                        fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: unknown error at 0x"
+                            << std::hex << target_addr << std::endl;
                         continue;
                     }
 
@@ -938,7 +950,19 @@ AnalysisArtifacts run_analysis_passes(
                     tfd->followFlow(tfa, tfa + 0x1000);
                     action->reset(*tfd);
                     action->perform(*tfd);
-                } catch (...) { continue; }
+                } catch (const ghidra::LowlevelError& e) {
+                    fission::utils::log_stream() << "[AnalysisPipeline] callgraph reanalysis LowlevelError at 0x"
+                        << std::hex << tfa.getOffset() << ": " << e.explain << std::endl;
+                    continue;
+                } catch (const std::exception& e) {
+                    fission::utils::log_stream() << "[AnalysisPipeline] callgraph reanalysis error at 0x"
+                        << std::hex << tfa.getOffset() << ": " << e.what() << std::endl;
+                    continue;
+                } catch (...) {
+                    fission::utils::log_stream() << "[AnalysisPipeline] callgraph reanalysis unknown error at 0x"
+                        << std::hex << tfa.getOffset() << std::endl;
+                    continue;
+                }
 
                 fission::types::FunctionSignature tsig = build_function_signature(tfd);
                 ctx.type_registry->register_function_types(tsig.address, tsig);
@@ -984,7 +1008,11 @@ AnalysisArtifacts run_analysis_passes(
                 fission::utils::log_stream() << "[AnalysisPipeline] PcodeOptimization: injected, re-running" << std::endl;
                 rerun_action(fd, action);
             }
-        } catch (...) {}
+        } catch (const std::exception& e) {
+            fission::utils::log_stream() << "[AnalysisPipeline] PcodeOptimization error: " << e.what() << std::endl;
+        } catch (...) {
+            fission::utils::log_stream() << "[AnalysisPipeline] PcodeOptimization unknown error" << std::endl;
+        }
     }
 
     // ---- Pre-analysis type propagation (call return types) -----------------

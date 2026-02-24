@@ -524,25 +524,26 @@ bool FidDatabase::parse_relations_table(std::ifstream& file, uint64_t offset, ui
     return true;
 }
 
+// FNV-1a 64-bit constants (from Ghidra's FNV1a64MessageDigest).
+// B-3: Declared once here, shared by has_relation() and FidHasher below.
+static const uint64_t FNV_64_OFFSET_BASIS = 0xcbf29ce484222325ULL;
+static const uint64_t FNV_64_PRIME        = 1099511628211ULL;  // 0x100000001b3
+
 bool FidDatabase::has_relation(uint64_t caller_id, uint64_t callee_hash) const {
     if (caller_id == 0 || callee_hash == 0) return false;
-    
+
     // Calculate "Smash" key: (CallerID * PRIME) ^ CalleeHash
-    // FNV_64_PRIME from FidHasher logic
-    static const uint64_t FNV_64_PRIME = 1099511628211ULL;
-    
+    // B-3: Use the file-scope FNV_64_PRIME constant defined below;
+    // removed the duplicate static-local declaration that shadowed it.
     uint64_t key = (caller_id * FNV_64_PRIME) ^ callee_hash;
-    
+
     return superior_relations.find(key) != superior_relations.end();
 }
 
 // FID Hash Calculator
 // Based on Ghidra's FNV1a64MessageDigest (from generic/hash/FNV1a64MessageDigest.java)
 // FNV-1a 64-bit hash algorithm
-
-// FNV-1a constants (from Ghidra source)
-static const uint64_t FNV_64_OFFSET_BASIS = 0xcbf29ce484222325ULL;
-static const uint64_t FNV_64_PRIME = 1099511628211ULL;  // 0x100000001b3
+// (Constants moved above has_relation() — see B-3 comment there.)
 
 uint64_t FidHasher::calculate_full_hash(const uint8_t* bytes, size_t size) {
     // Mask instruction operands for position-independent hashing

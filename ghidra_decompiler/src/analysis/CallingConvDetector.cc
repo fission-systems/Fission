@@ -142,75 +142,79 @@ bool CallingConvDetector::check_sysv_x64(Funcdata* fd) {
 
 bool CallingConvDetector::check_stdcall(Funcdata* fd) {
     if (is_64bit) return false;
-    
-    // Look for RET with immediate (callee cleans stack)
-    list<PcodeOp*>::const_iterator iter;
-    for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
-        PcodeOp* op = *iter;
-        if (!op || op->code() != CPUI_RETURN) continue;
-        
-        // STDCALL typically shows in the adjustment at function end
-        // This is a simplified heuristic
-        return true;
-    }
-    
+
+    // A-2: True stdcall detection requires stack-delta analysis — the callee must
+    // issue a `RET imm16` that cleans its own stack arguments.  Checking only for
+    // the presence of CPUI_RETURN (as the previous code did) returns true for
+    // EVERY 32-bit function, causing all of them to be misclassified as stdcall.
+    //
+    // Returning false here lets detect() fall through to CONV_CDECL, which is the
+    // correct default for most 32-bit C functions compiled without __stdcall.
+    // TODO: implement proper stack-delta analysis when cross-function context is
+    // available (e.g. inspect call sites for stack adjustments after CALL).
+    (void)fd;
     return false;
 }
 
 bool CallingConvDetector::check_fastcall(Funcdata* fd) {
     if (is_64bit) return false;
-    
-    // Check for ECX/EDX usage as first two parameters
+
+    // A-3: Use getRegisterName() instead of raw offset comparisons.
+    // Hardcoded offsets (0x8=ECX, 0x10=EDX) are SLEIGH-version-dependent and
+    // would silently misfire on other architectures or updated SLEIGH specs.
+    const Translate* trans = arch->translate;
     int ecx_edx_count = 0;
-    
+
     list<PcodeOp*>::const_iterator iter;
     for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
         PcodeOp* op = *iter;
         if (!op) continue;
-        
+
         for (int i = 0; i < op->numInput(); ++i) {
             Varnode* vn = op->getIn(i);
             if (!vn || !vn->isInput()) continue;
-            
+
             AddrSpace* sp = vn->getSpace();
             if (!sp || sp->getName() != "register") continue;
-            
-            // ECX or EDX
-            if (vn->getOffset() == 0x8 || vn->getOffset() == 0x10) {
+
+            std::string reg_name = trans->getRegisterName(sp, vn->getOffset(), vn->getSize());
+            if (reg_name == "ECX" || reg_name == "EDX") {
                 ecx_edx_count++;
             }
         }
     }
-    
+
     return ecx_edx_count >= 2;
 }
 
 bool CallingConvDetector::check_thiscall(Funcdata* fd) {
     if (is_64bit) return false;
-    
-    // Check if ECX is used as "this" pointer (first arg, pointer type)
+
+    // A-3: Use getRegisterName() instead of raw offset comparison (0x8=ECX).
+    const Translate* trans = arch->translate;
+
     list<PcodeOp*>::const_iterator iter;
     for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
         PcodeOp* op = *iter;
         if (!op) continue;
-        
-        // Look for early ECX usage that appears to be a pointer
+
+        // Look for ECX used as a pointer base in LOAD/STORE ("this" pointer pattern)
         if (op->code() == CPUI_LOAD || op->code() == CPUI_STORE) {
             for (int i = 0; i < op->numInput(); ++i) {
                 Varnode* vn = op->getIn(i);
                 if (!vn || !vn->isInput()) continue;
-                
+
                 AddrSpace* sp = vn->getSpace();
                 if (!sp || sp->getName() != "register") continue;
-                
-                // ECX used as pointer base
-                if (vn->getOffset() == 0x8) {
+
+                std::string reg_name = trans->getRegisterName(sp, vn->getOffset(), vn->getSize());
+                if (reg_name == "ECX") {
                     return true;
                 }
             }
         }
     }
-    
+
     return false;
 }
 

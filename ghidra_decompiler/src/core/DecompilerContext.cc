@@ -107,10 +107,15 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             ghidra::DocumentStorage store;
             arch_64bit->init(store);
             configure_arch(arch_64bit);
-            
-            TypeManager::register_windows_types(arch_64bit->types, ArchPolicy::getPointerSize(arch_64bit));
+
+            // A-1: Only inject Windows-specific types (HANDLE, HWND, DWORD…) for
+            // PE/MSVC binaries. Loading them for ELF or Mach-O taints the type DB
+            // and degrades analysis quality on non-Windows targets.
+            if (compiler_id == "windows" || compiler_id == "msvc") {
+                TypeManager::register_windows_types(arch_64bit->types, ArchPolicy::getPointerSize(arch_64bit));
+            }
             load_gdt_for_arch(arch_64bit, true);
-            
+
             arch_64bit_ready = true;
             fission::utils::log_stream() << "[DecompilerContext] Initialized 64-bit architecture" << std::endl;
         } else {
@@ -134,10 +139,13 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             ghidra::DocumentStorage store;
             arch_32bit->init(store);
             configure_arch(arch_32bit);
-            
-            TypeManager::register_windows_types(arch_32bit->types, ArchPolicy::getPointerSize(arch_32bit));
+
+            // A-1: Same guard as 64-bit path — skip Windows types for non-PE targets.
+            if (compiler_id == "windows" || compiler_id == "msvc") {
+                TypeManager::register_windows_types(arch_32bit->types, ArchPolicy::getPointerSize(arch_32bit));
+            }
             load_gdt_for_arch(arch_32bit, false);
-            
+
             arch_32bit_ready = true;
             fission::utils::log_stream() << "[DecompilerContext] Initialized 32-bit architecture" << std::endl;
         } else {

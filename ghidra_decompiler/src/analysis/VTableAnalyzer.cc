@@ -124,14 +124,18 @@ void VTableAnalyzer::scan_vtables(const uint8_t* data, size_t size, uint64_t ima
         vt.rtti_pointer = 0;
         
         if (scan_vtable_at(data, offset, size, image_base, size, ptr_size, vt)) {
-            // Skip if overlaps with existing vtable
+            // D-1: O(log n) overlap check via vtable_index instead of O(n) linear scan.
+            // The previous code iterated all 'vtables' for each candidate — O(n²)
+            // overall. vtable_index is a sorted map, so lower_bound gives us the
+            // nearest predecessor in O(log n) and we check one range overlap.
             bool overlaps = false;
-            for (const auto& existing : vtables) {
-                if (addr >= existing.address && 
-                    addr < existing.address + existing.entries.size() * ptr_size) {
-                    overlaps = true;
-                    break;
-                }
+            auto it = vtable_index.upper_bound(addr);
+            if (it != vtable_index.begin()) {
+                --it;  // largest known vtable address <= addr
+                const VTable& prev = vtables[it->second];
+                uint64_t prev_end = prev.address +
+                                    prev.entries.size() * static_cast<size_t>(ptr_size);
+                overlaps = (addr < prev_end);
             }
             
             if (!overlaps) {

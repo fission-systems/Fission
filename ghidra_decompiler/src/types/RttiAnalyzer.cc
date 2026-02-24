@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <cctype>
+#include "fission/utils/logger.h"  // E-2: use log_stream() instead of std::cerr
 
 // Itanium ABI demangling (available on GCC/Clang)
 #if defined(__GNUC__) || defined(__clang__)
@@ -278,7 +279,8 @@ std::map<uint64_t, std::string> RttiAnalyzer::recover_class_names(
     // B-4: Itanium ABI type_info chain (ELF / Mach-O)
     scan_itanium_rtti(bytes, image_base, is_64bit, result);
 
-    std::cerr << "[RttiAnalyzer] Recovered " << result.size()
+    // E-2: Use log_stream() consistent with the rest of the codebase.
+    fission::utils::log_stream() << "[RttiAnalyzer] Recovered " << result.size()
               << " vtable->class_name mappings" << std::endl;
     return result;
 }

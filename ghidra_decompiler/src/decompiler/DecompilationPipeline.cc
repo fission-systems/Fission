@@ -40,10 +40,6 @@
 #include <iomanip>
 #include <set>
 
-// Global struct registry - define here to avoid linker issues
-// This will be the primary definition for both executable and shared library
-std::map<uint64_t, std::map<int, std::string>> global_struct_registry;
-
 using namespace fission::utils;
 using namespace fission::loader;
 using namespace fission::types;
@@ -791,7 +787,7 @@ std::string DecompilationPipeline::handle_decompile(
     batch_ctx.arch           = arch;
     batch_ctx.type_registry  = &state.type_registry;
     batch_ctx.symbols        = &state.iat_symbols;
-    batch_ctx.struct_registry = &global_struct_registry;
+    batch_ctx.struct_registry = &state.struct_registry;
     batch_ctx.data_start     = state.data_section_start;
     batch_ctx.data_end       = state.data_section_end;
     // Note: executable_ranges left empty — batch_is_addr_executable returns
@@ -830,18 +826,11 @@ std::string DecompilationPipeline::handle_decompile(
     c_code = smart_constant_replace(c_code);
     c_code = post_process_constants(c_code, state.enum_values);
     
-    // Step 6d: GUID substitution
+    // Step 6d: GUID substitution — load on first use, then cache in state
     if (state.guid_map.empty()) {
-        std::vector<std::string> guid_files = {
-            "../../utils/signatures/typeinfo/win32/msvcrt/guids.txt",
-            "../utils/signatures/typeinfo/win32/msvcrt/guids.txt",
-            "./utils/signatures/typeinfo/win32/msvcrt/guids.txt",
-            "../../utils/signatures/typeinfo/win32/msvcrt/iids.txt",
-            "../utils/signatures/typeinfo/win32/msvcrt/iids.txt",
-            "./utils/signatures/typeinfo/win32/msvcrt/iids.txt"
-        };
-        
-        for (const auto& path : guid_files) {
+        // B-1: Single authoritative source: fission::config::get_guid_files()
+        // Eliminates the previous inline list that diverged from PathConfig.cc.
+        for (const auto& path : fission::config::get_guid_files()) {
             if (file_exists(path)) {
                 fission::utils::log_stream() << "[fission_decomp] Loading GUIDs from: " << path << std::endl;
                 std::string content = read_file_content(path);
@@ -852,7 +841,7 @@ std::string DecompilationPipeline::handle_decompile(
             }
         }
         if (!state.guid_map.empty()) {
-            fission::utils::log_stream() << "[fission_decomp] Loaded " << state.guid_map.size() 
+            fission::utils::log_stream() << "[fission_decomp] Loaded " << state.guid_map.size()
                      << " GUIDs/IIDs." << std::endl;
         }
     }

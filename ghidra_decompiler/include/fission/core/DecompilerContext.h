@@ -67,6 +67,10 @@ public:
     // Cross-function type registry for CallGraphAnalyzer
     fission::types::GlobalTypeRegistry type_registry;
 
+    // Struct field registry: address -> (field_offset -> field_name)
+    // Previously global_struct_registry in DecompilationPipeline.cc
+    std::map<uint64_t, std::map<int, std::string>> struct_registry;
+
     // Per-context FID databases for batch prologue scan (replaces static statics)
     std::vector<fission::analysis::FidDatabase> batch_fid_dbs;
     bool batch_fid_dbs_loaded = false;

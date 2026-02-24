@@ -18,8 +18,7 @@
 #include "fission/core/DecompilerContext.h"
 #include "fission/utils/logger.h"
 
-// Global Structure Registry - declared extern, defined in DecompilationPipeline.cc
-extern std::map<uint64_t, std::map<int, std::string>> global_struct_registry;
+// struct_registry is now a member of DecompilerContext (see DecompilerContext.h)
 
 int main(int /*argc*/, char** /*argv*/) {
     // Initialize logger (optional file sink)
