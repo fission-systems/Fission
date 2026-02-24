@@ -274,7 +274,10 @@ def normalize_for_similarity(text: str) -> str:
     # Include trailing \s* so the token doesn't merge with the following identifier.
     text = re.sub(r"\b(?:void|undefined\d*)\s*\*\s*", "OPAQUE_PTR ", text)
     # Normalise variable name prefixes that encode type (pvVar/puVar/pcVar → VAR)
-    text = re.sub(r"\bp[vucslt]Var(\d+)\b", r"VAR\1", text)
+    # Bug-fix: previously produced VAR1 (kept digit) which mismatched iVar1 → VAR.
+    text = re.sub(r"\bp[vucslt]Var[0-9]*\b", "VAR", text)
+    # Also normalise other single-letter-prefix Var names from Fission (e.g. xVar2, mVar3)
+    text = re.sub(r"\b[a-z]Var[0-9]+\b", "VAR", text)
     # Strip explicit integer-width casts that Ghidra PrintC inserts but Fission omits:
     # e.g. (longlong)&local_38 → &local_38, (uint)x → x
     # Run AFTER variable name normalization so VAR tokens are already in place.

@@ -199,14 +199,37 @@ void TypePropagator::propagate_from_call(Funcdata* fd, PcodeOp* call_op) {
                 infer_posix_api_types(call_op, fc_name);
             }
             // Propagate parameter types from FuncCallSpecs prototype.
+            // x86 32-bit cdecl: a double (8B) is pushed as two 4-byte stack
+            // slots, so call_op->getIn() has more entries than proto params.
+            // Track arg_idx and param_idx independently.
+            bool is_32bit_fc = (arch->getDefaultCodeSpace()->getAddrSize() == 4);
             int nparams = fc->numParams();
-            for (int i = 0; i < nparams && (i + 1) < call_op->numInput(); ++i) {
-                ProtoParameter* param = fc->getParam(i);
-                if (!param) continue;
+            int arg_idx_fc = 1; // getIn(0) = call target
+            for (int pi = 0; pi < nparams; ++pi) {
+                if (arg_idx_fc >= call_op->numInput()) break;
+                ProtoParameter* param = fc->getParam(pi);
+                if (!param) { ++arg_idx_fc; continue; }
                 Datatype* pt = param->getType();
-                if (!pt || pt->getMetatype() == TYPE_UNKNOWN) continue;
-                Varnode* arg = call_op->getIn(i + 1);
-                if (arg) propagate_backwards(arg, pt);
+                if (!pt || pt->getMetatype() == TYPE_UNKNOWN) { ++arg_idx_fc; continue; }
+                Varnode* arg = call_op->getIn(arg_idx_fc);
+                if (!arg) { ++arg_idx_fc; continue; }
+                // x86 cdecl double split: 8-byte float param, two 4-byte call inputs
+                if (is_32bit_fc
+                    && pt->getMetatype() == TYPE_FLOAT
+                    && pt->getSize() == 8
+                    && arg->getSize() == 4) {
+                    propagate_backwards(arg, pt);
+                    ++arg_idx_fc;
+                    if (arg_idx_fc < call_op->numInput()) {
+                        Varnode* arg_hi = call_op->getIn(arg_idx_fc);
+                        if (arg_hi && arg_hi->getSize() == 4)
+                            propagate_backwards(arg_hi, pt);
+                        ++arg_idx_fc;
+                    }
+                } else {
+                    propagate_backwards(arg, pt);
+                    ++arg_idx_fc;
+                }
             }
         }
         return;
@@ -229,19 +252,147 @@ void TypePropagator::propagate_from_call(Funcdata* fd, PcodeOp* call_op) {
     const FuncProto& proto = target_func->getFuncProto();
     int num_params = proto.numParams();
     
-    // Map each input parameter to its type
-    for (int i = 1; i < call_op->numInput() && i <= num_params; ++i) {
-        Varnode* arg = call_op->getIn(i);
-        if (!arg) continue;
-        
-        ProtoParameter* param = proto.getParam(i - 1);
-        if (!param) continue;
-        
+    // Map each input parameter to its type.
+    // x86 32-bit cdecl: a double (8B) is pushed as two 4-byte stack slots,
+    // so call_op->getIn() may have more inputs than proto.numParams().
+    // Use independent arg_idx / param_idx counters and consume two call
+    // inputs for every 8-byte float (double) parameter.
+    bool is_32bit = (arch->getDefaultCodeSpace()->getAddrSize() == 4);
+    int arg_idx = 1; // getIn(0) = call target
+    for (int param_idx = 0; param_idx < num_params; ++param_idx) {
+        if (arg_idx >= call_op->numInput()) break;
+        ProtoParameter* param = proto.getParam(param_idx);
+        if (!param) { ++arg_idx; continue; }
         Datatype* param_type = param->getType();
-        if (!param_type || param_type->getMetatype() == TYPE_UNKNOWN) continue;
-        
-        // Propagate this type backwards
-        propagate_backwards(arg, param_type);
+        if (!param_type || param_type->getMetatype() == TYPE_UNKNOWN) { ++arg_idx; continue; }
+        Varnode* arg = call_op->getIn(arg_idx);
+        if (!arg) { ++arg_idx; continue; }
+        // x86 cdecl double split: 8-byte float param, two 4-byte call inputs
+        if (is_32bit
+            && param_type->getMetatype() == TYPE_FLOAT
+            && param_type->getSize() == 8
+            && arg->getSize() == 4) {
+            propagate_backwards(arg, param_type);
+            ++arg_idx;
+            if (arg_idx < call_op->numInput()) {
+                Varnode* arg_hi = call_op->getIn(arg_idx);
+                if (arg_hi && arg_hi->getSize() == 4)
+                    propagate_backwards(arg_hi, param_type);
+                ++arg_idx;
+            }
+        } else {
+            propagate_backwards(arg, param_type);
+            ++arg_idx;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// merge_split_double_args
+// ---------------------------------------------------------------------------
+// x86 32-bit cdecl passes a double (8B IEEE 754) as two consecutive 4-byte
+// stack slots.  The Pcode CPUI_CALL therefore has two 4-byte input varnodes
+// where the callee prototype expects a single 8-byte float.  When both halves
+// are compile-time constants we can combine them into one 8-byte constant
+// so the C printer outputs a single argument (matching Ghidra's behaviour).
+//
+// Byte layout (little-endian x86):
+//   [esp+0] = lo dword  → getIn(arg_idx)
+//   [esp+4] = hi dword  → getIn(arg_idx+1)
+//   combined = (hi << 32) | lo
+// ---------------------------------------------------------------------------
+void TypePropagator::merge_split_double_args(Funcdata* fd) {
+    int addrSize = arch ? (int)arch->getDefaultCodeSpace()->getAddrSize() : -1;
+    fission::utils::log_stream() << "[merge_split_double] ENTER fd="
+              << (fd ? fd->getName() : "null") << " addrSize=" << addrSize << std::endl;
+    // Only applicable on 32-bit targets where double fits into two 4B slots.
+    if (addrSize != 4) {
+        fission::utils::log_stream() << "[merge_split_double] EXIT: not 32-bit" << std::endl;
+        return;
+    }
+
+    // Collect CPUI_CALL ops first — we will modify them during the loop.
+    std::vector<PcodeOp*> call_ops;
+    for (auto iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
+        PcodeOp* op = *iter;
+        if (op && op->code() == CPUI_CALL)
+            call_ops.push_back(op);
+    }
+
+    fission::utils::log_stream() << "[merge_split_double] fd=" << fd->getName()
+              << " call_ops=" << call_ops.size() << std::endl;
+
+    for (PcodeOp* call_op : call_ops) {
+        // Use FuncCallSpecs — works for both regular functions (RAM space)
+        // and imported functions (fspec / external space).  This is the same
+        // mechanism used by propagate_from_call().
+        FuncCallSpecs* fc = fd->getCallSpecs(call_op);
+        if (!fc) continue;
+
+        // FuncCallSpecs inherits from FuncProto — use its methods directly.
+        int num_params = fc->numParams();
+
+        fission::utils::log_stream() << "[merge_split_double]  call=" << fc->getName()
+                  << " numParams=" << num_params
+                  << " numInput=" << call_op->numInput() << std::endl;
+
+        int arg_idx = 1;  // getIn(0) is the call target address
+        for (int pi = 0; pi < num_params; ++pi) {
+            if (arg_idx >= call_op->numInput()) break;
+
+            ProtoParameter* param = fc->getParam(pi);
+            if (!param) { ++arg_idx; continue; }
+
+            Datatype* pt = param->getType();
+            if (!pt) { ++arg_idx; continue; }
+
+            fission::utils::log_stream() << "[merge_split_double]    param[" << pi << "] size=" << pt->getSize()
+                      << " meta=" << (int)pt->getMetatype()
+                      << " arg_idx=" << arg_idx << " arg.size="
+                      << call_op->getIn(arg_idx)->getSize()
+                      << " arg.isConst=" << call_op->getIn(arg_idx)->isConstant()
+                      << std::endl;
+
+            // Is this an 8-byte parameter that may have been split into two
+            // 4-byte inputs on a 32-bit stack?
+            // Covers double (TYPE_FLOAT), long long (TYPE_INT), undefined8
+            // (TYPE_UNKNOWN) — anything 8 bytes that is not a pointer, array,
+            // or struct (those don't get split this way).
+            bool is_split_param = (pt->getSize() == 8
+                                   && pt->getMetatype() != TYPE_PTR
+                                   && pt->getMetatype() != TYPE_ARRAY
+                                   && pt->getMetatype() != TYPE_STRUCT);
+            if (is_split_param && (arg_idx + 1) < call_op->numInput()) {
+                Varnode* lo_vn = call_op->getIn(arg_idx);
+                Varnode* hi_vn = call_op->getIn(arg_idx + 1);
+                // Only merge when both halves are compile-time constants of 4B.
+                if (lo_vn && hi_vn
+                    && lo_vn->isConstant() && hi_vn->isConstant()
+                    && lo_vn->getSize() == 4 && hi_vn->getSize() == 4) {
+
+                    uint64_t lo_val = lo_vn->getOffset() & 0xFFFFFFFFULL;
+                    uint64_t hi_val = hi_vn->getOffset() & 0xFFFFFFFFULL;
+                    uint64_t combined = (hi_val << 32) | lo_val;
+
+                    fission::utils::log_stream() << "[merge_split_double]    MERGING: lo=0x" << std::hex << lo_val
+                              << " hi=0x" << hi_val << " -> 0x" << combined << std::dec << std::endl;
+
+                    // Create an 8-byte constant and replace the two inputs.
+                    Varnode* merged = fd->newConstant(8, combined);
+                    fd->opSetInput(call_op, merged, arg_idx);
+                    fd->opRemoveInput(call_op, arg_idx + 1);
+                    // Consumed one merged slot — advance by 1.
+                    ++arg_idx;
+                    continue;
+                }
+                // Non-constant split double: consume both slots as-is.
+                fission::utils::log_stream() << "[merge_split_double]    non-constant 8B param, skipping 2 slots" << std::endl;
+                arg_idx += 2;
+                continue;
+            }
+
+            ++arg_idx;
+        }
     }
 }
 

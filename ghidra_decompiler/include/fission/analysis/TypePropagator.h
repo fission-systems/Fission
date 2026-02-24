@@ -95,6 +95,13 @@ private:
 public:
     /// Propagate call return types using FuncCallSpecs
     void propagate_call_return_types(ghidra::Funcdata* fd);
+
+    /// x86 32-bit cdecl: merge pairs of 4-byte constant call inputs that
+    /// correspond to a single double (8-byte float) callee parameter.
+    /// Replaces the two inputs with one 8-byte constant and removes the
+    /// extra slot so the C printer emits one argument instead of two.
+    /// Must be called AFTER the final rerun_action() since rerun clears Pcode.
+    void merge_split_double_args(ghidra::Funcdata* fd);
     
     /// Propagate inferred types to update structure definitions
     bool propagate_struct_types(ghidra::Funcdata* fd);

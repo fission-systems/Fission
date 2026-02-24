@@ -730,6 +730,15 @@ AnalysisArtifacts run_analysis_passes(
         rerun_action(fd, action);
     }
 
+    // Post-barrier: x86 32-bit cdecl double-arg synthesis.
+    // merge_split_double_args modifies Pcode (CPUI_CALL inputs) so it must
+    // run AFTER the last rerun_action; rerun_action calls fd->clear() which
+    // would otherwise undo the Pcode modifications.
+    {
+        TypePropagator double_merger(ctx->arch.get(), &ctx->struct_registry);
+        double_merger.merge_split_double_args(fd);
+    }
+
     return artifacts;
 }
 
@@ -984,6 +993,17 @@ AnalysisArtifacts run_analysis_passes(
     if (needs_rerun_stage2) {
         fission::utils::log_stream() << "[AnalysisPipeline] Stage-2 re-run (callgraph/pcode changes)." << std::endl;
         rerun_action(fd, action);
+    }
+
+    // Post-barrier: x86 32-bit cdecl double-arg synthesis.
+    // Must run AFTER the last rerun_action; rerun_action calls fd->clear()
+    // which would undo Pcode modifications made by merge_split_double_args.
+    if (ctx.struct_registry) {
+        TypePropagator double_merger(ctx.arch, ctx.struct_registry);
+        double_merger.merge_split_double_args(fd);
+    } else {
+        TypePropagator double_merger(ctx.arch, nullptr);
+        double_merger.merge_split_double_args(fd);
     }
 
     return artifacts;
