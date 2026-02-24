@@ -6,6 +6,7 @@
 #include "type.hh"
 #include <cstring>
 #include <iostream>
+#include <unordered_set>
 #include "fission/utils/logger.h"
 
 namespace fission {
@@ -16,7 +17,7 @@ using namespace fission::loaders;
 
 /// \brief Register data section symbols in global scope
 ///
-/// Scans data sections (.rdata, .data) for floating-point constants
+/// Scans data sections (.rdata, .data, .rodata, __const) for floating-point constants
 /// and registers them as symbols in the global scope with proper types.
 /// This enables type propagation through memory loads.
 ///
@@ -243,9 +244,18 @@ void registerDataSectionSymbols(fission::ffi::DecompContext* ctx) {
     DataSectionScanner scanner;
     
     // Scan each memory block that looks like data
+    // D-1: Extended from ".rdata" / ".data" (PE) to include ELF and Mach-O read-only sections.
+    static const std::unordered_set<std::string> data_sections = {
+        ".rdata",        // PE read-only data
+        ".data",         // PE writable data
+        ".rodata",       // ELF read-only data
+        "__const",       // Mach-O read-only constants
+        ".data.rel.ro",  // ELF RELRO
+    };
+
     for (const auto& block : ctx->memory_blocks) {
         // Only scan read-only data sections
-        if (block.name != ".rdata" && block.name != ".data") {
+        if (data_sections.count(block.name) == 0) {
             continue;
         }
         

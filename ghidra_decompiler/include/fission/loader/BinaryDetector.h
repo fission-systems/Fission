@@ -30,6 +30,17 @@ enum class ArchType {
 };
 
 /**
+ * Section information extracted from the binary's section table.
+ * Used to locate data, code, and read-only sections during analysis.
+ */
+struct SectionInfo {
+    std::string name;           // Section name (e.g. ".text", ".rdata", "__TEXT")
+    uint64_t    va_addr  = 0;   // Virtual address (load address)
+    uint64_t    va_size  = 0;   // Virtual size in bytes
+    bool is_executable   = false; // True if section is executable (code)
+};
+
+/**
  * Binary detection result
  */
 struct BinaryInfo {
@@ -40,6 +51,7 @@ struct BinaryInfo {
     uint64_t entry_point = 0;
     std::string sleigh_id;      // e.g., "x86:LE:64:default"
     std::string compiler_id;    // e.g., "windows", "gcc", "clang"
+    std::vector<SectionInfo> sections; // C-1: parsed section table
 };
 
 /**

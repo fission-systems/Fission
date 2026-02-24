@@ -2,7 +2,6 @@
 
 #include <iostream>
 #include "fission/utils/logger.h"
-#include <algorithm>
 
 namespace fission {
 namespace types {
@@ -60,12 +59,9 @@ bool GlobalTypeRegistry::is_analyzed(uint64_t func_addr) const {
 }
 
 void GlobalTypeRegistry::mark_for_reanalysis(uint64_t func_addr) {
-    // Only add if not already pending
-    auto it = std::find(pending_reanalysis.begin(), pending_reanalysis.end(), func_addr);
-    if (it == pending_reanalysis.end()) {
-        pending_reanalysis.push_back(func_addr);
-    }
-    
+    // O(1) insert — unordered_set ignores duplicates automatically.
+    pending_reanalysis.insert(func_addr);
+
     // Mark as not analyzed
     if (signatures.count(func_addr)) {
         signatures[func_addr].analyzed = false;
@@ -73,11 +69,11 @@ void GlobalTypeRegistry::mark_for_reanalysis(uint64_t func_addr) {
 }
 
 std::vector<uint64_t> GlobalTypeRegistry::get_pending_reanalysis() const {
-    return pending_reanalysis;
+    return std::vector<uint64_t>(pending_reanalysis.begin(), pending_reanalysis.end());
 }
 
 std::vector<uint64_t> GlobalTypeRegistry::consume_pending_reanalysis() {
-    std::vector<uint64_t> result = pending_reanalysis;
+    std::vector<uint64_t> result(pending_reanalysis.begin(), pending_reanalysis.end());
     pending_reanalysis.clear();
     return result;
 }
@@ -87,7 +83,7 @@ void GlobalTypeRegistry::clear() {
     call_sites.clear();
     callers_map.clear();
     callees_map.clear();
-    pending_reanalysis.clear();
+    pending_reanalysis.clear();  // unordered_set::clear() is O(n)
 }
 
 } // namespace types

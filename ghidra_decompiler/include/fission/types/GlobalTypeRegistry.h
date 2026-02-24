@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <map>
+#include <unordered_set>
 #include <vector>
 #include <string>
 
@@ -123,8 +124,8 @@ private:
     // Caller -> list of callees (for forward propagation)
     std::map<uint64_t, std::vector<uint64_t>> callees_map;
     
-    // Functions needing re-analysis
-    std::vector<uint64_t> pending_reanalysis;
+    // Functions needing re-analysis (unordered_set for O(1) duplicate check)
+    std::unordered_set<uint64_t> pending_reanalysis;
 };
 
 } // namespace types

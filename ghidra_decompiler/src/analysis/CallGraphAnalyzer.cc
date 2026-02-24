@@ -35,7 +35,7 @@ void CallGraphAnalyzer::extract_calls(ghidra::Funcdata* fd) {
         if (!op || op->isDead()) continue;
         
         if (op->code() == ghidra::CPUI_CALL) {
-            // CALL(target, ...)
+            // Direct CALL(target, ...)
             ghidra::Varnode* target = op->getIn(0);
             if (target && target->isConstant()) {
                 uint64_t callee_addr = target->getOffset();
@@ -44,6 +44,21 @@ void CallGraphAnalyzer::extract_calls(ghidra::Funcdata* fd) {
                     registry->register_call(caller_addr, callee_addr, op->getSeqNum().getAddr().getOffset());
                 }
             }
+        } else if (op->code() == ghidra::CPUI_CALLIND) {
+            // A-1: Indirect CALL (function pointer / virtual call).
+            // If the target varnode has been resolved to a constant (e.g. after
+            // constant folding or vtable resolution), we can still record the
+            // edge so that CallGraph type propagation reaches callee functions.
+            ghidra::Varnode* target = op->getIn(0);
+            if (target && target->isConstant()) {
+                uint64_t callee_addr = target->getOffset();
+                if (is_valid_function_addr(callee_addr)) {
+                    all_functions.insert(callee_addr);
+                    registry->register_call(caller_addr, callee_addr, op->getSeqNum().getAddr().getOffset());
+                }
+            }
+            // Non-constant indirect calls (classic virtual dispatch) are not
+            // resolved here; VTableAnalyzer handles those separately.
         }
     }
 }

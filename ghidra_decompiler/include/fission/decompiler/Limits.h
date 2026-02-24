@@ -39,6 +39,12 @@ inline constexpr int k_allocator_flow_depth = 6;
 /// Used to bound the unified prologue scan on very large binaries.
 inline constexpr size_t k_max_prologue_candidates = 500'000;
 
+/// followFlow upper bound for callee pre-analysis (bytes).
+/// A-3: Raises the previous 0x1000 (4 KB) hard-coded limit to 16 KB so that
+/// larger callee functions (factory methods, allocator wrappers) are fully
+/// analysed before their return types are used for type propagation.
+inline constexpr size_t k_callee_follow_limit = 0x4000;
+
 } // namespace decompiler
 } // namespace fission
 

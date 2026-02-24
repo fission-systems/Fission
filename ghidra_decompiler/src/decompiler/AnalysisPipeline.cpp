@@ -12,6 +12,7 @@
 #include "fission/types/GlobalTypeRegistry.h"
 #include "fission/decompiler/PcodeOptimizationBridge.h"
 #include "fission/decompiler/PcodeExtractor.h"
+#include "fission/decompiler/Limits.h"
 #include "fission/ffi/DecompContext.h"
 
 #include "libdecomp.hh"
@@ -346,7 +347,10 @@ static bool infer_callee_pointer_returns(
         bool flow_ok = true;
         try {
             ghidra::Address start(func_addr);
-            ghidra::Address end = start + 0x1000;
+            // A-3: Use k_callee_follow_limit (16 KB) instead of the previous
+            // 4 KB hard-coded limit so larger callee functions are fully
+            // covered during pointer-return type inference.
+            ghidra::Address end = start + fission::decompiler::k_callee_follow_limit;
             callee->followFlow(start, end);
         } catch (const ghidra::LowlevelError& e) {
             fission::utils::log_stream() << "[AnalysisPipeline] followFlow LowlevelError at 0x"
@@ -618,7 +622,7 @@ AnalysisArtifacts run_analysis_passes(
 
                     try {
                         target_fd->clear();
-                        ghidra::Address end_addr = func_addr + 0x1000;
+                        ghidra::Address end_addr = func_addr + fission::decompiler::k_callee_follow_limit;
                         target_fd->followFlow(func_addr, end_addr);
                         action->reset(*target_fd);
                         action->perform(*target_fd);
@@ -819,15 +823,17 @@ AnalysisArtifacts run_analysis_passes(
         return artifacts;
     }
 
+    bool needs_rerun_stage1 = false;
+
     // ---- Structure recovery ------------------------------------------------
     {
         StructureAnalyzer struct_analyzer;
         bool structs_found = struct_analyzer.analyze_function_structures(fd);
         if (structs_found) {
-            fission::utils::log_stream() << "[AnalysisPipeline] Inferred structures, re-running..." << std::endl;
+            fission::utils::log_stream() << "[AnalysisPipeline] Inferred structures, flagging stage-1 re-run..." << std::endl;
             artifacts.inferred_struct_definitions = struct_analyzer.generate_struct_definitions();
             artifacts.captured_structs            = struct_analyzer.get_inferred_structs();
-            rerun_action(fd, action);
+            needs_rerun_stage1 = true;
 
             if (ctx.struct_registry) {
                 const ghidra::FuncProto& proto = fd->getFuncProto();
@@ -851,15 +857,15 @@ AnalysisArtifacts run_analysis_passes(
         tp.clear();
         bool sc = tp.propagate_struct_types(fd);
         if (sc) {
-            fission::utils::log_stream() << "[AnalysisPipeline] Reverse struct propagation, re-running..." << std::endl;
-            rerun_action(fd, action);
+            fission::utils::log_stream() << "[AnalysisPipeline] Reverse struct propagation detected." << std::endl;
+            needs_rerun_stage1 = true;
             tp.clear();
         }
         int ti = tp.propagate(fd);
         bool sc2 = tp.propagate_struct_types(fd);
         if (ti > 0 || sc2) {
-            fission::utils::log_stream() << "[AnalysisPipeline] Type propagation complete, re-running..." << std::endl;
-            rerun_action(fd, action);
+            fission::utils::log_stream() << "[AnalysisPipeline] Type propagation complete (" << ti << " types)." << std::endl;
+            needs_rerun_stage1 = true;
         }
     }
 
@@ -905,9 +911,19 @@ AnalysisArtifacts run_analysis_passes(
     }
 
     if (rerun_for_struct_symbols) {
-        fission::utils::log_stream() << "[AnalysisPipeline] Struct symbols applied, re-running..." << std::endl;
+        fission::utils::log_stream() << "[AnalysisPipeline] Struct symbols applied, flagging stage-1 re-run." << std::endl;
+        needs_rerun_stage1 = true;
+    }
+
+    // ---- Barrier 1: single re-run for all stage-1 analysis changes ---------
+    // B-1: Consolidates structure recovery, type propagation, and global data
+    // symbol registration (previously up to 4 separate rerun_action() calls).
+    if (needs_rerun_stage1) {
+        fission::utils::log_stream() << "[AnalysisPipeline] Stage-1 re-run (structure/type/global-data changes)." << std::endl;
         rerun_action(fd, action);
     }
+
+    bool needs_rerun_stage2 = false;
 
     // ---- Call graph analysis + pending reanalysis --------------------------
     if (ctx.type_registry) {
@@ -947,7 +963,7 @@ AnalysisArtifacts run_analysis_passes(
 
                 try {
                     tfd->clear();
-                    tfd->followFlow(tfa, tfa + 0x1000);
+                    tfd->followFlow(tfa, tfa + fission::decompiler::k_callee_follow_limit);
                     action->reset(*tfd);
                     action->perform(*tfd);
                 } catch (const ghidra::LowlevelError& e) {
@@ -976,8 +992,8 @@ AnalysisArtifacts run_analysis_passes(
 
         if (reanalyzed > 0) {
             fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: reanalyzed "
-                      << reanalyzed << " pending functions" << std::endl;
-            rerun_action(fd, action);
+                      << reanalyzed << " pending functions." << std::endl;
+            needs_rerun_stage2 = true;
         }
     }
 
@@ -1005,8 +1021,8 @@ AnalysisArtifacts run_analysis_passes(
         try {
             std::string opt = fission::decompiler::PcodeOptimizationBridge::extract_and_optimize(fd);
             if (!opt.empty() && fission::decompiler::PcodeExtractor::inject_pcode(fd, opt)) {
-                fission::utils::log_stream() << "[AnalysisPipeline] PcodeOptimization: injected, re-running" << std::endl;
-                rerun_action(fd, action);
+                fission::utils::log_stream() << "[AnalysisPipeline] PcodeOptimization: injected, flagging stage-2 re-run." << std::endl;
+                needs_rerun_stage2 = true;
             }
         } catch (const std::exception& e) {
             fission::utils::log_stream() << "[AnalysisPipeline] PcodeOptimization error: " << e.what() << std::endl;
@@ -1019,6 +1035,14 @@ AnalysisArtifacts run_analysis_passes(
     if (ctx.struct_registry) {
         TypePropagator initial_tp(ctx.arch, ctx.struct_registry);
         initial_tp.propagate_call_return_types(fd);
+    }
+
+    // ---- Barrier 2: single re-run for callgraph + optimisation changes -----
+    // B-1: Consolidates callgraph reanalysis and Pcode bridge injection
+    // (previously up to 2 separate rerun_action() calls).
+    if (needs_rerun_stage2) {
+        fission::utils::log_stream() << "[AnalysisPipeline] Stage-2 re-run (callgraph/pcode changes)." << std::endl;
+        rerun_action(fd, action);
     }
 
     return artifacts;

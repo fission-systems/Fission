@@ -152,10 +152,10 @@ bool resolve_stack_offset(
 
 } // namespace
 
-TypePropagator::TypePropagator(Architecture* a) : arch(a), struct_registry(nullptr), local_count(0) {}
+TypePropagator::TypePropagator(Architecture* a) : arch(a), struct_registry(nullptr), local_count(0), compiler_id_("") {}
 
 TypePropagator::TypePropagator(Architecture* a, std::map<uint64_t, std::map<int, std::string>>* registry) 
-    : arch(a), struct_registry(registry), local_count(0) {}
+    : arch(a), struct_registry(registry), local_count(0), compiler_id_("") {}
 
 TypePropagator::~TypePropagator() {}
 
@@ -182,11 +182,17 @@ void TypePropagator::propagate_from_call(Funcdata* fd, PcodeOp* call_op) {
     
     if (!target_func) return;
     
-    // Get function name for Windows API inference
+    // Get function name for Windows/POSIX API inference
     std::string func_name = target_func->getName();
-    
-    // Enhanced type inference for common Windows APIs
-    infer_windows_api_types(call_op, func_name);
+
+    // A-2: Apply platform-specific type inference rules.
+    // Windows (PE / MSVC / MinGW) gets Windows API patterns.
+    // Everything else (ELF gcc/clang, Mach-O) gets POSIX patterns.
+    if (compiler_id_.empty() || compiler_id_ == "windows" || compiler_id_ == "msvc") {
+        infer_windows_api_types(call_op, func_name);
+    } else {
+        infer_posix_api_types(call_op, func_name);
+    }
     
     // Get prototype
     const FuncProto& proto = target_func->getFuncProto();
@@ -295,6 +301,116 @@ void TypePropagator::infer_windows_api_types(PcodeOp* call_op, const std::string
                                                         arch->getDefaultCodeSpace()->getWordSize());
                 if (str_type) propagate_backwards(str, str_type);
             }
+        }
+        return;
+    }
+}
+
+// A-2: POSIX / standard-C API type inference (ELF and Mach-O targets).
+void TypePropagator::infer_posix_api_types(PcodeOp* call_op, const std::string& func_name) {
+    if (!call_op) return;
+
+    TypeFactory* tf = arch->types;
+    if (!tf) return;
+
+    const int ptr_size  = arch->getDefaultCodeSpace()->getAddrSize();
+    const int word_size = arch->getDefaultCodeSpace()->getWordSize();
+
+    auto make_ptr = [&](type_metatype meta, int bytes) -> Datatype* {
+        Datatype* base = tf->getBase(bytes, meta);
+        if (!base) return nullptr;
+        return tf->getTypePointer(ptr_size, base, word_size);
+    };
+
+    Datatype* void_type = tf->getBase(1, TYPE_VOID);
+    Datatype* void_ptr  = void_type ? tf->getTypePointer(ptr_size, void_type, word_size) : nullptr;
+    Datatype* char_ptr  = make_ptr(TYPE_INT, 1);   // char*
+
+    // open(const char* path, int flags [, mode_t mode]) -> int fd
+    if (func_name == "open" || func_name == "openat") {
+        int path_arg = (func_name == "openat") ? 2 : 1;
+        if (call_op->numInput() > path_arg && char_ptr) {
+            propagate_backwards(call_op->getIn(path_arg), char_ptr);
+        }
+        return;
+    }
+
+    // fopen(const char* path, const char* mode) -> FILE*
+    if (func_name == "fopen" || func_name == "fopen64") {
+        if (call_op->numInput() >= 2 && char_ptr)
+            propagate_backwards(call_op->getIn(1), char_ptr);
+        if (call_op->numInput() >= 3 && char_ptr)
+            propagate_backwards(call_op->getIn(2), char_ptr);
+        return;
+    }
+
+    // read(int fd, void* buf, size_t n) / write(int fd, const void* buf, size_t n)
+    if (func_name == "read"  || func_name == "write" ||
+        func_name == "pread" || func_name == "pwrite") {
+        if (call_op->numInput() >= 3 && void_ptr)
+            propagate_backwards(call_op->getIn(2), void_ptr);
+        return;
+    }
+
+    // fread/fwrite(ptr, size, nmemb, FILE*) / fgets(buf, size, FILE*)
+    if (func_name == "fread" || func_name == "fwrite" || func_name == "fgets") {
+        if (call_op->numInput() >= 2 && void_ptr)
+            propagate_backwards(call_op->getIn(1), void_ptr);
+        return;
+    }
+
+    // memcpy/memmove/memset(void* dst, ...)
+    if (func_name == "memcpy" || func_name == "memmove" ||
+        func_name == "memset" || func_name == "bcopy") {
+        if (call_op->numInput() >= 2 && void_ptr)
+            propagate_backwards(call_op->getIn(1), void_ptr);
+        if ((func_name == "memcpy" || func_name == "memmove" || func_name == "bcopy") &&
+            call_op->numInput() >= 3 && void_ptr)
+            propagate_backwards(call_op->getIn(2), void_ptr);
+        return;
+    }
+
+    // strcmp/strncmp/strcpy/strncpy/strcat(char*, char* [, n])
+    if (func_name == "strcmp"  || func_name == "strncmp"  ||
+        func_name == "strcpy"  || func_name == "strncpy"  ||
+        func_name == "strcat"  || func_name == "strncat"  ||
+        func_name == "strchr"  || func_name == "strstr") {
+        if (call_op->numInput() >= 2 && char_ptr)
+            propagate_backwards(call_op->getIn(1), char_ptr);
+        if (call_op->numInput() >= 3 && char_ptr &&
+            (func_name == "strncmp" || func_name == "strncpy" || func_name == "strncat"))
+            propagate_backwards(call_op->getIn(2), char_ptr);
+        return;
+    }
+
+    // strlen/strnlen(const char* s [, size_t n])
+    if (func_name == "strlen" || func_name == "strnlen") {
+        if (call_op->numInput() >= 2 && char_ptr)
+            propagate_backwards(call_op->getIn(1), char_ptr);
+        return;
+    }
+
+    // printf/fprintf/sprintf/snprintf(const char* fmt, ...)
+    if (func_name == "printf" || func_name == "vprintf") {
+        if (call_op->numInput() >= 2 && char_ptr)
+            propagate_backwards(call_op->getIn(1), char_ptr);
+        return;
+    }
+    if (func_name == "fprintf" || func_name == "vfprintf") {
+        if (call_op->numInput() >= 3 && char_ptr)
+            propagate_backwards(call_op->getIn(2), char_ptr);
+        return;
+    }
+    if (func_name == "sprintf" || func_name == "snprintf" ||
+        func_name == "vsprintf" || func_name == "vsnprintf") {
+        if (call_op->numInput() >= 2 && void_ptr)
+            propagate_backwards(call_op->getIn(1), void_ptr);
+        if (func_name == "snprintf" || func_name == "vsnprintf") {
+            if (call_op->numInput() >= 4 && char_ptr)
+                propagate_backwards(call_op->getIn(3), char_ptr);
+        } else {
+            if (call_op->numInput() >= 3 && char_ptr)
+                propagate_backwards(call_op->getIn(2), char_ptr);
         }
         return;
     }

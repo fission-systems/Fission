@@ -393,8 +393,17 @@ std::string DecompilationPipeline::handle_load_bin(
         
         // Phase 5: Global Data Analyzer
         GlobalDataAnalyzer global_analyzer;
-        uint64_t data_start = image_base + (bin_bytes.size() / 2);  // Rough estimate
-        uint64_t data_end = image_base + bin_bytes.size();
+        // C-1: Prefer first non-executable section from the parsed section table.
+        // Falls back to a rough binary-midpoint estimate when no section map is available.
+        uint64_t data_start = image_base + (bin_bytes.size() / 2);  // Default: rough estimate
+        uint64_t data_end   = image_base + bin_bytes.size();
+        for (const auto& sec : bin_info.sections) {
+            if (!sec.is_executable && sec.va_size > 0) {
+                data_start = sec.va_addr;
+                data_end   = sec.va_addr + sec.va_size;
+                break;
+            }
+        }
         global_analyzer.set_data_section(data_start, data_end);
         state.data_section_start = data_start;
         state.data_section_end = data_end;

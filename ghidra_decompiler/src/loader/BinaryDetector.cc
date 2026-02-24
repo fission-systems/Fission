@@ -187,6 +187,35 @@ BinaryInfo BinaryDetector::parse_pe(const uint8_t* data, size_t size) {
         info.entry_point = info.image_base + *(const uint32_t*)(data + pe_offset + 24 + 16);
     }
     
+    // C-1: Parse PE section table (IMAGE_SECTION_HEADER array).
+    // NumberOfSections at PE+6; SizeOfOptionalHeader at PE+20.
+    // Section table begins immediately after the Optional Header.
+    {
+        uint16_t num_sections   = *(const uint16_t*)(data + pe_offset + 6);
+        uint16_t opt_hdr_size   = *(const uint16_t*)(data + pe_offset + 20);
+        size_t   sec_table_base = pe_offset + 24 + (size_t)opt_hdr_size;
+
+        for (uint16_t i = 0; i < num_sections; ++i) {
+            size_t sec_off = sec_table_base + (size_t)i * 40;
+            if (sec_off + 40 > size) break;
+
+            SectionInfo sec;
+            char raw_name[9] = {};
+            memcpy(raw_name, data + sec_off, 8);
+            sec.name      = raw_name;                                     // e.g. ".text\0\0\0"
+            sec.va_size   = *(const uint32_t*)(data + sec_off + 8);      // VirtualSize
+            uint32_t rva  = *(const uint32_t*)(data + sec_off + 12);     // VirtualAddress (RVA)
+            sec.va_addr   = info.image_base + rva;
+            if (sec.va_size == 0)
+                sec.va_size = *(const uint32_t*)(data + sec_off + 16);   // SizeOfRawData fallback
+            uint32_t ch   = *(const uint32_t*)(data + sec_off + 36);     // Characteristics
+            sec.is_executable = ((ch & 0x20000000u) != 0)                // IMAGE_SCN_MEM_EXECUTE
+                             || ((ch & 0x00000020u) != 0);               // IMAGE_SCN_CNT_CODE
+            if (!sec.name.empty() && sec.va_size > 0)
+                info.sections.push_back(std::move(sec));
+        }
+    }
+
     fission::utils::log_stream() << "[BinaryDetector] PE: " << (info.is_64bit ? "64-bit" : "32-bit")
               << " Arch=" << info.sleigh_id << std::endl;
     
@@ -239,6 +268,69 @@ BinaryInfo BinaryDetector::parse_elf(const uint8_t* data, size_t size) {
         info.entry_point = *(const uint32_t*)(data + 24);
     }
     
+    // C-1: Parse ELF section headers.
+    // We replicate the read helpers here so this function remains self-contained.
+    {
+        if (size >= 64) {
+            bool isle = (data[5] == 1); // ELFDATA2LSB
+            auto rd16e = [&](size_t off) -> uint16_t {
+                if (off + 2 > size) return 0;
+                return isle ? (uint16_t)(data[off] | (data[off+1] << 8))
+                            : (uint16_t)((data[off] << 8) | data[off+1]);
+            };
+            auto rd32e = [&](size_t off) -> uint32_t {
+                if (off + 4 > size) return 0;
+                if (isle) return (uint32_t)(data[off]|(data[off+1]<<8)|(data[off+2]<<16)|(data[off+3]<<24));
+                return (uint32_t)((data[off]<<24)|(data[off+1]<<16)|(data[off+2]<<8)|data[off+3]);
+            };
+            auto rd64e = [&](size_t off) -> uint64_t {
+                if (off + 8 > size) return 0;
+                uint64_t lo = rd32e(off), hi = rd32e(off + 4);
+                return isle ? lo | (hi << 32) : (lo << 32) | hi;
+            };
+            auto rdptr = [&](size_t off) -> uint64_t {
+                return info.is_64bit ? rd64e(off) : (uint64_t)rd32e(off);
+            };
+
+            uint64_t shoff     = info.is_64bit ? rd64e(40)  : (uint64_t)rd32e(32);
+            uint16_t shentsize = info.is_64bit ? rd16e(58)  : rd16e(46);
+            uint16_t shnum     = info.is_64bit ? rd16e(60)  : rd16e(48);
+            uint16_t shstrndx  = info.is_64bit ? rd16e(62)  : rd16e(50);
+
+            if (shoff > 0 && shentsize > 0 && shnum > 0 && shstrndx < shnum &&
+                shoff + (uint64_t)shnum * shentsize <= size) {
+
+                size_t   strtab_shdr  = (size_t)(shoff + (uint64_t)shstrndx * shentsize);
+                uint64_t sh_name_off  = info.is_64bit ? rd64e(strtab_shdr + 24) : (uint64_t)rd32e(strtab_shdr + 16);
+                uint64_t sh_name_size = info.is_64bit ? rd64e(strtab_shdr + 32) : (uint64_t)rd32e(strtab_shdr + 20);
+
+                for (uint16_t i = 0; i < shnum; ++i) {
+                    size_t   shdr       = (size_t)(shoff + (uint64_t)i * shentsize);
+                    uint32_t sh_name    = rd32e(shdr);
+                    // ELF64: sh_flags@8(8), sh_addr@16(8), sh_size@32(8)
+                    // ELF32: sh_flags@8(4), sh_addr@12(4), sh_size@20(4)
+                    uint64_t sh_flags   = rdptr(shdr + 8);
+                    uint64_t sh_addr    = rdptr(shdr + (info.is_64bit ? 16 : 12));
+                    uint64_t sh_size    = rdptr(shdr + (info.is_64bit ? 32 : 20));
+
+                    uint64_t name_pos = sh_name_off + sh_name;
+                    if (name_pos >= size || sh_size == 0) continue;
+
+                    // Bound the name string
+                    size_t name_max = (size_t)std::min((uint64_t)(size - name_pos), (uint64_t)64);
+                    const char* raw = (const char*)(data + name_pos);
+                    SectionInfo sec;
+                    sec.name          = std::string(raw, strnlen(raw, name_max));
+                    sec.va_addr       = sh_addr;
+                    sec.va_size       = sh_size;
+                    sec.is_executable = (sh_flags & 0x4u) != 0; // SHF_EXECINSTR
+                    if (!sec.name.empty())
+                        info.sections.push_back(std::move(sec));
+                }
+            }
+        }
+    }
+
     fission::utils::log_stream() << "[BinaryDetector] ELF: " << (info.is_64bit ? "64-bit" : "32-bit")
               << " Arch=" << info.sleigh_id << std::endl;
     
@@ -405,34 +497,59 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
         if (cmdsize < 8 || lc_off + cmdsize > lc_end) break;
 
         if (cmd == LC_SEGMENT_64 && lc_off + 64 <= lc_end) {
-            // segment_command_64: cmd(4) cmdsize(4) segname[16] vmaddr(8) ...
+            // segment_command_64: cmd(4) cmdsize(4) segname[16] vmaddr(8) vmsize(8) ...
             const char* segname = (const char*)(data + lc_off + 8);
-            if (std::strncmp(segname, "__TEXT", 6) == 0) {
-                uint64_t vmaddr = *(const uint64_t*)(data + lc_off + 24);
-                if (is_big_endian) {
+            uint64_t vmaddr = *(const uint64_t*)(data + lc_off + 24);
+            uint64_t vmsize = *(const uint64_t*)(data + lc_off + 32);
+            if (is_big_endian) {
 #ifdef _MSC_VER
-                    vmaddr = _byteswap_uint64(vmaddr);
+                vmaddr = _byteswap_uint64(vmaddr);
+                vmsize = _byteswap_uint64(vmsize);
 #else
-                    vmaddr = __builtin_bswap64(vmaddr);
+                vmaddr = __builtin_bswap64(vmaddr);
+                vmsize = __builtin_bswap64(vmsize);
 #endif
-                }
+            }
+            // Record image_base from __TEXT
+            if (std::strncmp(segname, "__TEXT", 6) == 0)
                 info.image_base = vmaddr;
-                break;
+            // C-1: Record section info for every segment
+            if (vmsize > 0) {
+                SectionInfo sec;
+                char raw[17] = {};
+                memcpy(raw, segname, 16);
+                sec.name          = raw;
+                sec.va_addr       = vmaddr;
+                sec.va_size       = vmsize;
+                sec.is_executable = (std::strncmp(segname, "__TEXT", 6) == 0);
+                info.sections.push_back(std::move(sec));
             }
         } else if (cmd == LC_SEGMENT && lc_off + 56 <= lc_end) {
-            // segment_command (32-bit): cmd(4) cmdsize(4) segname[16] vmaddr(4) ...
+            // segment_command (32-bit): cmd(4) cmdsize(4) segname[16] vmaddr(4) vmsize(4) ...
             const char* segname = (const char*)(data + lc_off + 8);
-            if (std::strncmp(segname, "__TEXT", 6) == 0) {
-                uint32_t vmaddr32 = *(const uint32_t*)(data + lc_off + 24);
-                if (is_big_endian) {
+            uint32_t vmaddr32 = *(const uint32_t*)(data + lc_off + 24);
+            uint32_t vmsize32 = *(const uint32_t*)(data + lc_off + 28);
+            if (is_big_endian) {
 #ifdef _MSC_VER
-                    vmaddr32 = _byteswap_ulong(vmaddr32);
+                vmaddr32 = _byteswap_ulong(vmaddr32);
+                vmsize32 = _byteswap_ulong(vmsize32);
 #else
-                    vmaddr32 = __builtin_bswap32(vmaddr32);
+                vmaddr32 = __builtin_bswap32(vmaddr32);
+                vmsize32 = __builtin_bswap32(vmsize32);
 #endif
-                }
+            }
+            if (std::strncmp(segname, "__TEXT", 6) == 0)
                 info.image_base = (uint64_t)vmaddr32;
-                break;
+            // C-1: Record section info for every segment
+            if (vmsize32 > 0) {
+                SectionInfo sec;
+                char raw[17] = {};
+                memcpy(raw, segname, 16);
+                sec.name          = raw;
+                sec.va_addr       = (uint64_t)vmaddr32;
+                sec.va_size       = (uint64_t)vmsize32;
+                sec.is_executable = (std::strncmp(segname, "__TEXT", 6) == 0);
+                info.sections.push_back(std::move(sec));
             }
         }
 

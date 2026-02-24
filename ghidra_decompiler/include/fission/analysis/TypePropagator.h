@@ -40,6 +40,10 @@ private:
     
     // Iteration counter for type propagation (Ghidra uses max 7)
     int local_count;
+
+    // A-2: compiler/platform identifier ("windows", "gcc", "clang", ...).
+    // Determines which platform-specific API type inference rules apply.
+    std::string compiler_id_;
     
     /// Get varnode unique ID for tracking
     uint64_t get_varnode_id(ghidra::Varnode* vn);
@@ -49,6 +53,9 @@ private:
     
     /// Infer types from known Windows API patterns
     void infer_windows_api_types(ghidra::PcodeOp* call_op, const std::string& func_name);
+
+    /// A-2: Infer types from POSIX / standard C API patterns (ELF / Mach-O)
+    void infer_posix_api_types(ghidra::PcodeOp* call_op, const std::string& func_name);
     
     /// Propagate type backwards through assignment chain
     void propagate_backwards(ghidra::Varnode* vn, ghidra::Datatype* type);
@@ -87,6 +94,9 @@ public:
     TypePropagator(ghidra::Architecture* arch, 
                    std::map<uint64_t, std::map<int, std::string>>* registry);
     ~TypePropagator();
+
+    /// A-2: Set compiler/platform identifier for platform-specific API inference.
+    void set_compiler_id(const std::string& id) { compiler_id_ = id; }
     
     /// \brief Run type propagation on a function
     /// \param fd The function to analyze
