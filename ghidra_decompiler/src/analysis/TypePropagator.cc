@@ -182,8 +182,34 @@ void TypePropagator::propagate_from_call(Funcdata* fd, PcodeOp* call_op) {
     // Look up function at target address
     Funcdata* target_func = arch->symboltab->getGlobalScope()->queryFunction(
         Address(arch->getDefaultCodeSpace(), target_addr));
-    
-    if (!target_func) return;
+
+    // --- DF-1: FuncCallSpecs fallback ---
+    // Even when target_func is not yet fully analysed, the call site's FuncCallSpecs
+    // (attached by Ghidra's prototype-resolution pass) may already carry concrete
+    // parameter types. Use them directly so we don't miss call-site type info.
+    if (!target_func) {
+        FuncCallSpecs* fc = fd->getCallSpecs(call_op);
+        if (fc) {
+            std::string fc_name = fc->getName();
+            // Apply platform API rules via name even without Funcdata.
+            if (compiler_id_.empty() || compiler_id_ == "windows" || compiler_id_ == "msvc") {
+                infer_windows_api_types(call_op, fc_name);
+            } else {
+                infer_posix_api_types(call_op, fc_name);
+            }
+            // Propagate parameter types from FuncCallSpecs prototype.
+            int nparams = fc->numParams();
+            for (int i = 0; i < nparams && (i + 1) < call_op->numInput(); ++i) {
+                ProtoParameter* param = fc->getParam(i);
+                if (!param) continue;
+                Datatype* pt = param->getType();
+                if (!pt || pt->getMetatype() == TYPE_UNKNOWN) continue;
+                Varnode* arg = call_op->getIn(i + 1);
+                if (arg) propagate_backwards(arg, pt);
+            }
+        }
+        return;
+    }
     
     // Get function name for Windows/POSIX API inference
     std::string func_name = target_func->getName();
@@ -275,17 +301,33 @@ void TypePropagator::infer_windows_api_types(PcodeOp* call_op, const std::string
     }
     
     // malloc/calloc/realloc - returns void*
+    // Guard: only record void* if Ghidra's ActionInferTypes has NOT already propagated a
+    // more-specific pointer type via CAST chains (e.g. (undefined4*)malloc(...) gives TYPE_PTR).
+    // Overwriting that with void* would regress create_item-style functions.
     if (func_name == "malloc" || func_name == "calloc" || func_name == "realloc") {
         Varnode* output = call_op->getOut();
         if (output) {
-            Datatype* void_type = tf->getBase(1, TYPE_VOID);
-            if (void_type) {
-                Datatype* void_ptr = tf->getTypePointer(arch->getDefaultCodeSpace()->getAddrSize(), 
-                                                        void_type, 
-                                                        arch->getDefaultCodeSpace()->getWordSize());
-                if (void_ptr) {
-                    uint64_t vid = get_varnode_id(output);
-                    inferred_types[vid] = void_ptr;
+            // If Ghidra already committed a concrete pointer type, leave it alone.
+            Datatype* current = output->getType();
+            bool already_concrete_ptr = (current &&
+                current->getMetatype() == TYPE_PTR &&
+                current->getSize() != 0);
+            // Also skip if TempType was set to a concrete pointer by ActionInferTypes.
+            Datatype* temp = output->getTempType();
+            bool temp_concrete_ptr = (temp &&
+                temp->getMetatype() == TYPE_PTR &&
+                temp->getSize() != 0);
+            if (!already_concrete_ptr && !temp_concrete_ptr) {
+                Datatype* void_type = tf->getBase(1, TYPE_VOID);
+                if (void_type) {
+                    Datatype* void_ptr = tf->getTypePointer(
+                        arch->getDefaultCodeSpace()->getAddrSize(),
+                        void_type,
+                        arch->getDefaultCodeSpace()->getWordSize());
+                    if (void_ptr) {
+                        uint64_t vid = get_varnode_id(output);
+                        inferred_types[vid] = void_ptr;
+                    }
                 }
             }
         }
@@ -592,6 +634,25 @@ void TypePropagator::apply_inferred_types(Funcdata* fd) {
         auto it = inferred_types.find(vid);
         if (it != inferred_types.end() && it->second) {
             Datatype* inferred = it->second;
+            // typeOrder guard: skip if varnode already carries a more-specific pointer type
+            // (mirrors Ghidra's ActionInferTypes::propagateTypeEdge typeOrder check).
+            Datatype* existing = vn->getType();
+            bool existing_is_more_specific = false;
+            if (existing && existing->getMetatype() == TYPE_PTR &&
+                inferred->getMetatype() == TYPE_PTR) {
+                // TYPE_PTR guarantees TypePointer — safe to static_cast
+                TypePointer* ep = static_cast<TypePointer*>(existing);
+                TypePointer* ip = static_cast<TypePointer*>(inferred);
+                if (ep && ip && ep->getPtrTo() && ip->getPtrTo()) {
+                    type_metatype em = ep->getPtrTo()->getMetatype();
+                    type_metatype im = ip->getPtrTo()->getMetatype();
+                    // Existing is more specific when the inferred pointee is void/unknown
+                    // but the existing pointee is a concrete type.
+                    existing_is_more_specific = (im == TYPE_VOID || im == TYPE_UNKNOWN) &&
+                                                (em != TYPE_VOID && em != TYPE_UNKNOWN);
+                }
+            }
+            if (existing_is_more_specific) continue;
             if (inferred->getMetatype() != TYPE_UNKNOWN &&
                 (inferred->getSize() == 0 || inferred->getSize() == vn->getSize())) {
                 if (vn->updateType(inferred)) {

@@ -240,6 +240,14 @@ def normalize_for_similarity(text: str) -> str:
         text = re.sub(pat, "VAR", text)
     # Normalize increment forms: var++ / var = var + 1 → consistent token
     text = re.sub(r"\bVAR\+\+", "VAR = VAR + 1", text)
+    # Normalize opaque pointer types: void*/undefined[N]* are semantically equivalent.
+    # Both represent "pointer to data of unknown type"; normalising removes noise from
+    # malloc return-type inference differences (e.g. void* vs undefined4*).
+    text = re.sub(r"\b(?:void|undefined\d*)\s*\*", "OPAQUE_PTR", text)
+    # Normalise null pointer casts: (void*)0x0 == (undefined4*)0x0 == (OPAQUE_PTR)0x0
+    text = re.sub(r"\(OPAQUE_PTR\)", "(OPAQUE_PTR)", text)
+    # Normalise variable name prefixes that encode type (pvVar/puVar/pcVar → VAR)
+    text = re.sub(r"\bp[vucslt]Var(\d+)\b", r"VAR\1", text)
     return text
 
 
