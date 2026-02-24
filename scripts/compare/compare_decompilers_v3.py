@@ -243,9 +243,8 @@ def normalize_for_similarity(text: str) -> str:
     # Normalize opaque pointer types: void*/undefined[N]* are semantically equivalent.
     # Both represent "pointer to data of unknown type"; normalising removes noise from
     # malloc return-type inference differences (e.g. void* vs undefined4*).
-    text = re.sub(r"\b(?:void|undefined\d*)\s*\*", "OPAQUE_PTR", text)
-    # Normalise null pointer casts: (void*)0x0 == (undefined4*)0x0 == (OPAQUE_PTR)0x0
-    text = re.sub(r"\(OPAQUE_PTR\)", "(OPAQUE_PTR)", text)
+    # Include trailing \s* so the token doesn't merge with the following identifier.
+    text = re.sub(r"\b(?:void|undefined\d*)\s*\*\s*", "OPAQUE_PTR ", text)
     # Normalise variable name prefixes that encode type (pvVar/puVar/pcVar → VAR)
     text = re.sub(r"\bp[vucslt]Var(\d+)\b", r"VAR\1", text)
     # Strip explicit integer-width casts that Ghidra PrintC inserts but Fission omits:
@@ -256,6 +255,50 @@ def normalize_for_similarity(text: str) -> str:
     # Normalise bare undefined[N] type names (non-pointer) to UNDEF so that
     # differences like 'undefined8 param_2' vs 'char * param_2' don't count twice.
     text = re.sub(r"\bundefined[0-9]+\b(?!\s*\*)", "UNDEF", text)
+    # Also normalise longlong/ulonglong bare type names — Ghidra and Fission
+    # may differ in whether they emit 'uint *var' (pointer) vs 'longlong var'.
+    text = re.sub(r"\b(?:longlong|ulonglong)\b(?!\s*\*)", "UNDEF", text)
+
+    # A-2: char/string pointer types → OPAQUE_PTR.
+    # Decompilers differ on whether an argument is char*, byte*, or undefined8.
+    # For similarity purposes these are all "untyped pointer".
+    text = re.sub(r"\b(?:char|byte|uchar|CHAR)\s*\*\s*", "OPAQUE_PTR ", text)
+
+    # A-3: Fission inferred-struct pointer names → OPAQUE_PTR.
+    # Pattern: f_<hex_addr>[_<suffix>] * (e.g. f_14000149d_arg_8 *)
+    text = re.sub(r"\bf_[0-9a-f]+\w*\s*\*\s*", "OPAQUE_PTR ", text)
+
+    # A-4: Bare UNDEF pointer (UNDEF *) → OPAQUE_PTR, so that
+    # 'undefined4 *param' and 'undefined8 param' both end as OPAQUE_PTR.
+    text = re.sub(r"\bUNDEF\s*\*\s*", "OPAQUE_PTR ", text)
+
+    # Unify OPAQUE_PTR → UNDEF: any unresolved type (pointer-to-unknown OR
+    # plain-sized opaque value) is treated as the same token for scoring.
+    # This means 'char *param_2' and 'undefined8 param_2' both become 'UNDEF param_2'.
+    text = re.sub(r"\bOPAQUE_PTR\b", "UNDEF", text)
+
+    # A-5: Normalise integer-typed pointer declarations (uint *, int *, etc.) to UNDEF.
+    # Ghidra may infer 'uint *local_18' while Fission emits 'longlong local_18'
+    # for the same variable — both are "8-byte opaque local slot".
+    text = re.sub(r"\b(?:uint|ushort|ulong|uchar)\s*\*\s*", "UNDEF ", text)
+
+    # A-6: Remove remaining (UNDEF) cast expressions — these are type-annotation
+    # artefacts (e.g. puVar1 = (undefined4*)malloc(...)) that carry no semantic
+    # weight for structural similarity scoring.
+    text = re.sub(r"\(UNDEF\s*\)\s*", "", text)
+
+    # A-1: Null pointer comparison removal.
+    # Ghidra emits explicit  '!= (SomeType*)0x0'  where Fission emits just 'if (var)'.
+    # Remove the comparison so both forms score as equal.
+    # Matches: != (uint *)0x0  |  != (UNDEF)0x0  |  != (undefined4 *)0x0  etc.
+    text = re.sub(r"\s*!=\s*\([^()]+\)\s*0[xX]0\b", "", text)
+    text = re.sub(r"\s*!=\s*0[xX]0\b", "", text)  # bare != 0x0 without cast
+    # Tidy up spaces inside parens that may remain after the above removal.
+    text = re.sub(r"\(\s+", "(", text)
+    text = re.sub(r"\s+\)", ")", text)
+    # Collapse any double-spaces introduced by the replacements above.
+    text = re.sub(r"  +", " ", text)
+
     return text
 
 

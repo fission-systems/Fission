@@ -192,7 +192,8 @@ void TypePropagator::propagate_from_call(Funcdata* fd, PcodeOp* call_op) {
         if (fc) {
             std::string fc_name = fc->getName();
             // Apply platform API rules via name even without Funcdata.
-            if (compiler_id_.empty() || compiler_id_ == "windows" || compiler_id_ == "msvc") {
+            if (compiler_id_.empty() || compiler_id_ == "windows" ||
+                compiler_id_ == "msvc"  || compiler_id_ == "mingw") {
                 infer_windows_api_types(call_op, fc_name);
             } else {
                 infer_posix_api_types(call_op, fc_name);
@@ -217,7 +218,8 @@ void TypePropagator::propagate_from_call(Funcdata* fd, PcodeOp* call_op) {
     // A-2: Apply platform-specific type inference rules.
     // Windows (PE / MSVC / MinGW) gets Windows API patterns.
     // Everything else (ELF gcc/clang, Mach-O) gets POSIX patterns.
-    if (compiler_id_.empty() || compiler_id_ == "windows" || compiler_id_ == "msvc") {
+    if (compiler_id_.empty() || compiler_id_ == "windows" ||
+        compiler_id_ == "msvc"  || compiler_id_ == "mingw") {
         infer_windows_api_types(call_op, func_name);
     } else {
         infer_posix_api_types(call_op, func_name);
@@ -1601,7 +1603,8 @@ void TypePropagator::seed_before_action(Funcdata* fd) {
         // those into TypeRecommendations.
         size_t before = inferred_types.size();
 
-        if (compiler_id_.empty() || compiler_id_ == "windows" || compiler_id_ == "msvc") {
+        if (compiler_id_.empty() || compiler_id_ == "windows" ||
+            compiler_id_ == "msvc"  || compiler_id_ == "mingw") {
             infer_windows_api_types(op, func_name);
         } else {
             infer_posix_api_types(op, func_name);
