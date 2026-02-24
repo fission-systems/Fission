@@ -1,0 +1,44 @@
+name: EverPlanet_KR
+description: EverPlanet Korea client installer — PE32 x86, MSVC 2010, fully stripped
+binary: EverPlanet_KR.exe
+source: Nexon Korea (commercial — do not redistribute)
+license: Proprietary
+
+binary_info:
+  format: PE32
+  arch: x86
+  compiler: MSVC 2010 (v100 runtime)
+  optimization: /O2
+  stripped: true
+  size_kb: 11264
+  sections:
+    - name: .text
+      size_kb: 9625
+      va_start: "0x401000"
+    - name: .rdata
+    - name: .data
+    - name: .rsrc
+    - name: .import
+    - name: .tls
+  entry_point_va: "0xC2CC03"   # deep into .text (CRT startup)
+  image_base: "0x400000"
+
+expected:
+  function_count_min: 15000
+  discovery_method: linear_sweep   # COFF symbols absent → prologue scan
+  first_code_va: "0x401070"        # first real user function
+
+test_functions:
+  - va: "0x401070"
+    description: "MSVC C++ method with SEH frame and virtual call (@0x30)"
+    expected_calling_conv: __fastcall
+    expected_features:
+      - seh_frame
+      - virtual_call
+      - interlocked_operations
+
+notes:
+  - "Binary is not committed (samples/.gitignore excludes *.exe)."
+  - "Function prologues: 0x55 0x8B 0xEC (push ebp; mov ebp,esp) — classic MSVC x86."
+  - "int3 (0xCC) padding between functions — confirms MSVC."
+  - "Pre-sweep result: 337 functions (all imports + 1 entry). Post-sweep: 20,062."

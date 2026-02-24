@@ -1,0 +1,39 @@
+name: 7zr
+description: 7-Zip standalone console binary (PE32 x86, MSVC, fully stripped)
+binary: 7zr.exe
+source: https://www.7-zip.org/download.html
+license: LGPL-2.1 / BSD
+
+binary_info:
+  format: PE32
+  arch: x86
+  compiler: MSVC
+  optimization: /O2
+  stripped: true
+  size_kb: 587
+
+expected:
+  function_count_min: 250
+  discovery_method: linear_sweep   # COFF symbols absent → prologue scan
+  first_function_va: "0x401000"
+
+test_functions:
+  - va: "0x401000"
+    description: "command-line argument parser (wide string tokenizer)"
+    expected_calling_conv: __fastcall
+    expected_features:
+      - loop
+      - branch
+      - struct_args
+
+  - va: "0x404880"
+    description: "pattern matcher with __thiscall"
+    expected_calling_conv: __thiscall
+    expected_features:
+      - nested_loop
+      - struct_field_access
+
+notes:
+  - "Binary is not committed (samples/.gitignore excludes *.exe)."
+  - "Download 7zr.exe from https://www.7-zip.org/a/7zr.exe and place here."
+  - "Good baseline for x86 linear sweep: 262 sub_XXXXXXXX discovered from 587 KB .text section."
