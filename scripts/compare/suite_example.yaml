@@ -15,28 +15,59 @@
 name: "decomp-quality-v1"
 
 binaries:
-  - path: "examples/comparison_test_x64"
+  - path: "examples/binaries/comparison_test_x64.exe"
     image_base: "0x140000000"
     functions:
-      - address: "0x140001680"
-        name: "main_or_entry"
+      - address: "0x140001450"
+        name: "add"
+        expected_patterns:
+          - "return"
+
+      - address: "0x140001464"
+        name: "multiply"
+        expected_patterns:
+          - "return"
+
+      - address: "0x140001477"
+        name: "print_message"
+        expected_patterns:
+          - "printf("
+
+      - address: "0x14000149d"
+        name: "init_item"
+        expected_patterns:
+          - "->"
+          - "="
+
+      - address: "0x14000156a"
+        name: "create_item"
+        expected_patterns:
+          - "malloc("
+          - "->"
+          - "return"
+
+      - address: "0x1400015e2"
+        name: "calculate_discount"
         expected_patterns:
           - "if ("
-          - "->"
+          - "return"
+
+      - address: "0x140001633"
+        name: "sum_array"
+        expected_patterns:
+          - "for ("
+          - "return"
+
+      - address: "0x140001680"
+        name: "main"
+        expected_patterns:
+          - "if ("
           - "printf("
-        # runs: 3  # uncomment to repeat 3 times for timing stats
+          - "return"
 
-      # Add more functions here as the suite grows:
-      # - address: "0x140002000"
-      #   name: "some_func"
-      #   expected_patterns:
-      #     - "switch ("
-      #     - "item->"
-      #     - "malloc("
-
-  # Add more binaries here:
-  # - path: "examples/some_elf"
+  # C++ binary (virtual functions, vtables)
+  # - path: "examples/binaries/comparison_test_cpp_x64.exe"
   #   functions:
-  #     - address: "0x401000"
-  #       name: "elf_main"
-  #       expected_patterns: ["argc", "argv"]
+  #     - address: "0x..."
+  #       name: "ctor"
+  #       expected_patterns: ["->", "virtual"]
