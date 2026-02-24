@@ -34,6 +34,7 @@
 | `ghidra/convert_fidb_batch.sh` | FIDB → FIDf 배치 변환 | 함수 식별 DB 변환 |
 | `test/test_fid.sh` | FID 데이터베이스 로딩 테스트 | 함수 식별 데이터베이스 검증 |
 | `test/run_tests.sh` | 테스트 바이너리 실행 검증 | 빌드 아티팩트 동작 확인 |
+| `test/decomp_smoke_ci.sh` | Fission 단독 디컴파일 스모크 (Ghidra 불필요) | CI용: 한 함수 디컴파일 exit 0 확인 |
 | `test/run_complex_tests.py` | 복합 디컴파일 테스트 자동화 | 회귀 테스트 및 HTML 리포트 |
 | `test/test_cfg_structurizer.py` | CFG 구조화 알고리즘 단위 테스트 | CFG 분석 검증 |
 | `test/test_postprocessor.py` | 후처리기 단위 테스트 | 디컴파일 후처리 검증 |
@@ -603,6 +604,7 @@ scripts/
 ├── lint/
 │   └── cppcheck.sh
 └── test/
+    ├── decomp_smoke_ci.sh
     ├── test_fid.sh
     ├── run_tests.sh
     ├── run_complex_tests.py
@@ -626,12 +628,16 @@ done
 
 ### CI/CD 통합
 
+- **CI (매 커밋/PR)**  
+  - Ghidra 없이 **Fission 단독 디컴파일 스모크**만 실행:  
+    `scripts/test/decomp_smoke_ci.sh` (빌드 후 한 주소에 대해 `fission_cli --decomp` 실행, exit 0 확인).
+- **풀 품질 벤치마크 (Ghidra)**  
+  - `compare_decompilers_v2.sh` / `run_complex_tests.py` 는 **로컬** 또는 **스케줄/수동** 워크플로에서만 실행하는 것을 권장합니다.
+
 ```yaml
-# GitHub Actions example
-- name: Compare Decompilers
-  run: |
-    ./scripts/compare/compare_decompilers_v2.sh examples/binary 0x401000 results/comparison.json
-    cat results/comparison.json | jq .
+# GitHub Actions example – lightweight smoke (no Ghidra)
+- name: Fission decompilation smoke test
+  run: ./scripts/test/decomp_smoke_ci.sh
 ```
 
 ### 개발 팁

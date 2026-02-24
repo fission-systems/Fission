@@ -76,52 +76,33 @@ std::string PostProcessor::convert_integer_constants(std::string c_code) {
 }
 
 std::string PostProcessor::convert_while_to_for(std::string c_code) {
-    // Convert compound assignment operators
-    
-    // Convert "i = i + 1" to "i++"
-    std::regex increment_pattern(R"((\w+)\s*=\s*\1\s*\+\s*1\s*;)");
+    // Static regex objects — compiled once at first call (C++11 magic statics)
+    static const std::regex increment_pattern(R"((\.\w+|\w+)\s*=\s*\1\s*\+\s*1\s*;)");
+    static const std::regex decrement_pattern(R"((\.\w+|\w+)\s*=\s*\1\s*-\s*1\s*;)");
+    static const std::regex add_assign_pattern(R"((\w+)\s*=\s*\1\s*\+\s*([^;]+);)");
+    static const std::regex sub_assign_pattern(R"((\w+)\s*=\s*\1\s*-\s*([^;]+);)");
+    static const std::regex mul_assign_pattern(R"((\w+)\s*=\s*\1\s*\*\s*([^;]+);)");
+    static const std::regex or_assign_pattern(R"((\w+)\s*=\s*\1\s*\|\s*([^;]+);)");
+    static const std::regex and_assign_pattern(R"((\w+)\s*=\s*\1\s*\&\s*([^;]+);)");
+
     c_code = std::regex_replace(c_code, increment_pattern, "$1++;");
-    
-    // Convert "i = i - 1" to "i--"
-    std::regex decrement_pattern(R"((\w+)\s*=\s*\1\s*-\s*1\s*;)");
     c_code = std::regex_replace(c_code, decrement_pattern, "$1--;");
-    
-    // Convert "i = i + N" to "i += N"
-    std::regex add_assign_pattern(R"((\w+)\s*=\s*\1\s*\+\s*([^;]+);)");
     c_code = std::regex_replace(c_code, add_assign_pattern, "$1 += $2;");
-    
-    // Convert "i = i - N" to "i -= N"
-    std::regex sub_assign_pattern(R"((\w+)\s*=\s*\1\s*-\s*([^;]+);)");
     c_code = std::regex_replace(c_code, sub_assign_pattern, "$1 -= $2;");
-    
-    // Convert "i = i * N" to "i *= N"
-    std::regex mul_assign_pattern(R"((\w+)\s*=\s*\1\s*\*\s*([^;]+);)");
     c_code = std::regex_replace(c_code, mul_assign_pattern, "$1 *= $2;");
-    
-    // Convert "i = i | N" to "i |= N"
-    std::regex or_assign_pattern(R"((\w+)\s*=\s*\1\s*\|\s*([^;]+);)");
     c_code = std::regex_replace(c_code, or_assign_pattern, "$1 |= $2;");
-    
-    // Convert "i = i & N" to "i &= N"
-    std::regex and_assign_pattern(R"((\w+)\s*=\s*\1\s*\&\s*([^;]+);)");
     c_code = std::regex_replace(c_code, and_assign_pattern, "$1 &= $2;");
-    
     return c_code;
 }
 
 std::string PostProcessor::simplify_nested_if(std::string c_code) {
-    // Remove redundant parentheses in conditions
-    std::regex double_paren(R"(\(\(([^()]+)\)\))");
+    static const std::regex double_paren(R"(\(\(([^()]+)\)\))");
+    static const std::regex non_zero_check(R"(if\s*\(\s*(\w+)\s*!=\s*0\s*\))");
+    static const std::regex zero_check(R"(if\s*\(\s*(\w+)\s*==\s*0\s*\))");
+
     c_code = std::regex_replace(c_code, double_paren, "($1)");
-    
-    // Simplify "if (x != 0)" to "if (x)"
-    std::regex non_zero_check(R"(if\s*\(\s*(\w+)\s*!=\s*0\s*\))");
     c_code = std::regex_replace(c_code, non_zero_check, "if ($1)");
-    
-    // Simplify "if (x == 0)" to "if (!x)"
-    std::regex zero_check(R"(if\s*\(\s*(\w+)\s*==\s*0\s*\))");
     c_code = std::regex_replace(c_code, zero_check, "if (!$1)");
-    
     return c_code;
 }
 
@@ -133,25 +114,22 @@ std::string PostProcessor::fold_array_init(std::string c_code) {
 }
 
 std::string PostProcessor::improve_variable_names(std::string c_code) {
-    // If a variable is returned, rename it to "result"
-    std::regex return_var_pattern(R"(return\s+(local_\w+)\s*;)");
+    static const std::regex return_var_pattern(R"(return\s+(local_\w+)\s*;)");
     std::smatch match;
-    
+
     if (std::regex_search(c_code, match, return_var_pattern)) {
         std::string var_name = match[1].str();
-        if (var_name.find("local_") == 0) {
-            // Count occurrences - only rename if used more than once
-            std::regex var_pattern(var_name);
-            auto begin = std::sregex_iterator(c_code.begin(), c_code.end(), var_pattern);
-            auto end = std::sregex_iterator();
-            int count = std::distance(begin, end);
-            
+        if (var_name.rfind("local_", 0) == 0) {
+            // Build a plain-text pattern for this specific variable name
+            // (var_name contains only \w chars, so no escaping needed)
+            const std::regex var_pattern(var_name);
+            auto it  = std::sregex_iterator(c_code.begin(), c_code.end(), var_pattern);
+            int count = static_cast<int>(std::distance(it, std::sregex_iterator()));
             if (count >= 2 && count <= 10) {
                 c_code = std::regex_replace(c_code, var_pattern, "result");
             }
         }
     }
-    
     return c_code;
 }
 

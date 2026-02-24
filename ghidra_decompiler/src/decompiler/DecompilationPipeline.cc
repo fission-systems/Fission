@@ -487,16 +487,24 @@ std::string DecompilationPipeline::handle_load_bin(
     state.arch_64bit->injectIatSymbols(iat_symbols);
     state.iat_symbols = iat_symbols;
     
-    // Phase 11: Setup 32-bit Architecture
+    // Phase 11: Setup 32-bit Architecture — lazy: only init on first use of a 32-bit binary.
+    // For 64-bit binaries the init is deferred; if arch_32bit was previously initialized we
+    // still update its data so a mixed-session scenario stays consistent.
     if (!state.arch_32bit_ready) {
-        state.setup_architecture(false, bin_bytes, image_base, compiler_id, bin_info.sleigh_id);
+        if (!bin_info.is_64bit) {
+            // 32-bit binary: initialize the 32-bit arch slot now.
+            state.setup_architecture(false, bin_bytes, image_base, compiler_id, bin_info.sleigh_id);
+        }
+        // else: 64-bit binary — defer 32-bit SLEIGH init until actually needed.
     } else {
         state.loader_32bit->updateData(bin_bytes, image_base);
         state.arch_32bit->symboltab->getGlobalScope()->clear();
     }
     
-    // Inject IAT symbols for 32-bit
-    state.arch_32bit->injectIatSymbols(iat_symbols);
+    // Inject IAT symbols for 32-bit (only when arch is live)
+    if (state.arch_32bit_ready) {
+        state.arch_32bit->injectIatSymbols(iat_symbols);
+    }
     
     // Phase 12: Unified prologue scan — InternalMatcher + multi-DB FID with RelationValidator
     {

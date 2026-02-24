@@ -4,7 +4,6 @@
 
 #include "fission/decompiler/AnalysisPipeline.h"
 #include "fission/analysis/GlobalDataAnalyzer.h"
-#include "fission/analysis/StackFrameAnalyzer.h"
 #include "fission/analysis/TypePropagator.h"
 #include "fission/analysis/CallGraphAnalyzer.h"
 #include "fission/analysis/TypeSharing.h"
@@ -461,76 +460,86 @@ AnalysisArtifacts run_analysis_passes(
         return artifacts;
     }
 
-    bool updated_self = false;
-    try {
-        if (returns_allocator_result(fd, ctx->symbols, ctx->arch.get())) {
-            updated_self = apply_pointer_return_prototype(ctx->arch.get(), fd);
-        }
-    } catch (const ghidra::LowlevelError& e) {
-        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (self): " << e.explain << std::endl;
-    } catch (const std::exception& e) {
-        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (self): " << e.what() << std::endl;
-    } catch (...) {
-        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (self): unknown error" << std::endl;
-    }
-
-    bool updated_callee = false;
-    try {
-        updated_callee = infer_callee_pointer_returns(ctx, fd, action);
-    } catch (const ghidra::LowlevelError& e) {
-        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (callee): " << e.explain << std::endl;
-    } catch (const std::exception& e) {
-        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (callee): " << e.what() << std::endl;
-    } catch (...) {
-        fission::utils::log_stream() << "[DecompilerCore] Pointer inference failed (callee): unknown error" << std::endl;
-    }
-    if (updated_self || updated_callee) {
-        fission::utils::log_stream() << "[DecompilerCore] Updated callee prototypes, re-running..." << std::endl;
-        rerun_action(fd, action);
-    }
-
-    // ========================================================================
-    // Structure Recovery + Reverse Type Propagation (Ghidra-inspired)
-    // ========================================================================
     size_t func_size = fd->getSize();
+    bool needs_rerun_stage1 = false;
+
+    // ========================================================================
+    // Stage-1 analysis passes — changes accumulated, one rerun at Barrier-1
+    // ========================================================================
+
+    // ---- Pointer-return prototype inference --------------------------------
+    {
+        bool updated_self = false;
+        try {
+            if (returns_allocator_result(fd, ctx->symbols, ctx->arch.get())) {
+                updated_self = apply_pointer_return_prototype(ctx->arch.get(), fd);
+            }
+        } catch (const ghidra::LowlevelError& e) {
+            fission::utils::log_stream() << "[DecompilerCore] Pointer inference (self) LowlevelError: " << e.explain << std::endl;
+        } catch (const std::exception& e) {
+            fission::utils::log_stream() << "[DecompilerCore] Pointer inference (self) error: " << e.what() << std::endl;
+        } catch (...) {
+            fission::utils::log_stream() << "[DecompilerCore] Pointer inference (self) unknown error" << std::endl;
+        }
+
+        bool updated_callee = false;
+        try {
+            updated_callee = infer_callee_pointer_returns(ctx, fd, action);
+        } catch (const ghidra::LowlevelError& e) {
+            fission::utils::log_stream() << "[DecompilerCore] Pointer inference (callee) LowlevelError: " << e.explain << std::endl;
+        } catch (const std::exception& e) {
+            fission::utils::log_stream() << "[DecompilerCore] Pointer inference (callee) error: " << e.what() << std::endl;
+        } catch (...) {
+            fission::utils::log_stream() << "[DecompilerCore] Pointer inference (callee) unknown error" << std::endl;
+        }
+
+        if (updated_self || updated_callee) {
+            fission::utils::log_stream() << "[DecompilerCore] Updated prototype(s), flagging stage-1 re-run." << std::endl;
+            needs_rerun_stage1 = true;
+        }
+    }
+
     if (func_size < max_function_size) {
-        StructureAnalyzer struct_analyzer;
-        bool structs_found = struct_analyzer.analyze_function_structures(fd);
+        // ---- Structure recovery --------------------------------------------
+        {
+            StructureAnalyzer struct_analyzer;
+            bool structs_found = struct_analyzer.analyze_function_structures(fd);
+            if (structs_found) {
+                fission::utils::log_stream() << "[DecompilerCore] Inferred structures, flagging stage-1 re-run." << std::endl;
+                artifacts.inferred_struct_definitions = struct_analyzer.generate_struct_definitions();
+                artifacts.captured_structs            = struct_analyzer.get_inferred_structs();
+                needs_rerun_stage1 = true;
 
-        if (structs_found) {
-            fission::utils::log_stream() << "[DecompilerCore] Inferred structures, re-running..." << std::endl;
-            artifacts.inferred_struct_definitions = struct_analyzer.generate_struct_definitions();
-            artifacts.captured_structs = struct_analyzer.get_inferred_structs();
-
-            rerun_action(fd, action);
-
-            const ghidra::FuncProto& proto = fd->getFuncProto();
-            int num = proto.numParams();
-            for (int i = 0; i < num; ++i) {
-                ghidra::ProtoParameter* param = proto.getParam(i);
-                if (!param) continue;
-                uint64_t off = param->getAddress().getOffset();
-                if (artifacts.captured_structs.count(off)) {
-                    std::string sname = artifacts.captured_structs[off]->getName();
-                    ctx->struct_registry[fd->getAddress().getOffset()][i] = sname;
+                const ghidra::FuncProto& proto = fd->getFuncProto();
+                int num = proto.numParams();
+                for (int i = 0; i < num; ++i) {
+                    ghidra::ProtoParameter* param = proto.getParam(i);
+                    if (!param) continue;
+                    uint64_t off = param->getAddress().getOffset();
+                    if (artifacts.captured_structs.count(off)) {
+                        ctx->struct_registry[fd->getAddress().getOffset()][i] =
+                            artifacts.captured_structs[off]->getName();
+                    }
                 }
             }
         }
-    } else {
-        fission::utils::log_stream() << "[DecompilerCore] Skipping structure recovery (function too large: "
-                  << func_size << " bytes)" << std::endl;
-    }
 
-    // ========================================================================
-    // Global Data + Stack Frame Structure Recovery
-    // ========================================================================
-    bool rerun_for_struct_symbols = false;
-    if (func_size < max_function_size) {
-        // Global data structures (const/global memory)
+        // ---- Reverse struct type propagation --------------------------------
+        {
+            TypePropagator rev_tp(ctx->arch.get(), &ctx->struct_registry);
+            rev_tp.clear();
+            bool sc = rev_tp.propagate_struct_types(fd);
+            if (sc) {
+                fission::utils::log_stream() << "[DecompilerCore] Reverse struct propagation detected, flagging stage-1 re-run." << std::endl;
+                needs_rerun_stage1 = true;
+                rev_tp.clear();
+            }
+        }
+
+        // ---- Global data structure recovery --------------------------------
         {
             GlobalDataAnalyzer global_analyzer;
-            uint64_t data_start = 0;
-            uint64_t data_end = 0;
+            uint64_t data_start = 0, data_end = 0;
             if (get_data_section_range(ctx, data_start, data_end)) {
                 global_analyzer.set_data_section(data_start, data_end);
             }
@@ -538,21 +547,16 @@ AnalysisArtifacts run_analysis_passes(
             global_analyzer.infer_structures();
             int created = global_analyzer.create_types(ctx->arch->types, ctx->arch->types->getSizeOfPointer());
             if (created > 0) {
-                fission::utils::log_stream() << "[DecompilerCore] Global data structures created: "
-                          << created << std::endl;
+                fission::utils::log_stream() << "[DecompilerCore] Global data structures created: " << created << std::endl;
             }
 
-            ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
-            ghidra::AddrSpace* data_space = ctx->arch->getDefaultDataSpace();
+            ghidra::Scope*     global_scope = ctx->arch->symboltab->getGlobalScope();
+            ghidra::AddrSpace* data_space   = ctx->arch->getDefaultDataSpace();
             if (global_scope && data_space) {
                 for (const auto& gs : global_analyzer.get_structures()) {
-                    if (gs.name.empty()) {
-                        continue;
-                    }
+                    if (gs.name.empty()) continue;
                     ghidra::Datatype* dt = ctx->arch->types->findByName(gs.name);
-                    if (!dt || dt->getMetatype() != ghidra::TYPE_STRUCT) {
-                        continue;
-                    }
+                    if (!dt || dt->getMetatype() != ghidra::TYPE_STRUCT) continue;
                     ghidra::Address addr(data_space, gs.address);
                     if (ghidra::SymbolEntry* entry = global_scope->findAddr(addr, fd->getAddress())) {
                         ghidra::Symbol* sym = entry->getSymbol();
@@ -560,23 +564,45 @@ AnalysisArtifacts run_analysis_passes(
                             try {
                                 global_scope->retypeSymbol(sym, dt);
                                 global_scope->setAttribute(sym, ghidra::Varnode::typelock);
-                                rerun_for_struct_symbols = true;
-                            } catch (const ghidra::RecovError&) {
-                                // ignore retype failures
-                            }
+                                needs_rerun_stage1 = true;
+                            } catch (const ghidra::RecovError&) {}
                         }
                         continue;
                     }
                     if (global_scope->addSymbol(gs.name, dt, addr, fd->getAddress())) {
-                        rerun_for_struct_symbols = true;
+                        needs_rerun_stage1 = true;
                     }
                 }
             }
         }
 
-        // Call Graph Analysis & Type Registry
+        // ---- Pre-analysis: call return type propagation --------------------
         {
-            uint64_t func_addr_cg = fd->getAddress().getOffset();
+            TypePropagator initial_propagator(ctx->arch.get(), &ctx->struct_registry);
+            initial_propagator.propagate_call_return_types(fd);
+        }
+    } else {
+        fission::utils::log_stream() << "[DecompilerCore] Skipping structure recovery (function too large: "
+                  << func_size << " bytes)" << std::endl;
+    }
+
+    // ========================================================================
+    // Barrier-1: single re-run for all stage-1 changes
+    // (was up to 4 separate rerun_action() calls)
+    // ========================================================================
+    if (needs_rerun_stage1) {
+        fission::utils::log_stream() << "[DecompilerCore] Stage-1 re-run (struct/prototype/global-data changes)." << std::endl;
+        rerun_action(fd, action);
+    }
+
+    bool needs_rerun_stage2 = false;
+
+    // ========================================================================
+    // Stage-2 analysis passes
+    // ========================================================================
+    if (func_size < max_function_size) {
+        // ---- Call graph analysis + pending reanalysis ----------------------
+        {
             register_signature_from_func(ctx, fd);
 
             fission::analysis::CallGraphAnalyzer call_analyzer(&ctx->type_registry);
@@ -587,38 +613,28 @@ AnalysisArtifacts run_analysis_passes(
                           << " type hints" << std::endl;
             }
 
-            // Drain pending reanalysis queue and run a bounded reanalysis loop.
             std::set<uint64_t> processed;
-            ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
-            const int max_rounds = 2;
-            int rounds = 0;
-            int reanalyzed = 0;
+            ghidra::Scope*     global_scope = ctx->arch->symboltab->getGlobalScope();
+            const int          max_rounds   = 2;
+            int rounds = 0, reanalyzed = 0;
 
             std::vector<uint64_t> pending = ctx->type_registry.consume_pending_reanalysis();
-            while (!pending.empty() && rounds < max_rounds && global_scope != nullptr) {
+            while (!pending.empty() && rounds < max_rounds && global_scope) {
                 ++rounds;
                 for (uint64_t target_addr : pending) {
-                    if (processed.count(target_addr) != 0) {
-                        continue;
-                    }
+                    if (processed.count(target_addr)) continue;
                     processed.insert(target_addr);
-
-                    if (!is_address_in_executable(ctx, target_addr)) {
-                        continue;
-                    }
+                    if (!is_address_in_executable(ctx, target_addr)) continue;
 
                     ghidra::Address func_addr(ctx->arch->getDefaultCodeSpace(), target_addr);
                     ghidra::Funcdata* target_fd = global_scope->findFunction(func_addr);
-                    if (target_fd == nullptr) {
-                        ghidra::FunctionSymbol* sym = global_scope->addFunction(func_addr, "sub_" + std::to_string(target_addr));
-                        if (sym == nullptr) {
-                            continue;
-                        }
+                    if (!target_fd) {
+                        ghidra::FunctionSymbol* sym =
+                            global_scope->addFunction(func_addr, "sub_" + std::to_string(target_addr));
+                        if (!sym) continue;
                         target_fd = sym->getFunction();
                     }
-                    if (target_fd == nullptr) {
-                        continue;
-                    }
+                    if (!target_fd) continue;
 
                     try {
                         target_fd->clear();
@@ -627,42 +643,33 @@ AnalysisArtifacts run_analysis_passes(
                         action->reset(*target_fd);
                         action->perform(*target_fd);
                     } catch (const ghidra::LowlevelError& e) {
-                        fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: LowlevelError at 0x"
-                            << std::hex << target_addr << ": " << e.explain << std::endl;
-                        continue;
+                        fission::utils::log_stream() << "[DecompilerCore] CallGraph LowlevelError at 0x"
+                            << std::hex << target_addr << ": " << e.explain << std::endl; continue;
                     } catch (const std::exception& e) {
-                        fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: error at 0x"
-                            << std::hex << target_addr << ": " << e.what() << std::endl;
-                        continue;
+                        fission::utils::log_stream() << "[DecompilerCore] CallGraph error at 0x"
+                            << std::hex << target_addr << ": " << e.what() << std::endl; continue;
                     } catch (...) {
-                        fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: unknown error at 0x"
-                            << std::hex << target_addr << std::endl;
-                        continue;
+                        fission::utils::log_stream() << "[DecompilerCore] CallGraph unknown error at 0x"
+                            << std::hex << target_addr << std::endl; continue;
                     }
 
                     register_signature_from_func(ctx, target_fd);
                     call_analyzer.extract_calls(target_fd);
-                    reanalyzed++;
+                    ++reanalyzed;
                 }
-
                 int newly_propagated = call_analyzer.propagate_types();
-                if (newly_propagated <= 0) {
-                    break;
-                }
+                if (newly_propagated <= 0) break;
                 pending = ctx->type_registry.consume_pending_reanalysis();
             }
 
             if (reanalyzed > 0) {
                 fission::utils::log_stream() << "[DecompilerCore] CallGraph: reanalyzed "
                           << reanalyzed << " pending functions" << std::endl;
-            }
-
-            if (reanalyzed > 0) {
-                rerun_action(fd, action);
+                needs_rerun_stage2 = true;
             }
         }
 
-        // Cross-function Type Sharing
+        // ---- Cross-function type sharing -----------------------------------
         {
             fission::analysis::TypeSharing type_sharing(ctx->arch.get());
             std::vector<ghidra::Datatype*> param_types_ts;
@@ -671,10 +678,9 @@ AnalysisArtifacts run_analysis_passes(
                 ghidra::ProtoParameter* param = proto_ts.getParam(i);
                 if (param) param_types_ts.push_back(param->getType());
             }
-            ghidra::ProtoParameter* ret_ts = proto_ts.getOutput();
-            ghidra::Datatype* ret_type_ts = (ret_ts ? ret_ts->getType() : nullptr);
-            uint64_t func_addr_ts = fd->getAddress().getOffset();
-            type_sharing.register_function_types(func_addr_ts, param_types_ts, ret_type_ts);
+            ghidra::ProtoParameter* ret_ts   = proto_ts.getOutput();
+            ghidra::Datatype*       ret_type = ret_ts ? ret_ts->getType() : nullptr;
+            type_sharing.register_function_types(fd->getAddress().getOffset(), param_types_ts, ret_type);
             int shared = type_sharing.share_types();
             if (shared > 0) {
                 fission::utils::log_stream() << "[DecompilerCore] TypeSharing: shared " << shared
@@ -682,7 +688,7 @@ AnalysisArtifacts run_analysis_passes(
             }
         }
 
-        // Pcode Optimization Bridge
+        // ---- Pcode optimization bridge -------------------------------------
         if (fission::decompiler::PcodeOptimizationBridge::is_enabled()) {
             try {
                 std::string optimized = fission::decompiler::PcodeOptimizationBridge::extract_and_optimize(fd);
@@ -690,105 +696,37 @@ AnalysisArtifacts run_analysis_passes(
                     fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization: extracted & optimized ("
                               << optimized.size() << " bytes)" << std::endl;
                     if (fission::decompiler::PcodeExtractor::inject_pcode(fd, optimized)) {
-                        fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization: injected optimized Pcode, re-running"
-                                  << std::endl;
-                        rerun_action(fd, action);
+                        fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization: injected, flagging stage-2 re-run." << std::endl;
+                        needs_rerun_stage2 = true;
                     }
                 }
             } catch (const std::exception& e) {
-                fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization error: "
-                          << e.what() << std::endl;
+                fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization error: " << e.what() << std::endl;
             } catch (...) {
                 fission::utils::log_stream() << "[DecompilerCore] PcodeOptimization unknown error" << std::endl;
             }
         }
 
-        // Pre-analysis: Propagate call return types (detect pointers from allocators)
-        // We do this BEFORE StackFrameAnalyzer so it knows about pointer returns
+        // ---- Forward type propagation (API inference) ----------------------
         {
-            TypePropagator initial_propagator(ctx->arch.get(), &ctx->struct_registry);
-            initial_propagator.propagate_call_return_types(fd);
-        }
-
-        // Stack frame structures
-        // DISABLED: Using Ghidra's default local variable mechanism instead
-        // This allows individual stack variables (e.g., local_c, local_10) 
-        // instead of grouping them into stack structures (e.g., sStack_38.field_44)
-        /*
-        {
-            StackFrameAnalyzer stack_analyzer(ctx->arch.get());
-            int detected = stack_analyzer.analyze(fd);
-            if (detected > 0) {
-                auto stack_structs = stack_analyzer.build_struct_map(ctx->arch->types);
-                if (!stack_structs.empty()) {
-                    ghidra::ScopeLocal* local_scope = fd->getScopeLocal();
-                    ghidra::AddrSpace* stack_space = ctx->arch->getStackSpace();
-                    if (local_scope && stack_space) {
-                        for (const auto& entry : stack_structs) {
-                            int64_t base_offset = entry.first;
-                            ghidra::TypeStruct* ts = entry.second;
-                            if (!ts) {
-                                continue;
-                            }
-                            ghidra::Address addr(
-                                stack_space,
-                                static_cast<uint64_t>(base_offset)
-                            );
-                            if (ghidra::SymbolEntry* sym_entry = local_scope->findAddr(addr, fd->getAddress())) {
-                                ghidra::Symbol* sym = sym_entry->getSymbol();
-                                if (sym) {
-                                    try {
-                                        local_scope->retypeSymbol(sym, ts);
-                                        local_scope->setAttribute(sym, ghidra::Varnode::typelock);
-                                        rerun_for_struct_symbols = true;
-                                    } catch (const ghidra::RecovError&) {
-                                        // ignore retype failures
-                                    }
-                                }
-                                continue;
-                            }
-                            if (local_scope->addSymbol(ts->getName(), ts, addr, fd->getAddress())) {
-                                rerun_for_struct_symbols = true;
-                            }
-                        }
-                    }
-                }
-
-                fission::utils::log_stream() << "[DecompilerCore] Stack frame structures created: "
-                          << detected << std::endl;
+            TypePropagator type_propagator(ctx->arch.get(), &ctx->struct_registry);
+            type_propagator.clear();
+            int types_inferred = type_propagator.propagate(fd);
+            bool struct_changed_after = type_propagator.propagate_struct_types(fd);
+            if (types_inferred > 0 || struct_changed_after) {
+                fission::utils::log_stream() << "[DecompilerCore] Type propagation: "
+                          << types_inferred << " type(s) inferred, flagging stage-2 re-run." << std::endl;
+                needs_rerun_stage2 = true;
             }
         }
-        */
-        
-        fission::utils::log_stream() << "[DecompilerCore] Using Ghidra's default stack variable handling" << std::endl;
     }
 
-    if (rerun_for_struct_symbols) {
-        fission::utils::log_stream() << "[DecompilerCore] Struct symbols applied, re-running..." << std::endl;
-        rerun_action(fd, action);
-    }
-
-    TypePropagator type_propagator(ctx->arch.get(), &ctx->struct_registry);
-    type_propagator.clear();  
-    
-    bool struct_changed = type_propagator.propagate_struct_types(fd);
-    if (struct_changed) {
-        fission::utils::log_stream() << "[DecompilerCore] Struct types propagated, re-running..." << std::endl;
-        rerun_action(fd, action);
-        type_propagator.clear();
-    }
-
-    int types_inferred = type_propagator.propagate(fd);
-
-    bool struct_changed_after = type_propagator.propagate_struct_types(fd);
-    if (types_inferred > 0 || struct_changed_after) {
-        if (struct_changed_after) {
-            fission::utils::log_stream() << "[DecompilerCore] Struct types updated after type propagation, re-running..."
-                      << std::endl;
-        } else {
-            fission::utils::log_stream() << "[DecompilerCore] Type propagation complete (" << types_inferred
-                      << " types), re-running for output..." << std::endl;
-        }
+    // ========================================================================
+    // Barrier-2: single re-run for all stage-2 changes
+    // (was up to 3 separate rerun_action() calls)
+    // ========================================================================
+    if (needs_rerun_stage2) {
+        fission::utils::log_stream() << "[DecompilerCore] Stage-2 re-run (callgraph/pcode/type changes)." << std::endl;
         rerun_action(fd, action);
     }
 

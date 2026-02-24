@@ -1,5 +1,16 @@
 # 🧪 복잡한 테스트 자동 실행 가이드
 
+## CI vs 풀 품질 테스트
+
+- **CI (매 커밋/PR)**  
+  - Ghidra를 내려받거나 실행하지 **않습니다**.  
+  - **가벼운 Fission 단독 스모크 테스트**만 실행합니다:  
+    `scripts/test/decomp_smoke_ci.sh` — 작은 C++ 테스트 바이너리 하나에 대해 Fission 디컴파일을 한 번 실행하고, 종료 코드 0(크래시 없음)을 확인합니다.
+- **풀 품질 벤치마크 (Ghidra 사용)**  
+  - `run_complex_tests.py`, `compare_decompilers_v2.py` 등은 **로컬**에서 실행하거나,  
+  - **스케줄/수동** 워크플로(`Decompilation Quality` workflow)에서만 실행하는 것을 권장합니다.  
+  - CI 비용·시간을 줄이기 위해 매 커밋마다 Ghidra 품질 비교는 하지 않습니다.
+
 ## 개요
 
 `run_complex_tests.py`는 6개의 복잡한 테스트 케이스를 자동으로 실행하고 Ghidra와 비교하여 결과를 생성하는 스크립트입니다.

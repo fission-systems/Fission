@@ -117,6 +117,12 @@ struct DecompContext {
 
     // Cross-function type registry for call-graph propagation
     fission::types::GlobalTypeRegistry type_registry;
+
+    // Cached per-section string table for string inlining.
+    // Built once on first call to run_post_processing(); reused for every
+    // subsequent function in the same binary (avoids O(n_funcs × section_size)).
+    std::map<uint64_t, std::string> cached_string_table;
+    bool string_table_built = false;
     
     // Thread safety
     std::mutex mutex;

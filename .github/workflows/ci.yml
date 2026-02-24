@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,3 +37,8 @@ jobs:
 
       - name: Run Tests
         run: cargo test --verbose
+
+      - name: Fission decompilation smoke test
+        run: |
+          chmod +x scripts/test/decomp_smoke_ci.sh
+          ./scripts/test/decomp_smoke_ci.sh

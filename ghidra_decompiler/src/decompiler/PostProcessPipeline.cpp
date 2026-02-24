@@ -89,8 +89,6 @@ std::string run_post_processing(
 
     // Step 2.5: String inlining
     if (options.inline_strings) {
-        // D-1: Extended from ".rdata" (PE-only) to cover ELF and Mach-O string sections.
-        // All matching sections are accumulated so no cross-section strings are missed.
         static const std::unordered_set<std::string> string_sections = {
             ".rdata",        // PE read-only data
             ".rodata",       // ELF read-only data
@@ -99,23 +97,25 @@ std::string run_post_processing(
             ".data.rel.ro",  // ELF RELRO (relocated read-only)
         };
 
-        std::map<uint64_t, std::string> string_table;
-        for (const auto& block : ctx->memory_blocks) {
-            if (string_sections.count(block.name) == 0 || block.file_size == 0) continue;
-            size_t start_idx = block.file_offset;
-            size_t end_idx   = start_idx + block.file_size;
-            if (end_idx > ctx->binary_data.size()) continue;
-
-            std::vector<uint8_t> section_data(
-                ctx->binary_data.begin() + start_idx,
-                ctx->binary_data.begin() + end_idx
-            );
-            auto sec_strings = StringScanner::scan_ascii_strings(section_data, block.va_addr);
-            string_table.insert(sec_strings.begin(), sec_strings.end());
+        // Build the section string table once per binary; reuse for every function.
+        if (!ctx->string_table_built) {
+            for (const auto& block : ctx->memory_blocks) {
+                if (string_sections.count(block.name) == 0 || block.file_size == 0) continue;
+                size_t start_idx = block.file_offset;
+                size_t end_idx   = start_idx + block.file_size;
+                if (end_idx > ctx->binary_data.size()) continue;
+                std::vector<uint8_t> section_data(
+                    ctx->binary_data.begin() + start_idx,
+                    ctx->binary_data.begin() + end_idx
+                );
+                auto sec_strings = StringScanner::scan_ascii_strings(section_data, block.va_addr);
+                ctx->cached_string_table.insert(sec_strings.begin(), sec_strings.end());
+            }
+            ctx->string_table_built = true;
         }
 
-        if (!string_table.empty()) {
-            result = inline_strings(result, string_table);
+        if (!ctx->cached_string_table.empty()) {
+            result = inline_strings(result, ctx->cached_string_table);
         }
     }
 

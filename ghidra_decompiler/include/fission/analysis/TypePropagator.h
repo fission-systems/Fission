@@ -3,6 +3,8 @@
 
 #include <map>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <vector>
 
@@ -30,10 +32,10 @@ private:
     ghidra::Architecture* arch;
     
     // Track type assignments: varnode unique ID -> inferred type
-    std::map<uint64_t, ghidra::Datatype*> inferred_types;
+    std::unordered_map<uint64_t, ghidra::Datatype*> inferred_types;
     
     // Track which varnodes have been processed
-    std::set<uint64_t> processed;
+    std::unordered_set<uint64_t> processed;
     
     // Struct registry: function address -> (param index -> struct name)
     std::map<uint64_t, std::map<int, std::string>>* struct_registry;

@@ -161,10 +161,13 @@ TypePropagator::~TypePropagator() {}
 
 uint64_t TypePropagator::get_varnode_id(Varnode* vn) {
     if (!vn) return 0;
-    // Use address space + offset + size as unique ID
-    return ((uint64_t)vn->getSpace()->getIndex() << 48) |
-           ((uint64_t)vn->getOffset() << 8) |
-           (vn->getSize() & 0xFF);
+    // Pack: [space_index:8][offset:52][size:4]
+    // Previous formula had (offset << 8)|size which aliased any two offsets
+    // differing by a multiple of 256. Fixed layout gives 2^52 distinct offsets.
+    uint64_t space_idx = (uint64_t)vn->getSpace()->getIndex() & 0xFF;
+    uint64_t offset    = vn->getOffset() & 0x000FFFFFFFFFFFFFULL;
+    uint64_t sz        = (uint64_t)vn->getSize() & 0xFULL;
+    return (space_idx << 56) | (offset << 4) | sz;
 }
 
 void TypePropagator::propagate_from_call(Funcdata* fd, PcodeOp* call_op) {
