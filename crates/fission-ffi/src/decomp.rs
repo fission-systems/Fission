@@ -135,6 +135,13 @@ unsafe extern "C" {
     fn decomp_load_fid_db(ctx: *mut DecompContext, db_path: *const c_char) -> DecompError;
     fn decomp_get_fid_match(ctx: *mut DecompContext, addr: u64, len: usize) -> *mut c_char;
 
+    // Pcode optimization bridge initialisation.
+    // Registers Rust function pointers with the C++ side so dlsym is not needed.
+    fn decomp_init_pcode_bridge(
+        optimize_fn: Option<unsafe extern "C" fn(*const c_char, usize) -> *mut c_char>,
+        free_fn: Option<unsafe extern "C" fn(*mut c_char)>,
+    );
+
     // Batch symbol registration (reduced FFI overhead)
     fn decomp_add_symbols_batch(
         ctx: *mut DecompContext,
@@ -283,6 +290,16 @@ impl DecompilerNative {
             return Err(FissionError::decompiler(
                 "Failed to create decompiler context",
             ));
+        }
+
+        // Register Rust Pcode-optimization functions with the C++ bridge.
+        // This is done via push-registration so the C++ side does not need
+        // dlsym, which is unreliable on macOS when symbols live in the Rust binary.
+        unsafe {
+            decomp_init_pcode_bridge(
+                Some(crate::pcode::fission_optimize_pcode_json),
+                Some(crate::pcode::fission_free_string),
+            );
         }
 
         Ok(Self {

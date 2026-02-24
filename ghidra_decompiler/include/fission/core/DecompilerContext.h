@@ -64,6 +64,10 @@ public:
     uint64_t data_section_start = 0;
     uint64_t data_section_end = 0;
 
+    // Executable section ranges populated from BinaryDetector::sections.
+    // Used by BatchAnalysisContext to guard callgraph pending-reanalysis.
+    std::vector<std::pair<uint64_t, uint64_t>> executable_ranges;
+
     // Cross-function type registry for CallGraphAnalyzer
     fission::types::GlobalTypeRegistry type_registry;
 

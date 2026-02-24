@@ -407,6 +407,14 @@ std::string DecompilationPipeline::handle_load_bin(
         global_analyzer.set_data_section(data_start, data_end);
         state.data_section_start = data_start;
         state.data_section_end = data_end;
+
+        // Stash executable ranges for callgraph reanalysis in handle_decompile().
+        state.executable_ranges.clear();
+        for (const auto& sec : bin_info.sections) {
+            if (sec.is_executable && sec.va_size > 0) {
+                state.executable_ranges.emplace_back(sec.va_addr, sec.va_addr + sec.va_size);
+            }
+        }
         
         // Phase 6: Pattern Matching
         fission::utils::log_stream() << "[fission_decomp] Debug: Loading Patterns..." << std::endl;
@@ -799,9 +807,11 @@ std::string DecompilationPipeline::handle_decompile(
     batch_ctx.struct_registry = &state.struct_registry;
     batch_ctx.data_start     = state.data_section_start;
     batch_ctx.data_end       = state.data_section_end;
-    // Note: executable_ranges left empty — batch_is_addr_executable returns
-    // false for unknown addresses, which safely skips pending reanalysis for
-    // addresses outside the current binary image.
+    // C-1 + Fix: Populate executable_ranges from parsed section table so that
+    // callgraph pending-reanalysis is not silently skipped for valid addresses.
+    for (const auto& r : state.executable_ranges) {
+        batch_ctx.executable_ranges.push_back(r);
+    }
 
     AnalysisArtifacts analysis_artifacts;
     {

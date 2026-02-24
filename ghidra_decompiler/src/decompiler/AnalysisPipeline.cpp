@@ -801,6 +801,9 @@ AnalysisArtifacts run_analysis_passes(
 // ============================================================================
 
 static bool batch_is_addr_executable(const BatchAnalysisContext& ctx, uint64_t addr) {
+    // When no ranges are configured, allow all addresses (conservative: don't
+    // silently drop pending reanalysis just because the caller forgot to set ranges).
+    if (ctx.executable_ranges.empty()) return true;
     for (const auto& r : ctx.executable_ranges) {
         if (addr >= r.first && addr < r.second) return true;
     }

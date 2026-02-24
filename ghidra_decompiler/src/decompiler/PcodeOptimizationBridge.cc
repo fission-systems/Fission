@@ -100,6 +100,20 @@ static bool load_rust_ffi() {
     return true;
 }
 
+void PcodeOptimizationBridge::register_rust_fn_ptrs(
+    char* (*optimize_fn)(const char*, size_t),
+    void  (*free_fn)(char*)
+) {
+    rust_optimize_fn = reinterpret_cast<FissionOptimizePcodeJson>(optimize_fn);
+    rust_free_fn     = reinterpret_cast<FissionFreeString>(free_fn);
+    // Mark as attempted+successful so load_rust_ffi() short-circuits immediately
+    // without trying dlsym, and won't reset our pointers on failure.
+    ffi_attempted = (rust_optimize_fn != nullptr && rust_free_fn != nullptr);
+    if (ffi_attempted) {
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Rust FFI registered via push (no dlsym needed)" << std::endl;
+    }
+}
+
 void PcodeOptimizationBridge::set_enabled(bool enabled) {
     optimization_enabled = enabled;
     fission::utils::log_stream() << "[PcodeOptimizationBridge] Optimization " 

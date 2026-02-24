@@ -12,6 +12,7 @@
 #include "fission/ffi/SymbolProviderManager.h"
 #include "fission/ffi/FidManager.h"
 #include "fission/ffi/DecompilerCore.h"
+#include "fission/decompiler/PcodeOptimizationBridge.h"
 
 // Ghidra types for type registration
 #include "type.hh"
@@ -557,3 +558,13 @@ extern "C" DECOMP_API DecompError decomp_apply_struct_to_param(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Pcode bridge initialisation — called from Rust at process startup.
+// Registers function pointers directly, bypassing dlsym on macOS/Linux.
+// ---------------------------------------------------------------------------
+void decomp_init_pcode_bridge(
+    char* (*optimize_fn)(const char*, size_t),
+    void  (*free_fn)(char*)
+) {
+    fission::decompiler::PcodeOptimizationBridge::register_rust_fn_ptrs(optimize_fn, free_fn);
+}

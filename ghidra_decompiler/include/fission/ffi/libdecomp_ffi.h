@@ -453,6 +453,21 @@ DECOMP_API DecompError decomp_apply_struct_to_param(
     const char* struct_name
 );
 
+/**
+ * Register Rust Pcode-optimization function pointers with the C++ bridge.
+ *
+ * Call this once at process startup (from Rust, before any decompilation)
+ * to supply the actual function pointers instead of relying on dlsym.
+ * Passing NULL for either argument disables Pcode optimization.
+ *
+ * @param optimize_fn  Pointer to fission_optimize_pcode_json, or NULL
+ * @param free_fn      Pointer to fission_free_string, or NULL
+ */
+DECOMP_API void decomp_init_pcode_bridge(
+    char* (*optimize_fn)(const char*, size_t),
+    void  (*free_fn)(char*)
+);
+
 #ifdef __cplusplus
 }
 #endif

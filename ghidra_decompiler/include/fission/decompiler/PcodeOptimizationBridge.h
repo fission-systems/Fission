@@ -19,6 +19,14 @@ public:
     
     /// Check if optimization is enabled
     static bool is_enabled();
+
+    /// Register Rust FFI function pointers directly (push-style, avoids dlsym).
+    /// Called at startup by the Rust host via decomp_init_pcode_bridge().
+    /// @param optimize_fn  Pointer to fission_optimize_pcode_json
+    /// @param free_fn      Pointer to fission_free_string
+    static void register_rust_fn_ptrs(
+        char* (*optimize_fn)(const char*, size_t),
+        void  (*free_fn)(char*));
     
     /// Optimize Pcode JSON through Rust FFI
     /// @param pcode_json Input Pcode in JSON format
