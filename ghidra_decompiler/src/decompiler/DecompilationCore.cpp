@@ -7,6 +7,7 @@
 #include "fission/types/PrototypeEnforcer.h"
 #include "fission/decompiler/PostProcessPipeline.h"
 #include "fission/analysis/CallingConvDetector.h"
+#include "fission/analysis/TypePropagator.h"
 #include "fission/decompiler/AnalysisPipeline.h"
 #include "libdecomp.hh"
 #include "address.hh"
@@ -259,7 +260,15 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     fission::utils::log_stream() << "[DecompilerCore] Resetting action state..." << std::endl;
     ctx->arch->clearAnalysis(fd);
     current_action->reset(*fd);
-    
+
+    // P1-A: Seed Ghidra's type recommendation system BEFORE action->perform()
+    // so that ActionInferTypes picks up API-derived types in its own loop.
+    {
+        fission::analysis::TypePropagator seeder(ctx->arch.get(), &ctx->struct_registry);
+        seeder.set_compiler_id(ctx->compiler_id.empty() ? "windows" : ctx->compiler_id);
+        seeder.seed_before_action(fd);
+    }
+
     fission::utils::log_stream() << "[DecompilerCore] Performing decompilation..." << std::endl;
     
     // Perform decompilation

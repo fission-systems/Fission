@@ -469,6 +469,11 @@ std::string DecompilationPipeline::handle_load_bin(
         state.data_symbols_scanned = true;
         fission::utils::log_stream() << "[fission_decomp] Registered " << total_data_symbols 
                   << " data section symbols (cached for future use)" << std::endl;
+
+        // P2-A: Register vtable type structures into Ghidra's TypeFactory so that
+        // ActionInferTypes can propagate vcall object types through indirect calls.
+        vtable_analyzer.register_vtable_types(state.arch_64bit);
+        fission::utils::log_stream() << "[fission_decomp] VTable types registered in TypeFactory." << std::endl;
         
     } else {
         state.loader_64bit->updateData(bin_bytes, image_base);
@@ -780,7 +785,15 @@ std::string DecompilationPipeline::handle_decompile(
     fission::utils::log_stream() << "[fission_decomp] Step 3: Resetting actions" << std::endl;
     arch->clearAnalysis(fd);
     arch->allacts.getCurrent()->reset(*fd);
-    
+
+    // P1-A: Seed Ghidra's type recommendation system BEFORE action->perform()
+    // so that ActionInferTypes picks up API-derived types in its own loop.
+    {
+        fission::analysis::TypePropagator seeder(arch, &state.struct_registry);
+        seeder.set_compiler_id(compiler_id);
+        seeder.seed_before_action(fd);
+    }
+
     // Step 3b: Enforce GDT prototypes
     {
         PrototypeEnforcer proto_enforcer;

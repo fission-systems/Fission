@@ -97,6 +97,17 @@ public:
 
     /// A-2: Set compiler/platform identifier for platform-specific API inference.
     void set_compiler_id(const std::string& id) { compiler_id_ = id; }
+
+    /// \brief Seed Ghidra's type system BEFORE action->perform().
+    ///
+    /// Calls ScopeLocal::addTypeRecommendation() for each CALL target whose
+    /// prototype is known from Windows/POSIX API tables.  Because this runs
+    /// before ActionInferTypes, the recommendations participate in Ghidra's
+    /// own 7-iteration type propagation loop instead of being applied only
+    /// after it has already converged.
+    ///
+    /// \param fd Function to process (must have had followFlow called on it)
+    void seed_before_action(ghidra::Funcdata* fd);
     
     /// \brief Run type propagation on a function
     /// \param fd The function to analyze

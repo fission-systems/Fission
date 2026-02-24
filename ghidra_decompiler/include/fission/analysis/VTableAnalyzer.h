@@ -6,6 +6,11 @@
 #include <vector>
 #include <string>
 
+// Forward declarations for Ghidra types (used in register_vtable_types)
+namespace ghidra {
+    class Architecture;
+}
+
 namespace fission {
 namespace analysis {
 
@@ -93,6 +98,20 @@ public:
      * Clear all data
      */
     void clear();
+
+    /**
+     * P2-A: Register vtable layouts into Ghidra's TypeFactory and global scope.
+     *
+     * For each detected vtable this creates:
+     *   - A TypeStruct named "vtbl_<class_name>" with one TypeCode* field per slot.
+     *   - A TypePointer to that struct.
+     *   - A global symbol at the vtable address with the struct pointer type.
+     *
+     * This allows ActionInferTypes to propagate vcall object types automatically.
+     *
+     * @param arch  Ghidra Architecture (provides types + symboltab)
+     */
+    void register_vtable_types(ghidra::Architecture* arch);
 
 private:
     std::vector<VTable> vtables;

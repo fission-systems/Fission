@@ -1495,5 +1495,85 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
     }
 }
 
+// ============================================================================
+// seed_before_action: inject API-derived types into Ghidra's recommendation
+// system BEFORE action->perform() so that ActionInferTypes can propagate them
+// within its own iterative loop.
+// ============================================================================
+void TypePropagator::seed_before_action(Funcdata* fd) {
+    if (!fd || !arch) return;
+
+    ghidra::ScopeLocal* local = fd->getScopeLocal();
+    if (!local) return;
+
+    TypeFactory* tf = arch->types;
+    if (!tf) return;
+
+    int ptr_size = arch->getDefaultDataSpace()->getAddrSize();
+    int seeded = 0;
+
+    // Walk all live CPUI_CALL ops and apply addTypeRecommendation for each
+    // argument whose API table gives a concrete type.
+    list<PcodeOp*>::const_iterator iter;
+    for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
+        PcodeOp* op = *iter;
+        if (!op) continue;
+        if (op->code() != CPUI_CALL) continue;
+
+        Varnode* target_vn = op->getIn(0);
+        if (!target_vn || !target_vn->isConstant()) continue;
+
+        uint64_t target_addr = target_vn->getOffset();
+        Funcdata* callee = arch->symboltab->getGlobalScope()->queryFunction(
+            Address(arch->getDefaultCodeSpace(), target_addr));
+        if (!callee) continue;
+
+        // Platform-specific inference: collect (arg_index, Datatype*) hints
+        std::string func_name = callee->getName();
+        // We reuse infer_*_api_types to mark inferred_types, then mirror
+        // those into TypeRecommendations.
+        size_t before = inferred_types.size();
+
+        if (compiler_id_.empty() || compiler_id_ == "windows" || compiler_id_ == "msvc") {
+            infer_windows_api_types(op, func_name);
+        } else {
+            infer_posix_api_types(op, func_name);
+        }
+
+        // For each newly tracked varnode, add a TypeRecommendation so Ghidra
+        // can use it during ActionInferTypes.
+        if (inferred_types.size() == before) continue;
+
+        // Scan call arguments (inputs 1..N)
+        for (int i = 1; i < op->numInput(); ++i) {
+            Varnode* arg = op->getIn(i);
+            if (!arg) continue;
+            uint64_t vid = get_varnode_id(arg);
+            auto it = inferred_types.find(vid);
+            if (it == inferred_types.end() || !it->second) continue;
+
+            Datatype* dt = it->second;
+            // Only recommend concrete non-unknown types with proper size
+            if (dt->getMetatype() == TYPE_UNKNOWN) continue;
+            if (arg->isConstant()) continue;
+
+            // Stack and register varnodes have storage addresses
+            Address storage(arg->getSpace(), arg->getOffset());
+            try {
+                local->addTypeRecommendation(storage, dt);
+                seeded++;
+            } catch (...) {
+                // addTypeRecommendation may reject invalid addresses — ignore
+            }
+        }
+    }
+
+    if (seeded > 0) {
+        fission::utils::log_stream() << "[TypePropagator] seed_before_action: injected "
+                  << seeded << " type recommendations for function 0x"
+                  << std::hex << fd->getAddress().getOffset() << std::dec << std::endl;
+    }
+}
+
 } // namespace analysis
 } // namespace fission

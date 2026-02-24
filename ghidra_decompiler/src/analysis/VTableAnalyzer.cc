@@ -5,6 +5,11 @@
 #include <sstream>
 #include <cstring>
 
+// Ghidra type-system headers (needed by register_vtable_types)
+#include "architecture.hh"
+#include "type.hh"
+#include "database.hh"
+
 namespace fission {
 namespace analysis {
 
@@ -220,6 +225,100 @@ std::string VTableAnalyzer::get_virtual_call_name(uint64_t vtable_addr, int slot
     std::stringstream ss;
     ss << vt->class_name << "::vfunc_" << slot_index;
     return ss.str();
+}
+
+// ============================================================================
+// P2-A: register_vtable_types
+// For each detected vtable, create a TypeStruct in Ghidra's TypeFactory whose
+// fields are code-pointer (TypePointer-to-TypeCode) entries, then register a
+// global symbol at the vtable address so ActionInferTypes can propagate the
+// derived type through indirect-call varnodes.
+// ============================================================================
+void VTableAnalyzer::register_vtable_types(ghidra::Architecture* arch) {
+    if (!arch || vtables.empty()) return;
+
+    ghidra::TypeFactory* tf = arch->types;
+    if (!tf) return;
+
+    ghidra::Scope* global_scope = arch->symboltab ? arch->symboltab->getGlobalScope() : nullptr;
+    ghidra::AddrSpace* data_space = arch->getDefaultDataSpace();
+    int ptr_size = data_space ? data_space->getAddrSize() : 8;
+
+    // Canonical code pointer type: void (*)(void)
+    ghidra::TypeCode* code_type = tf->getTypeCode();
+    ghidra::Datatype* fn_ptr_type = tf->getTypePointer(ptr_size, code_type, ptr_size);
+
+    int registered = 0;
+
+    for (const VTable& vt : vtables) {
+        if (vt.entries.empty()) continue;
+
+        // Build struct name: "vtbl_ClassName" or "vtbl_addr_XXXX"
+        std::string struct_name;
+        if (!vt.class_name.empty() && vt.class_name.find("vtable_") == std::string::npos) {
+            struct_name = "vtbl_" + vt.class_name;
+        } else {
+            std::ostringstream ns;
+            ns << "vtbl_" << std::hex << vt.address;
+            struct_name = ns.str();
+        }
+
+        // Reuse if already registered
+        ghidra::Datatype* existing = tf->findByName(struct_name);
+        ghidra::TypeStruct* vtbl_struct = nullptr;
+
+        if (existing && existing->getMetatype() == ghidra::TYPE_STRUCT) {
+            vtbl_struct = dynamic_cast<ghidra::TypeStruct*>(existing);
+        } else if (!existing) {
+            vtbl_struct = tf->getTypeStruct(struct_name);
+
+            // Build fields: one fn_ptr per vtable slot in order
+            std::vector<ghidra::TypeField> fields;
+            int field_id = 0;
+            for (const VirtualFunction& vf : vt.entries) {
+                int offset = vf.slot_index * ptr_size;
+                std::string fname = vf.name.empty() ? ("vfunc_" + std::to_string(vf.slot_index)) : vf.name;
+                fields.push_back(ghidra::TypeField(field_id++, offset, fname, fn_ptr_type));
+            }
+
+            int struct_size = static_cast<int>(vt.entries.size()) * ptr_size;
+            try {
+                tf->setFields(fields, vtbl_struct, struct_size, ptr_size, 0);
+            } catch (...) {
+                fission::utils::log_stream() << "[VTableAnalyzer] setFields failed for " << struct_name << std::endl;
+                continue;
+            }
+        }
+
+        if (!vtbl_struct) continue;
+
+        // Create TypePointer-to-struct for the vtable pointer lodged in objects
+        ghidra::Datatype* struct_ptr = tf->getTypePointer(ptr_size, vtbl_struct, ptr_size);
+        (void)struct_ptr; // Available for future use in parameter inference
+
+        // Register a global symbol at the vtable address so Ghidra's
+        // ActionConstantPtr / ActionMapGlobals can resolve references to it.
+        if (global_scope && data_space) {
+            ghidra::Address vtaddr(data_space, vt.address);
+            if (!global_scope->findAddr(vtaddr, ghidra::Address())) {
+                try {
+                    global_scope->addSymbol(struct_name, vtbl_struct, vtaddr, ghidra::Address());
+                    registered++;
+                } catch (...) {
+                    // Symbol may already exist under a different name — ignore
+                }
+            }
+        }
+
+        fission::utils::log_stream() << "[VTableAnalyzer] Registered vtable type '"
+                  << struct_name << "' with " << vt.entries.size() << " slots at 0x"
+                  << std::hex << vt.address << std::dec << std::endl;
+    }
+
+    if (registered > 0) {
+        fission::utils::log_stream() << "[VTableAnalyzer] register_vtable_types: "
+                  << registered << " vtable symbols added to global scope." << std::endl;
+    }
 }
 
 } // namespace analysis
