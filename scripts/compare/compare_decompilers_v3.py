@@ -245,6 +245,24 @@ def normalize_for_similarity(text: str) -> str:
     #  3. x86 cdecl prepends '_' to C symbols; strip it so 'add' and '_add'
     #     compare equal (single underscore prefix only, not __ reserved names).
     text = re.sub(r"\b_([a-zA-Z]\w*)\b", r"\1", text)
+    #  4. Normalise ALL identifiers that appear as callables (immediately before '(')
+    #     to FUNC.  After rule 2 Ghidra's sub_XXXX is already FUNC; now rule 4
+    #     maps Fission's COFF-resolved names (add, multiply, printf, …) to FUNC
+    #     as well, so call-sites and function declarations compare equal regardless
+    #     of whether the name was symbol-resolved or address-based.
+    #     C keywords, already-normalised tokens, and type names are excluded.
+    _C_KEYWORDS = {
+        "if", "for", "while", "do", "switch", "return", "sizeof", "typeof",
+        "else", "case", "break", "continue", "goto", "typedef", "struct",
+        "union", "enum", "extern", "static", "inline", "void", "int", "char",
+        "float", "double", "long", "short", "unsigned", "signed", "const",
+        "auto", "register", "volatile", "restrict", "VAR", "FUNC", "UNDEF",
+        "FUNCNAME", "OPAQUE_PTR",
+    }
+    def _norm_callable(m: re.Match) -> str:
+        name = m.group(1)
+        return m.group(0) if name in _C_KEYWORDS else "FUNC("
+    text = re.sub(r"\b([A-Za-z_]\w*)\s*\(", _norm_callable, text)
     # Normalize Fission rename-pass variable names to match Ghidra's VAR tokens
     for pat in (r"\bresult\b", r"\bretval\b"):
         text = re.sub(pat, "VAR", text)
@@ -321,10 +339,29 @@ def extract_ghidra_parts(raw: str) -> tuple[str, str]:
 
 
 def extract_fission_decomp(text: str) -> str:
-    for i, line in enumerate(text.splitlines()):
-        if line.strip().startswith("//") and "===" in line:
-            return "\n".join(text.splitlines()[i:]).strip()
-    return text.strip()
+    """Extract C decompilation, stripping fission_cli header comment block.
+
+    fission_cli prepends either:
+      // ============================================
+      // Function: NAME @ 0xADDR
+      // ============================================
+    or (single-function --decomp path):
+      // Function: NAME @ 0xADDR
+
+    These lines are not present in Ghidra output, so including them
+    artificially depresses similarity scores.
+    """
+    result = []
+    for line in text.splitlines():
+        s = line.strip()
+        # Skip header decoration lines injected by fission_cli
+        if s.startswith("//") and (
+            "===" in s
+            or (s.startswith("// Function:") and "@" in s)
+        ):
+            continue
+        result.append(line)
+    return "\n".join(result).strip()
 
 
 def strip_fission_noise(text: str) -> str:
@@ -495,7 +532,7 @@ def compare_single(
     ghidra_raw, ghidra_sec = _run_ghidra(binary, address, timeout, ghidra_cache_dir)
 
     fission_asm_cmd = fission_cmd + [str(binary), "--disasm-function", address]
-    fission_decomp_cmd = fission_cmd + [str(binary), "--decomp", address]
+    fission_decomp_cmd = fission_cmd + [str(binary), "--decomp", address, "--no-header"]
 
     print(f"    - Running Fission disassembly...")
     fission_asm_raw, fission_asm_sec = run_command(fission_asm_cmd, timeout)

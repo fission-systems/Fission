@@ -97,6 +97,11 @@ pub struct OneShotArgs {
     /// Verbose output
     #[arg(short, long)]
     pub verbose: bool,
+
+    /// Suppress the '// ===...=== Function: ...' header comment in decompilation output
+    /// (useful for clean output or benchmark comparison against Ghidra)
+    #[arg(long)]
+    pub no_header: bool,
 }
 
 /// TUI CLI arguments (for fission_tui binary)

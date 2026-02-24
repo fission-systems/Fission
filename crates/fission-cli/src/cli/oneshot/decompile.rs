@@ -357,12 +357,14 @@ pub(super) fn run_decompilation(
                         "code": code
                     }));
                 } else {
-                    all_output.push_str("// ============================================\n");
-                    all_output.push_str(&format!(
-                        "// Function: {} @ 0x{:x}\n",
-                        func.name, func.address
-                    ));
-                    all_output.push_str("// ============================================\n\n");
+                    if !cli.no_header {
+                        all_output.push_str("// ============================================\n");
+                        all_output.push_str(&format!(
+                            "// Function: {} @ 0x{:x}\n",
+                            func.name, func.address
+                        ));
+                        all_output.push_str("// ============================================\n\n");
+                    }
                     all_output.push_str(&code);
                     all_output.push_str("\n\n");
                 }
@@ -433,7 +435,9 @@ pub(super) fn decompile_and_output(
                 })?;
                 writeln!(stdout, "{}", json_output)?;
             } else {
-                writeln!(stdout, "// Function: {} @ 0x{:x}\n", name, addr)?;
+                if !cli.no_header {
+                    writeln!(stdout, "// Function: {} @ 0x{:x}\n", name, addr)?;
+                }
                 writeln!(stdout, "{}", code)?;
             }
         }

@@ -471,9 +471,9 @@ function App() {
                                         className="explorer__action-btn"
                                         onClick={handleRunFid}
                                         disabled={fidRunning}
-                                        title="시그니처 DB를 사용해 라이브러리 함수를 자동 식별합니다"
+                                        title="Automatically identify library functions using the signature DB"
                                     >
-                                        {fidRunning ? "식별 중…" : "🔍 함수 식별 (FID)"}
+                                        {fidRunning ? "Identifying…" : "🔍 Function ID (FID)"}
                                     </button>
                                 </div>
                             )}

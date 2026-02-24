@@ -1490,70 +1490,84 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
         
         fission::utils::log_stream() << "Proceeding to heuristic for " << func_name_dbg << std::endl;
         
-        // For non-locked prototypes, check if called function returns pointer
-        // (heuristic: functions named *alloc*, *create*, *new*, etc.)
-        fission::utils::log_stream() << "[TypePropagator] Checking " << func_name_dbg 
-                  << ", output_size=" << output->getSize() 
-                  << ", ptr_size=" << ptr_size << std::endl;
-        if (output->getSize() == ptr_size) {
+        if (output->getSize() == ptr_size || output->getSize() >= ptr_size) {
             std::string func_name = fc->getName();
             
-            // Normalize to lowercase for matching
-            std::string lower_name;
-            for (char c : func_name) {
-                lower_name += std::tolower(c);
-            }
-            
-            // Check for allocator-like names
-            bool is_allocator = false;
-            if (lower_name.find("malloc") != std::string::npos ||
-                lower_name.find("calloc") != std::string::npos ||
-                lower_name.find("realloc") != std::string::npos ||
-                lower_name.find("alloc") != std::string::npos ||
-                lower_name.find("create") != std::string::npos ||
-                lower_name.find("new") != std::string::npos ||
-                lower_name.find("open") != std::string::npos) {
-                is_allocator = true;
-                fission::utils::log_stream() << "[TypePropagator] Matched allocator-like function: " 
-                          << func_name << std::endl;
-            }
-            
-            if (is_allocator) {
-                // Create void* type
-                Datatype* void_type = tf->getTypeVoid();
-                Datatype* void_ptr = tf->getTypePointer(ptr_size, void_type, ptr_size);
-                
-                if (void_ptr) {
-                    // Set temp type on varnode
-                    output->setTempType(void_ptr);
-                    uint64_t vid = get_varnode_id(output);
-                    inferred_types[vid] = void_ptr;
-                    
-                    // IMPORTANT: Lock the return type in FuncCallSpecs
-                    // This ensures the type persists across rerun_action
-                    try {
-                        // Get output parameter and lock its type
-                        ProtoParameter* outparam = fc->getOutput();
-                        if (outparam && !outparam->isTypeLocked()) {
-                            // Create ParameterPieces for the output
-                            ParameterPieces piece;
-                            piece.type = void_ptr;
-                            piece.addr = outparam->getAddress();
-                            piece.flags = 0;
-                            
-                            fc->setOutput(piece);
-                            fc->setOutputLock(true);
-                            
-                            fission::utils::log_stream() << "[TypePropagator] Locked return type to void* for: " 
-                                      << func_name << std::endl;
+            // ── Step 1: Try to resolve the callee's Funcdata and read its prototype ──
+            // If the callee has a known return type (e.g., from COFF symbols +
+            // prior type-recovery) that's a pointer, use it directly instead of
+            // falling back to the name-based heuristic below.
+            Datatype* resolved_ret = nullptr;
+            Varnode* target_vn = op->getIn(0);
+            if (target_vn && target_vn->isConstant()) {
+                uint64_t target_addr = target_vn->getOffset();
+                try {
+                    Funcdata* callee_fd = arch->symboltab->getGlobalScope()->queryFunction(
+                        Address(arch->getDefaultCodeSpace(), target_addr));
+                    if (callee_fd) {
+                        FuncProto& callee_proto = callee_fd->getFuncProto();
+                        Datatype* ret = callee_proto.getOutputType();
+                        if (ret && ret->getMetatype() == TYPE_PTR) {
+                            resolved_ret = ret;
+                            fission::utils::log_stream() << "[TypePropagator] Resolved concrete return ptr type "
+                                      << ret->getName() << " for callee " << func_name << std::endl;
                         }
-                    } catch (...) {
-                        // FuncCallSpecs may not support direct modification
-                        // Fall back to just setting temp type
                     }
-                    
-                    types_set++;
+                } catch (...) {}
+            }
+
+            // ── Step 2: Name-based heuristic (allocator pattern) ──
+            Datatype* ptr_type = nullptr;
+            if (resolved_ret) {
+                ptr_type = resolved_ret;
+            } else {
+                // Normalize to lowercase for matching
+                std::string lower_name;
+                for (char c : func_name) {
+                    lower_name += std::tolower(c);
                 }
+                
+                bool is_allocator = (
+                    lower_name.find("malloc") != std::string::npos ||
+                    lower_name.find("calloc") != std::string::npos ||
+                    lower_name.find("realloc") != std::string::npos ||
+                    lower_name.find("alloc") != std::string::npos ||
+                    lower_name.find("create") != std::string::npos ||
+                    lower_name.find("new") != std::string::npos ||
+                    lower_name.find("open") != std::string::npos
+                );
+                
+                if (is_allocator) {
+                    Datatype* void_type = tf->getTypeVoid();
+                    ptr_type = tf->getTypePointer(ptr_size, void_type, ptr_size);
+                    fission::utils::log_stream() << "[TypePropagator] Matched allocator-like function: "
+                              << func_name << std::endl;
+                }
+            }
+
+            // ── Step 3: Apply the pointer type to the output varnode ──
+            if (ptr_type) {
+                output->setTempType(ptr_type);
+                uint64_t vid = get_varnode_id(output);
+                inferred_types[vid] = ptr_type;
+                
+                // Lock return type in FuncCallSpecs so it persists across
+                // Ghidra's rerun_action loop.
+                try {
+                    ProtoParameter* outparam = fc->getOutput();
+                    if (outparam && !outparam->isTypeLocked()) {
+                        ParameterPieces piece;
+                        piece.type = ptr_type;
+                        piece.addr = outparam->getAddress();
+                        piece.flags = 0;
+                        fc->setOutput(piece);
+                        fc->setOutputLock(true);
+                        fission::utils::log_stream() << "[TypePropagator] Locked return type to "
+                                  << ptr_type->getName() << " for: " << func_name << std::endl;
+                    }
+                } catch (...) {}
+                
+                types_set++;
             }
         }
     }

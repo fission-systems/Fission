@@ -120,12 +120,12 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
         setFidRunning(true);
         try {
             const result = await invoke<FidResultDto>("run_fid");
-            log(`FID: ${result.matched} / ${result.total_scanned} 함수 식별 완료`);
+            log(`FID: ${result.matched} / ${result.total_scanned} functions identified`);
             const funcs = await invoke<FunctionDto[]>("get_functions");
             setFunctions(funcs);
             setAsmCache({});
         } catch (e) {
-            log(`FID 오류: ${e}`);
+            log(`FID error: ${e}`);
         } finally {
             setFidRunning(false);
         }
