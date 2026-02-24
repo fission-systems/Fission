@@ -814,6 +814,9 @@ int TypePropagator::propagate(Funcdata* fd) {
         propagate_one_type(vn);
     }
 
+    // Phase 4b: Synchronise types across CPUI_RETURN ops (Ghidra propagateAcrossReturns)
+    propagate_across_returns(fd);
+
     // Phase 5: Infer pointer types for stack variables
     infer_stack_pointer_types(fd);
 
@@ -1636,6 +1639,70 @@ void TypePropagator::seed_before_action(Funcdata* fd) {
         fission::utils::log_stream() << "[TypePropagator] seed_before_action: injected "
                   << seeded << " type recommendations for function 0x"
                   << std::hex << fd->getAddress().getOffset() << std::dec << std::endl;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// propagateAcrossReturns — mirrors Ghidra ActionInferTypes::canonicalReturnOp
+// + propagateAcrossReturns (coreaction.cc L5186–L5245)
+// ---------------------------------------------------------------------------
+
+PcodeOp* TypePropagator::canonical_return_op(Funcdata* fd) {
+    PcodeOp* best = nullptr;
+    Datatype* bestdt = nullptr;
+    auto iter = fd->beginOp(CPUI_RETURN);
+    auto iterend = fd->endOp(CPUI_RETURN);
+    for (; iter != iterend; ++iter) {
+        PcodeOp* retop = *iter;
+        if (retop->isDead()) continue;
+        if (retop->getHaltType() != 0) continue;
+        if (retop->numInput() <= 1) continue;  // no return value
+        Varnode* vn = retop->getIn(1);
+        Datatype* ct = vn->getTempType();
+        if (!ct) continue;
+        if (!bestdt) {
+            best = retop;
+            bestdt = ct;
+        } else if (ct->typeOrder(*bestdt) < 0) {
+            // ct is more specific than current best
+            best = retop;
+            bestdt = ct;
+        }
+    }
+    return best;
+}
+
+void TypePropagator::propagate_across_returns(Funcdata* fd) {
+    if (!fd) return;
+    // Skip if the function prototype already has a locked return type —
+    // in that case ActionInferTypes won't touch it either.
+    if (fd->getFuncProto().isOutputLocked()) return;
+
+    PcodeOp* op = canonical_return_op(fd);
+    if (!op) return;
+
+    Varnode* baseVn = op->getIn(1);
+    Datatype* ct = baseVn->getTempType();
+    if (!ct) return;
+
+    int baseSize = baseVn->getSize();
+    bool isBool = (ct->getMetatype() == TYPE_BOOL);
+
+    auto iter = fd->beginOp(CPUI_RETURN);
+    auto iterend = fd->endOp(CPUI_RETURN);
+    for (; iter != iterend; ++iter) {
+        PcodeOp* retop = *iter;
+        if (retop == op) continue;
+        if (retop->isDead()) continue;
+        if (retop->getHaltType() != 0) continue;
+        if (retop->numInput() <= 1) continue;
+        Varnode* vn = retop->getIn(1);
+        if (vn->getSize() != baseSize) continue;
+        // Don't propagate bool to a varnode that can hold values other than 0/1.
+        if (isBool && vn->getNZMask() > 1) continue;
+        if (vn->getTempType() == ct) continue;  // already consistent
+        vn->setTempType(ct);
+        propagate_one_type(vn);
     }
 }
 

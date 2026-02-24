@@ -248,6 +248,14 @@ def normalize_for_similarity(text: str) -> str:
     text = re.sub(r"\(OPAQUE_PTR\)", "(OPAQUE_PTR)", text)
     # Normalise variable name prefixes that encode type (pvVar/puVar/pcVar → VAR)
     text = re.sub(r"\bp[vucslt]Var(\d+)\b", r"VAR\1", text)
+    # Strip explicit integer-width casts that Ghidra PrintC inserts but Fission omits:
+    # e.g. (longlong)&local_38 → &local_38, (uint)x → x
+    # Run AFTER variable name normalization so VAR tokens are already in place.
+    int_cast_pat = r"\((?:longlong|ulonglong|uint|ushort|uchar|sbyte|longdouble)\)\s*"
+    text = re.sub(int_cast_pat, "", text)
+    # Normalise bare undefined[N] type names (non-pointer) to UNDEF so that
+    # differences like 'undefined8 param_2' vs 'char * param_2' don't count twice.
+    text = re.sub(r"\bundefined[0-9]+\b(?!\s*\*)", "UNDEF", text)
     return text
 
 

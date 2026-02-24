@@ -82,6 +82,15 @@ private:
     
     /// Write back temporary types to permanent fields (Ghidra style)
     bool write_back(ghidra::Funcdata* fd);
+
+    /// Select the CPUI_RETURN op whose input varnode carries the most-specific
+    /// TempType (mirrors Ghidra ActionInferTypes::canonicalReturnOp).
+    ghidra::PcodeOp* canonical_return_op(ghidra::Funcdata* fd);
+
+    /// Synchronise TempTypes across all CPUI_RETURN ops so that the
+    /// most-specific inferred return type is propagated to every exit path
+    /// (mirrors Ghidra ActionInferTypes::propagateAcrossReturns).
+    void propagate_across_returns(ghidra::Funcdata* fd);
     
 public:
     /// Propagate call return types using FuncCallSpecs
