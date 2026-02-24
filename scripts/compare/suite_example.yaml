@@ -1,0 +1,42 @@
+# Fission decompiler benchmark suite definition
+# Used with: python3 scripts/compare/compare_decompilers_v3.py --suite <this_file>
+#
+# Schema:
+#   name          : Suite identifier (used in output directory name)
+#   binaries[]    : List of binaries to benchmark
+#     path        : Path relative to project root
+#     image_base  : (optional) PE image base in hex
+#     functions[] : List of functions to compare
+#       address          : Function entry address in hex
+#       name             : (optional) Human-readable label
+#       expected_patterns: (optional) Strings that should appear in Fission output
+#       runs             : (optional) Override global --runs for this function
+
+name: "decomp-quality-v1"
+
+binaries:
+  - path: "examples/comparison_test_x64"
+    image_base: "0x140000000"
+    functions:
+      - address: "0x140001680"
+        name: "main_or_entry"
+        expected_patterns:
+          - "if ("
+          - "->"
+          - "printf("
+        # runs: 3  # uncomment to repeat 3 times for timing stats
+
+      # Add more functions here as the suite grows:
+      # - address: "0x140002000"
+      #   name: "some_func"
+      #   expected_patterns:
+      #     - "switch ("
+      #     - "item->"
+      #     - "malloc("
+
+  # Add more binaries here:
+  # - path: "examples/some_elf"
+  #   functions:
+  #     - address: "0x401000"
+  #       name: "elf_main"
+  #       expected_patterns: ["argc", "argv"]
