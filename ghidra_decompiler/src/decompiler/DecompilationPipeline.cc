@@ -72,9 +72,15 @@ static std::vector<std::string> collect_referenced_strings_near(
     const std::vector<uint8_t>& bytes,
     size_t func_off,
     uint64_t image_base,
-    const std::map<uint64_t, std::string>& known_strings
+    const std::map<uint64_t, std::string>& known_strings,
+    ArchType arch = ArchType::X86_64   // x86 byte patterns only — skip for ARM/ARM64
 ) {
     std::vector<std::string> refs;
+    // The patterns below are exclusively x86/x64 instruction encodings.
+    // Returning an empty set for other architectures avoids false positives.
+    if (arch != ArchType::X86 && arch != ArchType::X86_64) {
+        return refs;
+    }
     if (known_strings.empty() || func_off >= bytes.size()) {
         return refs;
     }
@@ -131,6 +137,70 @@ static std::vector<std::string> collect_referenced_strings_near(
     return refs;
 }
 
+// ============================================================================
+// Parse a Ghidra sleigh_id string ("ARCH:ENDIAN:BITS:VARIANT") into BinaryInfo.
+//
+// Steps:
+//  1. Derive arch type + bitness from the sleigh_id fields.
+//  2. Try BinaryDetector::detect() on the raw bytes for format (most accurate).
+//  3. If bytes are absent or format is UNKNOWN, fall back to compiler_id hints.
+// ============================================================================
+static BinaryInfo parse_sleigh_id(const std::string& sleigh_id,
+                                   const std::string& compiler_id,
+                                   const std::vector<uint8_t>& bytes) {
+    BinaryInfo info;
+    info.sleigh_id  = sleigh_id;
+    info.compiler_id = compiler_id.empty() ? "default" : compiler_id;
+
+    // Split sleigh_id on ':' to read individual fields
+    std::vector<std::string> fields;
+    {
+        std::istringstream ss(sleigh_id);
+        std::string tok;
+        while (std::getline(ss, tok, ':')) fields.push_back(tok);
+    }
+    const std::string arch_field = fields.size() > 0 ? fields[0] : "";
+    const std::string bits_field = fields.size() > 2 ? fields[2] : "";
+
+    // Determine bitness from the third field ("32" or "64")
+    info.is_64bit = (bits_field == "64");
+
+    // Determine ArchType from the first field
+    if (arch_field == "x86") {
+        info.arch = info.is_64bit ? ArchType::X86_64 : ArchType::X86;
+    } else if (arch_field == "AARCH64") {
+        info.arch   = ArchType::ARM64;
+        info.is_64bit = true;  // AARCH64 is always 64-bit
+    } else if (arch_field == "ARM") {
+        info.arch   = ArchType::ARM;
+        info.is_64bit = false;
+    }
+    // else: leave arch = UNKNOWN
+
+    // Try to detect format from binary magic bytes (most accurate)
+    if (!bytes.empty()) {
+        BinaryInfo detected = BinaryDetector::detect(bytes.data(), bytes.size());
+        if (detected.format != BinaryFormat::UNKNOWN) {
+            info.format = detected.format;
+            // Trust the byte-level bitness only when sleigh_id did not specify it
+            if (bits_field.empty()) info.is_64bit = detected.is_64bit;
+            return info;
+        }
+    }
+
+    // Fall back to compiler_id heuristics
+    if (info.compiler_id == "windows") {
+        info.format = BinaryFormat::PE;
+    } else if (info.compiler_id == "gcc") {
+        info.format = BinaryFormat::ELF;
+    } else if (info.compiler_id == "clang") {
+        // clang targets both ELF (Linux) and Mach-O (Apple); pick by arch
+        info.format = (info.arch == ArchType::ARM64) ? BinaryFormat::MACHO : BinaryFormat::ELF;
+    }
+    // else: format stays UNKNOWN (caller will warn)
+
+    return info;
+}
 
 std::string DecompilationPipeline::process_request(
     core::DecompilerContext& state, 
@@ -205,40 +275,36 @@ std::string DecompilationPipeline::handle_load_bin(
     // Phase 1: Binary Format Detection
     BinaryInfo bin_info;
     if (!req_sleigh_id.empty()) {
-        fission::utils::log_stream() << "[fission_decomp] Using provided architecture: " << req_sleigh_id << std::endl;
-        bin_info.sleigh_id = req_sleigh_id;
-        bin_info.compiler_id = req_compiler_id.empty() ? "default" : req_compiler_id;
-        
-        // Infer format and bitness from sleigh_id if possible
-        if (req_sleigh_id.find(":64:") != std::string::npos) bin_info.is_64bit = true;
-        if (req_sleigh_id.find("x86") != std::string::npos) bin_info.arch = ArchType::X86_64; // simplified
-        
-        // Map compiler_id to format for internal logic
-        if (bin_info.compiler_id == "windows") bin_info.format = BinaryFormat::PE;
-        else if (bin_info.compiler_id == "gcc") bin_info.format = BinaryFormat::ELF;
-        else if (bin_info.compiler_id == "clang") bin_info.format = BinaryFormat::MACHO;
+        fission::utils::log_stream() << "[fission_decomp] Using provided sleigh_id: "
+                  << req_sleigh_id << std::endl;
+        // parse_sleigh_id() sets arch, bitness, format — tries BinaryDetector first
+        bin_info = parse_sleigh_id(req_sleigh_id, req_compiler_id, bin_bytes);
     } else {
         fission::utils::log_stream() << "[fission_decomp] Debug: Detecting Binary Format..." << std::endl;
         bin_info = BinaryDetector::detect(bin_bytes.data(), bin_bytes.size());
     }
-    
-    bool is_pe = (bin_info.format == BinaryFormat::PE);
-    bool is_elf = (bin_info.format == BinaryFormat::ELF);
+
+    bool is_pe    = (bin_info.format == BinaryFormat::PE);
+    bool is_elf   = (bin_info.format == BinaryFormat::ELF);
     bool is_macho = (bin_info.format == BinaryFormat::MACHO);
     std::string compiler_id = bin_info.compiler_id.empty() ? "default" : bin_info.compiler_id;
-    
+
     if (bin_info.format != BinaryFormat::UNKNOWN || !bin_info.sleigh_id.empty()) {
-        fission::utils::log_stream() << "[fission_decomp] Binary Info: " 
+        fission::utils::log_stream() << "[fission_decomp] Binary Info: "
                   << (is_pe ? "PE" : (is_elf ? "ELF" : (is_macho ? "Mach-O" : "Unknown")))
-                  << " " << (bin_info.is_64bit ? "64-bit" : "32-bit") 
+                  << " " << (bin_info.is_64bit ? "64-bit" : "32-bit")
                   << " Arch=" << bin_info.sleigh_id
                   << " Compiler=" << compiler_id << std::endl;
     } else {
-        fission::utils::log_stream() << "[fission_decomp] Warning: Unknown binary format, assuming PE x64" << std::endl;
-        bin_info.format = BinaryFormat::PE;
+        // Fix 3: emit an explicit warning rather than silently forcing PE x64
+        fission::utils::log_stream() << "[fission_decomp] WARNING: Binary format undetected "
+                  << "(format=UNKNOWN, sleigh_id empty). "
+                  << "Falling back to PE x64/windows. "
+                  << "Pass a valid binary or supply sleigh_id in the request." << std::endl;
+        bin_info.format   = BinaryFormat::PE;
         bin_info.is_64bit = true;
         bin_info.sleigh_id = "x86:LE:64:default";
-        compiler_id = "windows";
+        compiler_id        = "windows";
     }
     
     // Phase 2: Setup 64-bit Architecture
@@ -365,7 +431,7 @@ std::string DecompilationPipeline::handle_load_bin(
         
         // Phase 9: Setup Architecture
         fission::utils::log_stream() << "[fission_decomp] Debug: Creating Loader and Arch..." << std::endl;
-        state.setup_architecture(true, bin_bytes, image_base, compiler_id);
+        state.setup_architecture(true, bin_bytes, image_base, compiler_id, bin_info.sleigh_id);
         
         // FISSION IMPROVEMENT: Phase 9.5: Scan data sections for floating-point constants
         fission::utils::log_stream() << "[fission_decomp] Debug: Scanning data sections for constants..." << std::endl;
@@ -405,7 +471,7 @@ std::string DecompilationPipeline::handle_load_bin(
     
     // Phase 11: Setup 32-bit Architecture
     if (!state.arch_32bit_ready) {
-        state.setup_architecture(false, bin_bytes, image_base, compiler_id);
+        state.setup_architecture(false, bin_bytes, image_base, compiler_id, bin_info.sleigh_id);
     } else {
         state.loader_32bit->updateData(bin_bytes, image_base);
         state.arch_32bit->symboltab->getGlobalScope()->clear();
@@ -595,6 +661,7 @@ std::string DecompilationPipeline::handle_decompile(
     bool is_64bit = extract_json_bool(input, "is_64bit");
     std::string sla_dir = extract_json_string(input, "sla_dir");
     std::string compiler_id = extract_json_string(input, "compiler_id");
+    std::string sleigh_id   = extract_json_string(input, "sleigh_id");
     if (compiler_id.empty()) {
         compiler_id = "windows";
     }
@@ -614,7 +681,7 @@ std::string DecompilationPipeline::handle_decompile(
     }
     
     // Setup architecture
-    state.setup_architecture(is_64bit, bytes, address, compiler_id);
+    state.setup_architecture(is_64bit, bytes, address, compiler_id, sleigh_id);
     
     // Determine loader/arch
     MemoryLoadImage* loader = nullptr;

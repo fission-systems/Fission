@@ -2,7 +2,9 @@
 #define FISSION_DECOMPILER_DECOMPILATION_PIPELINE_H
 
 #include <string>
+#include <vector>
 #include "fission/core/DecompilerContext.h"
+#include "fission/loader/BinaryDetector.h"
 
 namespace fission {
 namespace decompiler {
@@ -62,6 +64,62 @@ private:
      * @return JSON response (status + C code)
      */
     static std::string handle_decompile(fission::core::DecompilerContext& state, const std::string& input);
+
+    // ── handle_load_bin sub-phases (decomposed from the monolithic God function) ───
+
+    /**
+     * @brief Phase 1 – Detect binary format, arch, and bitness.
+     *
+     * Uses the optional sleigh_id/compiler_id hints from the JSON request
+     * (via parse_sleigh_id()) and falls back to BinaryDetector::detect().
+     *
+     * @param input  Raw JSON request
+     * @param bytes  Binary bytes
+     * @return Populated BinaryInfo (format, arch, sleigh_id, compiler_id, is_64bit)
+     */
+    static fission::loader::BinaryInfo detect_binary_info(
+        const std::string& input,
+        const std::vector<uint8_t>& bytes);
+
+    /**
+     * @brief Phases 3-9.5 – Run pre-decompilation analysis (RTTI, VTable, FID, strings…).
+     *
+     * Populates state.iat_symbols, state.fid_function_names, state.vtable_virtual_names,
+     * state.enum_values and sets up the Ghidra architecture objects.
+     *
+     * @param state        Decompiler context to populate
+     * @param info         Binary info from detect_binary_info()
+     * @param bytes        Full binary bytes
+     * @param image_base   Load address
+     * @param compiler_id  Compiler/OS string (e.g. "windows", "gcc")
+     */
+    static void run_preanalysis(
+        fission::core::DecompilerContext& state,
+        const fission::loader::BinaryInfo& info,
+        const std::vector<uint8_t>& bytes,
+        uint64_t image_base,
+        const std::string& compiler_id);
+
+    /**
+     * @brief Phases 10-12 – IAT injection + FID/InternalMatcher prologue scan.
+     *
+     * Finalises symbol tables for both 32- and 64-bit architectures and runs
+     * the unified prologue/FID matching pass.
+     *
+     * @param state        Decompiler context (arch already initialised)
+     * @param info         Binary info from detect_binary_info()
+     * @param bytes        Full binary bytes
+     * @param image_base   Load address
+     * @param compiler_id  Compiler/OS string
+     * @param input        Original JSON request (for IAT symbol extraction)
+     */
+    static void run_signature_analysis(
+        fission::core::DecompilerContext& state,
+        const fission::loader::BinaryInfo& info,
+        const std::vector<uint8_t>& bytes,
+        uint64_t image_base,
+        const std::string& compiler_id,
+        const std::string& input);
 };
 
 } // namespace decompiler

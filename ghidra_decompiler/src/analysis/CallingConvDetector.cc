@@ -25,6 +25,10 @@ CallingConvDetector::CallingConvDetector(Architecture* a) : arch(a) {
     
     // x86 FASTCALL
     fastcall_regs = {"ECX", "EDX"};
+
+    // AAPCS64 (ARM64) integer + FP arg registers
+    aapcs64_arg_regs = {"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
+                        "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7"};
 }
 
 CallingConvDetector::~CallingConvDetector() {}
@@ -210,6 +214,49 @@ bool CallingConvDetector::check_thiscall(Funcdata* fd) {
     return false;
 }
 
+bool CallingConvDetector::check_aapcs64(Funcdata* fd) {
+    if (!is_64bit) return false;
+
+    // Verify this is actually an AArch64 architecture by probing for register "x0".
+    // If the translate spec does not know "x0", we are not on ARM64.
+    const Translate* trans = arch->translate;
+    bool arch_is_aarch64 = false;
+    try {
+        VarnodeData vd = trans->getRegister("x0");
+        arch_is_aarch64 = (vd.size > 0);
+    } catch (...) {}
+    if (!arch_is_aarch64) return false;
+
+    // Count AAPCS64 argument registers used (x0-x7, v0-v7)
+    std::set<std::string> regs_used;
+    list<PcodeOp*>::const_iterator iter;
+    for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
+        PcodeOp* op = *iter;
+        if (!op) continue;
+
+        for (int i = 0; i < op->numInput(); ++i) {
+            Varnode* vn = op->getIn(i);
+            if (!vn || !vn->isInput()) continue;
+
+            AddrSpace* sp = vn->getSpace();
+            if (!sp || sp->getName() != "register") continue;
+
+            std::string reg_name = trans->getRegisterName(sp, vn->getOffset(), vn->getSize());
+            if (aapcs64_arg_regs.count(reg_name)) {
+                regs_used.insert(reg_name);
+            }
+        }
+
+        if (regs_used.size() >= 2) {
+            fission::utils::log_stream() << "[CallingConvDetector] AAPCS64 detected (regs="
+                      << regs_used.size() << ")" << std::endl;
+            return true;
+        }
+    }
+
+    return regs_used.size() >= 2;
+}
+
 CallingConvDetector::ConvType CallingConvDetector::detect(Funcdata* fd) {
     if (!fd) return CONV_UNKNOWN;
     
@@ -218,7 +265,10 @@ CallingConvDetector::ConvType CallingConvDetector::detect(Funcdata* fd) {
               << ", is_64bit=" << is_64bit << std::endl;
     
     if (is_64bit) {
-        // 64-bit: check MS x64 first (Windows), then SYSV (Linux/Mac)
+        // AArch64 has priority: probe for x0 register presence
+        if (check_aapcs64(fd)) return CONV_AAPCS64;
+
+        // 64-bit x86: check MS x64 first (Windows), then SYSV (Linux/Mac)
         fission::utils::log_stream() << "[CallingConvDetector] Checking MS x64..." << std::endl;
         if (check_ms_x64(fd)) return CONV_MS_X64;
         
@@ -244,6 +294,7 @@ const char* CallingConvDetector::conv_name(ConvType type) {
         case CONV_THISCALL: return "__thiscall";
         case CONV_MS_X64: return "__fastcall"; // MS x64 uses fastcall name
         case CONV_SYSV_X64: return "__sysv_abi";
+        case CONV_AAPCS64: return "__aapcs64";
         default: return "unknown";
     }
 }
@@ -284,6 +335,10 @@ void CallingConvDetector::apply(Funcdata* fd, ConvType type) {
             break;
         case CONV_THISCALL:
             model = arch->getModel("__thiscall");
+            break;
+        case CONV_AAPCS64:
+            model = arch->getModel("__aapcs64");
+            if (!model) model = arch->getModel("default");
             break;
         default:
             break;

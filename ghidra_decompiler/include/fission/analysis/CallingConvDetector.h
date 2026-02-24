@@ -24,7 +24,8 @@ public:
         CONV_FASTCALL,
         CONV_THISCALL,
         CONV_MS_X64,
-        CONV_SYSV_X64
+        CONV_SYSV_X64,
+        CONV_AAPCS64    ///< ARM64 AAPCS (x0-x7 integer args, v0-v7 FP args)
     };
 
 private:
@@ -35,6 +36,7 @@ private:
     std::set<std::string> ms_x64_arg_regs;  // RCX, RDX, R8, R9
     std::set<std::string> sysv_arg_regs;    // RDI, RSI, RDX, RCX, R8, R9
     std::set<std::string> fastcall_regs;    // ECX, EDX
+    std::set<std::string> aapcs64_arg_regs; // x0-x7, v0-v7
     
     /// Check if function uses MS x64 ABI
     bool check_ms_x64(ghidra::Funcdata* fd);
@@ -50,6 +52,9 @@ private:
     
     /// Check for THISCALL (ECX = this)
     bool check_thiscall(ghidra::Funcdata* fd);
+
+    /// Check if function uses AAPCS64 (ARM64) ABI: x0-x7, v0-v7
+    bool check_aapcs64(ghidra::Funcdata* fd);
 
 public:
     CallingConvDetector(ghidra::Architecture* arch);

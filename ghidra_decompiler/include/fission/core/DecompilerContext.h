@@ -79,7 +79,10 @@ public:
     bool initialize(const std::string& sleigh_directory);
 
     // Setup architecture for a specific mode
-    void setup_architecture(bool is_64bit, const std::vector<uint8_t>& bytes, uint64_t image_base, const std::string& compiler_id);
+    // sleigh_id: if non-empty, overrides the default arch_id (e.g. "AARCH64:LE:64:v8A")
+    void setup_architecture(bool is_64bit, const std::vector<uint8_t>& bytes,
+                            uint64_t image_base, const std::string& compiler_id,
+                            const std::string& sleigh_id = "");
 };
 
 } // namespace core

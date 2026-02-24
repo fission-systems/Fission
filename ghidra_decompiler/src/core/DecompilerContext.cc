@@ -92,14 +92,17 @@ bool DecompilerContext::initialize(const std::string& sleigh_directory) {
     }
 }
 
-void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint8_t>& bytes, uint64_t image_base, const std::string& compiler_id) {
+void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint8_t>& bytes, uint64_t image_base, const std::string& compiler_id, const std::string& sleigh_id) {
     if (is_64bit) {
         if (!arch_64bit_ready) {
             if (loader_64bit) delete loader_64bit;
             if (arch_64bit) delete arch_64bit;
 
             loader_64bit = new fission::loader::MemoryLoadImage(bytes, image_base);
-            std::string arch_id = "x86:LE:64:default:" + compiler_id;
+            // Use caller-supplied sleigh_id when available (e.g. "AARCH64:LE:64:v8A"),
+            // otherwise fall back to x86:LE:64 default.
+            std::string arch_id = (sleigh_id.empty() ? "x86:LE:64:default" : sleigh_id)
+                                   + ":" + compiler_id;
             arch_64bit = new CliArchitecture(arch_id, loader_64bit, &fission::utils::null_stream());
             ghidra::DocumentStorage store;
             arch_64bit->init(store);
@@ -123,7 +126,10 @@ void DecompilerContext::setup_architecture(bool is_64bit, const std::vector<uint
             if (arch_32bit) delete arch_32bit;
 
             loader_32bit = new fission::loader::MemoryLoadImage(bytes, image_base);
-            std::string arch_id = "x86:LE:32:default:" + compiler_id;
+            // Use caller-supplied sleigh_id when available (e.g. "ARM:LE:32:v7"),
+            // otherwise fall back to x86:LE:32 default.
+            std::string arch_id = (sleigh_id.empty() ? "x86:LE:32:default" : sleigh_id)
+                                   + ":" + compiler_id;
             arch_32bit = new CliArchitecture(arch_id, loader_32bit, &fission::utils::null_stream());
             ghidra::DocumentStorage store;
             arch_32bit->init(store);
