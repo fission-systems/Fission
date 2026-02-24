@@ -3,6 +3,7 @@
 *
 !.gitignore
 !.gitkeep
+!README.md
 !*.yaml
 !*.yml
 !*/
