@@ -89,17 +89,32 @@ public:
      * @return Modified C code with structured control flow
      */
     static std::string structurize_control_flow(std::string c_code);
-    
+
+    /**
+     * @brief Convert while-with-init-and-increment patterns to for loops.
+     *
+     * Detects:
+     *   VAR = INIT;
+     *   while (VAR OP END) { ...body...; VAR++; }
+     * and transforms to:
+     *   for (VAR = INIT; VAR OP END; VAR++) { ...body... }
+     *
+     * @param c_code The C code string to process
+     * @return Modified C code with for loops where possible
+     */
+    static std::string convert_while_to_for_struct(std::string c_code);
+
     /**
      * @brief Apply all post-processing steps
      * 
      * Order of processing:
      * 1. convert_integer_constants - Extract string literals
      * 2. structurize_control_flow - Eliminate gotos
-     * 3. convert_while_to_for - Compound operators
-     * 4. simplify_nested_if - Condition simplification
-     * 5. fold_array_init - Array detection
-     * 6. improve_variable_names - Variable renaming
+     * 3. convert_while_to_for_struct - while+init+inc → for loops
+     * 4. convert_while_to_for - Compound operators
+     * 5. simplify_nested_if - Condition simplification
+     * 6. fold_array_init - Array detection
+     * 7. improve_variable_names - Variable renaming
      * 
      * @param c_code The raw decompiled C code
      * @return Processed C code

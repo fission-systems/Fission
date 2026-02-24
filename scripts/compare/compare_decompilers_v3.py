@@ -227,13 +227,19 @@ def strip_banner_and_comments(text: str) -> str:
 
 
 def normalize_for_similarity(text: str) -> str:
+    text = strip_inferred_structs(text)
     text = strip_banner_and_comments(text)
     lines = [re.sub(r"\s+", " ", l.strip()) for l in text.splitlines() if l.strip()]
     text = "\n".join(lines)
-    # Normalize auto-generated variable names
+    # Normalize auto-generated variable names (Ghidra patterns)
     for pat in (r"\blocal_[0-9a-f]+\b", r"\buVar[0-9]+\b", r"\biVar[0-9]+\b",
                 r"\bpVar[0-9]+\b", r"\bdVar[0-9]+\b"):
         text = re.sub(pat, "VAR", text)
+    # Normalize Fission rename-pass variable names to match Ghidra's VAR tokens
+    for pat in (r"\bresult\b", r"\bretval\b"):
+        text = re.sub(pat, "VAR", text)
+    # Normalize increment forms: var++ / var = var + 1 → consistent token
+    text = re.sub(r"\bVAR\+\+", "VAR = VAR + 1", text)
     return text
 
 
