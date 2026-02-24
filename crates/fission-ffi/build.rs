@@ -103,8 +103,58 @@ fn main() {
                     }
                 }
             } else {
-                // On macOS and Linux, add rpath for runtime discovery
+                // macOS / Linux: add rpath so the linker embeds the search path.
                 println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_path.display());
+
+                // Additionally copy the dylib into target/{profile}/ so that
+                // `dyld` can find it even when rpaths from OUT_DIR entries are
+                // used (this affects `cargo run` / `tauri dev` on macOS).
+                if let Ok(out_dir) = std::env::var("OUT_DIR") {
+                    let target_dir = std::path::Path::new(&out_dir)
+                        .ancestors()
+                        .find(|p| {
+                            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            name == "debug" || name == "release"
+                        })
+                        .map(|p| p.to_path_buf());
+
+                    if let Some(target_dir) = target_dir {
+                        let dylib_src = lib_path.join("libdecomp.dylib");
+                        if dylib_src.exists() {
+                            let dst = target_dir.join("libdecomp.dylib");
+                            // If dst is a symlink (or regular file), check that
+                            // it isn't the same inode as the source before copying,
+                            // otherwise std::fs::copy would truncate the source.
+                            let same_file = dst.exists() && {
+                                let src_canon = dylib_src.canonicalize().ok();
+                                let dst_canon = dst.canonicalize().ok();
+                                src_canon.is_some() && src_canon == dst_canon
+                            };
+                            if same_file {
+                                // Replace the circular symlink with a real copy:
+                                // remove the symlink first so that copy targets
+                                // a fresh path.
+                                let _ = std::fs::remove_file(&dst);
+                            }
+                            match std::fs::copy(&dylib_src, &dst) {
+                                Ok(_) => println!(
+                                    "cargo:warning=Copied libdecomp.dylib to {}",
+                                    dst.display()
+                                ),
+                                Err(e) => println!(
+                                    "cargo:warning=Failed to copy libdecomp.dylib: {}",
+                                    e
+                                ),
+                            }
+                        }
+                        // Also handle libdecomp.so for Linux
+                        let so_src = lib_path.join("libdecomp.so");
+                        if so_src.exists() {
+                            let dst = target_dir.join("libdecomp.so");
+                            let _ = std::fs::copy(&so_src, &dst);
+                        }
+                    }
+                }
             }
 
             println!("cargo:rerun-if-changed={}", lib_path.display());
