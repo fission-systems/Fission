@@ -1,0 +1,76 @@
+# Fission decompiler benchmark suite — MinGW i686 x86 -O2 build
+# Compiled from examples/sources/comparison_test.c
+#   i686-w64-mingw32-gcc -O2 -g \
+#     -o examples/binaries/comparison_test_x86_O2.exe \
+#     examples/sources/comparison_test.c
+#
+# Used with:
+#   python3 scripts/compare/compare_decompilers_v3.py \
+#     --suite scripts/compare/suite_x86_O2.yaml scripts/result_x86_O2
+#
+# -O2 vs -O1 differences to watch:
+#   • sum_array: GCC 15 may vectorize → SSE2 loop idioms
+#   • calculate_discount: float math optimized (FIST/FILD may merge)
+#   • x86 double args: merge_split_double_args should still fire for
+#     create_item since both halves remain as CPUI_CALL inputs
+#   • main: destroy_item null-check may be stripped (inlined/elided)
+
+name: "decomp-quality-x86-O2"
+
+binaries:
+  - path: "examples/binaries/comparison_test_x86_O2.exe"
+    image_base: "0x400000"
+    functions:
+      - address: "0x401460"
+        name: "add"
+        expected_patterns:
+          - "return"
+
+      - address: "0x401470"
+        name: "multiply"
+        expected_patterns:
+          - "return"
+
+      - address: "0x401480"
+        name: "print_message"
+        expected_patterns:
+          - "printf("
+
+      - address: "0x4014a0"
+        name: "init_item"
+        expected_patterns:
+          - "->"
+          - "="
+
+      - address: "0x4014f0"
+        name: "print_item"
+        expected_patterns:
+          - "printf("
+
+      - address: "0x401540"
+        name: "create_item"
+        expected_patterns:
+          - "malloc("
+          - "return"
+
+      - address: "0x4015a0"
+        name: "destroy_item"
+        expected_patterns:
+          - "free("
+
+      - address: "0x4015c0"
+        name: "calculate_discount"
+        expected_patterns:
+          - "if ("
+          - "return"
+
+      - address: "0x401610"
+        name: "sum_array"
+        expected_patterns:
+          - "return"
+
+      - address: "0x402910"
+        name: "main"
+        expected_patterns:
+          - "create_item("
+          - "return"
