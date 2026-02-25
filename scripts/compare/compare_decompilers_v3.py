@@ -235,6 +235,11 @@ def normalize_for_similarity(text: str) -> str:
     for pat in (r"\blocal_[0-9a-f]+\b", r"\buVar[0-9]+\b", r"\biVar[0-9]+\b",
                 r"\bpVar[0-9]+\b", r"\bdVar[0-9]+\b"):
         text = re.sub(pat, "VAR", text)
+    # Normalize Fission/Ghidra parameter names:
+    #  param_N  : Fission's default for unnamed params (param_1, param_2, …)
+    #  arg_N    : alternate naming sometimes used by Fission
+    text = re.sub(r"\bparam_[0-9]+\b", "VAR", text)
+    text = re.sub(r"\barg_[0-9]+\b", "VAR", text)
     # x86/x64 ABI normalizations:
     #  1. Calling-convention annotations (__cdecl, __fastcall, etc.) carry no
     #     structural meaning for scoring purposes.
@@ -276,8 +281,10 @@ def normalize_for_similarity(text: str) -> str:
     # Normalise variable name prefixes that encode type (pvVar/puVar/pcVar → VAR)
     # Bug-fix: previously produced VAR1 (kept digit) which mismatched iVar1 → VAR.
     text = re.sub(r"\bp[vucslt]Var[0-9]*\b", "VAR", text)
-    # Also normalise other single-letter-prefix Var names from Fission (e.g. xVar2, mVar3)
-    text = re.sub(r"\b[a-z]Var[0-9]+\b", "VAR", text)
+    # Comprehensive Ghidra/Fission Var-suffix names:
+    #   1-char prefix:  uVar1, iVar1, dVar1, xVar (digit optional)
+    #   2-char prefix:  pvVar1, puVar1, pIVar1, pcVar1 (capital middle letter OK)
+    text = re.sub(r"\b[a-z][A-Za-z]?Var[0-9]*\b", "VAR", text)
     # Strip explicit integer-width casts that Ghidra PrintC inserts but Fission omits:
     # e.g. (longlong)&local_38 → &local_38, (uint)x → x
     # Run AFTER variable name normalization so VAR tokens are already in place.
@@ -329,6 +336,12 @@ def normalize_for_similarity(text: str) -> str:
     text = re.sub(r"\s+\)", ")", text)
     # Collapse any double-spaces introduced by the replacements above.
     text = re.sub(r"  +", " ", text)
+    # Single-character lowercase identifiers (a, b, i, n, s, …) appearing at this
+    # point are almost always debug-symbol-derived parameter/variable names from
+    # Ghidra (when source has named 1-char params like `int add(int a, int b)`).
+    # Normalise them to VAR so they match Fission's `param_1`/`param_2` (already
+    # → VAR above).  Runs last so multi-char keywords (int, char, …) are untouched.
+    text = re.sub(r"\b[a-z]\b", "VAR", text)
 
     return text
 

@@ -92,6 +92,33 @@ void FunctionMatcher::load_builtin_msvc_x64() {
         // Very common, skip
     }
 
+    // __acrt_iob_func(unsigned int index) -> FILE*
+    // Called in -O2 CRT when printf decomposes to CRT internal calls.
+    // Typical x64 prologue: sub rsp, 28h; mov ecx, ecx (normalize arg)
+    // Pattern is too generic to be reliable by bytes alone; registered here
+    // so the name-based resolver in TypePropagator knows the return semantics.
+    {
+        FunctionSignature sig;
+        sig.name = "__acrt_iob_func";
+        sig.library = "ucrtbase";
+        sig.pattern = {};  // name-only: matched by symbol lookup, not bytes
+        sig.mask = {};
+        sig.pattern_length = 0;
+        // Not pushed to signatures[] (byte pattern empty), but the entry
+        // serves as documentation and allows future name-lookup tables.
+    }
+
+    // __stdio_common_vfprintf(options, stream, format, locale, arglist) -> int
+    // Used in -O2 when printf inlines into ucrtbase CRT internal calls (x64).
+    {
+        FunctionSignature sig;
+        sig.name = "__stdio_common_vfprintf";
+        sig.library = "ucrtbase";
+        sig.pattern = {};
+        sig.mask = {};
+        sig.pattern_length = 0;
+    }
+
     fission::utils::log_stream() << "[FunctionMatcher] Loaded " << signatures.size() 
               << " built-in MSVC x64 signatures" << std::endl;
 }

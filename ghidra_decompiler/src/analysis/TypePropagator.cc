@@ -439,6 +439,44 @@ void TypePropagator::infer_windows_api_types(PcodeOp* call_op, const std::string
         return;
     }
     
+    // Windows CRT O2-inline decomposed printf:
+    //   __acrt_iob_func(unsigned index) -> FILE*   (index 1 = stdout)
+    //   __stdio_common_vfprintf(opts, FILE*, fmt, locale, ...) -> int
+    // Handle before the generic printf/.find("printf") block below so the
+    // more-specific names are not caught by that broad substring match.
+    if (func_name == "__acrt_iob_func") {
+        Varnode* output = call_op->getOut();
+        if (output) {
+            // Return is FILE* — represent as void* (we have no FILE typedef).
+            Datatype* void_type = tf->getBase(1, TYPE_VOID);
+            if (void_type) {
+                Datatype* file_ptr = tf->getTypePointer(
+                    arch->getDefaultCodeSpace()->getAddrSize(),
+                    void_type,
+                    arch->getDefaultCodeSpace()->getWordSize());
+                if (file_ptr) {
+                    uint64_t vid = get_varnode_id(output);
+                    inferred_types[vid] = file_ptr;
+                }
+            }
+        }
+        return;
+    }
+    // __stdio_common_vfprintf / vfwprintf / vsprintf_s / vsnprintf_s:
+    //   arg1 = uint64 options, arg2 = FILE*, arg3 = const char* format
+    if (func_name == "__stdio_common_vfprintf"  ||
+        func_name == "__stdio_common_vfwprintf" ||
+        func_name == "__stdio_common_vsprintf"  ||
+        func_name == "__stdio_common_vsnprintf_s") {
+        if (call_op->numInput() >= 4) {
+            Datatype* char_ptr = tf->getTypePointer(arch->getDefaultCodeSpace()->getAddrSize(),
+                                                    tf->getBase(1, TYPE_INT),
+                                                    arch->getDefaultCodeSpace()->getWordSize());
+            if (char_ptr) propagate_backwards(call_op->getIn(3), char_ptr);
+        }
+        return;
+    }
+
     // sprintf, printf family - first arg is char*
     if (func_name.find("printf") != std::string::npos || func_name.find("sprintf") != std::string::npos) {
         if (call_op->numInput() >= 2) {
@@ -453,19 +491,70 @@ void TypePropagator::infer_windows_api_types(PcodeOp* call_op, const std::string
         return;
     }
     
-    // malloc/calloc/realloc - returns void*
-    // Guard: only record void* if Ghidra's ActionInferTypes has NOT already propagated a
-    // more-specific pointer type via CAST chains (e.g. (undefined4*)malloc(...) gives TYPE_PTR).
-    // Overwriting that with void* would regress create_item-style functions.
+    // malloc/calloc/realloc — attempt to recover concrete pointer type from CAST uses.
+    // Step 3A: When Ghidra emits (SomeType*)malloc(sz), the p-code is:
+    //   output = CALL malloc(sz)
+    //   cast_out = CAST(output)          <- concrete type on cast_out
+    // Scan forward over descendant ops to find any CAST that already has a
+    // specific pointer type, and promote the malloc output to that type.
+    // This makes create_item-style functions emit typed field access instead
+    // of raw pointer arithmetic.
     if (func_name == "malloc" || func_name == "calloc" || func_name == "realloc") {
         Varnode* output = call_op->getOut();
         if (output) {
-            // If Ghidra already committed a concrete pointer type, leave it alone.
+            // Phase 1: scan CAST descendant uses for concrete pointer type.
+            Datatype* promoted = nullptr;
+            for (auto use_it = output->beginDescend();
+                 use_it != output->endDescend(); ++use_it) {
+                PcodeOp* use_op = *use_it;
+                if (!use_op || use_op->code() != CPUI_CAST) continue;
+                Varnode* cast_out = use_op->getOut();
+                if (!cast_out) continue;
+                // Prefer TempType (set by ActionInferTypes) over current type.
+                Datatype* ct = cast_out->getTempType();
+                if (!ct) ct = cast_out->getType();
+                if (ct && ct->getMetatype() == TYPE_PTR && ct->getSize() > 0) {
+                    // Pick the most specific (largest pointee) if multiple CASTs.
+                    if (!promoted || ct->getSize() > promoted->getSize())
+                        promoted = ct;
+                }
+            }
+            if (promoted) {
+                uint64_t vid = get_varnode_id(output);
+                inferred_types[vid] = promoted;
+                output->setTempType(promoted);
+                return;
+            }
+
+            // Phase 2 (fallback): scan COPY/PTRSUB uses for concrete pointer type.
+            // Handles patterns like: ptr = malloc(sz); *(int*)ptr = x;
+            for (auto use_it = output->beginDescend();
+                 use_it != output->endDescend(); ++use_it) {
+                PcodeOp* use_op = *use_it;
+                if (!use_op) continue;
+                if (use_op->code() != CPUI_COPY && use_op->code() != CPUI_STORE) continue;
+                Varnode* dst = use_op->getOut();
+                if (!dst) continue;
+                Datatype* dt = dst->getTempType();
+                if (!dt) dt = dst->getType();
+                if (dt && dt->getMetatype() == TYPE_PTR && dt->getSize() > 0) {
+                    promoted = dt;
+                    break;
+                }
+            }
+            if (promoted) {
+                uint64_t vid = get_varnode_id(output);
+                inferred_types[vid] = promoted;
+                output->setTempType(promoted);
+                return;
+            }
+
+            // Phase 3 (last resort): If Ghidra already committed a concrete pointer
+            // type on the call output itself, leave it alone; otherwise set void*.
             Datatype* current = output->getType();
             bool already_concrete_ptr = (current &&
                 current->getMetatype() == TYPE_PTR &&
                 current->getSize() != 0);
-            // Also skip if TempType was set to a concrete pointer by ActionInferTypes.
             Datatype* temp = output->getTempType();
             bool temp_concrete_ptr = (temp &&
                 temp->getMetatype() == TYPE_PTR &&
