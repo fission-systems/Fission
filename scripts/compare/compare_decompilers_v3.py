@@ -343,6 +343,59 @@ def normalize_for_similarity(text: str) -> str:
     # → VAR above).  Runs last so multi-char keywords (int, char, …) are untouched.
     text = re.sub(r"\b[a-z]\b", "VAR", text)
 
+    # Normalize floating-point numeric types to UNDEF.
+    # Ghidra (with debug info) uses 'double'/'float' for typed params; Fission
+    # emits 'undefined8'. Both become UNDEF so they compare equal.
+    text = re.sub(r"\bdouble\b(?!\s*\*)", "UNDEF", text)
+    text = re.sub(r"\bfloat\b(?!\s*\*)", "UNDEF", text)
+    # Normalize 'int' type name (Ghidra may emit 'int param'; Fission uses 'undefined4').
+    # Both should score equally. Bare int without pointer qualifier only.
+    text = re.sub(r"\bint\b(?!\s*\*)", "UNDEF", text)
+
+    # Normalize custom struct/typedef pointer types (CamelCase like 'Item *')
+    # to UNDEF. Ghidra knows such types from debug info; Fission emits generic
+    # undefined pointers. Both should reduce to the same UNDEF token.
+    # Exclude already-normalised tokens (VAR, FUNC, UNDEF, OPAQUE_PTR) so that
+    # arithmetic expressions like 'VAR * DAT_xxx' are not incorrectly converted.
+    text = re.sub(
+        r"\b(?!(?:VAR|FUNC|UNDEF|OPAQUE_PTR)\b)([A-Z][a-zA-Z0-9_]*)\s*\*\s*",
+        "UNDEF ",
+        text
+    )
+    # Clean up any dangling 'UNDEF *' left by the above (→ OPAQUE_PTR → UNDEF).
+    text = re.sub(r"\bUNDEF\s*\*\s*", "UNDEF ", text)
+    # Remove (UNDEF) cast expressions as before
+    text = re.sub(r"\(UNDEF\s*\)\s*", "", text)
+
+    # Normalize Ghidra debug-symbol parameter names to VAR.
+    # When compiled with -g, Ghidra uses actual source names (e.g. 'age', 'price',
+    # 'msg', 'item') instead of Fission's auto-generated param_N (already VAR).
+    # Strategy: extract the last identifier in each parameter declaration from the
+    # function signature and replace every occurrence in the full text with VAR.
+    _SIG_TYPE_WORDS = {
+        "void", "int", "char", "float", "double", "long", "short", "unsigned",
+        "signed", "const", "volatile", "struct", "union", "enum", "typedef",
+        "static", "extern", "inline", "restrict",
+        # already-normalised tokens
+        "VAR", "FUNC", "UNDEF", "OPAQUE_PTR",
+        # C control-flow keywords (should never appear as param names, but be safe)
+        "if", "else", "for", "while", "do", "switch", "case", "break",
+        "continue", "return", "goto",
+    }
+    _brace = text.find("{")
+    if _brace > 0:
+        _sig = text[:_brace]
+        _p1 = _sig.find("(")
+        _p2 = _sig.rfind(")")
+        if 0 <= _p1 < _p2:
+            _params_raw = _sig[_p1 + 1:_p2]
+            for _param in _params_raw.split(","):
+                _idents = re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", _param)
+                if _idents:
+                    _pname = _idents[-1]
+                    if _pname not in _SIG_TYPE_WORDS:
+                        text = re.sub(r"\b" + re.escape(_pname) + r"\b", "VAR", text)
+
     return text
 
 
