@@ -57,7 +57,7 @@ memory_loadimage.cc
 ghidra_decompiler/build/
 
 # Ghidra and vendor dependencies
-
+vendor/
 
 # Build artifacts
 /build/
