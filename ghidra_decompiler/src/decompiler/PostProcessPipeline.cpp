@@ -174,6 +174,7 @@ std::string run_post_processing(
         );
         result = apply_function_signatures(result);
         result = normalize_mingw_printf_args(result);
+        result = normalize_msvc_crt_printf(result);
         result = improve_internal_function_names(result);
     }
 

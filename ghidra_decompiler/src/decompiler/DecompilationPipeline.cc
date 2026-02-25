@@ -902,6 +902,7 @@ std::string DecompilationPipeline::handle_decompile(
     );
     c_code = apply_function_signatures(c_code);
     c_code = normalize_mingw_printf_args(c_code);
+    c_code = normalize_msvc_crt_printf(c_code);
     c_code = improve_internal_function_names(c_code);
     c_code = annotate_structure_offsets(c_code);
     c_code = apply_fid_names(c_code, state.fid_function_names);

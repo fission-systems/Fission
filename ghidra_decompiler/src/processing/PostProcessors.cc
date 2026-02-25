@@ -4,6 +4,7 @@
 #include <string>
 #include <map>
 #include <vector>
+#include <set>
 #include <sstream>
 #include <iomanip>
 #include <cstdint>
@@ -298,6 +299,290 @@ std::string normalize_mingw_printf_args(const std::string& code) {
         item_field_access_from_typed_vararg,
         "$1(ulonglong)$2->id$3$2->name$4$2->value$5"
     );
+
+    return result;
+}
+
+// ============================================================================
+// MSVC CRT printf Reconstruction
+// ============================================================================
+// Windows x64 -O2 decomposes printf("fmt", arg) into:
+//   xVar = __acrt_iob_func(1);
+//   pVar = (T*)__local_stdio_printf_options();
+//   __stdio_common_vfprintf(*pVar, xVar, "fmt", 0, &arg);
+// This function folds it back into: printf("fmt", arg)
+
+std::string normalize_msvc_crt_printf(const std::string& code) {
+    std::string result = code;
+
+    // Step 1: Replace __stdio_common_v*printf(...) with printf(...)
+    // Arguments: [0]=options, [1]=FILE*, [2]=format, [3]=locale, [4..]=varargs
+    size_t pos = 0;
+    while (true) {
+        size_t fn_start = result.find("__stdio_common_v", pos);
+        if (fn_start == std::string::npos) break;
+
+        // Walk to end of identifier
+        size_t fn_end = fn_start + 16; // len("__stdio_common_v")
+        while (fn_end < result.size() &&
+               (std::isalnum(static_cast<unsigned char>(result[fn_end])) || result[fn_end] == '_'))
+            fn_end++;
+
+        std::string fn_name = result.substr(fn_start, fn_end - fn_start);
+        // Only handle printf variants, not scanf/sscanf
+        if (fn_name.find("printf") == std::string::npos) {
+            pos = fn_end;
+            continue;
+        }
+
+        // Skip whitespace to find '('
+        size_t paren_start = fn_end;
+        while (paren_start < result.size() && result[paren_start] == ' ') paren_start++;
+        if (paren_start >= result.size() || result[paren_start] != '(') {
+            pos = fn_end;
+            continue;
+        }
+
+        // Balanced-paren argument parser (handles strings correctly)
+        int depth = 1;
+        size_t p = paren_start + 1;
+        std::vector<std::string> args;
+        std::string cur;
+        bool in_str = false;
+        char str_delim = 0;
+
+        while (p < result.size() && depth > 0) {
+            char c = result[p];
+            if (in_str) {
+                cur += c;
+                if (c == '\\') {
+                    p++;
+                    if (p < result.size()) cur += result[p];
+                } else if (c == str_delim) {
+                    in_str = false;
+                }
+            } else if (c == '"' || c == '\'') {
+                in_str = true;
+                str_delim = c;
+                cur += c;
+            } else if (c == '(') {
+                depth++;
+                cur += c;
+            } else if (c == ')') {
+                depth--;
+                if (depth == 0) {
+                    args.push_back(cur);
+                    cur.clear();
+                } else {
+                    cur += c;
+                }
+            } else if (c == ',' && depth == 1) {
+                args.push_back(cur);
+                cur.clear();
+            } else {
+                cur += c;
+            }
+            p++;
+        }
+
+        size_t call_end = p; // one past the closing ')'
+
+        // Need at least: options, FILE*, format (3 args); ideally 5 for varargs
+        if (args.size() < 3) {
+            pos = fn_end;
+            continue;
+        }
+
+        // Helper: trim leading/trailing whitespace from a string
+        auto trim = [](const std::string& s) -> std::string {
+            size_t a = s.find_first_not_of(" \t\n\r");
+            if (a == std::string::npos) return "";
+            size_t b = s.find_last_not_of(" \t\n\r");
+            return s.substr(a, b - a + 1);
+        };
+
+        // args[2] = format string
+        std::string format = trim(args[2]);
+
+        // Build replacement: printf(format, varargs...)
+        // args[4..] = actual varargs; strip leading '&' (address-of local copy)
+        std::string new_call = "printf(" + format;
+        for (size_t i = 4; i < args.size(); i++) {
+            std::string arg = trim(args[i]);
+            // Strip leading '&' that MSVC CRT uses to pass args as va_list pointer
+            if (!arg.empty() && arg[0] == '&') {
+                arg = arg.substr(1);
+                // Trim again after stripping '&'
+                arg = trim(arg);
+            }
+            new_call += ", " + arg;
+        }
+        new_call += ")";
+
+        result.replace(fn_start, call_end - fn_start, new_call);
+        pos = fn_start + new_call.size();
+    }
+
+    // Step 2: Remove lines containing __acrt_iob_func (stream handle temp)
+    // and __local_stdio_printf_options (options temp)
+    {
+        std::istringstream iss(result);
+        std::string line;
+        std::string filtered;
+        filtered.reserve(result.size());
+        while (std::getline(iss, line)) {
+            bool skip = (line.find("__acrt_iob_func") != std::string::npos ||
+                         line.find("__local_stdio_printf_options") != std::string::npos);
+            if (!skip) {
+                filtered += line;
+                filtered += '\n';
+            }
+        }
+        result = filtered;
+    }
+
+    // Step 3: Remove orphaned local variable declarations and assignments that
+    // were only used in the removed CRT lines.
+    // Pass A: Remove declaration lines (TYPE varname;) for vars that don't
+    //         appear elsewhere.
+    // Pass B: Remove assignment lines (varname = expr;) for vars that only
+    //         appear in their declaration and nowhere else.
+    // Both passes run to convergence (cascading removal).
+    {
+        // Fast word-boundary count (no regex, linear scan)
+        auto count_word = [](const std::string& text, const std::string& word) -> int {
+            int cnt = 0;
+            size_t wlen = word.size();
+            size_t pos = 0;
+            while ((pos = text.find(word, pos)) != std::string::npos) {
+                bool left_ok  = (pos == 0 ||
+                    (!std::isalnum(static_cast<unsigned char>(text[pos - 1])) &&
+                      text[pos - 1] != '_'));
+                bool right_ok = (pos + wlen >= text.size() ||
+                    (!std::isalnum(static_cast<unsigned char>(text[pos + wlen])) &&
+                      text[pos + wlen] != '_'));
+                if (left_ok && right_ok) cnt++;
+                pos++;
+            }
+            return cnt;
+        };
+
+        // Extract the identifier immediately before the first ';' on a line
+        // (variable name in a declaration like "undefined8 *pxVar2;" or "int x;")
+        // Returns "" if the line looks like an assignment (contains '=') or is not a declaration.
+        auto parse_decl_varname = [](const std::string& ln) -> std::string {
+            // Must end with ';'
+            size_t e = ln.find_last_not_of(" \t\n\r");
+            if (e == std::string::npos || ln[e] != ';') return "";
+            // Must not be a comparison / assignment
+            if (ln.find('=') != std::string::npos) return "";
+            // Must not be a function call (contains '(')
+            if (ln.find('(') != std::string::npos) return "";
+            // Walk backwards from ';' to find the identifier
+            size_t nameEnd = e - 1; // skip ';'
+            while (nameEnd > 0 && std::isspace(static_cast<unsigned char>(ln[nameEnd]))) nameEnd--;
+            if (!std::isalnum(static_cast<unsigned char>(ln[nameEnd])) && ln[nameEnd] != '_')
+                return "";
+            size_t nameStart = nameEnd;
+            while (nameStart > 0 &&
+                   (std::isalnum(static_cast<unsigned char>(ln[nameStart - 1])) ||
+                    ln[nameStart - 1] == '_'))
+                nameStart--;
+            std::string vname = ln.substr(nameStart, nameEnd - nameStart + 1);
+            // Reject C keywords
+            static const std::set<std::string> kws = {
+                "return","if","else","while","for","do","switch","case","break",
+                "continue","goto","typedef","struct","union","enum","void"
+            };
+            if (kws.count(vname)) return "";
+            return vname;
+        };
+
+        // Extract the LHS identifier from a simple assignment line "varname = ...;"
+        // Returns "" if not a simple assignment, if LHS contains '*', ')', etc.
+        auto parse_assign_lhs = [](const std::string& ln) -> std::string {
+            size_t e = ln.find_last_not_of(" \t\n\r");
+            if (e == std::string::npos || ln[e] != ';') return "";
+            if (ln.find('(') != std::string::npos) return "";  // function call or cast
+            size_t eq = ln.find('=');
+            if (eq == std::string::npos || eq == 0) return "";
+            // Reject compound assignments and comparisons
+            char before = ln[eq - 1];
+            if (before == '!' || before == '<' || before == '>' ||
+                before == '=' || before == '+' || before == '-' ||
+                before == '*' || before == '/' || before == '&' ||
+                before == '|' || before == '^') return "";
+            if (eq + 1 < ln.size() && ln[eq + 1] == '=') return "";
+            // Extract identifier before '='
+            size_t ne = eq - 1;
+            while (ne > 0 && std::isspace(static_cast<unsigned char>(ln[ne]))) ne--;
+            if (!std::isalnum(static_cast<unsigned char>(ln[ne])) && ln[ne] != '_') return "";
+            size_t ns = ne;
+            while (ns > 0 && (std::isalnum(static_cast<unsigned char>(ln[ns - 1])) ||
+                               ln[ns - 1] == '_'))
+                ns--;
+            return ln.substr(ns, ne - ns + 1);
+        };
+
+        bool changed = true;
+        while (changed) {
+            changed = false;
+
+            // Split into lines
+            std::vector<std::string> lns;
+            {
+                std::istringstream iss2(result);
+                std::string ln;
+                while (std::getline(iss2, ln)) lns.push_back(ln);
+            }
+
+            // Pass A: remove orphaned declarations
+            for (size_t i = 0; i < lns.size(); i++) {
+                std::string vname = parse_decl_varname(lns[i]);
+                if (vname.empty()) continue;
+                // Count occurrences in all OTHER lines
+                std::string other;
+                other.reserve(result.size());
+                for (size_t j = 0; j < lns.size(); j++) {
+                    if (j != i) { other += lns[j]; other += '\n'; }
+                }
+                if (count_word(other, vname) == 0) {
+                    lns.erase(lns.begin() + i);
+                    changed = true;
+                    break;
+                }
+            }
+            if (changed) {
+                std::string rebuilt;
+                for (const auto& ln : lns) { rebuilt += ln; rebuilt += '\n'; }
+                result = rebuilt;
+                continue;
+            }
+
+            // Pass B: remove orphaned assignments
+            for (size_t i = 0; i < lns.size(); i++) {
+                std::string vname = parse_assign_lhs(lns[i]);
+                if (vname.empty()) continue;
+                std::string other;
+                other.reserve(result.size());
+                for (size_t j = 0; j < lns.size(); j++) {
+                    if (j != i) { other += lns[j]; other += '\n'; }
+                }
+                int cnt = count_word(other, vname);
+                // cnt == 1 means only the declaration remains → remove assignment
+                if (cnt <= 1) {
+                    lns.erase(lns.begin() + i);
+                    changed = true;
+                    break;
+                }
+            }
+            if (changed) {
+                std::string rebuilt;
+                for (const auto& ln : lns) { rebuilt += ln; rebuilt += '\n'; }
+                result = rebuilt;
+            }
+        }
+    }
 
     return result;
 }

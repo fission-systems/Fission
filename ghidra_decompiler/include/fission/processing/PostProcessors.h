@@ -18,6 +18,8 @@ std::string inline_strings(const std::string& code, const std::map<uint64_t, std
 // Apply function signatures
 std::string apply_function_signatures(const std::string& code);
 std::string normalize_mingw_printf_args(const std::string& code);
+// Fold MSVC CRT __stdio_common_v*printf back into printf()
+std::string normalize_msvc_crt_printf(const std::string& code);
 
 
 // Smart constant replacement
