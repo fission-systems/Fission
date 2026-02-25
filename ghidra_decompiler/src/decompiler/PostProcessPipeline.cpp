@@ -82,6 +82,11 @@ std::string run_post_processing(
         result = post_process_iat_calls(result, ctx->symbols);
     }
 
+    // Step 1.5: Strip Windows x64 shadow-spill parameters (param_N never read in body)
+    if (options.strip_shadow_params) {
+        result = strip_shadow_only_params(result);
+    }
+
     // Step 2: Smart constant replacement
     if (options.smart_constants) {
         result = smart_constant_replace(result);

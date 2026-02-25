@@ -69,8 +69,106 @@ std::string post_process_iat_calls(const std::string& code, const std::map<uint6
             pos += strlen(pattern64);
         }
     }
-    
+
+    // Pass 2: Handle (*_dllname.dll!funcname)(args) pattern.
+    // When Ghidra registers an IAT symbol via addFunction(), the C printer
+    // outputs the indirect call as (*_api-ms-win-crt-heap-l1-1-0.dll!free)(args).
+    // Extract the function name after '!' and preserve the argument list.
+    // e.g. (*_ucrtbase.dll!free)(ptr) -> free(ptr)
+    {
+        static const std::regex iat_indirect_pat(
+            R"(\(\*_[A-Za-z0-9._\-]+\.[Dd][Ll][Ll]!([A-Za-z_]\w*)\)(\([^)]*\)))",
+            std::regex::optimize
+        );
+        result = std::regex_replace(result, iat_indirect_pat, "$1$2");
+    }
+
     return result;
+}
+
+// ============================================================================
+// Shadow Parameter Stripping (Windows x64 MSVC ABI)
+// ============================================================================
+
+// MSVC always spills the 4 register arguments (RCX, RDX, R8, R9) into the
+// 32-byte "shadow space" at [RSP+8..RSP+32] during the prologue, even when
+// the callee never uses them.  Ghidra (Java build) suppresses these via PDB
+// debug information; in their absence we apply a conservative text heuristic:
+// a parameter named param_N that never appears in the function body after the
+// opening '{' is a shadow-spill-only parameter and may be removed from the
+// signature without changing semantics.
+std::string strip_shadow_only_params(const std::string& code) {
+    // Locate the opening brace that begins the function body.
+    size_t brace_pos = code.find('{');
+    if (brace_pos == std::string::npos) return code;
+
+    std::string header = code.substr(0, brace_pos);
+    std::string body   = code.substr(brace_pos);
+
+    // Find the parameter list: last '(' ... ')' pair in the header.
+    size_t paren_open  = header.rfind('(');
+    size_t paren_close = header.rfind(')');
+    if (paren_open  == std::string::npos ||
+        paren_close == std::string::npos ||
+        paren_close < paren_open) {
+        return code;
+    }
+
+    std::string pre_params     = header.substr(0, paren_open + 1);  // up to and including '('
+    std::string param_list_str = header.substr(paren_open + 1, paren_close - paren_open - 1);
+    std::string post_params    = header.substr(paren_close);        // from ')' onward
+
+    // Collect all param_N identifiers that are actually referenced in the body.
+    std::set<std::string> used_in_body;
+    {
+        static const std::regex param_re(R"(\bparam_\d+\b)", std::regex::optimize);
+        auto it  = std::sregex_iterator(body.begin(), body.end(), param_re);
+        auto end = std::sregex_iterator();
+        for (; it != end; ++it) {
+            used_in_body.insert((*it)[0].str());
+        }
+    }
+
+    // Split the parameter list on commas and drop shadow-only parameters.
+    static const std::regex param_name_re(R"(\bparam_\d+\b)", std::regex::optimize);
+    std::vector<std::string> kept_params;
+
+    std::istringstream ss(param_list_str);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        // Trim surrounding whitespace.
+        auto first = token.find_first_not_of(" \t\n\r");
+        auto last  = token.find_last_not_of(" \t\n\r");
+        if (first == std::string::npos) continue;
+        token = token.substr(first, last - first + 1);
+
+        // If this token contains a param_N that is not used in the body, skip it.
+        std::smatch m;
+        if (std::regex_search(token, m, param_name_re)) {
+            if (used_in_body.count(m[0].str()) == 0) {
+                continue;  // shadow-only → drop
+            }
+        }
+        kept_params.push_back(token);
+    }
+
+    // If nothing was dropped, return the original to avoid spurious copies.
+    if (kept_params.size() == param_list_str.find(',') + 1 &&
+        kept_params.size() > 0) {
+        // Quick check: count original comma-separated tokens
+        size_t orig_count = 1;
+        for (char c : param_list_str) if (c == ',') ++orig_count;
+        if (kept_params.size() == orig_count) return code;
+    }
+
+    // Reconstruct the function signature with remaining parameters.
+    std::string new_param_list;
+    for (size_t i = 0; i < kept_params.size(); ++i) {
+        if (i > 0) new_param_list += ", ";
+        new_param_list += kept_params[i];
+    }
+
+    return pre_params + new_param_list + post_params + body;
 }
 
 // ============================================================================

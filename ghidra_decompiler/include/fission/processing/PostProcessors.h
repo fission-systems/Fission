@@ -62,6 +62,9 @@ std::string annotate_structure_offsets(const std::string& code);
 // Demangle C++ names and standardize 'this' pointer
 std::string demangle_cpp_names(const std::string& code);
 
+// Strip Windows x64 MSVC shadow-spill parameters that are never used in the body
+std::string strip_shadow_only_params(const std::string& code);
+
 // Normalize noisy C++ indirect/vtable call patterns for readability
 std::string normalize_cpp_virtual_calls(const std::string& code);
 

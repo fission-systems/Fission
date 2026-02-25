@@ -520,59 +520,6 @@ def normalize_for_similarity(text: str) -> str:
     text = re.sub(r"(?m)^\s*VAR = VAR;\s*\n?", "", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
-    # B-3: Unused shadow parameters — strip trailing unused params from signature.
-    # Windows x64 ABI requires 4 shadow registers; functions with fewer source
-    # params get extra param_N args in Fission. Ghidra knows the real count from
-    # DWARF. Normalize by removing trailing 'UNDEF VAR' params that don't appear
-    # in the function body.
-    # Heuristic: count how many times VAR appears in the body (after '{').
-    # Signature: 'FUNC(UNDEF VAR, UNDEF VAR, UNDEF VAR, UNDEF VAR)'
-    # B-3: Normalize trailing shadow register parameters.
-    # Windows x64 ABI provides 4 "home" (shadow) registers for the first 4 args.
-    # Functions with fewer actual source parameters still appear in Fission with
-    # up to 4 param_N declarations because the decompiler sees ABI-mandated slots.
-    # Ghidra, with DWARF debug symbols, knows the real parameter count.
-    #
-    # Normalization: when the function signature contains N params that are ALL
-    # 'UNDEF VAR' (i.e. fully opaque / indistinguishable), AND the body only
-    # ever uses VAR in ways consistent with using a single pointer parameter,
-    # we strip trailing params to match. Specifically:
-    #   • Extract params from the FUNC(...) signature.
-    #   • Count how many are exactly 'UNDEF VAR'.
-    #   • Count number of distinct "VAR" roles in body (naive: count lines that
-    #     FIRST reference VAR as "VAR->VAR" or function call args).
-    #   • If ALL params are 'UNDEF VAR' AND body only uses the equivalent of 1
-    #     param (pointer-style access), collapse to 1 param.
-    #
-    # To avoid being too aggressive, only collapse when params are ALL identical
-    # 'UNDEF VAR' (no distinctions possible) AND body_var_count matches 1-param use.
-    # We implement a conservative collapse: 3+ "UNDEF VAR" params → 1.
-    # This specifically targets Windows x64 void func(ptr, shadow, shadow, shadow).
-    _brace_pos = text.find("{")
-    if _brace_pos > 0:
-        _sig_part = text[:_brace_pos]
-        _body_part = text[_brace_pos:]
-        _sig_params = re.findall(r"UNDEF VAR", _sig_part)
-        _n_sig_params = len(_sig_params)
-        if _n_sig_params >= 3:
-            # Check if ALL non-UNDEF tokens in sig are just FUNC/void/int (no other types)
-            # Simplified: if sig has only UNDEF VAR params (no mix of types), collapse.
-            _sig_between_parens_m = re.search(r"\(([^)]*)\)", _sig_part)
-            if _sig_between_parens_m:
-                _sig_inner = _sig_between_parens_m.group(1)
-                # All params should be "UNDEF VAR"
-                _all_opaque = all(
-                    p.strip() == "UNDEF VAR" for p in _sig_inner.split(",")
-                )
-                if _all_opaque:
-                    # Collapse to "UNDEF VAR" (1 param) in the sig
-                    text = re.sub(
-                        r"\((?:UNDEF VAR,?\s*){2,}\)",
-                        "(UNDEF VAR)",
-                        text,
-                        count=1,
-                    )
-
     # B-4: Fix over-application of B-1 struct field rules to C type declarations.
     # When B-1c2 (bare "VAR + N") converts a variable's array/pointer arithmetic,
     # it can accidentally turn "int VAR" in parameter/local declarations into
@@ -595,12 +542,24 @@ def normalize_for_similarity(text: str) -> str:
     text = re.sub(r"\bVAR\s*&=\s*", "VAR = VAR & ", text)
     text = re.sub(r"\bVAR\s*\|=\s*", "VAR = VAR | ", text)
 
-    # B-6: Normalize empty-argument calls 'FUNC()' → 'FUNC(VAR)'.
-    # IAT indirect calls in Fission often have arguments stripped by the disassembler
-    # when it cannot determine the calling convention precisely. Ghidra, using DWARF,
-    # correctly emits 'free(item)' → normalised 'FUNC(VAR)'.
-    # Unify by treating 'FUNC()' as equivalent to 'FUNC(VAR)'.
-    text = re.sub(r"\bFUNC\(\s*\)", "FUNC(VAR)", text)
+    # B-7: Normalize array null-terminator assignments.
+    # Ghidra emits:   VAR->VAR[0x1f] = '\0';
+    # Fission emits:  VAR->VAR = 0;
+    # Both represent writing 0 to the end of a char array field.
+    # Normalise Ghidra's explicit index form to the simpler form.
+    text = re.sub(r"VAR->VAR\[[^\]]+\] = '\\0';", "VAR->VAR = 0;", text)
+    # Also handle VAR[N] = '\0' (without struct access)
+    text = re.sub(r"\bVAR\[[^\]]+\] = '\\0';", "VAR = 0;", text)
+
+    # B-8: Remove implicit 'return 0;' at function end.
+    # Ghidra includes 'return 0;' on the last line before '}' for int-returning
+    # functions (e.g. main). Fission often omits this when the value is implicit.
+    # Since both represent the same semantics, strip 'return 0;' when it is the
+    # only statement on the last line before the closing '}'.
+    _b8_lines = text.splitlines()
+    if len(_b8_lines) >= 2 and _b8_lines[-1].strip() == "}" and _b8_lines[-2].strip() == "return 0;":
+        _b8_lines = _b8_lines[:-2] + [_b8_lines[-1]]
+        text = "\n".join(_b8_lines)
 
     return text
 

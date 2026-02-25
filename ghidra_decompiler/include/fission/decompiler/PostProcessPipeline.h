@@ -17,6 +17,7 @@ namespace decompiler {
 struct PostProcessOptions {
     bool apply_struct_definitions = true;
     bool iat_symbols = true;
+    bool strip_shadow_params = true;
     bool smart_constants = true;
     bool inline_strings = true;
     bool constants = true;
