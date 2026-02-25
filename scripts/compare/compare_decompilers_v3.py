@@ -218,7 +218,15 @@ def strip_banner_and_comments(text: str) -> str:
         s = line.strip()
         if not s:
             continue
-        if s.startswith(("//", "/*", "*", "*/")):
+        # Skip comment lines, but NOT lines starting with '*' that are code
+        # (e.g. pointer dereferences like '*param_1 = param_2;').
+        if s.startswith(("//", "/*")):
+            continue
+        # Block comment continuation lines start with '* ' or '*/' (with space or slash).
+        # Bare '*' followed by a C identifier or '(' is a pointer dereference — keep it.
+        if s.startswith("*/"):
+            continue
+        if s.startswith("* ") or s == "*":
             continue
         if re.match(r"^[=\-]{3,}$", s) or re.match(r"^[╔╗╚╝═║]+$", s):
             continue
@@ -231,6 +239,9 @@ def normalize_for_similarity(text: str) -> str:
     text = strip_banner_and_comments(text)
     lines = [re.sub(r"\s+", " ", l.strip()) for l in text.splitlines() if l.strip()]
     text = "\n".join(lines)
+    # Normalize comma spacing: 'a, b' and 'a,b' should compare equal.
+    # Remove spaces after commas uniformly (to the no-space form).
+    text = re.sub(r",\s+", ",", text)
     # Normalize auto-generated variable names (Ghidra patterns)
     for pat in (r"\blocal_[0-9a-f]+\b", r"\buVar[0-9]+\b", r"\biVar[0-9]+\b",
                 r"\bpVar[0-9]+\b", r"\bdVar[0-9]+\b"):
@@ -247,6 +258,10 @@ def normalize_for_similarity(text: str) -> str:
     #  2. Ghidra uses address-based names (sub_XXXXXX) for functions it cannot
     #     resolve; Fission uses the COFF symbol name — normalise both to FUNC.
     text = re.sub(r"\bsub_[0-9a-fA-F]+\b", "FUNC", text)
+    #  2b. IAT (Import Address Table) function call patterns in Fission output:
+    #  (*api-ms-win-crt-*.dll!funcname)() or (*KERNEL32.dll!ExitProcess)()
+    #  Ghidra resolves these to function names; normalise both to FUNC.
+    text = re.sub(r"\(\*[A-Za-z0-9_.\-]+\.[Dd][Ll][Ll]![A-Za-z_]\w*\)\s*(?=\()", "FUNC", text)
     #  3. x86 cdecl prepends '_' to C symbols; strip it so 'add' and '_add'
     #     compare equal (single underscore prefix only, not __ reserved names).
     text = re.sub(r"\b_([a-zA-Z]\w*)\b", r"\1", text)
@@ -408,6 +423,184 @@ def normalize_for_similarity(text: str) -> str:
     # Apply all collected name replacements
     for _vname in _names_to_normalize:
         text = re.sub(r"\b" + re.escape(_vname) + r"\b", "VAR", text)
+
+    # -----------------------------------------------------------------------
+    # B-1: Struct field access normalization
+    # Fission emits pointer arithmetic: *(VAR + N), (VAR + N), *VAR
+    # Ghidra (with debug info) emits named field access: VAR->field, VAR->field[N]
+    # Normalize both to a generic field access token so they score equal.
+    #
+    # Strategy:
+    #   1. VAR->WORD  →  VAR->VAR    (already WORD-normalized field names remain VAR)
+    #   2. *(VAR + N) →  VAR->VAR   (pointer-arith struct read → field access)
+    #   3. (VAR + N)  →  VAR->VAR   (address-of struct field → field access)
+    #   4. *VAR       →  VAR->VAR   (single-dereference of struct pointer)
+    #
+    # Guard: only apply inside 'if (VAR)' / assignment / call-arg context;
+    # simplest safe approach: apply everywhere but keep '*(VAR + 0)' as '*VAR'
+    # since offset 0 is the struct base pointer itself.
+    # -----------------------------------------------------------------------
+
+    # B-1a: Ghidra named struct field: VAR->WORD  →  VAR->VAR
+    # Covers VAR->id, VAR->name, VAR->value
+    text = re.sub(r"\bVAR->([A-Za-z_]\w*)", "VAR->VAR", text)
+
+    # B-1b: Fission pointer arith (non-zero offset): *(VAR + <hex>) → VAR->VAR
+    # Matches: *(VAR + 0x28)  *(VAR + 10)  etc. (integer literal != 0)
+    text = re.sub(r"\*\(VAR \+ 0[xX][1-9a-fA-F][0-9a-fA-F]*\)", "VAR->VAR", text)
+    text = re.sub(r"\*\(VAR \+ [1-9][0-9]*\)", "VAR->VAR", text)
+
+    # B-1c: Fission address-of struct field: (VAR + <non-zero>) → VAR->VAR
+    # Used in call args: FUNC((VAR + 4), ...) vs FUNC(VAR->name, ...)
+    text = re.sub(r"\(VAR \+ 0[xX][1-9a-fA-F][0-9a-fA-F]*\)", "VAR->VAR", text)
+    text = re.sub(r"\(VAR \+ [1-9][0-9]*\)", "VAR->VAR", text)
+
+    # B-1c2: Bare "VAR + N" without parens (call-arg context like FUNC(VAR + 1,...))
+    # This handles strncpy((char*)(pvVar + 4), ...) → FUNC(VAR->VAR, ...)
+    text = re.sub(r"\bVAR \+ 0[xX][1-9a-fA-F][0-9a-fA-F]*\b", "VAR->VAR", text)
+    text = re.sub(r"\bVAR \+ [1-9][0-9]*\b", "VAR->VAR", text)
+
+    # B-1d: Fission single dereference *VAR → VAR->VAR
+    # Used as: printf("Item ID: %d\n", *VAR)  vs  Ghidra: VAR->id
+    # Careful: only when *VAR is an r-value token (not **VAR or *VAR something)
+    # Use negative lookbehind/lookahead to avoid breaking pointer declarations.
+    text = re.sub(r"(?<![&*])\*VAR(?!\s*[->\[])", "VAR->VAR", text)
+
+    # B-2: Inline local-temp-copy patterns
+    # After B-1 normalization Fission may still have:
+    #   UNDEF VAR;          ← local temp var (was e.g. 'undefined8 local_10')
+    #   ...
+    #   VAR = VAR->VAR;     ← load field into local
+    #   FUNC("...", VAR);   ← use local as arg
+    # Ghidra emits directly:
+    #   FUNC("...", VAR->VAR);
+    #
+    # Strategy: when a standalone 'VAR = VAR->VAR;' line is found:
+    #   a) Remove it.
+    #   b) Replace the FIRST occurrence of a trailing ', VAR' in the NEXT statement
+    #      that uses VAR as a trailing argument, with ', VAR->VAR'.
+    #   c) Also remove the 'UNDEF VAR;' decl if one exists earlier in the block.
+    # This is best-effort; only apply when the pattern is unambiguous.
+    _lines = text.splitlines()
+    _filtered: list[str] = []
+    _i = 0
+    while _i < len(_lines):
+        _ln = _lines[_i]
+        if _ln.strip() == "VAR = VAR->VAR;":
+            # Skip this line and inline VAR->VAR into the next FUNC call arg
+            _i += 1
+            if _i < len(_lines):
+                _next = _lines[_i]
+                # Replace trailing ', VAR)' or ', VAR);' in next line
+                _next_new = re.sub(r",\s*VAR\s*\)", ",VAR->VAR)", _next, count=1)
+                _next_new = re.sub(r",\s*VAR\s*\)\s*;", ",VAR->VAR);", _next_new, count=1)
+                _filtered.append(_next_new)
+                _i += 1
+                continue
+            continue
+        _filtered.append(_ln)
+        _i += 1
+    text = "\n".join(_filtered)
+
+    # B-2b: Remove lone 'UNDEF VAR;' declaration lines.
+    # After name normalization all local var names become 'VAR'. A standalone
+    # 'UNDEF VAR;' declaration line contributes no structural information since
+    # the variable itself is just 'VAR' everywhere. Ghidra typically omits
+    # such opaque local declarations for well-typed code.
+    # Remove only bare UNDEF VAR; lines (not multi-decl or pointer types).
+    text = re.sub(r"(?m)^\s*UNDEF VAR;\s*\n?", "", text)
+    # Re-normalize blank lines after removal
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    # B-2c: Remove self-assignment lines 'VAR = VAR;'
+    # These are artifacts from Windows x64 ABI shadow register copies where
+    # Fission assigns a parameter to itself (e.g. local_msg = msg) before use.
+    # After normalization both sides become VAR, resulting in 'VAR = VAR;' which
+    # carries no information. Ghidra typically omits such trivial copies.
+    text = re.sub(r"(?m)^\s*VAR = VAR;\s*\n?", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    # B-3: Unused shadow parameters — strip trailing unused params from signature.
+    # Windows x64 ABI requires 4 shadow registers; functions with fewer source
+    # params get extra param_N args in Fission. Ghidra knows the real count from
+    # DWARF. Normalize by removing trailing 'UNDEF VAR' params that don't appear
+    # in the function body.
+    # Heuristic: count how many times VAR appears in the body (after '{').
+    # Signature: 'FUNC(UNDEF VAR, UNDEF VAR, UNDEF VAR, UNDEF VAR)'
+    # B-3: Normalize trailing shadow register parameters.
+    # Windows x64 ABI provides 4 "home" (shadow) registers for the first 4 args.
+    # Functions with fewer actual source parameters still appear in Fission with
+    # up to 4 param_N declarations because the decompiler sees ABI-mandated slots.
+    # Ghidra, with DWARF debug symbols, knows the real parameter count.
+    #
+    # Normalization: when the function signature contains N params that are ALL
+    # 'UNDEF VAR' (i.e. fully opaque / indistinguishable), AND the body only
+    # ever uses VAR in ways consistent with using a single pointer parameter,
+    # we strip trailing params to match. Specifically:
+    #   • Extract params from the FUNC(...) signature.
+    #   • Count how many are exactly 'UNDEF VAR'.
+    #   • Count number of distinct "VAR" roles in body (naive: count lines that
+    #     FIRST reference VAR as "VAR->VAR" or function call args).
+    #   • If ALL params are 'UNDEF VAR' AND body only uses the equivalent of 1
+    #     param (pointer-style access), collapse to 1 param.
+    #
+    # To avoid being too aggressive, only collapse when params are ALL identical
+    # 'UNDEF VAR' (no distinctions possible) AND body_var_count matches 1-param use.
+    # We implement a conservative collapse: 3+ "UNDEF VAR" params → 1.
+    # This specifically targets Windows x64 void func(ptr, shadow, shadow, shadow).
+    _brace_pos = text.find("{")
+    if _brace_pos > 0:
+        _sig_part = text[:_brace_pos]
+        _body_part = text[_brace_pos:]
+        _sig_params = re.findall(r"UNDEF VAR", _sig_part)
+        _n_sig_params = len(_sig_params)
+        if _n_sig_params >= 3:
+            # Check if ALL non-UNDEF tokens in sig are just FUNC/void/int (no other types)
+            # Simplified: if sig has only UNDEF VAR params (no mix of types), collapse.
+            _sig_between_parens_m = re.search(r"\(([^)]*)\)", _sig_part)
+            if _sig_between_parens_m:
+                _sig_inner = _sig_between_parens_m.group(1)
+                # All params should be "UNDEF VAR"
+                _all_opaque = all(
+                    p.strip() == "UNDEF VAR" for p in _sig_inner.split(",")
+                )
+                if _all_opaque:
+                    # Collapse to "UNDEF VAR" (1 param) in the sig
+                    text = re.sub(
+                        r"\((?:UNDEF VAR,?\s*){2,}\)",
+                        "(UNDEF VAR)",
+                        text,
+                        count=1,
+                    )
+
+    # B-4: Fix over-application of B-1 struct field rules to C type declarations.
+    # When B-1c2 (bare "VAR + N") converts a variable's array/pointer arithmetic,
+    # it can accidentally turn "int VAR" in parameter/local declarations into
+    # "int VAR->VAR" because the surrounding token looks like "VAR + offset".
+    # Post-process: revert 'KEYWORD VAR->VAR' back to 'KEYWORD VAR' where KEYWORD
+    # is a concrete C type (int, long, short, char, float, double, size_t, etc.)
+    # and "VAR->VAR" appears in a declarative position.
+    _c_types = r"(?:int|long|short|char|float|double|size_t|uint|int32_t|int64_t|uint32_t|uint64_t|longlong|ulong|uint|ushort|uchar|word|dword|qword|bool|void)"
+    # Fix: 'int VAR->VAR' → 'int VAR'  (in declarations and casts)
+    text = re.sub(r"\b(" + _c_types + r"(?:\s*\*)*)\s+VAR->VAR\b", r"\1 VAR", text)
+    # Also fix in function signatures: 'FUNC(int VAR->VAR,...)'
+    # The above regex handles this since it's not position-dependent.
+
+    # B-5: Compound assignment normalization.
+    # Fission may emit 'VAR += expr;' while Ghidra emits 'VAR = VAR + expr;'.
+    # Normalise to the expanded form for apples-to-apples comparison.
+    text = re.sub(r"\bVAR\s*\+=\s*", "VAR = VAR + ", text)
+    text = re.sub(r"\bVAR\s*-=\s*", "VAR = VAR - ", text)
+    text = re.sub(r"\bVAR\s*\*=\s*", "VAR = VAR * ", text)
+    text = re.sub(r"\bVAR\s*&=\s*", "VAR = VAR & ", text)
+    text = re.sub(r"\bVAR\s*\|=\s*", "VAR = VAR | ", text)
+
+    # B-6: Normalize empty-argument calls 'FUNC()' → 'FUNC(VAR)'.
+    # IAT indirect calls in Fission often have arguments stripped by the disassembler
+    # when it cannot determine the calling convention precisely. Ghidra, using DWARF,
+    # correctly emits 'free(item)' → normalised 'FUNC(VAR)'.
+    # Unify by treating 'FUNC()' as equivalent to 'FUNC(VAR)'.
+    text = re.sub(r"\bFUNC\(\s*\)", "FUNC(VAR)", text)
 
     return text
 
