@@ -82,11 +82,6 @@ std::string run_post_processing(
         result = post_process_iat_calls(result, ctx->symbols);
     }
 
-    // Step 1.5: Strip Windows x64 shadow-spill parameters (param_N never read in body)
-    if (options.strip_shadow_params) {
-        result = strip_shadow_only_params(result);
-    }
-
     // Step 2: Smart constant replacement
     if (options.smart_constants) {
         result = smart_constant_replace(result);
@@ -241,6 +236,14 @@ std::string run_post_processing(
     // Step 11: Advanced Structurization and Cleanup (Fission Core Improvement)
     // This includes goto elimination, for-loop recovery, and if-flattening.
     result = PostProcessor::process(result);
+
+    // Step 11.5: Strip Windows x64 MSVC shadow-spill parameters.
+    // Run LAST so the body is fully simplified before we check param usage.
+    // params written only to shadow space (never read) won't appear in the
+    // cleaned-up body, so they can be safely removed from the signature.
+    if (options.strip_shadow_params) {
+        result = strip_shadow_only_params(result);
+    }
 
     return result;
 }

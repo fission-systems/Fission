@@ -99,8 +99,16 @@ std::string post_process_iat_calls(const std::string& code, const std::map<uint6
 // signature without changing semantics.
 std::string strip_shadow_only_params(const std::string& code) {
     // Locate the opening brace that begins the function body.
-    size_t brace_pos = code.find('{');
-    if (brace_pos == std::string::npos) return code;
+    // We cannot use code.find('{') because the code may be prefixed by
+    // "// Inferred Structure Definitions\ntypedef struct name { ... } name;"
+    // blocks whose '{' would be found first.
+    // The function body '{' always immediately follows the closing ')' of the
+    // function signature (possibly separated by whitespace/newlines), whereas
+    // struct braces follow an identifier, not ')'.
+    static const std::regex body_brace_re(R"(\)\s*(\{))", std::regex::optimize);
+    std::smatch sm;
+    if (!std::regex_search(code, sm, body_brace_re)) return code;
+    size_t brace_pos = (size_t)sm.position(1);  // position of the body '{'
 
     std::string header = code.substr(0, brace_pos);
     std::string body   = code.substr(brace_pos);
