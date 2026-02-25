@@ -372,6 +372,7 @@ def normalize_for_similarity(text: str) -> str:
     # 'msg', 'item') instead of Fission's auto-generated param_N (already VAR).
     # Strategy: extract the last identifier in each parameter declaration from the
     # function signature and replace every occurrence in the full text with VAR.
+    # Also normalize local variable names from 'UNDEF varname;' declaration lines.
     _SIG_TYPE_WORDS = {
         "void", "int", "char", "float", "double", "long", "short", "unsigned",
         "signed", "const", "volatile", "struct", "union", "enum", "typedef",
@@ -382,6 +383,8 @@ def normalize_for_similarity(text: str) -> str:
         "if", "else", "for", "while", "do", "switch", "case", "break",
         "continue", "return", "goto",
     }
+    _names_to_normalize: set[str] = set()
+    # Collect param names from function signature
     _brace = text.find("{")
     if _brace > 0:
         _sig = text[:_brace]
@@ -394,7 +397,17 @@ def normalize_for_similarity(text: str) -> str:
                 if _idents:
                     _pname = _idents[-1]
                     if _pname not in _SIG_TYPE_WORDS:
-                        text = re.sub(r"\b" + re.escape(_pname) + r"\b", "VAR", text)
+                        _names_to_normalize.add(_pname)
+    # Collect local variable names from 'UNDEF localname;' declaration lines
+    for _decl_line in text.splitlines():
+        _dm = re.match(r"^\s*UNDEF\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*$", _decl_line)
+        if _dm:
+            _lname = _dm.group(1)
+            if _lname not in _SIG_TYPE_WORDS:
+                _names_to_normalize.add(_lname)
+    # Apply all collected name replacements
+    for _vname in _names_to_normalize:
+        text = re.sub(r"\b" + re.escape(_vname) + r"\b", "VAR", text)
 
     return text
 
