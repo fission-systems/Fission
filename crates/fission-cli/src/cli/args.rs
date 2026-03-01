@@ -102,6 +102,20 @@ pub struct OneShotArgs {
     /// (useful for clean output or benchmark comparison against Ghidra)
     #[arg(long)]
     pub no_header: bool,
+
+    /// Ghidra-compatible output mode: implies --no-header, strips WARNING lines
+    /// and inferred struct definitions for cleaner benchmark comparison
+    #[arg(long)]
+    pub ghidra_compat: bool,
+
+    /// Suppress WARNING/NOTICE diagnostic lines in decompilation output
+    #[arg(long)]
+    pub no_warnings: bool,
+
+    /// Override binary format detection (auto|pe|elf|macho)
+    /// Affects sleigh ID selection for architecture-specific analysis
+    #[arg(long, value_name = "FORMAT")]
+    pub format: Option<String>,
 }
 
 /// TUI CLI arguments (for fission_tui binary)

@@ -11,14 +11,14 @@ Fission is a Cargo workspace with strict crate boundaries:
 - `fission-signatures`: API/signature and relation databases
 - `fission-ffi`: unsafe boundary to native decompiler and pcode C ABI
 - `fission-analysis`: analysis logic (CFG/xref/decomp wrapping/debug/unpacker/plugin/script)
-- `fission-ui`: egui GUI presentation and UI state/viewmodels
+- `fission-tauri`: Tauri 2.x + React 19 desktop GUI (backend commands + frontend)
 - `fission-cli`: entrypoints, one-shot/interactive CLI, TUI binaries
 
 ## Dependency Direction
 
 Primary dependency flow:
 
-`fission-core` -> (`fission-loader`, `fission-signatures`, `fission-disasm`) -> `fission-pcode` -> `fission-analysis` -> (`fission-ui`, `fission-cli`)
+`fission-core` -> (`fission-loader`, `fission-signatures`, `fission-disasm`) -> `fission-pcode` -> `fission-analysis` -> (`fission-tauri`, `fission-cli`)
 
 Native integration flow:
 
@@ -56,7 +56,7 @@ Two distinct domains exist in `fission-analysis`:
 
 ### 4) Presentation Layer
 
-- `fission-ui`: egui app, panels, viewmodels, GUI command routing
+- `fission-tauri`: Tauri backend (`commands/`) + React 19 frontend (`src/panels/`, `src/components/`)
 - `fission-cli`: CLI arguments, one-shot analysis commands, interactive REPL/TUI
 
 ## Feature Gates

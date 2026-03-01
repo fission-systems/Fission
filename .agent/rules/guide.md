@@ -88,7 +88,7 @@ fission-analysis   fission-pcode                   │
         fission-cli ◄───────────────────────────────┘
              │
              ▼
-        fission-ui
+        fission-tauri
 ```
 
 ### 크레이트별 주요 파일
@@ -102,8 +102,8 @@ fission-analysis   fission-pcode                   │
 | `fission-analysis` | `analysis/decomp/postprocess.rs` | 디컴파일 후처리 |
 | | `analysis/cfg/` | CFG 구축 |
 | `fission-ffi` | `decomp.rs` | Ghidra FFI 바인딩 |
-| `fission-ui` | `ui/gui/app/mod.rs` | GUI 메인 앱 |
-| | `ui/gui/panels/` | 각종 패널 |
+| `fission-tauri` | `src-tauri/src/commands/` | Tauri IPC 커맨드 |
+| | `src/panels/` | React 패널 컴포넌트 |
 
 ### C++ 코드 구조
 

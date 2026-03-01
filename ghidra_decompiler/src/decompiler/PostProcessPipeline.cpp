@@ -144,11 +144,11 @@ std::string run_post_processing(
     }
 
     // Step 6.5: Variable naming standardization (Ghidra standard)
-    // Converts xStackX_38 -> local_38 for better Ghidra compatibility
-    result = standardize_variable_names(result);
+    {
+        result = standardize_variable_names(result);
+    }
 
     // Step 7: xunknown/undefined type replacement
-    // NOTE: Now disabled for Ghidra standard compatibility
     if (options.xunknown_types) {
         result = replace_xunknown_types(result);
     }
@@ -180,7 +180,11 @@ std::string run_post_processing(
 
     // Step 9.5: Structure offset annotation
     if (options.struct_offsets) {
-        result = annotate_structure_offsets(result);
+        if (!analysis.type_replacements.empty()) {
+            result = annotate_structure_offsets(result, analysis.type_replacements);
+        } else {
+            result = annotate_structure_offsets(result);
+        }
     }
 
     // Step 10: Apply FID-resolved function names
@@ -234,13 +238,11 @@ std::string run_post_processing(
     }
 
     // Step 11: Advanced Structurization and Cleanup (Fission Core Improvement)
-    // This includes goto elimination, for-loop recovery, and if-flattening.
-    result = PostProcessor::process(result);
+    {
+        result = PostProcessor::process(result);
+    }
 
     // Step 11.5: Strip Windows x64 MSVC shadow-spill parameters.
-    // Run LAST so the body is fully simplified before we check param usage.
-    // params written only to shadow space (never read) won't appear in the
-    // cleaned-up body, so they can be safely removed from the signature.
     if (options.strip_shadow_params) {
         result = strip_shadow_only_params(result);
     }

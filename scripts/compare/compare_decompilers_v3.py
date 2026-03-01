@@ -252,6 +252,10 @@ def normalize_for_similarity(text: str) -> str:
     text = re.sub(r"\bparam_[0-9]+\b", "VAR", text)
     text = re.sub(r"\barg_[0-9]+\b", "VAR", text)
     # x86/x64 ABI normalizations:
+    #  0. Register-based parameter names (Ghidra fastcall / custom calling convention):
+    #     in_ECX, in_EDX, in_RCX, in_RDX, in_R8, in_ESI, in_EDI, etc.
+    #     These represent function parameters passed via registers — normalise to VAR.
+    text = re.sub(r"\bin_[A-Z][A-Za-z0-9]+\b", "VAR", text)
     #  1. Calling-convention annotations (__cdecl, __fastcall, etc.) carry no
     #     structural meaning for scoring purposes.
     text = re.sub(r"\b__(?:cdecl|fastcall|stdcall|thiscall)\b\s*", "", text)

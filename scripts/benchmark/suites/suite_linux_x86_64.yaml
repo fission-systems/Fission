@@ -1,0 +1,1229 @@
+name: benchmark-linux_x86_64
+description: Auto-generated benchmark suite for linux_x86_64
+binaries:
+- path: samples/linux/x64/test_advanced_patterns_x64_O0
+  source: test_advanced_patterns
+  category: advanced
+  opt_level: O0
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400335'
+    name: rotate_left
+    expected_patterns: &id010
+    - '|'
+    - '<<'
+    - '>>'
+    - return
+  - address: '0x40034d'
+    name: rotate_right
+    expected_patterns: &id011
+    - '|'
+    - '<<'
+    - '>>'
+    - return
+  - address: '0x400365'
+    name: bswap32
+    expected_patterns: &id012
+    - '>>'
+    - '<<'
+    - return
+  - address: '0x400398'
+    name: bswap16
+    expected_patterns: &id013
+    - '>>'
+    - '<<'
+    - return
+  - address: '0x4003b7'
+    name: count_leading_zeros
+    expected_patterns: &id014
+    - while
+    - return
+  - address: '0x400426'
+    name: count_trailing_zeros
+    expected_patterns: &id015
+    - return
+    - '&'
+  - address: '0x40049c'
+    name: next_token
+    expected_patterns: &id016
+    - switch
+    - return
+  - address: '0x400685'
+    name: handle_add
+    expected_patterns: &id002
+    - return
+    - +
+  - address: '0x400699'
+    name: handle_sub
+    expected_patterns: &id003
+    - return
+    - '-'
+  - address: '0x4006ab'
+    name: handle_mul
+    expected_patterns: &id004
+    - return
+    - '*'
+  - address: '0x4006be'
+    name: handle_div
+    expected_patterns: &id005
+    - return
+    - /
+  - address: '0x4006de'
+    name: handle_mod
+    expected_patterns: &id006
+    - return
+    - '%'
+  - address: '0x400700'
+    name: handle_and
+    expected_patterns: &id007
+    - return
+    - '&'
+  - address: '0x400712'
+    name: handle_or
+    expected_patterns: &id008
+    - return
+    - '|'
+  - address: '0x400724'
+    name: handle_xor
+    expected_patterns: &id009
+    - return
+    - ^
+  - address: '0x400736'
+    name: dispatch_operation
+    expected_patterns: &id017
+    - return
+  - address: '0x400775'
+    name: fnv1a_hash
+    expected_patterns: &id018
+    - while
+    - ^
+    - return
+  - address: '0x4007c3'
+    name: murmur3_mix
+    expected_patterns: &id019
+    - '>>'
+    - return
+  - address: '0x4007fd'
+    name: crc32_init
+    expected_patterns: &id020
+    - for (
+  - address: '0x400868'
+    name: crc32_compute
+    expected_patterns: &id021
+    - for (
+    - ^
+    - return
+  - address: '0x4008d6'
+    name: get_flag
+    expected_patterns: &id022
+    - '>>'
+    - '&'
+    - return
+  - address: '0x4008f1'
+    name: set_flag
+    expected_patterns: &id023
+    - '|'
+    - return
+  - address: '0x40091b'
+    name: clear_flag
+    expected_patterns: &id024
+    - '&'
+    - return
+  - address: '0x400947'
+    name: extract_bits
+    expected_patterns: &id025
+    - '>>'
+    - '&'
+    - return
+  - address: '0x400972'
+    name: insert_bits
+    expected_patterns: &id026
+    - '|'
+    - '&'
+    - return
+  - address: '0x4009bc'
+    name: complex_expression
+    expected_patterns: &id027
+    - return
+  - address: '0x400a3d'
+    name: multi_ternary
+    expected_patterns: &id028
+    - return
+  - address: '0x400a71'
+    name: min3
+    expected_patterns: &id029
+    - return
+  - address: '0x400aaa'
+    name: max3
+    expected_patterns: &id030
+    - return
+  - address: '0x400ae3'
+    name: main
+    expected_patterns: &id001
+    - printf(
+    - return
+- path: samples/linux/x64/test_advanced_patterns_x64_O2
+  source: test_advanced_patterns
+  category: advanced
+  opt_level: O2
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400220'
+    name: main
+    expected_patterns: *id001
+  - address: '0x400560'
+    name: handle_add
+    expected_patterns: *id002
+  - address: '0x400570'
+    name: handle_sub
+    expected_patterns: *id003
+  - address: '0x400580'
+    name: handle_mul
+    expected_patterns: *id004
+  - address: '0x400590'
+    name: handle_div
+    expected_patterns: *id005
+  - address: '0x4005a0'
+    name: handle_mod
+    expected_patterns: *id006
+  - address: '0x4005b0'
+    name: handle_and
+    expected_patterns: *id007
+  - address: '0x4005c0'
+    name: handle_or
+    expected_patterns: *id008
+  - address: '0x4005d0'
+    name: handle_xor
+    expected_patterns: *id009
+  - address: '0x4005e0'
+    name: rotate_left
+    expected_patterns: *id010
+  - address: '0x4005f0'
+    name: rotate_right
+    expected_patterns: *id011
+  - address: '0x400600'
+    name: bswap32
+    expected_patterns: *id012
+  - address: '0x400610'
+    name: bswap16
+    expected_patterns: *id013
+  - address: '0x400620'
+    name: count_leading_zeros
+    expected_patterns: *id014
+  - address: '0x400670'
+    name: count_trailing_zeros
+    expected_patterns: *id015
+  - address: '0x4006c0'
+    name: next_token
+    expected_patterns: *id016
+  - address: '0x400810'
+    name: dispatch_operation
+    expected_patterns: *id017
+  - address: '0x400840'
+    name: fnv1a_hash
+    expected_patterns: *id018
+  - address: '0x400880'
+    name: murmur3_mix
+    expected_patterns: *id019
+  - address: '0x400890'
+    name: crc32_init
+    expected_patterns: *id020
+  - address: '0x400950'
+    name: crc32_compute
+    expected_patterns: *id021
+  - address: '0x400a60'
+    name: get_flag
+    expected_patterns: *id022
+  - address: '0x400a70'
+    name: set_flag
+    expected_patterns: *id023
+  - address: '0x400a80'
+    name: clear_flag
+    expected_patterns: *id024
+  - address: '0x400a90'
+    name: extract_bits
+    expected_patterns: *id025
+  - address: '0x400ab0'
+    name: insert_bits
+    expected_patterns: *id026
+  - address: '0x400ad0'
+    name: complex_expression
+    expected_patterns: *id027
+  - address: '0x400b30'
+    name: multi_ternary
+    expected_patterns: *id028
+  - address: '0x400b60'
+    name: min3
+    expected_patterns: *id029
+  - address: '0x400b70'
+    name: max3
+    expected_patterns: *id030
+- path: samples/linux/x64/test_arithmetic_idioms_x64_O0
+  source: test_arithmetic_idioms
+  category: arithmetic
+  opt_level: O0
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400335'
+    name: divide_by_3
+    expected_patterns: &id031
+    - return
+  - address: '0x400352'
+    name: divide_by_7
+    expected_patterns: &id032
+    - return
+  - address: '0x400374'
+    name: divide_by_10
+    expected_patterns: &id033
+    - return
+  - address: '0x400392'
+    name: divide_by_100
+    expected_patterns: &id034
+    - return
+  - address: '0x4003ae'
+    name: signed_div_3
+    expected_patterns: &id035
+    - return
+  - address: '0x4003cf'
+    name: signed_div_5
+    expected_patterns: &id036
+    - return
+  - address: '0x4003f2'
+    name: signed_div_7
+    expected_patterns: &id037
+    - return
+  - address: '0x400418'
+    name: mod_2
+    expected_patterns: &id038
+    - return
+    - '%|&'
+  - address: '0x400427'
+    name: mod_4
+    expected_patterns: &id039
+    - return
+    - '%|&'
+  - address: '0x400436'
+    name: mod_8
+    expected_patterns: &id040
+    - return
+    - '%|&'
+  - address: '0x400445'
+    name: mod_16
+    expected_patterns: &id041
+    - return
+    - '%|&'
+  - address: '0x400454'
+    name: mod_256
+    expected_patterns: &id042
+    - return
+    - '%|&'
+  - address: '0x400463'
+    name: multiply_by_2
+    expected_patterns: &id043
+    - return
+  - address: '0x400471'
+    name: multiply_by_4
+    expected_patterns: &id044
+    - return
+  - address: '0x400480'
+    name: multiply_by_8
+    expected_patterns: &id045
+    - return
+  - address: '0x40048f'
+    name: unsigned_div_2
+    expected_patterns: &id046
+    - return
+  - address: '0x40049d'
+    name: unsigned_div_4
+    expected_patterns: &id047
+    - return
+  - address: '0x4004ac'
+    name: signed_mod_2
+    expected_patterns: &id048
+    - return
+  - address: '0x4004c9'
+    name: signed_mod_4
+    expected_patterns: &id049
+    - return
+  - address: '0x4004e6'
+    name: signed_mod_8
+    expected_patterns: &id050
+    - return
+  - address: '0x400503'
+    name: absolute_value
+    expected_patterns: &id051
+    - return
+  - address: '0x400516'
+    name: divmod
+    expected_patterns: &id052
+    - return
+    - /
+  - address: '0x40054f'
+    name: negate_float
+    expected_patterns: &id053
+    - return
+  - address: '0x40056a'
+    name: negate_double
+    expected_patterns: &id054
+    - return
+  - address: '0x400586'
+    name: complex_arith
+    expected_patterns: &id055
+    - return
+    - +
+    - '*'
+  - address: '0x4005b6'
+    name: div64_by_3
+    expected_patterns: &id056
+    - return
+  - address: '0x4005d7'
+    name: div64_by_1000
+    expected_patterns: &id057
+    - return
+  - address: '0x4005fd'
+    name: multiply_by_3
+    expected_patterns: &id058
+    - return
+  - address: '0x40060f'
+    name: multiply_by_5
+    expected_patterns: &id059
+    - return
+  - address: '0x400622'
+    name: multiply_by_7
+    expected_patterns: &id060
+    - return
+  - address: '0x400635'
+    name: multiply_by_15
+    expected_patterns: &id061
+    - return
+  - address: '0x400648'
+    name: main
+    expected_patterns: *id001
+- path: samples/linux/x64/test_arithmetic_idioms_x64_O2
+  source: test_arithmetic_idioms
+  category: arithmetic
+  opt_level: O2
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400220'
+    name: main
+    expected_patterns: *id001
+  - address: '0x4004a0'
+    name: divide_by_3
+    expected_patterns: *id031
+  - address: '0x4004b0'
+    name: divide_by_7
+    expected_patterns: *id032
+  - address: '0x4004d0'
+    name: divide_by_10
+    expected_patterns: *id033
+  - address: '0x4004e0'
+    name: divide_by_100
+    expected_patterns: *id034
+  - address: '0x4004f0'
+    name: signed_div_3
+    expected_patterns: *id035
+  - address: '0x400510'
+    name: signed_div_5
+    expected_patterns: *id036
+  - address: '0x400530'
+    name: signed_div_7
+    expected_patterns: *id037
+  - address: '0x400550'
+    name: mod_2
+    expected_patterns: *id038
+  - address: '0x400560'
+    name: mod_4
+    expected_patterns: *id039
+  - address: '0x400570'
+    name: mod_8
+    expected_patterns: *id040
+  - address: '0x400580'
+    name: mod_16
+    expected_patterns: *id041
+  - address: '0x400590'
+    name: mod_256
+    expected_patterns: *id042
+  - address: '0x4005a0'
+    name: multiply_by_2
+    expected_patterns: *id043
+  - address: '0x4005b0'
+    name: multiply_by_4
+    expected_patterns: *id044
+  - address: '0x4005c0'
+    name: multiply_by_8
+    expected_patterns: *id045
+  - address: '0x4005d0'
+    name: unsigned_div_2
+    expected_patterns: *id046
+  - address: '0x4005e0'
+    name: unsigned_div_4
+    expected_patterns: *id047
+  - address: '0x4005f0'
+    name: signed_mod_2
+    expected_patterns: *id048
+  - address: '0x400600'
+    name: signed_mod_4
+    expected_patterns: *id049
+  - address: '0x400620'
+    name: signed_mod_8
+    expected_patterns: *id050
+  - address: '0x400640'
+    name: absolute_value
+    expected_patterns: *id051
+  - address: '0x400650'
+    name: divmod
+    expected_patterns: *id052
+  - address: '0x400660'
+    name: negate_float
+    expected_patterns: *id053
+  - address: '0x400670'
+    name: negate_double
+    expected_patterns: *id054
+  - address: '0x400680'
+    name: complex_arith
+    expected_patterns: *id055
+  - address: '0x4006a0'
+    name: div64_by_3
+    expected_patterns: *id056
+  - address: '0x4006c0'
+    name: div64_by_1000
+    expected_patterns: *id057
+  - address: '0x4006e0'
+    name: multiply_by_3
+    expected_patterns: *id058
+  - address: '0x4006f0'
+    name: multiply_by_5
+    expected_patterns: *id059
+  - address: '0x400700'
+    name: multiply_by_7
+    expected_patterns: *id060
+  - address: '0x400710'
+    name: multiply_by_15
+    expected_patterns: *id061
+- path: samples/linux/x64/test_calling_conventions_x64_O0
+  source: test_calling_conventions
+  category: calling
+  opt_level: O0
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400335'
+    name: one_param
+    expected_patterns: &id065
+    - return
+  - address: '0x400344'
+    name: two_params
+    expected_patterns: &id066
+    - return
+  - address: '0x400358'
+    name: three_params
+    expected_patterns: &id067
+    - return
+  - address: '0x400374'
+    name: four_params
+    expected_patterns: &id068
+    - return
+    - +
+  - address: '0x400398'
+    name: six_params
+    expected_patterns: &id069
+    - return
+    - +
+  - address: '0x4003ce'
+    name: eight_params
+    expected_patterns: &id070
+    - return
+    - +
+  - address: '0x40040e'
+    name: ten_params
+    expected_patterns: &id071
+    - return
+    - +
+  - address: '0x400458'
+    name: mixed_params
+    expected_patterns: &id072
+    - return
+  - address: '0x400492'
+    name: float_params
+    expected_patterns: &id073
+    - return
+  - address: '0x4004ca'
+    name: make_result
+    expected_patterns: &id074
+    - ->
+    - '='
+  - address: '0x40052d'
+    name: make_small
+    expected_patterns: &id075
+    - return
+  - address: '0x400548'
+    name: sum_variadic
+    expected_patterns: &id076
+    - while
+    - return
+  - address: '0x400645'
+    name: log_message
+    expected_patterns: &id077
+    - printf(
+  - address: '0x400700'
+    name: apply_op
+    expected_patterns: &id078
+    - return
+  - address: '0x400724'
+    name: add
+    expected_patterns: &id064
+    - return
+    - +
+  - address: '0x400738'
+    name: sub
+    expected_patterns: &id062
+    - return
+    - '-'
+  - address: '0x40074a'
+    name: mul
+    expected_patterns: &id063
+    - return
+    - '*'
+  - address: '0x40075d'
+    name: dispatch_op
+    expected_patterns: &id079
+    - if (
+    - return
+  - address: '0x4007b5'
+    name: factorial_tail
+    expected_patterns: &id080
+    - if (
+    - return
+  - address: '0x4007e7'
+    name: factorial
+    expected_patterns: &id081
+    - return
+  - address: '0x400803'
+    name: process_array
+    expected_patterns: &id082
+    - for (
+  - address: '0x400858'
+    name: sum_callback
+    expected_patterns: &id083
+    - return
+  - address: '0x400877'
+    name: main
+    expected_patterns: *id001
+- path: samples/linux/x64/test_calling_conventions_x64_O2
+  source: test_calling_conventions
+  category: calling
+  opt_level: O2
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400220'
+    name: main
+    expected_patterns: *id001
+  - address: '0x400500'
+    name: sub
+    expected_patterns: *id062
+  - address: '0x400510'
+    name: mul
+    expected_patterns: *id063
+  - address: '0x400520'
+    name: add
+    expected_patterns: *id064
+  - address: '0x400530'
+    name: one_param
+    expected_patterns: *id065
+  - address: '0x400540'
+    name: two_params
+    expected_patterns: *id066
+  - address: '0x400550'
+    name: three_params
+    expected_patterns: *id067
+  - address: '0x400560'
+    name: four_params
+    expected_patterns: *id068
+  - address: '0x400570'
+    name: six_params
+    expected_patterns: *id069
+  - address: '0x400580'
+    name: eight_params
+    expected_patterns: *id070
+  - address: '0x4005a0'
+    name: ten_params
+    expected_patterns: *id071
+  - address: '0x4005c0'
+    name: mixed_params
+    expected_patterns: *id072
+  - address: '0x4005f0'
+    name: float_params
+    expected_patterns: *id073
+  - address: '0x400610'
+    name: make_result
+    expected_patterns: *id074
+  - address: '0x4006a0'
+    name: make_small
+    expected_patterns: *id075
+  - address: '0x4006b0'
+    name: sum_variadic
+    expected_patterns: *id076
+  - address: '0x400740'
+    name: log_message
+    expected_patterns: *id077
+  - address: '0x400800'
+    name: apply_op
+    expected_patterns: *id078
+  - address: '0x400810'
+    name: dispatch_op
+    expected_patterns: *id079
+  - address: '0x400850'
+    name: factorial_tail
+    expected_patterns: *id080
+  - address: '0x4008a0'
+    name: factorial
+    expected_patterns: *id081
+  - address: '0x4008e0'
+    name: process_array
+    expected_patterns: *id082
+  - address: '0x400930'
+    name: sum_callback
+    expected_patterns: *id083
+- path: samples/linux/x64/test_control_flow_x64_O0
+  source: test_control_flow
+  category: control
+  opt_level: O0
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400335'
+    name: day_name
+    expected_patterns: &id084
+    - switch
+    - case
+    - return
+  - address: '0x400387'
+    name: sparse_switch
+    expected_patterns: &id085
+    - if (
+    - return
+  - address: '0x40041c'
+    name: classify_temperature
+    expected_patterns: &id086
+    - if (
+    - return
+  - address: '0x400478'
+    name: sum_range
+    expected_patterns: &id087
+    - for (
+    - return
+  - address: '0x4004a8'
+    name: count_digits
+    expected_patterns: &id088
+    - while
+    - return
+  - address: '0x4004fb'
+    name: find_first_set
+    expected_patterns: &id089
+    - while
+    - return
+    - '&'
+  - address: '0x400539'
+    name: matrix_multiply
+    expected_patterns: &id090
+    - for (
+  - address: '0x400625'
+    name: read_until_sentinel
+    expected_patterns: &id091
+    - while
+    - return
+  - address: '0x40067e'
+    name: count_set_bits_loop
+    expected_patterns: &id092
+    - while
+    - return
+  - address: '0x4006b2'
+    name: safe_divide
+    expected_patterns: &id093
+    - if (
+    - return
+  - address: '0x4006d2'
+    name: clamp
+    expected_patterns: &id094
+    - if (
+    - return
+  - address: '0x4006fe'
+    name: fatal_error
+    expected_patterns: &id095
+    - printf(
+  - address: '0x40072c'
+    name: process_command
+    expected_patterns: &id096
+    - if (
+  - address: '0x400761'
+    name: constant_condition_test
+    expected_patterns: &id097
+    - return
+  - address: '0x400770'
+    name: memzero_manual
+    expected_patterns: &id098
+    - for (
+    - = 0
+  - address: '0x4007fe'
+    name: fibonacci
+    expected_patterns: &id099
+    - if (
+    - return
+  - address: '0x400848'
+    name: main
+    expected_patterns: *id001
+- path: samples/linux/x64/test_control_flow_x64_O2
+  source: test_control_flow
+  category: control
+  opt_level: O2
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400220'
+    name: main
+    expected_patterns: *id001
+  - address: '0x4005e0'
+    name: day_name
+    expected_patterns: *id084
+  - address: '0x400600'
+    name: sparse_switch
+    expected_patterns: *id085
+  - address: '0x400670'
+    name: classify_temperature
+    expected_patterns: *id086
+  - address: '0x4006b0'
+    name: sum_range
+    expected_patterns: *id087
+  - address: '0x4006f0'
+    name: count_digits
+    expected_patterns: *id088
+  - address: '0x400740'
+    name: find_first_set
+    expected_patterns: *id089
+  - address: '0x400770'
+    name: matrix_multiply
+    expected_patterns: *id090
+  - address: '0x4007e0'
+    name: read_until_sentinel
+    expected_patterns: *id091
+  - address: '0x400810'
+    name: count_set_bits_loop
+    expected_patterns: *id092
+  - address: '0x400840'
+    name: safe_divide
+    expected_patterns: *id093
+  - address: '0x400860'
+    name: clamp
+    expected_patterns: *id094
+  - address: '0x400870'
+    name: fatal_error
+    expected_patterns: *id095
+  - address: '0x400890'
+    name: process_command
+    expected_patterns: *id096
+  - address: '0x4008c0'
+    name: constant_condition_test
+    expected_patterns: *id097
+  - address: '0x4008d0'
+    name: memzero_manual
+    expected_patterns: *id098
+  - address: '0x400970'
+    name: fibonacci
+    expected_patterns: *id099
+- path: samples/linux/x64/test_real_world_algorithms_x64_O0
+  source: test_real_world_algorithms
+  category: algorithms
+  opt_level: O0
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400335'
+    name: insertion_sort
+    expected_patterns: &id100
+    - for (
+    - while
+  - address: '0x4003f7'
+    name: partition
+    expected_patterns:
+    - while
+    - return
+  - address: '0x40052f'
+    name: quicksort
+    expected_patterns: &id101
+    - if (
+    - quicksort(
+  - address: '0x400591'
+    name: binary_search
+    expected_patterns: &id102
+    - while
+    - if (
+    - return
+  - address: '0x400628'
+    name: ht_hash
+    expected_patterns:
+    - while
+    - return
+  - address: '0x40066a'
+    name: ht_init
+    expected_patterns: &id103
+    - malloc(
+    - for (
+  - address: '0x40068f'
+    name: ht_put
+    expected_patterns: &id104
+    - while
+    - ->
+    - if (
+  - address: '0x4007ca'
+    name: ht_get
+    expected_patterns: &id105
+    - while
+    - ->
+    - return
+  - address: '0x40089e'
+    name: rb_create
+    expected_patterns: &id106
+    - malloc(
+    - ->
+    - return
+  - address: '0x4008ff'
+    name: rb_push
+    expected_patterns: &id107
+    - ->
+    - if (
+  - address: '0x400977'
+    name: rb_pop
+    expected_patterns: &id108
+    - ->
+    - if (
+    - return
+  - address: '0x4009ea'
+    name: rb_free
+    expected_patterns: &id109
+    - free(
+  - address: '0x400a14'
+    name: base64_encode
+    expected_patterns: &id110
+    - while
+    - '>>'
+    - return
+  - address: '0x400c5b'
+    name: parse_command
+    expected_patterns: &id111
+    - while
+    - if (
+  - address: '0x400ea8'
+    name: execute_command
+    expected_patterns: &id112
+    - if (
+    - strcmp(
+  - address: '0x400fda'
+    name: matrix_transpose
+    expected_patterns: &id113
+    - for (
+  - address: '0x401060'
+    name: matrix_trace
+    expected_patterns: &id114
+    - for (
+    - return
+  - address: '0x4010c1'
+    name: main
+    expected_patterns: *id001
+- path: samples/linux/x64/test_real_world_algorithms_x64_O2
+  source: test_real_world_algorithms
+  category: algorithms
+  opt_level: O2
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400220'
+    name: main
+    expected_patterns: *id001
+  - address: '0x400600'
+    name: insertion_sort
+    expected_patterns: *id100
+  - address: '0x400660'
+    name: quicksort
+    expected_patterns: *id101
+  - address: '0x400720'
+    name: binary_search
+    expected_patterns: *id102
+  - address: '0x400760'
+    name: ht_init
+    expected_patterns: *id103
+  - address: '0x400790'
+    name: ht_put
+    expected_patterns: *id104
+  - address: '0x400870'
+    name: ht_get
+    expected_patterns: *id105
+  - address: '0x400920'
+    name: rb_create
+    expected_patterns: *id106
+  - address: '0x400960'
+    name: rb_push
+    expected_patterns: *id107
+  - address: '0x4009a0'
+    name: rb_pop
+    expected_patterns: *id108
+  - address: '0x4009d0'
+    name: rb_free
+    expected_patterns: *id109
+  - address: '0x4009f0'
+    name: base64_encode
+    expected_patterns: *id110
+  - address: '0x400b70'
+    name: parse_command
+    expected_patterns: *id111
+  - address: '0x400d50'
+    name: execute_command
+    expected_patterns: *id112
+  - address: '0x400e60'
+    name: matrix_transpose
+    expected_patterns: *id113
+  - address: '0x400ef0'
+    name: matrix_trace
+    expected_patterns: *id114
+- path: samples/linux/x64/test_string_memory_x64_O0
+  source: test_string_memory
+  category: strings
+  opt_level: O0
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400335'
+    name: get_greeting
+    expected_patterns: &id115
+    - switch
+    - return
+  - address: '0x400385'
+    name: my_strlen
+    expected_patterns: &id116
+    - while
+    - return
+  - address: '0x4003af'
+    name: zero_buffer
+    expected_patterns: &id117
+    - for (
+    - = 0
+  - address: '0x4003e3'
+    name: my_memcpy
+    expected_patterns: &id118
+    - for (
+  - address: '0x40043a'
+    name: sb_init
+    expected_patterns: &id119
+    - malloc(
+    - ->
+  - address: '0x40048e'
+    name: sb_append
+    expected_patterns: &id120
+    - ->
+    - realloc(
+  - address: '0x40056e'
+    name: sb_free
+    expected_patterns: &id121
+    - free(
+  - address: '0x4005ad'
+    name: format_address
+    expected_patterns: &id122
+    - snprintf(
+  - address: '0x40060f'
+    name: classify_command
+    expected_patterns: &id123
+    - strcmp(
+    - return
+  - address: '0x4006cd'
+    name: count_words
+    expected_patterns: &id124
+    - while
+    - return
+  - address: '0x400735'
+    name: duplicate_string
+    expected_patterns: &id125
+    - malloc(
+    - return
+  - address: '0x400794'
+    name: find_string
+    expected_patterns: &id126
+    - for (
+    - strcmp(
+    - return
+  - address: '0x4007f2'
+    name: popcount32
+    expected_patterns: &id127
+    - while
+    - '&'
+    - return
+  - address: '0x40081a'
+    name: parse_packet
+    expected_patterns: &id128
+    - ->
+    - return
+  - address: '0x400862'
+    name: main
+    expected_patterns: *id001
+- path: samples/linux/x64/test_string_memory_x64_O2
+  source: test_string_memory
+  category: strings
+  opt_level: O2
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400220'
+    name: main
+    expected_patterns: *id001
+  - address: '0x400520'
+    name: get_greeting
+    expected_patterns: *id115
+  - address: '0x400540'
+    name: my_strlen
+    expected_patterns: *id116
+  - address: '0x400570'
+    name: zero_buffer
+    expected_patterns: *id117
+  - address: '0x400590'
+    name: my_memcpy
+    expected_patterns: *id118
+  - address: '0x4005c0'
+    name: sb_init
+    expected_patterns: *id119
+  - address: '0x4005f0'
+    name: sb_append
+    expected_patterns: *id120
+  - address: '0x400670'
+    name: sb_free
+    expected_patterns: *id121
+  - address: '0x400690'
+    name: format_address
+    expected_patterns: *id122
+  - address: '0x4006d0'
+    name: classify_command
+    expected_patterns: *id123
+  - address: '0x400760'
+    name: count_words
+    expected_patterns: *id124
+  - address: '0x4007b0'
+    name: duplicate_string
+    expected_patterns: *id125
+  - address: '0x4007f0'
+    name: find_string
+    expected_patterns: *id126
+  - address: '0x400860'
+    name: popcount32
+    expected_patterns: *id127
+  - address: '0x400880'
+    name: parse_packet
+    expected_patterns: *id128
+- path: samples/linux/x64/test_structs_classes_x64_O0
+  source: test_structs_classes
+  category: structs
+  opt_level: O0
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400985'
+    name: make_point
+    expected_patterns: &id129
+    - return
+  - address: '0x4009a1'
+    name: rect_area
+    expected_patterns: &id130
+    - ->
+    - return
+    - '*'
+  - address: '0x4009bc'
+    name: rect_perimeter
+    expected_patterns: &id131
+    - ->
+    - return
+  - address: '0x4009d8'
+    name: validate_header
+    expected_patterns: &id132
+    - ->
+    - if (
+    - return
+  - address: '0x400a46'
+    name: list_insert
+    expected_patterns: &id133
+    - malloc(
+    - ->
+    - return
+  - address: '0x400a7e'
+    name: list_length
+    expected_patterns: &id134
+    - while
+    - ->
+    - return
+  - address: '0x400aab'
+    name: list_sum
+    expected_patterns: &id135
+    - while
+    - ->
+    - return
+  - address: '0x400ae5'
+    name: list_free
+    expected_patterns: &id136
+    - while
+    - ->
+    - free(
+  - address: '0x400b1e'
+    name: total_salary
+    expected_patterns: &id137
+    - for (
+    - return
+  - address: '0x400b7e'
+    name: find_employee
+    expected_patterns: &id138
+    - for (
+    - if (
+    - return
+  - address: '0x400beb'
+    name: main
+    expected_patterns: *id001
+- path: samples/linux/x64/test_structs_classes_x64_O2
+  source: test_structs_classes
+  category: structs
+  opt_level: O2
+  format: elf
+  arch: x86_64
+  functions:
+  - address: '0x400680'
+    name: main
+    expected_patterns: *id001
+  - address: '0x400d60'
+    name: make_point
+    expected_patterns: *id129
+  - address: '0x400d70'
+    name: rect_area
+    expected_patterns: *id130
+  - address: '0x400d80'
+    name: rect_perimeter
+    expected_patterns: *id131
+  - address: '0x400d90'
+    name: validate_header
+    expected_patterns: *id132
+  - address: '0x400df0'
+    name: list_insert
+    expected_patterns: *id133
+  - address: '0x400e20'
+    name: list_length
+    expected_patterns: *id134
+  - address: '0x400e50'
+    name: list_sum
+    expected_patterns: *id135
+  - address: '0x400e80'
+    name: list_free
+    expected_patterns: *id136
+  - address: '0x400eb0'
+    name: total_salary
+    expected_patterns: *id137
+  - address: '0x400f00'
+    name: find_employee
+    expected_patterns: *id138

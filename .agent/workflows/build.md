@@ -55,7 +55,8 @@ cargo build
 cargo build -p fission-loader
 cargo build -p fission-analysis
 cargo build -p fission-ffi
-cargo build -p fission-ui
+# GUI 빌드 (Tauri)
+cd crates/fission-tauri && npm run tauri build
 ```
 
 ---

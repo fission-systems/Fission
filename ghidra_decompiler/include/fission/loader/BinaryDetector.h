@@ -35,9 +35,11 @@ enum class ArchType {
  */
 struct SectionInfo {
     std::string name;           // Section name (e.g. ".text", ".rdata", "__TEXT")
-    uint64_t    va_addr  = 0;   // Virtual address (load address)
-    uint64_t    va_size  = 0;   // Virtual size in bytes
-    bool is_executable   = false; // True if section is executable (code)
+    uint64_t    va_addr      = 0;   // Virtual address (load address)
+    uint64_t    va_size      = 0;   // Virtual size in bytes
+    uint64_t    file_offset  = 0;   // Offset within the binary file
+    uint64_t    file_size    = 0;   // Size on disk (raw size)
+    bool is_executable       = false; // True if section is executable (code)
 };
 
 /**

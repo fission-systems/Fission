@@ -1806,24 +1806,28 @@ void PrintC::pushConstant(uintb val,const Datatype *ct,tagtype tag,
   // Default printing
   // FISSION IMPROVEMENT: Try to interpret as float/double if size matches
   // This handles cases where floating-point constants are not properly typed
-  // BUT: Do not convert small integers (especially 0) or very large hex values that look like pointers
+  // (e.g. undefined8 holding 0x4048feb851eb851f which is the double 49.99)
+  //
+  // Strategy: attempt float decoding first, and only reject if the decoded
+  // value itself looks like a code/data pointer (i.e. very large absolute
+  // value that cannot be a sensible floating-point literal in C).
+  // We do NOT use the raw bit pattern to gate the check — the bit patterns of
+  // ordinary double values fully overlap with typical 64-bit pointer ranges.
   if ((ct->getSize() == 8 || ct->getSize() == 4) && val != 0) {
-    // Skip values that look like pointers (high addresses)
-    bool looksLikePointer = (val > 0x10000 && val < 0xFFFFFFFFFFFFFFFFULL);
-    
-    if (!looksLikePointer) {
-      const FloatFormat *format = glb->translate->getFloatFormat(ct->getSize());
-      if (format != (const FloatFormat *)0) {
-        FloatFormat::floatclass type;
-        double floatval = format->getHostFloat(val,&type);
-        // Only convert normalized or denormalized floats (not zero, not special)
-        if (type == FloatFormat::normalized || type == FloatFormat::denormalized) {
-          // Check if value is in reasonable range for floating point
-          if (floatval >= -1e308 && floatval <= 1e308) {
-            // This looks like it could be a float/double, use it
-            push_float(val,ct->getSize(),tag,vn,op);
-            return;
-          }
+    const FloatFormat *format = glb->translate->getFloatFormat(ct->getSize());
+    if (format != (const FloatFormat *)0) {
+      FloatFormat::floatclass type;
+      double floatval = format->getHostFloat(val, &type);
+      // Only reinterpret as float when:
+      //   1. It is a normalized or denormalized finite number.
+      //   2. Its absolute value is in a range that makes sense as a literal
+      //      (avoids huge values like 1e300 that are almost certainly raw data).
+      if (type == FloatFormat::normalized || type == FloatFormat::denormalized) {
+        double absval = floatval < 0.0 ? -floatval : floatval;
+        if (absval >= 1e-30 && absval <= 1e15) {
+          // Plausible floating-point literal — emit as float constant
+          push_float(val, ct->getSize(), tag, vn, op);
+          return;
         }
       }
     }

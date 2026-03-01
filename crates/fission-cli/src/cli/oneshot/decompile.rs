@@ -17,6 +17,47 @@ fn prefer_function_name(candidate: &str, current: &str) -> bool {
     candidate.len() > current.len()
 }
 
+/// Strip WARNING / NOTICE diagnostic lines from decompiler output.
+/// Removes lines starting with `WARNING:`, `NOTICE:`, or `/* WARNING` comments.
+fn strip_warnings(code: &str) -> String {
+    code.lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.starts_with("WARNING:")
+                && !trimmed.starts_with("NOTICE:")
+                && !trimmed.starts_with("/* WARNING")
+                && !trimmed.starts_with("// WARNING")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Strip inferred struct definitions (typedef struct ... } name;) blocks
+/// from the top of decompiler output for cleaner Ghidra-compatible comparison.
+fn strip_inferred_structs(code: &str) -> String {
+    let mut result = String::new();
+    let mut in_struct_block = false;
+    for line in code.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("typedef struct") || trimmed.starts_with("// Inferred Structure") {
+            in_struct_block = true;
+            continue;
+        }
+        if in_struct_block {
+            // End of struct block: closing `} name;`
+            if trimmed.starts_with('}') && trimmed.ends_with(';') {
+                in_struct_block = false;
+                continue;
+            }
+            // Still inside struct definition
+            continue;
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    result
+}
+
 pub(super) fn run_decompilation(
     cli: &OneShotArgs,
     binary: &LoadedBinary,
@@ -338,6 +379,10 @@ pub(super) fn run_decompilation(
         return Ok(());
     }
 
+    // Derive effective flags: --ghidra-compat implies --no-header + --no-warnings
+    let effective_no_header = cli.no_header || cli.ghidra_compat;
+    let effective_no_warnings = cli.no_warnings || cli.ghidra_compat;
+
     // Decompile each function
     let mut all_output = String::new();
     let mut json_results: Vec<serde_json::Value> = Vec::new();
@@ -350,14 +395,23 @@ pub(super) fn run_decompilation(
         let _silencer = OutputSilencer::new_if(!cli.verbose);
         match decomp.decompile(func.address) {
             Ok(code) => {
+                // Apply output filters
+                let mut filtered = code.clone();
+                if effective_no_warnings {
+                    filtered = strip_warnings(&filtered);
+                }
+                if cli.ghidra_compat {
+                    filtered = strip_inferred_structs(&filtered);
+                }
+
                 if cli.json {
                     json_results.push(serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
-                        "code": code
+                        "code": filtered
                     }));
                 } else {
-                    if !cli.no_header {
+                    if !effective_no_header {
                         all_output.push_str("// ============================================\n");
                         all_output.push_str(&format!(
                             "// Function: {} @ 0x{:x}\n",
@@ -365,7 +419,7 @@ pub(super) fn run_decompilation(
                         ));
                         all_output.push_str("// ============================================\n\n");
                     }
-                    all_output.push_str(&code);
+                    all_output.push_str(&filtered);
                     all_output.push_str("\n\n");
                 }
             }
@@ -417,15 +471,27 @@ pub(super) fn decompile_and_output(
     addr: u64,
     name: &str,
 ) -> io::Result<()> {
+    let effective_no_header = cli.no_header || cli.ghidra_compat;
+    let effective_no_warnings = cli.no_warnings || cli.ghidra_compat;
+
     let _silencer = OutputSilencer::new_if(!cli.verbose);
     match decomp.decompile(addr) {
         Ok(code) => {
+            // Apply output filters
+            let mut filtered = code.clone();
+            if effective_no_warnings {
+                filtered = strip_warnings(&filtered);
+            }
+            if cli.ghidra_compat {
+                filtered = strip_inferred_structs(&filtered);
+            }
+
             let mut stdout = io::stdout().lock();
             if cli.json {
                 let json_output = serde_json::to_string_pretty(&serde_json::json!({
                     "address": format!("0x{:x}", addr),
                     "name": name,
-                    "code": code
+                    "code": filtered
                 }))
                 .map_err(|e| {
                     io::Error::new(
@@ -435,10 +501,10 @@ pub(super) fn decompile_and_output(
                 })?;
                 writeln!(stdout, "{}", json_output)?;
             } else {
-                if !cli.no_header {
+                if !effective_no_header {
                     writeln!(stdout, "// Function: {} @ 0x{:x}\n", name, addr)?;
                 }
-                writeln!(stdout, "{}", code)?;
+                writeln!(stdout, "{}", filtered)?;
             }
         }
         Err(e) => {

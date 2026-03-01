@@ -3,9 +3,13 @@
  *
  * Runs structure/type/global/stack analysis passes after initial decompilation.
  *
- * Two entry points share the same implementation:
- *  - run_analysis_passes(ffi::DecompContext*, ...)  — FFI path
- *  - run_analysis_passes(BatchAnalysisContext&, ...) — batch path
+ * A single unified implementation is driven by the AnalysisContext interface.
+ * Two concrete adapters (FfiAnalysisContext, BatchAnalysisAdapter) are provided
+ * internally; the legacy overloads forward to the unified path.
+ *
+ *  - run_analysis_passes(ffi::DecompContext*, ...)   — FFI convenience wrapper
+ *  - run_analysis_passes(BatchAnalysisContext&, ...) — batch convenience wrapper
+ *  - run_analysis_passes(AnalysisContext&, ...)      — unified implementation
  */
 #ifndef FISSION_DECOMPILER_ANALYSIS_PIPELINE_H
 #define FISSION_DECOMPILER_ANALYSIS_PIPELINE_H
@@ -39,6 +43,51 @@ namespace decompiler {
 struct AnalysisArtifacts {
     std::string inferred_struct_definitions;
     std::map<unsigned long long, ghidra::TypeStruct*> captured_structs;
+    // Dynamic field-offset map: offset-key → "struct_name.field_name"
+    // Used by annotate_structure_offsets() for field annotation
+    std::map<std::string, std::string> type_replacements;
+};
+
+// ===========================================================================
+// AnalysisContext — abstract interface consumed by the unified pipeline.
+// Concrete implementations (FfiAnalysisContext, BatchAnalysisAdapter) live in
+// AnalysisPipeline.cpp and adapt the two existing context types.
+// ===========================================================================
+class AnalysisContext {
+public:
+    virtual ~AnalysisContext() = default;
+
+    /// Underlying Ghidra Architecture object.
+    virtual ghidra::Architecture* get_arch() = 0;
+
+    /// IAT / imported symbol map (address → name).
+    virtual const std::map<uint64_t, std::string>& get_symbols() = 0;
+
+    /// Per-function struct field registry (nullable).
+    virtual std::map<uint64_t, std::map<int, std::string>>* get_struct_registry() = 0;
+
+    /// Cross-function type registry for call-graph analysis (nullable).
+    virtual fission::types::GlobalTypeRegistry* get_type_registry() = 0;
+
+    /// Populate [out_start, out_end) with the data-section VA range.
+    /// Returns false if unavailable.
+    virtual bool get_data_section_range(uint64_t& out_start, uint64_t& out_end) = 0;
+
+    /// Return true if `addr` falls inside an executable section.
+    virtual bool is_address_executable(uint64_t addr) = 0;
+
+    /// Whether pointer-return prototype inference is available (FFI only).
+    virtual bool has_pointer_return_inference() const = 0;
+
+    /// Run pointer-return inference on the current function and its callees.
+    /// Returns true if any prototypes were updated (triggers Stage-1 rerun).
+    /// Default: no-op (batch path).
+    virtual bool try_infer_pointer_returns(
+        ghidra::Funcdata* /*fd*/, ghidra::Action* /*action*/) { return false; }
+
+    /// Register the function's signature in the type registry for call-graph
+    /// propagation.
+    virtual void register_function_signature(ghidra::Funcdata* fd) = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -56,7 +105,17 @@ struct BatchAnalysisContext {
 };
 
 // ---------------------------------------------------------------------------
-// FFI path (existing)
+// Unified entry point (new — takes the abstract AnalysisContext interface)
+// ---------------------------------------------------------------------------
+AnalysisArtifacts run_analysis_passes(
+    AnalysisContext& ctx,
+    ghidra::Funcdata* fd,
+    ghidra::Action* action,
+    size_t max_function_size
+);
+
+// ---------------------------------------------------------------------------
+// FFI convenience wrapper (existing API — delegates to unified path)
 // ---------------------------------------------------------------------------
 AnalysisArtifacts run_analysis_passes(
     fission::ffi::DecompContext* ctx,
@@ -66,7 +125,7 @@ AnalysisArtifacts run_analysis_passes(
 );
 
 // ---------------------------------------------------------------------------
-// Batch path — same passes, different context source
+// Batch convenience wrapper (existing API — delegates to unified path)
 // ---------------------------------------------------------------------------
 AnalysisArtifacts run_analysis_passes(
     BatchAnalysisContext& ctx,

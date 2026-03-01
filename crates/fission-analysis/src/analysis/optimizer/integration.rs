@@ -7,34 +7,56 @@ use super::{BinOpKind, Expr, Optimizer, OptimizerConfig, Stmt, UnaryOpKind};
 
 /// Parse decompiled C code into statements
 pub fn parse_c_to_ast(c_code: &str) -> Vec<Stmt> {
+    let lines: Vec<&str> = c_code.lines().collect();
+    parse_lines_to_stmts(&lines, 0).0
+}
+
+/// Recursive line-based parser that respects brace-delimited blocks.
+/// Returns (parsed statements, number of lines consumed).
+fn parse_lines_to_stmts(lines: &[&str], start: usize) -> (Vec<Stmt>, usize) {
     let mut stmts = Vec::new();
+    let mut i = start;
 
-    // Split by semicolons and braces
-    for line in c_code.lines() {
-        let line = line.trim();
+    while i < lines.len() {
+        let line = lines[i].trim();
 
-        // Skip empty lines, comments, and function signatures
-        if line.is_empty() || line.starts_with("//") || line.starts_with("/*") {
+        // Stop at a closing brace — the caller will consume it
+        if line == "}" || line == "} else {" || line.starts_with("} else") {
+            break;
+        }
+
+        // Skip empty lines, comments, opening braces, and function signatures
+        if line.is_empty()
+            || line.starts_with("//")
+            || line.starts_with("/*")
+            || line == "{"
+        {
+            i += 1;
+            continue;
+        }
+
+        // Parse if statements with block awareness
+        if line.starts_with("if") || line.starts_with("if ") || line.starts_with("if(") {
+            let (stmt, consumed) = parse_if_block(lines, i);
+            if let Some(s) = stmt {
+                stmts.push(s);
+            }
+            i += consumed;
             continue;
         }
 
         // Parse variable declarations: type name = expr;
         if let Some(stmt) = try_parse_var_decl(line) {
             stmts.push(stmt);
+            i += 1;
             continue;
         }
 
         // Parse assignments: name = expr;
         if let Some(stmt) = try_parse_assignment(line) {
             stmts.push(stmt);
+            i += 1;
             continue;
-        }
-
-        // Parse if statements
-        if line.starts_with("if") {
-            if let Some(stmt) = try_parse_if(line) {
-                stmts.push(stmt);
-            }
         }
 
         // Parse return statements
@@ -42,10 +64,99 @@ pub fn parse_c_to_ast(c_code: &str) -> Vec<Stmt> {
             if let Some(stmt) = try_parse_return(line) {
                 stmts.push(stmt);
             }
+            i += 1;
+            continue;
+        }
+
+        i += 1;
+    }
+
+    let consumed = i - start;
+    (stmts, consumed)
+}
+
+/// Parse an if/else block spanning multiple lines.
+/// Returns (optional statement, number of lines consumed).
+fn parse_if_block(lines: &[&str], start: usize) -> (Option<Stmt>, usize) {
+    let line = lines[start].trim();
+
+    // Extract condition from "if (condition) {"  or  "if (condition)"
+    let condition = match extract_if_condition(line) {
+        Some(c) => c,
+        None => return (None, 1),
+    };
+
+    let mut i = start + 1;
+
+    // Check if the opening brace is on the same line or the next line
+    let has_brace = line.ends_with('{');
+
+    if !has_brace {
+        // Check next line for a lone opening brace
+        if i < lines.len() && lines[i].trim() == "{" {
+            i += 1;
         }
     }
 
-    stmts
+    // Parse then-block lines until closing brace
+    let (then_block, consumed) = parse_lines_to_stmts(lines, i);
+    i += consumed;
+
+    // Consume closing brace (could be "}" or "} else {")
+    let mut else_block = None;
+    if i < lines.len() {
+        let closing = lines[i].trim();
+        if closing == "} else {" || closing.starts_with("} else") {
+            i += 1;
+            let (else_stmts, else_consumed) = parse_lines_to_stmts(lines, i);
+            i += else_consumed;
+            if !else_stmts.is_empty() {
+                else_block = Some(else_stmts);
+            }
+            // Consume final "}"
+            if i < lines.len() && lines[i].trim() == "}" {
+                i += 1;
+            }
+        } else if closing == "}" {
+            i += 1;
+        }
+    }
+
+    let stmt = Stmt::If {
+        condition,
+        then_block,
+        else_block,
+    };
+
+    (Some(stmt), i - start)
+}
+
+/// Extract the condition expression from an if-line like "if (x > 0) {"
+fn extract_if_condition(line: &str) -> Option<Expr> {
+    let if_start = line.find("if")?;
+    let paren_start = line[if_start..].find('(')?;
+
+    // Find matching closing paren (handle nested parens)
+    let after_if = &line[if_start + paren_start..];
+    let mut depth = 0i32;
+    let mut end = None;
+    for (idx, ch) in after_if.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(idx);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let paren_end = end?;
+    let cond_str = &after_if[1..paren_end];
+    Some(parse_expr(cond_str))
 }
 
 /// Try to parse variable declaration: type name = expr;
@@ -92,20 +203,14 @@ fn try_parse_assignment(line: &str) -> Option<Stmt> {
     None
 }
 
-/// Try to parse if statement: if (cond) { ... }
+/// Try to parse if statement from a single line (fallback for single-line ifs)
+#[allow(dead_code)]
 fn try_parse_if(line: &str) -> Option<Stmt> {
-    // Extract condition from "if (condition)"
-    // Simple pattern matching without regex
-    let if_start = line.find("if")?;
-    let paren_start = line[if_start..].find('(')?;
-    let paren_end = line[if_start..].rfind(')')?;
-
-    let cond_str = &line[if_start + paren_start + 1..if_start + paren_end];
-    let condition = parse_expr(cond_str);
+    let condition = extract_if_condition(line)?;
 
     Some(Stmt::If {
         condition,
-        then_block: vec![], // TODO: Parse block
+        then_block: vec![],
         else_block: None,
     })
 }
@@ -399,5 +504,51 @@ mod tests {
         // Should optimize x ^ 0 to x
         eprintln!("Optimized: {}", optimized);
         assert!(optimized.contains("x") && !optimized.contains("^ 0"));
+    }
+
+    #[test]
+    fn test_parse_if_block() {
+        let code = r#"
+if (x > 0) {
+    y = 1;
+}
+"#;
+        let stmts = parse_c_to_ast(code);
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::If { then_block, else_block, .. } = &stmts[0] {
+            assert_eq!(then_block.len(), 1, "then_block should have 1 statement");
+            assert!(else_block.is_none());
+        } else {
+            panic!("Expected If statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_if_else_block() {
+        let code = r#"
+if (x > 0) {
+    y = 1;
+} else {
+    y = 2;
+}
+"#;
+        let stmts = parse_c_to_ast(code);
+        assert_eq!(stmts.len(), 1);
+        if let Stmt::If { then_block, else_block, .. } = &stmts[0] {
+            assert_eq!(then_block.len(), 1);
+            let eb = else_block.as_ref().expect("should have else block");
+            assert_eq!(eb.len(), 1);
+        } else {
+            panic!("Expected If statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_if_roundtrip() {
+        let code = "if (x > 0) {\n    y = 1;\n}\n";
+        let stmts = parse_c_to_ast(code);
+        let output = ast_to_c(&stmts);
+        assert!(output.contains("if"), "roundtrip must contain if");
+        assert!(output.contains("y = 1"), "roundtrip must contain assignment");
     }
 }

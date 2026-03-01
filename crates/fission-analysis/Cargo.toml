@@ -70,6 +70,8 @@ cc = "1.0"
 proptest = "1.4"
 insta = { version = "1.34", features = ["yaml"] }
 criterion = "0.5"
+fission-pcode = { path = "../fission-pcode" }
+fission-loader = { path = "../fission-loader" }
 
 [[bench]]
 name = "benchmark"

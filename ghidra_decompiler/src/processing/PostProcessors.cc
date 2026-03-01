@@ -584,6 +584,11 @@ std::string normalize_msvc_crt_printf(const std::string& code) {
             if (ln.find('=') != std::string::npos) return "";
             // Must not be a function call (contains '(')
             if (ln.find('(') != std::string::npos) return "";
+            // Must not be a return statement
+            {
+                size_t first = ln.find_first_not_of(" \t");
+                if (first != std::string::npos && ln.substr(first, 6) == "return") return "";
+            }
             // Walk backwards from ';' to find the identifier
             size_t nameEnd = e - 1; // skip ';'
             while (nameEnd > 0 && std::isspace(static_cast<unsigned char>(ln[nameEnd]))) nameEnd--;
@@ -595,6 +600,8 @@ std::string normalize_msvc_crt_printf(const std::string& code) {
                     ln[nameStart - 1] == '_'))
                 nameStart--;
             std::string vname = ln.substr(nameStart, nameEnd - nameStart + 1);
+            // Reject names starting with a digit (not valid C identifiers)
+            if (!vname.empty() && std::isdigit(static_cast<unsigned char>(vname[0]))) return "";
             // Reject C keywords
             static const std::set<std::string> kws = {
                 "return","if","else","while","for","do","switch","case","break",
@@ -610,6 +617,11 @@ std::string normalize_msvc_crt_printf(const std::string& code) {
             size_t e = ln.find_last_not_of(" \t\n\r");
             if (e == std::string::npos || ln[e] != ';') return "";
             if (ln.find('(') != std::string::npos) return "";  // function call or cast
+            // Must not be a return statement
+            {
+                size_t first = ln.find_first_not_of(" \t");
+                if (first != std::string::npos && ln.substr(first, 6) == "return") return "";
+            }
             size_t eq = ln.find('=');
             if (eq == std::string::npos || eq == 0) return "";
             // Reject compound assignments and comparisons
@@ -745,19 +757,62 @@ std::string smart_constant_replace(const std::string& code) {
             if (mapping.param_index < (int)args.size()) {
                 std::string& arg = args[mapping.param_index];
                 
-                size_t hex_pos = arg.find("0x");
-                if (hex_pos != std::string::npos) {
-                    size_t hex_end = hex_pos + 2;
-                    while (hex_end < arg.length() && std::isxdigit(arg[hex_end])) hex_end++;
+                // Try to detect bitwise OR expression: 0xA | 0xB | 0xC
+                // Combine all hex literals in the arg connected by '|'.
+                auto group_it = ENUM_GROUPS.find(mapping.enum_group);
+                if (group_it != ENUM_GROUPS.end()) {
+                    // Count how many 0x literals appear
+                    size_t first_hex = arg.find("0x");
+                    size_t second_hex = (first_hex != std::string::npos)
+                        ? arg.find("0x", first_hex + 2) : std::string::npos;
                     
-                    std::string hex_str = arg.substr(hex_pos, hex_end - hex_pos);
-                    uint64_t value = std::stoull(hex_str, nullptr, 16);
-                    
-                    auto group_it = ENUM_GROUPS.find(mapping.enum_group);
-                    if (group_it != ENUM_GROUPS.end()) {
+                    if (first_hex != std::string::npos && second_hex != std::string::npos) {
+                        // Multiple hex literals — parse all and OR them together
+                        uint64_t combined = 0;
+                        size_t scan = first_hex;
+                        size_t span_start = first_hex;
+                        size_t span_end = first_hex;
+                        bool valid = true;
+                        
+                        while (scan != std::string::npos && scan < arg.length()) {
+                            if (arg.substr(scan, 2) != "0x") { valid = false; break; }
+                            size_t hex_end = scan + 2;
+                            while (hex_end < arg.length() && std::isxdigit(arg[hex_end])) hex_end++;
+                            if (hex_end == scan + 2) { valid = false; break; }
+                            
+                            std::string hex_str = arg.substr(scan, hex_end - scan);
+                            combined |= std::stoull(hex_str, nullptr, 16);
+                            span_end = hex_end;
+                            
+                            // Skip whitespace and '|'
+                            size_t next = hex_end;
+                            while (next < arg.length() && (arg[next] == ' ' || arg[next] == '\t')) next++;
+                            if (next < arg.length() && arg[next] == '|') {
+                                next++;
+                                while (next < arg.length() && (arg[next] == ' ' || arg[next] == '\t')) next++;
+                                scan = next;
+                            } else {
+                                break;
+                            }
+                        }
+                        
+                        if (valid) {
+                            std::string resolved = resolve_flag_combination(combined, group_it->second);
+                            if (!resolved.empty()) {
+                                arg.replace(span_start, span_end - span_start, resolved);
+                            }
+                        }
+                    } else if (first_hex != std::string::npos) {
+                        // Single hex literal (original path)
+                        size_t hex_end = first_hex + 2;
+                        while (hex_end < arg.length() && std::isxdigit(arg[hex_end])) hex_end++;
+                        
+                        std::string hex_str = arg.substr(first_hex, hex_end - first_hex);
+                        uint64_t value = std::stoull(hex_str, nullptr, 16);
+                        
                         std::string resolved = resolve_flag_combination(value, group_it->second);
                         if (!resolved.empty()) {
-                            arg.replace(hex_pos, hex_end - hex_pos, resolved);
+                            arg.replace(first_hex, hex_end - first_hex, resolved);
                         }
                     }
                 }
@@ -1341,52 +1396,179 @@ std::string apply_fid_names(const std::string& code, const std::map<uint64_t, st
 }
 
 // ============================================================================
-// Structure Offset Annotation
+// Structure Access Conversion (pointer arithmetic → arrow notation)
 // ============================================================================
-// Adds inline comments for structure field accesses like param_1 + 10
+// Converts *(TYPE *)(param + offset) → param->field_name when struct info available
 
-std::string annotate_structure_offsets(const std::string& code) {
-    std::string result = code;
-    
-    // Known structure field offsets from our test case (Item struct)
-    // offset 0: int id
-    // offset 4-35: char name[32] (DWORD offset +1 to +8)
-    // offset 40: double value (DWORD offset +10)
-    // offset 48: int point.x (DWORD offset +12)
-    // offset 52: int point.y (DWORD offset +13)
-    
-    std::map<std::string, std::string> offset_hints = {
-        {"+ 1", "+ 1  /* &name */"},
-        {"+ 10", "+ 10  /* &value */"},
-        {"[0xc]", "[0xc]  /* point.x */"},
-        {"[0xd]", "[0xd]  /* point.y */"},
-        {"+ 0xc", "+ 0xc  /* &point.x */"},
-        {"+ 0xd", "+ 0xd  /* &point.y */"}
-    };
-    
-    // Simple string replacement for known patterns
-    for (const auto& [pattern, replacement] : offset_hints) {
-        size_t pos = 0;
-        while ((pos = result.find(pattern, pos)) != std::string::npos) {
-            // Check if pattern is part of param_N
-            if (pos > 6) {
-                std::string prefix = result.substr(pos - 7, 7);
-                if (prefix.find("param_") != std::string::npos) {
-                    // Check if not already commented
-                    size_t next_comment = result.find("/*", pos);
-                    size_t next_newline = result.find("\n", pos);
-                    if (next_comment == std::string::npos || 
-                        (next_newline != std::string::npos && next_comment > next_newline)) {
-                        result.replace(pos, pattern.length(), replacement);
-                        pos += replacement.length();
-                        continue;
-                    }
+// Helper: parse struct typedef definitions from code header
+// Returns map: struct_name → { byte_offset → field_name }
+static std::map<std::string, std::map<int, std::string>>
+parse_struct_typedefs(const std::string& code) {
+    std::map<std::string, std::map<int, std::string>> structs;
+    // Pattern: typedef struct NAME { ... } NAME;
+    // Fields have comments: // Offset XX (hex)
+    std::regex typedef_re(R"(typedef\s+struct\s+(\w+)\s*\{([^}]*)\}\s*(\w+)\s*;)");
+    std::regex field_re(R"((\w[\w\s\*]*)\s+(\w+)\s*;\s*//\s*Offset\s+([0-9a-fA-Fx]+))");
+
+    auto tbegin = std::sregex_iterator(code.begin(), code.end(), typedef_re);
+    auto tend   = std::sregex_iterator();
+
+    for (auto it = tbegin; it != tend; ++it) {
+        std::string struct_name = (*it)[3].str();
+        std::string body = (*it)[2].str();
+
+        std::map<int, std::string> fields;
+        auto fbegin = std::sregex_iterator(body.begin(), body.end(), field_re);
+        auto fend   = std::sregex_iterator();
+        for (auto fi = fbegin; fi != fend; ++fi) {
+            std::string fname = (*fi)[2].str();
+            std::string off_str = (*fi)[3].str();
+            int offset = 0;
+            try {
+                if (off_str.size() > 2 && off_str.substr(0, 2) == "0x") {
+                    offset = std::stoi(off_str.substr(2), nullptr, 16);
+                } else {
+                    offset = std::stoi(off_str);
                 }
-            }
-            pos += pattern.length();
+            } catch (...) { continue; }
+            fields[offset] = fname;
+        }
+        if (!fields.empty()) {
+            structs[struct_name] = std::move(fields);
         }
     }
-    
+    return structs;
+}
+
+// Helper: find struct-typed parameters
+// Returns map: param_name → struct_name
+static std::map<std::string, std::string>
+find_struct_params(const std::string& code,
+                   const std::map<std::string, std::map<int, std::string>>& struct_defs) {
+    std::map<std::string, std::string> params;
+    for (auto const& [sname, _] : struct_defs) {
+        // Match: STRUCT_NAME *param_N  or  STRUCT_NAME *local_N
+        std::regex param_re(sname + R"(\s*\*\s*(\w+))");
+        auto pbegin = std::sregex_iterator(code.begin(), code.end(), param_re);
+        auto pend   = std::sregex_iterator();
+        for (auto pi = pbegin; pi != pend; ++pi) {
+            std::string var_name = (*pi)[1].str();
+            params[var_name] = sname;
+        }
+    }
+    return params;
+}
+
+// Helper: parse a hex or decimal offset string to int, returns -1 on failure
+static int parse_offset_value(const std::string& s) {
+    if (s.empty()) return -1;
+    try {
+        if (s.size() > 2 && (s.substr(0,2) == "0x" || s.substr(0,2) == "0X")) {
+            return std::stoi(s.substr(2), nullptr, 16);
+        }
+        return std::stoi(s);
+    } catch (...) { return -1; }
+}
+
+std::string annotate_structure_offsets(const std::string& code) {
+    // No-op fallback: without analysis data, skip to avoid incorrect annotations
+    return code;
+}
+
+std::string annotate_structure_offsets(const std::string& code,
+                                       const std::map<std::string, std::string>& type_replacements) {
+    if (code.empty()) return code;
+
+    std::string result = code;
+
+    // Phase 1: Build field mapping from type_replacements
+    // @off:OFFSET → struct.field_name  →  byte_offset → field_name
+    std::map<int, std::string> tr_fields;  // byte_offset → field_name
+    for (auto const& [key, value] : type_replacements) {
+        if (key.substr(0, 5) == "@off:") {
+            std::string off_str = key.substr(5);
+            int offset = parse_offset_value(off_str);
+            if (offset < 0) continue;
+            std::string field_name = value;
+            size_t dot = value.find('.');
+            if (dot != std::string::npos) field_name = value.substr(dot + 1);
+            tr_fields[offset] = field_name;
+        }
+    }
+
+    // Phase 2: Parse struct typedefs from code header
+    auto struct_defs = parse_struct_typedefs(result);
+    auto struct_params = find_struct_params(result, struct_defs);
+
+    // Phase 3: Regex-based conversion of pointer arithmetic to -> notation
+    // Pattern: *(CAST_TYPE *)(VAR_EXPR + OFFSET)
+    //   where VAR_EXPR can be: param_N, local_N, (longlong)param_N, etc.
+    // We capture the full match and replace with VAR->field_name
+    std::regex access_re(
+        R"(\*\s*\(\s*(\w[\w\s]*\*)\s*\)\s*\()"   // *(TYPE *)(
+        R"(\s*(?:\([^)]*\)\s*)?)"                  // optional inner cast like (longlong)
+        R"((\w+))"                                 // variable name (param_N, local_N, pxVarN)
+        R"(\s*\+\s*)"                              // +
+        R"((0x[0-9a-fA-F]+|\d+))"                  // offset value
+        R"(\s*\))"                                  // closing )
+    );
+
+    // Also match *(TYPE *)&VAR->field for address-of cases (skip these)
+    // And *(TYPE *)VAR for offset 0 access
+
+    // Do the conversion iteratively (regex_replace can have issues with
+    // overlapping/nested matches, so we use a manual loop)
+    std::string converted;
+    converted.reserve(result.size());
+    std::string::const_iterator search_start = result.cbegin();
+    std::smatch m;
+
+    while (std::regex_search(search_start, result.cend(), m, access_re)) {
+        // Append text before match
+        converted.append(search_start, search_start + m.position());
+
+        std::string cast_type = m[1].str();
+        std::string var_name = m[2].str();
+        std::string offset_str = m[3].str();
+        int byte_offset = parse_offset_value(offset_str);
+
+        std::string field_name;
+        bool converted_ok = false;
+
+        // Try struct typedef fields first
+        if (struct_params.count(var_name)) {
+            auto const& sname = struct_params[var_name];
+            if (struct_defs.count(sname) && struct_defs[sname].count(byte_offset)) {
+                field_name = struct_defs[sname][byte_offset];
+                converted_ok = true;
+            }
+        }
+
+        // Fall back to type_replacements
+        if (!converted_ok && byte_offset >= 0 && tr_fields.count(byte_offset)) {
+            // Only apply to param_N and local_ variables near struct-like patterns
+            if (var_name.substr(0, 6) == "param_" ||
+                var_name.substr(0, 6) == "local_" ||
+                var_name.find("Var") != std::string::npos) {
+                field_name = tr_fields[byte_offset];
+                converted_ok = true;
+            }
+        }
+
+        if (converted_ok && !field_name.empty()) {
+            // Emit: var_name->field_name
+            converted += var_name + "->" + field_name;
+        } else {
+            // Keep original match unchanged
+            converted.append(m[0].str());
+        }
+
+        search_start += m.position() + m.length();
+    }
+    // Append remaining text
+    converted.append(search_start, result.cend());
+    result = std::move(converted);
+
     return result;
 }
 

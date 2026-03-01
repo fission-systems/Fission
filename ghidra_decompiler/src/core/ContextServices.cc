@@ -248,7 +248,20 @@ DecompError load_binary(
                   << ctx->vcall_slot_name_hints.size() << " slot hints, "
                   << ctx->vcall_slot_target_hints.size() << " slot target hints" << std::endl;
 
-        ctx->arch.release(); // WORKAROUND: Leak instead of crash
+        // The old Architecture (if any) is now stale — it references the
+        // previous memory image.  Attempt a proper destruction first; only
+        // fall back to a controlled leak if the destructor throws (a known
+        // issue in Ghidra's SleighArchitecture teardown path).
+        if (ctx->arch) {
+            try {
+                ctx->arch.reset();
+            } catch (...) {
+                fission::utils::log_stream()
+                    << "[ContextServices] WARNING: Architecture destructor threw — "
+                       "leaking pointer to avoid crash" << std::endl;
+                ctx->arch.release(); // controlled leak
+            }
+        }
         return DECOMP_OK;
     } catch (const std::exception& e) {
         ctx->last_error = e.what();

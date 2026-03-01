@@ -85,6 +85,46 @@ public:
     static std::string reconstruct_switch_from_jump_table(const std::string& c_code);
     
     /**
+     * @brief Reconstruct switch from if-else-if chains
+     * 
+     * Pattern:
+     *   if (var == A) { body_A; }
+     *   else if (var == B) { body_B; }
+     *   else { default; }
+     *   
+     * Becomes:
+     *   switch (var) {
+     *   case A: body_A; break;
+     *   case B: body_B; break;
+     *   default: default; }
+     */
+    static std::string reconstruct_switch_from_if_else_chain(const std::string& c_code);
+    
+    /**
+     * @brief Reconstruct switch from sequential equality-check ifs
+     * 
+     * Handles both flat sequential patterns and BST (binary search tree) patterns
+     * produced by optimising compilers / Ghidra's structure recovery:
+     * 
+     * Flat:
+     *   if (var == A) { return X; }
+     *   if (var == B) { return Y; }
+     *   return Z;  // default
+     * 
+     * BST:
+     *   if (var == A) { return X; }
+     *   if (var < M) { if (var == B) { return Y; } }
+     *   return Z;  // default
+     *   
+     * Becomes:
+     *   switch (var) {
+     *   case A: return X;
+     *   case B: return Y;
+     *   default: return Z; }
+     */
+    static std::string reconstruct_switch_from_sequential_ifs(const std::string& c_code);
+    
+    /**
      * @brief Remove unnecessary labels that are no longer referenced
      */
     static std::string remove_unused_labels(const std::string& c_code);

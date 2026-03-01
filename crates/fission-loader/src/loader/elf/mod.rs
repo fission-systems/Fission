@@ -91,7 +91,7 @@ impl ElfLoader {
                 }
             }
 
-            for shdr in shdrs {
+            for shdr in &shdrs {
                 // Calculate simplified Image Base (lowest VA of loadable section)
                 if (shdr.sh_flags & 0x2) != 0 && shdr.sh_addr < image_base && shdr.sh_addr != 0 {
                     image_base = shdr.sh_addr;
@@ -119,7 +119,7 @@ impl ElfLoader {
                         shdr.sh_size,
                         shdr.sh_entsize,
                         shdr.sh_link as usize, // Link to String Table
-                        &sections_info,        // To get strtab section data
+                        &shdrs,
                         &mut functions_info,
                         endian,
                     );
@@ -171,6 +171,7 @@ impl ElfLoader {
         };
 
         let mut sections_info = Vec::new();
+        let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
 
         // Parse Sections
@@ -196,7 +197,7 @@ impl ElfLoader {
                 }
             }
 
-            for shdr in shdrs {
+            for shdr in &shdrs {
                 // Calculate simplified Image Base
                 if (shdr.sh_flags & 0x2) != 0
                     && (shdr.sh_addr as u64) < image_base
@@ -217,6 +218,20 @@ impl ElfLoader {
                     is_readable: (shdr.sh_flags & 0x2) != 0,
                     is_writable: (shdr.sh_flags & 0x1) != 0,
                 });
+
+                // If this is a symbol table, read functions
+                if shdr.sh_type == 2 || shdr.sh_type == 11 {
+                    Self::parse_symbols_32(
+                        bytes,
+                        shdr.sh_offset as u64,
+                        shdr.sh_size as u64,
+                        shdr.sh_entsize as u64,
+                        shdr.sh_link as usize,
+                        &shdrs,
+                        &mut functions_info,
+                        endian,
+                    );
+                }
             }
         }
 
@@ -224,7 +239,16 @@ impl ElfLoader {
             image_base = 0;
         }
 
-        // Functions parsing skipped for brevity in Initial Phase 1 for 32-bit (implementation pattern same as 64)
+        // Entry point fallback
+        if entry_point != 0 && !functions_info.iter().any(|f| f.address == entry_point) {
+            functions_info.push(FunctionInfo {
+                name: "_start".to_string(),
+                address: entry_point,
+                size: 0,
+                is_export: false,
+                is_import: false,
+            });
+        }
 
         LoadedBinaryBuilder::new(path, data)
             .format("ELF32 (binrw)")
@@ -233,29 +257,151 @@ impl ElfLoader {
             .image_base(image_base)
             .is_64bit(is_64bit)
             .add_sections(sections_info)
+            .add_functions(functions_info)
             .build()
     }
 
-    #[allow(clippy::needless_pass_by_ref_mut, dead_code)]
     fn parse_symbols_64(
-        _full_data: &[u8],
-        _offset: u64,
-        _size: u64,
-        _entsize: u64,
-        _strtab_shndx: usize,
-        _sections: &[SectionInfo],
-        _out_funcs: &mut Vec<FunctionInfo>,
-        _endian: binrw::Endian,
+        full_data: &[u8],
+        offset: u64,
+        size: u64,
+        entsize: u64,
+        strtab_shndx: usize,
+        shdrs: &[Elf64Shdr],
+        out_funcs: &mut Vec<FunctionInfo>,
+        endian: binrw::Endian,
     ) {
-        // Find string table data from previously parsed sections info
-        // Limitation: SectionsInfo array indices match SH headers, but we only stored processed info.
-        // We need to re-read the strtab section raw data here.
-        // For Proof of Concept, we'll try to find the section by index if possible,
-        // but `sections` passed here is processed info, so we can't reliably index it via `strtab_shndx`.
-        // We need to read the raw section header again or pass raw headers.
-        // Let's defer full symbol parsing for brevity or implement a naive reader logic.
+        // Resolve the symbol string table from the linked section header
+        let strtab = if strtab_shndx < shdrs.len() {
+            let sh = &shdrs[strtab_shndx];
+            let start = sh.sh_offset as usize;
+            let end = start + sh.sh_size as usize;
+            if end <= full_data.len() {
+                &full_data[start..end]
+            } else {
+                return;
+            }
+        } else {
+            return;
+        };
 
-        // Naive implementation:
-        // Assume we can just read symbols and print them for now.
+        let entry_size = if entsize > 0 { entsize as usize } else { std::mem::size_of::<Elf64Sym>() };
+        let count = if entry_size > 0 { size as usize / entry_size } else { 0 };
+
+        let sym_start = offset as usize;
+        let sym_end = sym_start + size as usize;
+        if sym_end > full_data.len() {
+            return;
+        }
+
+        let mut reader = Cursor::new(&full_data[sym_start..sym_end]);
+        for _ in 0..count {
+            let sym = match Elf64Sym::read_options(&mut reader, endian, ()) {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+
+            // STT_FUNC = 2 (lower 4 bits of st_info)
+            let sym_type = sym.st_info & 0xf;
+            if sym_type != 2 {
+                continue;
+            }
+
+            // Skip undefined symbols (SHN_UNDEF = 0)
+            if sym.st_shndx == 0 {
+                continue;
+            }
+
+            let name = extract_cstring(strtab, sym.st_name as usize);
+            if name.is_empty() {
+                continue;
+            }
+
+            // STB_GLOBAL = 1, STB_WEAK = 2 (upper 4 bits)
+            let binding = sym.st_info >> 4;
+            let is_export = binding == 1 || binding == 2;
+
+            // Deduplicate by address
+            if out_funcs.iter().any(|f| f.address == sym.st_value) {
+                continue;
+            }
+
+            out_funcs.push(FunctionInfo {
+                name,
+                address: sym.st_value,
+                size: sym.st_size,
+                is_export,
+                is_import: false,
+            });
+        }
+    }
+
+    fn parse_symbols_32(
+        full_data: &[u8],
+        offset: u64,
+        size: u64,
+        entsize: u64,
+        strtab_shndx: usize,
+        shdrs: &[Elf32Shdr],
+        out_funcs: &mut Vec<FunctionInfo>,
+        endian: binrw::Endian,
+    ) {
+        let strtab = if strtab_shndx < shdrs.len() {
+            let sh = &shdrs[strtab_shndx];
+            let start = sh.sh_offset as usize;
+            let end = start + sh.sh_size as usize;
+            if end <= full_data.len() {
+                &full_data[start..end]
+            } else {
+                return;
+            }
+        } else {
+            return;
+        };
+
+        let entry_size = if entsize > 0 { entsize as usize } else { std::mem::size_of::<Elf32Sym>() };
+        let count = if entry_size > 0 { size as usize / entry_size } else { 0 };
+
+        let sym_start = offset as usize;
+        let sym_end = sym_start + size as usize;
+        if sym_end > full_data.len() {
+            return;
+        }
+
+        let mut reader = Cursor::new(&full_data[sym_start..sym_end]);
+        for _ in 0..count {
+            let sym = match Elf32Sym::read_options(&mut reader, endian, ()) {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+
+            let sym_type = sym.st_info & 0xf;
+            if sym_type != 2 {
+                continue;
+            }
+            if sym.st_shndx == 0 {
+                continue;
+            }
+
+            let name = extract_cstring(strtab, sym.st_name as usize);
+            if name.is_empty() {
+                continue;
+            }
+
+            let binding = sym.st_info >> 4;
+            let is_export = binding == 1 || binding == 2;
+
+            if out_funcs.iter().any(|f| f.address == sym.st_value as u64) {
+                continue;
+            }
+
+            out_funcs.push(FunctionInfo {
+                name,
+                address: sym.st_value as u64,
+                size: sym.st_size as u64,
+                is_export,
+                is_import: false,
+            });
+        }
     }
 }

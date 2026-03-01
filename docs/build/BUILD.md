@@ -396,7 +396,7 @@ cargo build --release --no-default-features --features "gui cli"
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `gui` | egui-based GUI | ✅ Yes |
+| `gui` | Tauri 2.x + React 19 desktop GUI (`cd crates/fission-tauri && npm run tauri build`) | ✅ Yes |
 | `cli` | CLI with REPL | ✅ Yes |
 | `native_decomp` | Built-in Ghidra decompiler | ✅ Yes |
 | `python` | Python plugin support (PyO3) | ❌ No |

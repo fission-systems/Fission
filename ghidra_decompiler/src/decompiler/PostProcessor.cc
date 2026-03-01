@@ -80,7 +80,7 @@ std::string PostProcessor::convert_while_to_for(std::string c_code) {
     static const std::regex increment_pattern(R"((\.\w+|\w+)\s*=\s*\1\s*\+\s*1\s*;)");
     static const std::regex decrement_pattern(R"((\.\w+|\w+)\s*=\s*\1\s*-\s*1\s*;)");
     static const std::regex add_assign_pattern(R"((\w+)\s*=\s*\1\s*\+\s*([^;]+);)");
-    static const std::regex sub_assign_pattern(R"((\w+)\s*=\s*\1\s*-\s*([^;]+);)");
+    static const std::regex sub_assign_pattern(R"((\w+)\s*=\s*\1\s*-(?!>)\s*([^;]+);)");
     static const std::regex mul_assign_pattern(R"((\w+)\s*=\s*\1\s*\*\s*([^;]+);)");
     static const std::regex or_assign_pattern(R"((\w+)\s*=\s*\1\s*\|\s*([^;]+);)");
     static const std::regex and_assign_pattern(R"((\w+)\s*=\s*\1\s*\&\s*([^;]+);)");
@@ -150,7 +150,7 @@ std::string PostProcessor::convert_while_to_for_struct(std::string c_code) {
     static const std::regex inc_me(R"(^(\s*)(\w+)\s*-=\s*([^;]+);\s*$)");
     // Pre-normalised fallbacks: var = var + expr  /  var = var - expr
     static const std::regex inc_raw_plus(R"(^(\s*)(\w+)\s*=\s*(\w+)\s*\+\s*([^;]+);\s*$)");
-    static const std::regex inc_raw_minus(R"(^(\s*)(\w+)\s*=\s*(\w+)\s*-\s*([^;]+);\s*$)");
+    static const std::regex inc_raw_minus(R"(^(\s*)(\w+)\s*=\s*(\w+)\s*-(?!>)\s*([^;]+);\s*$)");
 
     // Split into lines (preserve trailing newline flag)
     bool ends_nl = !c_code.empty() && c_code.back() == '\n';

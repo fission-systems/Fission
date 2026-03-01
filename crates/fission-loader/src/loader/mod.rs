@@ -208,15 +208,54 @@ impl LoadedBinary {
 
         // DWARF Debug Information Analysis (works for ELF and Mach-O with debug info)
         {
-            let dwarf_analyzer = dwarf::DwarfAnalyzer::new(&binary);
-            if dwarf_analyzer.has_debug_info() {
-                tracing::info!("[Loader] Found DWARF debug info, extracting types...");
-                let dwarf_types = dwarf_analyzer.analyze_types();
-                for ty in dwarf_types {
+            // Phase 1: Extract all DWARF data (immutable borrow)
+            let (dwarf_types, dwarf_funcs) = {
+                let dwarf_analyzer = dwarf::DwarfAnalyzer::new(&binary);
+                if dwarf_analyzer.has_debug_info() {
+                    tracing::info!(
+                        "[Loader] Found DWARF debug info, extracting types and functions..."
+                    );
+                    let types = dwarf_analyzer.analyze_types();
+                    let funcs = dwarf_analyzer.analyze_functions();
+                    (types, funcs)
+                } else {
+                    (Vec::new(), Vec::new())
+                }
+            };
+
+            // Phase 2: Apply extracted data (mutable borrow)
+            for ty in dwarf_types {
+                binary
+                    .inner_mut()
+                    .inferred_types
+                    .push(ty.to_inferred_type());
+            }
+
+            if !dwarf_funcs.is_empty() {
+                tracing::info!(
+                    "[Loader] DWARF: {} functions with debug info extracted",
+                    dwarf_funcs.len()
+                );
+
+                // Update function names from DWARF if better than symbol table names
+                for func_info in &dwarf_funcs {
+                    if let Some(idx) = binary.function_addr_index.get(&func_info.address).copied()
+                    {
+                        let current_name = &binary.functions[idx].name;
+                        if current_name.is_empty()
+                            || current_name.starts_with("FUN_")
+                            || current_name.starts_with("sub_")
+                        {
+                            binary.inner_mut().functions[idx].name = func_info.name.clone();
+                        }
+                    }
+                }
+
+                // Store DWARF function info for post-processing (param/local name substitution)
+                for func_info in dwarf_funcs {
                     binary
-                        .inner_mut()
-                        .inferred_types
-                        .push(ty.to_inferred_type());
+                        .dwarf_functions
+                        .insert(func_info.address, func_info);
                 }
             }
         }

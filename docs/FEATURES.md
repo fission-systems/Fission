@@ -20,7 +20,7 @@ Fission is a next-generation decompiler and reverse engineering platform.
 | `fission-pcode` | P-code IR and optimizer | ~5K |
 | `fission-signatures` | Function signatures database | ~2K |
 | `fission-disasm` | Fast x86/x64 disassembler (iced-x86) | ~200 |
-| `fission-ui` | egui-based GUI | ~15K |
+| `fission-tauri` | Tauri 2.x + React 19 desktop GUI | ~8K |
 | `fission-cli` | Command-line interface | ~3K |
 
 ---
@@ -73,33 +73,31 @@ Fission is a next-generation decompiler and reverse engineering platform.
 
 ---
 
-## 🖥️ GUI Features (egui)
+## 🖥️ GUI Features (Tauri + React)
 
 ### Main Panels
 
 | Panel | Description | File |
 |-------|-------------|------|
-| Assembly View | Disassembly with syntax highlighting | `assembly.rs` |
-| Decompile View | C-like decompiled code | `decompile.rs` |
-| Functions List | Function browser with search | `functions.rs` |
-| Side Bar | Project navigation | `side_bar.rs` |
-| XRefs | Cross-reference analysis | `xrefs.rs` |
-| String XRefs | String reference browser | `string_xrefs.rs` |
-| Search | Global search | `search.rs` |
-| Settings | Application settings | `settings.rs` |
+| Assembly View | Disassembly with syntax highlighting | `AssemblyView.tsx` |
+| Decompile View | C-like decompiled code | `DecompileView.tsx` |
+| Hex View | Raw hex editor | `HexView.tsx` |
+| Listing View | Linear listing | `ListingView.tsx` |
+| Functions List | Function browser with search | `FunctionsList.tsx` |
+| Search Panel | Global search | `SearchPanel.tsx` |
+| Settings | Application settings | `SettingsPanel.tsx` |
+| Plugins | Plugin manager | `PluginsPanel.tsx` |
 
 ### Bottom Tabs
 
-- Console (log output)
-- Strings
-- Imports
-- Exports
-- Sections
-- Bookmarks
-- Patches
-- Scripts
-- Notes
-- Symbols
+- XRefs (`XrefsPanel.tsx`)
+- String XRefs (`StringXrefsPanel.tsx`)
+- CFG (`CfgPanel.tsx`)
+- Exports (`ExportsPanel.tsx`)
+- Patches (`PatchesPanel.tsx`)
+- Notes (`NotesPanel.tsx`)
+- Debug (`DebugTab.tsx`)
+- Timeline (`TimelinePanel.tsx`)
 
 ### Keyboard Shortcuts
 
@@ -159,7 +157,7 @@ fission --cli <binary> functions
       /golang.rs           # Go analysis
       /dwarf.rs            # DWARF debug info
   /fission-analysis/       # Analysis passes
-  /fission-ui/             # GUI
+  /fission-tauri/          # Tauri GUI (React frontend + Rust backend)
 ```
 
 ---

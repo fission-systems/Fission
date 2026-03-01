@@ -46,6 +46,8 @@ pub struct CachingDecompiler {
     inner: DecompilerNative,
     cache: DecompilerCache,
     inferred_types: Vec<fission_loader::loader::types::InferredTypeInfo>,
+    dwarf_functions:
+        std::collections::HashMap<u64, fission_loader::loader::types::DwarfFunctionInfo>,
 }
 
 #[cfg(feature = "native_decomp")]
@@ -59,11 +61,13 @@ impl CachingDecompiler {
         let inner = DecompilerNative::new(sla_dir)?;
         let cache = DecompilerCache::new(&binary.hash, cache_size)?;
         let inferred_types = binary.inferred_types.clone();
+        let dwarf_functions = binary.dwarf_functions.clone();
 
         Ok(Self {
             inner,
             cache,
             inferred_types,
+            dwarf_functions,
         })
     }
 
@@ -77,9 +81,11 @@ impl CachingDecompiler {
         // 2. Decompile using native engine
         let raw_code = self.inner.decompile(address)?;
 
-        // 3. Post-process with inferred types for field resolution
+        // 3. Post-process with inferred types and DWARF debug info
+        let dwarf_info = self.dwarf_functions.get(&address).cloned();
         let processor = self::postprocess::PostProcessor::new()
-            .with_inferred_types(self.inferred_types.clone());
+            .with_inferred_types(self.inferred_types.clone())
+            .with_dwarf_info(dwarf_info);
         let code = processor.process(&raw_code);
 
         // 4. Store in cache

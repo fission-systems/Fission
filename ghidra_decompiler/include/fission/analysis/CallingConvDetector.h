@@ -15,6 +15,8 @@ namespace analysis {
 /// \brief Calling Convention Detection
 ///
 /// Analyzes register usage patterns to detect calling convention.
+/// Supports format hints (compiler_id) to adjust heuristic thresholds
+/// and prioritize the correct ABI check order.
 class CallingConvDetector {
 public:
     enum ConvType {
@@ -31,6 +33,10 @@ public:
 private:
     ghidra::Architecture* arch;
     bool is_64bit;
+    
+    /// Binary format hint from compiler_id (e.g. "windows", "gcc", "clang").
+    /// Used to adjust detection thresholds and check order.
+    std::string format_hint_;
     
     // Register sets for detection
     std::set<std::string> ms_x64_arg_regs;  // RCX, RDX, R8, R9
@@ -59,6 +65,14 @@ private:
 public:
     CallingConvDetector(ghidra::Architecture* arch);
     ~CallingConvDetector();
+    
+    /// \brief Set binary format hint (compiler_id) to improve detection accuracy.
+    ///
+    /// When set, the detector will:
+    /// - Adjust check order (e.g. SYSV before MS x64 for "gcc"/"clang")
+    /// - Lower thresholds for the preferred ABI (accept 1 register instead of 2)
+    /// \param hint compiler_id string: "windows", "gcc", "clang", "default"
+    void set_format_hint(const std::string& hint);
     
     /// \brief Detect calling convention for a function
     /// \param fd The function to analyze

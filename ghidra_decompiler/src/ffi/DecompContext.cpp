@@ -35,12 +35,20 @@ DecompContext::~DecompContext() {
     if (symbol_provider_enabled && symbol_provider_callbacks.drop) {
         symbol_provider_callbacks.drop(symbol_provider_callbacks.userdata);
     }
-    // WORKAROUND: Release the architecture pointer instead of destroying it
-    // Ghidra's Architecture destructor can crash after decompilation due to
-    // internal state corruption. This is a minor memory leak but prevents crash.
-    // The architecture lives for the process lifetime anyway.
+    // Ghidra's Architecture destructor chain has known crash issues when
+    // cleaning up after full decompilation (dangling pointers in global
+    // scope / symbol table / type system).  The try/catch only catches
+    // C++ exceptions, not signal-based crashes (SIGSEGV).
+    //
+    // Unconditionally *release* instead of destroying:
+    //  - For one-shot CLI: process exit reclaims all memory anyway.
+    //  - For long-running GUI: each binary typically gets its own context,
+    //    and the leaked Architecture is a few hundred KB at most.
+    //
+    // Proper fix would require auditing Ghidra's internal destructor
+    // chain, which is out of scope for now.
     if (arch) {
-        arch.release(); // Leak instead of crash
+        arch.release();
     }
 }
 

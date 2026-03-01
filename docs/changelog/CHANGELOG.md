@@ -4,6 +4,77 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-01
+
+### 디컴파일러 품질 대폭 개선: 4대 버그 수정 + v4 벤치마크 시스템
+
+**벤치마크 점수: ARM64 69.4% → 88.9% | x64 71.6% → 88.2% | Linux 69.8% → 91.6% | Windows 68.0% → 91.1%**
+
+#### Bug 1 (CRITICAL): 빈 함수 본문 생성 버그 수정 (`parse_decl_varname`)
+
+`normalize_msvc_crt_printf` 후처리 스텝의 `parse_decl_varname` 람다가 `return param_1 / 3;`를 고아 변수 선언으로 잘못 파싱하는 치명적 버그 수정.
+
+- **원인**: `return` 키워드 이후의 표현식에서 `3`을 변수명으로 파싱 → 다른 곳에서 미사용으로 판단 → 해당 라인 전체 삭제 → 함수 본문 소실
+- **증상**: `divide_by_3(unsigned x)` → `uint __Z11divide_by_3j() { }` (파라미터도, 본문도 없음)
+- **수정 위치**: `ghidra_decompiler/src/processing/PostProcessors.cc`
+  - `parse_decl_varname`: `return` 키워드 검사 + 숫자로 시작하는 식별자 거부 조건 추가
+  - `parse_assign_lhs`: `return` 키워드 exclusion 추가
+
+#### Bug 2: 소멸자 Segfault 수정 (`arch.release()`)
+
+- **원인**: `DecompContext::~DecompContext()`에서 `arch.reset()` 호출 시 Ghidra `Architecture` 소멸자 체인이 SIGSEGV 발생 (try/catch로 포착 불가)
+- **수정**: `arch.reset()` → `arch.release()` (제어된 메모리 누수, 프로세스 종료 시 OS가 회수)
+- **수정 위치**: `ghidra_decompiler/src/ffi/DecompContext.cpp`
+
+#### Bug 3: 구조체 포인터 접근 미변환 수정 (`convert_struct_access`)
+
+- **원인**: 기존 `annotate_structure_offsets`는 주석만 추가, `*(type*)(param + offset)` → `param->field` 변환 불가. 추가로 hex 리터럴 분할 버그(`0xc` → `0  /* field_0 */xc`) 존재
+- **수정**: 완전한 새 함수 `convert_struct_access()` 구현 (5단계: 구조체 typedef 파싱 → struct 타입 파라미터 탐지 → 포인터 역참조 변환 → 오프셋-0 `*param` 변환 → 잔여 오프셋 재주석)
+- **수정 위치**: `ghidra_decompiler/src/processing/PostProcessors.cc`, `ghidra_decompiler/include/fission/processing/PostProcessors.h`
+
+#### Bug 4: 복합 대입 연산자 regex가 `->` 를 삼키는 버그 수정
+
+- **원인**: `sub_assign_pattern` 정규식 `(\w+)\s*=\s*\1\s*-\s*([^;]+);`이 `local_8 = local_8->field_8;`를 빼기 연산으로 매칭 → `local_8 -= >field_8` 생성
+- **수정**: `->` 음수 전방탐색(negative lookahead) 추가
+- **수정 위치**: `ghidra_decompiler/src/decompiler/PostProcessor.cc` (2곳)
+
+#### Feature: v4 벤치마크 시스템 구축
+
+7개 C++ 소스 파일 × 4개 플랫폼 × 2개 최적화 레벨 = **56개 테스트 바이너리** 기반 자동화 벤치마크.
+
+| 구성 요소 | 내용 |
+|-----------|------|
+| 테스트 소스 | arithmetic_idioms, control_flow, structs_classes, calling_conventions, string_memory, real_world_algorithms, advanced_patterns |
+| 플랫폼 | macOS ARM64, macOS x86_64, Linux x86_64, Windows x86_64 |
+| 스크립트 | `scripts/benchmark/run_benchmark.sh`, `benchmark_v4.py`, `analyze_results.py` |
+| YAML 수트 | `suite_macos_arm64.yaml`, `suite_macos_x86_64.yaml`, `suite_linux_x86_64.yaml`, `suite_windows_x86_64.yaml` |
+
+- **패턴 OR 지원**: `benchmark_v4.py`에 `|` 연산자 지원 추가 (예: `%|&`로 ARM64 `%` 와 x64 `&` 동시 매칭)
+
+#### 벤치마크 결과 요약
+
+| 플랫폼 | Bug 1+2 수정 후 | Bug 3 수정 후 | 최종 |
+|--------|----------------|---------------|------|
+| macOS ARM64 | 69.4% → 85.9% (+16.5pp) | 85.9% → 88.9% (+3.0pp) | **88.9%** |
+| macOS x86_64 | 71.6% → 87.6% (+16.0pp) | 87.6% → 88.2% (+0.6pp) | **88.2%** |
+| Linux x86_64 | 69.8% → 88.6% (+18.8pp) | 88.6% → 91.6% (+3.0pp) | **91.6%** |
+| Windows x86_64 | 68.0% → 88.0% (+20.0pp) | 88.0% → 91.1% (+3.1pp) | **91.1%** |
+
+#### 변경 파일 목록
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `ghidra_decompiler/src/processing/PostProcessors.cc` | Bug 1 parse_decl_varname 수정, Bug 3 convert_struct_access 구현 |
+| `ghidra_decompiler/include/fission/processing/PostProcessors.h` | convert_struct_access 선언 추가 |
+| `ghidra_decompiler/src/ffi/DecompContext.cpp` | Bug 2 arch.release() 수정 |
+| `ghidra_decompiler/src/decompiler/PostProcessor.cc` | Bug 4 복합대입 regex 수정 |
+| `ghidra_decompiler/src/decompiler/PostProcessPipeline.cpp` | 파이프라인 정리 |
+| `scripts/benchmark/benchmark_v4.py` | OR 패턴(`\|`) 지원 추가 |
+| `scripts/benchmark/suites/*.yaml` | mod 함수 패턴 `%\|&` 업데이트 (플랫폼 차이 흡수) |
+| `examples/sources/test_*.cpp` | 7개 테스트 소스 추가 |
+
+---
+
 ## [Unreleased / HEAD] — 2026-02-25
 
 ### x86 Double Argument Synthesis + Benchmark Normalization Fixes

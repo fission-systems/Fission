@@ -197,6 +197,58 @@ pub struct InferredTypeInfo {
     pub metadata_address: u64,
 }
 
+// ============================================================================
+// DWARF Debug Information Types
+// ============================================================================
+
+/// Location of a variable extracted from DWARF DW_AT_location
+#[derive(Debug, Clone)]
+pub enum DwarfLocation {
+    /// Stack offset relative to frame base (DW_OP_fbreg)
+    StackOffset(i64),
+    /// CPU register (DW_OP_reg*)
+    Register(String),
+    /// Complex or unparsed location expression
+    Unknown,
+}
+
+/// Parameter information extracted from DWARF DW_TAG_formal_parameter
+#[derive(Debug, Clone)]
+pub struct DwarfParamInfo {
+    /// Parameter name from DW_AT_name
+    pub name: String,
+    /// Type name resolved from DW_AT_type
+    pub type_name: String,
+    /// Parameter location (register or stack)
+    pub location: DwarfLocation,
+}
+
+/// Local variable information from DWARF DW_TAG_variable
+#[derive(Debug, Clone)]
+pub struct DwarfLocalVar {
+    /// Variable name from DW_AT_name
+    pub name: String,
+    /// Type name resolved from DW_AT_type
+    pub type_name: String,
+    /// Variable location
+    pub location: DwarfLocation,
+}
+
+/// Function information extracted from DWARF DW_TAG_subprogram
+#[derive(Debug, Clone)]
+pub struct DwarfFunctionInfo {
+    /// Function address (DW_AT_low_pc)
+    pub address: u64,
+    /// Function name (DW_AT_name or DW_AT_linkage_name)
+    pub name: String,
+    /// Return type resolved from DW_AT_type
+    pub return_type: Option<String>,
+    /// Parameters in declaration order
+    pub params: Vec<DwarfParamInfo>,
+    /// Local variables
+    pub local_vars: Vec<DwarfLocalVar>,
+}
+
 /// Inner data structure containing all binary information.
 /// This is wrapped in Arc for O(1) cloning with COW semantics.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
@@ -246,6 +298,10 @@ pub struct LoadedBinaryInner {
 #[derive(Debug, Clone)]
 pub struct LoadedBinary {
     inner: Arc<LoadedBinaryInner>,
+    /// DWARF debug information for functions (params, locals, return types).
+    /// Keyed by function address for O(1) lookup during post-processing.
+    /// Not serialized — rebuilt on each load from debug sections.
+    pub dwarf_functions: std::collections::HashMap<u64, DwarfFunctionInfo>,
 }
 
 impl LoadedBinary {
@@ -253,6 +309,7 @@ impl LoadedBinary {
     pub fn from_inner(inner: LoadedBinaryInner) -> Self {
         Self {
             inner: Arc::new(inner),
+            dwarf_functions: std::collections::HashMap::new(),
         }
     }
 

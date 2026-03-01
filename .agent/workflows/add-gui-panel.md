@@ -4,24 +4,46 @@ description: GUI 패널 추가 워크플로우
 
 # Add GUI Panel Workflow
 
-Fission GUI에 새 패널 추가 가이드
+Fission GUI (Tauri 2.x + React 19)에 새 패널 추가 가이드
 
 ---
 
 ## 📋 기존 패널 구조
 
-### 패널 위치
+### 프론트엔드 패널 위치
 
 ```
-crates/fission-ui/src/ui/gui/panels/
-├── assembly.rs        # 어셈블리 뷰
-├── decompile.rs       # 디컴파일 뷰
-├── functions.rs       # 함수 목록
-├── side_bar.rs        # 사이드바
-├── xrefs.rs           # XRefs
-├── string_xrefs.rs    # 문자열 참조
-├── settings.rs        # 설정
-└── bottom_tabs/       # 하단 탭들
+crates/fission-tauri/src/panels/
+├── sidebar/                # 사이드바 패널
+│   ├── FunctionsList.tsx
+│   ├── SearchPanel.tsx
+│   ├── SettingsPanel.tsx
+│   ├── PluginsPanel.tsx
+│   ├── SectionsPanel.tsx
+│   ├── DebugSidebar.tsx
+│   └── index.ts
+├── editor/                 # 에디터 뷰 (메인 영역)
+│   ├── AssemblyView.tsx
+│   ├── DecompileView.tsx
+│   ├── HexView.tsx
+│   ├── ListingView.tsx
+│   └── index.ts
+└── bottom/                 # 하단 탭 패널
+    ├── XrefsPanel.tsx
+    ├── StringXrefsPanel.tsx
+    ├── CfgPanel.tsx
+    ├── ExportsPanel.tsx
+    ├── PatchesPanel.tsx
+    ├── NotesPanel.tsx
+    ├── DebugTab.tsx
+    ├── TimelinePanel.tsx
+    └── index.ts
+```
+
+### 백엔드 커맨드 위치
+
+```
+crates/fission-tauri/src-tauri/src/commands/
 ```
 
 ### 현재 패널 확인
@@ -29,143 +51,139 @@ crates/fission-ui/src/ui/gui/panels/
 // turbo
 
 ```bash
-ls -la crates/fission-ui/src/ui/gui/panels/
+ls -la crates/fission-tauri/src/panels/
 ```
 
 ---
 
-## 🏗️ 1단계: 패널 파일 생성
+## 🏗️ 1단계: React 패널 컴포넌트 생성
 
-`panels/new_panel.rs`:
+`src/panels/<위치>/NewPanel.tsx`:
 
-```rust
+```tsx
 //! 새 패널 - 설명
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
 
-use crate::ui::gui::core::AppState;
-use crate::ui::gui::theme::catppuccin;
-use eframe::egui;
+interface Props {
+  // 필요한 props
+}
 
-/// 새 패널 렌더링
-pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
-    ui.heading(
-        egui::RichText::new("🔍 새 패널")
-            .color(catppuccin::LAVENDER)
-    );
-    
-    ui.separator();
-    
-    // 패널 내용
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        // 내용 렌더링
-    });
+export function NewPanel({ ...props }: Props) {
+  const [data, setData] = useState<string | null>(null);
+
+  useEffect(() => {
+    invoke<string>("new_panel_command").then(setData).catch(console.error);
+  }, []);
+
+  return (
+    <div className="panel">
+      <h2 className="panel-title" style={{ color: "var(--color-lavender)" }}>
+        🔍 새 패널
+      </h2>
+      <div className="panel-body">
+        {data ?? "로딩 중..."}
+      </div>
+    </div>
+  );
 }
 ```
 
 ---
 
-## 📦 2단계: 모듈 등록
+## 📦 2단계: index.ts에 등록
 
-`panels/mod.rs`에 추가:
+`src/panels/<위치>/index.ts`에 추가:
 
-```rust
-mod new_panel;
-pub use new_panel::render as render_new_panel;
+```ts
+export { NewPanel } from "./NewPanel";
 ```
 
 ---
 
-## 🔗 3단계: 앱에 통합
+## 🔗 3단계: Tauri 백엔드 커맨드 추가 (필요한 경우)
 
-### 사이드 패널인 경우
-
-`app/mod.rs`에서 호출:
+`src-tauri/src/commands/new_feature.rs` 생성:
 
 ```rust
-panels::render_new_panel(ui, &mut self.state);
-```
+use crate::state::AppState;
 
-### 하단 탭인 경우
-
-1. `core/state.rs`에 탭 추가:
-
-```rust
-pub enum BottomTab {
-    // 기존 탭...
-    NewPanel,
+#[tauri::command]
+pub async fn new_panel_command(
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    // 구현
+    Ok("결과".to_string())
 }
 ```
 
-1. `panels/bottom_tabs/mod.rs`에 추가:
+`src-tauri/src/lib.rs`의 `invoke_handler`에 등록:
 
 ```rust
-mod new_panel;
-
-// match 문에 추가:
-BottomTab::NewPanel => {
-    new_panel::render(ui, state);
-}
+tauri::Builder::default()
+    .invoke_handler(tauri::generate_handler![
+        // 기존 커맨드들...
+        commands::new_feature::new_panel_command,
+    ])
 ```
 
 ---
 
 ## 🎨 4단계: 스타일링
 
-### 테마 색상 사용
+Catppuccin Mocha CSS 변수 사용:
 
-```rust
-use crate::ui::gui::theme::catppuccin;
-
+```tsx
 // 제목
-egui::RichText::new("제목").color(catppuccin::MAUVE)
+<h2 style={{ color: "var(--color-mauve)" }}>제목</h2>
 
 // 버튼
-if ui.button(
-    egui::RichText::new("버튼").color(catppuccin::BLUE)
-).clicked() {
-    // 액션
-}
-```
+<button style={{ backgroundColor: "var(--color-blue)" }}>
+  버튼
+</button>
 
-### 코드 하이라이팅
-
-```rust
-use crate::ui::gui::theme::code;
-
-egui::RichText::new("keyword").color(code::KEYWORD)
-egui::RichText::new("function").color(code::FUNCTION)
+// 에러 상태
+<span style={{ color: "var(--color-red)" }}>에러</span>
 ```
 
 ---
 
 ## ⌨️ 5단계: 키보드 단축키 (선택)
 
-`app/mod.rs`의 `handle_navigation_actions`에 추가:
+`src/hooks/useKeyboard.ts` 또는 컴포넌트의 `onKeyDown` 핸들러에 추가:
 
-```rust
-// 새 단축키
-if ctx.input(|i| i.key_pressed(egui::Key::SomeKey)) {
-    // 액션
-}
+```tsx
+useEffect(() => {
+  const handler = (e: KeyboardEvent) => {
+    if (e.key === "P" && e.ctrlKey) {
+      // 액션
+    }
+  };
+  window.addEventListener("keydown", handler);
+  return () => window.removeEventListener("keydown", handler);
+}, []);
 ```
 
 ---
 
 ## 🔨 6단계: 빌드 및 테스트
 
-### 빌드
+### 개발 서버 실행
 
 // turbo
 
 ```bash
-cargo build -p fission-ui
+cd crates/fission-tauri
+npm run tauri dev
 ```
 
-### GUI 실행
+### 프로덕션 빌드
 
 // turbo
 
 ```bash
-cargo run -p fission-cli -- --gui
+cd crates/fission-tauri
+npm run tauri build
 ```
 
 ---
@@ -175,5 +193,5 @@ cargo run -p fission-cli -- --gui
 `docs/FEATURES.md`에 패널 추가:
 
 ```markdown
-| 새 패널 | 설명 | `new_panel.rs` |
+| 새 패널 | 설명 | `NewPanel.tsx` |
 ```

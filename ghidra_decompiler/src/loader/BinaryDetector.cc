@@ -206,8 +206,12 @@ BinaryInfo BinaryDetector::parse_pe(const uint8_t* data, size_t size) {
             sec.va_size   = *(const uint32_t*)(data + sec_off + 8);      // VirtualSize
             uint32_t rva  = *(const uint32_t*)(data + sec_off + 12);     // VirtualAddress (RVA)
             sec.va_addr   = info.image_base + rva;
+            uint32_t raw_data_size   = *(const uint32_t*)(data + sec_off + 16); // SizeOfRawData
+            uint32_t raw_data_offset = *(const uint32_t*)(data + sec_off + 20); // PointerToRawData
+            sec.file_offset = raw_data_offset;
+            sec.file_size   = raw_data_size;
             if (sec.va_size == 0)
-                sec.va_size = *(const uint32_t*)(data + sec_off + 16);   // SizeOfRawData fallback
+                sec.va_size = raw_data_size;                              // SizeOfRawData fallback
             uint32_t ch   = *(const uint32_t*)(data + sec_off + 36);     // Characteristics
             sec.is_executable = ((ch & 0x20000000u) != 0)                // IMAGE_SCN_MEM_EXECUTE
                              || ((ch & 0x00000020u) != 0);               // IMAGE_SCN_CNT_CODE
@@ -311,6 +315,9 @@ BinaryInfo BinaryDetector::parse_elf(const uint8_t* data, size_t size) {
                     // ELF32: sh_flags@8(4), sh_addr@12(4), sh_size@20(4)
                     uint64_t sh_flags   = rdptr(shdr + 8);
                     uint64_t sh_addr    = rdptr(shdr + (info.is_64bit ? 16 : 12));
+                    // ELF64: sh_offset@24(8), sh_size@32(8)
+                    // ELF32: sh_offset@16(4), sh_size@20(4)
+                    uint64_t sh_offset  = rdptr(shdr + (info.is_64bit ? 24 : 16));
                     uint64_t sh_size    = rdptr(shdr + (info.is_64bit ? 32 : 20));
 
                     uint64_t name_pos = sh_name_off + sh_name;
@@ -323,6 +330,8 @@ BinaryInfo BinaryDetector::parse_elf(const uint8_t* data, size_t size) {
                     sec.name          = std::string(raw, strnlen(raw, name_max));
                     sec.va_addr       = sh_addr;
                     sec.va_size       = sh_size;
+                    sec.file_offset   = sh_offset;
+                    sec.file_size     = sh_size;
                     sec.is_executable = (sh_flags & 0x4u) != 0; // SHF_EXECINSTR
                     if (!sec.name.empty())
                         info.sections.push_back(std::move(sec));
@@ -497,17 +506,23 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
         if (cmdsize < 8 || lc_off + cmdsize > lc_end) break;
 
         if (cmd == LC_SEGMENT_64 && lc_off + 64 <= lc_end) {
-            // segment_command_64: cmd(4) cmdsize(4) segname[16] vmaddr(8) vmsize(8) ...
+            // segment_command_64: cmd(4) cmdsize(4) segname[16] vmaddr(8) vmsize(8) fileoff(8) filesize(8) ...
             const char* segname = (const char*)(data + lc_off + 8);
             uint64_t vmaddr = *(const uint64_t*)(data + lc_off + 24);
             uint64_t vmsize = *(const uint64_t*)(data + lc_off + 32);
+            uint64_t fileoff  = *(const uint64_t*)(data + lc_off + 40);
+            uint64_t filesize = *(const uint64_t*)(data + lc_off + 48);
             if (is_big_endian) {
 #ifdef _MSC_VER
                 vmaddr = _byteswap_uint64(vmaddr);
                 vmsize = _byteswap_uint64(vmsize);
+                fileoff  = _byteswap_uint64(fileoff);
+                filesize = _byteswap_uint64(filesize);
 #else
                 vmaddr = __builtin_bswap64(vmaddr);
                 vmsize = __builtin_bswap64(vmsize);
+                fileoff  = __builtin_bswap64(fileoff);
+                filesize = __builtin_bswap64(filesize);
 #endif
             }
             // Record image_base from __TEXT
@@ -521,21 +536,29 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
                 sec.name          = raw;
                 sec.va_addr       = vmaddr;
                 sec.va_size       = vmsize;
+                sec.file_offset   = fileoff;
+                sec.file_size     = filesize;
                 sec.is_executable = (std::strncmp(segname, "__TEXT", 6) == 0);
                 info.sections.push_back(std::move(sec));
             }
         } else if (cmd == LC_SEGMENT && lc_off + 56 <= lc_end) {
-            // segment_command (32-bit): cmd(4) cmdsize(4) segname[16] vmaddr(4) vmsize(4) ...
+            // segment_command (32-bit): cmd(4) cmdsize(4) segname[16] vmaddr(4) vmsize(4) fileoff(4) filesize(4) ...
             const char* segname = (const char*)(data + lc_off + 8);
-            uint32_t vmaddr32 = *(const uint32_t*)(data + lc_off + 24);
-            uint32_t vmsize32 = *(const uint32_t*)(data + lc_off + 28);
+            uint32_t vmaddr32  = *(const uint32_t*)(data + lc_off + 24);
+            uint32_t vmsize32  = *(const uint32_t*)(data + lc_off + 28);
+            uint32_t fileoff32  = *(const uint32_t*)(data + lc_off + 32);
+            uint32_t filesize32 = *(const uint32_t*)(data + lc_off + 36);
             if (is_big_endian) {
 #ifdef _MSC_VER
-                vmaddr32 = _byteswap_ulong(vmaddr32);
-                vmsize32 = _byteswap_ulong(vmsize32);
+                vmaddr32  = _byteswap_ulong(vmaddr32);
+                vmsize32  = _byteswap_ulong(vmsize32);
+                fileoff32  = _byteswap_ulong(fileoff32);
+                filesize32 = _byteswap_ulong(filesize32);
 #else
-                vmaddr32 = __builtin_bswap32(vmaddr32);
-                vmsize32 = __builtin_bswap32(vmsize32);
+                vmaddr32  = __builtin_bswap32(vmaddr32);
+                vmsize32  = __builtin_bswap32(vmsize32);
+                fileoff32  = __builtin_bswap32(fileoff32);
+                filesize32 = __builtin_bswap32(filesize32);
 #endif
             }
             if (std::strncmp(segname, "__TEXT", 6) == 0)
@@ -548,6 +571,8 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
                 sec.name          = raw;
                 sec.va_addr       = (uint64_t)vmaddr32;
                 sec.va_size       = (uint64_t)vmsize32;
+                sec.file_offset   = (uint64_t)fileoff32;
+                sec.file_size     = (uint64_t)filesize32;
                 sec.is_executable = (std::strncmp(segname, "__TEXT", 6) == 0);
                 info.sections.push_back(std::move(sec));
             }
@@ -571,6 +596,11 @@ std::string BinaryDetector::get_sleigh_id(BinaryFormat format, ArchType arch) {
         case ArchType::ARM:
             return "ARM:LE:32:v7";
         case ArchType::ARM64:
+            // Mach-O ARM64 uses AppleSilicon variant (matches AARCH64.opinion)
+            // ELF/PE use generic v8A
+            if (format == BinaryFormat::MACHO) {
+                return "AARCH64:LE:64:AppleSilicon";
+            }
             return "AARCH64:LE:64:v8A";
         default:
             return "x86:LE:64:default";

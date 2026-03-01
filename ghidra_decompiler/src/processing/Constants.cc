@@ -124,6 +124,68 @@ std::map<std::string, std::map<uint64_t, std::string>> ENUM_GROUPS = {
         {0x0004, "FILE_MAP_READ"},
         {0x001F, "FILE_MAP_ALL_ACCESS"},
     }},
+    // ── POSIX constants ──────────────────────────────────────
+    {"MMAP_PROT", {
+        {0x00, "PROT_NONE"},
+        {0x01, "PROT_READ"},
+        {0x02, "PROT_WRITE"},
+        {0x03, "PROT_READ | PROT_WRITE"},
+        {0x04, "PROT_EXEC"},
+        {0x05, "PROT_READ | PROT_EXEC"},
+        {0x07, "PROT_READ | PROT_WRITE | PROT_EXEC"},
+    }},
+    {"MMAP_FLAGS", {
+        {0x01, "MAP_SHARED"},
+        {0x02, "MAP_PRIVATE"},
+        {0x10, "MAP_FIXED"},
+        {0x20, "MAP_ANONYMOUS"},        // Linux
+        {0x22, "MAP_PRIVATE | MAP_ANONYMOUS"},
+    }},
+    {"OPEN_FLAGS", {
+        {0x00, "O_RDONLY"},
+        {0x01, "O_WRONLY"},
+        {0x02, "O_RDWR"},
+        {0x40, "O_CREAT"},              // Linux
+        {0x80, "O_EXCL"},               // Linux
+        {0x200, "O_TRUNC"},             // Linux
+        {0x400, "O_APPEND"},            // Linux
+        {0x800, "O_NONBLOCK"},          // Linux
+    }},
+    {"SIGNAL_NUM", {
+        {1,  "SIGHUP"},
+        {2,  "SIGINT"},
+        {3,  "SIGQUIT"},
+        {6,  "SIGABRT"},
+        {9,  "SIGKILL"},
+        {11, "SIGSEGV"},
+        {13, "SIGPIPE"},
+        {14, "SIGALRM"},
+        {15, "SIGTERM"},
+        {17, "SIGCHLD"},               // Linux
+    }},
+    {"DLOPEN_FLAGS", {
+        {0x00, "RTLD_LOCAL"},
+        {0x01, "RTLD_LAZY"},
+        {0x02, "RTLD_NOW"},
+        {0x100, "RTLD_GLOBAL"},         // Linux
+    }},
+    {"SEEK_WHENCE", {
+        {0, "SEEK_SET"},
+        {1, "SEEK_CUR"},
+        {2, "SEEK_END"},
+    }},
+    {"FCNTL_CMD", {
+        {0, "F_DUPFD"},
+        {1, "F_GETFD"},
+        {2, "F_SETFD"},
+        {3, "F_GETFL"},
+        {4, "F_SETFL"},
+    }},
+    {"SHUTDOWN_HOW", {
+        {0, "SHUT_RD"},
+        {1, "SHUT_WR"},
+        {2, "SHUT_RDWR"},
+    }},
 };
 
 // ============================================================================
@@ -179,6 +241,30 @@ std::vector<ApiParamMapping> API_PARAM_MAPPINGS = {
     // Wait
     {"WaitForSingleObject", 1, "WAIT_TIMEOUT"},
     {"WaitForMultipleObjects", 3, "WAIT_TIMEOUT"},
+    // ── POSIX API parameter mappings ────────────────────────
+    // mmap / mprotect
+    {"mmap",     2, "MMAP_PROT"},
+    {"mmap",     3, "MMAP_FLAGS"},
+    {"mmap64",   2, "MMAP_PROT"},
+    {"mmap64",   3, "MMAP_FLAGS"},
+    {"mprotect", 2, "MMAP_PROT"},
+    // open
+    {"open",     1, "OPEN_FLAGS"},
+    {"open64",   1, "OPEN_FLAGS"},
+    // signal / kill
+    {"signal",   0, "SIGNAL_NUM"},
+    {"kill",     1, "SIGNAL_NUM"},
+    {"raise",    0, "SIGNAL_NUM"},
+    // dlopen
+    {"dlopen",   1, "DLOPEN_FLAGS"},
+    // lseek
+    {"lseek",    2, "SEEK_WHENCE"},
+    {"lseek64",  2, "SEEK_WHENCE"},
+    {"fseek",    2, "SEEK_WHENCE"},
+    // fcntl
+    {"fcntl",    1, "FCNTL_CMD"},
+    // socket (POSIX too)
+    {"shutdown", 1, "SHUTDOWN_HOW"},
 };
 
 // ============================================================================
@@ -272,6 +358,110 @@ std::map<std::string, ApiSignature> API_SIGNATURES = {
     {"VirtualFreeEx", {{"hProcess", "lpAddress", "dwSize", "dwFreeType"}}},
     {"VirtualProtectEx", {{"hProcess", "lpAddress", "dwSize", "flNewProtect", "lpflOldProtect"}}},
     {"CreateRemoteThreadEx", {{"hProcess", "lpThreadAttributes", "dwStackSize", "lpStartAddress", "lpParameter", "dwCreationFlags", "lpAttributeList", "lpThreadId"}}},
+
+    // ── POSIX API signatures ─────────────────────────────────
+    // Memory mapping
+    {"mmap",       {{"addr", "length", "prot", "flags", "fd", "offset"}}},
+    {"mmap64",     {{"addr", "length", "prot", "flags", "fd", "offset"}}},
+    {"munmap",     {{"addr", "length"}}},
+    {"mprotect",   {{"addr", "len", "prot"}}},
+    {"mremap",     {{"old_address", "old_size", "new_size", "flags"}}},
+
+    // File I/O
+    {"open",       {{"pathname", "flags", "mode"}}},
+    {"open64",     {{"pathname", "flags", "mode"}}},
+    {"close",      {{"fd"}}},
+    {"read",       {{"fd", "buf", "count"}}},
+    {"write",      {{"fd", "buf", "count"}}},
+    {"lseek",      {{"fd", "offset", "whence"}}},
+    {"lseek64",    {{"fd", "offset", "whence"}}},
+    {"pread",      {{"fd", "buf", "count", "offset"}}},
+    {"pwrite",     {{"fd", "buf", "count", "offset"}}},
+    {"dup",        {{"oldfd"}}},
+    {"dup2",       {{"oldfd", "newfd"}}},
+    {"pipe",       {{"pipefd"}}},
+    {"fcntl",      {{"fd", "cmd"}}},
+    {"ioctl",      {{"fd", "request"}}},
+    {"stat",       {{"pathname", "statbuf"}}},
+    {"fstat",      {{"fd", "statbuf"}}},
+    {"lstat",      {{"pathname", "statbuf"}}},
+
+    // C standard library
+    {"malloc",     {{"size"}}},
+    {"calloc",     {{"nmemb", "size"}}},
+    {"realloc",    {{"ptr", "size"}}},
+    {"free",       {{"ptr"}}},
+    {"memcpy",     {{"dest", "src", "n"}}},
+    {"memset",     {{"s", "c", "n"}}},
+    {"memmove",    {{"dest", "src", "n"}}},
+    {"memcmp",     {{"s1", "s2", "n"}}},
+    {"strlen",     {{"s"}}},
+    {"strcpy",     {{"dest", "src"}}},
+    {"strncpy",    {{"dest", "src", "n"}}},
+    {"strcat",     {{"dest", "src"}}},
+    {"strncat",    {{"dest", "src", "n"}}},
+    {"strcmp",     {{"s1", "s2"}}},
+    {"strncmp",    {{"s1", "s2", "n"}}},
+    {"strchr",     {{"s", "c"}}},
+    {"strrchr",    {{"s", "c"}}},
+    {"strstr",     {{"haystack", "needle"}}},
+    {"atoi",       {{"nptr"}}},
+    {"atol",       {{"nptr"}}},
+    {"strtol",     {{"nptr", "endptr", "base"}}},
+    {"strtoul",    {{"nptr", "endptr", "base"}}},
+
+    // stdio
+    {"printf",     {{"format"}}},
+    {"fprintf",    {{"stream", "format"}}},
+    {"sprintf",    {{"str", "format"}}},
+    {"snprintf",   {{"str", "size", "format"}}},
+    {"puts",       {{"s"}}},
+    {"fputs",      {{"s", "stream"}}},
+    {"fgets",      {{"s", "size", "stream"}}},
+    {"fopen",      {{"pathname", "mode"}}},
+    {"fclose",     {{"stream"}}},
+    {"fread",      {{"ptr", "size", "nmemb", "stream"}}},
+    {"fwrite",     {{"ptr", "size", "nmemb", "stream"}}},
+    {"fseek",      {{"stream", "offset", "whence"}}},
+    {"ftell",      {{"stream"}}},
+    {"fflush",     {{"stream"}}},
+
+    // Process
+    {"fork",       {{}}},
+    {"execve",     {{"pathname", "argv", "envp"}}},
+    {"execvp",     {{"file", "argv"}}},
+    {"waitpid",    {{"pid", "wstatus", "options"}}},
+    {"exit",       {{"status"}}},
+    {"_exit",      {{"status"}}},
+    {"getpid",     {{}}},
+    {"getppid",    {{}}},
+    {"kill",       {{"pid", "sig"}}},
+    {"signal",     {{"signum", "handler"}}},
+    {"raise",      {{"sig"}}},
+
+    // Dynamic loading
+    {"dlopen",     {{"filename", "flags"}}},
+    {"dlsym",      {{"handle", "symbol"}}},
+    {"dlclose",    {{"handle"}}},
+    {"dlerror",    {{}}},
+
+    // Threads (pthread)
+    {"pthread_create",    {{"thread", "attr", "start_routine", "arg"}}},
+    {"pthread_join",      {{"thread", "retval"}}},
+    {"pthread_exit",      {{"retval"}}},
+    {"pthread_mutex_init",    {{"mutex", "attr"}}},
+    {"pthread_mutex_lock",    {{"mutex"}}},
+    {"pthread_mutex_unlock",  {{"mutex"}}},
+    {"pthread_mutex_destroy", {{"mutex"}}},
+
+    // Networking (POSIX)
+    {"shutdown",   {{"sockfd", "how"}}},
+    {"setsockopt", {{"sockfd", "level", "optname", "optval", "optlen"}}},
+    {"getsockopt", {{"sockfd", "level", "optname", "optval", "optlen"}}},
+    {"getaddrinfo", {{"node", "service", "hints", "res"}}},
+    {"freeaddrinfo", {{"res"}}},
+    {"inet_pton",  {{"af", "src", "dst"}}},
+    {"inet_ntop",  {{"af", "src", "dst", "size"}}},
 };
 
 // ============================================================================

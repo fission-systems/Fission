@@ -58,7 +58,7 @@ impl MachoLoader {
 
         let arch_spec = match cputype {
             0x1000007 | 0x7 => "x86:LE:64:default", // x86_64 (CPU_TYPE_X86_64)
-            0x100000C | 0xC => "AARCH64:LE:64:v8A", // ARM64 (CPU_TYPE_ARM64)
+            0x100000C | 0xC => "AARCH64:LE:64:AppleSilicon", // ARM64 (CPU_TYPE_ARM64, Mach-O uses AppleSilicon variant)
             _ => {
                 eprintln!(
                     "[Warning] Unknown Mach-O CPU type: {} (0x{:X}), defaulting to x86_64",

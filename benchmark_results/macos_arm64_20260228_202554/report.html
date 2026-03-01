@@ -1,0 +1,811 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>Fission Benchmark — benchmark-macos_arm64</title>
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         font-size: 14px; color: #333; background: #fafafa; }
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 1.8em; margin-bottom: 10px; }
+  h2 { font-size: 1.3em; margin: 20px 0 10px; color: #2c3e50; }
+  .meta { color: #777; font-size: 0.85em; margin-bottom: 15px; }
+
+  /* Tabs */
+  .tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 15px; }
+  .tab { padding: 10px 20px; cursor: pointer; border-bottom: 3px solid transparent;
+         color: #777; font-weight: 500; }
+  .tab:hover { color: #2c3e50; }
+  .tab.active { color: #2c3e50; border-color: #3498db; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+  th { background: #34495e; color: #fff; text-align: left; padding: 8px 12px;
+       font-weight: 500; font-size: 0.85em; cursor: pointer; user-select: none; }
+  th:hover { background: #2c3e50; }
+  td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+  tr:hover td { background: #f5f6fa; }
+  .mono { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85em; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+           font-size: 0.8em; font-weight: 600; color: #fff; }
+  .sim-badge { min-width: 50px; text-align: center; }
+
+  /* Cards */
+  .card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 12px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .card-title { font-weight: 600; margin-bottom: 8px; }
+
+  /* Stats grid */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+           gap: 12px; margin-bottom: 20px; }
+  .stat-card { background: #fff; border-radius: 8px; padding: 16px; text-align: center;
+               box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .stat-value { font-size: 2em; font-weight: 700; }
+  .stat-label { color: #777; font-size: 0.85em; }
+
+  /* Code blocks */
+  .code-container { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+  .code-block { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px;
+                overflow-x: auto; font-family: "SFMono-Regular", Consolas, monospace;
+                font-size: 0.8em; white-space: pre; max-height: 500px; overflow-y: auto; }
+  .code-label { font-weight: 600; margin-bottom: 5px; font-size: 0.9em; }
+  .expand-btn { color: #3498db; cursor: pointer; text-decoration: underline; font-size: 0.85em; }
+
+  /* Distribution bar */
+  .dist-bar { display: flex; height: 24px; border-radius: 4px; overflow: hidden; margin: 5px 0; }
+  .dist-seg { display: flex; align-items: center; justify-content: center;
+              font-size: 0.75em; font-weight: 600; color: #fff; min-width: 1px; }
+</style>
+
+</head><body><div class="container">
+<h1>Fission vs Ghidra — benchmark-macos_arm64</h1>
+<div class="meta">2026-02-28T11:29:00.989476Z · rev b02eae2 · macOS-26.3-arm64-arm-64bit</div>
+<div class="tabs">
+<div class="tab active" data-tab="tab-overview" onclick="switchTab('tab-overview')">Overview</div>
+<div class="tab" data-tab="tab-category" onclick="switchTab('tab-category')">By Category</div>
+<div class="tab" data-tab="tab-all" onclick="switchTab('tab-all')">All Functions</div>
+<div class="tab" data-tab="tab-low" onclick="switchTab('tab-low')">Low Similarity</div>
+<div class="tab" data-tab="tab-sidebyside" onclick="switchTab('tab-sidebyside')">Side-by-Side</div>
+</div>
+<div id="tab-overview" class="tab-content active">
+<div class="stats">
+<div class="stat-card"><div class="stat-value">292</div><div class="stat-label">Total Functions</div></div>
+<div class="stat-card"><div class="stat-value">0</div><div class="stat-label">Compared</div></div>
+<div class="stat-card"><div class="stat-value">4</div><div class="stat-label">Errors</div></div>
+<div class="stat-card"><div class="stat-value">N/A%</div><div class="stat-label">Avg Similarity</div></div>
+<div class="stat-card"><div class="stat-value">N/A%</div><div class="stat-label">Median Similarity</div></div>
+<div class="stat-card"><div class="stat-value">69%</div><div class="stat-label">Checklist Score</div></div>
+</div>
+</div>
+<div id="tab-category" class="tab-content">
+<p>No category data available.</p>
+</div>
+<div id="tab-all" class="tab-content">
+<table id="tbl-all"><thead><tr>
+<th onclick="sortTable('tbl-all',0)">Function</th>
+<th onclick="sortTable('tbl-all',1)">Binary</th>
+<th onclick="sortTable('tbl-all',2)">Category</th>
+<th onclick="sortTable('tbl-all',3)">Opt</th>
+<th onclick="sortTable('tbl-all',4)">Format</th>
+<th onclick="sortTable('tbl-all',5)">Similarity</th>
+<th onclick="sortTable('tbl-all',6)">Checklist</th>
+<th onclick="sortTable('tbl-all',7)">Lines(F)</th>
+<th onclick="sortTable('tbl-all',8)">Errors</th>
+</tr></thead><tbody>
+<tr><td class="mono">rotate_left</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>4/4</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">rotate_right</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>4/4</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">bswap32</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">bswap16</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">count_leading_zeros</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>34</td><td>-</td></tr>
+<tr><td class="mono">count_trailing_zeros</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>37</td><td>-</td></tr>
+<tr><td class="mono">next_token</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>60</td><td>-</td></tr>
+<tr><td class="mono">dispatch_operation</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>11</td><td>-</td></tr>
+<tr><td class="mono">handle_add</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_sub</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_mul</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_div</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>14</td><td>-</td></tr>
+<tr><td class="mono">handle_mod</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>16</td><td>-</td></tr>
+<tr><td class="mono">handle_and</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_or</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_xor</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">fnv1a_hash</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>10</td><td>-</td></tr>
+<tr><td class="mono">murmur3_mix</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">crc32_init</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>21</td><td>-</td></tr>
+<tr><td class="mono">crc32_compute</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>13</td><td>-</td></tr>
+<tr><td class="mono">get_flag</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">set_flag</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">clear_flag</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">extract_bits</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">insert_bits</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>6</td><td>-</td></tr>
+<tr><td class="mono">complex_expression</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>11</td><td>-</td></tr>
+<tr><td class="mono">multi_ternary</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>23</td><td>-</td></tr>
+<tr><td class="mono">min3</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>21</td><td>-</td></tr>
+<tr><td class="mono">max3</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>21</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>74</td><td>-</td></tr>
+<tr><td class="mono">dispatch_operation</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O0">test_advanced_patterns_arm64_O0</td><td>advanced</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>2</td><td>Yes</td></tr>
+<tr><td class="mono">rotate_left</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>4/4</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">rotate_right</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>4/4</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">bswap32</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">bswap16</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">count_leading_zeros</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>33</td><td>-</td></tr>
+<tr><td class="mono">count_trailing_zeros</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>35</td><td>-</td></tr>
+<tr><td class="mono">next_token</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>56</td><td>-</td></tr>
+<tr><td class="mono">dispatch_operation</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>5</td><td>Yes</td></tr>
+<tr><td class="mono">handle_add</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_sub</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_mul</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_div</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">handle_mod</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">handle_and</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_or</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">handle_xor</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">fnv1a_hash</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>15</td><td>-</td></tr>
+<tr><td class="mono">murmur3_mix</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">crc32_init</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>389</td><td>-</td></tr>
+<tr><td class="mono">crc32_compute</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>401</td><td>-</td></tr>
+<tr><td class="mono">get_flag</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">set_flag</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">clear_flag</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">extract_bits</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">insert_bits</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>7</td><td>-</td></tr>
+<tr><td class="mono">complex_expression</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>11</td><td>-</td></tr>
+<tr><td class="mono">multi_ternary</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>15</td><td>-</td></tr>
+<tr><td class="mono">min3</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>10</td><td>-</td></tr>
+<tr><td class="mono">max3</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>10</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>81</td><td>-</td></tr>
+<tr><td class="mono">dispatch_operation</td><td class="mono" title="samples/macos/arm64/test_advanced_patterns_arm64_O2">test_advanced_patterns_arm64_O2</td><td>advanced</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>2</td><td>Yes</td></tr>
+<tr><td class="mono">divide_by_3</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">divide_by_7</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">divide_by_10</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">divide_by_100</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_div_3</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_div_5</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_div_7</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_2</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_4</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_8</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_16</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_256</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_2</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_4</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_8</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">unsigned_div_2</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">unsigned_div_4</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_mod_2</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_mod_4</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_mod_8</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">absolute_value</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">divmod</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>13</td><td>-</td></tr>
+<tr><td class="mono">negate_float</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">negate_double</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">complex_arith</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">div64_by_3</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">div64_by_1000</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_3</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_5</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_7</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_15</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O0">test_arithmetic_idioms_arm64_O0</td><td>arithmetic</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>39</td><td>-</td></tr>
+<tr><td class="mono">divide_by_3</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">divide_by_7</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">divide_by_10</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">divide_by_100</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">signed_div_3</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_div_5</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_div_7</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_2</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_4</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_8</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_16</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">mod_256</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_2</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_4</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_8</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">unsigned_div_2</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">unsigned_div_4</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">signed_mod_2</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">signed_mod_4</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">signed_mod_8</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">absolute_value</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">divmod</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">negate_float</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">negate_double</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">complex_arith</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">div64_by_3</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">div64_by_1000</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_3</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_5</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_7</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">multiply_by_15</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_arithmetic_idioms_arm64_O2">test_arithmetic_idioms_arm64_O2</td><td>arithmetic</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>23</td><td>-</td></tr>
+<tr><td class="mono">one_param</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">two_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">three_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">four_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">six_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">eight_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">ten_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>6</td><td>-</td></tr>
+<tr><td class="mono">mixed_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>6</td><td>-</td></tr>
+<tr><td class="mono">float_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">make_result</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>10</td><td>-</td></tr>
+<tr><td class="mono">make_small</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">sum_variadic</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>13</td><td>-</td></tr>
+<tr><td class="mono">log_message</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>7</td><td>-</td></tr>
+<tr><td class="mono">apply_op</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">add</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">sub</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">mul</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">dispatch_op</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>20</td><td>-</td></tr>
+<tr><td class="mono">factorial_tail</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">factorial</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">process_array</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>8</td><td>-</td></tr>
+<tr><td class="mono">sum_callback</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O0">test_calling_conventions_arm64_O0</td><td>calling</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>48</td><td>-</td></tr>
+<tr><td class="mono">one_param</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">two_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">three_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">four_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">six_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">eight_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">ten_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>6</td><td>-</td></tr>
+<tr><td class="mono">mixed_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">float_params</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">make_result</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>26</td><td>-</td></tr>
+<tr><td class="mono">make_small</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">sum_variadic</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>18</td><td>-</td></tr>
+<tr><td class="mono">log_message</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>7</td><td>-</td></tr>
+<tr><td class="mono">apply_op</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>7</td><td>-</td></tr>
+<tr><td class="mono">add</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">sub</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">mul</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">dispatch_op</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>5</td><td>Yes</td></tr>
+<tr><td class="mono">factorial_tail</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>152</td><td>-</td></tr>
+<tr><td class="mono">factorial</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>159</td><td>-</td></tr>
+<tr><td class="mono">process_array</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>14</td><td>-</td></tr>
+<tr><td class="mono">sum_callback</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_calling_conventions_arm64_O2">test_calling_conventions_arm64_O2</td><td>calling</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>40</td><td>-</td></tr>
+<tr><td class="mono">day_name</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/3</td><td>29</td><td>-</td></tr>
+<tr><td class="mono">sparse_switch</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>29</td><td>-</td></tr>
+<tr><td class="mono">classify_temperature</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>28</td><td>-</td></tr>
+<tr><td class="mono">sum_range</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>10</td><td>-</td></tr>
+<tr><td class="mono">count_digits</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>22</td><td>-</td></tr>
+<tr><td class="mono">find_first_set</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>17</td><td>-</td></tr>
+<tr><td class="mono">matrix_multiply</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>20</td><td>-</td></tr>
+<tr><td class="mono">read_until_sentinel</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">count_set_bits_loop</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>14</td><td>-</td></tr>
+<tr><td class="mono">safe_divide</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>14</td><td>-</td></tr>
+<tr><td class="mono">clamp</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">fatal_error</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>8</td><td>-</td></tr>
+<tr><td class="mono">process_command</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">constant_condition_test</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">memzero_manual</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>17</td><td>-</td></tr>
+<tr><td class="mono">fibonacci</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>17</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O0">test_control_flow_arm64_O0</td><td>control</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>48</td><td>-</td></tr>
+<tr><td class="mono">day_name</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/3</td><td>7</td><td>-</td></tr>
+<tr><td class="mono">sparse_switch</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>28</td><td>-</td></tr>
+<tr><td class="mono">classify_temperature</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>30</td><td>-</td></tr>
+<tr><td class="mono">sum_range</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">count_digits</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>22</td><td>-</td></tr>
+<tr><td class="mono">find_first_set</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>18</td><td>-</td></tr>
+<tr><td class="mono">matrix_multiply</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>88</td><td>-</td></tr>
+<tr><td class="mono">read_until_sentinel</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>27</td><td>-</td></tr>
+<tr><td class="mono">count_set_bits_loop</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>14</td><td>-</td></tr>
+<tr><td class="mono">safe_divide</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>11</td><td>-</td></tr>
+<tr><td class="mono">clamp</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">fatal_error</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>7</td><td>-</td></tr>
+<tr><td class="mono">process_command</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">constant_condition_test</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">memzero_manual</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>20</td><td>-</td></tr>
+<tr><td class="mono">fibonacci</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>29</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_control_flow_arm64_O2">test_control_flow_arm64_O2</td><td>control</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>70</td><td>-</td></tr>
+<tr><td class="mono">insertion_sort</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>25</td><td>-</td></tr>
+<tr><td class="mono">quicksort</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>10</td><td>-</td></tr>
+<tr><td class="mono">partition</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>23</td><td>-</td></tr>
+<tr><td class="mono">binary_search</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>22</td><td>-</td></tr>
+<tr><td class="mono">ht_init</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">ht_put</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>22</td><td>-</td></tr>
+<tr><td class="mono">ht_hash</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">ht_get</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>23</td><td>-</td></tr>
+<tr><td class="mono">rb_create</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>13</td><td>-</td></tr>
+<tr><td class="mono">rb_push</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>30</td><td>-</td></tr>
+<tr><td class="mono">rb_pop</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>30</td><td>-</td></tr>
+<tr><td class="mono">rb_free</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>7</td><td>-</td></tr>
+<tr><td class="mono">base64_encode</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>53</td><td>-</td></tr>
+<tr><td class="mono">parse_command</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>91</td><td>-</td></tr>
+<tr><td class="mono">execute_command</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>46</td><td>-</td></tr>
+<tr><td class="mono">matrix_transpose</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">matrix_trace</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>11</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O0">test_real_world_algorithms_arm64_O0</td><td>algorithms</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>66</td><td>-</td></tr>
+<tr><td class="mono">insertion_sort</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>28</td><td>-</td></tr>
+<tr><td class="mono">quicksort</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>33</td><td>-</td></tr>
+<tr><td class="mono">binary_search</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>26</td><td>-</td></tr>
+<tr><td class="mono">ht_init</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>8</td><td>-</td></tr>
+<tr><td class="mono">ht_put</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>65</td><td>-</td></tr>
+<tr><td class="mono">ht_get</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>52</td><td>-</td></tr>
+<tr><td class="mono">rb_create</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">rb_push</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>25</td><td>-</td></tr>
+<tr><td class="mono">rb_pop</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>25</td><td>-</td></tr>
+<tr><td class="mono">rb_free</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>9</td><td>-</td></tr>
+<tr><td class="mono">base64_encode</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>75</td><td>-</td></tr>
+<tr><td class="mono">parse_command</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>202</td><td>-</td></tr>
+<tr><td class="mono">execute_command</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>43</td><td>-</td></tr>
+<tr><td class="mono">matrix_transpose</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>81</td><td>-</td></tr>
+<tr><td class="mono">matrix_trace</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>58</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_real_world_algorithms_arm64_O2">test_real_world_algorithms_arm64_O2</td><td>algorithms</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>353</td><td>-</td></tr>
+<tr><td class="mono">get_greeting</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>20</td><td>-</td></tr>
+<tr><td class="mono">my_strlen</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">zero_buffer</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>8</td><td>-</td></tr>
+<tr><td class="mono">my_memcpy</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>8</td><td>-</td></tr>
+<tr><td class="mono">sb_init</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>18</td><td>-</td></tr>
+<tr><td class="mono">sb_append</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>29</td><td>-</td></tr>
+<tr><td class="mono">sb_free</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>14</td><td>-</td></tr>
+<tr><td class="mono">format_address</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>5</td><td>-</td></tr>
+<tr><td class="mono">classify_command</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>43</td><td>-</td></tr>
+<tr><td class="mono">count_words</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>20</td><td>-</td></tr>
+<tr><td class="mono">duplicate_string</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>14</td><td>-</td></tr>
+<tr><td class="mono">find_string</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>15</td><td>-</td></tr>
+<tr><td class="mono">popcount32</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>3/3</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">parse_packet</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>22</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O0">test_string_memory_arm64_O0</td><td>strings</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>50</td><td>-</td></tr>
+<tr><td class="mono">get_greeting</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>7</td><td>-</td></tr>
+<tr><td class="mono">my_strlen</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>14</td><td>-</td></tr>
+<tr><td class="mono">zero_buffer</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/2</td><td>11</td><td>-</td></tr>
+<tr><td class="mono">my_memcpy</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>82</td><td>-</td></tr>
+<tr><td class="mono">sb_init</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>18</td><td>-</td></tr>
+<tr><td class="mono">sb_append</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>33</td><td>-</td></tr>
+<tr><td class="mono">sb_free</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">format_address</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>6</td><td>-</td></tr>
+<tr><td class="mono">classify_command</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>35</td><td>-</td></tr>
+<tr><td class="mono">count_words</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>24</td><td>-</td></tr>
+<tr><td class="mono">duplicate_string</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>15</td><td>-</td></tr>
+<tr><td class="mono">find_string</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>15</td><td>-</td></tr>
+<tr><td class="mono">popcount32</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/3</td><td>13</td><td>-</td></tr>
+<tr><td class="mono">parse_packet</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>13</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_string_memory_arm64_O2">test_string_memory_arm64_O2</td><td>strings</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>120</td><td>-</td></tr>
+<tr><td class="mono">make_point</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/1</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">rect_area</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">rect_perimeter</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">validate_header</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>31</td><td>-</td></tr>
+<tr><td class="mono">list_insert</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>8</td><td>-</td></tr>
+<tr><td class="mono">list_length</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">list_sum</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">list_free</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">total_salary</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>11</td><td>-</td></tr>
+<tr><td class="mono">find_employee</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>13</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O0">test_structs_classes_arm64_O0</td><td>structs</td><td>O0</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>76</td><td>-</td></tr>
+<tr><td class="mono">make_point</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>0/1</td><td>3</td><td>-</td></tr>
+<tr><td class="mono">rect_area</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">rect_perimeter</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>4</td><td>-</td></tr>
+<tr><td class="mono">validate_header</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>22</td><td>-</td></tr>
+<tr><td class="mono">list_insert</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>8</td><td>-</td></tr>
+<tr><td class="mono">list_length</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">list_sum</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">list_free</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>12</td><td>-</td></tr>
+<tr><td class="mono">total_salary</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>1/2</td><td>39</td><td>-</td></tr>
+<tr><td class="mono">find_employee</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/3</td><td>15</td><td>-</td></tr>
+<tr><td class="mono">main</td><td class="mono" title="samples/macos/arm64/test_structs_classes_arm64_O2">test_structs_classes_arm64_O2</td><td>structs</td><td>O2</td><td>macho</td><td data-val="-1"><span class="badge sim-badge" style="background:#999">N/A</span></td><td>2/2</td><td>74</td><td>-</td></tr>
+</tbody></table>
+</div>
+<div id="tab-low" class="tab-content">
+<p>No functions below 70.0% similarity.</p>
+</div>
+<div id="tab-sidebyside" class="tab-content">
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> rotate_left — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-0')">[toggle code]</span></div>
+<div id="code-0" style="display:block">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000580</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __Z11rotate_leftji(uint param_1, uint param_2)
+{
+  return param_1 &lt;&lt; (ulonglong)(param_2 &amp; 0x1f) | param_1 &gt;&gt; (ulonglong)(0x20 - param_2 &amp; 0x1f);
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> rotate_right — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-1')">[toggle code]</span></div>
+<div id="code-1" style="display:block">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x1000005b8</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __Z12rotate_rightji(uint param_1, uint param_2)
+{
+  return param_1 &gt;&gt; (ulonglong)(param_2 &amp; 0x1f) | param_1 &lt;&lt; (ulonglong)(0x20 - param_2 &amp; 0x1f);
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> bswap32 — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-2')">[toggle code]</span></div>
+<div id="code-2" style="display:block">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x1000005f0</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __Z7bswap32j(uint param_1)
+{
+  return param_1 &gt;&gt; 0x18 | param_1 &gt;&gt; 8 &amp; 0xff00 | (param_1 &amp; 0xff00) &lt;&lt; 8 | param_1 &lt;&lt; 0x18;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> bswap16 — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-3')">[toggle code]</span></div>
+<div id="code-3" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x10000063c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __Z7bswap16t(ushort param_1)
+{
+  return (param_1 &amp; 0xff) &lt;&lt; 8 | (int)(uint)param_1 &gt;&gt; 8;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> count_leading_zeros — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-4')">[toggle code]</span></div>
+<div id="code-4" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000660</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">int __Z19count_leading_zerosj(uint param_1)
+{
+  undefined4 local_c;
+  undefined4 local_8;
+  undefined4 result;
+  if (!param_1) {
+    result = 0x20;
+  }
+  else {
+    local_c = 0;
+    local_8 = param_1;
+    if ((param_1 &amp; 0xffff0000) == 0) {
+      local_c = 0x10;
+      local_8 = param_1 &lt;&lt; 0x10;
+    }
+    if ((local_8 &amp; 0xff000000) == 0) {
+      local_c += 8;
+      local_8 = local_8 &lt;&lt; 8;
+    }
+    if ((local_8 &amp; 0xf0000000) == 0) {
+      local_c += 4;
+      local_8 = local_8 &lt;&lt; 4;
+    }
+    if ((local_8 &amp; 0xc0000000) == 0) {
+      local_c += 2;
+      local_8 = local_8 &lt;&lt; 2;
+    }
+    if (-1 &lt; (int)local_8) {
+      local_c++;
+    }
+    result = local_c;
+  }
+  return result;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> count_trailing_zeros — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-5')">[toggle code]</span></div>
+<div id="code-5" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000768</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">int __Z20count_trailing_zerosj(uint param_1)
+{
+  bool bVar1;
+  undefined4 local_c;
+  undefined4 local_8;
+  undefined4 result;
+  if (!param_1) {
+    result = 0x20;
+  }
+  else {
+    local_c = 0;
+    local_8._0_2_ = (short)param_1;
+    bVar1 = (short)local_8 == 0;
+    local_8 = param_1;
+    if (bVar1) {
+      local_c = 0x10;
+      local_8 = param_1 &gt;&gt; 0x10;
+    }
+    if ((char)local_8 == &#x27;\0&#x27;) {
+      local_c += 8;
+      local_8 = local_8 &gt;&gt; 8;
+    }
+    if ((local_8 &amp; 0xf) == 0) {
+      local_c += 4;
+      local_8 = local_8 &gt;&gt; 4;
+    }
+    if ((local_8 &amp; 3) == 0) {
+      local_c += 2;
+      local_8 = local_8 &gt;&gt; 2;
+    }
+    if ((local_8 &amp; 1) == 0) {
+      local_c++;
+    }
+    result = local_c;
+  }
+  return result;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> next_token — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-6')">[toggle code]</span></div>
+<div id="code-6" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000868</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">/* WARNING: Globals starting with &#x27;_&#x27; overlap smaller symbols at the same address */
+longlong __Z10next_tokenPPKc(longlong *param_1)
+{
+  bool bVar1;
+  char cVar2;
+  undefined8 xVar3;
+  undefined8 local_8;
+  xVar3 = _DAT_1000016d0;
+  while (*(char *)*param_1 == &#x27; &#x27;) {
+    *param_1 = *param_1 + 1  /* field_1 */;
+  }
+  local_8._4_4_ = (int)((ulonglong)xVar3 &gt;&gt; 0x20);
+  if (*(char *)*param_1 == &#x27;\0&#x27;) {
+    local_8 = CONCAT44(local_8._4_4_,7);
+  }
+  else {
+    cVar2 = *(char *)*param_1;
+    if (cVar2 == &#x27;(&#x27;) {
+      local_8 = CONCAT44(local_8._4_4_,5);
+      *param_1 = *param_1 + 1  /* field_1 */;
+    }
+    else if (cVar2 == &#x27;)&#x27;) {
+      local_8 = CONCAT44(local_8._4_4_,6);
+      *param_1 = *param_1 + 1  /* field_1 */;
+    }
+    else if (cVar2 == &#x27;*&#x27;) {
+      local_8 = CONCAT44(local_8._4_4_,3);
+      *param_1 = *param_1 + 1  /* field_1 */;
+    }
+    else if (cVar2 == &#x27;+&#x27;) {
+      local_8 = CONCAT44(local_8._4_4_,1);
+      *param_1 = *param_1 + 1  /* field_1 */;
+    }
+    else if (cVar2 == &#x27;-&#x27;) {
+      local_8 = CONCAT44(local_8._4_4_,2);
+      *param_1 = *param_1 + 1  /* field_1 */;
+    }
+    else if (cVar2 == &#x27;/&#x27;) {
+      local_8 = CONCAT44(local_8._4_4_,4);
+      *param_1 = *param_1 + 1  /* field_1 */;
+    }
+    else if ((*(char *)*param_1 &lt; &#x27;0&#x27;) || (&#x27;9&#x27; &lt; *(char *)*param_1)) {
+      local_8 = CONCAT44(local_8._4_4_,8);
+      *param_1 = *param_1 + 1  /* field_1 */;
+    }
+    else {
+      local_8 = 0;
+      while( true ) {
+        bVar1 = false;
+        if (&#x27;/&#x27; &lt; *(char *)*param_1) {
+          bVar1 = *(char *)*param_1 &lt; &#x27;:&#x27;;
+        }
+        if (!bVar1) break;
+        local_8 = (ulonglong)(uint)(local_8._4_4_ * 10 + *(char *)*param_1 + -0x30) &lt;&lt; 0x20;
+        *param_1 = *param_1 + 1  /* field_1 */;
+      }
+    }
+  }
+  return local_8;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> dispatch_operation — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-7')">[toggle code]</span></div>
+<div id="code-7" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000acc</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">undefined4 __Z18dispatch_operationiii(int param_1, undefined4 param_2, undefined4 param_3)
+{
+  undefined4 result;
+  if ((param_1 &lt; 0) || (7 &lt; param_1)) {
+    result = 0;
+  }
+  else {
+    result = (**(undefined8 *)(&amp;DAT_100004010 + (longlong)param_1 * 2))(param_2,param_3);
+  }
+  return result;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> handle_add — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-8')">[toggle code]</span></div>
+<div id="code-8" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000b3c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">int __ZL10handle_addii(int param_1, int param_2)
+{
+  return param_1 + param_2;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> handle_sub — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-9')">[toggle code]</span></div>
+<div id="code-9" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000b5c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">int __ZL10handle_subii(int param_1, int param_2)
+{
+  return param_1 - param_2;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> handle_mul — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-10')">[toggle code]</span></div>
+<div id="code-10" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000b7c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">int __ZL10handle_mulii(int param_1, int param_2)
+{
+  return param_1 * param_2;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> handle_div — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-11')">[toggle code]</span></div>
+<div id="code-11" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000b9c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">int __ZL10handle_divii(int param_1, int param_2)
+{
+  undefined4 result;
+  if (!param_2) {
+    result = 0;
+  }
+  else {
+    result = 0;
+    if (param_2) {
+      result = param_1 / param_2;
+    }
+  }
+  return result;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> handle_mod — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-12')">[toggle code]</span></div>
+<div id="code-12" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000be0</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">int __ZL10handle_modii(int param_1, int param_2)
+{
+  int iVar1;
+  undefined4 result;
+  if (!param_2) {
+    result = 0;
+  }
+  else {
+    iVar1 = 0;
+    if (param_2) {
+      iVar1 = param_1 / param_2;
+    }
+    result = param_1 - iVar1 * param_2;
+  }
+  return result;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> handle_and — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-13')">[toggle code]</span></div>
+<div id="code-13" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000c2c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __ZL10handle_andii(uint param_1, uint param_2)
+{
+  return param_1 &amp; param_2;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> handle_or — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-14')">[toggle code]</span></div>
+<div id="code-14" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000c4c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __ZL9handle_orii(uint param_1, uint param_2)
+{
+  return param_1 | param_2;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> handle_xor — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-15')">[toggle code]</span></div>
+<div id="code-15" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000c6c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __ZL10handle_xorii(uint param_1, uint param_2)
+{
+  return param_1 ^ param_2;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> fnv1a_hash — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-16')">[toggle code]</span></div>
+<div id="code-16" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000c8c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __Z10fnv1a_hashPKhi(longlong param_1, int param_2)
+{
+  undefined4 local_14;
+  undefined4 result;
+  result = 0x811c9dc5;
+  for (local_14 = 0; local_14 &lt; param_2; local_14++) {
+    result = (result ^ *(byte *)(param_1 + local_14)) * 0x1000193;
+  }
+  return result;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> murmur3_mix — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-17')">[toggle code]</span></div>
+<div id="code-17" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000d0c</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">int __Z11murmur3_mixj(int param_1)
+{
+  int iVar1;
+  iVar1 = __Z11rotate_leftji(param_1 * -0x3361d2af,0xf);
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> crc32_init — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-18')">[toggle code]</span></div>
+<div id="code-18" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000d64</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">void __Z10crc32_initv(void)
+{
+  undefined4 local_c;
+  undefined4 local_8;
+  undefined4 local_4;
+  local_4 = 0;
+  while ((int)local_4 &lt; 0x100) {
+    local_8 = local_4;
+    for (local_c = 0; local_c &lt; 8; local_c++) {
+      if ((local_8 &amp; 1) == 0) {
+        local_8 = local_8 &gt;&gt; 1;
+      }
+      else {
+        local_8 = local_8 &gt;&gt; 1 ^ 0xedb88320;
+      }
+    }
+    *(uint *)((longlong)(int)local_4 * 4 + 0x100008000) = local_8;
+    local_4++;
+  }
+  return;
+}</div></div>
+</div></div></div>
+<div class="card">
+<div class="card-title"><span class="badge sim-badge" style="background:#999">N/A</span> crc32_compute — test_advanced_patterns_arm64_O0 <span class="expand-btn" onclick="toggleCode('code-19')">[toggle code]</span></div>
+<div id="code-19" style="display:none">
+<div class="code-container">
+<div><div class="code-label">Ghidra</div><div class="code-block">// No cached result for 0x100000e24</div></div>
+<div><div class="code-label">Fission</div><div class="code-block">uint __Z13crc32_computePKhi(longlong param_1, int param_2)
+{
+  undefined4 local_24;
+  undefined4 local_20;
+  if (!g_0000000100008400) {
+    __Z10crc32_initv();
+  }
+  local_20 = 0xffffffff;
+  for (local_24 = 0; local_24 &lt; param_2; local_24++) {
+    local_20 = *(uint *)((ulonglong)((local_20 ^ *(byte *)(param_1 + local_24)) &amp; 0xff) * 4 +
+  }
+  return ~local_20;
+}</div></div>
+</div></div></div>
+</div>
+
+<script>
+function switchTab(tabId) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelector('[data-tab="'+tabId+'"]').classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+}
+
+function sortTable(tableId, col) {
+    const table = document.getElementById(tableId);
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.rows);
+    const th = table.querySelectorAll('th')[col];
+    const asc = th.dataset.sort !== 'asc';
+    th.dataset.sort = asc ? 'asc' : 'desc';
+
+    rows.sort((a, b) => {
+        let va = a.cells[col].dataset.val || a.cells[col].textContent.trim();
+        let vb = b.cells[col].dataset.val || b.cells[col].textContent.trim();
+        let na = parseFloat(va), nb = parseFloat(vb);
+        if (!isNaN(na) && !isNaN(nb)) return asc ? na - nb : nb - na;
+        return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+}
+
+function toggleCode(id) {
+    const el = document.getElementById(id);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+</script>
+
+</div></body></html>

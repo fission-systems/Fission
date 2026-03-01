@@ -429,9 +429,54 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
     }
 
     std::map<std::string, std::string> StructureAnalyzer::get_type_replacements() const {
-        // Future implementation: Return map for precise type replacement
-        // e.g. "DWORD *param_1" -> "f_... *param_1"
-        return std::map<std::string, std::string>();
+        std::map<std::string, std::string> replacements;
+
+        for (auto const& [base_key, st] : inferred_structs) {
+            if (!st) continue;
+
+            std::string struct_name = st->getName();
+
+            // Build field offset → field name map for this struct
+            auto iter = st->beginField();
+            auto end  = st->endField();
+
+            for (; iter != end; ++iter) {
+                int off = iter->offset;
+                std::string fname = iter->name;
+
+                // Text-level patterns emitted by Ghidra's PrintC for pointer arithmetic:
+                //   *(type *)(param + 0xNN)   →   param->field_name
+                //   param[0xNN]               →   param->field_name
+                //   *(param + NN)             →   param->field_name
+
+                // Build hex offset key (decimal and hex variants):
+                std::stringstream hex_ss;
+                hex_ss << "0x" << std::hex << off;
+                std::string hex_off = hex_ss.str();
+                std::string dec_off = std::to_string(off);
+
+                // Map: offset value → struct_name.field_name
+                // PostProcessPipeline will use this to annotate offsets
+                std::string field_key = struct_name + "." + fname;
+                replacements["@off:" + hex_off] = field_key;
+                replacements["@off:" + dec_off] = field_key;
+            }
+
+            // Map: struct typedef replacement (DWORD * → struct_name *)
+            // Use base_key to identify which parameter gets this struct type
+            std::stringstream key_ss;
+            if (base_key & 0x8000000000000000ULL) {
+                // Stack local — type replacement for local variables
+                uint64_t offset = base_key & 0x00FFFFFFFFFFFFFFULL;
+                key_ss << "@local:" << std::hex << offset;
+            } else {
+                // Input parameter — type replacement for function params
+                key_ss << "@param:" << std::hex << base_key;
+            }
+            replacements[key_ss.str()] = struct_name + " *";
+        }
+
+        return replacements;
     }
 
 } // namespace types

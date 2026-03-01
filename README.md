@@ -247,7 +247,7 @@ fission_cli binary.exe
 ### GUI (Tauri)
 
 ```bash
-cd crates/fission-ui
+cd crates/fission-tauri
 npm install
 npm run tauri dev    # dev (hot reload)
 npm run tauri build  # production
@@ -481,7 +481,7 @@ Fission/
 │   ├── fission-signatures/    # API/FID signature DBs
 │   ├── fission-ffi/           # Rust ↔ C++ FFI boundary
 │   ├── fission-analysis/      # CFG, XRef, debug, plugins (+ benches/)
-│   ├── fission-ui/            # Tauri desktop app (React + Rust backend)
+│   ├── fission-tauri/         # Tauri desktop app (React + Rust backend)
 │   └── fission-cli/           # CLI binary (fission_cli)
 ├── utils/signatures/          # GDT type DBs, DIE rules, FID sigs
 ├── tests/                     # Integration tests

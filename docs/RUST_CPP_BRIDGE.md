@@ -58,7 +58,7 @@ The following C FFI functions are implemented in `ghidra_decompiler` and are **n
   - Used inside decompiler (batch and FFI) for IAT/symbol names and FID names.
 - **Rust:**  
   - `fission-signatures`: `SignatureDatabase` (byte-pattern + first-byte index), MSVC CRT patterns, `identify_functions_in_binary`.  
-  - Used in UI/analysis (e.g. `fission-ui`, message handlers) to identify functions.
+  - Used in UI/analysis (e.g. `fission-tauri`, message handlers) to identify functions.
 
 **Issue:** Two separate “identify library function” mechanisms. Rust does not feed `SignatureDatabase` results into C++ FID; symbols can be passed via `decomp_add_symbol` but the matching logic and DBs are independent. Risk of divergence (e.g. different names or coverage for the same function).
 

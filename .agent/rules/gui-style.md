@@ -1,52 +1,89 @@
 ---
 trigger: glob
-globs: ["crates/fission-ui/**/*.rs"]
+globs: ["crates/fission-tauri/**/*.tsx", "crates/fission-tauri/**/*.ts", "crates/fission-tauri/**/*.rs"]
 ---
 
-# GUI 코드 작성 규칙
+# GUI 코드 작성 규칙 (Tauri 2.x + React 19)
 
-## 테마
+GUI는 `crates/fission-tauri/` 아래의 Tauri 2.x + React 19 구조로 구성됩니다.
+- 프론트엔드: `src/` (TypeScript + React)
+- 백엔드: `src-tauri/src/` (Rust Tauri commands)
 
-- **항상 Catppuccin 팔레트 사용**
-- `crate::ui::gui::theme::catppuccin::*` import
-- 하드코딩된 Color32 금지
+## 프론트엔드 (React/TypeScript)
+
+### 테마
+
+- **항상 CSS 변수 / Catppuccin Mocha 팔레트 사용**
+- `src/theme/` 내 토큰 참조
+- 하드코딩된 색상값 금지
 
 ### 색상 사용 가이드
 
-| 용도 | 색상 |
-|------|------|
-| 제목/강조 | `LAVENDER`, `MAUVE` |
-| 버튼 | `BLUE`, `SAPPHIRE` |
-| 성공 | `GREEN`, `TEAL` |
-| 경고 | `YELLOW`, `PEACH` |
-| 에러 | `RED`, `MAROON` |
-| 텍스트 | `TEXT`, `SUBTEXT1` |
-| 배경 | `BASE`, `SURFACE0` |
+| 용도 | CSS 변수 |
+|------|----------|
+| 제목/강조 | `--color-lavender`, `--color-mauve` |
+| 버튼 | `--color-blue`, `--color-sapphire` |
+| 성공 | `--color-green`, `--color-teal` |
+| 경고 | `--color-yellow`, `--color-peach` |
+| 에러 | `--color-red`, `--color-maroon` |
+| 텍스트 | `--color-text`, `--color-subtext1` |
+| 배경 | `--color-base`, `--color-surface0` |
 
-## 코드 하이라이팅
+### 패널 컴포넌트 구조
 
-- `crate::ui::gui::theme::code::*` 사용
-- 키워드: `code::KEYWORD`
-- 함수: `code::FUNCTION`
-- 문자열: `code::STRING`
+```tsx
+// src/panels/sidebar/MyPanel.tsx
+import { invoke } from "@tauri-apps/api/core";
 
-## 패널 구조
+interface Props {
+  // props 정의
+}
 
-```rust
-pub fn render(ui: &mut egui::Ui, state: &mut AppState) {
-    // 제목
-    ui.heading(egui::RichText::new("패널").color(catppuccin::LAVENDER));
-    
-    ui.separator();
-    
-    // 내용
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        // ...
-    });
+export function MyPanel({ ...props }: Props) {
+  return (
+    <div className="panel">
+      <h2 className="panel-title">패널 제목</h2>
+      <div className="panel-body">
+        {/* 내용 */}
+      </div>
+    </div>
+  );
 }
 ```
 
+### Tauri IPC 호출 패턴
+
+```tsx
+import { invoke } from "@tauri-apps/api/core";
+
+// 커맨드 호출
+const result = await invoke<ReturnType>("command_name", {
+  arg1: value1,
+});
+```
+
+## 백엔드 (Rust Tauri Commands)
+
+### 커맨드 구조
+
+- 커맨드는 `src-tauri/src/commands/` 에 기능별로 파일 분리
+- 반드시 `#[tauri::command]` 어트리뷰트 추가
+- 에러는 `crate::error::AppError` 반환
+
+```rust
+// src-tauri/src/commands/my_feature.rs
+#[tauri::command]
+pub async fn my_command(
+    state: tauri::State<'_, AppState>,
+    arg: String,
+) -> Result<MyDto, String> {
+    // 구현
+}
+```
+
+- `lib.rs`의 `invoke_handler`에 커맨드 등록 필요
+
 ## 키보드 단축키
 
-- 새 단축키 추가 시 `app/mod.rs`의 `handle_navigation_actions` 수정
-- 기존 단축키와 충돌 확인
+- `src/hooks/useKeyboard.ts` 또는 컴포넌트 내 `onKeyDown` 핸들러 사용
+- 기존 단축키 충돌 확인

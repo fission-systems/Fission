@@ -42,7 +42,7 @@ grep_search로 다음 검색:
 |----------|---------|
 | 바이너리 파싱 | `fission-loader` |
 | 분석/최적화 | `fission-analysis` |
-| GUI | `fission-ui` |
+| GUI | `fission-tauri` |
 | CLI | `fission-cli` |
 
 ### Ghidra 연동 필요

@@ -33,6 +33,11 @@ CallingConvDetector::CallingConvDetector(Architecture* a) : arch(a) {
 
 CallingConvDetector::~CallingConvDetector() {}
 
+void CallingConvDetector::set_format_hint(const std::string& hint) {
+    format_hint_ = hint;
+    fission::utils::log_stream() << "[CallingConvDetector] Format hint set to: " << hint << std::endl;
+}
+
 bool CallingConvDetector::check_ms_x64(Funcdata* fd) {
     if (!is_64bit) return false;
     
@@ -108,6 +113,9 @@ bool CallingConvDetector::check_sysv_x64(Funcdata* fd) {
     
     // Check for RDI/RSI usage (SYSV first two args)
     std::set<std::string> regs_used;
+    // Also track SYSV-unique registers (RDI, RSI) that are NOT in MS x64 ABI.
+    // If we see these, even one is strong evidence for SYSV.
+    bool has_sysv_unique = false;
     const Translate* trans = arch->translate;
     
     list<PcodeOp*>::const_iterator iter;
@@ -131,10 +139,32 @@ bool CallingConvDetector::check_sysv_x64(Funcdata* fd) {
                 reg_name == "R8" || reg_name == "R9") {
                 regs_used.insert(reg_name);
             }
+            // Also match sub-registers of RDI/RSI: EDI, ESI, DI, SI, DIL, SIL
+            if (reg_name == "EDI" || reg_name == "ESI" ||
+                reg_name == "DI"  || reg_name == "SI"  ||
+                reg_name == "DIL" || reg_name == "SIL") {
+                regs_used.insert(reg_name);
+                has_sysv_unique = true;
+            }
+            // RDI and RSI are SYSV-unique (not used as args in MS x64)
+            if (reg_name == "RDI" || reg_name == "RSI") {
+                has_sysv_unique = true;
+            }
         }
         
         // Early exit if we found enough evidence
         if (regs_used.size() >= 2) return true;
+    }
+    
+    // If format hint indicates non-Windows, a single SYSV-unique register
+    // (RDI, RSI, or their sub-registers) is sufficient evidence.
+    // This handles single-argument functions that would otherwise go undetected.
+    bool hint_is_nonwindows = (!format_hint_.empty() &&
+                               format_hint_ != "windows");
+    if (has_sysv_unique && hint_is_nonwindows) {
+        fission::utils::log_stream() << "[CallingConvDetector] SYSV x64 detected via single "
+                  << "SYSV-unique register + non-Windows hint" << std::endl;
+        return true;
     }
     
     return regs_used.size() >= 2;
@@ -143,16 +173,38 @@ bool CallingConvDetector::check_sysv_x64(Funcdata* fd) {
 bool CallingConvDetector::check_stdcall(Funcdata* fd) {
     if (is_64bit) return false;
 
-    // A-2: True stdcall detection requires stack-delta analysis — the callee must
-    // issue a `RET imm16` that cleans its own stack arguments.  Checking only for
-    // the presence of CPUI_RETURN (as the previous code did) returns true for
-    // EVERY 32-bit function, causing all of them to be misclassified as stdcall.
+    // Detect stdcall by inspecting the RET instruction opcode.
+    // x86 RET imm16 (opcode 0xC2) cleans the stack — this is the hallmark of
+    // __stdcall.  Normal cdecl uses plain RET (opcode 0xC3).
     //
-    // Returning false here lets detect() fall through to CONV_CDECL, which is the
-    // correct default for most 32-bit C functions compiled without __stdcall.
-    // TODO: implement proper stack-delta analysis when cross-function context is
-    // available (e.g. inspect call sites for stack adjustments after CALL).
-    (void)fd;
+    // This mirrors Ghidra's own fillinExtrapop() logic in funcdata.cc.
+
+    list<PcodeOp*>::const_iterator iter = fd->beginOp(CPUI_RETURN);
+    if (iter == fd->endOp(CPUI_RETURN)) {
+        return false; // No return statements — cannot determine convention
+    }
+
+    PcodeOp* retop = *iter;
+    uint1 buffer[4];
+
+    try {
+        arch->loader->loadFill(buffer, 4, retop->getAddr());
+    } catch (...) {
+        // If we cannot read the instruction bytes, fall back to cdecl
+        return false;
+    }
+
+    // 0xC2 = RET imm16 (near return, pops imm16 bytes)
+    // 0xCA = RETF imm16 (far return, pops imm16 bytes) — rare but possible
+    if (buffer[0] == 0xC2 || buffer[0] == 0xCA) {
+        int stack_cleanup = buffer[1] | (buffer[2] << 8);
+        fission::utils::log_stream() << "[CallingConvDetector] stdcall detected: RET 0x"
+                  << std::hex << stack_cleanup << std::dec
+                  << " (stack cleanup " << stack_cleanup << " bytes + 4 for retaddr)"
+                  << std::endl;
+        return true;
+    }
+
     return false;
 }
 
@@ -193,6 +245,9 @@ bool CallingConvDetector::check_thiscall(Funcdata* fd) {
     // A-3: Use getRegisterName() instead of raw offset comparison (0x8=ECX).
     const Translate* trans = arch->translate;
 
+    bool ecx_as_ptr = false;
+    bool edx_as_input = false;
+
     list<PcodeOp*>::const_iterator iter;
     for (iter = fd->beginOpAlive(); iter != fd->endOpAlive(); ++iter) {
         PcodeOp* op = *iter;
@@ -209,13 +264,33 @@ bool CallingConvDetector::check_thiscall(Funcdata* fd) {
 
                 std::string reg_name = trans->getRegisterName(sp, vn->getOffset(), vn->getSize());
                 if (reg_name == "ECX") {
-                    return true;
+                    ecx_as_ptr = true;
                 }
+            }
+        }
+
+        // Also check if EDX is used as a register input anywhere.
+        // If both ECX (ptr) and EDX are inputs, this is __fastcall, not __thiscall.
+        for (int i = 0; i < op->numInput(); ++i) {
+            Varnode* vn = op->getIn(i);
+            if (!vn || !vn->isInput()) continue;
+
+            AddrSpace* sp = vn->getSpace();
+            if (!sp || sp->getName() != "register") continue;
+
+            std::string reg_name = trans->getRegisterName(sp, vn->getOffset(), vn->getSize());
+            if (reg_name == "EDX") {
+                edx_as_input = true;
             }
         }
     }
 
-    return false;
+    // ECX as pointer + EDX as input => __fastcall (both parameter regs used)
+    if (ecx_as_ptr && edx_as_input) {
+        return false;
+    }
+
+    return ecx_as_ptr;
 }
 
 bool CallingConvDetector::check_aapcs64(Funcdata* fd) {
@@ -266,18 +341,32 @@ CallingConvDetector::ConvType CallingConvDetector::detect(Funcdata* fd) {
     
     fission::utils::log_stream() << "[CallingConvDetector] Detecting convention for function at 0x" 
               << std::hex << fd->getAddress().getOffset() << std::dec 
-              << ", is_64bit=" << is_64bit << std::endl;
+              << ", is_64bit=" << is_64bit
+              << ", format_hint=" << (format_hint_.empty() ? "(none)" : format_hint_) << std::endl;
     
     if (is_64bit) {
         // AArch64 has priority: probe for x0 register presence
         if (check_aapcs64(fd)) return CONV_AAPCS64;
 
-        // 64-bit x86: check MS x64 first (Windows), then SYSV (Linux/Mac)
-        fission::utils::log_stream() << "[CallingConvDetector] Checking MS x64..." << std::endl;
-        if (check_ms_x64(fd)) return CONV_MS_X64;
+        // Use format hint to determine check order.
+        // For non-Windows binaries (gcc, clang, default ELF/Mach-O), check
+        // SYSV first to avoid false MS x64 positives (RDX, RCX overlap).
+        bool prefer_sysv = (!format_hint_.empty() && format_hint_ != "windows");
         
-        fission::utils::log_stream() << "[CallingConvDetector] Checking SYSV x64..." << std::endl;
-        if (check_sysv_x64(fd)) return CONV_SYSV_X64;
+        if (prefer_sysv) {
+            fission::utils::log_stream() << "[CallingConvDetector] Checking SYSV x64 first (non-Windows hint)..." << std::endl;
+            if (check_sysv_x64(fd)) return CONV_SYSV_X64;
+            
+            fission::utils::log_stream() << "[CallingConvDetector] Checking MS x64..." << std::endl;
+            if (check_ms_x64(fd)) return CONV_MS_X64;
+        } else {
+            // Windows or unknown: check MS x64 first
+            fission::utils::log_stream() << "[CallingConvDetector] Checking MS x64..." << std::endl;
+            if (check_ms_x64(fd)) return CONV_MS_X64;
+            
+            fission::utils::log_stream() << "[CallingConvDetector] Checking SYSV x64..." << std::endl;
+            if (check_sysv_x64(fd)) return CONV_SYSV_X64;
+        }
     } else {
         // 32-bit: check in order of specificity
         if (check_thiscall(fd)) return CONV_THISCALL;

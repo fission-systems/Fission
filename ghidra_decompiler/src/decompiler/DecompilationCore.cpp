@@ -18,6 +18,7 @@
 #include "varnode.hh"
 
 #include <iostream>
+#include <set>
 #include "fission/utils/logger.h"
 using namespace fission::ffi;
 using namespace fission::core;
@@ -25,6 +26,91 @@ using namespace fission::types;
 using namespace fission::analysis;
 
 static constexpr size_t MAX_FUNCTION_SIZE = 10000;
+
+// ============================================================================
+// Known noreturn functions — marking these allows Ghidra's FlowInfo to insert
+// artificial halts after calls, eliminating dead code in the decompiled output.
+// ============================================================================
+static const std::set<std::string> KNOWN_NORETURN_FUNCTIONS = {
+    // C / POSIX
+    "exit", "_exit", "_Exit", "abort", "quick_exit",
+    "__assert_fail", "__assert_rtn", "__assert",
+    "__stack_chk_fail", "__fortify_fail",
+    // POSIX / BSD
+    "pthread_exit", "err", "errx", "verr", "verrx",
+    // C++ exceptions
+    "__cxa_throw", "__cxa_rethrow", "__cxa_bad_cast", "__cxa_bad_typeid",
+    "__cxa_call_terminate", "__cxa_call_unexpected",
+    "__cxa_pure_virtual", "__cxa_deleted_virtual",
+    // GCC / Clang builtins
+    "__builtin_abort", "__builtin_unreachable", "__builtin_trap",
+    // setjmp/longjmp
+    "longjmp", "_longjmp", "siglongjmp",
+    // Windows CRT
+    "ExitProcess", "TerminateProcess", "FatalExit",
+    "RaiseException", "_CxxThrowException",
+    // Common wrappers
+    "__halt", "__stop",
+};
+
+/// Strip common decoration from a function name for noreturn lookup.
+static std::string strip_for_noreturn(const std::string& name) {
+    std::string s = name;
+    // Remove leading underscore (_exit -> exit)
+    if (!s.empty() && s[0] == '_' && s.size() > 1 && s[1] != '_') {
+        s = s.substr(1);
+    }
+    // Remove @N suffix (stdcall decoration: _exit@4 -> exit)
+    auto at = s.find('@');
+    if (at != std::string::npos) {
+        s = s.substr(0, at);
+    }
+    return s;
+}
+
+/// Mark known noreturn functions in the Ghidra scope so that FlowInfo
+/// inserts artificial halts after calls to them.
+static void mark_noreturn_functions(
+    DecompContext* ctx,
+    const std::map<uint64_t, std::string>& symbols
+) {
+    if (!ctx || !ctx->arch || !ctx->arch->symboltab) return;
+
+    ghidra::Scope* global = ctx->arch->symboltab->getGlobalScope();
+    ghidra::AddrSpace* code_space = ctx->arch->getDefaultCodeSpace();
+    if (!global || !code_space) return;
+
+    int count = 0;
+    for (const auto& [addr, name] : symbols) {
+        // Check both the raw name and the stripped version.
+        bool matched = KNOWN_NORETURN_FUNCTIONS.count(name) > 0;
+        if (!matched) {
+            std::string stripped = strip_for_noreturn(name);
+            matched = KNOWN_NORETURN_FUNCTIONS.count(stripped) > 0;
+        }
+        if (!matched) continue;
+
+        ghidra::Address ga(code_space, addr);
+        ghidra::Funcdata* fd_target = global->findFunction(ga);
+        if (!fd_target) {
+            // Create a stub so the flow analysis knows about this symbol.
+            ghidra::FunctionSymbol* sym = global->addFunction(ga, name);
+            fd_target = sym ? sym->getFunction() : nullptr;
+        }
+        if (fd_target && !fd_target->getFuncProto().isNoReturn()) {
+            fd_target->getFuncProto().setNoReturn(true);
+            ++count;
+            fission::utils::log_stream()
+                << "[NoReturn] Marked " << name << " @ 0x"
+                << std::hex << addr << std::dec << std::endl;
+        }
+    }
+
+    if (count > 0) {
+        fission::utils::log_stream()
+            << "[NoReturn] Total: " << count << " functions marked" << std::endl;
+    }
+}
 
 // Helper function to escape strings for JSON output
 static std::string json_escape(const std::string& input) {
@@ -210,11 +296,21 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     // ========================================================================
     try {
         fission::analysis::CallingConvDetector detector(ctx->arch.get());
+        // Provide binary format hint so the detector can adjust heuristics
+        // and choose the correct fallback when detection is ambiguous.
+        detector.set_format_hint(ctx->compiler_id);
         auto conv = detector.detect(fd);
         if (conv == fission::analysis::CallingConvDetector::CONV_UNKNOWN) {
-            conv = ctx->is_64bit
-                ? fission::analysis::CallingConvDetector::CONV_MS_X64
-                : fission::analysis::CallingConvDetector::CONV_CDECL;
+            if (ctx->is_64bit) {
+                // Use compiler_id / binary format to pick the correct 64-bit ABI.
+                // PE/windows -> MS x64 (__fastcall), ELF/Mach-O -> SYSV x64.
+                const auto& cid = ctx->compiler_id;
+                conv = (cid == "windows")
+                    ? fission::analysis::CallingConvDetector::CONV_MS_X64
+                    : fission::analysis::CallingConvDetector::CONV_SYSV_X64;
+            } else {
+                conv = fission::analysis::CallingConvDetector::CONV_CDECL;
+            }
         }
         detector.apply(fd, conv);
     } catch (const std::exception& e) {
@@ -254,6 +350,15 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         if (!func_name.empty()) {
             proto_enforcer.enforce_single_prototype(ctx->arch.get(), addr, func_name);
         }
+    }
+
+    // ========================================================================
+    // noreturn auto-marking — must run AFTER prototype enforcement, BEFORE
+    // clearAnalysis/reset so that FlowInfo sees the flags during perform().
+    // ========================================================================
+    {
+        mark_noreturn_functions(ctx, ctx->symbols);
+        mark_noreturn_functions(ctx, ctx->global_symbols);
     }
 
     // CRITICAL: Reset action state for this function AFTER prototypes are applied

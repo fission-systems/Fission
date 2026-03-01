@@ -27,7 +27,11 @@ inline constexpr int k_max_ptrsub_ops = 100;
 inline constexpr size_t k_string_scan_window = 0x120;
 
 /// followFlow upper bound relative to function start (bytes).
-inline constexpr size_t k_follow_flow_limit = 0x2000;
+/// Raised from 8 KB (0x2000) to 64 KB (0x10000) so that large functions
+/// (crypto, hash, loop-heavy code) are fully traversed.  The pipeline will
+/// additionally try to use the distance to the *next* known function as a
+/// tighter bound where that information is available.
+inline constexpr size_t k_follow_flow_limit = 0x10000;
 
 /// callee relationship scan window inside a function body (bytes).
 inline constexpr size_t k_callee_scan_window = 0x100;

@@ -1,0 +1,23 @@
+{
+  "total_functions": 292,
+  "compared_functions": 0,
+  "fission_errors": 2,
+  "checklist": {
+    "avg_ratio": 0.889,
+    "perfect_count": 236,
+    "total_checked": 292
+  },
+  "by_category": {},
+  "by_opt_level": {},
+  "by_format": {},
+  "worst_10": [],
+  "env": {
+    "python": "3.12.1",
+    "platform": "macOS-26.3-arm64-arm-64bit",
+    "fission_git_rev": "b02eae2",
+    "run_at": "2026-02-28T12:47:36.437717Z"
+  },
+  "suite": "benchmark-macos_arm64",
+  "binary_count": 14,
+  "function_count": 292
+}

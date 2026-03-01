@@ -70,7 +70,7 @@ feature-depth = 1
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    { id = "RUSTSEC-2024-0436", reason = "paste crate is unmaintained but required by egui dependencies" },
+    # egui 의존성 RUSTSEC 예외 항목 제거 (egui가 2026-02-23 Phase 9에서 완전 제거됨)
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

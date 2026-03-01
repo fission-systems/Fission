@@ -11,6 +11,7 @@
 #include "fspec.hh"
 #include "fission/config/PathConfig.h"
 #include <iostream>
+#include <set>
 #include "fission/utils/logger.h"
 
 namespace fission {
@@ -526,17 +527,38 @@ void TypePropagator::infer_windows_api_types(PcodeOp* call_op, const std::string
                 return;
             }
 
-            // Phase 2 (fallback): scan COPY/PTRSUB uses for concrete pointer type.
-            // Handles patterns like: ptr = malloc(sz); *(int*)ptr = x;
+            // Phase 2 (fallback): scan COPY/PTRSUB/STORE uses for concrete pointer type.
+            // Handles patterns like:
+            //   MyStruct* p = (MyStruct*)malloc(sz);  -- COPY(cast_out) with typed dst
+            //   *p = x;                               -- STORE where input[1] is the typed ptr
+            //   p->field = y;                         -- PTRSUB on the output
+            //
+            // NOTE: STORE ops have no output varnode (getOut() is always null for STORE).
+            //       We inspect input[1] (the address operand) instead, since it is the
+            //       varnode that holds the typed pointer derived from the malloc result.
             for (auto use_it = output->beginDescend();
                  use_it != output->endDescend(); ++use_it) {
                 PcodeOp* use_op = *use_it;
                 if (!use_op) continue;
-                if (use_op->code() != CPUI_COPY && use_op->code() != CPUI_STORE) continue;
-                Varnode* dst = use_op->getOut();
-                if (!dst) continue;
-                Datatype* dt = dst->getTempType();
-                if (!dt) dt = dst->getType();
+
+                Varnode* candidate = nullptr;
+
+                if (use_op->code() == CPUI_COPY) {
+                    // Destination carries the type.
+                    candidate = use_op->getOut();
+                } else if (use_op->code() == CPUI_STORE) {
+                    // input[0] = AddrSpace, input[1] = address (typed ptr), input[2] = value.
+                    // The address operand (input[1]) tells us what the pointer type should be.
+                    if (use_op->numInput() >= 2)
+                        candidate = use_op->getIn(1);
+                } else if (use_op->code() == CPUI_PTRSUB) {
+                    // PTRSUB(base_ptr, offset): base_ptr is input[0].
+                    candidate = use_op->getOut();
+                }
+
+                if (!candidate) continue;
+                Datatype* dt = candidate->getTempType();
+                if (!dt) dt = candidate->getType();
                 if (dt && dt->getMetatype() == TYPE_PTR && dt->getSize() > 0) {
                     promoted = dt;
                     break;
@@ -1778,10 +1800,80 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
                 );
                 
                 if (is_allocator) {
-                    Datatype* void_type = tf->getTypeVoid();
-                    ptr_type = tf->getTypePointer(ptr_size, void_type, ptr_size);
+                    // ── Step 2.5: Trace downstream usage to infer concrete struct type ──
+                    // Walk the output varnode's descendants to find PTRSUB/INT_ADD/LOAD/STORE
+                    // operations that reveal offset access patterns matching a known struct.
+                    Datatype* concrete_struct_ptr = nullptr;
+                    if (struct_registry) {
+                        std::set<int> observed_offsets;
+                        // Collect offsets from descendants of the output varnode
+                        std::vector<Varnode*> work = {output};
+                        std::set<Varnode*> visited;
+                        int depth = 0;
+                        while (!work.empty() && depth < 8) {
+                            std::vector<Varnode*> next_work;
+                            for (Varnode* v : work) {
+                                if (!v || visited.count(v)) continue;
+                                visited.insert(v);
+                                // Walk all descendants
+                                auto desc_iter = v->beginDescend();
+                                auto desc_end = v->endDescend();
+                                for (; desc_iter != desc_end; ++desc_iter) {
+                                    PcodeOp* desc_op = *desc_iter;
+                                    if (!desc_op) continue;
+                                    OpCode desc_opc = desc_op->code();
+                                    if (desc_opc == CPUI_PTRSUB || desc_opc == CPUI_INT_ADD || desc_opc == CPUI_PTRADD) {
+                                        // The offset is typically the second input
+                                        Varnode* off_vn = desc_op->getIn(1);
+                                        if (off_vn && off_vn->isConstant()) {
+                                            int off = (int)off_vn->getOffset();
+                                            observed_offsets.insert(off);
+                                        }
+                                    }
+                                    // Follow through COPY/CAST
+                                    if (desc_opc == CPUI_COPY || desc_opc == CPUI_CAST ||
+                                        desc_opc == CPUI_PTRSUB || desc_opc == CPUI_INT_ADD ||
+                                        desc_opc == CPUI_PTRADD) {
+                                        Varnode* out = desc_op->getOut();
+                                        if (out) next_work.push_back(out);
+                                    }
+                                }
+                            }
+                            work = next_work;
+                            depth++;
+                        }
+
+                        // Match observed offsets against struct_registry entries for current func
+                        if (!observed_offsets.empty()) {
+                            uint64_t func_addr = fd->getAddress().getOffset();
+                            auto func_it = struct_registry->find(func_addr);
+                            if (func_it != struct_registry->end()) {
+                                // found — try to find a matching struct via TypeFactory
+                                for (auto const& [param_idx, struct_name] : func_it->second) {
+                                    Datatype* dt = tf->findByName(struct_name);
+                                    if (dt && dt->getMetatype() == TYPE_STRUCT) {
+                                        concrete_struct_ptr = tf->getTypePointer(
+                                            ptr_size, dt, ptr_size);
+                                        fission::utils::log_stream()
+                                            << "[TypePropagator] Allocator " << func_name
+                                            << " → concrete struct " << struct_name
+                                            << "* (matched " << observed_offsets.size()
+                                            << " offsets)" << std::endl;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (concrete_struct_ptr) {
+                        ptr_type = concrete_struct_ptr;
+                    } else {
+                        Datatype* void_type = tf->getTypeVoid();
+                        ptr_type = tf->getTypePointer(ptr_size, void_type, ptr_size);
+                    }
                     fission::utils::log_stream() << "[TypePropagator] Matched allocator-like function: "
-                              << func_name << std::endl;
+                              << func_name << " → " << (ptr_type ? ptr_type->getName() : "void *") << std::endl;
                 }
             }
 
