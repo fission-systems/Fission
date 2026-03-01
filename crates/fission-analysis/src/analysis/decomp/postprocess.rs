@@ -957,34 +957,68 @@ impl PostProcessor {
     fn remove_constant_conditions(code: &str) -> String {
         let mut result = code.to_string();
 
+        // Helper: returns true if text contains any brace (nested block present)
+        fn has_nested_braces(s: &str) -> bool {
+            s.contains('{') || s.contains('}')
+        }
+
         // while (false) { ... } → remove entirely
+        // SAFETY: Only apply when body has no nested braces.
         static WHILE_FALSE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\bwhile\s*\(\s*(?:false|0)\s*\)\s*\{[^}]*\}").unwrap()
+            Regex::new(r"(?s)\bwhile\s*\(\s*(?:false|0)\s*\)\s*\{(?P<body>[^}]*)\}").unwrap()
         });
-        result = WHILE_FALSE.replace_all(&result, "").to_string();
+        result = WHILE_FALSE
+            .replace_all(&result, |caps: &regex::Captures| {
+                if has_nested_braces(&caps["body"]) {
+                    caps[0].to_string() // skip — nested blocks inside
+                } else {
+                    String::new()
+                }
+            })
+            .to_string();
 
         // if (false) { ... } → remove (but keep else clause if present)
+        // SAFETY: Only apply when neither body has nested braces.
         static IF_FALSE_WITH_ELSE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(r"(?s)\bif\s*\(\s*(?:false|0)\s*\)\s*\{[^}]*\}\s*else\s*\{(?P<else_body>[^}]*)\}").unwrap()
         });
         result = IF_FALSE_WITH_ELSE
             .replace_all(&result, |caps: &regex::Captures| {
-                caps["else_body"].trim().to_string()
+                let else_body = &caps["else_body"];
+                if has_nested_braces(else_body) {
+                    caps[0].to_string()
+                } else {
+                    else_body.trim().to_string()
+                }
             })
             .to_string();
 
         static IF_FALSE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\bif\s*\(\s*(?:false|0)\s*\)\s*\{[^}]*\}").unwrap()
+            Regex::new(r"(?s)\bif\s*\(\s*(?:false|0)\s*\)\s*\{(?P<body>[^}]*)\}").unwrap()
         });
-        result = IF_FALSE.replace_all(&result, "").to_string();
+        result = IF_FALSE
+            .replace_all(&result, |caps: &regex::Captures| {
+                if has_nested_braces(&caps["body"]) {
+                    caps[0].to_string()
+                } else {
+                    String::new()
+                }
+            })
+            .to_string();
 
         // if (true) { BODY } → BODY  (keep body, discard if wrapper)
+        // SAFETY: Only apply when body has no nested braces.
         static IF_TRUE_WITH_ELSE: Lazy<Regex> = Lazy::new(|| {
             Regex::new(r"(?s)\bif\s*\(\s*(?:true|1)\s*\)\s*\{(?P<body>[^}]*)\}\s*else\s*\{[^}]*\}").unwrap()
         });
         result = IF_TRUE_WITH_ELSE
             .replace_all(&result, |caps: &regex::Captures| {
-                caps["body"].trim().to_string()
+                let body = &caps["body"];
+                if has_nested_braces(body) {
+                    caps[0].to_string()
+                } else {
+                    body.trim().to_string()
+                }
             })
             .to_string();
 
@@ -993,7 +1027,12 @@ impl PostProcessor {
         });
         result = IF_TRUE
             .replace_all(&result, |caps: &regex::Captures| {
-                caps["body"].trim().to_string()
+                let body = &caps["body"];
+                if has_nested_braces(body) {
+                    caps[0].to_string()
+                } else {
+                    body.trim().to_string()
+                }
             })
             .to_string();
 
@@ -1021,6 +1060,12 @@ impl PostProcessor {
             .replace_all(&result, |caps: &regex::Captures| {
                 let if_block = &caps["if_block"];
                 let else_body = caps["else_body"].trim();
+                // SAFETY: Skip when if_block has nested braces (>1 '{') or
+                // when else_body itself contains braces (nested block inside else).
+                let if_open_count = if_block.matches('{').count();
+                if if_open_count > 1 || else_body.contains('{') || else_body.contains('}') {
+                    return caps[0].to_string();
+                }
                 if else_body.is_empty() {
                     if_block.to_string()
                 } else {
