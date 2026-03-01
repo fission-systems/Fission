@@ -1,0 +1,202 @@
+[
+  {
+    "name": "RegOpenKeyExA",
+    "return_type": "LSTATUS",
+    "params": [
+      { "name": "hKey", "type_name": "HKEY" },
+      { "name": "lpSubKey", "type_name": "LPCSTR" },
+      { "name": "ulOptions", "type_name": "DWORD" },
+      { "name": "samDesired", "type_name": "REGSAM" },
+      { "name": "phkResult", "type_name": "PHKEY" }
+    ]
+  },
+  {
+    "name": "RegOpenKeyExW",
+    "return_type": "LSTATUS",
+    "params": [
+      { "name": "hKey", "type_name": "HKEY" },
+      { "name": "lpSubKey", "type_name": "LPCWSTR" },
+      { "name": "ulOptions", "type_name": "DWORD" },
+      { "name": "samDesired", "type_name": "REGSAM" },
+      { "name": "phkResult", "type_name": "PHKEY" }
+    ]
+  },
+  {
+    "name": "RegSetValueExA",
+    "return_type": "LSTATUS",
+    "params": [
+      { "name": "hKey", "type_name": "HKEY" },
+      { "name": "lpValueName", "type_name": "LPCSTR" },
+      { "name": "Reserved", "type_name": "DWORD" },
+      { "name": "dwType", "type_name": "DWORD" },
+      { "name": "lpData", "type_name": "const BYTE*" },
+      { "name": "cbData", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "RegSetValueExW",
+    "return_type": "LSTATUS",
+    "params": [
+      { "name": "hKey", "type_name": "HKEY" },
+      { "name": "lpValueName", "type_name": "LPCWSTR" },
+      { "name": "Reserved", "type_name": "DWORD" },
+      { "name": "dwType", "type_name": "DWORD" },
+      { "name": "lpData", "type_name": "const BYTE*" },
+      { "name": "cbData", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "RegQueryValueExA",
+    "return_type": "LSTATUS",
+    "params": [
+      { "name": "hKey", "type_name": "HKEY" },
+      { "name": "lpValueName", "type_name": "LPCSTR" },
+      { "name": "lpReserved", "type_name": "LPDWORD" },
+      { "name": "lpType", "type_name": "LPDWORD" },
+      { "name": "lpData", "type_name": "LPBYTE" },
+      { "name": "lpcbData", "type_name": "LPDWORD" }
+    ]
+  },
+  {
+    "name": "RegCloseKey",
+    "return_type": "LSTATUS",
+    "params": [
+      { "name": "hKey", "type_name": "HKEY" }
+    ]
+  },
+  {
+    "name": "OpenProcessToken",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "DesiredAccess", "type_name": "DWORD" },
+      { "name": "TokenHandle", "type_name": "PHANDLE" }
+    ]
+  },
+  {
+    "name": "AdjustTokenPrivileges",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "TokenHandle", "type_name": "HANDLE" },
+      { "name": "DisableAllPrivileges", "type_name": "BOOL" },
+      { "name": "NewState", "type_name": "PTOKEN_PRIVILEGES" },
+      { "name": "BufferLength", "type_name": "DWORD" },
+      { "name": "PreviousState", "type_name": "PTOKEN_PRIVILEGES" },
+      { "name": "ReturnLength", "type_name": "PDWORD" }
+    ]
+  },
+  {
+    "name": "LookupPrivilegeValueA",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "lpSystemName", "type_name": "LPCSTR" },
+      { "name": "lpName", "type_name": "LPCSTR" },
+      { "name": "lpLuid", "type_name": "PLUID" }
+    ]
+  },
+  {
+    "name": "CryptAcquireContextA",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "phProv", "type_name": "HCRYPTPROV*" },
+      { "name": "szContainer", "type_name": "LPCSTR" },
+      { "name": "szProvider", "type_name": "LPCSTR" },
+      { "name": "dwProvType", "type_name": "DWORD" },
+      { "name": "dwFlags", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "CryptEncrypt",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hKey", "type_name": "HCRYPTKEY" },
+      { "name": "hHash", "type_name": "HCRYPTHASH" },
+      { "name": "Final", "type_name": "BOOL" },
+      { "name": "dwFlags", "type_name": "DWORD" },
+      { "name": "pbData", "type_name": "BYTE*" },
+      { "name": "pdwDataLen", "type_name": "DWORD*" },
+      { "name": "dwBufLen", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "CryptDecrypt",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hKey", "type_name": "HCRYPTKEY" },
+      { "name": "hHash", "type_name": "HCRYPTHASH" },
+      { "name": "Final", "type_name": "BOOL" },
+      { "name": "dwFlags", "type_name": "DWORD" },
+      { "name": "pbData", "type_name": "BYTE*" },
+      { "name": "pdwDataLen", "type_name": "DWORD*" }
+    ]
+  },
+  {
+    "name": "OpenSCManagerA",
+    "return_type": "SC_HANDLE",
+    "params": [
+      { "name": "lpMachineName", "type_name": "LPCSTR" },
+      { "name": "lpDatabaseName", "type_name": "LPCSTR" },
+      { "name": "dwDesiredAccess", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "CreateServiceA",
+    "return_type": "SC_HANDLE",
+    "params": [
+      { "name": "hSCManager", "type_name": "SC_HANDLE" },
+      { "name": "lpServiceName", "type_name": "LPCSTR" },
+      { "name": "lpDisplayName", "type_name": "LPCSTR" },
+      { "name": "dwDesiredAccess", "type_name": "DWORD" },
+      { "name": "dwServiceType", "type_name": "DWORD" },
+      { "name": "dwStartType", "type_name": "DWORD" },
+      { "name": "dwErrorControl", "type_name": "DWORD" },
+      { "name": "lpBinaryPathName", "type_name": "LPCSTR" },
+      { "name": "lpLoadOrderGroup", "type_name": "LPCSTR" },
+      { "name": "lpdwTagId", "type_name": "LPDWORD" },
+      { "name": "lpDependencies", "type_name": "LPCSTR" },
+      { "name": "lpServiceStartName", "type_name": "LPCSTR" },
+      { "name": "lpPassword", "type_name": "LPCSTR" }
+    ]
+  },
+  {
+    "name": "OpenServiceA",
+    "return_type": "SC_HANDLE",
+    "params": [
+      { "name": "hSCManager", "type_name": "SC_HANDLE" },
+      { "name": "lpServiceName", "type_name": "LPCSTR" },
+      { "name": "dwDesiredAccess", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "StartServiceA",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hService", "type_name": "SC_HANDLE" },
+      { "name": "dwNumServiceArgs", "type_name": "DWORD" },
+      { "name": "lpServiceArgVectors", "type_name": "LPCSTR*" }
+    ]
+  },
+  {
+    "name": "ControlService",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hService", "type_name": "SC_HANDLE" },
+      { "name": "dwControl", "type_name": "DWORD" },
+      { "name": "lpServiceStatus", "type_name": "LPSERVICE_STATUS" }
+    ]
+  },
+  {
+    "name": "DeleteService",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hService", "type_name": "SC_HANDLE" }
+    ]
+  },
+  {
+    "name": "CloseServiceHandle",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hSCObject", "type_name": "SC_HANDLE" }
+    ]
+  }
+]

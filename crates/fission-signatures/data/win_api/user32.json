@@ -1,0 +1,152 @@
+[
+  {
+    "name": "MessageBoxA",
+    "return_type": "int",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "lpText", "type_name": "LPCSTR" },
+      { "name": "lpCaption", "type_name": "LPCSTR" },
+      { "name": "uType", "type_name": "UINT", "enum_group": "MB_TYPE" }
+    ]
+  },
+  {
+    "name": "MessageBoxW",
+    "return_type": "int",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "lpText", "type_name": "LPCWSTR" },
+      { "name": "lpCaption", "type_name": "LPCWSTR" },
+      { "name": "uType", "type_name": "UINT", "enum_group": "MB_TYPE" }
+    ]
+  },
+  {
+    "name": "GetWindowTextA",
+    "return_type": "int",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "lpString", "type_name": "LPSTR" },
+      { "name": "nMaxCount", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "SetWindowTextA",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "lpString", "type_name": "LPCSTR" }
+    ]
+  },
+  {
+    "name": "GetAsyncKeyState",
+    "return_type": "SHORT",
+    "params": [
+      { "name": "vKey", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "GetKeyState",
+    "return_type": "SHORT",
+    "params": [
+      { "name": "nVirtKey", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "SetWindowsHookExA",
+    "return_type": "HHOOK",
+    "params": [
+      { "name": "idHook", "type_name": "int" },
+      { "name": "lpfn", "type_name": "HOOKPROC" },
+      { "name": "hmod", "type_name": "HINSTANCE" },
+      { "name": "dwThreadId", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "SetWindowsHookExW",
+    "return_type": "HHOOK",
+    "params": [
+      { "name": "idHook", "type_name": "int" },
+      { "name": "lpfn", "type_name": "HOOKPROC" },
+      { "name": "hmod", "type_name": "HINSTANCE" },
+      { "name": "dwThreadId", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "CallNextHookEx",
+    "return_type": "LRESULT",
+    "params": [
+      { "name": "hhk", "type_name": "HHOOK" },
+      { "name": "nCode", "type_name": "int" },
+      { "name": "wParam", "type_name": "WPARAM" },
+      { "name": "lParam", "type_name": "LPARAM" }
+    ]
+  },
+  {
+    "name": "UnhookWindowsHookEx",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hhk", "type_name": "HHOOK" }
+    ]
+  },
+  {
+    "name": "GetForegroundWindow",
+    "return_type": "HWND",
+    "params": []
+  },
+  {
+    "name": "GetWindowThreadProcessId",
+    "return_type": "DWORD",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "lpdwProcessId", "type_name": "LPDWORD" }
+    ]
+  },
+  {
+    "name": "FindWindowA",
+    "return_type": "HWND",
+    "params": [
+      { "name": "lpClassName", "type_name": "LPCSTR" },
+      { "name": "lpWindowName", "type_name": "LPCSTR" }
+    ]
+  },
+  {
+    "name": "FindWindowW",
+    "return_type": "HWND",
+    "params": [
+      { "name": "lpClassName", "type_name": "LPCWSTR" },
+      { "name": "lpWindowName", "type_name": "LPCWSTR" }
+    ]
+  },
+  {
+    "name": "EnumWindows",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "lpEnumFunc", "type_name": "WNDENUMPROC" },
+      { "name": "lParam", "type_name": "LPARAM" }
+    ]
+  },
+  {
+    "name": "GetDesktopWindow",
+    "return_type": "HWND",
+    "params": []
+  },
+  {
+    "name": "PostMessageA",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "Msg", "type_name": "UINT" },
+      { "name": "wParam", "type_name": "WPARAM" },
+      { "name": "lParam", "type_name": "LPARAM" }
+    ]
+  },
+  {
+    "name": "SendMessageA",
+    "return_type": "LRESULT",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "Msg", "type_name": "UINT" },
+      { "name": "wParam", "type_name": "WPARAM" },
+      { "name": "lParam", "type_name": "LPARAM" }
+    ]
+  }
+]

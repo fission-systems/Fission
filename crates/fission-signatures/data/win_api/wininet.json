@@ -1,0 +1,69 @@
+[
+  {
+    "name": "InternetOpenA",
+    "return_type": "HINTERNET",
+    "params": [
+      { "name": "lpszAgent", "type_name": "LPCSTR" },
+      { "name": "dwAccessType", "type_name": "DWORD" },
+      { "name": "lpszProxy", "type_name": "LPCSTR" },
+      { "name": "lpszProxyBypass", "type_name": "LPCSTR" },
+      { "name": "dwFlags", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "InternetConnectA",
+    "return_type": "HINTERNET",
+    "params": [
+      { "name": "hInternet", "type_name": "HINTERNET" },
+      { "name": "lpszServerName", "type_name": "LPCSTR" },
+      { "name": "nServerPort", "type_name": "INTERNET_PORT" },
+      { "name": "lpszUserName", "type_name": "LPCSTR" },
+      { "name": "lpszPassword", "type_name": "LPCSTR" },
+      { "name": "dwService", "type_name": "DWORD" },
+      { "name": "dwFlags", "type_name": "DWORD" },
+      { "name": "dwContext", "type_name": "DWORD_PTR" }
+    ]
+  },
+  {
+    "name": "HttpOpenRequestA",
+    "return_type": "HINTERNET",
+    "params": [
+      { "name": "hConnect", "type_name": "HINTERNET" },
+      { "name": "lpszVerb", "type_name": "LPCSTR" },
+      { "name": "lpszObjectName", "type_name": "LPCSTR" },
+      { "name": "lpszVersion", "type_name": "LPCSTR" },
+      { "name": "lpszReferrer", "type_name": "LPCSTR" },
+      { "name": "lplpszAcceptTypes", "type_name": "LPCSTR*" },
+      { "name": "dwFlags", "type_name": "DWORD" },
+      { "name": "dwContext", "type_name": "DWORD_PTR" }
+    ]
+  },
+  {
+    "name": "HttpSendRequestA",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hRequest", "type_name": "HINTERNET" },
+      { "name": "lpszHeaders", "type_name": "LPCSTR" },
+      { "name": "dwHeadersLength", "type_name": "DWORD" },
+      { "name": "lpOptional", "type_name": "LPVOID" },
+      { "name": "dwOptionalLength", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "InternetReadFile",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hFile", "type_name": "HINTERNET" },
+      { "name": "lpBuffer", "type_name": "LPVOID" },
+      { "name": "dwNumberOfBytesToRead", "type_name": "DWORD" },
+      { "name": "lpdwNumberOfBytesRead", "type_name": "LPDWORD" }
+    ]
+  },
+  {
+    "name": "InternetCloseHandle",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hInternet", "type_name": "HINTERNET" }
+    ]
+  }
+]

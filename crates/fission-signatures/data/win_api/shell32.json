@@ -1,0 +1,44 @@
+[
+  {
+    "name": "ShellExecuteA",
+    "return_type": "HINSTANCE",
+    "params": [
+      { "name": "hwnd", "type_name": "HWND" },
+      { "name": "lpOperation", "type_name": "LPCSTR" },
+      { "name": "lpFile", "type_name": "LPCSTR" },
+      { "name": "lpParameters", "type_name": "LPCSTR" },
+      { "name": "lpDirectory", "type_name": "LPCSTR" },
+      { "name": "nShowCmd", "type_name": "INT" }
+    ]
+  },
+  {
+    "name": "ShellExecuteW",
+    "return_type": "HINSTANCE",
+    "params": [
+      { "name": "hwnd", "type_name": "HWND" },
+      { "name": "lpOperation", "type_name": "LPCWSTR" },
+      { "name": "lpFile", "type_name": "LPCWSTR" },
+      { "name": "lpParameters", "type_name": "LPCWSTR" },
+      { "name": "lpDirectory", "type_name": "LPCWSTR" },
+      { "name": "nShowCmd", "type_name": "INT" }
+    ]
+  },
+  {
+    "name": "ShellExecuteExA",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "pExecInfo", "type_name": "SHELLEXECUTEINFOA*" }
+    ]
+  },
+  {
+    "name": "SHGetFolderPathA",
+    "return_type": "HRESULT",
+    "params": [
+      { "name": "hwnd", "type_name": "HWND" },
+      { "name": "csidl", "type_name": "int" },
+      { "name": "hToken", "type_name": "HANDLE" },
+      { "name": "dwFlags", "type_name": "DWORD" },
+      { "name": "pszPath", "type_name": "LPSTR" }
+    ]
+  }
+]

@@ -4,6 +4,42 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-02
+
+### Decompiler Postprocess 모듈화 리팩토링 (대형 `postprocess.rs` 분해)
+
+`crates/fission-analysis/src/analysis/decomp/postprocess.rs`의 단일 대형 구현을
+기능 책임별 하위 모듈로 분리해 유지보수성과 회귀 안정성을 개선.
+
+#### 주요 변경
+
+- `naming` 분리: `replace_field_offsets`, `recognize_swift_accessors`, `demangle_swift_symbols`, `rename_induction_vars`, `rename_semantic_vars`, `apply_dwarf_names`
+- `structure` 분리: `simplify_if_structure`, `while_true_to_while_cond`
+- `arithmetic` 확장 분리: `apply_arithmetic_idioms`, `recover_divisor`, `mul_pow2_to_shift`
+- 공통 조건 유틸 분리: `negate_condition` → `postprocess/condition.rs`
+- 테스트 분리: 인라인 테스트 제거, `postprocess/tests.rs`로 이관
+
+#### 신규/변경 파일
+
+- `crates/fission-analysis/src/analysis/decomp/postprocess.rs`: 오케스트레이션 중심으로 슬림화
+- `crates/fission-analysis/src/analysis/decomp/postprocess/naming.rs`: 네이밍/필드/DWARF 후처리 분리
+- `crates/fission-analysis/src/analysis/decomp/postprocess/structure.rs`: if/while 구조 단순화 분리
+- `crates/fission-analysis/src/analysis/decomp/postprocess/arithmetic.rs`: 산술 이디엄/매직디비전 복구 분리
+- `crates/fission-analysis/src/analysis/decomp/postprocess/condition.rs`: `negate_condition` 공용 유틸
+- `crates/fission-analysis/src/analysis/decomp/postprocess/tests.rs`: postprocess 회귀 테스트 모듈
+- `docs/analysis/POSTPROCESS_MODULES.md`: 모듈 구조/확장 규칙 문서 추가
+
+#### 테스트/검증
+
+- `cargo build -p fission-analysis` 통과
+- `cargo test -p fission-analysis postprocess::tests:: -- --nocapture` 통과 (`test_switch_from_if_else_assign_multiline`, `test_negate_condition_basic_cases`, `test_while_true_to_while_cond_simple`)
+
+#### 비고
+
+- 기존 `python` feature 관련 `unexpected cfg` 경고는 유지(이번 리팩토링과 무관)
+
+---
+
 ## 2026-03-01
 
 ### 디컴파일러 품질 대폭 개선: 4대 버그 수정 + v4 벤치마크 시스템

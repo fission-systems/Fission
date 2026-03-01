@@ -1,0 +1,110 @@
+[
+  {
+    "name": "WSAStartup",
+    "return_type": "int",
+    "params": [
+      { "name": "wVersionRequested", "type_name": "WORD" },
+      { "name": "lpWSAData", "type_name": "LPWSADATA" }
+    ]
+  },
+  {
+    "name": "WSACleanup",
+    "return_type": "int",
+    "params": []
+  },
+  {
+    "name": "socket",
+    "return_type": "SOCKET",
+    "params": [
+      { "name": "af", "type_name": "int" },
+      { "name": "type", "type_name": "int" },
+      { "name": "protocol", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "connect",
+    "return_type": "int",
+    "params": [
+      { "name": "s", "type_name": "SOCKET" },
+      { "name": "name", "type_name": "const sockaddr*" },
+      { "name": "namelen", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "send",
+    "return_type": "int",
+    "params": [
+      { "name": "s", "type_name": "SOCKET" },
+      { "name": "buf", "type_name": "const char*" },
+      { "name": "len", "type_name": "int" },
+      { "name": "flags", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "recv",
+    "return_type": "int",
+    "params": [
+      { "name": "s", "type_name": "SOCKET" },
+      { "name": "buf", "type_name": "char*" },
+      { "name": "len", "type_name": "int" },
+      { "name": "flags", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "closesocket",
+    "return_type": "int",
+    "params": [
+      { "name": "s", "type_name": "SOCKET" }
+    ]
+  },
+  {
+    "name": "bind",
+    "return_type": "int",
+    "params": [
+      { "name": "s", "type_name": "SOCKET" },
+      { "name": "name", "type_name": "const sockaddr*" },
+      { "name": "namelen", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "listen",
+    "return_type": "int",
+    "params": [
+      { "name": "s", "type_name": "SOCKET" },
+      { "name": "backlog", "type_name": "int" }
+    ]
+  },
+  {
+    "name": "accept",
+    "return_type": "SOCKET",
+    "params": [
+      { "name": "s", "type_name": "SOCKET" },
+      { "name": "addr", "type_name": "sockaddr*" },
+      { "name": "addrlen", "type_name": "int*" }
+    ]
+  },
+  {
+    "name": "getaddrinfo",
+    "return_type": "INT",
+    "params": [
+      { "name": "pNodeName", "type_name": "PCSTR" },
+      { "name": "pServiceName", "type_name": "PCSTR" },
+      { "name": "pHints", "type_name": "const ADDRINFOA*" },
+      { "name": "ppResult", "type_name": "PADDRINFOA*" }
+    ]
+  },
+  {
+    "name": "inet_addr",
+    "return_type": "unsigned long",
+    "params": [
+      { "name": "cp", "type_name": "const char*" }
+    ]
+  },
+  {
+    "name": "htons",
+    "return_type": "u_short",
+    "params": [
+      { "name": "hostshort", "type_name": "u_short" }
+    ]
+  }
+]

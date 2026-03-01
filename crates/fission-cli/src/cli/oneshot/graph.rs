@@ -5,35 +5,17 @@
 use crate::analysis::pcode::PcodeFunction;
 use crate::analysis::pcode::graph::PcodeGraph;
 use crate::analysis::pcode::optimizer::{DefUseTracker, PcodeOptimizer, PcodeOptimizerConfig};
+use crate::cli::oneshot::common::{
+    apply_profile, init_decompiler, load_binary_into_decompiler, read_binary_data,
+    resolve_compiler_id, resolve_profile,
+};
 use crate::cli::output::OutputSilencer;
-use fission_core::find_sla_dir;
 use fission_loader::loader::LoadedBinary;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 use tracing::{debug, warn};
-
-fn apply_profile(decomp: &mut fission_ffi::DecompilerNative, profile: Option<&str>) {
-    let selected = profile.unwrap_or("balanced").to_ascii_lowercase();
-    match selected.as_str() {
-        "quality" => {
-            decomp.set_feature("infer_pointers", true);
-            decomp.set_feature("analyze_loops", true);
-            decomp.set_feature("readonly_propagate", true);
-        }
-        "speed" => {
-            decomp.set_feature("infer_pointers", false);
-            decomp.set_feature("analyze_loops", false);
-            decomp.set_feature("readonly_propagate", false);
-        }
-        _ => {
-            decomp.set_feature("infer_pointers", true);
-            decomp.set_feature("analyze_loops", false);
-            decomp.set_feature("readonly_propagate", true);
-        }
-    }
-}
 
 pub fn generate_pcode_graph(
     binary: &LoadedBinary,
@@ -50,85 +32,16 @@ pub fn generate_pcode_graph(
     }
 
     // 1. Decompile to get Pcode
-    // Initialize decompiler
-    let sla_dir = find_sla_dir();
-
-    if verbose {
-        eprintln!("[*] Initializing native decompiler...");
-    } else {
+    if !verbose {
         debug!("initializing native decompiler");
     }
+    let mut decomp = init_decompiler(verbose);
+    let (selected_profile, _) = resolve_profile(profile_override);
+    apply_profile(&mut decomp, selected_profile);
 
-    let mut decomp = {
-        let _silencer = OutputSilencer::new_if(!verbose);
-        match fission_ffi::DecompilerNative::new(&sla_dir) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("Error: Failed to create decompiler: {}", e);
-                std::process::exit(1);
-            }
-        }
-    };
-    apply_profile(&mut decomp, profile_override);
-
-    // Load binary
-    // We need raw binary data. LoadedBinary doesn't store it?
-    // LoadedBinary is parsed. We need to read file again or pass data.
-    // But run_oneshot reads data.
-    // We should probably pass data to this function.
-    // For now, let's read it again from path.
-    // Wait, LoadedBinary has `path`? No, it has `name`.
-    // Let's assume we can read from `binary.name` if it's a path.
-
-    let binary_path = PathBuf::from(&binary.path);
-    let binary_data = match fs::read(&binary_path) {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("Error: Failed to read binary from {}: {}", binary.path, e);
-            std::process::exit(1);
-        }
-    };
-
-    {
-        let _silencer = OutputSilencer::new_if(!verbose);
-        let compiler_id = if let Some(user_compiler) = compiler_id_override {
-            Some(match user_compiler.to_ascii_lowercase().as_str() {
-                "windows" => "windows",
-                "gcc" => "gcc",
-                "clang" => "clang",
-                "default" => "default",
-                _ => "default",
-            })
-        } else {
-            let detection = fission_loader::detect(binary);
-            let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
-            detection
-                .compiler()
-                .map(|d| match d.name.to_lowercase().as_str() {
-                    "microsoft visual c++" | "msvc" => "windows",
-                    "gcc" | "mingw" => {
-                        if is_pe {
-                            "windows"
-                        } else {
-                            "gcc"
-                        }
-                    }
-                    "clang" => "clang",
-                    _ => "default",
-                })
-        };
-
-        if let Err(e) = decomp.load_binary(
-            &binary_data,
-            binary.image_base,
-            binary.is_64bit,
-            Some(&binary.arch_spec),
-            compiler_id,
-        ) {
-            eprintln!("Error: Failed to load binary: {}", e);
-            std::process::exit(1);
-        }
-    }
+    let binary_data = read_binary_data(binary);
+    let (compiler_id, _) = resolve_compiler_id(binary, compiler_id_override);
+    load_binary_into_decompiler(&mut decomp, binary, &binary_data, compiler_id, verbose);
 
     // Add memory blocks (sections)
     {

@@ -1,0 +1,74 @@
+[
+  {
+    "name": "WinHttpOpen",
+    "return_type": "HINTERNET",
+    "params": [
+      { "name": "pszAgentW", "type_name": "LPCWSTR" },
+      { "name": "dwAccessType", "type_name": "DWORD" },
+      { "name": "pszProxyW", "type_name": "LPCWSTR" },
+      { "name": "pszProxyBypassW", "type_name": "LPCWSTR" },
+      { "name": "dwFlags", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "WinHttpConnect",
+    "return_type": "HINTERNET",
+    "params": [
+      { "name": "hSession", "type_name": "HINTERNET" },
+      { "name": "pswzServerName", "type_name": "LPCWSTR" },
+      { "name": "nServerPort", "type_name": "INTERNET_PORT" },
+      { "name": "dwReserved", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "WinHttpOpenRequest",
+    "return_type": "HINTERNET",
+    "params": [
+      { "name": "hConnect", "type_name": "HINTERNET" },
+      { "name": "pwszVerb", "type_name": "LPCWSTR" },
+      { "name": "pwszObjectName", "type_name": "LPCWSTR" },
+      { "name": "pwszVersion", "type_name": "LPCWSTR" },
+      { "name": "pwszReferrer", "type_name": "LPCWSTR" },
+      { "name": "ppwszAcceptTypes", "type_name": "LPCWSTR*" },
+      { "name": "dwFlags", "type_name": "DWORD" }
+    ]
+  },
+  {
+    "name": "WinHttpSendRequest",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hRequest", "type_name": "HINTERNET" },
+      { "name": "lpszHeaders", "type_name": "LPCWSTR" },
+      { "name": "dwHeadersLength", "type_name": "DWORD" },
+      { "name": "lpOptional", "type_name": "LPVOID" },
+      { "name": "dwOptionalLength", "type_name": "DWORD" },
+      { "name": "dwTotalLength", "type_name": "DWORD" },
+      { "name": "dwContext", "type_name": "DWORD_PTR" }
+    ]
+  },
+  {
+    "name": "WinHttpReceiveResponse",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hRequest", "type_name": "HINTERNET" },
+      { "name": "lpReserved", "type_name": "LPVOID" }
+    ]
+  },
+  {
+    "name": "WinHttpReadData",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hRequest", "type_name": "HINTERNET" },
+      { "name": "lpBuffer", "type_name": "LPVOID" },
+      { "name": "dwNumberOfBytesToRead", "type_name": "DWORD" },
+      { "name": "lpdwNumberOfBytesRead", "type_name": "LPDWORD" }
+    ]
+  },
+  {
+    "name": "WinHttpCloseHandle",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hInternet", "type_name": "HINTERNET" }
+    ]
+  }
+]

@@ -1,0 +1,1019 @@
+[
+  {
+    "name": "VirtualAlloc",
+    "return_type": "LPVOID",
+    "params": [
+      {
+        "name": "lpAddress",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "dwSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "flAllocationType",
+        "type_name": "DWORD",
+        "enum_group": "MEM_ALLOC"
+      },
+      {
+        "name": "flProtect",
+        "type_name": "DWORD",
+        "enum_group": "PAGE_PROTECT"
+      }
+    ]
+  },
+  {
+    "name": "VirtualFree",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "lpAddress",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "dwSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "dwFreeType",
+        "type_name": "DWORD",
+        "enum_group": "MEM_ALLOC"
+      }
+    ]
+  },
+  {
+    "name": "VirtualProtect",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "lpAddress",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "dwSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "lpflOldProtect",
+        "type_name": "PDWORD"
+      },
+      {
+        "name": "flNewProtect",
+        "type_name": "DWORD",
+        "enum_group": "PAGE_PROTECT"
+      }
+    ]
+  },
+  {
+    "name": "GetCurrentProcess",
+    "return_type": "HANDLE",
+    "params": []
+  },
+  {
+    "name": "GetCurrentProcessId",
+    "return_type": "DWORD",
+    "params": []
+  },
+  {
+    "name": "GetCurrentThread",
+    "return_type": "HANDLE",
+    "params": []
+  },
+  {
+    "name": "GetCurrentThreadId",
+    "return_type": "DWORD",
+    "params": []
+  },
+  {
+    "name": "CreateThread",
+    "return_type": "HANDLE",
+    "params": [
+      {
+        "name": "lpThreadAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "dwStackSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "lpStartAddress",
+        "type_name": "LPTHREAD_START_ROUTINE"
+      },
+      {
+        "name": "lpParameter",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "dwCreationFlags",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "lpThreadId",
+        "type_name": "LPDWORD"
+      }
+    ]
+  },
+  {
+    "name": "ExitThread",
+    "return_type": "void",
+    "params": [
+      {
+        "name": "dwExitCode",
+        "type_name": "DWORD"
+      }
+    ]
+  },
+  {
+    "name": "TerminateProcess",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "uExitCode",
+        "type_name": "UINT"
+      }
+    ]
+  },
+  {
+    "name": "CreateFileA",
+    "return_type": "HANDLE",
+    "params": [
+      {
+        "name": "lpFileName",
+        "type_name": "LPCSTR"
+      },
+      {
+        "name": "lpSecurityAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "hTemplateFile",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "dwDesiredAccess",
+        "type_name": "DWORD",
+        "enum_group": "GENERIC_ACCESS"
+      },
+      {
+        "name": "dwShareMode",
+        "type_name": "DWORD",
+        "enum_group": "FILE_SHARE"
+      },
+      {
+        "name": "dwCreationDisposition",
+        "type_name": "DWORD",
+        "enum_group": "FILE_CREATE"
+      },
+      {
+        "name": "dwFlagsAndAttributes",
+        "type_name": "DWORD",
+        "enum_group": "FILE_ATTRIBUTE"
+      }
+    ]
+  },
+  {
+    "name": "CreateFileW",
+    "return_type": "HANDLE",
+    "params": [
+      {
+        "name": "lpFileName",
+        "type_name": "LPCWSTR"
+      },
+      {
+        "name": "lpSecurityAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "hTemplateFile",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "dwDesiredAccess",
+        "type_name": "DWORD",
+        "enum_group": "GENERIC_ACCESS"
+      },
+      {
+        "name": "dwShareMode",
+        "type_name": "DWORD",
+        "enum_group": "FILE_SHARE"
+      },
+      {
+        "name": "dwCreationDisposition",
+        "type_name": "DWORD",
+        "enum_group": "FILE_CREATE"
+      },
+      {
+        "name": "dwFlagsAndAttributes",
+        "type_name": "DWORD",
+        "enum_group": "FILE_ATTRIBUTE"
+      }
+    ]
+  },
+  {
+    "name": "ReadFile",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hFile",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpBuffer",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "nNumberOfBytesToRead",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "lpNumberOfBytesRead",
+        "type_name": "LPDWORD"
+      },
+      {
+        "name": "lpOverlapped",
+        "type_name": "LPOVERLAPPED"
+      }
+    ]
+  },
+  {
+    "name": "WriteFile",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hFile",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpBuffer",
+        "type_name": "LPCVOID"
+      },
+      {
+        "name": "nNumberOfBytesToWrite",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "lpNumberOfBytesWritten",
+        "type_name": "LPDWORD"
+      },
+      {
+        "name": "lpOverlapped",
+        "type_name": "LPOVERLAPPED"
+      }
+    ]
+  },
+  {
+    "name": "CloseHandle",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hObject",
+        "type_name": "HANDLE"
+      }
+    ]
+  },
+  {
+    "name": "GetModuleHandleA",
+    "return_type": "HMODULE",
+    "params": [
+      {
+        "name": "lpModuleName",
+        "type_name": "LPCSTR"
+      }
+    ]
+  },
+  {
+    "name": "GetModuleHandleW",
+    "return_type": "HMODULE",
+    "params": [
+      {
+        "name": "lpModuleName",
+        "type_name": "LPCWSTR"
+      }
+    ]
+  },
+  {
+    "name": "LoadLibraryA",
+    "return_type": "HMODULE",
+    "params": [
+      {
+        "name": "lpLibFileName",
+        "type_name": "LPCSTR"
+      }
+    ]
+  },
+  {
+    "name": "LoadLibraryW",
+    "return_type": "HMODULE",
+    "params": [
+      {
+        "name": "lpLibFileName",
+        "type_name": "LPCWSTR"
+      }
+    ]
+  },
+  {
+    "name": "GetProcAddress",
+    "return_type": "FARPROC",
+    "params": [
+      {
+        "name": "hModule",
+        "type_name": "HMODULE"
+      },
+      {
+        "name": "lpProcName",
+        "type_name": "LPCSTR"
+      }
+    ]
+  },
+  {
+    "name": "FreeLibrary",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hLibModule",
+        "type_name": "HMODULE"
+      }
+    ]
+  },
+  {
+    "name": "HeapAlloc",
+    "return_type": "LPVOID",
+    "params": [
+      {
+        "name": "hHeap",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "dwFlags",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "dwBytes",
+        "type_name": "SIZE_T"
+      }
+    ]
+  },
+  {
+    "name": "HeapFree",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hHeap",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "dwFlags",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "lpMem",
+        "type_name": "LPVOID"
+      }
+    ]
+  },
+  {
+    "name": "GetProcessHeap",
+    "return_type": "HANDLE",
+    "params": []
+  },
+  {
+    "name": "OpenProcess",
+    "return_type": "HANDLE",
+    "params": [
+      {
+        "name": "bInheritHandle",
+        "type_name": "BOOL"
+      },
+      {
+        "name": "dwProcessId",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "dwDesiredAccess",
+        "type_name": "DWORD",
+        "enum_group": "PROCESS_ACCESS"
+      }
+    ]
+  },
+  {
+    "name": "VirtualAllocEx",
+    "return_type": "LPVOID",
+    "params": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpAddress",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "dwSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "flAllocationType",
+        "type_name": "DWORD",
+        "enum_group": "MEM_ALLOC"
+      },
+      {
+        "name": "flProtect",
+        "type_name": "DWORD",
+        "enum_group": "PAGE_PROTECT"
+      }
+    ]
+  },
+  {
+    "name": "VirtualFreeEx",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpAddress",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "dwSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "dwFreeType",
+        "type_name": "DWORD",
+        "enum_group": "MEM_ALLOC"
+      }
+    ]
+  },
+  {
+    "name": "WriteProcessMemory",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpBaseAddress",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "lpBuffer",
+        "type_name": "LPCVOID"
+      },
+      {
+        "name": "nSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "lpNumberOfBytesWritten",
+        "type_name": "SIZE_T*"
+      }
+    ]
+  },
+  {
+    "name": "ReadProcessMemory",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpBaseAddress",
+        "type_name": "LPCVOID"
+      },
+      {
+        "name": "lpBuffer",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "nSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "lpNumberOfBytesRead",
+        "type_name": "SIZE_T*"
+      }
+    ]
+  },
+  {
+    "name": "CreateRemoteThread",
+    "return_type": "HANDLE",
+    "params": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpThreadAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "dwStackSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "lpStartAddress",
+        "type_name": "LPTHREAD_START_ROUTINE"
+      },
+      {
+        "name": "lpParameter",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "dwCreationFlags",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "lpThreadId",
+        "type_name": "LPDWORD"
+      }
+    ]
+  },
+  {
+    "name": "CreateRemoteThreadEx",
+    "return_type": "HANDLE",
+    "params": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpThreadAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "dwStackSize",
+        "type_name": "SIZE_T"
+      },
+      {
+        "name": "lpStartAddress",
+        "type_name": "LPTHREAD_START_ROUTINE"
+      },
+      {
+        "name": "lpParameter",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "dwCreationFlags",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "lpAttributeList",
+        "type_name": "LPPROC_THREAD_ATTRIBUTE_LIST"
+      },
+      {
+        "name": "lpThreadId",
+        "type_name": "LPDWORD"
+      }
+    ]
+  },
+  {
+    "name": "IsDebuggerPresent",
+    "return_type": "BOOL",
+    "params": []
+  },
+  {
+    "name": "CheckRemoteDebuggerPresent",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "pbDebuggerPresent",
+        "type_name": "PBOOL"
+      }
+    ]
+  },
+  {
+    "name": "OutputDebugStringA",
+    "return_type": "void",
+    "params": [
+      {
+        "name": "lpOutputString",
+        "type_name": "LPCSTR"
+      }
+    ]
+  },
+  {
+    "name": "OutputDebugStringW",
+    "return_type": "void",
+    "params": [
+      {
+        "name": "lpOutputString",
+        "type_name": "LPCWSTR"
+      }
+    ]
+  },
+  {
+    "name": "CreateToolhelp32Snapshot",
+    "return_type": "HANDLE",
+    "params": [
+      {
+        "name": "th32ProcessID",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "dwFlags",
+        "type_name": "DWORD",
+        "enum_group": "TH32CS"
+      }
+    ]
+  },
+  {
+    "name": "Process32FirstW",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hSnapshot",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lppe",
+        "type_name": "LPPROCESSENTRY32W"
+      }
+    ]
+  },
+  {
+    "name": "Process32NextW",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hSnapshot",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lppe",
+        "type_name": "LPPROCESSENTRY32W"
+      }
+    ]
+  },
+  {
+    "name": "CreateProcessA",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "lpApplicationName",
+        "type_name": "LPCSTR"
+      },
+      {
+        "name": "lpCommandLine",
+        "type_name": "LPSTR"
+      },
+      {
+        "name": "lpProcessAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "lpThreadAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "bInheritHandles",
+        "type_name": "BOOL"
+      },
+      {
+        "name": "lpEnvironment",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "lpCurrentDirectory",
+        "type_name": "LPCSTR"
+      },
+      {
+        "name": "lpStartupInfo",
+        "type_name": "LPSTARTUPINFOA"
+      },
+      {
+        "name": "lpProcessInformation",
+        "type_name": "LPPROCESS_INFORMATION"
+      },
+      {
+        "name": "dwCreationFlags",
+        "type_name": "DWORD",
+        "enum_group": "CREATION_FLAGS"
+      }
+    ]
+  },
+  {
+    "name": "CreateProcessW",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "lpApplicationName",
+        "type_name": "LPCWSTR"
+      },
+      {
+        "name": "lpCommandLine",
+        "type_name": "LPWSTR"
+      },
+      {
+        "name": "lpProcessAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "lpThreadAttributes",
+        "type_name": "LPSECURITY_ATTRIBUTES"
+      },
+      {
+        "name": "bInheritHandles",
+        "type_name": "BOOL"
+      },
+      {
+        "name": "lpEnvironment",
+        "type_name": "LPVOID"
+      },
+      {
+        "name": "lpCurrentDirectory",
+        "type_name": "LPCWSTR"
+      },
+      {
+        "name": "lpStartupInfo",
+        "type_name": "LPSTARTUPINFOW"
+      },
+      {
+        "name": "lpProcessInformation",
+        "type_name": "LPPROCESS_INFORMATION"
+      },
+      {
+        "name": "dwCreationFlags",
+        "type_name": "DWORD",
+        "enum_group": "CREATION_FLAGS"
+      }
+    ]
+  },
+  {
+    "name": "WaitForSingleObject",
+    "return_type": "DWORD",
+    "params": [
+      {
+        "name": "hHandle",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "dwMilliseconds",
+        "type_name": "DWORD"
+      }
+    ]
+  },
+  {
+    "name": "WaitForMultipleObjects",
+    "return_type": "DWORD",
+    "params": [
+      {
+        "name": "nCount",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "lpHandles",
+        "type_name": "const HANDLE*"
+      },
+      {
+        "name": "bWaitAll",
+        "type_name": "BOOL"
+      },
+      {
+        "name": "dwMilliseconds",
+        "type_name": "DWORD"
+      }
+    ]
+  },
+  {
+    "name": "Sleep",
+    "return_type": "void",
+    "params": [
+      {
+        "name": "dwMilliseconds",
+        "type_name": "DWORD"
+      }
+    ]
+  },
+  {
+    "name": "GetEnvironmentVariableA",
+    "return_type": "DWORD",
+    "params": [
+      {
+        "name": "lpName",
+        "type_name": "LPCSTR"
+      },
+      {
+        "name": "lpBuffer",
+        "type_name": "LPSTR"
+      },
+      {
+        "name": "nSize",
+        "type_name": "DWORD"
+      }
+    ]
+  },
+  {
+    "name": "GetTempPathA",
+    "return_type": "DWORD",
+    "params": [
+      {
+        "name": "nBufferLength",
+        "type_name": "DWORD"
+      },
+      {
+        "name": "lpBuffer",
+        "type_name": "LPSTR"
+      }
+    ]
+  },
+  {
+    "name": "GetSystemDirectoryA",
+    "return_type": "UINT",
+    "params": [
+      {
+        "name": "lpBuffer",
+        "type_name": "LPSTR"
+      },
+      {
+        "name": "uSize",
+        "type_name": "UINT"
+      }
+    ]
+  },
+  {
+    "name": "GetWindowsDirectoryA",
+    "return_type": "UINT",
+    "params": [
+      {
+        "name": "lpBuffer",
+        "type_name": "LPSTR"
+      },
+      {
+        "name": "uSize",
+        "type_name": "UINT"
+      }
+    ]
+  },
+  {
+    "name": "CopyFileA",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "lpExistingFileName",
+        "type_name": "LPCSTR"
+      },
+      {
+        "name": "lpNewFileName",
+        "type_name": "LPCSTR"
+      },
+      {
+        "name": "bFailIfExists",
+        "type_name": "BOOL"
+      }
+    ]
+  },
+  {
+    "name": "DeleteFileA",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "lpFileName",
+        "type_name": "LPCSTR"
+      }
+    ]
+  },
+  {
+    "name": "MoveFileA",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "lpExistingFileName",
+        "type_name": "LPCSTR"
+      },
+      {
+        "name": "lpNewFileName",
+        "type_name": "LPCSTR"
+      }
+    ]
+  },
+  {
+    "name": "GetModuleFileNameA",
+    "return_type": "DWORD",
+    "params": [
+      {
+        "name": "hModule",
+        "type_name": "HMODULE"
+      },
+      {
+        "name": "lpFilename",
+        "type_name": "LPSTR"
+      },
+      {
+        "name": "nSize",
+        "type_name": "DWORD"
+      }
+    ]
+  },
+  {
+    "name": "GetCommandLineA",
+    "return_type": "LPSTR",
+    "params": []
+  },
+  {
+    "name": "GetTickCount",
+    "return_type": "DWORD",
+    "params": []
+  },
+  {
+    "name": "GetTickCount64",
+    "return_type": "ULONGLONG",
+    "params": []
+  },
+  {
+    "name": "QueryPerformanceCounter",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "lpPerformanceCount",
+        "type_name": "LARGE_INTEGER*"
+      }
+    ]
+  },
+  {
+    "name": "GetLastError",
+    "return_type": "DWORD",
+    "params": []
+  },
+  {
+    "name": "SetLastError",
+    "return_type": "void",
+    "params": [
+      {
+        "name": "dwErrCode",
+        "type_name": "DWORD"
+      }
+    ]
+  },
+  {
+    "name": "ExitProcess",
+    "return_type": "void",
+    "params": [
+      {
+        "name": "uExitCode",
+        "type_name": "UINT"
+      }
+    ]
+  },
+  {
+    "name": "GetThreadContext",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hThread",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpContext",
+        "type_name": "LPCONTEXT"
+      }
+    ]
+  },
+  {
+    "name": "SetThreadContext",
+    "return_type": "BOOL",
+    "params": [
+      {
+        "name": "hThread",
+        "type_name": "HANDLE"
+      },
+      {
+        "name": "lpContext",
+        "type_name": "const CONTEXT*"
+      }
+    ]
+  },
+  {
+    "name": "ResumeThread",
+    "return_type": "DWORD",
+    "params": [
+      {
+        "name": "hThread",
+        "type_name": "HANDLE"
+      }
+    ]
+  },
+  {
+    "name": "SuspendThread",
+    "return_type": "DWORD",
+    "params": [
+      {
+        "name": "hThread",
+        "type_name": "HANDLE"
+      }
+    ]
+  }
+]

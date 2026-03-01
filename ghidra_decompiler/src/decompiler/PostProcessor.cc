@@ -140,8 +140,12 @@ std::string PostProcessor::structurize_control_flow(std::string c_code) {
 
 std::string PostProcessor::convert_while_to_for_struct(std::string c_code) {
     // Static regex objects — compiled once at first call (C++11 magic statics)
+    // Extended to handle optional casts: while ((int)var < N) or while (var < N)
     static const std::regex while_pat(
-        R"(^(\s*)while\s*\(\s*(\w+)\s*(<=|<|>=|>|!=|==)\s*([^)]+)\)\s*\{\s*$)");
+        R"(^(\s*)while\s*\(\s*(?:\(\s*\w+\s*\)\s*)?(\w+)\s*(<=|<|>=|>|!=|==)\s*([^)]+)\)\s*\{\s*$)");
+    // Also match cast in compound condition: while ((int)var op (int)expr)
+    static const std::regex while_pat_cast(
+        R"(^(\s*)while\s*\(\s*\(\s*\w+\s*\)\s*(\w+)\s*(<=|<|>=|>|!=|==)\s*([^)]+)\)\s*\{\s*$)");
     static const std::regex init_pat(R"(^(\s*)(\w+)\s*=\s*([^;]+);\s*$)");
     // Increment patterns — checked after compound-operator pass, so ++ / -- etc. are normalised
     static const std::regex inc_pp(R"(^(\s*)(\w+)\s*\+\+\s*;\s*$)");
@@ -166,7 +170,8 @@ std::string PostProcessor::convert_while_to_for_struct(std::string c_code) {
         any_changed = false;
         for (size_t i = 0; i < lines.size(); i++) {
             std::smatch wm;
-            if (!std::regex_match(lines[i], wm, while_pat)) continue;
+            if (!std::regex_match(lines[i], wm, while_pat) &&
+                !std::regex_match(lines[i], wm, while_pat_cast)) continue;
 
             std::string w_indent = wm[1].str();
             std::string w_var   = wm[2].str();

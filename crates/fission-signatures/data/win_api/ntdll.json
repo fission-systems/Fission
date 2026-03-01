@@ -1,0 +1,188 @@
+[
+  {
+    "name": "NtAllocateVirtualMemory",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "BaseAddress", "type_name": "PVOID*" },
+      { "name": "ZeroBits", "type_name": "ULONG_PTR" },
+      { "name": "RegionSize", "type_name": "PSIZE_T" },
+      { "name": "AllocationType", "type_name": "ULONG" },
+      { "name": "Protect", "type_name": "ULONG" }
+    ]
+  },
+  {
+    "name": "NtProtectVirtualMemory",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "BaseAddress", "type_name": "PVOID*" },
+      { "name": "RegionSize", "type_name": "PSIZE_T" },
+      { "name": "NewProtect", "type_name": "ULONG" },
+      { "name": "OldProtect", "type_name": "PULONG" }
+    ]
+  },
+  {
+    "name": "NtWriteVirtualMemory",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "BaseAddress", "type_name": "PVOID" },
+      { "name": "Buffer", "type_name": "PVOID" },
+      { "name": "NumberOfBytesToWrite", "type_name": "SIZE_T" },
+      { "name": "NumberOfBytesWritten", "type_name": "PSIZE_T" }
+    ]
+  },
+  {
+    "name": "NtReadVirtualMemory",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "BaseAddress", "type_name": "PVOID" },
+      { "name": "Buffer", "type_name": "PVOID" },
+      { "name": "NumberOfBytesToRead", "type_name": "SIZE_T" },
+      { "name": "NumberOfBytesRead", "type_name": "PSIZE_T" }
+    ]
+  },
+  {
+    "name": "NtCreateThreadEx",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ThreadHandle", "type_name": "PHANDLE" },
+      { "name": "DesiredAccess", "type_name": "ACCESS_MASK" },
+      { "name": "ObjectAttributes", "type_name": "POBJECT_ATTRIBUTES" },
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "StartRoutine", "type_name": "PVOID" },
+      { "name": "Argument", "type_name": "PVOID" },
+      { "name": "CreateFlags", "type_name": "ULONG" },
+      { "name": "ZeroBits", "type_name": "SIZE_T" },
+      { "name": "StackSize", "type_name": "SIZE_T" },
+      { "name": "MaximumStackSize", "type_name": "SIZE_T" },
+      { "name": "AttributeList", "type_name": "PVOID" }
+    ]
+  },
+  {
+    "name": "NtQueryInformationProcess",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "ProcessInformationClass", "type_name": "PROCESSINFOCLASS" },
+      { "name": "ProcessInformation", "type_name": "PVOID" },
+      { "name": "ProcessInformationLength", "type_name": "ULONG" },
+      { "name": "ReturnLength", "type_name": "PULONG" }
+    ]
+  },
+  {
+    "name": "NtQuerySystemInformation",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "SystemInformationClass", "type_name": "SYSTEM_INFORMATION_CLASS" },
+      { "name": "SystemInformation", "type_name": "PVOID" },
+      { "name": "SystemInformationLength", "type_name": "ULONG" },
+      { "name": "ReturnLength", "type_name": "PULONG" }
+    ]
+  },
+  {
+    "name": "LdrLoadDll",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "PathToFile", "type_name": "PWSTR" },
+      { "name": "Flags", "type_name": "PULONG" },
+      { "name": "ModuleFileName", "type_name": "PUNICODE_STRING" },
+      { "name": "ModuleHandle", "type_name": "PHANDLE" }
+    ]
+  },
+  {
+    "name": "NtOpenProcess",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "PHANDLE" },
+      { "name": "DesiredAccess", "type_name": "ACCESS_MASK" },
+      { "name": "ObjectAttributes", "type_name": "POBJECT_ATTRIBUTES" },
+      { "name": "ClientId", "type_name": "PCLIENT_ID" }
+    ]
+  },
+  {
+    "name": "NtCreateSection",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "SectionHandle", "type_name": "PHANDLE" },
+      { "name": "DesiredAccess", "type_name": "ACCESS_MASK" },
+      { "name": "ObjectAttributes", "type_name": "POBJECT_ATTRIBUTES" },
+      { "name": "MaximumSize", "type_name": "PLARGE_INTEGER" },
+      { "name": "SectionPageProtection", "type_name": "ULONG" },
+      { "name": "AllocationAttributes", "type_name": "ULONG" },
+      { "name": "FileHandle", "type_name": "HANDLE" }
+    ]
+  },
+  {
+    "name": "NtMapViewOfSection",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "SectionHandle", "type_name": "HANDLE" },
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "BaseAddress", "type_name": "PVOID*" },
+      { "name": "ZeroBits", "type_name": "ULONG_PTR" },
+      { "name": "CommitSize", "type_name": "SIZE_T" },
+      { "name": "SectionOffset", "type_name": "PLARGE_INTEGER" },
+      { "name": "ViewSize", "type_name": "PSIZE_T" },
+      { "name": "InheritDisposition", "type_name": "SECTION_INHERIT" },
+      { "name": "AllocationType", "type_name": "ULONG" },
+      { "name": "Win32Protect", "type_name": "ULONG" }
+    ]
+  },
+  {
+    "name": "NtUnmapViewOfSection",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "BaseAddress", "type_name": "PVOID" }
+    ]
+  },
+  {
+    "name": "NtQueueApcThread",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ThreadHandle", "type_name": "HANDLE" },
+      { "name": "ApcRoutine", "type_name": "PPS_APC_ROUTINE" },
+      { "name": "ApcArgument1", "type_name": "PVOID" },
+      { "name": "ApcArgument2", "type_name": "PVOID" },
+      { "name": "ApcArgument3", "type_name": "PVOID" }
+    ]
+  },
+  {
+    "name": "NtClose",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "Handle", "type_name": "HANDLE" }
+    ]
+  },
+  {
+    "name": "NtFreeVirtualMemory",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ProcessHandle", "type_name": "HANDLE" },
+      { "name": "BaseAddress", "type_name": "PVOID*" },
+      { "name": "RegionSize", "type_name": "PSIZE_T" },
+      { "name": "FreeType", "type_name": "ULONG" }
+    ]
+  },
+  {
+    "name": "RtlInitUnicodeString",
+    "return_type": "void",
+    "params": [
+      { "name": "DestinationString", "type_name": "PUNICODE_STRING" },
+      { "name": "SourceString", "type_name": "PCWSTR" }
+    ]
+  },
+  {
+    "name": "NtSetInformationThread",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "ThreadHandle", "type_name": "HANDLE" },
+      { "name": "ThreadInformationClass", "type_name": "THREADINFOCLASS" },
+      { "name": "ThreadInformation", "type_name": "PVOID" },
+      { "name": "ThreadInformationLength", "type_name": "ULONG" }
+    ]
+  }
+]

@@ -1,6 +1,10 @@
 use crate::cli::args::OneShotArgs;
+use crate::cli::oneshot::common::{
+    apply_profile, init_decompiler, load_binary_into_decompiler, resolve_compiler_id,
+    resolve_profile,
+};
 use crate::cli::output::OutputSilencer;
-use fission_core::find_sla_dir;
+use fission_analysis::analysis::decomp::postprocess::PostProcessor;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::collections::BTreeMap;
@@ -58,262 +62,100 @@ fn strip_inferred_structs(code: &str) -> String {
     result
 }
 
-pub(super) fn run_decompilation(
-    cli: &OneShotArgs,
-    binary: &LoadedBinary,
-    binary_data: &[u8],
-) -> io::Result<()> {
-    // Initialize decompiler
-    let sla_dir = find_sla_dir();
-
-    if cli.verbose {
-        eprintln!("[*] Initializing native decompiler...");
+fn register_memory_sections(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
+    if verbose {
+        eprintln!("[*] Registering {} memory sections...", binary.sections.len());
     }
 
-    let mut decomp = {
-        let _silencer = OutputSilencer::new_if(!cli.verbose);
-        match DecompilerNative::new(&sla_dir) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("Error: Failed to create decompiler: {}", e);
-                std::process::exit(1);
+    let _silencer = OutputSilencer::new_if(!verbose);
+    for section in &binary.sections {
+        if let Err(e) = decomp.add_memory_block(
+            &section.name,
+            section.virtual_address,
+            section.virtual_size,
+            section.file_offset,
+            section.file_size,
+            section.is_executable,
+            section.is_writable,
+        ) && verbose
+        {
+            eprintln!("[!] Failed to register section {}: {}", section.name, e);
+        }
+    }
+}
+
+fn register_known_functions(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
+    if verbose {
+        eprintln!("[*] Registering {} known functions...", binary.functions.len());
+    }
+
+    let _silencer = OutputSilencer::new_if(!verbose);
+    let mut by_addr: BTreeMap<u64, &FunctionInfo> = BTreeMap::new();
+    for func in &binary.functions {
+        if func.address == 0 || func.name.is_empty() {
+            continue;
+        }
+        match by_addr.get(&func.address) {
+            None => {
+                by_addr.insert(func.address, func);
             }
-        }
-    };
-
-    // Apply one-shot profile before binary load/decompilation.
-    let selected_profile = cli.profile.as_deref().unwrap_or("balanced");
-    match selected_profile.to_ascii_lowercase().as_str() {
-        "quality" => {
-            decomp.set_feature("infer_pointers", true);
-            decomp.set_feature("analyze_loops", true);
-            decomp.set_feature("readonly_propagate", true);
-        }
-        "speed" => {
-            decomp.set_feature("infer_pointers", false);
-            decomp.set_feature("analyze_loops", false);
-            decomp.set_feature("readonly_propagate", false);
-        }
-        "balanced" => {
-            decomp.set_feature("infer_pointers", true);
-            decomp.set_feature("analyze_loops", false);
-            decomp.set_feature("readonly_propagate", true);
-        }
-        other => {
-            // Show inline so user always sees it, even without RUST_LOG set
-            eprintln!("[!] Unknown --profile '{}', using balanced (quality|speed|balanced)", other);
-            warn!(profile = other, "unknown decompilation profile, using balanced");
-            decomp.set_feature("infer_pointers", true);
-            decomp.set_feature("analyze_loops", false);
-            decomp.set_feature("readonly_propagate", true);
-        }
-    }
-
-    if cli.verbose {
-        eprintln!("[*] Decompilation profile = {}", selected_profile);
-    }
-
-    // Load binary
-    {
-        let _silencer = OutputSilencer::new_if(!cli.verbose);
-        // Allow explicit compiler override for deterministic one-shot runs.
-        let compiler_id = if let Some(user_compiler) = cli.compiler_id.as_deref() {
-            Some(match user_compiler.to_ascii_lowercase().as_str() {
-                "windows" => "windows",
-                "gcc" => "gcc",
-                "clang" => "clang",
-                "default" => "default",
-                "auto" => {
-                    let detection = fission_loader::detect(binary);
-                    let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
-                    detection
-                        .compiler()
-                        .map(|d| match d.name.to_lowercase().as_str() {
-                            "microsoft visual c++" | "msvc" => "windows",
-                            "gcc" | "mingw" => {
-                                if is_pe {
-                                    "windows"
-                                } else {
-                                    "gcc"
-                                }
-                            }
-                            "clang" => "clang",
-                            _ => "default",
-                        })
-                        .unwrap_or("default")
-                }
-                _ => {
-                    eprintln!("[!] Unknown --compiler-id '{}', falling back to auto detection", user_compiler);
-                    warn!(compiler_id = user_compiler, "unknown compiler-id, falling back to auto detection");
-                    let detection = fission_loader::detect(binary);
-                    let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
-                    detection
-                        .compiler()
-                        .map(|d| match d.name.to_lowercase().as_str() {
-                            "microsoft visual c++" | "msvc" => "windows",
-                            "gcc" | "mingw" => {
-                                if is_pe {
-                                    "windows"
-                                } else {
-                                    "gcc"
-                                }
-                            }
-                            "clang" => "clang",
-                            _ => "default",
-                        })
-                        .unwrap_or("default")
-                }
-            })
-        } else {
-            let detection = fission_loader::detect(binary);
-            let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
-            detection
-                .compiler()
-                .map(|d| match d.name.to_lowercase().as_str() {
-                    "microsoft visual c++" | "msvc" => "windows",
-                    "gcc" | "mingw" => {
-                        if is_pe {
-                            "windows"
-                        } else {
-                            "gcc"
-                        }
-                    }
-                    "clang" => "clang",
-                    _ => "default",
-                })
-        };
-
-        if cli.verbose {
-            eprintln!(
-                "[*] Decompiler compiler_id = {}",
-                compiler_id.unwrap_or("default")
-            );
-        }
-
-        if let Err(e) = decomp.load_binary(
-            binary_data,
-            binary.image_base,
-            binary.is_64bit,
-            Some(&binary.arch_spec),
-            compiler_id,
-        ) {
-            eprintln!("Error: Failed to load binary: {}", e);
-            std::process::exit(1);
-        }
-    }
-
-    // Add IAT symbols
-    decomp.add_symbols(&binary.iat_symbols);
-    decomp.add_global_symbols(&binary.global_symbols);
-    decomp.set_symbol_provider(&binary.functions, &binary.global_symbols, &binary.sections);
-
-    // Add memory blocks (sections) to improve analysis
-    if cli.verbose {
-        eprintln!(
-            "[*] Registering {} memory sections...",
-            binary.sections.len()
-        );
-    }
-
-    {
-        let _silencer = OutputSilencer::new_if(!cli.verbose);
-        for section in &binary.sections {
-            if let Err(e) = decomp.add_memory_block(
-                &section.name,
-                section.virtual_address,
-                section.virtual_size,
-                section.file_offset,
-                section.file_size,
-                section.is_executable,
-                section.is_writable,
-            ) && cli.verbose
-            {
-                eprintln!("[!] Failed to register section {}: {}", section.name, e);
-            }
-        }
-    }
-
-    // Add all known functions to improve decompilation quality
-    if cli.verbose {
-        eprintln!(
-            "[*] Registering {} known functions...",
-            binary.functions.len()
-        );
-    }
-
-    {
-        let _silencer = OutputSilencer::new_if(!cli.verbose);
-        let mut by_addr: BTreeMap<u64, &FunctionInfo> = BTreeMap::new();
-        for func in &binary.functions {
-            if func.address == 0 || func.name.is_empty() {
-                continue;
-            }
-            match by_addr.get(&func.address) {
-                None => {
+            Some(current) => {
+                if prefer_function_name(&func.name, &current.name) {
                     by_addr.insert(func.address, func);
                 }
-                Some(current) => {
-                    if prefer_function_name(&func.name, &current.name) {
-                        by_addr.insert(func.address, func);
-                    }
-                }
-            }
-        }
-
-        for func in by_addr.values() {
-            if func.address != 0
-                && !func.name.is_empty()
-                && let Err(e) = decomp.add_function(func.address, Some(&func.name))
-                && cli.verbose
-            {
-                eprintln!(
-                    "[!] Failed to register function at 0x{:x}: {}",
-                    func.address, e
-                );
             }
         }
     }
 
-    // Try to load FID databases if available (load all matching ones)
+    for func in by_addr.values() {
+        if func.address != 0
+            && !func.name.is_empty()
+            && let Err(e) = decomp.add_function(func.address, Some(&func.name))
+            && verbose
+        {
+            eprintln!(
+                "[!] Failed to register function at 0x{:x}: {}",
+                func.address, e
+            );
+        }
+    }
+}
+
+fn load_fid_databases(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
     let target_suffix = if binary.is_64bit {
         "_x64.fidbf"
     } else {
         "_x86.fidbf"
     };
 
-    // Build comprehensive FID database list
-    // Primary: utils/signatures/fid/ (unified location)
     let fid_paths = vec![
-        // MSVC databases
         format!("utils/signatures/fid/vs2019{}", target_suffix),
         format!("utils/signatures/fid/vs2017{}", target_suffix),
         format!("utils/signatures/fid/vs2015{}", target_suffix),
         format!("utils/signatures/fid/vs2012{}", target_suffix),
         format!("utils/signatures/fid/vsOlder{}", target_suffix),
-        // GCC/MinGW databases
         format!("utils/signatures/fid/gcc13{}", target_suffix),
         format!("utils/signatures/fid/gcc12{}", target_suffix),
         format!("utils/signatures/fid/gcc11{}", target_suffix),
         format!("utils/signatures/fid/mingw{}", target_suffix),
     ];
 
-    // Load all available FID databases for better matching coverage
     let mut fid_loaded_count = 0;
     for fid_path in &fid_paths {
         if let Ok(full_path) = std::env::current_dir() {
             let fid_full = full_path.join(fid_path);
             if fid_full.exists() {
-                if cli.verbose {
+                if verbose {
                     eprintln!("[*] Loading FID database: {}", fid_full.display());
                 }
-                let _silencer = OutputSilencer::new_if(!cli.verbose);
+                let _silencer = OutputSilencer::new_if(!verbose);
                 if let Err(e) = decomp.load_fid_database(&fid_full.to_string_lossy()) {
-                    if cli.verbose {
+                    if verbose {
                         eprintln!("[!] Warning: Failed to load FID database: {}", e);
                     }
                 } else {
                     fid_loaded_count += 1;
-                    if cli.verbose {
+                    if verbose {
                         eprintln!("[✓] FID database loaded");
                     }
                 }
@@ -321,22 +163,20 @@ pub(super) fn run_decompilation(
         }
     }
 
-    if cli.verbose && fid_loaded_count > 0 {
+    if verbose && fid_loaded_count > 0 {
         eprintln!(
             "[✓] Loaded {} FID database(s) for function matching",
             fid_loaded_count
         );
     }
+}
 
-    if cli.verbose {
-        eprintln!("[✓] Decompiler ready");
-    }
-
-    // Collect functions to decompile and deduplicate by address.
-    // Some loaders may expose multiple aliases for a single address
-    // (e.g., sub_xxx + exported symbol), which can trigger duplicate
-    // decompile attempts and noisy recursive-guard errors.
-    let functions: Vec<&FunctionInfo> = if let Some(addr) = cli.address {
+fn collect_target_functions<'a>(
+    binary: &'a LoadedBinary,
+    address: Option<u64>,
+    all: bool,
+) -> Vec<&'a FunctionInfo> {
+    if let Some(addr) = address {
         let mut best: Option<&FunctionInfo> = None;
         for func in &binary.functions {
             if func.address != addr {
@@ -351,8 +191,10 @@ pub(super) fn run_decompilation(
                 }
             }
         }
-        best.into_iter().collect()
-    } else if cli.all {
+        return best.into_iter().collect();
+    }
+
+    if all {
         let mut by_addr: BTreeMap<u64, &FunctionInfo> = BTreeMap::new();
         for func in binary.functions.iter().filter(|f| !f.is_import) {
             match by_addr.get(&func.address) {
@@ -366,10 +208,70 @@ pub(super) fn run_decompilation(
                 }
             }
         }
-        by_addr.into_values().collect()
-    } else {
-        vec![]
-    };
+        return by_addr.into_values().collect();
+    }
+
+    vec![]
+}
+
+pub(super) fn run_decompilation(
+    cli: &OneShotArgs,
+    binary: &LoadedBinary,
+    binary_data: &[u8],
+) -> io::Result<()> {
+    let mut decomp = init_decompiler(cli.verbose);
+
+    // Apply one-shot profile before binary load/decompilation.
+    let (selected_profile, unknown_profile) = resolve_profile(cli.profile.as_deref());
+    if let Some(other) = unknown_profile {
+        eprintln!(
+            "[!] Unknown --profile '{}', using balanced (quality|speed|balanced)",
+            other
+        );
+        warn!(profile = other, "unknown decompilation profile, using balanced");
+    }
+    apply_profile(&mut decomp, selected_profile);
+
+    if cli.verbose {
+        eprintln!("[*] Decompilation profile = {}", selected_profile);
+    }
+
+    {
+        let (compiler_id, unknown_compiler) = resolve_compiler_id(binary, cli.compiler_id.as_deref());
+        if let Some(user_compiler) = unknown_compiler {
+            eprintln!(
+                "[!] Unknown --compiler-id '{}', falling back to auto detection",
+                user_compiler
+            );
+            warn!(compiler_id = user_compiler, "unknown compiler-id, falling back to auto detection");
+        }
+        if cli.verbose {
+            eprintln!(
+                "[*] Decompiler compiler_id = {}",
+                compiler_id.unwrap_or("default")
+            );
+        }
+        load_binary_into_decompiler(&mut decomp, binary, binary_data, compiler_id, cli.verbose);
+    }
+
+    // Add IAT symbols
+    decomp.add_symbols(&binary.iat_symbols);
+    decomp.add_global_symbols(&binary.global_symbols);
+    decomp.set_symbol_provider(&binary.functions, &binary.global_symbols, &binary.sections);
+
+    register_memory_sections(&mut decomp, binary, cli.verbose);
+    register_known_functions(&mut decomp, binary, cli.verbose);
+    load_fid_databases(&mut decomp, binary, cli.verbose);
+
+    if cli.verbose {
+        eprintln!("[✓] Decompiler ready");
+    }
+
+    // Collect functions to decompile and deduplicate by address.
+    // Some loaders may expose multiple aliases for a single address
+    // (e.g., sub_xxx + exported symbol), which can trigger duplicate
+    // decompile attempts and noisy recursive-guard errors.
+    let functions = collect_target_functions(binary, cli.address, cli.all);
 
     if functions.is_empty() && cli.address.is_some() {
         let addr = cli.address.expect("address should be Some");
@@ -395,6 +297,10 @@ pub(super) fn run_decompilation(
         let _silencer = OutputSilencer::new_if(!cli.verbose);
         match decomp.decompile(func.address) {
             Ok(code) => {
+                // Apply Rust-side post-processing (switch reconstruction, while→for, etc.)
+                let postprocessor = PostProcessor::new()
+                    .with_inferred_types(binary.inferred_types.clone());
+                let code = postprocessor.process(&code);
                 // Apply output filters
                 let mut filtered = code.clone();
                 if effective_no_warnings {
@@ -477,6 +383,9 @@ pub(super) fn decompile_and_output(
     let _silencer = OutputSilencer::new_if(!cli.verbose);
     match decomp.decompile(addr) {
         Ok(code) => {
+            // Apply Rust-side post-processing
+            let postprocessor = PostProcessor::new();
+            let code = postprocessor.process(&code);
             // Apply output filters
             let mut filtered = code.clone();
             if effective_no_warnings {

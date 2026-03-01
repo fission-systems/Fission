@@ -1,0 +1,65 @@
+[
+  {
+    "name": "BCryptOpenAlgorithmProvider",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "phAlgorithm", "type_name": "BCRYPT_ALG_HANDLE*" },
+      { "name": "pszAlgId", "type_name": "LPCWSTR" },
+      { "name": "pszImplementation", "type_name": "LPCWSTR" },
+      { "name": "dwFlags", "type_name": "ULONG" }
+    ]
+  },
+  {
+    "name": "BCryptGenerateSymmetricKey",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "hAlgorithm", "type_name": "BCRYPT_ALG_HANDLE" },
+      { "name": "phKey", "type_name": "BCRYPT_KEY_HANDLE*" },
+      { "name": "pbKeyObject", "type_name": "PUCHAR" },
+      { "name": "cbKeyObject", "type_name": "ULONG" },
+      { "name": "pbSecret", "type_name": "PUCHAR" },
+      { "name": "cbSecret", "type_name": "ULONG" },
+      { "name": "dwFlags", "type_name": "ULONG" }
+    ]
+  },
+  {
+    "name": "BCryptEncrypt",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "hKey", "type_name": "BCRYPT_KEY_HANDLE" },
+      { "name": "pbInput", "type_name": "PUCHAR" },
+      { "name": "cbInput", "type_name": "ULONG" },
+      { "name": "pPaddingInfo", "type_name": "VOID*" },
+      { "name": "pbIV", "type_name": "PUCHAR" },
+      { "name": "cbIV", "type_name": "ULONG" },
+      { "name": "pbOutput", "type_name": "PUCHAR" },
+      { "name": "cbOutput", "type_name": "ULONG" },
+      { "name": "pcbResult", "type_name": "ULONG*" },
+      { "name": "dwFlags", "type_name": "ULONG" }
+    ]
+  },
+  {
+    "name": "BCryptDecrypt",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "hKey", "type_name": "BCRYPT_KEY_HANDLE" },
+      { "name": "pbInput", "type_name": "PUCHAR" },
+      { "name": "cbInput", "type_name": "ULONG" },
+      { "name": "pPaddingInfo", "type_name": "VOID*" },
+      { "name": "pbIV", "type_name": "PUCHAR" },
+      { "name": "cbIV", "type_name": "ULONG" },
+      { "name": "pbOutput", "type_name": "PUCHAR" },
+      { "name": "cbOutput", "type_name": "ULONG" },
+      { "name": "pcbResult", "type_name": "ULONG*" },
+      { "name": "dwFlags", "type_name": "ULONG" }
+    ]
+  },
+  {
+    "name": "BCryptCloseAlgorithmProvider",
+    "return_type": "NTSTATUS",
+    "params": [
+      { "name": "hAlgorithm", "type_name": "BCRYPT_ALG_HANDLE" },
+      { "name": "dwFlags", "type_name": "ULONG" }
+    ]
+  }
+]

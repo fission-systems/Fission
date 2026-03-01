@@ -5,6 +5,8 @@
 
 mod binary_info;
 #[cfg(feature = "native_decomp")]
+mod common;
+#[cfg(feature = "native_decomp")]
 mod cfg;
 #[cfg(feature = "native_decomp")]
 mod decompile;
