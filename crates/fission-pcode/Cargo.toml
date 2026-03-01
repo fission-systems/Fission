@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "P-code IR and optimizer for Fission decompiler"
-license = "MIT"
 repository = "https://github.com/sjkim1127/Fission"
 keywords = ["ir", "pcode", "optimizer", "decompiler"]
 categories = ["development-tools"]

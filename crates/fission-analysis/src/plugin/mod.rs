@@ -9,9 +9,10 @@ pub mod api;
 pub mod hooks;
 pub mod manager;
 pub mod module;
-pub mod traits;
+
+// Re-export core plugin traits directly (no wrapper module needed)
+pub use fission_core::plugin::traits::{self, FissionPlugin, PluginAPI as CorePluginAPI, PluginContext};
 
 pub use api::PluginAPI;
 pub use hooks::{FissionEvent, FissionEventType, HookPriority, PluginHook};
 pub use manager::PluginManager;
-pub use traits::{FissionPlugin, PluginContext};

@@ -93,3 +93,7 @@ scripts/**/*.pyc
 *.backup
 *.cache/
 ghidra_decompiler/.cache/
+
+# Benchmark results (criterion output)
+benchmark_results/
+**/benchmark_results/

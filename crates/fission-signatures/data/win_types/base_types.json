@@ -1,0 +1,198 @@
+[
+  {
+    "name": "BYTE",
+    "size_32": 1,
+    "size_64": 1,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "WORD",
+    "size_32": 2,
+    "size_64": 2,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "DWORD",
+    "size_32": 4,
+    "size_64": 4,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "QWORD",
+    "size_32": 8,
+    "size_64": 8,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "BOOL",
+    "size_32": 4,
+    "size_64": 4,
+    "is_pointer": false,
+    "is_signed": true
+  },
+  {
+    "name": "LONG",
+    "size_32": 4,
+    "size_64": 4,
+    "is_pointer": false,
+    "is_signed": true
+  },
+  {
+    "name": "ULONG",
+    "size_32": 4,
+    "size_64": 4,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "INT",
+    "size_32": 4,
+    "size_64": 4,
+    "is_pointer": false,
+    "is_signed": true
+  },
+  {
+    "name": "UINT",
+    "size_32": 4,
+    "size_64": 4,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "CHAR",
+    "size_32": 1,
+    "size_64": 1,
+    "is_pointer": false,
+    "is_signed": true
+  },
+  {
+    "name": "WCHAR",
+    "size_32": 2,
+    "size_64": 2,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "HANDLE",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "PVOID",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "LPVOID",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "LPSTR",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "LPCSTR",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "LPWSTR",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "LPCWSTR",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "SIZE_T",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "ULONG_PTR",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": false,
+    "is_signed": false
+  },
+  {
+    "name": "HMODULE",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "HWND",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "HINSTANCE",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "HKEY",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "HFILE",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "HGLOBAL",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
+    "name": "NTSTATUS",
+    "size_32": 4,
+    "size_64": 4,
+    "is_pointer": false,
+    "is_signed": true
+  },
+  {
+    "name": "SECURITY_STATUS",
+    "size_32": 4,
+    "size_64": 4,
+    "is_pointer": false,
+    "is_signed": true
+  }
+]

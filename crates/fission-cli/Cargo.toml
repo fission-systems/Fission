@@ -5,7 +5,6 @@ edition = "2024"
 build = "build.rs"
 authors = ["Fission Dev Team"]
 description = "Fission CLI and entrypoint"
-license = "MIT"
 repository = "https://github.com/sjkim1127/Fission"
 readme = "../../README.md"
 keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Function signature database for Fission"
-license = "MIT"
 repository = "https://github.com/sjkim1127/Fission"
 keywords = ["signatures", "windows-api", "msvc"]
 categories = ["development-tools"]

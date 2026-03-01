@@ -21,49 +21,12 @@ pub struct ParamInfo {
     pub enum_group: Option<String>,
 }
 
-impl ParamInfo {
-    pub fn new(name: &str, type_name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            type_name: type_name.to_string(),
-            enum_group: None,
-        }
-    }
-
-    pub fn with_enum(name: &str, type_name: &str, group: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            type_name: type_name.to_string(),
-            enum_group: Some(group.to_string()),
-        }
-    }
-}
-
 /// Function signature with parameter and return types
 #[derive(Debug, Clone)]
 pub struct ApiSignature {
     pub name: String,
     pub return_type: String,
     pub params: Vec<ParamInfo>,
-}
-
-impl ApiSignature {
-    pub fn new(name: &str, ret: &str, params: &[(&str, &str)]) -> Self {
-        Self {
-            name: name.to_string(),
-            return_type: ret.to_string(),
-            params: params.iter().map(|(n, t)| ParamInfo::new(n, t)).collect(),
-        }
-    }
-
-    /// Create signature with enum groups for specific parameters
-    pub fn with_enums(name: &str, ret: &str, params: Vec<ParamInfo>) -> Self {
-        Self {
-            name: name.to_string(),
-            return_type: ret.to_string(),
-            params,
-        }
-    }
 }
 
 /// Windows API Signature Database

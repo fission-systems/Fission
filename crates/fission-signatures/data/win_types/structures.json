@@ -1,0 +1,3787 @@
+[
+  {
+    "name": "UNICODE_STRING",
+    "size_32": 8,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "Length",
+        "type_name": "USHORT",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "MaximumLength",
+        "type_name": "USHORT",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Buffer",
+        "type_name": "PWSTR",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "LIST_ENTRY",
+    "size_32": 8,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "Flink",
+        "type_name": "PLIST_ENTRY",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "Blink",
+        "type_name": "PLIST_ENTRY",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "OVERLAPPED",
+    "size_32": 20,
+    "size_64": 32,
+    "fields": [
+      {
+        "name": "Internal",
+        "type_name": "ULONG_PTR",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "InternalHigh",
+        "type_name": "ULONG_PTR",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "Offset",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "OffsetHigh",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 20,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "hEvent",
+        "type_name": "HANDLE",
+        "offset_32": 16,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "SECURITY_ATTRIBUTES",
+    "size_32": 12,
+    "size_64": 24,
+    "fields": [
+      {
+        "name": "nLength",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "lpSecurityDescriptor",
+        "type_name": "LPVOID",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "bInheritHandle",
+        "type_name": "BOOL",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "STARTUPINFOW",
+    "size_32": 68,
+    "size_64": 104,
+    "fields": [
+      {
+        "name": "cb",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "lpReserved",
+        "type_name": "LPWSTR",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "lpDesktop",
+        "type_name": "LPWSTR",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "lpTitle",
+        "type_name": "LPWSTR",
+        "offset_32": 12,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "dwX",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwY",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 36,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwXSize",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwYSize",
+        "type_name": "DWORD",
+        "offset_32": 28,
+        "offset_64": 44,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwXCountChars",
+        "type_name": "DWORD",
+        "offset_32": 32,
+        "offset_64": 48,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwYCountChars",
+        "type_name": "DWORD",
+        "offset_32": 36,
+        "offset_64": 52,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwFillAttribute",
+        "type_name": "DWORD",
+        "offset_32": 40,
+        "offset_64": 56,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwFlags",
+        "type_name": "DWORD",
+        "offset_32": 44,
+        "offset_64": 60,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "wShowWindow",
+        "type_name": "WORD",
+        "offset_32": 48,
+        "offset_64": 64,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "cbReserved2",
+        "type_name": "WORD",
+        "offset_32": 50,
+        "offset_64": 66,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "lpReserved2",
+        "type_name": "LPBYTE",
+        "offset_32": 52,
+        "offset_64": 72,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "hStdInput",
+        "type_name": "HANDLE",
+        "offset_32": 56,
+        "offset_64": 80,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "hStdOutput",
+        "type_name": "HANDLE",
+        "offset_32": 60,
+        "offset_64": 88,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "hStdError",
+        "type_name": "HANDLE",
+        "offset_32": 64,
+        "offset_64": 96,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "PROCESS_INFORMATION",
+    "size_32": 16,
+    "size_64": 24,
+    "fields": [
+      {
+        "name": "hProcess",
+        "type_name": "HANDLE",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "hThread",
+        "type_name": "HANDLE",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "dwProcessId",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwThreadId",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 20,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "FILETIME",
+    "size_32": 8,
+    "size_64": 8,
+    "fields": [
+      {
+        "name": "dwLowDateTime",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwHighDateTime",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "GUID",
+    "size_32": 16,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "Data1",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Data2",
+        "type_name": "WORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Data3",
+        "type_name": "WORD",
+        "offset_32": 6,
+        "offset_64": 6,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Data4",
+        "type_name": "BYTE[8]",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 8,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "CRITICAL_SECTION",
+    "size_32": 24,
+    "size_64": 40,
+    "fields": [
+      {
+        "name": "DebugInfo",
+        "type_name": "PRTL_CRITICAL_SECTION_DEBUG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "LockCount",
+        "type_name": "LONG",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "RecursionCount",
+        "type_name": "LONG",
+        "offset_32": 8,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "OwningThread",
+        "type_name": "HANDLE",
+        "offset_32": 12,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "LockSemaphore",
+        "type_name": "HANDLE",
+        "offset_32": 16,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "SpinCount",
+        "type_name": "ULONG_PTR",
+        "offset_32": 20,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_DOS_HEADER",
+    "size_32": 64,
+    "size_64": 64,
+    "fields": [
+      {
+        "name": "e_magic",
+        "type_name": "WORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "e_cblp",
+        "type_name": "WORD",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "e_cp",
+        "type_name": "WORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "e_lfanew",
+        "type_name": "LONG",
+        "offset_32": 60,
+        "offset_64": 60,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "POINT",
+    "size_32": 8,
+    "size_64": 8,
+    "fields": [
+      {
+        "name": "x",
+        "type_name": "LONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "y",
+        "type_name": "LONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "RECT",
+    "size_32": 16,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "left",
+        "type_name": "LONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "top",
+        "type_name": "LONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "right",
+        "type_name": "LONG",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "bottom",
+        "type_name": "LONG",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "MSG",
+    "size_32": 28,
+    "size_64": 48,
+    "fields": [
+      {
+        "name": "hwnd",
+        "type_name": "HWND",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "message",
+        "type_name": "UINT",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "wParam",
+        "type_name": "WPARAM",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "lParam",
+        "type_name": "LPARAM",
+        "offset_32": 12,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "time",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "pt",
+        "type_name": "POINT",
+        "offset_32": 20,
+        "offset_64": 36,
+        "size_32": 8,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "MEMORY_BASIC_INFORMATION",
+    "size_32": 28,
+    "size_64": 48,
+    "fields": [
+      {
+        "name": "BaseAddress",
+        "type_name": "PVOID",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "AllocationBase",
+        "type_name": "PVOID",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "AllocationProtect",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "RegionSize",
+        "type_name": "SIZE_T",
+        "offset_32": 12,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "State",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Protect",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 36,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Type",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "SYSTEM_INFO",
+    "size_32": 36,
+    "size_64": 48,
+    "fields": [
+      {
+        "name": "wProcessorArchitecture",
+        "type_name": "WORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "wReserved",
+        "type_name": "WORD",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "dwPageSize",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "lpMinimumApplicationAddress",
+        "type_name": "LPVOID",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "lpMaximumApplicationAddress",
+        "type_name": "LPVOID",
+        "offset_32": 12,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "dwActiveProcessorMask",
+        "type_name": "DWORD_PTR",
+        "offset_32": 16,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "dwNumberOfProcessors",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwProcessorType",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 36,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwAllocationGranularity",
+        "type_name": "DWORD",
+        "offset_32": 28,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "wProcessorLevel",
+        "type_name": "WORD",
+        "offset_32": 32,
+        "offset_64": 44,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "wProcessorRevision",
+        "type_name": "WORD",
+        "offset_32": 34,
+        "offset_64": 46,
+        "size_32": 2,
+        "size_64": 2
+      }
+    ]
+  },
+  {
+    "name": "WIN32_FIND_DATAW",
+    "size_32": 592,
+    "size_64": 592,
+    "fields": [
+      {
+        "name": "dwFileAttributes",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ftCreationTime",
+        "type_name": "FILETIME",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 8,
+        "size_64": 8
+      },
+      {
+        "name": "ftLastAccessTime",
+        "type_name": "FILETIME",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 8,
+        "size_64": 8
+      },
+      {
+        "name": "ftLastWriteTime",
+        "type_name": "FILETIME",
+        "offset_32": 20,
+        "offset_64": 20,
+        "size_32": 8,
+        "size_64": 8
+      },
+      {
+        "name": "nFileSizeHigh",
+        "type_name": "DWORD",
+        "offset_32": 28,
+        "offset_64": 28,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "nFileSizeLow",
+        "type_name": "DWORD",
+        "offset_32": 32,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwReserved0",
+        "type_name": "DWORD",
+        "offset_32": 36,
+        "offset_64": 36,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwReserved1",
+        "type_name": "DWORD",
+        "offset_32": 40,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "cFileName",
+        "type_name": "WCHAR[260]",
+        "offset_32": 44,
+        "offset_64": 44,
+        "size_32": 520,
+        "size_64": 520
+      },
+      {
+        "name": "cAlternateFileName",
+        "type_name": "WCHAR[14]",
+        "offset_32": 564,
+        "offset_64": 564,
+        "size_32": 28,
+        "size_64": 28
+      }
+    ]
+  },
+  {
+    "name": "PEB_LDR_DATA",
+    "size_32": 48,
+    "size_64": 88,
+    "fields": [
+      {
+        "name": "Length",
+        "type_name": "ULONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Initialized",
+        "type_name": "BOOLEAN",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "SsHandle",
+        "type_name": "HANDLE",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "InLoadOrderModuleList",
+        "type_name": "LIST_ENTRY",
+        "offset_32": 12,
+        "offset_64": 16,
+        "size_32": 8,
+        "size_64": 16
+      },
+      {
+        "name": "InMemoryOrderModuleList",
+        "type_name": "LIST_ENTRY",
+        "offset_32": 20,
+        "offset_64": 32,
+        "size_32": 8,
+        "size_64": 16
+      },
+      {
+        "name": "InInitializationOrderModuleList",
+        "type_name": "LIST_ENTRY",
+        "offset_32": 28,
+        "offset_64": 48,
+        "size_32": 8,
+        "size_64": 16
+      },
+      {
+        "name": "EntryInProgress",
+        "type_name": "PVOID",
+        "offset_32": 36,
+        "offset_64": 64,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "ShutdownInProgress",
+        "type_name": "BOOLEAN",
+        "offset_32": 40,
+        "offset_64": 72,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "ShutdownThreadId",
+        "type_name": "HANDLE",
+        "offset_32": 44,
+        "offset_64": 80,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "LDR_DATA_TABLE_ENTRY",
+    "size_32": 80,
+    "size_64": 144,
+    "fields": [
+      {
+        "name": "InLoadOrderLinks",
+        "type_name": "LIST_ENTRY",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 8,
+        "size_64": 16
+      },
+      {
+        "name": "InMemoryOrderLinks",
+        "type_name": "LIST_ENTRY",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 8,
+        "size_64": 16
+      },
+      {
+        "name": "InInitializationOrderLinks",
+        "type_name": "LIST_ENTRY",
+        "offset_32": 16,
+        "offset_64": 32,
+        "size_32": 8,
+        "size_64": 16
+      },
+      {
+        "name": "DllBase",
+        "type_name": "PVOID",
+        "offset_32": 24,
+        "offset_64": 48,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "EntryPoint",
+        "type_name": "PVOID",
+        "offset_32": 28,
+        "offset_64": 56,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "SizeOfImage",
+        "type_name": "ULONG",
+        "offset_32": 32,
+        "offset_64": 64,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "FullDllName",
+        "type_name": "UNICODE_STRING",
+        "offset_32": 36,
+        "offset_64": 72,
+        "size_32": 8,
+        "size_64": 16
+      },
+      {
+        "name": "BaseDllName",
+        "type_name": "UNICODE_STRING",
+        "offset_32": 44,
+        "offset_64": 88,
+        "size_32": 8,
+        "size_64": 16
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_FILE_HEADER",
+    "size_32": 20,
+    "size_64": 20,
+    "fields": [
+      {
+        "name": "Machine",
+        "type_name": "WORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "NumberOfSections",
+        "type_name": "WORD",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "TimeDateStamp",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "PointerToSymbolTable",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "NumberOfSymbols",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "SizeOfOptionalHeader",
+        "type_name": "WORD",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Characteristics",
+        "type_name": "WORD",
+        "offset_32": 18,
+        "offset_64": 18,
+        "size_32": 2,
+        "size_64": 2
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_DATA_DIRECTORY",
+    "size_32": 8,
+    "size_64": 8,
+    "fields": [
+      {
+        "name": "VirtualAddress",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Size",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_SECTION_HEADER",
+    "size_32": 40,
+    "size_64": 40,
+    "fields": [
+      {
+        "name": "Name",
+        "type_name": "BYTE[8]",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 8,
+        "size_64": 8
+      },
+      {
+        "name": "VirtualSize",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "VirtualAddress",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "SizeOfRawData",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "PointerToRawData",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 20,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "PointerToRelocations",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "PointerToLinenumbers",
+        "type_name": "DWORD",
+        "offset_32": 28,
+        "offset_64": 28,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "NumberOfRelocations",
+        "type_name": "WORD",
+        "offset_32": 32,
+        "offset_64": 32,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "NumberOfLinenumbers",
+        "type_name": "WORD",
+        "offset_32": 34,
+        "offset_64": 34,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Characteristics",
+        "type_name": "DWORD",
+        "offset_32": 36,
+        "offset_64": 36,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_NT_HEADERS",
+    "size_32": 248,
+    "size_64": 264,
+    "fields": [
+      {
+        "name": "Signature",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "FileHeader",
+        "type_name": "IMAGE_FILE_HEADER",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 20,
+        "size_64": 20
+      },
+      {
+        "name": "OptionalHeader_Magic",
+        "type_name": "WORD",
+        "offset_32": 24,
+        "offset_64": 24,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "AddressOfEntryPoint",
+        "type_name": "DWORD",
+        "offset_32": 40,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ImageBase",
+        "type_name": "ULONGLONG",
+        "offset_32": 52,
+        "offset_64": 48,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_IMPORT_DESCRIPTOR",
+    "size_32": 20,
+    "size_64": 20,
+    "fields": [
+      {
+        "name": "OriginalFirstThunk",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "TimeDateStamp",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ForwarderChain",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Name",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "FirstThunk",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "SOCKADDR_IN",
+    "size_32": 16,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "sin_family",
+        "type_name": "SHORT",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "sin_port",
+        "type_name": "USHORT",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "sin_addr",
+        "type_name": "ULONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "sin_zero",
+        "type_name": "CHAR[8]",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 8,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "WSADATA",
+    "size_32": 400,
+    "size_64": 408,
+    "fields": [
+      {
+        "name": "wVersion",
+        "type_name": "WORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "wHighVersion",
+        "type_name": "WORD",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "szDescription",
+        "type_name": "CHAR[257]",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 257,
+        "size_64": 257
+      },
+      {
+        "name": "szSystemStatus",
+        "type_name": "CHAR[129]",
+        "offset_32": 261,
+        "offset_64": 261,
+        "size_32": 129,
+        "size_64": 129
+      }
+    ]
+  },
+  {
+    "name": "HOSTENT",
+    "size_32": 16,
+    "size_64": 32,
+    "fields": [
+      {
+        "name": "h_name",
+        "type_name": "PCHAR",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "h_aliases",
+        "type_name": "PCHAR*",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "h_addrtype",
+        "type_name": "SHORT",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "h_length",
+        "type_name": "SHORT",
+        "offset_32": 10,
+        "offset_64": 18,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "h_addr_list",
+        "type_name": "PCHAR*",
+        "offset_32": 12,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "LUID",
+    "size_32": 8,
+    "size_64": 8,
+    "fields": [
+      {
+        "name": "LowPart",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "HighPart",
+        "type_name": "LONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "LUID_AND_ATTRIBUTES",
+    "size_32": 12,
+    "size_64": 12,
+    "fields": [
+      {
+        "name": "Luid",
+        "type_name": "LUID",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 8,
+        "size_64": 8
+      },
+      {
+        "name": "Attributes",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "TOKEN_PRIVILEGES",
+    "size_32": 16,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "PrivilegeCount",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Privileges",
+        "type_name": "LUID_AND_ATTRIBUTES[1]",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 12,
+        "size_64": 12
+      }
+    ]
+  },
+  {
+    "name": "SID_IDENTIFIER_AUTHORITY",
+    "size_32": 6,
+    "size_64": 6,
+    "fields": [
+      {
+        "name": "Value",
+        "type_name": "BYTE[6]",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 6,
+        "size_64": 6
+      }
+    ]
+  },
+  {
+    "name": "PROCESSENTRY32W",
+    "size_32": 556,
+    "size_64": 568,
+    "fields": [
+      {
+        "name": "dwSize",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "cntUsage",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "th32ProcessID",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "th32DefaultHeapID",
+        "type_name": "ULONG_PTR",
+        "offset_32": 12,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "th32ModuleID",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "cntThreads",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 28,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "th32ParentProcessID",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "pcPriClassBase",
+        "type_name": "LONG",
+        "offset_32": 28,
+        "offset_64": 36,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwFlags",
+        "type_name": "DWORD",
+        "offset_32": 32,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "szExeFile",
+        "type_name": "WCHAR[260]",
+        "offset_32": 36,
+        "offset_64": 44,
+        "size_32": 520,
+        "size_64": 520
+      }
+    ]
+  },
+  {
+    "name": "MODULEENTRY32W",
+    "size_32": 1064,
+    "size_64": 1080,
+    "fields": [
+      {
+        "name": "dwSize",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "th32ModuleID",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "th32ProcessID",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "GlblcntUsage",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ProccntUsage",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "modBaseAddr",
+        "type_name": "BYTE*",
+        "offset_32": 20,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "modBaseSize",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "hModule",
+        "type_name": "HMODULE",
+        "offset_32": 28,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "szModule",
+        "type_name": "WCHAR[256]",
+        "offset_32": 32,
+        "offset_64": 48,
+        "size_32": 512,
+        "size_64": 512
+      },
+      {
+        "name": "szExePath",
+        "type_name": "WCHAR[260]",
+        "offset_32": 544,
+        "offset_64": 560,
+        "size_32": 520,
+        "size_64": 520
+      }
+    ]
+  },
+  {
+    "name": "THREADENTRY32",
+    "size_32": 28,
+    "size_64": 28,
+    "fields": [
+      {
+        "name": "dwSize",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "cntUsage",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "th32ThreadID",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "th32OwnerProcessID",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "tpBasePri",
+        "type_name": "LONG",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "tpDeltaPri",
+        "type_name": "LONG",
+        "offset_32": 20,
+        "offset_64": 20,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwFlags",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "EXCEPTION_RECORD",
+    "size_32": 80,
+    "size_64": 152,
+    "fields": [
+      {
+        "name": "ExceptionCode",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ExceptionFlags",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ExceptionRecord",
+        "type_name": "PEXCEPTION_RECORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "ExceptionAddress",
+        "type_name": "PVOID",
+        "offset_32": 12,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "NumberParameters",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ExceptionInformation",
+        "type_name": "ULONG_PTR[15]",
+        "offset_32": 20,
+        "offset_64": 32,
+        "size_32": 60,
+        "size_64": 120
+      }
+    ]
+  },
+  {
+    "name": "CONTEXT_X86",
+    "size_32": 716,
+    "size_64": 0,
+    "fields": [
+      {
+        "name": "ContextFlags",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Dr0",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Dr1",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Dr2",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Dr3",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SegGs",
+        "type_name": "DWORD",
+        "offset_32": 140,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SegFs",
+        "type_name": "DWORD",
+        "offset_32": 144,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SegEs",
+        "type_name": "DWORD",
+        "offset_32": 148,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SegDs",
+        "type_name": "DWORD",
+        "offset_32": 152,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Edi",
+        "type_name": "DWORD",
+        "offset_32": 156,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Esi",
+        "type_name": "DWORD",
+        "offset_32": 160,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Ebx",
+        "type_name": "DWORD",
+        "offset_32": 164,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Edx",
+        "type_name": "DWORD",
+        "offset_32": 168,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Ecx",
+        "type_name": "DWORD",
+        "offset_32": 172,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Eax",
+        "type_name": "DWORD",
+        "offset_32": 176,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Ebp",
+        "type_name": "DWORD",
+        "offset_32": 180,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Eip",
+        "type_name": "DWORD",
+        "offset_32": 184,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SegCs",
+        "type_name": "DWORD",
+        "offset_32": 188,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "EFlags",
+        "type_name": "DWORD",
+        "offset_32": 192,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Esp",
+        "type_name": "DWORD",
+        "offset_32": 196,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SegSs",
+        "type_name": "DWORD",
+        "offset_32": 200,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      }
+    ]
+  },
+  {
+    "name": "CONTEXT_X64",
+    "size_32": 0,
+    "size_64": 1232,
+    "fields": [
+      {
+        "name": "P1Home",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "P2Home",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 8,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "P3Home",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 16,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "P4Home",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 24,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "P5Home",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 32,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "P6Home",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 40,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "ContextFlags",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 48,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "MxCsr",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 52,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "Rax",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 120,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "Rcx",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 128,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "Rdx",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 136,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "Rbx",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 144,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "Rsp",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 152,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "Rbp",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 160,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "Rsi",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 168,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "Rdi",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 176,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "R8",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 184,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "R9",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 192,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "R10",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 200,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "R11",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 208,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "R12",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 216,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "R13",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 224,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "R14",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 232,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "R15",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 240,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "Rip",
+        "type_name": "DWORD64",
+        "offset_32": 0,
+        "offset_64": 248,
+        "size_32": 0,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_OPTIONAL_HEADER32",
+    "size_32": 224,
+    "size_64": 0,
+    "fields": [
+      {
+        "name": "Magic",
+        "type_name": "WORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 0
+      },
+      {
+        "name": "MajorLinkerVersion",
+        "type_name": "BYTE",
+        "offset_32": 2,
+        "offset_64": 0,
+        "size_32": 1,
+        "size_64": 0
+      },
+      {
+        "name": "MinorLinkerVersion",
+        "type_name": "BYTE",
+        "offset_32": 3,
+        "offset_64": 0,
+        "size_32": 1,
+        "size_64": 0
+      },
+      {
+        "name": "SizeOfCode",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "AddressOfEntryPoint",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "BaseOfCode",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "BaseOfData",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "ImageBase",
+        "type_name": "DWORD",
+        "offset_32": 28,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SectionAlignment",
+        "type_name": "DWORD",
+        "offset_32": 32,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "FileAlignment",
+        "type_name": "DWORD",
+        "offset_32": 36,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SizeOfImage",
+        "type_name": "DWORD",
+        "offset_32": 56,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SizeOfHeaders",
+        "type_name": "DWORD",
+        "offset_32": 60,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Subsystem",
+        "type_name": "WORD",
+        "offset_32": 68,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 0
+      },
+      {
+        "name": "NumberOfRvaAndSizes",
+        "type_name": "DWORD",
+        "offset_32": 92,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "DataDirectory",
+        "type_name": "IMAGE_DATA_DIRECTORY[16]",
+        "offset_32": 96,
+        "offset_64": 0,
+        "size_32": 128,
+        "size_64": 0
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_OPTIONAL_HEADER64",
+    "size_32": 0,
+    "size_64": 240,
+    "fields": [
+      {
+        "name": "Magic",
+        "type_name": "WORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 0,
+        "size_64": 2
+      },
+      {
+        "name": "MajorLinkerVersion",
+        "type_name": "BYTE",
+        "offset_32": 0,
+        "offset_64": 2,
+        "size_32": 0,
+        "size_64": 1
+      },
+      {
+        "name": "MinorLinkerVersion",
+        "type_name": "BYTE",
+        "offset_32": 0,
+        "offset_64": 3,
+        "size_32": 0,
+        "size_64": 1
+      },
+      {
+        "name": "SizeOfCode",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 4,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "AddressOfEntryPoint",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 16,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "BaseOfCode",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 20,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "ImageBase",
+        "type_name": "ULONGLONG",
+        "offset_32": 0,
+        "offset_64": 24,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "SectionAlignment",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 32,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "FileAlignment",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 36,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "SizeOfImage",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 56,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "SizeOfHeaders",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 60,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "Subsystem",
+        "type_name": "WORD",
+        "offset_32": 0,
+        "offset_64": 68,
+        "size_32": 0,
+        "size_64": 2
+      },
+      {
+        "name": "NumberOfRvaAndSizes",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 108,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "DataDirectory",
+        "type_name": "IMAGE_DATA_DIRECTORY[16]",
+        "offset_32": 0,
+        "offset_64": 112,
+        "size_32": 0,
+        "size_64": 128
+      }
+    ]
+  },
+  {
+    "name": "KEY_VALUE_PARTIAL_INFORMATION",
+    "size_32": 16,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "TitleIndex",
+        "type_name": "ULONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Type",
+        "type_name": "ULONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "DataLength",
+        "type_name": "ULONG",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Data",
+        "type_name": "UCHAR[1]",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 1,
+        "size_64": 1
+      }
+    ]
+  },
+  {
+    "name": "KEY_VALUE_FULL_INFORMATION",
+    "size_32": 20,
+    "size_64": 20,
+    "fields": [
+      {
+        "name": "TitleIndex",
+        "type_name": "ULONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Type",
+        "type_name": "ULONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "DataOffset",
+        "type_name": "ULONG",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "DataLength",
+        "type_name": "ULONG",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "NameLength",
+        "type_name": "ULONG",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_EXPORT_DIRECTORY",
+    "size_32": 40,
+    "size_64": 40,
+    "fields": [
+      {
+        "name": "Characteristics",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "TimeDateStamp",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "MajorVersion",
+        "type_name": "WORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "MinorVersion",
+        "type_name": "WORD",
+        "offset_32": 10,
+        "offset_64": 10,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Name",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Base",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "NumberOfFunctions",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 20,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "NumberOfNames",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "AddressOfFunctions",
+        "type_name": "DWORD",
+        "offset_32": 28,
+        "offset_64": 28,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "AddressOfNames",
+        "type_name": "DWORD",
+        "offset_32": 32,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "AddressOfNameOrdinals",
+        "type_name": "DWORD",
+        "offset_32": 36,
+        "offset_64": 36,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_THUNK_DATA32",
+    "size_32": 4,
+    "size_64": 0,
+    "fields": [
+      {
+        "name": "u1",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_THUNK_DATA64",
+    "size_32": 0,
+    "size_64": 8,
+    "fields": [
+      {
+        "name": "u1",
+        "type_name": "ULONGLONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 0,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_IMPORT_BY_NAME",
+    "size_32": 4,
+    "size_64": 4,
+    "fields": [
+      {
+        "name": "Hint",
+        "type_name": "WORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Name",
+        "type_name": "CHAR[1]",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 1,
+        "size_64": 1
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_BASE_RELOCATION",
+    "size_32": 8,
+    "size_64": 8,
+    "fields": [
+      {
+        "name": "VirtualAddress",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "SizeOfBlock",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_RESOURCE_DIRECTORY",
+    "size_32": 16,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "Characteristics",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "TimeDateStamp",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "MajorVersion",
+        "type_name": "WORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "MinorVersion",
+        "type_name": "WORD",
+        "offset_32": 10,
+        "offset_64": 10,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "NumberOfNamedEntries",
+        "type_name": "WORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "NumberOfIdEntries",
+        "type_name": "WORD",
+        "offset_32": 14,
+        "offset_64": 14,
+        "size_32": 2,
+        "size_64": 2
+      }
+    ]
+  },
+  {
+    "name": "CLIENT_ID",
+    "size_32": 8,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "UniqueProcess",
+        "type_name": "HANDLE",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "UniqueThread",
+        "type_name": "HANDLE",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "OBJECT_ATTRIBUTES",
+    "size_32": 24,
+    "size_64": 48,
+    "fields": [
+      {
+        "name": "Length",
+        "type_name": "ULONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "RootDirectory",
+        "type_name": "HANDLE",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "ObjectName",
+        "type_name": "PUNICODE_STRING",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "Attributes",
+        "type_name": "ULONG",
+        "offset_32": 12,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "SecurityDescriptor",
+        "type_name": "PVOID",
+        "offset_32": 16,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "SecurityQualityOfService",
+        "type_name": "PVOID",
+        "offset_32": 20,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "IO_STATUS_BLOCK",
+    "size_32": 8,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "Status",
+        "type_name": "NTSTATUS",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "Information",
+        "type_name": "ULONG_PTR",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "DEBUG_EVENT",
+    "size_32": 96,
+    "size_64": 176,
+    "fields": [
+      {
+        "name": "dwDebugEventCode",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwProcessId",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwThreadId",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "u",
+        "type_name": "UNION",
+        "offset_32": 12,
+        "offset_64": 16,
+        "size_32": 84,
+        "size_64": 160
+      }
+    ]
+  },
+  {
+    "name": "EXCEPTION_POINTERS",
+    "size_32": 8,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "ExceptionRecord",
+        "type_name": "PEXCEPTION_RECORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "ContextRecord",
+        "type_name": "PCONTEXT",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "ACL",
+    "size_32": 8,
+    "size_64": 8,
+    "fields": [
+      {
+        "name": "AclRevision",
+        "type_name": "BYTE",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "Sbz1",
+        "type_name": "BYTE",
+        "offset_32": 1,
+        "offset_64": 1,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "AclSize",
+        "type_name": "WORD",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "AceCount",
+        "type_name": "WORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Sbz2",
+        "type_name": "WORD",
+        "offset_32": 6,
+        "offset_64": 6,
+        "size_32": 2,
+        "size_64": 2
+      }
+    ]
+  },
+  {
+    "name": "ACE_HEADER",
+    "size_32": 4,
+    "size_64": 4,
+    "fields": [
+      {
+        "name": "AceType",
+        "type_name": "BYTE",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "AceFlags",
+        "type_name": "BYTE",
+        "offset_32": 1,
+        "offset_64": 1,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "AceSize",
+        "type_name": "WORD",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      }
+    ]
+  },
+  {
+    "name": "SECURITY_DESCRIPTOR",
+    "size_32": 20,
+    "size_64": 40,
+    "fields": [
+      {
+        "name": "Revision",
+        "type_name": "BYTE",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "Sbz1",
+        "type_name": "BYTE",
+        "offset_32": 1,
+        "offset_64": 1,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "Control",
+        "type_name": "WORD",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "Owner",
+        "type_name": "PSID",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "Group",
+        "type_name": "PSID",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "Sacl",
+        "type_name": "PACL",
+        "offset_32": 12,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "Dacl",
+        "type_name": "PACL",
+        "offset_32": 16,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "SID",
+    "size_32": 12,
+    "size_64": 12,
+    "fields": [
+      {
+        "name": "Revision",
+        "type_name": "BYTE",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "SubAuthorityCount",
+        "type_name": "BYTE",
+        "offset_32": 1,
+        "offset_64": 1,
+        "size_32": 1,
+        "size_64": 1
+      },
+      {
+        "name": "IdentifierAuthority",
+        "type_name": "SID_IDENTIFIER_AUTHORITY",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 6,
+        "size_64": 6
+      },
+      {
+        "name": "SubAuthority",
+        "type_name": "DWORD[1]",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "TOKEN_USER",
+    "size_32": 8,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "User",
+        "type_name": "SID_AND_ATTRIBUTES",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 8,
+        "size_64": 16
+      }
+    ]
+  },
+  {
+    "name": "SID_AND_ATTRIBUTES",
+    "size_32": 8,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "Sid",
+        "type_name": "PSID",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "Attributes",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "SOCKADDR_IN6",
+    "size_32": 28,
+    "size_64": 28,
+    "fields": [
+      {
+        "name": "sin6_family",
+        "type_name": "SHORT",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "sin6_port",
+        "type_name": "USHORT",
+        "offset_32": 2,
+        "offset_64": 2,
+        "size_32": 2,
+        "size_64": 2
+      },
+      {
+        "name": "sin6_flowinfo",
+        "type_name": "ULONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "sin6_addr",
+        "type_name": "IN6_ADDR",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 16,
+        "size_64": 16
+      },
+      {
+        "name": "sin6_scope_id",
+        "type_name": "ULONG",
+        "offset_32": 24,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "IN_ADDR",
+    "size_32": 4,
+    "size_64": 4,
+    "fields": [
+      {
+        "name": "S_addr",
+        "type_name": "ULONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "IN6_ADDR",
+    "size_32": 16,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "Byte",
+        "type_name": "UCHAR[16]",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 16,
+        "size_64": 16
+      }
+    ]
+  },
+  {
+    "name": "ADDRINFO",
+    "size_32": 32,
+    "size_64": 48,
+    "fields": [
+      {
+        "name": "ai_flags",
+        "type_name": "INT",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ai_family",
+        "type_name": "INT",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ai_socktype",
+        "type_name": "INT",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ai_protocol",
+        "type_name": "INT",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ai_addrlen",
+        "type_name": "SIZE_T",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "ai_canonname",
+        "type_name": "PCHAR",
+        "offset_32": 20,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "ai_addr",
+        "type_name": "PSOCKADDR",
+        "offset_32": 24,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "ai_next",
+        "type_name": "PADDRINFO",
+        "offset_32": 28,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "SERVICE_STATUS",
+    "size_32": 28,
+    "size_64": 28,
+    "fields": [
+      {
+        "name": "dwServiceType",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwCurrentState",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwControlsAccepted",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwWin32ExitCode",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwServiceSpecificExitCode",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwCheckPoint",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 20,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwWaitHint",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "SERVICE_TABLE_ENTRYW",
+    "size_32": 8,
+    "size_64": 16,
+    "fields": [
+      {
+        "name": "lpServiceName",
+        "type_name": "LPWSTR",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "lpServiceProc",
+        "type_name": "LPSERVICE_MAIN_FUNCTION",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "SERVICE_STATUS_PROCESS",
+    "size_32": 36,
+    "size_64": 36,
+    "fields": [
+      {
+        "name": "dwServiceType",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwCurrentState",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwControlsAccepted",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwWin32ExitCode",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwServiceSpecificExitCode",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwCheckPoint",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 20,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwWaitHint",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwProcessId",
+        "type_name": "DWORD",
+        "offset_32": 28,
+        "offset_64": 28,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "dwServiceFlags",
+        "type_name": "DWORD",
+        "offset_32": 32,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_TLS_DIRECTORY32",
+    "size_32": 24,
+    "size_64": 0,
+    "fields": [
+      {
+        "name": "StartAddressOfRawData",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "EndAddressOfRawData",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "AddressOfIndex",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "AddressOfCallBacks",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "SizeOfZeroFill",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      },
+      {
+        "name": "Characteristics",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 0
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_TLS_DIRECTORY64",
+    "size_32": 0,
+    "size_64": 40,
+    "fields": [
+      {
+        "name": "StartAddressOfRawData",
+        "type_name": "ULONGLONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "EndAddressOfRawData",
+        "type_name": "ULONGLONG",
+        "offset_32": 0,
+        "offset_64": 8,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "AddressOfIndex",
+        "type_name": "ULONGLONG",
+        "offset_32": 0,
+        "offset_64": 16,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "AddressOfCallBacks",
+        "type_name": "ULONGLONG",
+        "offset_32": 0,
+        "offset_64": 24,
+        "size_32": 0,
+        "size_64": 8
+      },
+      {
+        "name": "SizeOfZeroFill",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 32,
+        "size_32": 0,
+        "size_64": 4
+      },
+      {
+        "name": "Characteristics",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 36,
+        "size_32": 0,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "NT_TIB",
+    "size_32": 28,
+    "size_64": 56,
+    "fields": [
+      {
+        "name": "ExceptionList",
+        "type_name": "PEXCEPTION_REGISTRATION_RECORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "StackBase",
+        "type_name": "PVOID",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "StackLimit",
+        "type_name": "PVOID",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "SubSystemTib",
+        "type_name": "PVOID",
+        "offset_32": 12,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "FiberData",
+        "type_name": "PVOID",
+        "offset_32": 16,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "ArbitraryUserPointer",
+        "type_name": "PVOID",
+        "offset_32": 20,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "Self",
+        "type_name": "PNT_TIB",
+        "offset_32": 24,
+        "offset_64": 48,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "PROCESS_BASIC_INFORMATION",
+    "size_32": 24,
+    "size_64": 48,
+    "fields": [
+      {
+        "name": "ExitStatus",
+        "type_name": "NTSTATUS",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "PebBaseAddress",
+        "type_name": "PPEB",
+        "offset_32": 4,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "AffinityMask",
+        "type_name": "ULONG_PTR",
+        "offset_32": 8,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "BasePriority",
+        "type_name": "LONG",
+        "offset_32": 12,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "UniqueProcessId",
+        "type_name": "ULONG_PTR",
+        "offset_32": 16,
+        "offset_64": 32,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "InheritedFromUniqueProcessId",
+        "type_name": "ULONG_PTR",
+        "offset_32": 20,
+        "offset_64": 40,
+        "size_32": 4,
+        "size_64": 8
+      }
+    ]
+  },
+  {
+    "name": "SYSTEM_PROCESS_INFORMATION",
+    "size_32": 184,
+    "size_64": 256,
+    "fields": [
+      {
+        "name": "NextEntryOffset",
+        "type_name": "ULONG",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "NumberOfThreads",
+        "type_name": "ULONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "WorkingSetPrivateSize",
+        "type_name": "LARGE_INTEGER",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 8,
+        "size_64": 8
+      },
+      {
+        "name": "UniqueProcessId",
+        "type_name": "HANDLE",
+        "offset_32": 56,
+        "offset_64": 80,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "InheritedFromUniqueProcessId",
+        "type_name": "HANDLE",
+        "offset_32": 60,
+        "offset_64": 88,
+        "size_32": 4,
+        "size_64": 8
+      },
+      {
+        "name": "HandleCount",
+        "type_name": "ULONG",
+        "offset_32": 64,
+        "offset_64": 96,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "SessionId",
+        "type_name": "ULONG",
+        "offset_32": 68,
+        "offset_64": 100,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ImageName",
+        "type_name": "UNICODE_STRING",
+        "offset_32": 92,
+        "offset_64": 112,
+        "size_32": 8,
+        "size_64": 16
+      }
+    ]
+  },
+  {
+    "name": "IMAGE_DELAYLOAD_DESCRIPTOR",
+    "size_32": 32,
+    "size_64": 32,
+    "fields": [
+      {
+        "name": "Attributes",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "DllNameRVA",
+        "type_name": "DWORD",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ModuleHandleRVA",
+        "type_name": "DWORD",
+        "offset_32": 8,
+        "offset_64": 8,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ImportAddressTableRVA",
+        "type_name": "DWORD",
+        "offset_32": 12,
+        "offset_64": 12,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "ImportNameTableRVA",
+        "type_name": "DWORD",
+        "offset_32": 16,
+        "offset_64": 16,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "BoundImportAddressTableRVA",
+        "type_name": "DWORD",
+        "offset_32": 20,
+        "offset_64": 20,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "UnloadInformationTableRVA",
+        "type_name": "DWORD",
+        "offset_32": 24,
+        "offset_64": 24,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "TimeDateStamp",
+        "type_name": "DWORD",
+        "offset_32": 28,
+        "offset_64": 28,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  },
+  {
+    "name": "LARGE_INTEGER",
+    "size_32": 8,
+    "size_64": 8,
+    "fields": [
+      {
+        "name": "LowPart",
+        "type_name": "DWORD",
+        "offset_32": 0,
+        "offset_64": 0,
+        "size_32": 4,
+        "size_64": 4
+      },
+      {
+        "name": "HighPart",
+        "type_name": "LONG",
+        "offset_32": 4,
+        "offset_64": 4,
+        "size_32": 4,
+        "size_64": 4
+      }
+    ]
+  }
+]

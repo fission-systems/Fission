@@ -1,9 +1,7 @@
 # Fission
 
 [![CI](https://github.com/sjkim1127/Fission/actions/workflows/ci.yml/badge.svg)](https://github.com/sjkim1127/Fission/actions/workflows/ci.yml)
-[![Security](https://github.com/sjkim1127/Fission/actions/workflows/security.yml/badge.svg)](https://github.com/sjkim1127/Fission/actions/workflows/security.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust_2024-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)]()
 
 > **"Split the Binary, Fuse the Power."**
@@ -32,7 +30,6 @@ and time-travel debugging in a single high-performance Rust-powered tool.
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
-- [License](#license)
 - [Acknowledgments](#acknowledgments)
 
 ---
@@ -43,7 +40,8 @@ and time-travel debugging in a single high-performance Rust-powered tool.
 
 - **Static Analysis** — Ghidra-powered decompiler via direct C++ FFI, pure-Rust disassembler, CFG analysis, RTTI recovery
 - **Dynamic Analysis** — Process debugging, breakpoints, memory inspection, time-travel debugging (Windows)
-- **Smart Post-Processing** — 32+ Pcode IR optimization rules, context-aware constant substitution (100+ Windows API mappings), type propagation, x86 `double` synthesis
+- **Smart Post-Processing** — 135 Pcode IR optimization rules, context-aware constant substitution (151 Windows API mappings across 9 DLLs), type propagation, x86 `double` synthesis
+- **Data-Driven Signatures** — 12 JSON data files: 151 Win API signatures, 138 MSVC byte patterns, 71 Windows structures, 28 base types
 
 ### Why Fission?
 
@@ -52,9 +50,9 @@ and time-travel debugging in a single high-performance Rust-powered tool.
 | **Decompiler quality** | x64 **98.8%** · x86 **92.6%** vs Ghidra baseline |
 | **Integration** | Static + dynamic analysis in one binary |
 | **Performance** | Rust core, zero-copy Ghidra FFI, LRU cache |
-| **GUI** | Tauri 2.x + React 19 desktop app |
+| **GUI** | Tauri 2 + React 19 + Monaco Editor |
 | **Platforms** | Windows PE · Linux ELF · macOS Mach-O |
-| **Extensible** | Native Rust plugin system |
+| **Extensible** | Native Rust plugin system + 42 IPC commands |
 
 ---
 
@@ -78,13 +76,24 @@ and time-travel debugging in a single high-performance Rust-powered tool.
 | Feature | Description |
 |---------|-------------|
 | **Context-Aware Constant Substitution** | PAGE_PROTECT, MEM_ALLOC, GENERIC_ACCESS, etc. |
-| **100+ Windows API Mappings** | 9 DLLs: kernel32, user32, ntdll, advapi32, ws2_32, winhttp, wininet, shell32, bcrypt |
-| **Dynamic Flag Resolution** | e.g., `0x3000` → `MEM_COMMIT | MEM_RESERVE` |
+| **151 Windows API Mappings** | 9 DLLs: kernel32 (62), ntdll (17), advapi32 (19), user32 (18), ws2_32 (13), winhttp (7), wininet (6), bcrypt (5), shell32 (4) |
+| **Dynamic Flag Resolution** | e.g., `0x3000` → `MEM_COMMIT \| MEM_RESERVE` |
 | **GDT Type Loading** | 5,700+ structures and 6,500+ typedefs from Ghidra data |
-| **Pcode IR Optimizer** | 32+ rules: constant folding, CSE, DCE, pointer arithmetic, NZMask |
+| **Pcode IR Optimizer** | 135 dataflow rules: constant folding, CSE, DCE, pointer arithmetic, NZMask |
 | **x86 Double Synthesis** | Merges two 4-byte cdecl stack pushes into a single `double` |
 | **Type Propagation** | Propagates callee type info back to callers |
 | **Smart String Recovery** | Converts hex constants into readable string literals |
+
+### Data-Driven Signature System
+
+All signature data is stored as JSON and embedded at compile time via `include_str!` + `serde_json`:
+
+| Data File | Content |
+|-----------|---------|
+| `win_api/*.json` (9 files) | 151 Windows API function signatures with parameter types and enum groups |
+| `signatures/msvc.json` | 138 MSVC/CRT byte-pattern signatures (CRT init, crypto, packer, anti-debug) |
+| `win_types/base_types.json` | 28 Windows base type definitions (BYTE, DWORD, HANDLE, etc.) |
+| `win_types/structures.json` | 71 Windows structure definitions (UNICODE_STRING, PEB, CONTEXT, etc.) |
 
 ### Dynamic Analysis
 
@@ -95,11 +104,12 @@ and time-travel debugging in a single high-performance Rust-powered tool.
 | **Time Travel Debugging** | Execution timeline + snapshot navigation (Windows) |
 | **Live Memory Patching** | Modify running process memory in real-time |
 
-### GUI (Tauri 2.x + React 19)
+### GUI (Tauri 2 + React 19)
 
 | Feature | Description |
 |---------|-------------|
 | **VS Code-Style Layout** | Activity Bar, tabbed editor, bottom panel |
+| **Monaco Editor** | Code editor component with syntax highlighting |
 | **Virtual Scrolling** | `@tanstack/react-virtual` — 5,000+ assembly lines |
 | **CFG Visualization** | SVG-rendered CFG with pan/zoom and UI scale slider |
 | **Function Explorer** | Filter (All / Imports / Exports / Internal), search, FID IDs |
@@ -159,7 +169,7 @@ Measured by `scripts/compare/compare_decompilers_v3.py` against Ghidra 11.x on W
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Rust | 1.85+ | [rustup.rs](https://rustup.rs/) |
+| Rust | 1.85+ (2024 edition) | [rustup.rs](https://rustup.rs/) |
 | CMake | 3.16+ | Ghidra decompiler build |
 | C++ Compiler | GCC 12+ / Clang 15+ / MSVC 2022 | Platform-specific |
 | Node.js | 20+ | Tauri GUI only |
@@ -257,7 +267,7 @@ npm run tauri build  # production
 2. **Browse Functions**: Explorer sidebar → filter by category
 3. **Decompile**: Click function → switch to **Decompiled** tab
 4. **CFG**: Click **CFG** → pan/zoom; scale with right-side slider
-5. **Analyze**: Toolbar → Analyze 🔍 (CALL scan) or Deep Scan 🕵
+5. **Analyze**: Toolbar → Analyze (CALL scan) or Deep Scan
 6. **Debug** (Windows): Attach process, set breakpoints, inspect registers, TTD timeline
 7. **Export**: File → Export Analysis JSON
 
@@ -265,25 +275,27 @@ npm run tauri build  # production
 
 ## GUI — Tauri Desktop App
 
-Built with **Tauri 2.x** (Rust backend) + **React 19 / TypeScript** frontend.
-The previous egui-based `fission-ui` crate has been fully removed.
+Built with **Tauri 2** (Rust backend) + **React 19 / TypeScript 5.6** frontend.
 
-### Key IPC Commands
+### IPC Commands (42 registered)
 
-| Command | Description |
-|---------|-------------|
-| `open_file` | Load binary |
-| `decompile_function` | Decompile at address |
-| `get_cfg` | CFG JSON for SVG render |
-| `get_strings` | List strings |
-| `get_xrefs` | Cross-references |
-| `analyze_functions` | CALL-scan function discovery |
-| `deep_scan_functions` | Prologue-pattern discovery |
-| `run_fid` | FID signature identification |
-| `debug_attach / detach` | Process attach/detach |
-| `debug_read_memory` | Hex dump up to 4 KB |
-| `export_analysis_json` | Full analysis JSON export |
-| `save_project / load_project` | `.fprj` project persistence |
+| Category | Commands | Count |
+|----------|----------|-------|
+| **Binary** | `open_file`, `get_binary_info`, `get_sections` | 3 |
+| **Analysis** | `analyze_functions`, `deep_scan_functions`, `run_fid` | 3 |
+| **Assembly** | `disassemble_function`, `get_listing_data`, `get_listing_total_lines` | 3 |
+| **CFG** | `get_cfg`, `get_cfg_json` | 2 |
+| **XRefs** | `get_xrefs` | 1 |
+| **Search** | `search_strings`, `search_bytes` | 2 |
+| **Debug** | `debug_attach`, `debug_detach`, `debug_read_memory`, etc. | 8 |
+| **TTD** | `ttd_*` commands | 5 |
+| **Annotations** | `add_annotation`, `get_annotations`, etc. | 6 |
+| **Project** | `save_project`, `load_project`, `export_analysis_json`, etc. | 6 |
+| **Plugins** | `list_plugins`, `load_plugin`, etc. | 5 |
+| **Settings** | `get_settings`, `update_settings` | 2 |
+| **Hex** | `get_hex_data`, `get_hex_page`, `write_hex_data` | 3 |
+| **Metadata** | `get_functions`, `decompile_function`, etc. | 4 |
+| **Listing** | `get_listing_*` | 2 |
 
 ### Keyboard Shortcuts
 
@@ -334,28 +346,46 @@ The previous egui-based `fission-ui` crate has been fully removed.
 
 ## Configuration
 
-`~/.config/fission/config.toml` (Linux/macOS) or `%APPDATA%\fission\config.toml` (Windows):
+`fission.toml` at the project root (or `~/.config/fission/fission.toml`):
 
 ```toml
+[logging]
+level = "info"
+file = ""
+console_enabled = true
+include_timestamp = true
+
 [decompiler]
+num_workers = 0            # 0 = auto (CPU cores)
+max_workers = 8
 timeout_ms = 30000
 enable_prefetch = true
 prefetch_count = 3
-enable_optimizer = true
-optimizer_max_passes = 10
+sla_dir = ""               # empty = auto-detect
 
 [analysis]
+max_string_search_size = 262144
 min_string_length = 4
 auto_xref_analysis = true
-cache_size = 100
+decompile_cache_size = 100
+function_address_range = 4096
 
 [debug]
 max_snapshots = 10000
+max_process_ids = 4096
 
 [ui]
-theme = "catppuccin"
+show_performance = false
 auto_scroll_entry = true
 max_log_entries = 1000
+hex_rows_per_page = 64
+
+[paths]
+workspace_root = ""
+fid_dir = ""
+gdt_dir = ""
+die_dir = ""
+patterns_dir = ""
 ```
 
 ### Environment Variables
@@ -371,24 +401,44 @@ max_log_entries = 1000
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  Fission Platform                   │
-├──────────────┬──────────────────────────────────────┤
-│  Tauri GUI   │         fission_cli                  │
-│ (React 19 /  │    (REPL + direct flags)              │
-│  TypeScript) │                                      │
-├──────────────┴──────────────────────────────────────┤
-│              fission-analysis (Rust)                │
-│  CFG · XRef · Debug · Plugin · FID · Type Prop      │
-├─────────────────────────────────────────────────────┤
-│  fission-ffi  │  fission-loader  │  fission-disasm  │
-│  (C++ FFI)    │  (PE/ELF/Mach-O) │  (iced-x86)      │
-├───────────────┴──────────────────┴──────────────────┤
-│       ghidra_decompiler/  (C++, CMake)              │
-│   Ghidra PCode Engine  ·  Sleigh ISA defs           │
-│   TypePropagator  ·  AnalysisPipeline               │
-│   PostProcessors  ·  CFGStructurizer                │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      Fission Platform                        │
+├─────────────────┬────────────────────────────────────────────┤
+│   Tauri GUI     │              fission-cli                   │
+│ React 19 + TS   │         REPL + direct flags                │
+│ Monaco Editor   │                                            │
+├─────────────────┴────────────────────────────────────────────┤
+│                  fission-analysis (Rust)                      │
+│   CFG · XRef · Debug · Plugin · FID · Type Prop · TTD        │
+├──────────────────────────────────────────────────────────────┤
+│ fission-ffi     │ fission-signatures │ fission-pcode         │
+│ (C++ FFI)       │ (JSON data-driven) │ (IR types)            │
+├─────────────────┼────────────────────┼───────────────────────┤
+│ fission-loader  │ fission-disasm     │ fission-core          │
+│ (PE/ELF/Mach-O) │ (iced-x86)         │ (config/errors/utils) │
+├─────────────────┴────────────────────┴───────────────────────┤
+│            ghidra_decompiler/ (C++, CMake)                    │
+│   135 PCode Rules · Sleigh ISA · TypePropagator              │
+│   AnalysisPipeline · PostProcessors · CFGStructurizer        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Crate Dependency Graph
+
+```
+fission-core ──────────────────────────────────────┐
+    ↓                                               │
+fission-loader    fission-disasm                    │
+    ↓                  ↓                            │
+fission-pcode ←────────┘                            │
+    ↓                                               │
+fission-signatures (12 JSON data files)             │
+    ↓                                               │
+fission-ffi (C++ bridge)                            │
+    ↓                                               │
+fission-analysis ←──────────────────────────────────┘
+    ↓           ↓
+fission-cli   fission-tauri
 ```
 
 See [docs/architecture/](docs/architecture/) and [docs/RUST_CPP_BRIDGE.md](docs/RUST_CPP_BRIDGE.md).
@@ -429,20 +479,22 @@ Set `crate-type = ["cdylib"]` in `Cargo.toml`. See [docs/plugins/](docs/plugins/
 
 ## Tech Stack
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Core | Rust 2021 | Performance and safety |
-| GUI Framework | Tauri 2.x + React 19 | Desktop app with web frontend |
-| Disassembler | iced-x86 | Pure Rust x86/x64 |
-| Decompiler | Ghidra (C++) | C code generation |
-| Binary Parsing | goblin + object | PE / ELF / Mach-O |
-| Windows Debug | windows crate | Win32 debug API |
-| Linux Debug | nix (ptrace) | POSIX debug |
-| Scripting | PyO3 | Python bindings |
-| Async | Tokio | I/O and threading |
-| CLI | reedline + clap | REPL and flags |
-| Serialization | serde + serde_json | Data exchange |
-| Virtual Scroll | @tanstack/react-virtual | GUI listing |
+| Component | Technology | Version | Purpose |
+|-----------|------------|---------|---------|
+| Core | Rust | 2024 edition | Performance and safety |
+| GUI Framework | Tauri | 2.x | Desktop app with Rust backend |
+| Frontend | React + TypeScript | 19 / 5.6 | Web-based UI |
+| Code Editor | Monaco Editor | 0.52.2 | Syntax-highlighted code view |
+| Build Tool | Vite | 6.x | Frontend bundling |
+| Disassembler | iced-x86 | 1.21 | Pure Rust x86/x64 |
+| Decompiler | Ghidra (C++) | — | C code generation via FFI |
+| Binary Parsing | goblin + object | — | PE / ELF / Mach-O |
+| Virtual Scroll | @tanstack/react-virtual | 3.x | Large list rendering |
+| Windows Debug | windows crate | — | Win32 debug API |
+| Linux Debug | nix (ptrace) | — | POSIX debug |
+| Async | Tokio | — | I/O and threading |
+| CLI | reedline + clap | — | REPL and flags |
+| Serialization | serde + serde_json | — | Data exchange |
 
 ---
 
@@ -450,7 +502,6 @@ Set `crate-type = ["cdylib"]` in `Cargo.toml`. See [docs/plugins/](docs/plugins/
 
 | Feature | Fission | Ghidra | IDA Pro | x64dbg | radare2 |
 |---------|---------|--------|---------|--------|---------|
-| Price | Free | Free | $$$$ | Free | Free |
 | Decompiler | ✅ 98.8% / 92.6% | Baseline | High | ❌ | ✅ variable |
 | Debugger | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Time-Travel Debug | ✅ (Windows) | ❌ | ✅ (paid) | ❌ | ❌ |
@@ -464,7 +515,8 @@ Set `crate-type = ["cdylib"]` in `Cargo.toml`. See [docs/plugins/](docs/plugins/
 
 ```
 Fission/
-├── Cargo.toml
+├── Cargo.toml                 # Workspace manifest (9 crates)
+├── fission.toml               # Runtime configuration
 ├── README.md
 ├── ghidra_decompiler/         # Native C++ decompiler layer
 │   ├── CMakeLists.txt
@@ -475,68 +527,86 @@ Fission/
 │   └── languages/             # Sleigh (.sla/.sinc) ISA definitions
 ├── crates/
 │   ├── fission-core/          # Config, errors, utilities
-│   ├── fission-loader/        # Binary parsing
-│   ├── fission-disasm/        # Disassembly abstraction
+│   ├── fission-loader/        # Binary parsing (PE/ELF/Mach-O)
+│   ├── fission-disasm/        # Disassembly (iced-x86)
 │   ├── fission-pcode/         # Pcode IR types
-│   ├── fission-signatures/    # API/FID signature DBs
+│   ├── fission-signatures/    # API/FID signature DBs (12 JSON data files)
+│   │   └── data/              # win_api/, win_types/, signatures/
 │   ├── fission-ffi/           # Rust ↔ C++ FFI boundary
 │   ├── fission-analysis/      # CFG, XRef, debug, plugins (+ benches/)
 │   ├── fission-tauri/         # Tauri desktop app (React + Rust backend)
 │   └── fission-cli/           # CLI binary (fission_cli)
+├── vendor/                    # Reference implementations & dependencies
 ├── utils/signatures/          # GDT type DBs, DIE rules, FID sigs
-├── tests/                     # Integration tests
 ├── scripts/
-│   └── compare/               # Benchmark scripts & YAML suites
+│   ├── compare/               # Benchmark scripts & YAML suites
+│   ├── build/                 # Build helper scripts
+│   └── test/                  # Test runner scripts
 ├── docs/
 │   ├── architecture/
 │   ├── analysis/
 │   ├── changelog/CHANGELOG.md
 │   └── …
+├── samples/                   # Sample binaries (Linux/macOS/Windows)
 └── examples/
-    ├── comparison_test_x64
-    └── binaries/
+    ├── binaries/
+    └── results/               # Benchmark comparison results
 ```
 
 ---
 
 ## Development Status
 
-### Completed
+### Completed (20 items)
 
 - [x] CLI REPL + direct flag interface
 - [x] Ghidra FFI (zero-copy direct C++ binding)
-- [x] Pcode IR Optimizer (32+ rules, def-use tracking, NZMask)
-- [x] Context-aware constant substitution (100+ Windows API mappings)
+- [x] Pcode IR Optimizer (135 dataflow rules, def-use tracking, NZMask)
+- [x] Context-aware constant substitution (151 Windows API mappings, 9 DLLs)
+- [x] Data-driven JSON signature system (12 files, compile-time embedded)
 - [x] Type propagation + smart string recovery + VTable analysis
 - [x] x86 `double` synthesis (`merge_split_double_args`)
 - [x] CFG analysis (dominator tree, loop detection, cyclomatic complexity)
 - [x] Listing view with virtual scrolling
 - [x] C++ RTTI recovery
-- [x] Tauri 2.x + React 19 GUI (30+ IPC commands)
+- [x] Tauri 2 + React 19 GUI (42 IPC commands)
+- [x] Monaco Editor integration
 - [x] FID signature identification
-- [x] Time Travel Debugging (Windows)
+- [x] Time Travel Debugging — Windows
 - [x] Native Rust plugin system
 - [x] Linear sweep function discovery for stripped PE
+- [x] Annotation system (comments, labels, bookmarks)
+- [x] Project save/load (`.fprj` format)
+- [x] Hex editor with live memory write
+- [x] CI/CD pipeline (build, quality gate, cross-platform release)
 
 ### Roadmap
 
 - [ ] DWARF debug info import
-- [ ] Python scripting (PyO3 API stabilization)  
+- [ ] Python scripting (PyO3 API stabilization)
 - [ ] Windows ARM64 support
 - [ ] DWARF-based variable naming
 - [ ] Collaborative annotation sharing
 
 ---
 
+## CI / CD
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `ci.yml` | Push / PR to `main` | Build, fmt, clippy, test, smoke test |
+| `cd.yml` | Tag `v*.*.*` | Cross-platform release (Linux x64, macOS ARM64, Windows x64) |
+| `decomp-quality.yml` | Daily 03:00 / Manual | Decompiler quality benchmark vs PyGhidra |
+
+---
+
 ## Testing
 
 ```bash
-# Unit + integration tests
+# Unit tests
 cargo test
-cargo test --test decompiler_tests
-cargo test --test cli_tests
 
-# Benchmarks
+# Benchmarks (criterion)
 cargo bench -p fission-analysis
 
 # Decompiler quality benchmark
@@ -544,16 +614,14 @@ python3 scripts/compare/compare_decompilers_v3.py \
     --suite scripts/compare/suite_example.yaml   # x64
 python3 scripts/compare/compare_decompilers_v3.py \
     --suite scripts/compare/suite_x86.yaml       # x86
-
-# Build test binaries
-bash scripts/build_all_tests.sh
 ```
 
 ---
 
 ## Troubleshooting
 
-### C++ debug output not appearing
+<details>
+<summary><b>C++ debug output not appearing</b></summary>
 
 Pass `--verbose` — without it, `OutputSilencer` redirects stderr to `/dev/null`.
 
@@ -561,7 +629,10 @@ Pass `--verbose` — without it, `OutputSilencer` redirects stderr to `/dev/null
 fission_cli --decomp 0x401000 --verbose binary.exe
 ```
 
-### `libdecomp.dylib` / `decomp.dll` not found
+</details>
+
+<details>
+<summary><b><code>libdecomp.dylib</code> / <code>decomp.dll</code> not found</b></summary>
 
 Build the Ghidra decompiler:
 
@@ -571,16 +642,24 @@ cd ghidra_decompiler && cmake -B build && cmake --build build
 
 Set `FISSION_DECOMP_PATH` if the binary is in a non-standard location.
 
-### Tauri GUI build fails on Linux
+</details>
+
+<details>
+<summary><b>Tauri GUI build fails on Linux</b></summary>
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev
 ```
 
-### x86 shows split `double` arguments
+</details>
 
-Ensure you are using the latest `ghidra_decompiler` build (commit `e80b18432` or newer) which
-includes the `FuncCallSpecs`-based fix in `merge_split_double_args`.
+<details>
+<summary><b>x86 shows split <code>double</code> arguments</b></summary>
+
+Ensure you are using the latest `ghidra_decompiler` build which includes the `FuncCallSpecs`-based
+fix in `merge_split_double_args`.
+
+</details>
 
 ---
 
@@ -599,18 +678,13 @@ git push origin feat/my-feature
 
 ---
 
-## License
-
-MIT — see [LICENSE](LICENSE).
-
----
-
 ## Acknowledgments
 
 - [Ghidra](https://ghidra-sre.org/) — NSA decompiler engine (Apache 2.0)
 - [iced-x86](https://github.com/icedland/iced) — Pure Rust x86/x64 disassembler
 - [Tauri](https://tauri.app/) — Desktop app framework
 - [React](https://react.dev/) — Frontend framework
+- [Monaco Editor](https://microsoft.github.io/monaco-editor/) — Code editor component
 - [goblin](https://github.com/m4b/goblin) — Rust binary parsing
 - [Tokio](https://tokio.rs/) — Async runtime
 - [Catppuccin](https://catppuccin.com/) — Color palette

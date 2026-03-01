@@ -13,7 +13,8 @@
 #![allow(clippy::too_many_lines)]
 #![allow(clippy::cognitive_complexity)]
 
-pub mod disasm;
+// Re-export fission-disasm directly (no wrapper needed)
+pub use fission_disasm as disasm;
 mod pcode;
 pub mod prelude;
 

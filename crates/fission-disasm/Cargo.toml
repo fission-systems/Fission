@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Disassembly engine for Fission using iced-x86"
-license = "MIT"
 
 [dependencies]
 iced-x86 = { version = "1.21", features = ["std"] }
