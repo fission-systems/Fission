@@ -34,10 +34,6 @@ All notable changes to the Fission project (November 2025 – Present).
 - `cargo build -p fission-analysis` 통과
 - `cargo test -p fission-analysis postprocess::tests:: -- --nocapture` 통과 (`test_switch_from_if_else_assign_multiline`, `test_negate_condition_basic_cases`, `test_while_true_to_while_cond_simple`)
 
-#### 비고
-
-- 기존 `python` feature 관련 `unexpected cfg` 경고는 유지(이번 리팩토링과 무관)
-
 ---
 
 ## 2026-03-01

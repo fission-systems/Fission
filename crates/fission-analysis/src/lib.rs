@@ -9,8 +9,6 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::multiple_crate_versions)]
-// Allow deprecated pyo3 methods (migration to be done separately)
-#![allow(deprecated)]
 
 #[allow(
     clippy::too_many_lines,
@@ -33,8 +31,6 @@ pub mod debug;
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
 pub mod plugin;
 pub mod prelude;
-#[allow(clippy::too_many_lines)]
-pub mod script;
 #[allow(
     clippy::too_many_lines,
     clippy::cognitive_complexity,

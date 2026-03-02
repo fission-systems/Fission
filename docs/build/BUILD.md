@@ -35,7 +35,6 @@ Complete guide for building Fission from source on Windows, Linux, and macOS.
 
 | Component | Required For |
 |-----------|--------------|
-| Python 3.8+ | Python plugin support |
 | vcpkg | Windows zlib management |
 | pkg-config | Linux library detection |
 
@@ -382,11 +381,8 @@ cargo build --release --no-default-features --features cli
 # GUI only
 cargo build --release --no-default-features --features gui
 
-# With Python scripting support
-cargo build --release --features python
-
 # All features
-cargo build --release --features "gui cli python"
+cargo build --release --features "gui cli"
 
 # Without native decompiler (use external Ghidra)
 cargo build --release --no-default-features --features "gui cli"
@@ -399,7 +395,6 @@ cargo build --release --no-default-features --features "gui cli"
 | `gui` | Tauri 2.x + React 19 desktop GUI (`cd crates/fission-tauri && npm run tauri build`) | ✅ Yes |
 | `cli` | CLI with REPL | ✅ Yes |
 | `native_decomp` | Built-in Ghidra decompiler | ✅ Yes |
-| `python` | Python plugin support (PyO3) | ❌ No |
 | `tui` | Terminal UI (ratatui) | ❌ No |
 
 ### Optimization Levels
@@ -520,17 +515,6 @@ sudo swapon /swapfile
 # Build CLI only (no GUI dependencies)
 cargo build --release --no-default-features --features cli
 ```
-
-### Python Feature Build Fails
-
-```bash
-# Install Python development headers
-sudo apt install python3-dev  # Ubuntu/Debian
-sudo dnf install python3-devel  # Fedora/RHEL
-brew install python@3.11  # macOS
-```
-
----
 
 ## Development Build
 

@@ -22,8 +22,6 @@ pub struct PluginInfo {
 /// Types of plugins
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginType {
-    /// Python script plugin
-    Python,
     /// Lua script plugin
     Lua,
     /// Native Rust plugin (dynamic library)
@@ -38,7 +36,7 @@ impl Default for PluginInfo {
             version: String::from("0.1.0"),
             author: String::from("Unknown"),
             description: String::new(),
-            plugin_type: PluginType::Python,
+            plugin_type: PluginType::Native,
             enabled: true,
         }
     }

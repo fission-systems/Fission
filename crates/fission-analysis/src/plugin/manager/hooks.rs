@@ -81,14 +81,7 @@ impl PluginManager {
             }
         }
 
-        // 2. Dispatch to Python plugins
-        #[cfg(feature = "python")]
-        {
-            self.python_runtime
-                .dispatch_event(event, self.event_bus.as_deref());
-        }
-
-        // 3. Dispatch to registered hooks
+        // 2. Dispatch to registered hooks
         let event_type = event.event_type();
 
         // Collect matching hooks and sort by priority

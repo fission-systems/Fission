@@ -583,7 +583,6 @@ Fission/
 ### Roadmap
 
 - [ ] DWARF debug info import
-- [ ] Python scripting (PyO3 API stabilization)
 - [ ] Windows ARM64 support
 - [ ] DWARF-based variable naming
 - [ ] Collaborative annotation sharing

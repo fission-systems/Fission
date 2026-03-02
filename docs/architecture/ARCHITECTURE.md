@@ -64,7 +64,6 @@ Two distinct domains exist in `fission-analysis`:
 Important workspace-level features:
 
 - `native_decomp`: enables native decompiler path (`fission-ffi` + analysis integration)
-- `python`: enables PyO3 bridge/script API
 - `gui` / `cli` / `tui`: binary/runtime surface selection
 
 Use `#[cfg(feature = "native_decomp")]` for native decompiler dependent code paths.
