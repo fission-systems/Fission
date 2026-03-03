@@ -265,7 +265,7 @@ std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes
     //   Medium (< 30 code units): use full_hash, verify specific_hash
     //   Full   (>= 30 code units): full_hash alone is sufficient
     //
-    // "code units" ≈ number of instructions; 1 instr ≈ 3-6 bytes on x86-64.
+    // "code units" ~= number of instructions; 1 instr ~= 3-6 bytes on x86-64.
     // We approximate via byte size: short < ~20 B, medium < ~180 B.
     //
     // Specific-hash scoring prevents false-positives on tiny stub functions.
@@ -277,16 +277,16 @@ std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes
     uint64_t specific_hash = FidHasher::calculate_specific_hash(bytes, std::min(size, (size_t)16));
 
     // Approximate code-unit count (Ghidra uses actual instruction count;
-    // we estimate: x86 avg instruction size ≈ 4 bytes)
+    // we estimate: x86 avg instruction size ~= 4 bytes)
     int approx_units = static_cast<int>(size / 4);
     bool need_specific_verify = (approx_units < 30);  // short + medium tiers
     bool need_strict_specific  = (approx_units <  5);  // short tier only
 
     // Debug: Print first 3 computed hashes
     if (debug_hash_count < 3) {
-        fission::utils::log_stream() << "[FunctionMatcher] Computed hash at 0x" << std::hex << address 
+        fission::utils::log_stream() << "[FunctionMatcher] Computed hash at 0x" << std::hex << address
                   << ": full=0x" << full_hash << " specific=0x" << specific_hash
-                  << " units≈" << std::dec << approx_units;
+                  << " units~=" << std::dec << approx_units;
         fission::utils::log_stream() << " bytes=[";
         for (size_t i = 0; i < std::min(size, (size_t)8); ++i) {
             fission::utils::log_stream() << std::hex << (int)bytes[i] << " ";

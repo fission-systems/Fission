@@ -11,7 +11,7 @@ enable_testing()
 
 # Platform settings
 if(MSVC)
-    add_compile_options(/W0 /EHsc /bigobj)
+    add_compile_options(/W0 /EHsc /bigobj /utf-8)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
     add_definitions(-DWIN32_LEAN_AND_MEAN -DNOMINMAX -DNOGDI)
 else()

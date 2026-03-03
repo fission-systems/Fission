@@ -23,7 +23,7 @@ TypeSharing::~TypeSharing() {}
 // For every function address recorded in func_param_types, finds the
 // corresponding Funcdata (if it has been through at least one decompilation
 // pass) and walks its alive Pcode ops to discover CALL / CALLIND targets.
-// Results are stored in call_graph[caller] = { callee0, callee1, … }.
+// Results are stored in call_graph[caller] = { callee0, callee1, ... }.
 // ---------------------------------------------------------------------------
 void TypeSharing::build_call_graph() {
     Scope* global = arch->symboltab->getGlobalScope();
@@ -34,7 +34,7 @@ void TypeSharing::build_call_graph() {
 
     fission::utils::log_stream() << "[TypeSharing] Building call graph from "
                                  << func_param_types.size()
-                                 << " registered function(s)…" << std::endl;
+                                 << " registered function(s)..." << std::endl;
 
     for (const auto& [caller_addr, param_vec] : func_param_types) {
         Address func_addr(arch->getDefaultCodeSpace(), caller_addr);
