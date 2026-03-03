@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <cstdint>
 
 // Forward declarations from Ghidra
 namespace ghidra {
