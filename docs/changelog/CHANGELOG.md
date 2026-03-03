@@ -4,6 +4,56 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-03
+
+### 안정화/성능/이식성 리팩토링 완료 (Phase 2 ~ 4)
+
+이번 배치에서 에러 처리 안전성(Phase 2), postprocess 성능(Phase 3), 경로 이식성(Phase 4)을
+연속적으로 완료하고 `main`에 반영.
+
+#### Added
+
+- Postprocess 실행 통계 API 추가
+   - `PassExecutionStats` (`executed_passes`, `borrowed_outputs`, `owned_outputs`, skip 카운트)
+   - `PassRegistry::execute_all_with_stats(...)`
+   - `execute_default_passes_with_stats(...)`
+
+#### Changed
+
+- **Phase 2 (`unwrap/expect` 제거):**
+   - analysis/loader/pcode/disasm/core/ffi/tauri 전반 panic-prone 경로 제거
+   - 실패 경로를 명시적 분기/에러 전파로 통일
+- **Phase 3 (`Cow` 기반 문자열 최적화):**
+   - pass pipeline을 `Result<Cow<str>, PassError>` 중심으로 전환
+   - cleanup/structure/naming/type/dwarf/arithmetic/loop/switch/casts/boilerplate 패스에 no-op `Borrowed` fast path 확장
+   - 불필요한 `String` 할당 감소
+- **Phase 4 (하드코딩 경로 제거):**
+   - `build.rs`의 Windows 절대 경로(`C:\\...`) fallback 제거
+   - `VCPKG_ROOT`/`VCPKG_INSTALLATION_ROOT` + 환경 기반 탐색으로 통일
+   - DIE 시그니처 로딩을 고정 상대경로 배열 대신 실행경로 기반 상향 탐색으로 변경
+
+#### Fixed
+
+- `switch` 재구성 회귀 수정:
+   - `result = ...` 같은 일반 대입 타깃도 인식하도록 패턴 매칭 보완
+   - 실패하던 `test_switch_from_if_else_assign_multiline` 복구
+
+#### 검증
+
+- `cargo build -p fission-loader -p fission-analysis -p fission-ffi` 통과
+- `cargo test --workspace` 최종 통과 (postprocess 회귀 포함)
+
+#### 대표 커밋
+
+- `719050e` Constants library and initial stability improvements
+- `58e05b2` Phase 2.8 remaining unwrap/expect 제거
+- `1c6a278` Phase 3.1 Cow 기반 pass pipeline 도입
+- `bb5e586` pass execution stats API 추가
+- `65888f9` Phase 4 하드코딩 경로 제거
+- `d12316d` switch reconstruction 회귀 수정
+
+---
+
 ## 2026-03-02
 
 ### Decompiler Postprocess 모듈화 리팩토링 (대형 `postprocess.rs` 분해)
