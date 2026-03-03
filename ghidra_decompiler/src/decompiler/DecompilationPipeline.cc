@@ -52,8 +52,11 @@ namespace fission {
 namespace decompiler {
 
 // Budget guards for structure recovery
-static constexpr size_t MAX_FUNCTION_SIZE = 10000;  // 10KB code limit
-static constexpr int MAX_PTRSUB_OPS = 100;           // Limit analyzed operations
+// Raised from 10000/100 to better handle large real-world functions.
+// A chrono-based timeout inside collect_accesses() provides the true
+// wall-clock safety net, so these are secondary hard caps.
+static constexpr size_t MAX_FUNCTION_SIZE = 50000;  // 50KB code limit
+static constexpr int MAX_PTRSUB_OPS = 500;           // Limit analyzed operations
 
 // ============================================================================
 // Centralized FID/Signature Path Configuration

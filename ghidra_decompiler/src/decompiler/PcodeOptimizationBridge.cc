@@ -41,11 +41,13 @@ static bool load_rust_ffi() {
     }
 
     if (!rust_optimize_fn || !rust_free_fn) {
-        fission::utils::log_stream() << "[PcodeOptimizationBridge] Warning: Could not load Rust FFI functions" << std::endl;
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] ERROR: Could not load Rust FFI functions — "
+                                        "Pcode optimization disabled for this session" << std::endl;
         fission::utils::log_stream() << "[PcodeOptimizationBridge] GetLastError: " << GetLastError() << std::endl;
         rust_optimize_fn = nullptr;
         rust_free_fn = nullptr;
-        ffi_attempted = false; // Allow retry on next call
+        // Keep ffi_attempted = true so we don't spam the log on every call.
+        // (mirrors the POSIX path behaviour)
         return false;
     }
 #else

@@ -756,6 +756,213 @@ std::string SwitchReconstructor::reconstruct_switch_from_sequential_ifs(const st
     return out.str();
 }
 
+// ============================================================================
+// Switch Reconstruction from Bounds-Guarded Equality Chains
+// ============================================================================
+//
+// Handles the common compiler output where a range guard precedes an equality
+// dispatch chain that the jump-table reconstructor would otherwise miss:
+//
+//   if (N < var) goto LAB_default;          // bounds check
+//   if (var == 0) goto LAB_0;
+//   if (var == 1) goto LAB_1;
+//   ...
+//   LAB_default:  default_body;
+//   LAB_0: case0_body; goto LAB_end;
+//   ...
+//
+// The bounds guard is stripped and LAB_default becomes the switch default:.
+// Supported guard forms:
+//   if (N < var) goto LABEL;
+//   if (var > N) goto LABEL;
+//   if ((cast)var > N) goto LABEL;
+
+std::string SwitchReconstructor::reconstruct_switch_from_bounded_chain(const std::string& c_code) {
+    // Guard: literal < var  →  captures (indent, literal N, var_name, default_label)
+    static const std::regex guard_lt(
+        R"(^(\s*)if\s*\(\s*(?:0[xX][0-9A-Fa-f]+|\d+)\s*<\s*(\w+)\s*\)\s*goto\s+(\w+)\s*;[ \t]*$)"
+    );
+    // Guard: var > literal  →  captures (indent, var_name, literal N, default_label)
+    static const std::regex guard_gt(
+        R"(^(\s*)if\s*\(\s*(?:\([^)]+\)\s*)?(\w+)\s*>\s*(?:0[xX][0-9A-Fa-f]+|\d+)\s*\)\s*goto\s+(\w+)\s*;[ \t]*$)"
+    );
+    // Equality check that reconstruct_switch_from_jump_table also uses.
+    static const std::regex eq_goto(
+        R"(^(\s*)if\s*\(\s*(\w+)\s*==\s*(-?(?:0[xX][0-9A-Fa-f]+|\d+))\s*\)\s*goto\s+(\w+)\s*;[ \t]*$)"
+    );
+    static const std::regex eq_goto_rev(
+        R"(^(\s*)if\s*\(\s*(-?(?:0[xX][0-9A-Fa-f]+|\d+))\s*==\s*(\w+)\s*\)\s*goto\s+(\w+)\s*;[ \t]*$)"
+    );
+    static const std::regex label_line(R"(^(\s*)(\w+)\s*:[ \t]*$)");
+    static const std::regex goto_line(R"(^\s*goto\s+(\w+)\s*;[ \t]*$)");
+
+    std::vector<std::string> lines;
+    {
+        std::istringstream ss(c_code);
+        std::string ln;
+        while (std::getline(ss, ln)) lines.push_back(ln);
+    }
+
+    bool changed = false;
+
+    auto try_convert = [&](size_t start_idx) -> size_t {
+        if (start_idx >= lines.size()) return start_idx + 1;
+
+        std::smatch m;
+        std::string var_name, base_indent, default_label;
+
+        // Match the bounds guard line
+        const std::string& guard_ln = lines[start_idx];
+        if (std::regex_match(guard_ln, m, guard_lt)) {
+            base_indent   = m[1].str();
+            var_name      = m[2].str();
+            default_label = m[3].str();
+        } else if (std::regex_match(guard_ln, m, guard_gt)) {
+            base_indent   = m[1].str();
+            var_name      = m[2].str();
+            default_label = m[3].str();
+        } else {
+            return start_idx + 1;
+        }
+
+        // Collect the following equality-check chain on the same variable
+        struct CaseEntry { std::string value; std::string label; };
+        std::vector<CaseEntry> cases;
+        size_t i = start_idx + 1;
+        for (; i < lines.size(); ++i) {
+            const std::string& ln = lines[i];
+            if (std::regex_match(ln, m, eq_goto) && m[2].str() == var_name) {
+                cases.push_back({m[3].str(), m[4].str()});
+            } else if (std::regex_match(ln, m, eq_goto_rev) && m[3].str() == var_name) {
+                cases.push_back({m[2].str(), m[4].str()});
+            } else {
+                break;
+            }
+        }
+
+        // Need at least 2 equality cases to be worth converting
+        if (cases.size() < 2) return start_idx + 1;
+
+        // i now points to the first non-case-check line after the chain.
+        // Collect default body: lines between chain end and the first case label.
+        std::set<std::string> case_labels;
+        for (const auto& c : cases) case_labels.insert(c.label);
+
+        std::vector<std::string> default_lines;
+        size_t j = i;
+        {
+            // If the first post-chain line is a blank goto to the default label,
+            // skip it (it's the "fall through to default" path).
+            // Otherwise collect until we hit a known case label.
+            for (; j < lines.size(); ++j) {
+                if (std::regex_match(lines[j], m, label_line)) {
+                    if (case_labels.count(m[2].str()) || m[2].str() == default_label)
+                        break;
+                }
+                if (std::regex_match(lines[j], m, goto_line)) {
+                    if (!case_labels.count(m[1].str())) continue; // skip exit goto
+                }
+                default_lines.push_back(lines[j]);
+            }
+        }
+
+        // Build body map for each case label
+        std::map<std::string, std::vector<std::string>> bodies;
+        std::string cur_label;
+        for (size_t k = j; k < lines.size(); ++k) {
+            const std::string& ln = lines[k];
+            if (std::regex_match(ln, m, label_line)) {
+                std::string lbl = m[2].str();
+                if (case_labels.count(lbl)) { cur_label = lbl; continue; }
+                if (lbl == default_label)   { cur_label = ""; break; }
+            }
+            if (!cur_label.empty()) {
+                if (std::regex_match(ln, m, goto_line)) {
+                    const std::string& tgt = m[1].str();
+                    if (!case_labels.count(tgt) && tgt != default_label) {
+                        bodies[cur_label].push_back(ln); // real goto inside body
+                    }
+                    // Skip exit goto — we'll emit break instead.
+                    continue;
+                }
+                bodies[cur_label].push_back(ln);
+            }
+        }
+
+        // Find end of the construct: the default_label definition line.
+        size_t end_idx = j;
+        if (!default_label.empty()) {
+            for (size_t k = j; k < lines.size(); ++k) {
+                if (std::regex_match(lines[k], m, label_line) && m[2].str() == default_label) {
+                    end_idx = k + 1; // consume the label line itself
+                    break;
+                }
+            }
+        }
+
+        // Build switch statement
+        std::ostringstream sw;
+        sw << base_indent << "switch (" << var_name << ") {\n";
+        for (const auto& ce : cases) {
+            sw << base_indent << "case " << ce.value << ":\n";
+            auto it = bodies.find(ce.label);
+            if (it != bodies.end()) {
+                for (const auto& bl : it->second) sw << bl << "\n";
+            }
+            bool needs_break = true;
+            if (it != bodies.end() && !it->second.empty()) {
+                const auto& last = it->second.back();
+                if (last.find("return ") != std::string::npos ||
+                    last.find("goto ")   != std::string::npos ||
+                    last.find("break;")  != std::string::npos)
+                    needs_break = false;
+            }
+            if (needs_break) sw << base_indent << "  break;\n";
+        }
+
+        bool has_default = false;
+        for (const auto& dl : default_lines) {
+            std::string t = dl;
+            t.erase(0, t.find_first_not_of(" \t"));
+            if (!t.empty()) { has_default = true; break; }
+        }
+        if (has_default) {
+            sw << base_indent << "default:\n";
+            for (const auto& dl : default_lines) sw << dl << "\n";
+        }
+        sw << base_indent << "}";
+
+        // Replace lines[start_idx .. end_idx) with the switch text
+        std::vector<std::string> sw_lines;
+        {
+            std::istringstream ss(sw.str());
+            std::string ln;
+            while (std::getline(ss, ln)) sw_lines.push_back(ln);
+        }
+
+        lines.erase(lines.begin() + start_idx, lines.begin() + end_idx);
+        lines.insert(lines.begin() + start_idx, sw_lines.begin(), sw_lines.end());
+
+        changed = true;
+        fission::utils::log_stream() << "[SwitchReconstructor] Reconstructed bounded-chain switch on '"
+                  << var_name << "' with " << cases.size() << " cases (default -> "
+                  << default_label << ")" << std::endl;
+        return start_idx + sw_lines.size();
+    };
+
+    size_t idx = 0;
+    while (idx < lines.size()) idx = try_convert(idx);
+
+    if (!changed) return c_code;
+
+    std::ostringstream out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        out << lines[i];
+        if (i + 1 < lines.size()) out << "\n";
+    }
+    return out.str();
+}
+
 }  // namespace cfg
 }  // namespace decompiler
 }  // namespace fission

@@ -19,55 +19,96 @@ std::string PostProcessor::convert_integer_constants(std::string c_code) {
         while (end < c_code.length() && isxdigit(c_code[end])) {
             end++;
         }
-        
+
         size_t len = end - start;
-        if (len > 4) { // Only check if longer than single byte (0xXX)
-            std::string hex_str = c_code.substr(start, len);
-            try {
-                unsigned long long val = std::stoull(hex_str, nullptr, 16);
-                
-                // Extract bytes (Little Endian for x86)
-                std::string decoded;
-                bool is_ascii = true;
-                unsigned long long temp = val;
-                
-                std::vector<char> bytes;
-                while (temp > 0) {
-                    char c = (char)(temp & 0xFF);
-                    bytes.push_back(c);
-                    temp >>= 8;
+        // Only consider constants with >= 8 hex chars (>= 4 raw bytes)
+        if (len >= 8) {
+            // ── Arithmetic-context guard ───────────────────────────────────
+            // Skip conversion if the constant appears directly adjacent to an
+            // arithmetic / bitwise operator — it's almost certainly a numeric
+            // operand, not a packed string literal.
+            bool in_arithmetic = false;
+            if (start >= 1) {
+                size_t prev = start - 1;
+                while (prev > 0 && (c_code[prev] == ' ' || c_code[prev] == '\t'))
+                    prev--;
+                char pc = c_code[prev];
+                if (pc == '+' || pc == '-' || pc == '*' || pc == '/' ||
+                    pc == '&' || pc == '|' || pc == '^' || pc == '~' ||
+                    pc == '%' || pc == '<' || pc == '>') {
+                    in_arithmetic = true;
                 }
-                
-                // If empty, it was 0x0 - not a string
-                if (bytes.empty()) is_ascii = false;
-                
-                int valid_chars = 0;
-                for (char c : bytes) {
-                    if (c == 0) continue; // Allow null terminators
-                    if (isalnum(c) || ispunct(c) || c == ' ') {
-                        valid_chars++;
-                        decoded += c;
-                    } else {
-                        is_ascii = false;
-                        break;
+            }
+            if (!in_arithmetic && end < c_code.length()) {
+                char nc = c_code[end];
+                if (nc == '+' || nc == '-' || nc == '*' || nc == '/' ||
+                    nc == '&' || nc == '|' || nc == '^' || nc == '%') {
+                    in_arithmetic = true;
+                }
+            }
+
+            if (!in_arithmetic) {
+                std::string hex_str = c_code.substr(start, len);
+                try {
+                    unsigned long long val = std::stoull(hex_str, nullptr, 16);
+
+                    // ── High-byte zero guard ──────────────────────────────
+                    // A zero most-significant byte means the constant is
+                    // likely a padded numeric value, not a packed string.
+                    int hex_digits = static_cast<int>(len) - 2; // subtract "0x"
+                    int num_bytes  = (hex_digits + 1) / 2;
+                    if (num_bytes >= 2) {
+                        unsigned long long high_mask = 0xFFULL << ((num_bytes - 1) * 8);
+                        if ((val & high_mask) == 0) {
+                            pos = end;
+                            continue; // Zero high byte — numeric constant, skip
+                        }
                     }
-                }
-                
-                if (is_ascii && valid_chars >= 3) {
-                    // Found a string! Format: (QWORD)"string" or (DWORD)"string"
-                    std::string replacement = "\"" + decoded + "\"";
-                    if (len > 10) { // > 4 bytes -> QWORD
-                        replacement = "(QWORD)" + replacement;
-                    } else {
-                        replacement = "(DWORD)" + replacement;
+
+                    // ── Extract bytes (Little Endian for x86) ────────────
+                    std::string decoded;
+                    bool is_ascii = true;
+                    unsigned long long temp = val;
+
+                    std::vector<char> bytes;
+                    while (temp > 0) {
+                        char c = (char)(temp & 0xFF);
+                        bytes.push_back(c);
+                        temp >>= 8;
                     }
-                    
-                    c_code.replace(start, len, replacement);
-                    pos = start + replacement.length();
-                    continue;
+
+                    if (bytes.empty()) is_ascii = false;
+
+                    int valid_chars = 0;
+                    for (char c : bytes) {
+                        if (c == 0) continue; // Allow null terminators
+                        // Require the byte to be a printable ASCII character
+                        if (c >= 0x20 && c <= 0x7E &&
+                            (isalnum((unsigned char)c) || ispunct((unsigned char)c) || c == ' ')) {
+                            valid_chars++;
+                            decoded += c;
+                        } else {
+                            is_ascii = false;
+                            break;
+                        }
+                    }
+
+                    // Require >= 4 consecutive printable chars (was 3)
+                    if (is_ascii && valid_chars >= 4) {
+                        std::string replacement = "\"" + decoded + "\"";
+                        if (len > 10) { // > 4 bytes -> QWORD
+                            replacement = "(QWORD)" + replacement;
+                        } else {
+                            replacement = "(DWORD)" + replacement;
+                        }
+
+                        c_code.replace(start, len, replacement);
+                        pos = start + replacement.length();
+                        continue;
+                    }
+                } catch (...) {
+                    // Ignore conversion errors
                 }
-            } catch (...) {
-                // Ignore conversion errors
             }
         }
         pos = end;
@@ -107,29 +148,171 @@ std::string PostProcessor::simplify_nested_if(std::string c_code) {
 }
 
 std::string PostProcessor::fold_array_init(std::string c_code) {
-    // Pattern detection for sequential local variable assignments
-    // For now, just return the original code
-    // Full implementation would replace with array initializers
-    return c_code;
+    // Detect runs of consecutive: var[0] = v0; var[1] = v1; ...
+    // and fold them into a single initializer: var[] = {v0, v1, ...};
+    // Only triggers when the run starts at index 0 and has >= 3 elements.
+    static const std::regex arr_assign(
+        R"(^(\s*)(\w+)\[(\d+)\]\s*=\s*([^;]+);\s*$)"
+    );
+
+    bool ends_nl = !c_code.empty() && c_code.back() == '\n';
+    std::vector<std::string> lines;
+    {
+        std::istringstream ss(c_code);
+        std::string ln;
+        while (std::getline(ss, ln)) lines.push_back(ln);
+    }
+
+    bool any_changed = true;
+    while (any_changed) {
+        any_changed = false;
+        for (size_t i = 0; i < lines.size(); i++) {
+            std::smatch m;
+            if (!std::regex_match(lines[i], m, arr_assign)) continue;
+            std::string indent = m[1].str();
+            std::string var    = m[2].str();
+            int idx0 = std::stoi(m[3].str());
+            if (idx0 != 0) continue; // only handle runs starting at [0]
+
+            std::vector<std::string> values;
+            {
+                std::string v = m[4].str();
+                while (!v.empty() && std::isspace((unsigned char)v.back())) v.pop_back();
+                values.push_back(v);
+            }
+
+            // Collect consecutive ascending indices on the same variable
+            size_t j = i + 1;
+            for (; j < lines.size(); j++) {
+                std::smatch m2;
+                if (!std::regex_match(lines[j], m2, arr_assign)) break;
+                if (m2[2].str() != var) break;
+                if (std::stoi(m2[3].str()) != static_cast<int>(values.size())) break;
+                std::string v = m2[4].str();
+                while (!v.empty() && std::isspace((unsigned char)v.back())) v.pop_back();
+                values.push_back(v);
+            }
+
+            // Only fold if we have >= 3 consecutive assignments
+            if (values.size() < 3) continue;
+
+            // Build initializer list (omit explicit size — let compiler infer)
+            std::ostringstream init;
+            init << indent << var << "[] = {";
+            for (size_t k = 0; k < values.size(); k++) {
+                if (k > 0) init << ", ";
+                init << values[k];
+            }
+            init << "};";
+
+            std::vector<std::string> newlines;
+            for (size_t k = 0; k < i; k++) newlines.push_back(lines[k]);
+            newlines.push_back(init.str());
+            for (size_t k = j; k < lines.size(); k++) newlines.push_back(lines[k]);
+            lines = std::move(newlines);
+            any_changed = true;
+            break;
+        }
+    }
+
+    std::string out;
+    out.reserve(c_code.size());
+    for (size_t i = 0; i < lines.size(); i++) {
+        out += lines[i];
+        if (i + 1 < lines.size()) out += '\n';
+    }
+    if (ends_nl && (out.empty() || out.back() != '\n')) out += '\n';
+    return out;
 }
 
 std::string PostProcessor::improve_variable_names(std::string c_code) {
-    static const std::regex return_var_pattern(R"(return\s+(local_\w+)\s*;)");
-    std::smatch match;
-
-    if (std::regex_search(c_code, match, return_var_pattern)) {
-        std::string var_name = match[1].str();
-        if (var_name.rfind("local_", 0) == 0) {
-            // Build a plain-text pattern for this specific variable name
-            // (var_name contains only \w chars, so no escaping needed)
-            const std::regex var_pattern(var_name);
-            auto it  = std::sregex_iterator(c_code.begin(), c_code.end(), var_pattern);
-            int count = static_cast<int>(std::distance(it, std::sregex_iterator()));
-            if (count >= 2 && count <= 10) {
-                c_code = std::regex_replace(c_code, var_pattern, "result");
+    // ── 1. Return variable → "result" ─────────────────────────────────────
+    {
+        static const std::regex return_var_pattern(R"(return\s+(local_\w+)\s*;)");
+        std::smatch match;
+        if (std::regex_search(c_code, match, return_var_pattern)) {
+            std::string var_name = match[1].str();
+            if (var_name.rfind("local_", 0) == 0) {
+                const std::regex var_pattern("\\b" + var_name + "\\b");
+                auto it  = std::sregex_iterator(c_code.begin(), c_code.end(), var_pattern);
+                int count = static_cast<int>(std::distance(it, std::sregex_iterator()));
+                if (count >= 2 && count <= 10) {
+                    c_code = std::regex_replace(c_code, var_pattern, "result");
+                }
             }
         }
     }
+
+    // ── 2. Allocator return → "buf" ────────────────────────────────────────
+    {
+        static const std::regex malloc_assign(
+            R"(\b(local_\w+)\s*=\s*(?:malloc|calloc|realloc|HeapAlloc|VirtualAlloc)\s*\()"
+        );
+        std::sregex_iterator it(c_code.begin(), c_code.end(), malloc_assign);
+        std::sregex_iterator end;
+        for (; it != end; ++it) {
+            std::string lv = (*it)[1].str();
+            std::regex lv_pat("\\b" + lv + "\\b");
+            auto it2 = std::sregex_iterator(c_code.begin(), c_code.end(), lv_pat);
+            int cnt = static_cast<int>(std::distance(it2, std::sregex_iterator()));
+            if (cnt >= 2 && cnt <= 15) {
+                c_code = std::regex_replace(c_code, lv_pat, "buf");
+                break; // only rename one allocator result per function
+            }
+        }
+    }
+
+    // ── 3. strlen/wcslen result → "len" ───────────────────────────────────
+    {
+        static const std::regex strlen_assign(
+            R"(\b(local_\w+)\s*=\s*(?:strlen|wcslen|strnlen)\s*\()"
+        );
+        std::sregex_iterator it(c_code.begin(), c_code.end(), strlen_assign);
+        std::sregex_iterator end;
+        for (; it != end; ++it) {
+            std::string lv = (*it)[1].str();
+            std::regex lv_pat("\\b" + lv + "\\b");
+            auto it2 = std::sregex_iterator(c_code.begin(), c_code.end(), lv_pat);
+            int cnt = static_cast<int>(std::distance(it2, std::sregex_iterator()));
+            if (cnt >= 2 && cnt <= 12) {
+                c_code = std::regex_replace(c_code, lv_pat, "len");
+                break;
+            }
+        }
+    }
+
+    // ── 4. for-loop counter starting at 0 → i / j / k / n ────────────────
+    {
+        static const std::regex for_counter(
+            R"(\bfor\s*\(\s*(local_\w+)\s*=\s*0\s*;)"
+        );
+        static const char* names[] = {"i", "j", "k", "n"};
+        int name_idx = 0;
+        std::string cur = c_code;
+        // Iterating over a copy; collect matches first to avoid invalidation.
+        std::vector<std::string> loop_vars;
+        {
+            std::sregex_iterator it(cur.begin(), cur.end(), for_counter);
+            std::sregex_iterator end;
+            for (; it != end && name_idx < 4; ++it, ++name_idx)
+                loop_vars.push_back((*it)[1].str());
+        }
+        for (int k = 0; k < static_cast<int>(loop_vars.size()); k++) {
+            const std::string& lv = loop_vars[k];
+            std::regex lv_pat("\\b" + lv + "\\b");
+            auto it2 = std::sregex_iterator(cur.begin(), cur.end(), lv_pat);
+            int cnt = static_cast<int>(std::distance(it2, std::sregex_iterator()));
+            if (cnt >= 2 && cnt <= 20) {
+                cur = std::regex_replace(cur, lv_pat, names[k]);
+                // Update loop_vars[remaining] if same var was listed again
+                for (int m = k + 1; m < static_cast<int>(loop_vars.size()); m++) {
+                    if (loop_vars[m] == lv) loop_vars[m] = names[k];
+                }
+            }
+        }
+        c_code = cur;
+    }
+
     return c_code;
 }
 

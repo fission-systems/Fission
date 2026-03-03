@@ -1018,7 +1018,16 @@ void TypePropagator::build_local_types(Funcdata* fd) {
             } else {
                 ct = vn->getLocalType(needs_block);
             }
+        } catch (const LowlevelError&) {
+            // Expected: varnode not fully initialised or type not resolvable — skip.
+            continue;
+        } catch (const std::exception& ex) {
+            fission::utils::log_stream() << "[TypePropagator] WARNING: unexpected exception during "
+                                            "varnode type inference: " << ex.what() << std::endl;
+            continue;
         } catch (...) {
+            fission::utils::log_stream() << "[TypePropagator] WARNING: unknown exception during "
+                                            "varnode type inference — skipping varnode" << std::endl;
             continue;
         }
 
@@ -1775,6 +1784,8 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
                                       << ret->getName() << " for callee " << func_name << std::endl;
                         }
                     }
+                } catch (const LowlevelError&) {
+                    // Callee not yet analysed — normal during incremental analysis, skip.
                 } catch (...) {}
             }
 
@@ -1897,6 +1908,11 @@ void TypePropagator::propagate_call_return_types(Funcdata* fd) {
                         fission::utils::log_stream() << "[TypePropagator] Locked return type to "
                                   << ptr_type->getName() << " for: " << func_name << std::endl;
                     }
+                } catch (const LowlevelError&) {
+                    // FuncCallSpecs not modifiable (e.g. setOutput on locked proto) — skip.
+                } catch (const std::exception& ex) {
+                    fission::utils::log_stream() << "[TypePropagator] WARNING: failed to lock return type for "
+                              << func_name << ": " << ex.what() << std::endl;
                 } catch (...) {}
                 
                 types_set++;

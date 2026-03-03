@@ -90,6 +90,24 @@ public:
      * @return Transformed code with switch statement
      */
     static std::string reconstruct_switch_from_sequential_ifs(const std::string& c_code);
+
+    /**
+     * @brief Reconstruct switch from a bounds-guarded equality chain
+     *
+     * Handles the common compiler output where an unsigned range guard appears
+     * before an equality dispatch chain, e.g.:
+     *
+     *   if (N < var) goto LAB_default;
+     *   if (var == 0) goto LAB_0;
+     *   if (var == 1) goto LAB_1;
+     *   ...
+     *
+     * Strips the guard and constructs the switch with LAB_default as default:.
+     *
+     * @param c_code The C source code
+     * @return Transformed code with switch statement
+     */
+    static std::string reconstruct_switch_from_bounded_chain(const std::string& c_code);
 };
 
 } // namespace cfg
