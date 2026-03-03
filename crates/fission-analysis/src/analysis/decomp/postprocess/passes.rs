@@ -5,6 +5,15 @@
 
 use super::pass::{PassCategory, PassContext, PassMetadata, PassResult, PostProcessPass};
 use super::PostProcessor;
+use std::borrow::Cow;
+
+fn pass_output<'a>(input: &'a str, output: String) -> PassResult<'a> {
+    if output == input {
+        Ok(Cow::Borrowed(input))
+    } else {
+        Ok(Cow::Owned(output))
+    }
+}
 
 // ============================================================================
 // Arithmetic Passes
@@ -25,10 +34,10 @@ impl PostProcessPass for ArithmeticIdiomsPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         // Create a temporary PostProcessor to access the method
         let processor = PostProcessor::new();
-        Ok(processor.apply_arithmetic_idioms(code))
+        pass_output(code, processor.apply_arithmetic_idioms(code))
     }
 }
 
@@ -45,8 +54,8 @@ impl PostProcessPass for MulPow2ToShiftPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::mul_pow2_to_shift(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::mul_pow2_to_shift(code))
     }
 }
 
@@ -67,8 +76,8 @@ impl PostProcessPass for WhileTrueToCondPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::while_true_to_while_cond(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::while_true_to_while_cond(code))
     }
 }
 
@@ -85,8 +94,8 @@ impl PostProcessPass for WhileTrueToForPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::while_true_to_for_loop(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::while_true_to_for_loop(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -107,8 +116,8 @@ impl PostProcessPass for WhileCondToForPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::while_cond_to_for(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::while_cond_to_for(code))
     }
 }
 
@@ -125,8 +134,8 @@ impl PostProcessPass for DoWhileToForPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::do_while_to_for(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::do_while_to_for(code))
     }
 }
 
@@ -143,8 +152,8 @@ impl PostProcessPass for WhileTrueToForEverPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::while_true_to_for_ever(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::while_true_to_for_ever(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -165,8 +174,8 @@ impl PostProcessPass for SimplifyIfStructurePass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::simplify_if_structure(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::simplify_if_structure(code))
     }
 }
 
@@ -183,8 +192,8 @@ impl PostProcessPass for SwitchReconstructionPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::reconstruct_switch_from_bst(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::reconstruct_switch_from_bst(code))
     }
 }
 
@@ -201,8 +210,8 @@ impl PostProcessPass for SwitchFromIfElseAssignPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::reconstruct_switch_from_if_else_assign(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::reconstruct_switch_from_if_else_assign(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -227,8 +236,8 @@ impl PostProcessPass for RemoveConstantConditionsPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::remove_constant_conditions(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::remove_constant_conditions(code))
     }
 }
 
@@ -254,12 +263,12 @@ impl PostProcessPass for RemoveDeadAssignmentsPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         let mut result = code.to_string();
         for _ in 0..self.iterations {
             result = PostProcessor::remove_dead_local_assigns(&result);
         }
-        Ok(result)
+        pass_output(code, result)
     }
 }
 
@@ -276,8 +285,8 @@ impl PostProcessPass for DerefToArrayIndexPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::deref_to_array_index(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::deref_to_array_index(code))
     }
 }
 
@@ -294,8 +303,8 @@ impl PostProcessPass for BitopToLogicopPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::bitop_to_logicop(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::bitop_to_logicop(code))
     }
 }
 
@@ -316,8 +325,8 @@ impl PostProcessPass for RenameInductionVarsPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::rename_induction_vars(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::rename_induction_vars(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -338,8 +347,8 @@ impl PostProcessPass for RenameSemanticVarsPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::rename_semantic_vars(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::rename_semantic_vars(code))
     }
 }
 
@@ -356,8 +365,8 @@ impl PostProcessPass for LoopIdiomsPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::recognize_loop_idioms(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::recognize_loop_idioms(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -382,9 +391,9 @@ impl PostProcessPass for RemoveRustBoilerplatePass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         let processor = PostProcessor::new();
-        Ok(processor.remove_rust_boilerplate(code))
+        pass_output(code, processor.remove_rust_boilerplate(code))
     }
 }
 
@@ -401,9 +410,9 @@ impl PostProcessPass for RemoveGoBoilerplatePass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         let processor = PostProcessor::new();
-        Ok(processor.remove_go_boilerplate(code))
+        pass_output(code, processor.remove_go_boilerplate(code))
     }
 }
 
@@ -420,9 +429,9 @@ impl PostProcessPass for SwiftDemanglePass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         let processor = PostProcessor::new();
-        Ok(processor.demangle_swift_symbols(code))
+        pass_output(code, processor.demangle_swift_symbols(code))
     }
 }
 
@@ -443,14 +452,14 @@ impl PostProcessPass for FieldOffsetReplacementPass {
         }
     }
 
-    fn run(&self, code: &str, context: &PassContext) -> PassResult {
+    fn run<'a>(&self, code: &'a str, context: &PassContext) -> PassResult<'a> {
         if context.inferred_types.is_empty() {
-            return Ok(code.to_string());
+            return Ok(Cow::Borrowed(code));
         }
         
         let processor = PostProcessor::new()
             .with_inferred_types(context.inferred_types.clone());
-        Ok(processor.replace_field_offsets(code))
+        pass_output(code, processor.replace_field_offsets(code))
     }
 
     fn should_run(&self, context: &PassContext) -> bool {
@@ -471,8 +480,8 @@ impl PostProcessPass for InsertMissingCastsPass {
         }
     }
 
-    fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-        Ok(PostProcessor::insert_missing_casts(code))
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        pass_output(code, PostProcessor::insert_missing_casts(code))
     }
 }
 
@@ -489,14 +498,14 @@ impl PostProcessPass for ApplyDwarfNamesPass {
         }
     }
 
-    fn run(&self, code: &str, context: &PassContext) -> PassResult {
+    fn run<'a>(&self, code: &'a str, context: &PassContext) -> PassResult<'a> {
         if context.dwarf_info.is_none() {
-            return Ok(code.to_string());
+            return Ok(Cow::Borrowed(code));
         }
         
         let processor = PostProcessor::new()
             .with_dwarf_info(context.dwarf_info.clone());
-        Ok(processor.apply_dwarf_names(code))
+        pass_output(code, processor.apply_dwarf_names(code))
     }
 
     fn should_run(&self, context: &PassContext) -> bool {

@@ -192,6 +192,7 @@ impl PostProcessor {
         // Execute all enabled passes with dependency resolution
         pass_registry
             .execute_all(code, &context)
+            .map(|output| output.into_owned())
             .map_err(|e| e.to_string())
     }
 

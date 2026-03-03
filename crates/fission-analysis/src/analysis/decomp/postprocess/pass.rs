@@ -8,6 +8,7 @@
 //! - Pass metadata and configuration
 
 use std::collections::{HashMap, HashSet};
+use std::borrow::Cow;
 
 /// Metadata about a post-processing pass
 #[derive(Debug, Clone)]
@@ -40,7 +41,7 @@ pub enum PassCategory {
 }
 
 /// Result type for pass execution
-pub type PassResult = Result<String, PassError>;
+pub type PassResult<'a> = Result<Cow<'a, str>, PassError>;
 
 /// Errors that can occur during pass execution
 #[derive(Debug, thiserror::Error)]
@@ -75,7 +76,7 @@ pub trait PostProcessPass: Send + Sync {
     ///
     /// # Returns
     /// Transformed code or an error
-    fn run(&self, code: &str, context: &PassContext) -> PassResult;
+    fn run<'a>(&self, code: &'a str, context: &PassContext) -> PassResult<'a>;
     
     /// Get the list of pass IDs that must run before this pass
     ///
@@ -197,8 +198,8 @@ impl PassRegistry {
     }
     
     /// Execute all enabled passes in dependency order
-    pub fn execute_all(&self, code: &str, context: &PassContext) -> PassResult {
-        let mut current = code.to_string();
+    pub fn execute_all<'a>(&self, code: &'a str, context: &PassContext) -> PassResult<'a> {
+        let mut current: Cow<'a, str> = Cow::Borrowed(code);
         
         for pass_id in &self.execution_order {
             if !self.is_enabled(pass_id) {
@@ -215,7 +216,10 @@ impl PassRegistry {
                 continue;
             }
             
-            current = pass.run(&current, context)?;
+            let next = pass.run(current.as_ref(), context)?;
+            if let Cow::Owned(s) = next {
+                current = Cow::Owned(s);
+            }
         }
         
         Ok(current)
@@ -312,8 +316,8 @@ mod tests {
             }
         }
         
-        fn run(&self, code: &str, _context: &PassContext) -> PassResult {
-            Ok(format!("{}:{}", self.id, code))
+        fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+            Ok(Cow::Owned(format!("{}:{}", self.id, code)))
         }
         
         fn dependencies(&self) -> &[&'static str] {

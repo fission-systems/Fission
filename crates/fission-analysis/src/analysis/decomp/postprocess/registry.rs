@@ -86,6 +86,7 @@ pub fn create_default_registry() -> Result<PassRegistry, String> {
 pub fn execute_default_passes(code: &str, context: &PassContext) -> Result<String, String> {
     let registry = create_default_registry()?;
     registry.execute_all(code, context)
+    .map(|output| output.into_owned())
         .map_err(|e| e.to_string())
 }
 
