@@ -83,12 +83,15 @@ impl MachoLoader {
         // First pass: collect segment/section info and load commands
         for _ in 0..header.ncmds {
             let cmd_start = reader.position();
-            let cmd_header = LoadCommand::read_options(&mut reader, endian, ()).unwrap();
+            let cmd_header = LoadCommand::read_options(&mut reader, endian, ())
+                .map_err(|e| err!(loader, "Failed to read Mach-O load command: {}", e))?;
 
-            reader.seek(SeekFrom::Start(cmd_start)).unwrap(); // Back to start of cmd to read full struct
+            reader.seek(SeekFrom::Start(cmd_start))
+                .map_err(|e| err!(loader, "Failed to seek to load command start: {}", e))?;
 
             if cmd_header.cmd == LC_SEGMENT_64 {
-                let seg = SegmentCommand64::read_options(&mut reader, endian, ()).unwrap();
+                let seg = SegmentCommand64::read_options(&mut reader, endian, ())
+                    .map_err(|e| err!(loader, "Failed to read segment command: {}", e))?;
                 let seg_name = extract_fixed_string(&seg.segname);
 
                 // Use __TEXT segment's vmaddr as image base (most reliable)
@@ -105,7 +108,8 @@ impl MachoLoader {
 
                 // Process Sections
                 for _ in 0..seg.nsects {
-                    let sect = Section64::read_options(&mut reader, endian, ()).unwrap();
+                    let sect = Section64::read_options(&mut reader, endian, ())
+                        .map_err(|e| err!(loader, "Failed to read section: {}", e))?;
 
                     // S_ATTR_PURE_INSTRUCTIONS = 0x80000000
                     // S_ATTR_SOME_INSTRUCTIONS = 0x00000400
@@ -128,17 +132,20 @@ impl MachoLoader {
                 // Skip remaining padding of command if any
                 reader
                     .seek(SeekFrom::Start(cmd_start + cmd_header.cmdsize as u64))
-                    .unwrap();
+                    .map_err(|e| err!(loader, "Failed to skip segment command: {}", e))?;
                 continue;
             } else if cmd_header.cmd == LC_SYMTAB {
-                let symtab = SymtabCommand::read_options(&mut reader, endian, ()).unwrap();
+                let symtab = SymtabCommand::read_options(&mut reader, endian, ())
+                    .map_err(|e| err!(loader, "Failed to read symtab command: {}", e))?;
                 symtab_info = Some(symtab.clone());
             } else if cmd_header.cmd == LC_DYSYMTAB {
-                let dysymtab = DysymtabCommand::read_options(&mut reader, endian, ()).unwrap();
+                let dysymtab = DysymtabCommand::read_options(&mut reader, endian, ())
+                    .map_err(|e| err!(loader, "Failed to read dysymtab command: {}", e))?;
                 dysymtab_info = Some(dysymtab);
             } else if cmd_header.cmd == LC_MAIN {
                 // Parse LC_MAIN for entry point
-                let entry_cmd = EntryPointCommand::read_options(&mut reader, endian, ()).unwrap();
+                let entry_cmd = EntryPointCommand::read_options(&mut reader, endian, ())
+                    .map_err(|e| err!(loader, "Failed to read entry point command: {}", e))?;
                 // entryoff is offset from __TEXT segment start
                 entry_point = text_segment_vmaddr + entry_cmd.entryoff;
             }
@@ -146,7 +153,7 @@ impl MachoLoader {
             // Skip command
             reader
                 .seek(SeekFrom::Start(cmd_start + cmd_header.cmdsize as u64))
-                .unwrap();
+                .map_err(|e| err!(loader, "Failed to skip load command: {}", e))?;
         }
 
         if image_base == u64::MAX {

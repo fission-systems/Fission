@@ -1,5 +1,4 @@
 use binrw::BinRead;
-use fission_core::constants::binary_format::*;
 
 // Load command types (from mach-o/loader.h)
 pub const LC_SEGMENT: u32 = 0x1;

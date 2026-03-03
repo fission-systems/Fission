@@ -68,10 +68,10 @@ impl<'a> RustAnalyzer<'a> {
                     let addr = section.virtual_address + offset as u64;
 
                     if let Some(vtable) = self.try_parse_vtable(addr, ptr_size) {
+                        let vtable_len = vtable.methods.len();
                         vtables.push(vtable);
                         // Skip the parsed vtable
-                        offset +=
-                            (ptr_size * 3) + (vtables.last().unwrap().methods.len() * ptr_size);
+                        offset += (ptr_size * 3) + (vtable_len * ptr_size);
                     } else {
                         offset += ptr_size;
                     }
@@ -158,9 +158,16 @@ impl<'a> RustAnalyzer<'a> {
             return 0;
         }
         if size == 8 {
-            u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
+            // Safe: bounds already checked above
+            match data[offset..offset + 8].try_into() {
+                Ok(bytes) => u64::from_le_bytes(bytes),
+                Err(_) => 0, // Should never happen due to bounds check
+            }
         } else {
-            u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as u64
+            match data[offset..offset + 4].try_into() {
+                Ok(bytes) => u32::from_le_bytes(bytes) as u64,
+                Err(_) => 0,
+            }
         }
     }
 

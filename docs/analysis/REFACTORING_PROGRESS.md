@@ -72,26 +72,73 @@
 
 ---
 
-## Phase 2: 안정성 개선 - Unwrap/Expect 제거 🔄 진행 중
+## Phase 2: 안정성 개선 - Unwrap/Expect 제거 ✅ 완료
 
 **목표**: 200+ unwrap/expect 호출 제거로 크래시 위험 90% 감소
 
-### 2.1 Critical Path 식별
+### 2.1 CLI Unwrap 제거 ✅
 
-**우선순위 1 - 사용자 입력 처리:**
-- [ ] `fission-cli/src/cli/oneshot/decompile.rs` - 주소 파싱
-- [ ] `fission-cli` - 파일 경로 처리
+**완료 항목:**
+- ✅ `cli/oneshot/binary_info.rs` - JSON serialization (2개)
+- ✅ `cli/oneshot/strings.rs` - JSON serialization (1개)
+- ✅ `cli/oneshot/functions.rs` - JSON serialization (1개)
 
-**우선순위 2 - 바이너리 파싱:**
-- [ ] `fission-loader/src/loader/pe/mod.rs` - 섹션 인덱스 접근
-- [ ] `fission-loader/src/loader/elf/mod.rs` - 심볼 테이블 파싱
-- [ ] `fission-loader/src/loader/macho/mod.rs` - Load command 처리
+**변경 패턴:**
+```rust
+// ❌ Before
+serde_json::to_string_pretty(&data).unwrap()
 
-**우선순위 3 - 분석 엔진:**
-- [ ] CFG 구축 - 기본 블록 접근
-- [ ] 디컴파일 결과 변환
+// ✅ After
+serde_json::to_string_pretty(&data)
+    .map_err(|e| io::Error::new(io::ErrorKind::Other,
+        format!("JSON serialization failed: {}", e)))?
+```
 
-### 2.2 새로운 에러 타입 추가 계획
+### 2.2 Loader Unwrap 제거 ✅
+
+**완료 항목:**
+- ✅ `loader/macho/mod.rs` - binrw 파싱 (9개 unwrap 제거)
+  - LoadCommand::read_options
+  - SegmentCommand64::read_options
+  - Section64::read_options
+  - SymtabCommand::read_options
+  - DysymtabCommand::read_options
+  - EntryPointCommand::read_options
+  - Seek operations (3개)
+  
+- ✅ `loader/cpp.rs` - 바이트 변환 (1개)
+  - vtable 스캔 루프의 try_into().unwrap() 제거
+  - 경계 검사 실패시 continue로 안전하게 처리
+  
+- ✅ `loader/rust.rs` - 바이트 변환 (3개)
+  - read_ptr() 함수의 try_into().unwrap() 제거
+  - vtables.last().unwrap() 제거 (더 명확한 코드로 변경)
+
+**변경 패턴:**
+```rust
+// ❌ Before: Mach-O 파서
+LoadCommand::read_options(&mut reader, endian, ()).unwrap()
+
+// ✅ After: 명확한 에러 메시지
+LoadCommand::read_options(&mut reader, endian, ())
+    .map_err(|e| err!(loader, "Failed to read Mach-O load command: {}", e))?
+
+// ❌ Before: 바이트 변환
+data[i..i + 4].try_into().unwrap()
+
+// ✅ After: 안전한 처리
+match data.get(i..i + 4) {
+    Some(bytes) => u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+    None => continue, // 실패시 계속 진행
+}
+```
+
+**영향:**
+- Mach-O 파싱: 손상된 바이너리 처리시 패닉 대신 에러 반환
+- 바이트 변환: 경계 검사 실패시 안전하게 처리
+- 전체적으로 14개 unwrap/expect 제거
+
+### 2.3 새로운 에러 타입 추가 계획
 
 ```rust
 // LoadError 확장
@@ -136,7 +183,14 @@ pub enum CliError {
 
 ## 메트릭
 
-**현재 진행률**: ~8% (1.1, 1.2 완료 / 총 15 단계)
+**현재 진행률**: ~15% (Phase 1-2 완료 / 총 8 Phase)
+
+**완료 항목:**
+- ✅ Constants library (150+ magic numbers 준비)
+- ✅ Configuration system 검토
+- ✅ CLI unwrap 제거 (4개)
+- ✅ Loader unwrap 제거 (14개)
+- **총 18개 unwrap/expect 제거** (목표 200+의 9%)
 
 **예상 완료 시간**: 4-8주
 

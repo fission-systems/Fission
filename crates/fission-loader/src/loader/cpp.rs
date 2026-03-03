@@ -129,7 +129,11 @@ impl<'a> CppAnalyzer<'a> {
 
                     let step = 4;
                     for i in (0..(data.len().saturating_sub(24))).step_by(step) {
-                        let signature = u32::from_le_bytes(data[i..i + 4].try_into().unwrap());
+                        // Safe: loop bounds ensure i+4 is valid
+                        let signature = match data.get(i..i + 4) {
+                            Some(bytes) => u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+                            None => continue, // Skip if bounds check fails
+                        };
                         if signature == 0 || signature == 1 {
                             // Potential COL
                             let addr = section.virtual_address + i as u64;
