@@ -440,7 +440,7 @@ impl PostProcessPass for SwiftDemanglePass {
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         let processor = PostProcessor::new();
-        pass_output(code, processor.demangle_swift_symbols(code))
+        Ok(processor.demangle_swift_symbols_cow(code))
     }
 }
 
@@ -468,7 +468,7 @@ impl PostProcessPass for FieldOffsetReplacementPass {
         
         let processor = PostProcessor::new()
             .with_inferred_types(context.inferred_types.clone());
-        pass_output(code, processor.replace_field_offsets(code))
+        Ok(processor.replace_field_offsets_cow(code))
     }
 
     fn should_run(&self, context: &PassContext) -> bool {
@@ -514,7 +514,7 @@ impl PostProcessPass for ApplyDwarfNamesPass {
         
         let processor = PostProcessor::new()
             .with_dwarf_info(context.dwarf_info.clone());
-        pass_output(code, processor.apply_dwarf_names(code))
+        Ok(processor.apply_dwarf_names_cow(code))
     }
 
     fn should_run(&self, context: &PassContext) -> bool {

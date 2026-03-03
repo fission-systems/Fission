@@ -6,7 +6,7 @@ use std::borrow::Cow;
 impl PostProcessor {
     /// Replace pointer offset accesses with field names
     /// e.g., *(ptr + 0x18) -> this->counter (if offset 24 maps to 'counter')
-    pub(super) fn replace_field_offsets(&self, code: &str) -> String {
+    pub(super) fn replace_field_offsets_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
         let mut result = code.to_string();
 
         let mut offset_map: std::collections::HashMap<u32, String> =
@@ -18,7 +18,7 @@ impl PostProcessor {
         }
 
         if offset_map.is_empty() {
-            return result;
+            return Cow::Borrowed(code);
         }
 
         result = PTR_OFFSET
@@ -89,16 +89,28 @@ impl PostProcessor {
             })
             .to_string();
 
-        result = self.recognize_swift_accessors(&result);
+        result = self.recognize_swift_accessors_cow(&result).into_owned();
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
+    pub(super) fn replace_field_offsets(&self, code: &str) -> String {
+        self.replace_field_offsets_cow(code).into_owned()
     }
 
     /// Recognize Swift accessor patterns and convert to field access
     /// Swift uses VTable calls for property access:
     /// getter: (**(ptr + 0x88))(buffer) -> ptr->get_fieldName()
     /// setter: (**(ptr + 0x90))(value, buffer) -> ptr->set_fieldName(value)
-    pub(super) fn recognize_swift_accessors(&self, code: &str) -> String {
+    pub(super) fn recognize_swift_accessors_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
+        if !DOUBLE_PTR_DEREF.is_match(code) && !XMM_FIELD.is_match(code) {
+            return Cow::Borrowed(code);
+        }
+
         let mut result = code.to_string();
 
         result = DOUBLE_PTR_DEREF
@@ -142,16 +154,30 @@ impl PostProcessor {
             })
             .to_string();
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
+    pub(super) fn demangle_swift_symbols_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
+        if !MANGLED_NAME.is_match(code) {
+            return Cow::Borrowed(code);
+        }
+
+        Cow::Owned(
+            MANGLED_NAME
+                .replace_all(code, |caps: &regex::Captures| {
+                    let symbol = &caps[0];
+                    fission_loader::loader::demangle::demangle(symbol)
+                })
+                .to_string(),
+        )
     }
 
     pub(super) fn demangle_swift_symbols(&self, code: &str) -> String {
-        MANGLED_NAME
-            .replace_all(code, |caps: &regex::Captures| {
-                let symbol = &caps[0];
-                fission_loader::loader::demangle::demangle(symbol)
-            })
-            .to_string()
+        self.demangle_swift_symbols_cow(code).into_owned()
     }
 
     // =========================================================================
@@ -348,10 +374,19 @@ impl PostProcessor {
     /// - `local_XX` → DWARF local var where XX is the absolute hex stack offset
     ///   (Ghidra: `local_38` means StackOffset(-0x38))
     /// - `in_REG` → DWARF param/var located in that register
-    pub(super) fn apply_dwarf_names(&self, code: &str) -> String {
+    pub(super) fn apply_dwarf_names_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
         let Some(ref dwarf) = self.dwarf_info else {
-            return code.to_string();
+            return Cow::Borrowed(code);
         };
+
+        let has_candidate = code.contains("param_")
+            || code.contains("local_")
+            || code.contains("in_")
+            || (dwarf.return_type.is_some() && UNDEF_TYPE_DECL.is_match(code));
+        if !has_candidate {
+            return Cow::Borrowed(code);
+        }
+
         let mut result = code.to_string();
 
         for (i, param) in dwarf.params.iter().enumerate() {
@@ -422,6 +457,14 @@ impl PostProcessor {
                 .to_string();
         }
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
+    pub(super) fn apply_dwarf_names(&self, code: &str) -> String {
+        self.apply_dwarf_names_cow(code).into_owned()
     }
 }
