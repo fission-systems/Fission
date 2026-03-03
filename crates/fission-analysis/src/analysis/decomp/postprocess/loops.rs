@@ -253,12 +253,14 @@ impl PostProcessor {
                         if let Some(inc) = inc_str {
                             // Build for loop
                             let init_part = if has_init {
-                                let icaps = INIT_ASSIGN
-                                    .captures(lines[i - 1])
-                                    .expect("init assignment capture must exist when has_init");
-                                // Remove the init line we already pushed
-                                result_lines.pop();
-                                format!("{} = {}", var, &icaps[3])
+                                // Safe: has_init was set when INIT_ASSIGN matched, but use if-let for safety
+                                if let Some(icaps) = INIT_ASSIGN.captures(lines[i - 1]) {
+                                    // Remove the init line we already pushed
+                                    result_lines.pop();
+                                    format!("{} = {}", var, &icaps[3])
+                                } else {
+                                    String::new()
+                                }
                             } else {
                                 String::new()
                             };
@@ -462,21 +464,30 @@ impl PostProcessor {
                     }
                 };
 
-                let close_caps = DO_WHILE_CLOSE
-                    .captures(lines[close_idx])
-                    .expect("do-while closing line must match capture regex");
-                let cond_var = close_caps[2].to_string();
-                let cond_op = close_caps[3].to_string();
-                let cond_lim = close_caps[4].trim().to_string();
+                // Safe: close_idx was found by matching DO_WHILE_CLOSE, but use if-let for robustness
+                let (cond_var, cond_op, cond_lim) = if let Some(close_caps) = DO_WHILE_CLOSE.captures(lines[close_idx]) {
+                    (
+                        close_caps[2].to_string(),
+                        close_caps[3].to_string(),
+                        close_caps[4].trim().to_string(),
+                    )
+                } else {
+                    // Fallback: shouldn't happen, but skip transformation
+                    result.push(lines[i].to_string());
+                    i += 1;
+                    continue;
+                };
 
                 // Find increment line among the body (last occurrence of VAR++ or VAR += ...)
                 let body_start = i + 1;
                 let body_end = close_idx;
                 let mut inc_idx = None;
                 let mut inc_expr = String::new(); // the full increment expression for the for-header
-                // Pattern for incrementing with indent
-                let inc_pp_local = Regex::new(r"^(\s*)(\w+)\+\+;\s*$").unwrap();
-                let inc_pe_local = Regex::new(r"^(\s*)(\w+)\s*\+=\s*([^;]+);\s*$").unwrap();
+                // Pattern for incrementing with indent (compile-time constants)
+                let inc_pp_local = Regex::new(r"^(\s*)(\w+)\+\+;\s*$")
+                    .expect("hardcoded regex should compile");
+                let inc_pe_local = Regex::new(r"^(\s*)(\w+)\s*\+=\s*([^;]+);\s*$")
+                    .expect("hardcoded regex should compile");
                 for k in (body_start..body_end).rev() {
                     if let Some(c) = inc_pp_local.captures(lines[k])
                         && c[2] == cond_var

@@ -167,7 +167,7 @@ impl<'a> CppAnalyzer<'a> {
         let signature = self
             .binary
             .get_bytes(addr, 4)
-            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .and_then(|b| b.try_into().ok().map(u32::from_le_bytes))
             .ok_or_else(|| FissionError::loader("Failed to read COL signature"))?;
 
         let is_x64 = signature == 1;
@@ -178,16 +178,14 @@ impl<'a> CppAnalyzer<'a> {
             let td_rva = u32::from_le_bytes(
                 self.binary
                     .get_bytes(addr + 12, 4)
-                    .ok_or_else(|| FissionError::loader(".."))?
-                    .try_into()
-                    .unwrap(),
+                    .and_then(|b| b.try_into().ok())
+                    .ok_or_else(|| FissionError::loader("Failed to read TD RVA"))?,
             );
             let chd_rva = u32::from_le_bytes(
                 self.binary
                     .get_bytes(addr + 16, 4)
-                    .ok_or_else(|| FissionError::loader(".."))?
-                    .try_into()
-                    .unwrap(),
+                    .and_then(|b| b.try_into().ok())
+                    .ok_or_else(|| FissionError::loader("Failed to read CHD RVA"))?,
             );
             (image_base + td_rva as u64, image_base + chd_rva as u64)
         } else {
@@ -195,16 +193,14 @@ impl<'a> CppAnalyzer<'a> {
             let td_va = u32::from_le_bytes(
                 self.binary
                     .get_bytes(addr + 12, 4)
-                    .ok_or_else(|| FissionError::loader(".."))?
-                    .try_into()
-                    .unwrap(),
+                    .and_then(|b| b.try_into().ok())
+                    .ok_or_else(|| FissionError::loader("Failed to read TD VA"))?,
             );
             let chd_va = u32::from_le_bytes(
                 self.binary
                     .get_bytes(addr + 16, 4)
-                    .ok_or_else(|| FissionError::loader(".."))?
-                    .try_into()
-                    .unwrap(),
+                    .and_then(|b| b.try_into().ok())
+                    .ok_or_else(|| FissionError::loader("Failed to read CHD VA"))?,
             );
             (td_va as u64, chd_va as u64)
         };
@@ -237,26 +233,23 @@ impl<'a> CppAnalyzer<'a> {
         let num_bases = u32::from_le_bytes(
             self.binary
                 .get_bytes(chd_addr + 8, 4)
-                .ok_or_else(|| FissionError::loader(".."))?
-                .try_into()
-                .unwrap(),
+                .and_then(|b| b.try_into().ok())
+                .ok_or_else(|| FissionError::loader("Failed to read number of base classes"))?,
         );
         let base_array_addr = if is_x64 {
             let rva = u32::from_le_bytes(
                 self.binary
                     .get_bytes(chd_addr + 12, 4)
-                    .ok_or_else(|| FissionError::loader(".."))?
-                    .try_into()
-                    .unwrap(),
+                    .and_then(|b| b.try_into().ok())
+                    .ok_or_else(|| FissionError::loader("Failed to read base array RVA"))?,
             );
             image_base + rva as u64
         } else {
             let va = u32::from_le_bytes(
                 self.binary
                     .get_bytes(chd_addr + 12, 4)
-                    .ok_or_else(|| FissionError::loader(".."))?
-                    .try_into()
-                    .unwrap(),
+                    .and_then(|b| b.try_into().ok())
+                    .ok_or_else(|| FissionError::loader("Failed to read base array VA"))?,
             );
             va as u64
         };
@@ -268,18 +261,16 @@ impl<'a> CppAnalyzer<'a> {
                 let rva = u32::from_le_bytes(
                     self.binary
                         .get_bytes(base_array_addr + (i * 4) as u64, 4)
-                        .ok_or_else(|| FissionError::loader(".."))?
-                        .try_into()
-                        .unwrap(),
+                        .and_then(|b| b.try_into().ok())
+                        .ok_or_else(|| FissionError::loader("Failed to read BCD RVA"))?,
                 );
                 image_base + rva as u64
             } else {
                 let va = u32::from_le_bytes(
                     self.binary
                         .get_bytes(base_array_addr + (i * 4) as u64, 4)
-                        .ok_or_else(|| FissionError::loader(".."))?
-                        .try_into()
-                        .unwrap(),
+                        .and_then(|b| b.try_into().ok())
+                        .ok_or_else(|| FissionError::loader("Failed to read BCD VA"))?,
                 );
                 va as u64
             };
@@ -289,18 +280,16 @@ impl<'a> CppAnalyzer<'a> {
                 let rva = u32::from_le_bytes(
                     self.binary
                         .get_bytes(bcd_addr, 4)
-                        .ok_or_else(|| FissionError::loader(".."))?
-                        .try_into()
-                        .unwrap(),
+                        .and_then(|b| b.try_into().ok())
+                        .ok_or_else(|| FissionError::loader("Failed to read BCD TD RVA"))?,
                 );
                 image_base + rva as u64
             } else {
                 let va = u32::from_le_bytes(
                     self.binary
                         .get_bytes(bcd_addr, 4)
-                        .ok_or_else(|| FissionError::loader(".."))?
-                        .try_into()
-                        .unwrap(),
+                        .and_then(|b| b.try_into().ok())
+                        .ok_or_else(|| FissionError::loader("Failed to read BCD TD VA"))?,
                 );
                 va as u64
             };

@@ -247,11 +247,13 @@ impl PostProcessor {
                 }
             }
             if return_vars.len() == 1 {
-                let var = return_vars.into_iter().next().unwrap();
-                if !result.contains("result") || result.contains(&var) {
-                    let pat = format!(r"\b{}\b", regex::escape(&var));
-                    if let Ok(re) = regex::Regex::new(&pat) {
-                        result = re.replace_all(&result, "result").to_string();
+                // Safe: We just confirmed len == 1, so next() will return Some
+                if let Some(var) = return_vars.into_iter().next() {
+                    if !result.contains("result") || result.contains(&var) {
+                        let pat = format!(r"\b{}\b", regex::escape(&var));
+                        if let Ok(re) = regex::Regex::new(&pat) {
+                            result = re.replace_all(&result, "result").to_string();
+                        }
                     }
                 }
             }

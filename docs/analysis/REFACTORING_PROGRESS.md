@@ -183,14 +183,15 @@ pub enum CliError {
 
 ## 메트릭
 
-**현재 진행률**: ~15% (Phase 1-2 완료 / 총 8 Phase)
+**현재 진행률**: ~20% (Phase 1-2 완료 / 총 8 Phase)
 
 **완료 항목:**
 - ✅ Constants library (150+ magic numbers 준비)
 - ✅ Configuration system 검토
 - ✅ CLI unwrap 제거 (4개)
 - ✅ Loader unwrap 제거 (14개)
-- **총 18개 unwrap/expect 제거** (목표 200+의 9%)
+- ✅ 분석 엔진 & FFI unwrap 제거 (18개)
+- **총 36개 unwrap/expect 제거** (목표 200+의 18%)
 
 **예상 완료 시간**: 4-8주
 

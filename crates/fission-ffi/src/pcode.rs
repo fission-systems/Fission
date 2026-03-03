@@ -109,17 +109,30 @@ mod tests {
     fn test_ffi_optimize_roundtrip() {
         let json = r#"{"blocks":[{"index":0,"start_addr":"0x1000","ops":[{"seq":0,"opcode":"INT_XOR","addr":"0x1000","output":{"space":1,"offset":"0x100","size":4},"inputs":[{"space":2,"offset":"0x10","size":4},{"space":0,"offset":"0x0","size":4,"const_val":0}]}]}]}"#;
 
-        let c_json = CString::new(json).unwrap();
+        let c_json = match CString::new(json) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to create CString: {}", e);
+                return;
+            }
+        };
         let result_ptr = unsafe { fission_optimize_pcode_json(c_json.as_ptr(), json.len()) };
 
         assert!(!result_ptr.is_null());
 
         unsafe {
-            let result_str = CStr::from_ptr(result_ptr).to_str().unwrap();
-            eprintln!("Result: {}", result_str);
-            // Check that optimization happened (XOR with 0 should become COPY)
-            // Note: The output format is different from input, check for optimization markers
-            assert!(result_str.len() > 0);
+            match CStr::from_ptr(result_ptr).to_str() {
+                Ok(result_str) => {
+                    eprintln!("Result: {}", result_str);
+                    // Check that optimization happened (XOR with 0 should become COPY)
+                    // Note: The output format is different from input, check for optimization markers
+                    assert!(result_str.len() > 0);
+                }
+                Err(e) => {
+                    eprintln!("Failed to convert result to str: {}", e);
+                    panic!("UTF-8 conversion failed");
+                }
+            }
             fission_free_string(result_ptr);
         }
     }
