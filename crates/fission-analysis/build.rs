@@ -57,6 +57,7 @@ fn build_libdecomp() {
         None
     }
 
+    #[cfg(target_os = "windows")]
     fn find_vcpkg_zlib_lib() -> Option<PathBuf> {
         for root in collect_vcpkg_roots() {
             let lib_path = root.join("installed").join("x64-windows").join("lib");

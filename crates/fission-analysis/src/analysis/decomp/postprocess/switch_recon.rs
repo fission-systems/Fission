@@ -329,7 +329,7 @@ impl PostProcessor {
             }
             let target_var;
             let first_expr;
-            if let Some(caps) = LOCAL_VAR_ASSIGN.captures(lines[i + 1]) {
+            if let Some(caps) = ASSIGNMENT.captures(lines[i + 1]) {
                 target_var = caps[1].to_string();
                 first_expr = caps[2].to_string();
             } else {
@@ -381,7 +381,7 @@ impl PostProcessor {
                     if j + 1 >= lines.len() {
                         break;
                     }
-                    if let Some(acaps) = LOCAL_VAR_ASSIGN.captures(lines[j + 1]) {
+                    if let Some(acaps) = ASSIGNMENT.captures(lines[j + 1]) {
                         let tgt = &acaps[1];
                         if tgt != target_var {
                             break;
@@ -414,7 +414,7 @@ impl PostProcessor {
                     if j + 1 >= lines.len() {
                         break;
                     }
-                    if let Some(acaps) = LOCAL_VAR_ASSIGN.captures(lines[j + 1]) {
+                    if let Some(acaps) = ASSIGNMENT.captures(lines[j + 1]) {
                         let tgt = &acaps[1];
                         if tgt != target_var {
                             break;
