@@ -130,6 +130,27 @@ public:
     static std::string eliminate_dead_stores(std::string c_code);
 
     /**
+     * @brief Rewrite pointer arithmetic to array subscript notation
+     *
+     * Detects common Ghidra output patterns and converts to readable form:
+     *
+     *   *(int *)((char *)ptr + 8)                    →  ((int *)ptr)[2]
+     *   *(uint32_t *)((longlong)base + (longlong)i*4) →  base[i]
+     *   *(uint32_t *)(base + i * 4)                  →  base[i]
+     *   *(uint64_t *)((longlong)base + 16)            →  ((uint64_t *)base)[2]
+     *
+     * Only fires when the byte offset is evenly divisible by sizeof(T),
+     * ensuring output is semantically equivalent to input.
+     *
+     * Should run before eliminate_redundant_casts() to give that pass a
+     * chance to clean up any remaining (longlong)/(char *) wrappers.
+     *
+     * @param c_code The C code string to process
+     * @return Modified C code with array subscript notation
+     */
+    static std::string rewrite_pointer_arithmetic_to_array(std::string c_code);
+
+    /**
      * @brief Apply all post-processing steps
      * 
      * Order of processing:

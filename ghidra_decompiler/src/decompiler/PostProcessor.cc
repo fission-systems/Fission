@@ -173,6 +173,141 @@ std::string PostProcessor::simplify_nested_if(std::string c_code) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// rewrite_pointer_arithmetic_to_array
+// ─────────────────────────────────────────────────────────────────────────────
+// Converts common Ghidra pointer-dereference patterns to readable array
+// subscript notation.  Run BEFORE eliminate_redundant_casts so that any
+// (longlong)/(char *) casts left after substitution are cleaned up there.
+//
+// Pattern A: *(T *)((char *)VAR + N)                 →  ((T *)VAR)[N/sz]
+// Pattern B: *(T *)((longlong)VAR + (longlong)IDX * sz)  →  VAR[IDX]
+// Pattern C: *(T *)(VAR + IDX * sz)                  →  VAR[IDX]
+// Pattern D: *(T *)((longlong)VAR + N)               →  ((T *)VAR)[N/sz]
+//
+// Only fires when the constant factor equals sizeof(T) (strong validation).
+// ─────────────────────────────────────────────────────────────────────────────
+std::string PostProcessor::rewrite_pointer_arithmetic_to_array(std::string c_code) {
+    // Type → byte-width table (every type emitted by Ghidra + our normaliser).
+    static const struct { const char* nm; int sz; } type_sizes[] = {
+        {"uint64_t",  8}, {"int64_t",   8}, {"ulonglong", 8}, {"longlong",  8},
+        {"double",    8}, {"uint32_t",  4}, {"int32_t",   4}, {"uint",      4},
+        {"int",       4}, {"float",     4}, {"uint16_t",  2}, {"int16_t",   2},
+        {"ushort",    2}, {"short",     2}, {"uint8_t",   1}, {"int8_t",    1},
+        {"byte",      1}, {"char",      1},
+    };
+    auto get_size = [&](const std::string& t) -> int {
+        for (auto& p : type_sizes)
+            if (t == p.nm) return p.sz;
+        return 0; // unknown type — don't transform
+    };
+
+    // ── Pass A: *(T *)((char *)VAR + N) → ((T *)VAR)[N/sz] ─────────────────
+    {
+        static const std::regex patA(
+            R"(\*\(\s*(\w+)\s*\*\s*\)\s*\(\s*\(\s*char\s*\*\s*\)\s*(\w+)\s*\+\s*(\d+)\s*\))"
+        );
+        std::string out;
+        out.reserve(c_code.size());
+        size_t last = 0;
+        bool changed = false;
+        for (auto it = std::sregex_iterator(c_code.begin(), c_code.end(), patA);
+             it != std::sregex_iterator(); ++it) {
+            const auto& m = *it;
+            int offset = std::stoi(m[3].str());
+            int sz = get_size(m[1].str());
+            if (sz <= 0 || offset % sz != 0) continue;
+            int idx = offset / sz;
+            out += c_code.substr(last, m.position() - last);
+            if (sz == 1)
+                out += m[2].str() + "[" + std::to_string(idx) + "]";
+            else
+                out += "((" + m[1].str() + " *)" + m[2].str() + ")[" + std::to_string(idx) + "]";
+            last = m.position() + m.length();
+            changed = true;
+        }
+        if (changed) { out += c_code.substr(last); c_code = std::move(out); }
+    }
+
+    // ── Pass B: *(T *)((longlong)VAR + (longlong)IDX * SZ) → VAR[IDX] ───────
+    // Both operands carry (longlong)/(u?int64_t) casts — typical on x86-64.
+    {
+        static const std::regex patB(
+            R"(\*\(\s*(\w+)\s*\*\s*\)\s*\(\s*\(\s*(?:u?longlong|u?int64_t)\s*\)\s*(\w+)\s*\+\s*\(\s*(?:u?longlong|u?int64_t)\s*\)\s*(\w+)\s*\*\s*(\d+)\s*\))"
+        );
+        std::string out;
+        out.reserve(c_code.size());
+        size_t last = 0;
+        bool changed = false;
+        for (auto it = std::sregex_iterator(c_code.begin(), c_code.end(), patB);
+             it != std::sregex_iterator(); ++it) {
+            const auto& m = *it;
+            int elem_sz = std::stoi(m[4].str());
+            int sz = get_size(m[1].str());
+            if (sz <= 0 || sz != elem_sz) continue;
+            out += c_code.substr(last, m.position() - last);
+            out += m[2].str() + "[" + m[3].str() + "]";
+            last = m.position() + m.length();
+            changed = true;
+        }
+        if (changed) { out += c_code.substr(last); c_code = std::move(out); }
+    }
+
+    // ── Pass C: *(T *)(VAR + IDX * SZ) → VAR[IDX] ──────────────────────────
+    // No casts — occurs in 32-bit code or after prior cast-elimination.
+    {
+        static const std::regex patC(
+            R"(\*\(\s*(\w+)\s*\*\s*\)\s*\(\s*(\w+)\s*\+\s*(\w+)\s*\*\s*(\d+)\s*\))"
+        );
+        std::string out;
+        out.reserve(c_code.size());
+        size_t last = 0;
+        bool changed = false;
+        for (auto it = std::sregex_iterator(c_code.begin(), c_code.end(), patC);
+             it != std::sregex_iterator(); ++it) {
+            const auto& m = *it;
+            int elem_sz = std::stoi(m[4].str());
+            int sz = get_size(m[1].str());
+            if (sz <= 0 || sz != elem_sz) continue;
+            out += c_code.substr(last, m.position() - last);
+            out += m[2].str() + "[" + m[3].str() + "]";
+            last = m.position() + m.length();
+            changed = true;
+        }
+        if (changed) { out += c_code.substr(last); c_code = std::move(out); }
+    }
+
+    // ── Pass D: *(T *)((longlong)VAR + N) → ((T *)VAR)[N/sz] ───────────────
+    // Only base has cast; second operand is a literal byte offset.
+    {
+        static const std::regex patD(
+            R"(\*\(\s*(\w+)\s*\*\s*\)\s*\(\s*\(\s*(?:u?longlong|u?int64_t)\s*\)\s*(\w+)\s*\+\s*(\d+)\s*\))"
+        );
+        std::string out;
+        out.reserve(c_code.size());
+        size_t last = 0;
+        bool changed = false;
+        for (auto it = std::sregex_iterator(c_code.begin(), c_code.end(), patD);
+             it != std::sregex_iterator(); ++it) {
+            const auto& m = *it;
+            int offset = std::stoi(m[3].str());
+            int sz = get_size(m[1].str());
+            if (sz <= 0 || offset % sz != 0) continue;
+            int idx = offset / sz;
+            out += c_code.substr(last, m.position() - last);
+            if (sz == 1)
+                out += m[2].str() + "[" + std::to_string(idx) + "]";
+            else
+                out += "((" + m[1].str() + " *)" + m[2].str() + ")[" + std::to_string(idx) + "]";
+            last = m.position() + m.length();
+            changed = true;
+        }
+        if (changed) { out += c_code.substr(last); c_code = std::move(out); }
+    }
+
+    return c_code;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // eliminate_redundant_casts
 // ─────────────────────────────────────────────────────────────────────────────
 // Removes display-noise casts that Ghidra emits:
@@ -589,13 +724,16 @@ std::string PostProcessor::process(const std::string& c_code) {
     // 6. Detect array initializations
     result = fold_array_init(result);
 
-    // 7. Remove redundant / widening casts and replace (void*)0 with NULL
+    // 7. Pointer arithmetic → array subscript ( *(T*)(ptr+i*sz) → ptr[i] )
+    result = rewrite_pointer_arithmetic_to_array(result);
+
+    // 8. Remove redundant / widening casts and replace (void*)0 with NULL
     result = eliminate_redundant_casts(result);
 
-    // 8. Drop self-assignment lines (x = x;)
+    // 9. Drop self-assignment lines (x = x;)
     result = eliminate_dead_stores(result);
 
-    // 9. Improve variable names
+    // 10. Improve variable names
     result = improve_variable_names(result);
     
     return result;
