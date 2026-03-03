@@ -24,6 +24,26 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: crates/fission-tauri/package-lock.json
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: Security advisory check (Rust)
+        continue-on-error: true
+        run: cargo deny check advisories
+
+      - name: Security advisory check (Node)
+        run: |
+          cd crates/fission-tauri
+          npm ci --ignore-scripts
+          npm audit --audit-level=high
+
       - name: Build Decompiler
         run: |
           chmod +x scripts/build/build_decompiler.sh

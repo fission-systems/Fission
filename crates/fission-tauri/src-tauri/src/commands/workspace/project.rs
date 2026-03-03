@@ -5,6 +5,51 @@ use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 use fission_core::parse_address;
 use tauri::State;
+use std::path::{Path, PathBuf};
+
+fn validated_read_path(path: &str) -> CmdResult<PathBuf> {
+    if path.trim().is_empty() || path.contains('\0') {
+        return Err(CmdError::other("Invalid input path"));
+    }
+
+    let input = PathBuf::from(path);
+    if !input.is_absolute() {
+        return Err(CmdError::other("Path must be absolute"));
+    }
+
+    input
+        .canonicalize()
+        .map_err(|e| CmdError::other(format!("Invalid input path: {e}")))
+}
+
+fn validated_write_path(path: &str) -> CmdResult<PathBuf> {
+    if path.trim().is_empty() || path.contains('\0') {
+        return Err(CmdError::other("Invalid output path"));
+    }
+
+    let output = PathBuf::from(path);
+    if !output.is_absolute() {
+        return Err(CmdError::other("Path must be absolute"));
+    }
+
+    let parent = output
+        .parent()
+        .ok_or_else(|| CmdError::other("Output path must have a parent directory"))?;
+
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|e| CmdError::other(format!("Invalid output directory: {e}")))?;
+
+    if !canonical_parent.is_dir() {
+        return Err(CmdError::other("Output directory is not a directory"));
+    }
+
+    let file_name = output
+        .file_name()
+        .ok_or_else(|| CmdError::other("Output path must include a file name"))?;
+
+    Ok(Path::new(&canonical_parent).join(file_name))
+}
 
 // ============================================================================
 // Commands
@@ -13,6 +58,7 @@ use tauri::State;
 /// Save the current project (user annotations) to a `.fprj` JSON file.
 #[tauri::command]
 pub async fn save_project(path: String, state: State<'_, AppState>) -> CmdResult<()> {
+    let path = validated_write_path(&path)?;
     let inner = state.inner.lock().await;
     let binary = inner
         .loaded_binary
@@ -57,6 +103,8 @@ pub async fn load_project(
     path: String,
     state: State<'_, AppState>,
 ) -> CmdResult<crate::dto::FissionProject> {
+    let path = validated_read_path(&path)?;
+
     let json = std::fs::read_to_string(&path)
         .map_err(|e| CmdError::other(format!("Read failed: {e}")))?;
 
@@ -88,6 +136,7 @@ pub async fn load_project(
 /// Unlike save_project, this does NOT require a binary to be loaded.
 #[tauri::command]
 pub async fn save_snapshot(path: String, state: State<'_, AppState>) -> CmdResult<()> {
+    let path = validated_write_path(&path)?;
     let inner = state.inner.lock().await;
 
     let comments: std::collections::HashMap<String, String> = inner
@@ -127,6 +176,8 @@ pub async fn load_snapshot(
     path: String,
     state: State<'_, AppState>,
 ) -> CmdResult<FissionProject> {
+    let path = validated_read_path(&path)?;
+
     let json = std::fs::read_to_string(&path)
         .map_err(|e| CmdError::other(format!("Read failed: {e}")))?;
     let snapshot: FissionProject = serde_json::from_str(&json)
@@ -169,6 +220,7 @@ pub async fn get_git_branch() -> String {
 /// the chosen path.
 #[tauri::command]
 pub async fn export_analysis_json(path: String, state: State<'_, AppState>) -> CmdResult<()> {
+    let path = validated_write_path(&path)?;
     let inner = state.inner.lock().await;
     let binary = inner
         .loaded_binary
