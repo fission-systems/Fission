@@ -18,6 +18,55 @@ fn build_libdecomp() {
     use std::path::PathBuf;
     use std::process::Command;
 
+    fn collect_vcpkg_roots() -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+
+        for key in ["VCPKG_ROOT", "VCPKG_INSTALLATION_ROOT"] {
+            if let Ok(val) = std::env::var(key) {
+                let path = PathBuf::from(val);
+                if path.exists() {
+                    roots.push(path);
+                }
+            }
+        }
+
+        if let Ok(user_profile) = std::env::var("USERPROFILE") {
+            let candidate = PathBuf::from(user_profile).join("vcpkg");
+            if candidate.exists() {
+                roots.push(candidate);
+            }
+        }
+
+        if let Ok(system_drive) = std::env::var("SystemDrive") {
+            let candidate = PathBuf::from(format!("{}\\", system_drive)).join("vcpkg");
+            if candidate.exists() {
+                roots.push(candidate);
+            }
+        }
+
+        roots
+    }
+
+    fn find_vcpkg_toolchain() -> Option<PathBuf> {
+        for root in collect_vcpkg_roots() {
+            let toolchain = root.join("scripts").join("buildsystems").join("vcpkg.cmake");
+            if toolchain.exists() {
+                return Some(toolchain);
+            }
+        }
+        None
+    }
+
+    fn find_vcpkg_zlib_lib() -> Option<PathBuf> {
+        for root in collect_vcpkg_roots() {
+            let lib_path = root.join("installed").join("x64-windows").join("lib");
+            if lib_path.exists() {
+                return Some(lib_path);
+            }
+        }
+        None
+    }
+
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .unwrap_or_else(|e| panic!("CARGO_MANIFEST_DIR should be set: {}", e));
     let decomp_dir = PathBuf::from(&manifest_dir)
@@ -33,35 +82,12 @@ fn build_libdecomp() {
     // Build CMake configure arguments
     let mut cmake_args: Vec<String> = vec!["..".to_string()];
 
-    // If VCPKG_ROOT is set, pass the toolchain file to CMake
-    if let Ok(vcpkg_root) = std::env::var("VCPKG_ROOT") {
-        let toolchain = PathBuf::from(&vcpkg_root)
-            .join("scripts")
-            .join("buildsystems")
-            .join("vcpkg.cmake");
-        if toolchain.exists() {
-            cmake_args.push(format!(
-                "-DCMAKE_TOOLCHAIN_FILE={}",
-                toolchain.display()
-            ));
-            println!("cargo:warning=Using vcpkg toolchain: {}", toolchain.display());
-        }
-    } else {
-        // Try well-known vcpkg locations on Windows
-        #[cfg(target_os = "windows")]
-        {
-            let candidates = [
-                "C:\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
-                "C:\\tools\\vcpkg\\scripts\\buildsystems\\vcpkg.cmake",
-            ];
-            for candidate in &candidates {
-                if std::path::Path::new(candidate).exists() {
-                    cmake_args.push(format!("-DCMAKE_TOOLCHAIN_FILE={}", candidate));
-                    println!("cargo:warning=Using vcpkg toolchain: {}", candidate);
-                    break;
-                }
-            }
-        }
+    if let Some(toolchain) = find_vcpkg_toolchain() {
+        cmake_args.push(format!(
+            "-DCMAKE_TOOLCHAIN_FILE={}",
+            toolchain.display()
+        ));
+        println!("cargo:warning=Using vcpkg toolchain: {}", toolchain.display());
     }
 
     // Run cmake configure
@@ -97,21 +123,11 @@ fn build_libdecomp() {
         println!("cargo:rustc-link-search=native={}\\Release", build_dir.display());
         println!("cargo:rustc-link-lib=dylib=decomp");
 
-        // Link against zlib from vcpkg
-        if let Ok(vcpkg_root) = std::env::var("VCPKG_ROOT") {
-            let zlib_lib = PathBuf::from(&vcpkg_root)
-                .join("installed")
-                .join("x64-windows")
-                .join("lib");
-            if zlib_lib.exists() {
-                println!("cargo:rustc-link-search=native={}", zlib_lib.display());
-            }
+        // Link against zlib from discovered vcpkg installation
+        if let Some(zlib_lib) = find_vcpkg_zlib_lib() {
+            println!("cargo:rustc-link-search=native={}", zlib_lib.display());
         } else {
-            // Try well-known vcpkg path
-            let zlib_lib = "C:\\vcpkg\\installed\\x64-windows\\lib";
-            if std::path::Path::new(zlib_lib).exists() {
-                println!("cargo:rustc-link-search=native={}", zlib_lib);
-            }
+            println!("cargo:warning=No vcpkg zlib path found; relying on system zlib");
         }
         println!("cargo:rustc-link-lib=zlib");
     }

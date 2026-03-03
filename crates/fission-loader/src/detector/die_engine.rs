@@ -70,18 +70,31 @@ impl SignatureDatabase {
             }
         }
 
-        // Fallback to hardcoded relative paths
-        let paths = [
-            "utils/signatures/die/pe_signatures.json",
-            "../utils/signatures/die/pe_signatures.json",
-            "../../utils/signatures/die/pe_signatures.json",
-        ];
+        // Fallback: search upward from current directory and executable path.
+        let suffix = Path::new("utils")
+            .join("signatures")
+            .join("die")
+            .join("pe_signatures.json");
 
-        for path in &paths {
-            if let Ok(db) = Self::load(Path::new(path)) {
-                return Some(db);
+        let mut search_roots = Vec::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            search_roots.push(cwd);
+        }
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(parent) = exe.parent()
+        {
+            search_roots.push(parent.to_path_buf());
+        }
+
+        for root in search_roots {
+            for dir in root.ancestors() {
+                let candidate = dir.join(&suffix);
+                if let Ok(db) = Self::load(&candidate) {
+                    return Some(db);
+                }
             }
         }
+
         None
     }
 }

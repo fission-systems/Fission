@@ -1,4 +1,53 @@
 fn main() {
+    fn collect_vcpkg_roots() -> Vec<std::path::PathBuf> {
+        let mut roots = Vec::new();
+
+        for key in ["VCPKG_ROOT", "VCPKG_INSTALLATION_ROOT"] {
+            if let Ok(val) = std::env::var(key) {
+                let path = std::path::PathBuf::from(val);
+                if path.exists() {
+                    roots.push(path);
+                }
+            }
+        }
+
+        if let Ok(user_profile) = std::env::var("USERPROFILE") {
+            let candidate = std::path::PathBuf::from(user_profile).join("vcpkg");
+            if candidate.exists() {
+                roots.push(candidate);
+            }
+        }
+
+        if let Ok(system_drive) = std::env::var("SystemDrive") {
+            let candidate = std::path::PathBuf::from(format!("{}\\", system_drive)).join("vcpkg");
+            if candidate.exists() {
+                roots.push(candidate);
+            }
+        }
+
+        roots
+    }
+
+    fn find_vcpkg_zlib_lib() -> Option<std::path::PathBuf> {
+        for root in collect_vcpkg_roots() {
+            let lib_path = root.join("installed").join("x64-windows").join("lib");
+            if lib_path.exists() {
+                return Some(lib_path);
+            }
+        }
+        None
+    }
+
+    fn find_vcpkg_bin() -> Option<std::path::PathBuf> {
+        for root in collect_vcpkg_roots() {
+            let bin_path = root.join("installed").join("x64-windows").join("bin");
+            if bin_path.exists() {
+                return Some(bin_path);
+            }
+        }
+        None
+    }
+
     // Only modify search path if the native_decomp feature is enabled
     if std::env::var("CARGO_FEATURE_NATIVE_DECOMP").is_ok() {
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
@@ -33,19 +82,8 @@ fn main() {
                 }
 
                 // Add vcpkg zlib search path
-                if let Ok(vcpkg_root) = std::env::var("VCPKG_ROOT") {
-                    let zlib_lib = std::path::Path::new(&vcpkg_root)
-                        .join("installed")
-                        .join("x64-windows")
-                        .join("lib");
-                    if zlib_lib.exists() {
-                        println!("cargo:rustc-link-search=native={}", zlib_lib.display());
-                    }
-                } else {
-                    let default_vcpkg_zlib = "C:\\vcpkg\\installed\\x64-windows\\lib";
-                    if std::path::Path::new(default_vcpkg_zlib).exists() {
-                        println!("cargo:rustc-link-search=native={}", default_vcpkg_zlib);
-                    }
+                if let Some(zlib_lib) = find_vcpkg_zlib_lib() {
+                    println!("cargo:rustc-link-search=native={}", zlib_lib.display());
                 }
 
                 // Auto-copy DLLs to cargo output directory for runtime discovery
@@ -70,12 +108,7 @@ fn main() {
                             }
                         }
                         // Copy zlib DLLs from vcpkg
-                        let vcpkg_bin = if let Ok(vr) = std::env::var("VCPKG_ROOT") {
-                            std::path::PathBuf::from(vr).join("installed").join("x64-windows").join("bin")
-                        } else {
-                            std::path::PathBuf::from("C:\\vcpkg\\installed\\x64-windows\\bin")
-                        };
-                        if vcpkg_bin.exists() {
+                        if let Some(vcpkg_bin) = find_vcpkg_bin() {
                             for dll_name in &["zlib1.dll", "zlibd1.dll"] {
                                 let src = vcpkg_bin.join(dll_name);
                                 if src.exists() {
