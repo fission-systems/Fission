@@ -35,7 +35,6 @@ jobs:
         run: cargo install cargo-deny --locked
 
       - name: Security advisory check (Rust)
-        continue-on-error: true
         run: cargo deny check advisories
 
       - name: Security advisory check (Node)

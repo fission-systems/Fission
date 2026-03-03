@@ -6,6 +6,29 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-03
 
+### 보안 취약점 대응 (2차: 정책 기준선/CI 게이트 정착)
+
+공급망 취약점 대응을 운영 가능한 형태로 고정하고, CI에서의 보안 점검을
+기본 품질 게이트로 복원.
+
+#### Added
+
+- `docs/build/SECURITY_ADVISORIES.md` 추가
+   - Rust/Node 보안 점검 명령, no-fix advisory 기준선 운영 원칙, 재검토 조건 문서화
+
+#### Changed
+
+- `deny.toml`
+   - no safe upgrade가 없는 생태계 advisory를 `advisories.ignore` 기준선으로 명시
+   - 신규/패치 가능한 advisory는 CI 실패로 triage 강제
+- `.github/workflows/ci.yml`
+   - Rust advisory 단계의 non-blocking 설정 제거(`continue-on-error` 제거)
+   - 기준선 외 신규 취약점은 build failure로 처리
+
+#### Security Notes
+
+- 본 기준선은 영구 면제가 아니며, upstream 안전 업그레이드 또는 런타임 전환 시 제거 대상.
+
 ### 안정화/성능/이식성 리팩토링 완료 (Phase 2 ~ 4)
 
 이번 배치에서 에러 처리 안전성(Phase 2), postprocess 성능(Phase 3), 경로 이식성(Phase 4)을
