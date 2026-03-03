@@ -6,6 +6,8 @@
 use std::env;
 #[cfg(feature = "native_decomp")]
 use std::fs;
+#[cfg(feature = "native_decomp")]
+use std::path::PathBuf;
 
 #[cfg(feature = "native_decomp")]
 use fission_ffi::DecompilerNative;
@@ -41,7 +43,7 @@ fn main() {
 
         // Get SLA directory
         let sla_dir = env::current_dir()
-            .unwrap()
+            .unwrap_or_else(|_| PathBuf::from("."))
             .join("ghidra_decompiler")
             .join("languages")
             .to_string_lossy()

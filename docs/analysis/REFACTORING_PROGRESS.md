@@ -188,11 +188,12 @@ pub enum CliError {
 **완료 항목:**
 - ✅ Constants library (150+ magic numbers 준비)
 - ✅ Configuration system 검토
-- ✅ CLI unwrap 제거 (4 + 5 = 9개)
+- ✅ CLI unwrap 제거 (4 + 5 + 2 = 11개)
 - ✅ Loader unwrap 제거 (14 + 1 = 15개)
 - ✅ 분석 엔진 & FFI unwrap 제거 (18개)
 - ✅ Pcode & Signatures unwrap 제거 (4개)
-- **총 46개 unwrap/expect 제거** (목표 200+의 23%)
+- ✅ Tauri debugging (Mutex 4개)
+- **총 52개 unwrap/expect 제거** (목표 200+의 26%)
 
 **예상 완료 시간**: 4-8주
 

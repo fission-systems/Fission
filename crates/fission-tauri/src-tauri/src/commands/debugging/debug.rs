@@ -203,8 +203,10 @@ pub async fn debug_attach(pid: u32, state: State<'_, AppState>) -> CmdResult<()>
             crossbeam_channel::unbounded::<fission_analysis::debug::types::DebugEvent>();
         let (tx_stop, rx_stop) = crossbeam_channel::bounded::<()>(1);
         start_event_loop(pid, tx_events, rx_stop);
-        *state.debug_event_rx.lock().unwrap() = Some(rx_events);
-        *state.debug_stop_tx.lock().unwrap() = Some(tx_stop);
+        
+        // Safe: Handle poisoned mutex by recovering
+        *state.debug_event_rx.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx_events);
+        *state.debug_stop_tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx_stop);
 
         // Update DTO
         let mut ds = state.debug_state.lock().await;
@@ -238,8 +240,10 @@ pub async fn debug_detach(state: State<'_, AppState>) -> CmdResult<()> {
                 }
             }
         }
-        *state.debug_stop_tx.lock().unwrap() = None;
-        *state.debug_event_rx.lock().unwrap() = None;
+        
+        // Safe: Handle poisoned mutex by recovering
+        *state.debug_stop_tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *state.debug_event_rx.lock().unwrap_or_else(|e| e.into_inner()) = None;
 
         // Detach debugger
         {

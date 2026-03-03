@@ -201,7 +201,7 @@ impl App {
         // Initialize decompiler if needed
         if self.decompiler.is_none() {
             let sla_dir = std::env::current_dir()
-                .unwrap()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
                 .join("ghidra_decompiler")
                 .to_string_lossy()
                 .into_owned();
