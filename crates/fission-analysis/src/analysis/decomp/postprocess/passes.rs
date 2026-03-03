@@ -402,7 +402,7 @@ impl PostProcessPass for RemoveRustBoilerplatePass {
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         let processor = PostProcessor::new();
-        pass_output(code, processor.remove_rust_boilerplate(code))
+        Ok(processor.remove_rust_boilerplate_cow(code))
     }
 }
 
@@ -421,7 +421,7 @@ impl PostProcessPass for RemoveGoBoilerplatePass {
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         let processor = PostProcessor::new();
-        pass_output(code, processor.remove_go_boilerplate(code))
+        Ok(processor.remove_go_boilerplate_cow(code))
     }
 }
 
@@ -490,7 +490,7 @@ impl PostProcessPass for InsertMissingCastsPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::insert_missing_casts(code))
+        Ok(PostProcessor::insert_missing_casts_cow(code))
     }
 }
 

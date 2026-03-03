@@ -30,7 +30,11 @@ impl PostProcessor {
     /// 1. `malloc(N)` → `(type *)malloc(N)` when assigned to a typed pointer
     /// 2. `*(base + offset)` → `*(type *)(base + offset)` when type is inferrable
     /// 3. Void pointer arithmetic without explicit cast
-    pub(super) fn insert_missing_casts(code: &str) -> String {
+    pub(super) fn insert_missing_casts_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !MALLOC_PATTERN.is_match(code) && !LONG_PTR_OFFSET.is_match(code) {
+            return Cow::Borrowed(code);
+        }
+
         let mut result = code.to_string();
 
         // Pattern 1: malloc/calloc return without cast
@@ -61,10 +65,22 @@ impl PostProcessor {
             })
             .to_string();
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
     }
 
-    pub(super) fn remove_rust_boilerplate(&self, code: &str) -> String {
+    pub(super) fn insert_missing_casts(code: &str) -> String {
+        Self::insert_missing_casts_cow(code).into_owned()
+    }
+
+    pub(super) fn remove_rust_boilerplate_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
+        if !RUST_OVERFLOW_PATTERN.is_match(code) && !RUST_BOUNDS_CHECK_PATTERN.is_match(code) {
+            return Cow::Borrowed(code);
+        }
+
         let mut result = code.to_string();
 
         // Replace overflow checks with comments
@@ -77,10 +93,22 @@ impl PostProcessor {
             .replace_all(&result, "/* [Safety Check: Bounds] */")
             .to_string();
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
     }
 
-    pub(super) fn remove_go_boilerplate(&self, code: &str) -> String {
+    pub(super) fn remove_rust_boilerplate(&self, code: &str) -> String {
+        self.remove_rust_boilerplate_cow(code).into_owned()
+    }
+
+    pub(super) fn remove_go_boilerplate_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
+        if !GO_PANIC.is_match(code) {
+            return Cow::Borrowed(code);
+        }
+
         let mut result = code.to_string();
 
         // Replace Go gopanic checks
@@ -88,7 +116,15 @@ impl PostProcessor {
             .replace_all(&result, "/* [Go Panic Check] */")
             .to_string();
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
+    pub(super) fn remove_go_boilerplate(&self, code: &str) -> String {
+        self.remove_go_boilerplate_cow(code).into_owned()
     }
 
     // =========================================================================
