@@ -1,8 +1,22 @@
 use super::PostProcessor;
 use crate::utils::patterns::*;
 use regex::Regex;
+use std::borrow::Cow;
 
 impl PostProcessor {
+    pub(super) fn reconstruct_switch_from_bst_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !code.contains("if") || !code.contains("return") {
+            return Cow::Borrowed(code);
+        }
+
+        let output = Self::reconstruct_switch_from_bst(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
+    }
+
     /// Reconstruct switch/case from BST (binary search tree) or sequential
     /// equality-check patterns that survive C++ post-processing.
     ///
@@ -470,5 +484,20 @@ impl PostProcessor {
         }
 
         result_lines.join("\n")
+    }
+
+    pub(super) fn reconstruct_switch_from_if_else_assign_cow<'a>(
+        code: &'a str,
+    ) -> Cow<'a, str> {
+        if !code.contains("if") || !code.contains("else") {
+            return Cow::Borrowed(code);
+        }
+
+        let output = Self::reconstruct_switch_from_if_else_assign(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
     }
 }

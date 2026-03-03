@@ -3,8 +3,22 @@ use super::condition::negate_condition;
 use crate::utils::patterns::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::borrow::Cow;
 
 impl PostProcessor {
+    pub(super) fn while_true_to_for_loop_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !code.contains("while") {
+            return Cow::Borrowed(code);
+        }
+
+        let output = Self::while_true_to_for_loop(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
+    }
+
     // =========================================================================
     // B-1: while(true) → for loop  (RetDec while_true_to_for_loop_optimizer.cpp)
     //
@@ -303,6 +317,19 @@ impl PostProcessor {
         result_lines.join("\n")
     }
 
+    pub(super) fn while_cond_to_for_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !code.contains("while") {
+            return Cow::Borrowed(code);
+        }
+
+        let output = Self::while_cond_to_for(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
+    }
+
     /// B-10: Convert `while( true )` / `while (true)` / `while (1)` → `for (;;)`
     /// This gives the `for (` pattern to infinite-loop functions that use explicit break/return.
     pub(super) fn while_true_to_for_ever(code: &str) -> String {
@@ -312,6 +339,14 @@ impl PostProcessor {
         WHILE_TRUE_ML
             .replace_all(code, |caps: &regex::Captures| format!("{}for (;;) {{", &caps[1]))
             .into_owned()
+    }
+
+    pub(super) fn while_true_to_for_ever_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !WHILE_TRUE_ML.is_match(code) {
+            return Cow::Borrowed(code);
+        }
+
+        Cow::Owned(Self::while_true_to_for_ever(code))
     }
 
     // =========================================================================
@@ -417,6 +452,19 @@ impl PostProcessor {
             .to_string();
 
         result
+    }
+
+    pub(super) fn recognize_loop_idioms_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !code.contains("while") && !code.contains("for") {
+            return Cow::Borrowed(code);
+        }
+
+        let output = Self::recognize_loop_idioms(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
     }
 
     /// B-8: Convert do-while with a counter variable to a for loop.
@@ -623,5 +671,18 @@ impl PostProcessor {
             return code.to_string();
         }
         result.join("\n")
+    }
+
+    pub(super) fn do_while_to_for_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !code.contains("do") || !code.contains("while") {
+            return Cow::Borrowed(code);
+        }
+
+        let output = Self::do_while_to_for(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
     }
 }

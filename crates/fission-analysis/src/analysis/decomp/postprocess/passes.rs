@@ -37,7 +37,7 @@ impl PostProcessPass for ArithmeticIdiomsPass {
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         // Create a temporary PostProcessor to access the method
         let processor = PostProcessor::new();
-        pass_output(code, processor.apply_arithmetic_idioms(code))
+        Ok(processor.apply_arithmetic_idioms_cow(code))
     }
 }
 
@@ -95,7 +95,7 @@ impl PostProcessPass for WhileTrueToForPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::while_true_to_for_loop(code))
+        Ok(PostProcessor::while_true_to_for_loop_cow(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -117,7 +117,7 @@ impl PostProcessPass for WhileCondToForPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::while_cond_to_for(code))
+        Ok(PostProcessor::while_cond_to_for_cow(code))
     }
 }
 
@@ -135,7 +135,7 @@ impl PostProcessPass for DoWhileToForPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::do_while_to_for(code))
+        Ok(PostProcessor::do_while_to_for_cow(code))
     }
 }
 
@@ -153,7 +153,7 @@ impl PostProcessPass for WhileTrueToForEverPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::while_true_to_for_ever(code))
+        Ok(PostProcessor::while_true_to_for_ever_cow(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -193,7 +193,7 @@ impl PostProcessPass for SwitchReconstructionPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::reconstruct_switch_from_bst(code))
+        Ok(PostProcessor::reconstruct_switch_from_bst_cow(code))
     }
 }
 
@@ -211,7 +211,7 @@ impl PostProcessPass for SwitchFromIfElseAssignPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::reconstruct_switch_from_if_else_assign(code))
+        Ok(PostProcessor::reconstruct_switch_from_if_else_assign_cow(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -375,7 +375,7 @@ impl PostProcessPass for LoopIdiomsPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::recognize_loop_idioms(code))
+        Ok(PostProcessor::recognize_loop_idioms_cow(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {

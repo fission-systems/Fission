@@ -2,6 +2,7 @@ use super::PostProcessor;
 use crate::utils::patterns::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::borrow::Cow;
 
 impl PostProcessor {
     /// Try to recover a divisor from a magic number multiplication and shift
@@ -299,6 +300,23 @@ impl PostProcessor {
             .to_string();
 
         result
+    }
+
+    pub(super) fn apply_arithmetic_idioms_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
+        if !code.contains("CONCAT")
+            && !code.contains(">>")
+            && !code.contains("<<")
+            && !code.contains('&')
+        {
+            return Cow::Borrowed(code);
+        }
+
+        let output = self.apply_arithmetic_idioms(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
     }
 
     /// B-9: Replace multiplication by power-of-2 with left shift, but ONLY when
