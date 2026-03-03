@@ -190,8 +190,9 @@ int NoReturnDetector::apply(ghidra::Architecture* arch, int threshold) {
             if (!entry) continue;
             ghidra::Symbol* sym = entry->getSymbol();
             if (!sym) continue;
-            if (sym->getType() != ghidra::Symbol::function_sym) continue;
-
+            // FunctionSymbol is the only Symbol subclass that wraps a Funcdata.
+            // A dynamic_cast is the correct way to identify it in Ghidra 11.4.2
+            // (there is no 'function_sym' enum value on Symbol::getType()).
             auto* fsym = dynamic_cast<ghidra::FunctionSymbol*>(sym);
             if (!fsym) continue;
             ghidra::Funcdata* fd = fsym->getFunction();
@@ -202,10 +203,15 @@ int NoReturnDetector::apply(ghidra::Architecture* arch, int threshold) {
             if (is_static_no_return(sym->getName())) {
                 fd->getFuncProto().setNoReturn(true);
                 ++marked;
+                // Retrieve the storage address via the first whole mapping entry.
+                // Symbol::getAddr() does not exist in Ghidra 11.4.2; the address
+                // lives in SymbolEntry, which is returned by getFirstWholeMap().
+                ghidra::SymbolEntry* first_entry = sym->getFirstWholeMap();
                 fission::utils::log_stream()
                     << "[NoReturnDetector] Static noreturn: "
                     << sym->getName() << " at 0x"
-                    << std::hex << sym->getAddr().getOffset()
+                    << std::hex
+                    << (first_entry ? first_entry->getAddr().getOffset() : 0ULL)
                     << std::dec << "\n";
             }
         }
