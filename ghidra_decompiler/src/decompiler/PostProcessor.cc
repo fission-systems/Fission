@@ -137,14 +137,128 @@ std::string PostProcessor::convert_while_to_for(std::string c_code) {
 }
 
 std::string PostProcessor::simplify_nested_if(std::string c_code) {
+    // ── 1. Double-paren: ((expr)) → (expr) ─────────────────────────────────
     static const std::regex double_paren(R"(\(\(([^()]+)\)\))");
+    c_code = std::regex_replace(c_code, double_paren, "($1)");
+
+    // ── 2. if (x != 0) → if (x)  /  if (x == 0) → if (!x) ──────────────
     static const std::regex non_zero_check(R"(if\s*\(\s*(\w+)\s*!=\s*0\s*\))");
     static const std::regex zero_check(R"(if\s*\(\s*(\w+)\s*==\s*0\s*\))");
-
-    c_code = std::regex_replace(c_code, double_paren, "($1)");
     c_code = std::regex_replace(c_code, non_zero_check, "if ($1)");
     c_code = std::regex_replace(c_code, zero_check, "if (!$1)");
+
+    // ── 3. if ((cast)x != 0) → if (x)  /  if ((cast)x == 0) → if (!x) ─────
+    // Covers: (int), (uint), (longlong), (ulonglong), (short), (ushort), (byte)
+    static const std::regex cast_nonzero(
+        R"(if\s*\(\s*\(\s*(?:u?longlong|u?int|u?short|byte)\s*\)\s*(\w+)\s*!=\s*0\s*\))");
+    static const std::regex cast_zero(
+        R"(if\s*\(\s*\(\s*(?:u?longlong|u?int|u?short|byte)\s*\)\s*(\w+)\s*==\s*0\s*\))");
+    c_code = std::regex_replace(c_code, cast_nonzero, "if ($1)");
+    c_code = std::regex_replace(c_code, cast_zero, "if (!$1)");
+
+    // ── 4. !!x → (bool)x  (double logical-not is display noise) ──────────
+    // Only safe when x is a single word (no side-effect concern).
+    static const std::regex double_not(R"(!!\s*(\w+))");
+    c_code = std::regex_replace(c_code, double_not, "(bool)$1");
+
+    // ── 5. while ((cast)x != 0) → while (x)  /  while ((cast)x == 0) → while (!x) ─
+    static const std::regex while_cast_nonzero(
+        R"(while\s*\(\s*\(\s*(?:u?longlong|u?int|u?short|byte)\s*\)\s*(\w+)\s*!=\s*0\s*\))");
+    static const std::regex while_cast_zero(
+        R"(while\s*\(\s*\(\s*(?:u?longlong|u?int|u?short|byte)\s*\)\s*(\w+)\s*==\s*0\s*\))");
+    c_code = std::regex_replace(c_code, while_cast_nonzero, "while ($1)");
+    c_code = std::regex_replace(c_code, while_cast_zero, "while (!$1)");
+
     return c_code;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// eliminate_redundant_casts
+// ─────────────────────────────────────────────────────────────────────────────
+// Removes display-noise casts that Ghidra emits:
+//   • widening wrappers: (ulonglong)(uint)x    → (uint)x
+//   • same-type double:  (int)(int)x           → (int)x
+//   • null pointer:      (void*)0 / (void *)0x0 → NULL
+// ─────────────────────────────────────────────────────────────────────────────
+std::string PostProcessor::eliminate_redundant_casts(std::string c_code) {
+    // 1. (void*)0 / (void *)0x0... → NULL
+    static const std::regex void_null(R"(\(\s*void\s*\*\s*\)\s*0x?0*\b)");
+    c_code = std::regex_replace(c_code, void_null, "NULL");
+
+    // 2. Widening wrapper removal: outer widens inner — outer is noise
+    static const std::regex widen_ull_uint(R"(\(ulonglong\)\s*(\(uint\)))");
+    static const std::regex widen_ull_ushort(R"(\(ulonglong\)\s*(\(ushort\)))");
+    static const std::regex widen_ull_byte(R"(\(ulonglong\)\s*(\(byte\)))");
+    static const std::regex widen_ll_int(R"(\(longlong\)\s*(\(int\)))");
+    static const std::regex widen_ll_short(R"(\(longlong\)\s*(\(short\)))");
+    c_code = std::regex_replace(c_code, widen_ull_uint, "$1");
+    c_code = std::regex_replace(c_code, widen_ull_ushort, "$1");
+    c_code = std::regex_replace(c_code, widen_ull_byte, "$1");
+    c_code = std::regex_replace(c_code, widen_ll_int, "$1");
+    c_code = std::regex_replace(c_code, widen_ll_short, "$1");
+
+    // 3. Same-type double cast: (T)(T) → (T)
+    static const std::regex same_int(R"(\(int\)\s*\(int\))");
+    static const std::regex same_uint(R"(\(uint\)\s*\(uint\))");
+    static const std::regex same_ll(R"(\(longlong\)\s*\(longlong\))");
+    static const std::regex same_ull(R"(\(ulonglong\)\s*\(ulonglong\))");
+    static const std::regex same_short(R"(\(short\)\s*\(short\))");
+    static const std::regex same_ushort(R"(\(ushort\)\s*\(ushort\))");
+    static const std::regex same_byte(R"(\(byte\)\s*\(byte\))");
+    c_code = std::regex_replace(c_code, same_int, "(int)");
+    c_code = std::regex_replace(c_code, same_uint, "(uint)");
+    c_code = std::regex_replace(c_code, same_ll, "(longlong)");
+    c_code = std::regex_replace(c_code, same_ull, "(ulonglong)");
+    c_code = std::regex_replace(c_code, same_short, "(short)");
+    c_code = std::regex_replace(c_code, same_ushort, "(ushort)");
+    c_code = std::regex_replace(c_code, same_byte, "(byte)");
+
+    return c_code;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// eliminate_dead_stores
+// ─────────────────────────────────────────────────────────────────────────────
+// Removes trivially-dead / no-op assignments:
+//   • Self-assignment:  x = x;  /  local_8 = local_8;
+// Full dead-store elimination (liveness analysis) is not done here; that
+// requires a proper data-flow pass operated on the Pcode IR.
+// ─────────────────────────────────────────────────────────────────────────────
+std::string PostProcessor::eliminate_dead_stores(std::string c_code) {
+    bool ends_nl = !c_code.empty() && c_code.back() == '\n';
+    std::vector<std::string> lines;
+    {
+        std::istringstream ss(c_code);
+        std::string ln;
+        while (std::getline(ss, ln)) lines.push_back(ln);
+    }
+
+    // Pattern: optional-indent  IDENTIFIER = IDENTIFIER ;
+    // (only simple word identifiers — struct field self-assigns are left alone
+    //  to avoid accidentally breaking intentional memory-barrier stores)
+    static const std::regex self_assign(R"(^(\s*)(\w+)\s*=\s*\2\s*;\s*$)");
+
+    bool changed = false;
+    std::vector<std::string> newlines;
+    newlines.reserve(lines.size());
+    for (const auto& ln : lines) {
+        if (std::regex_match(ln, self_assign)) {
+            changed = true;
+            continue; // drop the line
+        }
+        newlines.push_back(ln);
+    }
+
+    if (!changed) return c_code;
+
+    std::string out;
+    out.reserve(c_code.size());
+    for (size_t i = 0; i < newlines.size(); i++) {
+        out += newlines[i];
+        if (i + 1 < newlines.size()) out += '\n';
+    }
+    if (ends_nl && (out.empty() || out.back() != '\n')) out += '\n';
+    return out;
 }
 
 std::string PostProcessor::fold_array_init(std::string c_code) {
@@ -474,8 +588,14 @@ std::string PostProcessor::process(const std::string& c_code) {
     
     // 6. Detect array initializations
     result = fold_array_init(result);
-    
-    // 7. Improve variable names
+
+    // 7. Remove redundant / widening casts and replace (void*)0 with NULL
+    result = eliminate_redundant_casts(result);
+
+    // 8. Drop self-assignment lines (x = x;)
+    result = eliminate_dead_stores(result);
+
+    // 9. Improve variable names
     result = improve_variable_names(result);
     
     return result;

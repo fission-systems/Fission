@@ -14,6 +14,7 @@
 #include <sstream>
 #include <algorithm>
 #include <limits>
+#include <chrono>
 
 namespace fission {
 namespace types {
@@ -121,7 +122,23 @@ void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
     auto end = fd->endOpAll();
     int ptr_size = fd->getArch()->types->getSizeOfPointer();
 
+    // Wall-clock safety net: stop collecting after 50 ms to prevent hangs on
+    // huge or heavily CFG-optimised functions.  Check the deadline every 256
+    // operations so the overhead is negligible.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+    int op_count = 0;
+
     for (; iter != end; ++iter) {
+        if ((++op_count & 0xFF) == 0) {
+            if (std::chrono::steady_clock::now() > deadline) {
+                fission::utils::log_stream()
+                    << "[StructureAnalyzer] collect_accesses: 50 ms deadline hit after "
+                    << op_count << " pcode ops — using partial results" << std::endl;
+                break;
+            }
+        }
+
         ghidra::PcodeOp* op = iter->second;
         if (!op || op->isDead()) continue;
 

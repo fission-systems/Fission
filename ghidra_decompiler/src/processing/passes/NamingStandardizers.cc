@@ -60,6 +60,30 @@ std::string replace_xunknown_types(const std::string& code) {
     std::regex float10_regex(R"(\bfloat10\b)");
     result = std::regex_replace(result, float10_regex, "long double");
 
+    // ── Normalise undefined1/2/4/8 → standard-width integer types ──────────
+    // Ghidra emits these both as type declarations and in cast expressions.
+    // Map them to the corresponding unsigned fixed-width types so the output
+    // reads more like production C code.
+    //
+    // Note: undefined alone (1-byte unresolved) maps to uint8_t as well.
+    // Use word-boundary anchors to avoid false matches inside identifiers.
+    static const std::regex undef8(R"(\bundefined8\b)");
+    result = std::regex_replace(result, undef8, "uint64_t");
+
+    static const std::regex undef4(R"(\bundefined4\b)");
+    result = std::regex_replace(result, undef4, "uint32_t");
+
+    static const std::regex undef2(R"(\bundefined2\b)");
+    result = std::regex_replace(result, undef2, "uint16_t");
+
+    static const std::regex undef1(R"(\bundefined1\b)");
+    result = std::regex_replace(result, undef1, "uint8_t");
+
+    // bare undefined (1-byte) — must come after numbered forms to avoid
+    // matching a prefix of "undefined4" etc.
+    static const std::regex undef_bare(R"(\bundefined\b)");
+    result = std::regex_replace(result, undef_bare, "uint8_t");
+
     return result;
 }
 

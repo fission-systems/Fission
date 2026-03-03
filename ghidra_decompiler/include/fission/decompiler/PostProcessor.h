@@ -105,6 +105,31 @@ public:
     static std::string convert_while_to_for_struct(std::string c_code);
 
     /**
+     * @brief Remove redundant / widening casts and replace (void*)0 with NULL
+     *
+     * Handles:
+     *   (ulonglong)(uint)x   → (uint)x    (widening wrapper is display noise)
+     *   (longlong)(int)x     → (int)x
+     *   (int)(int)x          → (int)x     (same-type double cast)
+     *   (void*)0 / (void *)0x0 → NULL
+     *
+     * @param c_code The C code string to process
+     * @return Modified C code with simplified casts
+     */
+    static std::string eliminate_redundant_casts(std::string c_code);
+
+    /**
+     * @brief Remove trivially-dead / self-assignment statements
+     *
+     * Deletes whole lines that are of the form:
+     *   x = x;   /   local_8 = local_8;
+     *
+     * @param c_code The C code string to process
+     * @return Modified C code with self-assignments removed
+     */
+    static std::string eliminate_dead_stores(std::string c_code);
+
+    /**
      * @brief Apply all post-processing steps
      * 
      * Order of processing:
