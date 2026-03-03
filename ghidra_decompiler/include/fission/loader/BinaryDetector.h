@@ -32,14 +32,18 @@ enum class ArchType {
 /**
  * Section information extracted from the binary's section table.
  * Used to locate data, code, and read-only sections during analysis.
+ * 
+ * NOTE: This struct must match fission_core::common::types::SectionInfo (Rust)
  */
 struct SectionInfo {
-    std::string name;           // Section name (e.g. ".text", ".rdata", "__TEXT")
-    uint64_t    va_addr      = 0;   // Virtual address (load address)
-    uint64_t    va_size      = 0;   // Virtual size in bytes
-    uint64_t    file_offset  = 0;   // Offset within the binary file
-    uint64_t    file_size    = 0;   // Size on disk (raw size)
-    bool is_executable       = false; // True if section is executable (code)
+    std::string name;                 // Section name (e.g. ".text", ".rdata", "__TEXT")
+    uint64_t    virtual_address = 0;  // Virtual address (load address)
+    uint64_t    virtual_size = 0;     // Virtual size in bytes  
+    uint64_t    file_offset = 0;      // Offset within the binary file
+    uint64_t    file_size = 0;        // Size on disk (raw size)
+    bool        is_executable = false; // True if section is executable (code)
+    bool        is_readable = false;   // True if section is readable
+    bool        is_writable = false;   // True if section is writable
 };
 
 /**

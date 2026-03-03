@@ -1,0 +1,7 @@
+{
+  "name": "_configure_narrow_argv",
+  "address": "0x140002ac8",
+  "code": "\nvoid _configure_narrow_argv(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002ac8. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  _configure_narrow_argv();\n  return;\n}\n\n",
+  "asm": "  0x140002AC8      JMP      qword ptr [0x140008338]\n",
+  "decomp_sec": 0.000353
+}

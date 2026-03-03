@@ -1,0 +1,7 @@
+{
+  "name": "__gcc_register_frame",
+  "address": "0x140001430",
+  "code": "\nvoid __gcc_register_frame(void)\n\n{\n  atexit(__gcc_deregister_frame);\n  return;\n}\n\n",
+  "asm": "  0x140001430      LEA      RCX, [0x140001440]\n  0x140001437      JMP      0x140001420\n",
+  "decomp_sec": 0.000654
+}

@@ -40,6 +40,8 @@ pub mod prelude;
 #[cfg(feature = "unpacker_runtime")]
 pub mod unpacker;
 
+pub mod utils;
+
 pub use fission_core as core;
 
 // Re-export core utilities at crate level for convenience

@@ -1,4 +1,5 @@
 use super::PostProcessor;
+use crate::utils::patterns::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -41,11 +42,7 @@ impl PostProcessor {
     pub(super) fn apply_arithmetic_idioms(&self, code: &str) -> String {
         let mut result = code.to_string();
 
-        static SIGNED_MOD2_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)(?P<s1>\w+)\s*=\s*(?P<high>\w+)\s*>>\s*0x1[fF];\s*(?P<m1>\w+)\s*=\s*\((?P<low>[\w\->\.\*]+)\s*\^\s*(?P<s2>\w+)\)\s*-\s*(?P<s3>\w+)\s*&\s*1\s*\^\s*(?P<s4>\w+);\s*return\s*CONCAT44\s*\(-\s*\(uint\)\s*\((?P<m2>\w+)\s*<\s*(?P<s5>\w+)\),\s*(?P<m3>\w+)\s*-\s*(?P<s6>\w+)\);").unwrap()
-        });
-
-        result = SIGNED_MOD2_PATTERN
+        result = SIGN_EXT_INT64_CONCAT
             .replace_all(&result, |caps: &regex::Captures| {
                 let sign = &caps["s1"];
                 let md = &caps["m1"];
@@ -66,11 +63,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static ABS64_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)(?P<s1>\w+)\s*=\s*(?P<high>\w+)\s*>>\s*0x1[fF];\s*(?P<out>\w+)\s*=\s*\((?P<val>[\w\->\.\*]+)\s*\^\s*(?P<s2>\w+)\)\s*-\s*(?P<s3>\w+);").unwrap()
-        });
-
-        result = ABS64_PATTERN
+        result = SIGN_EXT_INT32
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 let sign = &caps["s1"];
@@ -84,11 +77,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static MOD_POW2_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\(\s*(?P<val>[\w\->\.\*]+)\s*\+\s*\((?P<s1>\w+)\s*>>\s*(?P<sh1>0x[0-9a-fA-F]+)\)\s*&\s*(?P<mask>0x[0-9a-fA-F]+|[\d]+)\s*\)\s*-\s*\(\s*(?P<s2>\w+)\s*>>\s*(?P<sh2>0x[0-9a-fA-F]+|[\d]+)\s*\)").unwrap()
-        });
-
-        result = MOD_POW2_PATTERN
+        result = ALIGNED_DIV
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 let sign = &caps["s1"];
@@ -107,20 +96,13 @@ impl PostProcessor {
             })
             .to_string();
 
-        static SIGN_MASK_PATTERN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"\(int\)\s*(\w+)\s*>>\s*0x1[fF]").unwrap());
-
-        result = SIGN_MASK_PATTERN
+        result = SIGN_BIT
             .replace_all(&result, |caps: &regex::Captures| {
                 format!("SIGN_EXTRACT({})", &caps[1])
             })
             .to_string();
 
-        static MAGIC_DIV_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\(uint\)\s*\(\s*\(ulonglong\)\s*(?P<val>[\w\->\.\*]+)\s*\*\s*(?P<magic>0x[0-9a-fA-F]+)\s*>>\s*0x20\s*\)\s*(?:>>\s*(?P<shift>0x[0-9a-fA-F]+|[\d]+))?").unwrap()
-        });
-
-        result = MAGIC_DIV_PATTERN
+        result = MAGIC_DIV
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 let magic_str = &caps["magic"];
@@ -144,10 +126,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static CONCAT_SEXT_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"CONCAT44\s*\(\s*(?P<hi>[\w\->\.\*]+)\s*>>\s*0x1[fF]\s*,\s*(?P<lo>[\w\->\.\*]+)\s*\)").unwrap()
-        });
-        result = CONCAT_SEXT_PATTERN
+        result = CONCAT44_SIGN
             .replace_all(&result, |caps: &regex::Captures| {
                 let hi = &caps["hi"];
                 let lo = &caps["lo"];
@@ -159,41 +138,25 @@ impl PostProcessor {
             })
             .to_string();
 
-        static CONCAT_ZEXT_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"CONCAT44\s*\(\s*0\s*,\s*(?P<lo>[^)]+?)\s*\)").unwrap()
-        });
-        result = CONCAT_ZEXT_PATTERN
+        result = CONCAT44_ZERO
             .replace_all(&result, |caps: &regex::Captures| {
                 let lo = caps["lo"].trim();
                 format!("(ulonglong){}", lo)
             })
             .to_string();
 
-        static CONCAT_PHANTOM_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"CONCAT\d+\s*\(\s*(?:(?:\([^)]*\)\s*)?in_\w+\s*,\s*(?P<real1>[^,)]+))\s*\)").unwrap()
-        });
-        static CONCAT_PHANTOM_PATTERN2: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"CONCAT\d+\s*\(\s*(?P<real2>[^,)]+?)\s*,\s*(?:\([^)]*\)\s*)?in_\w+\s*\)").unwrap()
-        });
-        result = CONCAT_PHANTOM_PATTERN
+        result = CONCAT_INPUT_FIRST
             .replace_all(&result, |caps: &regex::Captures| caps["real1"].trim().to_string())
             .to_string();
-        result = CONCAT_PHANTOM_PATTERN2
+        result = CONCAT_INPUT_SECOND
             .replace_all(&result, |caps: &regex::Captures| caps["real2"].trim().to_string())
             .to_string();
 
-        static CONCAT_REGISTER_JOIN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"CONCAT\d+\s*\(\s*(?:\([^)]*\)\s*)?(?:in_[A-Z]\w*)\s*,\s*(?P<lo_val>[^)]+?)\s*\)").unwrap()
-        });
-        result = CONCAT_REGISTER_JOIN
+        result = CONCAT_CAP_INPUT
             .replace_all(&result, |caps: &regex::Captures| caps["lo_val"].trim().to_string())
             .to_string();
 
-        static MOD_DIV_SUB_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\(\s*(?P<val>[\w\->\.\*]+)\s*-\s*\(\s*(?:[\w\s\(\)\*>>&\^|~]+)\s*\+\s*(?P<v2>[\w\->\.\*]+)\s*/\s*(?P<divisor>\d+)\s*\)\s*\)").unwrap()
-        });
-
-        result = MOD_DIV_SUB_PATTERN
+        result = MODULO_TO_SUB
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 let v2 = &caps["v2"];
@@ -206,10 +169,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static LSHR_TO_DIV: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\(uint\)\s*(?P<val>\w+)\s*>>\s*(?P<sh>\d+)\b").unwrap()
-        });
-        result = LSHR_TO_DIV
+        result = UNSIGNED_RSHIFT
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 let sh: u32 = caps["sh"].parse().unwrap_or(0);
@@ -222,10 +182,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static SHL_TO_MUL: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\b(?P<val>\w+)\s*<<\s*(?P<sh>[1-9]\d*)\b").unwrap()
-        });
-        result = SHL_TO_MUL
+        result = LEFT_SHIFT
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 let sh: u32 = caps["sh"].parse().unwrap_or(0);
@@ -241,10 +198,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static AND_MASK_TO_MOD: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\b(?P<val>\w+)\s*&\s*(?P<mask>0x[0-9a-fA-F]+)\b").unwrap()
-        });
-        result = AND_MASK_TO_MOD
+        result = BITWISE_AND_MASK
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 let mask_str = &caps["mask"];
@@ -335,11 +289,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static FLOAT_NEG_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\b(?P<val>\w+)\s*\^\s*(?:0x80000000|-2147483648)\b").unwrap()
-        });
-
-        result = FLOAT_NEG_PATTERN
+        result = XOR_SIGN_BIT
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 format!("-{}", val)
@@ -354,12 +304,6 @@ impl PostProcessor {
     /// e.g. `x * 256 | y` → `x << 8 | y`, `x | y * 0x100` → `x | y << 8`
     /// Does NOT apply to pure arithmetic contexts like `x * 8 + x / 10`.
     pub(super) fn mul_pow2_to_shift(code: &str) -> String {
-        // Match `* LITERAL` where LITERAL is a power of 2 >= 4
-        static MUL_PAT: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"\*\s*(0[xX][0-9a-fA-F]+|[1-9][0-9]*)").unwrap());
-        // Bitwise context indicator on the same line
-        static BITWISE_CTX: Lazy<Regex> = Lazy::new(|| Regex::new(r">>|<<|\^|\b&\b|\|").unwrap());
-
         fn parse_int(s: &str) -> Option<u64> {
             let s = s.trim();
             if s.starts_with("0x") || s.starts_with("0X") {
@@ -377,7 +321,7 @@ impl PostProcessor {
                 if !BITWISE_CTX.is_match(line) {
                     return line.to_string();
                 }
-                let new_line = MUL_PAT.replace_all(line, |caps: &regex::Captures| {
+                let new_line = MULT_CONTEXT.replace_all(line, |caps: &regex::Captures| {
                     let numstr = caps[1].trim();
                     if let Some(v) = parse_int(numstr) {
                         // Only replace powers of 2 in range [4, 2^24]

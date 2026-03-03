@@ -1,0 +1,7 @@
+{
+  "name": "multiply",
+  "address": "0x140001464",
+  "code": "\nint multiply(int param_1,int param_2)\n\n{\n  return param_1 * param_2;\n}\n\n",
+  "asm": "  0x140001464      PUSH     RBP\n  0x140001465      MOV      RBP, RSP\n  0x140001468      MOV      dword ptr [RBP + 0x10], ECX\n  0x14000146B      MOV      dword ptr [RBP + 0x18], EDX\n  0x14000146E      MOV      EAX, dword ptr [RBP + 0x10]\n  0x140001471      IMUL     EAX, dword ptr [RBP + 0x18]\n  0x140001475      POP      RBP\n  0x140001476      RET      \n",
+  "decomp_sec": 0.000708
+}

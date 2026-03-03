@@ -2,6 +2,7 @@ use super::PostProcessor;
 use super::condition::negate_condition;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use crate::utils::patterns::*;
 
 impl PostProcessor {
     // =========================================================================
@@ -38,8 +39,6 @@ impl PostProcessor {
             })
             .to_string();
 
-        static EMPTY_ELSE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"\}\s*else\s*\{\s*\}").unwrap());
         result = EMPTY_ELSE.replace_all(&result, "}").to_string();
 
         result

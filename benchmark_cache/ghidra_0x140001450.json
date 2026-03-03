@@ -1,0 +1,7 @@
+{
+  "name": "add",
+  "address": "0x140001450",
+  "code": "\nint add(int param_1,int param_2)\n\n{\n  return param_2 + param_1;\n}\n\n",
+  "asm": "  0x140001450      PUSH     RBP\n  0x140001451      MOV      RBP, RSP\n  0x140001454      MOV      dword ptr [RBP + 0x10], ECX\n  0x140001457      MOV      dword ptr [RBP + 0x18], EDX\n  0x14000145A      MOV      EDX, dword ptr [RBP + 0x10]\n  0x14000145D      MOV      EAX, dword ptr [RBP + 0x18]\n  0x140001460      ADD      EAX, EDX\n  0x140001462      POP      RBP\n  0x140001463      RET      \n",
+  "decomp_sec": 0.000768
+}

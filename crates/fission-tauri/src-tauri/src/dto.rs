@@ -163,6 +163,9 @@ pub struct AppSettings {
     pub decompile_style: String,
     /// Decompiler simplification level 0-3 (0 = off, 3 = aggressive).
     pub simplify_level: u8,
+    /// Full decompiler options (persisted separately from basic settings).
+    #[serde(default)]
+    pub decompiler_options: Option<DecompilerOptions>,
 }
 
 impl Default for AppSettings {
@@ -172,6 +175,206 @@ impl Default for AppSettings {
             font_size: 14.0,
             decompile_style: "c-like".to_string(),
             simplify_level: 1,
+            decompiler_options: None,
+        }
+    }
+}
+
+// ============================================================================
+// Decompiler Options (Ghidra-level configuration)
+// ============================================================================
+
+/// Comprehensive decompiler options mirroring Ghidra's DecompileOptions.
+///
+/// Divided into four categories: Analysis, Post-Processing, Display, Performance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecompilerOptions {
+    pub analysis: AnalysisOptions,
+    pub cpp_postprocess: CppPostProcessOptions,
+    pub rust_postprocess: RustPostProcessOptions,
+    pub display: DisplayOptions,
+    pub performance: PerformanceOptions,
+}
+
+impl Default for DecompilerOptions {
+    fn default() -> Self {
+        Self {
+            analysis: AnalysisOptions::default(),
+            cpp_postprocess: CppPostProcessOptions::default(),
+            rust_postprocess: RustPostProcessOptions::default(),
+            display: DisplayOptions::default(),
+            performance: PerformanceOptions::default(),
+        }
+    }
+}
+
+/// Ghidra engine analysis options (controlled via FFI set_feature).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisOptions {
+    pub infer_pointers: bool,
+    pub analyze_loops: bool,
+    pub readonly_propagate: bool,
+    pub record_jumploads: bool,
+    pub allow_inline: bool,
+    pub disable_toomanyinstructions_error: bool,
+}
+
+impl Default for AnalysisOptions {
+    fn default() -> Self {
+        Self {
+            infer_pointers: true,
+            analyze_loops: true,
+            readonly_propagate: true,
+            record_jumploads: true,
+            allow_inline: false,
+            disable_toomanyinstructions_error: true,
+        }
+    }
+}
+
+/// C++ side post-processing options (controlled via FFI set_feature with "pp_" prefix).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CppPostProcessOptions {
+    pub apply_struct_definitions: bool,
+    pub iat_symbols: bool,
+    pub strip_shadow_params: bool,
+    pub smart_constants: bool,
+    pub inline_strings: bool,
+    pub constants: bool,
+    pub guids: bool,
+    pub unicode_strings: bool,
+    pub interlocked_patterns: bool,
+    pub xunknown_types: bool,
+    pub seh_cleanup: bool,
+    pub global_symbols: bool,
+    pub internal_names: bool,
+    pub struct_offsets: bool,
+    pub fid_names: bool,
+}
+
+impl Default for CppPostProcessOptions {
+    fn default() -> Self {
+        Self {
+            apply_struct_definitions: true,
+            iat_symbols: true,
+            strip_shadow_params: true,
+            smart_constants: true,
+            inline_strings: true,
+            constants: true,
+            guids: true,
+            unicode_strings: true,
+            interlocked_patterns: true,
+            xunknown_types: true,
+            seh_cleanup: true,
+            global_symbols: true,
+            internal_names: true,
+            struct_offsets: true,
+            fid_names: true,
+        }
+    }
+}
+
+/// Rust side post-processing options (individual pass toggles).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustPostProcessOptions {
+    pub clean_rust: bool,
+    pub clean_go: bool,
+    pub swift_demangle: bool,
+    pub field_offsets: bool,
+    pub insert_casts: bool,
+    pub arithmetic_idioms: bool,
+    pub deref_to_array: bool,
+    pub bitop_to_logicop: bool,
+    pub remove_dead_branches: bool,
+    pub simplify_if: bool,
+    pub while_to_for: bool,
+    pub dead_assign_removal: bool,
+    pub rename_induction_vars: bool,
+    pub rename_semantic_vars: bool,
+    pub loop_idioms: bool,
+    pub switch_reconstruction: bool,
+    pub mul_to_shift: bool,
+    pub dwarf_names: bool,
+}
+
+impl Default for RustPostProcessOptions {
+    fn default() -> Self {
+        Self {
+            clean_rust: true,
+            clean_go: true,
+            swift_demangle: true,
+            field_offsets: true,
+            insert_casts: true,
+            arithmetic_idioms: true,
+            deref_to_array: true,
+            bitop_to_logicop: true,
+            remove_dead_branches: true,
+            simplify_if: true,
+            while_to_for: true,
+            dead_assign_removal: true,
+            rename_induction_vars: true,
+            rename_semantic_vars: true,
+            loop_idioms: true,
+            switch_reconstruction: true,
+            mul_to_shift: true,
+            dwarf_names: true,
+        }
+    }
+}
+
+/// Display/formatting options for decompiler output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplayOptions {
+    /// Maximum characters per line before wrapping
+    pub max_line_width: u32,
+    /// Indentation width in spaces
+    pub indent_width: u8,
+    /// Integer display format
+    pub integer_format: String,
+    /// Comment style
+    pub comment_style: String,
+    /// Show type casts
+    pub show_casts: bool,
+    /// Show namespace qualifiers
+    pub show_namespaces: bool,
+    /// Show line numbers
+    pub show_line_numbers: bool,
+}
+
+impl Default for DisplayOptions {
+    fn default() -> Self {
+        Self {
+            max_line_width: 100,
+            indent_width: 2,
+            integer_format: "best_fit".to_string(),
+            comment_style: "c_style".to_string(),
+            show_casts: true,
+            show_namespaces: false,
+            show_line_numbers: true,
+        }
+    }
+}
+
+/// Performance/limits options for the decompiler engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceOptions {
+    /// Decompilation timeout in milliseconds
+    pub timeout_ms: u64,
+    /// Maximum function size in bytes
+    pub max_function_size: u32,
+    /// Maximum instructions before aborting
+    pub max_instructions: u32,
+    /// Number of functions to cache
+    pub cache_size: u32,
+}
+
+impl Default for PerformanceOptions {
+    fn default() -> Self {
+        Self {
+            timeout_ms: 30000,
+            max_function_size: 65536,
+            max_instructions: 100000,
+            cache_size: 10,
         }
     }
 }
@@ -242,6 +445,11 @@ pub struct ListingRow {
     pub comment: Option<String>,
     /// `"instruction"` | `"label"` | `"section"`
     pub row_type: String,
+    /// Mnemonic category for syntax-highlighting:
+    /// `"call"` | `"jmp"` | `"cjmp"` | `"ret"` | `"nop"` |
+    /// `"push_pop"` | `"mov"` | `"cmp"` | `"int"` | `"normal"`
+    #[serde(default)]
+    pub mnemonic_type: String,
 }
 
 /// Metadata about the full listing, returned by `get_listing_info`.

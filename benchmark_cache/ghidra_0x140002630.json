@@ -1,0 +1,7 @@
+{
+  "name": "__mingw_GetSectionCount",
+  "address": "0x140002630",
+  "code": "\n/* WARNING: Unknown calling convention */\n\nint __mingw_GetSectionCount(void)\n\n{\n  int *piVar1;\n  \n  if (((*(short *)_refptr___ImageBase == 0x5a4d) &&\n      (piVar1 = (int *)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)),\n      *piVar1 == 0x4550)) && ((short)piVar1[6] == 0x20b)) {\n    return (uint)*(ushort *)((longlong)piVar1 + 6);\n  }\n  return 0;\n}\n\n",
+  "asm": "  0x140002630      MOV      RAX, qword ptr [0x140004460]\n  0x140002637      XOR      ECX, ECX\n  0x140002639      CMP      word ptr [RAX], 0x5a4d\n  0x14000263E      JNZ      0x14000264f\n  0x140002640      MOVSXD   RDX, dword ptr [RAX + 0x3c]\n  0x140002644      ADD      RAX, RDX\n  0x140002647      CMP      dword ptr [RAX], 0x4550\n  0x14000264D      JZ       0x140002658\n  0x14000264F      MOV      EAX, ECX\n  0x140002651      RET      \n  0x140002658      CMP      word ptr [RAX + 0x18], 0x20b\n  0x14000265E      JNZ      0x14000264f\n  0x140002660      MOVZX    ECX, word ptr [RAX + 0x6]\n  0x140002664      MOV      EAX, ECX\n  0x140002666      RET      \n",
+  "decomp_sec": 0.001315
+}

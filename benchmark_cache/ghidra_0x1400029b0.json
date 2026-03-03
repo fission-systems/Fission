@@ -1,0 +1,7 @@
+{
+  "name": "__local_stdio_printf_options",
+  "address": "0x1400029b0",
+  "code": "\n/* WARNING: Unknown calling convention */\n\nulonglong * __local_stdio_printf_options(void)\n\n{\n  return &options;\n}\n\n",
+  "asm": "  0x1400029B0      LEA      RAX, [0x140003050]\n  0x1400029B7      RET      \n",
+  "decomp_sec": 0.000435
+}

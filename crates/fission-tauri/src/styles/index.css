@@ -10,13 +10,14 @@
 @import './layout.css';
 
 /* ─── Shell components ─── */
-@import './components/menubar.css';
+/* menubar.css removed — now using native OS menu bar */
 @import './components/activitybar.css';
 @import './components/sidebar.css';
 @import './components/editor-tabs.css';
 @import './components/bottom-panel.css';
 @import './components/status-bar.css';
 @import './components/dialogs.css';
+@import './components/decompiler-options.css';
 @import './components/context-menu.css';
 
 /* ─── Editor panels ─── */

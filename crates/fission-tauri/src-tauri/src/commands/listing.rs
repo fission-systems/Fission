@@ -53,7 +53,7 @@ pub async fn get_listing_chunk(
     count: usize,
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<ListingRow>> {
-    use iced_x86::{Decoder, DecoderOptions, Formatter, IntelFormatter};
+    use iced_x86::{Decoder, DecoderOptions, FlowControl, Formatter, IntelFormatter};
     use std::collections::HashMap;
 
     let start_address = parse_address(&start_address)
@@ -142,6 +142,7 @@ pub async fn get_listing_chunk(
                 label: Some(name.clone()),
                 comment: None,
                 row_type: "label".to_string(),
+                mnemonic_type: String::new(),
             });
         }
 
@@ -161,6 +162,31 @@ pub async fn get_listing_chunk(
 
         let comment = inner.comments.get(&ip).cloned();
 
+        // Classify mnemonic for syntax highlighting (x64dbg-style categories)
+        let mnemonic_type = match insn.flow_control() {
+            FlowControl::Call | FlowControl::IndirectCall => "call",
+            FlowControl::UnconditionalBranch | FlowControl::IndirectBranch => "jmp",
+            FlowControl::ConditionalBranch => "cjmp",
+            FlowControl::Return => "ret",
+            FlowControl::Interrupt => "int",
+            _ => {
+                let m = mnemonic.as_str();
+                if m == "nop" || m.starts_with("nop") {
+                    "nop"
+                } else if m == "push" || m == "pop" || m == "pusha" || m == "popa"
+                    || m == "pushf" || m == "popf" || m == "pushfq" || m == "popfq"
+                {
+                    "push_pop"
+                } else if m.starts_with("mov") || m == "lea" || m == "xchg" {
+                    "mov"
+                } else if m == "cmp" || m == "test" {
+                    "cmp"
+                } else {
+                    "normal"
+                }
+            }
+        };
+
         rows.push(ListingRow {
             address: format!("0x{:x}", ip),
             bytes: hex_bytes,
@@ -169,6 +195,7 @@ pub async fn get_listing_chunk(
             label: None,
             comment,
             row_type: "instruction".to_string(),
+            mnemonic_type: mnemonic_type.to_string(),
         });
 
         insn_count += 1;

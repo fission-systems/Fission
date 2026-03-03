@@ -14,7 +14,6 @@ import type {
 } from "./types";
 import { ListingView } from "./panels/editor/ListingView";
 import { DebugSidebar } from "./panels/sidebar/DebugSidebar";
-import MenuBar from "./components/MenuBar";
 import ActivityBar from "./components/ActivityBar";
 import Sidebar from "./components/Sidebar";
 import EditorTabs from "./components/EditorTabs";
@@ -30,6 +29,7 @@ import HexView from "./panels/editor/HexView";
 import SettingsPanel from "./panels/sidebar/SettingsPanel";
 import SectionsPanel from "./panels/sidebar/SectionsPanel";
 import AboutDialog from "./panels/dialogs/AboutDialog";
+import DecompilerOptionsDialog from "./panels/dialogs/DecompilerOptionsDialog";
 import SearchPanel from "./panels/sidebar/SearchPanel";
 import PluginsPanel from "./panels/sidebar/PluginsPanel";
 import { useEditorTabs } from "./hooks/useEditorTabs";
@@ -37,6 +37,7 @@ import { useBinary } from "./hooks/useBinary";
 import { useDebug } from "./hooks/useDebug";
 import { useDialogs } from "./hooks/useDialogs";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useMenuEvents } from "./hooks/useMenuEvents";
 import { useDragAndDrop } from "./hooks/useDragAndDrop";
 import { parseAddress } from "./utils/address";
 
@@ -100,6 +101,7 @@ function App() {
         renameOpen, setRenameOpen, renameTarget, openRename,
         commentOpen, setCommentOpen, commentTarget, openComment,
         aboutOpen, setAboutOpen,
+        decompilerOptionsOpen, setDecompilerOptionsOpen,
     } = useDialogs();
 
     // Undo/Redo stacks
@@ -172,6 +174,12 @@ function App() {
     // --- Exit ---
     const handleExit = useCallback(() => {
         getCurrentWindow().close();
+    }, []);
+
+    // --- Toggle Developer Tools ---
+    // Now handled natively by Rust on_menu_event — keep for keyboard shortcut fallback
+    const handleToggleDevTools = useCallback(() => {
+        invoke("toggle_devtools").catch((e) => log(`[DevTools error] ${e}`));
     }, []);
 
     // --- Toggle Bottom Panel ---
@@ -409,6 +417,36 @@ function App() {
         onOpenRename: openRename,
         onOpenComment: openComment,
         onToggleBottomPanel: handleToggleBottomPanel,
+        onToggleDevTools: handleToggleDevTools,
+    });
+
+    // --- Native menu bar events ---
+    useMenuEvents({
+        onOpenFile: handleOpenFile,
+        onSaveProject: handleSaveProject,
+        onLoadProject: handleLoadProject,
+        onSaveSnapshot: handleSaveSnapshot,
+        onLoadSnapshot: handleLoadSnapshot,
+        onExportJson: handleExportJson,
+        onClearConsole: handleClearConsole,
+        onClearCache: handleClearDecompileCache,
+        onGotoAddress: () => { if (binaryInfo) setGotoOpen(true); },
+        onRenameSymbol: () => {
+            const tab = tabs.find((t) => t.id === activeTabId);
+            if (tab) openRename(tab.address, tab.functionName);
+        },
+        onAddComment: () => {
+            const tab = tabs.find((t) => t.id === activeTabId);
+            if (tab) openComment(tab.address, "");
+        },
+        onDecompilerOptions: () => setDecompilerOptionsOpen(true),
+        onToggleDynamic: handleToggleDynamicMode,
+        onAssemblyView: handleOpenAssemblyView,
+        onDecompileView: handleOpenDecompileView,
+        onListingView: handleOpenListingTab,
+        onToggleSidebar: handleToggleSidebar,
+        onToggleBottom: handleToggleBottomPanel,
+        onAbout: () => setAboutOpen(true),
     });
 
     // --- Drag & Drop ---
@@ -420,38 +458,6 @@ function App() {
     // --- Render ---
     return (
         <div className="app-layout">
-            <MenuBar
-                onOpenFile={handleOpenFile}
-                onSaveProject={handleSaveProject}
-                onLoadProject={handleLoadProject}
-                onClearConsole={handleClearConsole}
-                onClearCache={handleClearDecompileCache}
-                onOpenListing={handleOpenListingTab}
-                onGotoAddress={() => binaryInfo && setGotoOpen(true)}
-                onRename={() => {
-                    const tab = tabs.find((t) => t.id === activeTabId);
-                    if (tab) openRename(tab.address, tab.functionName);
-                }}
-                onComment={() => {
-                    const tab = tabs.find((t) => t.id === activeTabId);
-                    if (tab) openComment(tab.address, "");
-                }}
-                binaryLoaded={!!binaryInfo}
-                onExit={handleExit}
-                onToggleBottomPanel={handleToggleBottomPanel}
-                bottomPanelVisible={bottomPanelVisible}
-                onAbout={() => setAboutOpen(true)}
-                onSaveSnapshot={handleSaveSnapshot}
-                onLoadSnapshot={handleLoadSnapshot}
-                onToggleDynamicMode={handleToggleDynamicMode}
-                dynamicMode={dynamicMode}
-                onToggleSidebar={handleToggleSidebar}
-                sidebarVisible={sidebarVisible}
-                onOpenAssemblyView={handleOpenAssemblyView}
-                onOpenDecompileView={handleOpenDecompileView}
-                onExportJson={handleExportJson}
-            />
-
             <div className="app-body">
                 <ActivityBar activeView={activeView} onViewChange={setActiveView} />
 
@@ -692,6 +698,21 @@ function App() {
             <AboutDialog
                 open={aboutOpen}
                 onClose={() => setAboutOpen(false)}
+            />
+            <DecompilerOptionsDialog
+                open={decompilerOptionsOpen}
+                onClose={() => setDecompilerOptionsOpen(false)}
+                onApplied={() => {
+                    // Re-decompile the current function if one is open
+                    const tab = tabs.find((t) => t.id === activeTabId);
+                    if (tab) {
+                        const addr = parseAddress(tab.address);
+                        if (addr !== null) {
+                            invoke("decompile_function", { address: addr }).catch(() => {});
+                        }
+                    }
+                }}
+                onLog={log}
             />
         </div>
     );

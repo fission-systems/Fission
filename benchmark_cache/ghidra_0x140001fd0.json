@@ -1,0 +1,7 @@
+{
+  "name": "__mingw_raise_matherr",
+  "address": "0x140001fd0",
+  "code": "\n/* WARNING: Unknown calling convention */\n\nvoid __mingw_raise_matherr(int typ,char *name,double a1,double a2,double rslt)\n\n{\n  _exception ex;\n  \n  if (stUserMathErr != (fUserMathErr)0x0) {\n    ex.retval = rslt;\n    ex.type = typ;\n    ex.name = name;\n    ex.arg1 = a1;\n    ex.arg2 = a2;\n    (*stUserMathErr)(&ex);\n  }\n  return;\n}\n\n",
+  "asm": "  0x140001FD0      SUB      RSP, 0x58\n  0x140001FD4      MOV      RAX, qword ptr [0x1400070b0]\n  0x140001FDB      TEST     RAX, RAX\n  0x140001FDE      JZ       0x140002009\n  0x140001FE0      MOVSD    XMM0, qword ptr [RSP + 0x80]\n  0x140001FE9      UNPCKLPD XMM2, XMM3\n  0x140001FED      MOV      dword ptr [RSP + 0x20], ECX\n  0x140001FF1      LEA      RCX, [RSP + 0x20]\n  0x140001FF6      MOV      qword ptr [RSP + 0x28], RDX\n  0x140001FFB      MOVAPS   xmmword ptr [RSP + 0x30], XMM2\n  0x140002000      MOVSD    qword ptr [RSP + 0x40], XMM0\n  0x140002006      CALL     RAX\n  0x140002008      NOP      \n  0x140002009      ADD      RSP, 0x58\n  0x14000200D      RET      \n",
+  "decomp_sec": 0.001761
+}

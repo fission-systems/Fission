@@ -1,0 +1,7 @@
+{
+  "name": ".text",
+  "address": "0x140002bd0",
+  "code": "\nvoid _text(void)\n\n{\n  atexit(__gcc_deregister_frame);\n  return;\n}\n\n",
+  "asm": "  0x140002BD0      JMP      0x140001430\n",
+  "decomp_sec": 0.000678
+}

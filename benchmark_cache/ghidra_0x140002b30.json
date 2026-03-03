@@ -1,0 +1,7 @@
+{
+  "name": "__setusermatherr",
+  "address": "0x140002b30",
+  "code": "\nvoid __setusermatherr(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002b30. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  __setusermatherr();\n  return;\n}\n\n",
+  "asm": "  0x140002B30      JMP      qword ptr [0x1400082f8]\n",
+  "decomp_sec": 0.000391
+}

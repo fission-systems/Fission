@@ -2,6 +2,7 @@
 
 use crate::dto::BookmarkDto;
 use crate::dto::DebugStateDto;
+use crate::menu::MenuHandles;
 use fission_analysis::debug::ttd::Timeline;
 use fission_analysis::plugin::PluginManager;
 use fission_loader::loader::LoadedBinary;
@@ -82,6 +83,9 @@ pub struct AppState {
 
     /// TTD (Time Travel Debugging) timeline — separate lock
     pub timeline: Mutex<Timeline>,
+
+    /// Native menu item handles for dynamic enable/disable
+    pub menu_handles: std::sync::OnceLock<MenuHandles>,
 }
 
 impl Default for AppState {
@@ -99,6 +103,7 @@ impl Default for AppState {
             debug_stop_tx: std::sync::Mutex::new(None),
             plugin_manager: Mutex::new(PluginManager::new()),
             timeline: Mutex::new(Timeline::new()),
+            menu_handles: std::sync::OnceLock::new(),
         }
     }
 }

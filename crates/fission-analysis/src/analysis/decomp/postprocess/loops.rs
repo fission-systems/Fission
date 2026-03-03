@@ -1,5 +1,6 @@
 use super::PostProcessor;
 use super::condition::negate_condition;
+use crate::utils::patterns::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -26,20 +27,10 @@ impl PostProcessor {
         // Regex patterns
         static INIT_ASSIGN: Lazy<Regex> =
             Lazy::new(|| Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$").unwrap());
-        static WHILE_TRUE_OPEN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^(\s*)while\s*\(\s*(?:true|1)\s*\)\s*\{\s*$").unwrap());
-        static IF_BREAK: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*if\s*\(\s*(.+?)\s*\)\s*\{?\s*break\s*;\s*\}?\s*$").unwrap());
-        static UPDATE_INC: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*(\w+)\s*(\+\+|--)\s*;\s*$").unwrap());
-        static UPDATE_COMPOUND: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*(\w+)\s*(\+=|-=)\s*(.+?)\s*;\s*$").unwrap());
-        static UPDATE_PLAIN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*(\w+)\s*=\s*(.+?)\s*;\s*$").unwrap());
 
         while i < lines.len() {
             // Check for while(true) { preceded by init assignment
-            if let Some(while_caps) = WHILE_TRUE_OPEN.captures(lines[i]) {
+            if let Some(while_caps) = WHILE_TRUE.captures(lines[i]) {
                 let while_indent = while_caps[1].to_string();
 
                 // Check previous line for init assignment
@@ -79,14 +70,14 @@ impl PostProcessor {
 
                         // Check last body line for update of init_var
                         let last_body = body_lines[body_lines.len() - 1];
-                        let update_info = if let Some(caps) = UPDATE_INC.captures(last_body) {
+                        let update_info = if let Some(caps) = INC_DEC.captures(last_body) {
                             let v = caps[1].to_string();
                             let op = caps[2].to_string();
                             Some((v, format!("{}{}", &caps[1], op)))
-                        } else if let Some(caps) = UPDATE_COMPOUND.captures(last_body) {
+                        } else if let Some(caps) = COMPOUND_ASSIGN.captures(last_body) {
                             let v = caps[1].to_string();
                             Some((v, format!("{} {} {}", &caps[1], &caps[2], &caps[3])))
-                        } else if let Some(caps) = UPDATE_PLAIN.captures(last_body) {
+                        } else if let Some(caps) = LOOP_ASSIGN.captures(last_body) {
                             let v = caps[1].to_string();
                             Some((v, caps[2].to_string()))
                         } else {
@@ -174,16 +165,8 @@ impl PostProcessor {
             )
             .unwrap()
         });
-        // Extract variable from optionally cast condition: (int)var → var, var → var
-        static CAST_VAR: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*(?:\(\s*\w+\s*\)\s*)?(\w+)\s*$").unwrap());
         static INIT_ASSIGN: Lazy<Regex> =
             Lazy::new(|| Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$").unwrap());
-        static INC_PP: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*(\w+)\s*\+\+\s*;\s*$").unwrap());
-        static INC_PE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*(\w+)\s*\+=\s*(.+?)\s*;\s*$").unwrap());
-        static INC_RAW: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*(\w+)\s*=\s*(\w+)\s*\+\s*(.+?)\s*;\s*$").unwrap());
 
         let lines: Vec<&str> = code.lines().collect();
         let mut result_lines: Vec<String> = Vec::new();
@@ -240,19 +223,19 @@ impl PostProcessor {
                         let inc_idx = close_idx - 1;
 
                         // Detect increment pattern
-                        let inc_str = if let Some(c) = INC_PP.captures(lines[inc_idx]) {
+                        let inc_str = if let Some(c) = crate::utils::patterns::INC_PP.captures(lines[inc_idx]) {
                             if &c[1] == var {
                                 Some(format!("{}++", var))
                             } else {
                                 None
                             }
-                        } else if let Some(c) = INC_PE.captures(lines[inc_idx]) {
+                        } else if let Some(c) = ADD_ASSIGN.captures(lines[inc_idx]) {
                             if &c[1] == var {
                                 Some(format!("{} += {}", var, &c[2]))
                             } else {
                                 None
                             }
-                        } else if let Some(c) = INC_RAW.captures(lines[inc_idx]) {
+                        } else if let Some(c) = ADD_PATTERN.captures(lines[inc_idx]) {
                             if &c[1] == var && &c[2] == var {
                                 let step = &c[3];
                                 if step.trim() == "1" {
@@ -315,12 +298,10 @@ impl PostProcessor {
     /// B-10: Convert `while( true )` / `while (true)` / `while (1)` → `for (;;)`
     /// This gives the `for (` pattern to infinite-loop functions that use explicit break/return.
     pub(super) fn while_true_to_for_ever(code: &str) -> String {
-        static WHILE_TRUE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"(?m)^(\s*)while\s*\(\s*(?:true|1)\s*\)\s*\{").unwrap());
-        if !WHILE_TRUE.is_match(code) {
+        if !WHILE_TRUE_ML.is_match(code) {
             return code.to_string();
         }
-        WHILE_TRUE
+        WHILE_TRUE_ML
             .replace_all(code, |caps: &regex::Captures| format!("{}for (;;) {{", &caps[1]))
             .into_owned()
     }
@@ -439,14 +420,6 @@ impl PostProcessor {
     ///   } while (VAR op LIMIT);
     /// → for (VAR = INIT; VAR op LIMIT; VAR++) { BODY; }
     pub(super) fn do_while_to_for(code: &str) -> String {
-        static DO_OPEN: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\s*)do\s*\{\s*$").unwrap());
-        static DO_WHILE_CLOSE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^(\s*)\}\s*while\s*\(\s*(\w+)\s*(!=|<|<=|>|>=)\s*([^)]+)\)\s*;\s*$")
-                .unwrap()
-        });
-        static INC_PP: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\s*)(\w+)\+\+;\s*$").unwrap());
-        static INC_PE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^(\s*)(\w+)\s*\+=\s*([^;]+);\s*$").unwrap());
         static INIT_ASSIGN: Lazy<Regex> =
             Lazy::new(|| Regex::new(r"^(\s*)(\w+)\s*=\s*([^;]+);\s*$").unwrap());
 
@@ -501,15 +474,18 @@ impl PostProcessor {
                 let body_end = close_idx;
                 let mut inc_idx = None;
                 let mut inc_expr = String::new(); // the full increment expression for the for-header
+                // Pattern for incrementing with indent
+                let inc_pp_local = Regex::new(r"^(\s*)(\w+)\+\+;\s*$").unwrap();
+                let inc_pe_local = Regex::new(r"^(\s*)(\w+)\s*\+=\s*([^;]+);\s*$").unwrap();
                 for k in (body_start..body_end).rev() {
-                    if let Some(c) = INC_PP.captures(lines[k])
+                    if let Some(c) = inc_pp_local.captures(lines[k])
                         && c[2] == cond_var
                     {
                         inc_idx = Some(k);
                         inc_expr = format!("{}++", cond_var);
                         break;
                     }
-                    if let Some(c) = INC_PE.captures(lines[k])
+                    if let Some(c) = inc_pe_local.captures(lines[k])
                         && c[2] == cond_var
                     {
                         inc_idx = Some(k);
@@ -524,20 +500,19 @@ impl PostProcessor {
                         // Also try: RHS of while condition is the counter
                         // e.g. `} while (limit != counter);`
                         // where counter is the variable being incremented
-                        static IDENT: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\w+$").unwrap());
-                        if IDENT.is_match(cond_lim.trim()) {
+                        if SINGLE_IDENT.is_match(cond_lim.trim()) {
                             let rhs_var = cond_lim.trim().to_string();
                             let mut found_rhs_idx = None;
                             let mut rhs_inc_expr = String::new();
                             for k in (body_start..body_end).rev() {
-                                if let Some(c) = INC_PP.captures(lines[k])
+                                if let Some(c) = inc_pp_local.captures(lines[k])
                                     && c[2] == rhs_var
                                 {
                                     found_rhs_idx = Some(k);
                                     rhs_inc_expr = format!("{}++", rhs_var);
                                     break;
                                 }
-                                if let Some(c) = INC_PE.captures(lines[k])
+                                if let Some(c) = inc_pe_local.captures(lines[k])
                                     && c[2] == rhs_var
                                 {
                                     found_rhs_idx = Some(k);

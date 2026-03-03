@@ -1,7 +1,5 @@
-use once_cell::sync::Lazy;
-use regex::Regex;
-
 use crate::analysis::decomp::postprocess::PostProcessor;
+use crate::utils::patterns::*;
 use fission_loader::loader::types::DwarfLocation;
 
 impl PostProcessor {
@@ -22,10 +20,7 @@ impl PostProcessor {
             return result;
         }
 
-        static OFFSET_PATTERN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"\*\s*\(\s*(\w+)\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\)").unwrap());
-
-        result = OFFSET_PATTERN
+        result = PTR_OFFSET
             .replace_all(&result, |caps: &regex::Captures| {
                 let base = &caps[1];
                 let offset_str = &caps[2];
@@ -44,12 +39,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static CAST_OFFSET_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\*\s*\(\s*[\w\s]+\*\s*\)\s*\(\s*(\w+)\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\)")
-                .unwrap()
-        });
-
-        result = CAST_OFFSET_PATTERN
+        result = CAST_PTR_OFFSET
             .replace_all(&result, |caps: &regex::Captures| {
                 let base = &caps[1];
                 let offset_str = &caps[2];
@@ -68,11 +58,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static ARRAY_OFFSET_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(\w+)\[\s*(0x[0-9a-fA-F]+)\s*\]").unwrap()
-        });
-
-        result = ARRAY_OFFSET_PATTERN
+        result = ARRAY_INDEX
             .replace_all(&result, |caps: &regex::Captures| {
                 let base = &caps[1];
                 let offset_str = &caps[2];
@@ -88,10 +74,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static GHIDRA_OFFSET_PATTERN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"(\w+)\._([\d]+)_([\d]+)_").unwrap());
-
-        result = GHIDRA_OFFSET_PATTERN
+        result = FIELD_OFFSET
             .replace_all(&result, |caps: &regex::Captures| {
                 let base = &caps[1];
                 let offset: u32 = caps[2].parse().unwrap_or(0);
@@ -117,11 +100,7 @@ impl PostProcessor {
     pub(super) fn recognize_swift_accessors(&self, code: &str) -> String {
         let mut result = code.to_string();
 
-        static SWIFT_VTABLE_PATTERN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\(\*\*\([\w\s\*]+\)\(\*(\w+)\s*\+\s*(0x[0-9a-fA-F]+)\)\)").unwrap()
-        });
-
-        result = SWIFT_VTABLE_PATTERN
+        result = DOUBLE_PTR_DEREF
             .replace_all(&result, |caps: &regex::Captures| {
                 let base = &caps[1];
                 let vtable_offset_str = &caps[2];
@@ -155,10 +134,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static SWIFT_ACCESSOR_RESULT: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"(axVar\d+)\._(8)_(8)_").unwrap());
-
-        result = SWIFT_ACCESSOR_RESULT
+        result = XMM_FIELD
             .replace_all(&result, |caps: &regex::Captures| {
                 let var = &caps[1];
                 format!("{}->value/* Swift property value */", var)
@@ -169,11 +145,7 @@ impl PostProcessor {
     }
 
     pub(super) fn demangle_swift_symbols(&self, code: &str) -> String {
-        static SWIFT_REGEX: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(_\$s[a-zA-Z0-9_\$]+|__T[a-zA-Z0-9_\$]+|_T[a-zA-Z0-9_\$]+)").unwrap()
-        });
-
-        SWIFT_REGEX
+        MANGLED_NAME
             .replace_all(code, |caps: &regex::Captures| {
                 let symbol = &caps[0];
                 fission_loader::loader::demangle::demangle(symbol)
@@ -190,27 +162,17 @@ impl PostProcessor {
     // Avoids collision with already-used identifiers.
     // =========================================================================
     pub(super) fn rename_induction_vars(code: &str) -> String {
-        static FOR_LOOP_VAR: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"for\s*\(\s*(\w+)\s*=").unwrap()
-        });
-        static COMPILER_VAR: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^(local_\w+|[a-z]Var\d+)$").unwrap()
-        });
-
         let candidate_names = ["i", "j", "k", "l", "m", "n"];
 
         let mut used_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-        static ALL_IDENT: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\b([a-zA-Z_]\w*)\b").unwrap()
-        });
-        for cap in ALL_IDENT.find_iter(code) {
+        for cap in IDENTIFIER.find_iter(code) {
             used_ids.insert(cap.as_str().to_string());
         }
 
         let mut induction_vars: Vec<String> = Vec::new();
-        for caps in FOR_LOOP_VAR.captures_iter(code) {
+        for caps in FOR_INIT.captures_iter(code) {
             let var = caps[1].to_string();
-            if COMPILER_VAR.is_match(&var) && !induction_vars.contains(&var) {
+            if GENERIC_VAR.is_match(&var) && !induction_vars.contains(&var) {
                 induction_vars.push(var);
             }
         }
@@ -243,7 +205,7 @@ impl PostProcessor {
             name_idx += 1;
 
             let pattern = format!(r"\b{}\b", regex::escape(var));
-            if let Ok(re) = Regex::new(&pattern) {
+            if let Ok(re) = regex::Regex::new(&pattern) {
                 result = re.replace_all(&result, new_name).to_string();
             }
         }
@@ -262,34 +224,25 @@ impl PostProcessor {
     pub(super) fn rename_semantic_vars(code: &str) -> String {
         let mut result = code.to_string();
 
-        static MAIN_SIG: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\bmain\s*\(").unwrap()
-        });
-        if MAIN_SIG.is_match(&result) {
-            if let Ok(re) = Regex::new(r"\bparam_1\b") {
+        if MAIN_FUNC.is_match(&result) {
+            if let Ok(re) = regex::Regex::new(r"\bparam_1\b") {
                 if re.is_match(&result) {
                     result = re.replace_all(&result, "argc").to_string();
                 }
             }
-            if let Ok(re) = Regex::new(r"\bparam_2\b") {
+            if let Ok(re) = regex::Regex::new(r"\bparam_2\b") {
                 if re.is_match(&result) {
                     result = re.replace_all(&result, "argv").to_string();
                 }
             }
         }
 
-        static RETURN_VAR: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\breturn\s+(\w+)\s*;").unwrap()
-        });
-        static COMPILER_NAME: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^(local_\w+|[a-z]Var\d+)$").unwrap()
-        });
         {
             let mut return_vars: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
-            for caps in RETURN_VAR.captures_iter(&result) {
+            for caps in RETURN_STMT.captures_iter(&result) {
                 let v = caps[1].to_string();
-                if COMPILER_NAME.is_match(&v) {
+                if GENERIC_VAR.is_match(&v) {
                     return_vars.insert(v);
                 }
             }
@@ -297,16 +250,12 @@ impl PostProcessor {
                 let var = return_vars.into_iter().next().unwrap();
                 if !result.contains("result") || result.contains(&var) {
                     let pat = format!(r"\b{}\b", regex::escape(&var));
-                    if let Ok(re) = Regex::new(&pat) {
+                    if let Ok(re) = regex::Regex::new(&pat) {
                         result = re.replace_all(&result, "result").to_string();
                     }
                 }
             }
         }
-
-        static API_ASSIGN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\b(local_\w+|[a-z]Var\d+)\s*=\s*(?:\([^)]*\)\s*)?(\w+)\s*\(").unwrap()
-        });
 
         let api_map: std::collections::HashMap<&str, &str> = [
             ("malloc", "ptr"),
@@ -342,7 +291,7 @@ impl PostProcessor {
         .collect();
 
         let mut renames: Vec<(String, String)> = Vec::new();
-        for caps in API_ASSIGN.captures_iter(&result.clone()) {
+        for caps in FUNC_CALL_ASSIGN.captures_iter(&result.clone()) {
             let var = caps[1].to_string();
             let func = &caps[2];
             if let Some(&new_base) = api_map.get(func) {
@@ -362,7 +311,7 @@ impl PostProcessor {
             }
             used.insert(new_name.clone());
             let pat = format!(r"\b{}\b", regex::escape(old));
-            if let Ok(re) = Regex::new(&pat) {
+            if let Ok(re) = regex::Regex::new(&pat) {
                 result = re.replace_all(&result, new_name.as_str()).to_string();
             }
         }
@@ -389,7 +338,7 @@ impl PostProcessor {
         for (i, param) in dwarf.params.iter().enumerate() {
             let ghidra_name = format!("param_{}", i + 1);
             let pattern = format!(r"\b{}\b", regex::escape(&ghidra_name));
-            if let Ok(re) = Regex::new(&pattern) {
+            if let Ok(re) = regex::Regex::new(&pattern) {
                 result = re.replace_all(&result, param.name.as_str()).to_string();
             }
         }
@@ -400,7 +349,7 @@ impl PostProcessor {
                 if abs_offset > 0 {
                     let ghidra_name = format!("local_{:x}", abs_offset);
                     let pattern = format!(r"\b{}\b", regex::escape(&ghidra_name));
-                    if let Ok(re) = Regex::new(&pattern) {
+                    if let Ok(re) = regex::Regex::new(&pattern) {
                         result = re.replace_all(&result, var.name.as_str()).to_string();
                     }
                 }
@@ -436,7 +385,7 @@ impl PostProcessor {
                         if let Some(reg_name) = x86_64_dwarf_to_name(reg_num) {
                             let ghidra_name = format!("in_{}", reg_name);
                             let pattern = format!(r"\b{}\b", regex::escape(&ghidra_name));
-                            if let Ok(re) = Regex::new(&pattern) {
+                            if let Ok(re) = regex::Regex::new(&pattern) {
                                 result =
                                     re.replace_all(&result, param.name.as_str()).to_string();
                             }
@@ -447,10 +396,7 @@ impl PostProcessor {
         }
 
         if let Some(ref ret_type) = dwarf.return_type {
-            static RET_TYPE_PATTERN: Lazy<Regex> = Lazy::new(|| {
-                Regex::new(r"\b(undefined\d*)\b\s+(\w+\s*\()").unwrap()
-            });
-            result = RET_TYPE_PATTERN
+            result = UNDEF_TYPE_DECL
                 .replace(&result, |caps: &regex::Captures| {
                     format!("{} {}", ret_type, &caps[2])
                 })

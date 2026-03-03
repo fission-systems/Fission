@@ -219,6 +219,7 @@ pub(super) fn run_decompilation(
     binary: &LoadedBinary,
     binary_data: &[u8],
 ) -> io::Result<()> {
+    let init_start = std::time::Instant::now();
     let mut decomp = init_decompiler(cli.verbose);
 
     // Apply one-shot profile before binary load/decompilation.
@@ -263,8 +264,9 @@ pub(super) fn run_decompilation(
     register_known_functions(&mut decomp, binary, cli.verbose);
     load_fid_databases(&mut decomp, binary, cli.verbose);
 
+    let init_elapsed = init_start.elapsed();
     if cli.verbose {
-        eprintln!("[✓] Decompiler ready");
+        eprintln!("[✓] Decompiler ready (init: {:.3}s)", init_elapsed.as_secs_f64());
     }
 
     // Collect functions to decompile and deduplicate by address.
@@ -274,7 +276,8 @@ pub(super) fn run_decompilation(
     let functions = collect_target_functions(binary, cli.address, cli.all);
 
     if functions.is_empty() && cli.address.is_some() {
-        let addr = cli.address.expect("address should be Some");
+        // Safe unwrap: we just checked is_some()
+        let addr = cli.address.unwrap();
         eprintln!("Warning: No function found at address 0x{:x}", addr);
         // Try to decompile anyway
         decompile_and_output(cli, &decomp, addr, &format!("sub_{:x}", addr))?;
@@ -282,12 +285,15 @@ pub(super) fn run_decompilation(
     }
 
     // Derive effective flags: --ghidra-compat implies --no-header + --no-warnings
+    // --benchmark implies --json
     let effective_no_header = cli.no_header || cli.ghidra_compat;
     let effective_no_warnings = cli.no_warnings || cli.ghidra_compat;
+    let effective_json = cli.json || cli.benchmark;
 
     // Decompile each function
     let mut all_output = String::new();
     let mut json_results: Vec<serde_json::Value> = Vec::new();
+    let mut total_decomp_secs: f64 = 0.0;
 
     for func in &functions {
         if cli.verbose {
@@ -295,8 +301,11 @@ pub(super) fn run_decompilation(
         }
 
         let _silencer = OutputSilencer::new_if(!cli.verbose);
+        let func_start = std::time::Instant::now();
         match decomp.decompile(func.address) {
             Ok(code) => {
+                let decomp_sec = func_start.elapsed().as_secs_f64();
+                total_decomp_secs += decomp_sec;
                 // Apply Rust-side post-processing (switch reconstruction, while→for, etc.)
                 let postprocessor = PostProcessor::new()
                     .with_inferred_types(binary.inferred_types.clone());
@@ -310,12 +319,18 @@ pub(super) fn run_decompilation(
                     filtered = strip_inferred_structs(&filtered);
                 }
 
-                if cli.json {
-                    json_results.push(serde_json::json!({
+                if effective_json {
+                    let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
                         "code": filtered
-                    }));
+                    });
+                    if cli.benchmark {
+                        entry["decomp_sec"] = serde_json::json!(
+                            (decomp_sec * 1_000_000.0).round() / 1_000_000.0
+                        );
+                    }
+                    json_results.push(entry);
                 } else {
                     if !effective_no_header {
                         all_output.push_str("// ============================================\n");
@@ -330,12 +345,20 @@ pub(super) fn run_decompilation(
                 }
             }
             Err(e) => {
-                if cli.json {
-                    json_results.push(serde_json::json!({
+                let decomp_sec = func_start.elapsed().as_secs_f64();
+                total_decomp_secs += decomp_sec;
+                if effective_json {
+                    let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
                         "error": e.to_string()
-                    }));
+                    });
+                    if cli.benchmark {
+                        entry["decomp_sec"] = serde_json::json!(
+                            (decomp_sec * 1_000_000.0).round() / 1_000_000.0
+                        );
+                    }
+                    json_results.push(entry);
                 } else {
                     all_output.push_str(&format!(
                         "// Error decompiling {} (0x{:x}): {}\n\n",
@@ -346,8 +369,27 @@ pub(super) fn run_decompilation(
         }
     }
 
-    // Output results
-    let final_output = if cli.json {
+    // In benchmark mode, wrap results with metadata envelope
+    let final_output = if cli.benchmark {
+        let envelope = serde_json::json!({
+            "_meta": {
+                "tool": "fission",
+                "version": env!("CARGO_PKG_VERSION"),
+                "profile": cli.profile.as_deref().unwrap_or("balanced"),
+                "function_count": functions.len(),
+                "init_sec": (init_elapsed.as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
+                "total_decomp_sec": (total_decomp_secs * 1_000_000.0).round() / 1_000_000.0,
+                "wall_clock_sec": (init_start.elapsed().as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
+            },
+            "functions": json_results
+        });
+        serde_json::to_string_pretty(&envelope).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e),
+            )
+        })?
+    } else if effective_json {
         serde_json::to_string_pretty(&json_results).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
@@ -359,7 +401,12 @@ pub(super) fn run_decompilation(
     };
 
     if let Some(ref output_path) = cli.output {
-        let mut file = fs::File::create(output_path).expect("Failed to create output file");
+        let mut file = fs::File::create(output_path).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to create output file '{}': {}", output_path.display(), e)
+            )
+        })?;
         file.write_all(final_output.as_bytes())?;
         if cli.verbose {
             eprintln!("[✓] Output written to: {}", output_path.display());

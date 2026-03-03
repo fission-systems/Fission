@@ -32,6 +32,8 @@
 pub mod cache;
 pub mod postprocess;
 
+pub use postprocess::RustPostProcessOptions;
+
 #[cfg(feature = "native_decomp")]
 use self::cache::DecompilerCache;
 #[cfg(feature = "native_decomp")]
@@ -48,6 +50,7 @@ pub struct CachingDecompiler {
     inferred_types: Vec<fission_loader::loader::types::InferredTypeInfo>,
     dwarf_functions:
         std::collections::HashMap<u64, fission_loader::loader::types::DwarfFunctionInfo>,
+    rust_postprocess_options: RustPostProcessOptions,
 }
 
 #[cfg(feature = "native_decomp")]
@@ -68,6 +71,7 @@ impl CachingDecompiler {
             cache,
             inferred_types,
             dwarf_functions,
+            rust_postprocess_options: RustPostProcessOptions::default(),
         })
     }
 
@@ -84,6 +88,7 @@ impl CachingDecompiler {
         // 3. Post-process with inferred types and DWARF debug info
         let dwarf_info = self.dwarf_functions.get(&address).cloned();
         let processor = self::postprocess::PostProcessor::new()
+            .with_options(self.rust_postprocess_options.clone())
             .with_inferred_types(self.inferred_types.clone())
             .with_dwarf_info(dwarf_info);
         let code = processor.process(&raw_code);
@@ -102,6 +107,16 @@ impl CachingDecompiler {
     /// Clear the decompiler cache
     pub fn clear_cache(&mut self) {
         self.cache.clear();
+    }
+
+    /// Set Rust post-processing options
+    pub fn set_rust_postprocess_options(&mut self, options: RustPostProcessOptions) {
+        self.rust_postprocess_options = options;
+    }
+
+    /// Get current Rust post-processing options
+    pub fn rust_postprocess_options(&self) -> &RustPostProcessOptions {
+        &self.rust_postprocess_options
     }
 }
 

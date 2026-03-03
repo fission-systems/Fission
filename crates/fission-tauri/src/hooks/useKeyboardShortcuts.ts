@@ -25,6 +25,8 @@ interface UseKeyboardShortcutsOptions {
     onOpenComment: (address: string, comment: string) => void;
     /** Toggle the bottom panel visibility */
     onToggleBottomPanel: () => void;
+    /** Toggle developer tools */
+    onToggleDevTools: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -41,6 +43,7 @@ export function useKeyboardShortcuts({
     onOpenRename,
     onOpenComment,
     onToggleBottomPanel,
+    onToggleDevTools,
 }: UseKeyboardShortcutsOptions) {
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -119,6 +122,13 @@ export function useKeyboardShortcuts({
                 onToggleBottomPanel();
                 return;
             }
+
+            // Cmd+Option+I (Mac) / Ctrl+Shift+I (Win/Linux): Toggle DevTools
+            if ((e.metaKey && e.altKey && e.key === "i") || (e.ctrlKey && e.shiftKey && e.key === "I")) {
+                e.preventDefault();
+                onToggleDevTools();
+                return;
+            }
         };
 
         window.addEventListener("keydown", handleKeyDown);
@@ -137,5 +147,6 @@ export function useKeyboardShortcuts({
         onOpenRename,
         onOpenComment,
         onToggleBottomPanel,
+        onToggleDevTools,
     ]);
 }

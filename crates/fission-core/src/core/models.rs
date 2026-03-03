@@ -24,9 +24,10 @@ pub struct BinaryInfo {
     pub sha256: String,
 }
 
-/// Metadata about a function
+/// Metadata about a function (used in analysis/patching context)
+/// Note: This is different from common::types::FunctionInfo which is used for loading
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct FunctionInfo {
+pub struct FunctionMetadata {
     pub name: String,
     pub start_address: Address,
     pub end_address: Address,

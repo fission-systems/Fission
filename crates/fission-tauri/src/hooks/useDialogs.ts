@@ -7,6 +7,7 @@ export function useDialogs() {
     const [commentOpen, setCommentOpen] = useState(false);
     const [commentTarget, setCommentTarget] = useState({ address: "", comment: "" });
     const [aboutOpen, setAboutOpen] = useState(false);
+    const [decompilerOptionsOpen, setDecompilerOptionsOpen] = useState(false);
 
     const openRename = useCallback((address: string, name: string) => {
         setRenameTarget({ address, name });
@@ -33,5 +34,7 @@ export function useDialogs() {
         openComment,
         aboutOpen,
         setAboutOpen,
+        decompilerOptionsOpen,
+        setDecompilerOptionsOpen,
     };
 }

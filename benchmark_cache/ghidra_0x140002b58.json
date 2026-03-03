@@ -1,0 +1,7 @@
+{
+  "name": "calloc",
+  "address": "0x140002b58",
+  "code": "\nvoid * __cdecl calloc(size_t _Count,size_t _Size)\n\n{\n  void *pvVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002b58. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  pvVar1 = calloc(_Count,_Size);\n  return pvVar1;\n}\n\n",
+  "asm": "  0x140002B58      JMP      qword ptr [0x1400082c8]\n",
+  "decomp_sec": 0.000576
+}

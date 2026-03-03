@@ -1,0 +1,7 @@
+{
+  "name": "__gcc_deregister_frame",
+  "address": "0x140001440",
+  "code": "\nvoid __gcc_deregister_frame(void)\n\n{\n  return;\n}\n\n",
+  "asm": "  0x140001440      RET      \n",
+  "decomp_sec": 0.000268
+}

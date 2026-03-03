@@ -26,6 +26,10 @@ interface MenuBarProps {
     onOpenDecompileView: () => void;
     // Phase 8: Export
     onExportJson: () => void;
+    // Decompiler Options
+    onDecompilerOptions: () => void;
+    // DevTools
+    onToggleDevTools: () => void;
 }
 
 interface MenuItem {
@@ -65,6 +69,8 @@ export default function MenuBar({
     onOpenAssemblyView,
     onOpenDecompileView,
     onExportJson,
+    onDecompilerOptions,
+    onToggleDevTools,
 }: MenuBarProps) {
     const [openMenu, setOpenMenu] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -95,6 +101,8 @@ export default function MenuBar({
                 { label: "Go to Address...", shortcut: "G", action: onGotoAddress, disabled: !binaryLoaded },
                 { label: "Rename Symbol", shortcut: "N", action: onRename, disabled: !binaryLoaded },
                 { label: "Add Comment", shortcut: ";", action: onComment, disabled: !binaryLoaded },
+                { separator: true, label: "" },
+                { label: "Decompiler Options...", action: onDecompilerOptions },
             ],
         },
         {
@@ -131,6 +139,8 @@ export default function MenuBar({
         {
             label: "Help",
             items: [
+                { label: "Toggle Developer Tools", shortcut: "Cmd+Opt+I", action: onToggleDevTools },
+                { separator: true, label: "" },
                 { label: "About Fission", action: onAbout },
             ],
         },

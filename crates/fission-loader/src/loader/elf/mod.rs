@@ -76,7 +76,10 @@ impl ElfLoader {
 
             let mut shdrs = Vec::new();
             for _ in 0..header.shnum {
-                shdrs.push(Elf64Shdr::read_options(&mut reader, endian, ()).unwrap());
+                shdrs.push(
+                    Elf64Shdr::read_options(&mut reader, endian, ())
+                        .map_err(|_| err!(loader, "Failed to read ELF64 section header"))?
+                );
             }
 
             // Get String Table for Section Names
@@ -182,7 +185,10 @@ impl ElfLoader {
 
             let mut shdrs = Vec::new();
             for _ in 0..header.shnum {
-                shdrs.push(Elf32Shdr::read_options(&mut reader, endian, ()).unwrap());
+                shdrs.push(
+                    Elf32Shdr::read_options(&mut reader, endian, ())
+                        .map_err(|_| err!(loader, "Failed to read ELF32 section header"))?
+                );
             }
 
             // Get String Table for Section Names

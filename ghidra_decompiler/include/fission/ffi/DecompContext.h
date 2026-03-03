@@ -30,6 +30,7 @@ namespace ghidra {
 #include "fission/analysis/FunctionMatcher.h"
 #include "fission/ffi/SymbolProviderFfi.h"
 #include "fission/types/GlobalTypeRegistry.h"
+#include "fission/decompiler/PostProcessPipeline.h"
 
 namespace fission {
 namespace ffi {
@@ -89,6 +90,9 @@ struct DecompContext {
     bool record_jumploads = true;
     bool disable_toomanyinstructions_error = true;
     bool allow_inline = false;
+
+    // Post-processing options (configurable via set_feature with "pp_" prefix)
+    fission::decompiler::PostProcessOptions post_process_options;
     
     // FID Support - Multiple databases for better matching
     std::vector<std::unique_ptr<fission::analysis::FidDatabase>> fid_databases;

@@ -109,6 +109,11 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     inner.renamed_functions.clear();
     inner.bookmarks.clear();
 
+    // Enable binary-dependent menu items
+    if let Some(handles) = state.menu_handles.get() {
+        handles.set_binary_loaded(true);
+    }
+
     Ok(info)
 }
 

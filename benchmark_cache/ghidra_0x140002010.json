@@ -1,0 +1,7 @@
+{
+  "name": "__mingw_setusermatherr",
+  "address": "0x140002010",
+  "code": "\n/* WARNING: Unknown calling convention */\n\nvoid __mingw_setusermatherr(_func_int__exception_ptr *f)\n\n{\n  stUserMathErr = f;\n  __setusermatherr();\n  return;\n}\n\n",
+  "asm": "  0x140002010      MOV      qword ptr [0x1400070b0], RCX\n  0x140002017      JMP      0x140002b30\n",
+  "decomp_sec": 0.000636
+}

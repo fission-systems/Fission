@@ -3,9 +3,12 @@
 mod commands;
 mod dto;
 pub(crate) mod error;
+pub(crate) mod menu;
 mod state;
 
+use menu::ids;
 use state::AppState;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -13,6 +16,34 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let (menu, handles) = menu::build_menu(&handle)?;
+            app.set_menu(menu)?;
+            // Store handles in AppState for dynamic enable/disable
+            let state: tauri::State<'_, AppState> = handle.state::<AppState>();
+            let _ = state.menu_handles.set(handles);
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            let id = event.id().as_ref();
+            match id {
+                // DevTools — handle directly in Rust (no WebView round-trip needed)
+                ids::TOGGLE_DEVTOOLS => {
+                    if let Some(w) = app.get_webview_window("main") {
+                        if w.is_devtools_open() {
+                            w.close_devtools();
+                        } else {
+                            w.open_devtools();
+                        }
+                    }
+                }
+                // Everything else → forward to the WebView as a "menu-action" event
+                _ => {
+                    let _ = app.emit("menu-action", id.to_string());
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::open_file,
             commands::get_functions,
@@ -41,6 +72,8 @@ pub fn run() {
             commands::load_project,
             commands::get_settings,
             commands::save_settings,
+            commands::get_decompiler_options,
+            commands::apply_decompiler_options,
             commands::clear_decompiler_cache,
             // Phase 2: CFG analysis
             commands::get_cfg,
@@ -72,6 +105,8 @@ pub fn run() {
             commands::load_snapshot,
             // System utilities
             commands::get_git_branch,
+            // DevTools
+            commands::toggle_devtools,
             // Phase 3: Function Identification (FID)
             commands::run_fid,
             // Phase 8: Analysis JSON Export

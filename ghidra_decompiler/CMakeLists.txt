@@ -88,6 +88,14 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/core/DecompilerContext.cc
     ${FISSION_MODULES_DIR}/processing/Constants.cc
     ${FISSION_MODULES_DIR}/processing/PostProcessors.cc
+    ${FISSION_MODULES_DIR}/processing/passes/PrintfNormalizers.cc
+    ${FISSION_MODULES_DIR}/processing/passes/NamingStandardizers.cc
+    ${FISSION_MODULES_DIR}/processing/passes/SehCleanup.cc
+    ${FISSION_MODULES_DIR}/processing/passes/FunctionNameResolvers.cc
+    ${FISSION_MODULES_DIR}/processing/passes/CppVirtualCallPasses.cc
+    ${FISSION_MODULES_DIR}/processing/passes/ConstantReplacementPasses.cc
+    ${FISSION_MODULES_DIR}/processing/passes/SymbolApplicationPasses.cc
+    ${FISSION_MODULES_DIR}/processing/passes/CodeCleanupPasses.cc
     ${FISSION_MODULES_DIR}/processing/StringScanner.cc
     ${FISSION_MODULES_DIR}/loader/SymbolLoader.cc
     ${FISSION_MODULES_DIR}/loader/BinaryDetector.cc
@@ -97,6 +105,10 @@ set(FISSION_SOURCES
     # New modular decompiler components
     ${FISSION_MODULES_DIR}/decompiler/PostProcessor.cc
     ${FISSION_MODULES_DIR}/decompiler/CFGStructurizer.cc
+    ${FISSION_MODULES_DIR}/decompiler/cfg/LabelAnalyzer.cc
+    ${FISSION_MODULES_DIR}/decompiler/cfg/GotoPatternMatcher.cc
+    ${FISSION_MODULES_DIR}/decompiler/cfg/LoopReconstructor.cc
+    ${FISSION_MODULES_DIR}/decompiler/cfg/SwitchReconstructor.cc
     ${FISSION_MODULES_DIR}/decompiler/PostProcessPipeline.cpp
     ${FISSION_MODULES_DIR}/decompiler/AnalysisPipeline.cpp
     ${FISSION_MODULES_DIR}/decompiler/DecompilationCore.cpp
@@ -116,10 +128,8 @@ add_executable(fission_decomp
 # Fission Decompiler Shared Library (for FFI)
 set(FFI_SOURCES
     ${FISSION_MODULES_DIR}/ffi/DecompContext.cpp
-    ${FISSION_MODULES_DIR}/ffi/MemoryManager.cpp
-    ${FISSION_MODULES_DIR}/ffi/SymbolManager.cpp
+    ${FISSION_MODULES_DIR}/ffi/DecompilerFFI.cpp
     ${FISSION_MODULES_DIR}/ffi/SymbolProviderManager.cpp
-    ${FISSION_MODULES_DIR}/ffi/FidManager.cpp
     ${FISSION_MODULES_DIR}/ffi/DecompilerCore.cpp
     ${FISSION_MODULES_DIR}/ffi/libdecomp_ffi.cpp
 )

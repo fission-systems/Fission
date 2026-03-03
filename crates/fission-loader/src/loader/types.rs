@@ -2,6 +2,9 @@
 use rkyv::{Archive, Deserialize, Serialize};
 use std::sync::Arc;
 
+// Re-export common types from fission-core to maintain API compatibility
+pub use fission_core::common::types::{FunctionInfo, SectionInfo};
+
 #[path = "types_string_utils.rs"]
 mod string_utils;
 #[path = "types_patching.rs"]
@@ -135,44 +138,6 @@ pub struct ArcSectionsWrapper;
 
 /// rkyv wrapper for `Arc<HashMap<u64, String>>` - symbol maps
 pub struct ArcSymbolMapWrapper;
-
-/// Information about a function found in the binary
-#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
-pub struct FunctionInfo {
-    /// Function name (may be empty for unnamed functions)
-    pub name: String,
-    /// Virtual address of the function
-    pub address: u64,
-    /// Size in bytes (0 if unknown)
-    pub size: u64,
-    /// Whether this is an exported function
-    pub is_export: bool,
-    /// Whether this is an imported function (stub)
-    pub is_import: bool,
-}
-
-/// Information about a section in the binary
-#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
-#[archive(check_bytes)]
-pub struct SectionInfo {
-    /// Section name
-    pub name: String,
-    /// Virtual address
-    pub virtual_address: u64,
-    /// Size in memory
-    pub virtual_size: u64,
-    /// Offset in file
-    pub file_offset: u64,
-    /// Size in file
-    pub file_size: u64,
-    /// Is this section executable?
-    pub is_executable: bool,
-    /// Is this section readable?
-    pub is_readable: bool,
-    /// Is this section writable?
-    pub is_writable: bool,
-}
 
 /// Information about an inferred field in a type
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]

@@ -1,0 +1,7 @@
+{
+  "name": "_amsg_exit",
+  "address": "0x1400029d0",
+  "code": "\nvoid __cdecl _amsg_exit(int param_1)\n\n{\n  FILE *_File;\n  \n  _File = (FILE *)__acrt_iob_func(2);\n  fprintf(_File,\"runtime error %d\\n\",(ulonglong)(uint)param_1);\n                    /* WARNING: Subroutine does not return */\n  _exit(0xff);\n}\n\n",
+  "asm": "  0x1400029D0      PUSH     RBX\n  0x1400029D1      SUB      RSP, 0x20\n  0x1400029D5      MOV      EBX, ECX\n  0x1400029D7      MOV      ECX, 0x2\n  0x1400029DC      CALL     0x140002a80\n  0x1400029E1      MOV      R8D, EBX\n  0x1400029E4      LEA      RDX, [0x140004410]\n  0x1400029EB      MOV      RCX, RAX\n  0x1400029EE      CALL     0x140002960\n  0x1400029F3      MOV      ECX, 0xff\n  0x1400029F8      CALL     0x140002ad8\n",
+  "decomp_sec": 0.001371
+}

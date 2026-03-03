@@ -1,0 +1,7 @@
+{
+  "name": "__p___argv",
+  "address": "0x140002ab8",
+  "code": "\nvoid __p___argv(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002ab8. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  __p___argv();\n  return;\n}\n\n",
+  "asm": "  0x140002AB8      JMP      qword ptr [0x140008328]\n",
+  "decomp_sec": 0.00038
+}

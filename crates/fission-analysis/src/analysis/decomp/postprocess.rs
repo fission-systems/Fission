@@ -17,10 +17,60 @@ mod switch_recon;
 #[cfg(test)]
 mod tests;
 
+/// Configurable options for the Rust-side post-processing passes.
+///
+/// Each flag corresponds to one pass in [`PostProcessor::process`].
+/// All default to `true` (enabled).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RustPostProcessOptions {
+    pub clean_rust: bool,
+    pub clean_go: bool,
+    pub swift_demangle: bool,
+    pub field_offsets: bool,
+    pub insert_casts: bool,
+    pub arithmetic_idioms: bool,
+    pub deref_to_array: bool,
+    pub bitop_to_logicop: bool,
+    pub remove_dead_branches: bool,
+    pub simplify_if: bool,
+    pub while_to_for: bool,
+    pub dead_assign_removal: bool,
+    pub rename_induction_vars: bool,
+    pub rename_semantic_vars: bool,
+    pub loop_idioms: bool,
+    pub switch_reconstruction: bool,
+    pub mul_to_shift: bool,
+    pub dwarf_names: bool,
+}
+
+impl Default for RustPostProcessOptions {
+    fn default() -> Self {
+        Self {
+            clean_rust: true,
+            clean_go: true,
+            swift_demangle: true,
+            field_offsets: true,
+            insert_casts: true,
+            arithmetic_idioms: true,
+            deref_to_array: true,
+            bitop_to_logicop: true,
+            remove_dead_branches: true,
+            simplify_if: true,
+            while_to_for: true,
+            dead_assign_removal: true,
+            rename_induction_vars: true,
+            rename_semantic_vars: true,
+            loop_idioms: true,
+            switch_reconstruction: true,
+            mul_to_shift: true,
+            dwarf_names: true,
+        }
+    }
+}
+
 /// Decompiler output post-processor
 pub struct PostProcessor {
-    clean_rust: bool,
-    clean_go: bool,
+    options: RustPostProcessOptions,
     inferred_types: Vec<InferredTypeInfo>,
     dwarf_info: Option<DwarfFunctionInfo>,
 }
@@ -28,11 +78,16 @@ pub struct PostProcessor {
 impl PostProcessor {
     pub fn new() -> Self {
         Self {
-            clean_rust: true,
-            clean_go: true,
+            options: RustPostProcessOptions::default(),
             inferred_types: Vec::new(),
             dwarf_info: None,
         }
+    }
+
+    /// Configure post-processing passes via options struct
+    pub fn with_options(mut self, options: RustPostProcessOptions) -> Self {
+        self.options = options;
+        self
     }
 
     /// Set inferred types for field name resolution
@@ -51,27 +106,33 @@ impl PostProcessor {
     pub fn process(&self, code: &str) -> String {
         let mut processed = code.to_string();
 
-        if self.clean_rust {
+        if self.options.clean_rust {
             processed = self.remove_rust_boilerplate(&processed);
         }
 
-        if self.clean_go {
+        if self.options.clean_go {
             processed = self.remove_go_boilerplate(&processed);
         }
 
-        // Always attempt to demangle Swift symbols
-        processed = self.demangle_swift_symbols(&processed);
+        // Demangle Swift symbols
+        if self.options.swift_demangle {
+            processed = self.demangle_swift_symbols(&processed);
+        }
 
         // Apply field offset replacement if we have type info
-        if !self.inferred_types.is_empty() {
+        if self.options.field_offsets && !self.inferred_types.is_empty() {
             processed = self.replace_field_offsets(&processed);
         }
 
         // Insert missing casts for assignment type mismatches
-        processed = Self::insert_missing_casts(&processed);
+        if self.options.insert_casts {
+            processed = Self::insert_missing_casts(&processed);
+        }
 
         // Apply arithmetic idiom recovery
-        processed = self.apply_arithmetic_idioms(&processed);
+        if self.options.arithmetic_idioms {
+            processed = self.apply_arithmetic_idioms(&processed);
+        }
 
         // =====================================================================
         // Phase A: RetDec-inspired post-processing passes
@@ -80,61 +141,93 @@ impl PostProcessor {
         // =====================================================================
 
         // A-1: Deref → Array index: *(a + N) → a[N]
-        processed = Self::deref_to_array_index(&processed);
+        if self.options.deref_to_array {
+            processed = Self::deref_to_array_index(&processed);
+        }
 
         // A-2: Bit-op → Logical-op in conditions: (cmp1) & (cmp2) → cmp1 && cmp2
-        processed = Self::bitop_to_logicop(&processed);
+        if self.options.bitop_to_logicop {
+            processed = Self::bitop_to_logicop(&processed);
+        }
 
         // A-3: Constant condition / dead branch removal
-        processed = Self::remove_constant_conditions(&processed);
+        if self.options.remove_dead_branches {
+            processed = Self::remove_constant_conditions(&processed);
+        }
 
         // A-4: Empty else removal + If-return early exit
-        processed = Self::simplify_if_structure(&processed);
+        if self.options.simplify_if {
+            processed = Self::simplify_if_structure(&processed);
+        }
 
         // A-5: while(true) { if(c) break; S } → while(!c) { S }
-        processed = Self::while_true_to_while_cond(&processed);
+        if self.options.while_to_for {
+            processed = Self::while_true_to_while_cond(&processed);
+        }
 
         // =====================================================================
         // Phase B: Advanced structural + naming passes
         // =====================================================================
 
         // B-1: while(true) → for loop (init + exit-cond + update detection)
-        processed = Self::while_true_to_for_loop(&processed);
+        if self.options.while_to_for {
+            processed = Self::while_true_to_for_loop(&processed);
+        }
 
         // B-2: Dead local assignment removal (2 iterations for cascading)
-        processed = Self::remove_dead_local_assigns(&processed);
-        processed = Self::remove_dead_local_assigns(&processed);
+        if self.options.dead_assign_removal {
+            processed = Self::remove_dead_local_assigns(&processed);
+            processed = Self::remove_dead_local_assigns(&processed);
+        }
 
         // B-3: Induction variable naming (i, j, k for loop counters)
-        processed = Self::rename_induction_vars(&processed);
+        if self.options.rename_induction_vars {
+            processed = Self::rename_induction_vars(&processed);
+        }
 
         // B-4: Semantic variable naming (main→argc/argv, return→result, API results)
-        processed = Self::rename_semantic_vars(&processed);
+        if self.options.rename_semantic_vars {
+            processed = Self::rename_semantic_vars(&processed);
+        }
 
         // B-5: Loop idiom recognition (strlen, popcount, memset)
-        processed = Self::recognize_loop_idioms(&processed);
+        if self.options.loop_idioms {
+            processed = Self::recognize_loop_idioms(&processed);
+        }
 
         // Reconstruct switch from BST / sequential equality-return patterns
-        processed = Self::reconstruct_switch_from_bst(&processed);
+        if self.options.switch_reconstruction {
+            processed = Self::reconstruct_switch_from_bst(&processed);
+        }
 
         // B-6: Reconstruct switch from if/else-if assignment chains
         // e.g.: if (!x) { r = A; } else if (x == 1) { r = B; } ... return r;
-        processed = Self::reconstruct_switch_from_if_else_assign(&processed);
+        if self.options.switch_reconstruction {
+            processed = Self::reconstruct_switch_from_if_else_assign(&processed);
+        }
 
         // B-7: General while(cond) → for conversion when init+increment detected
-        processed = Self::while_cond_to_for(&processed);
+        if self.options.while_to_for {
+            processed = Self::while_cond_to_for(&processed);
+        }
 
         // B-8: do { ... VAR++; } while (VAR op LIMIT); → for (...)
-        processed = Self::do_while_to_for(&processed);
+        if self.options.while_to_for {
+            processed = Self::do_while_to_for(&processed);
+        }
 
         // B-9: Multiply by power-of-2 → bitshift  (e.g. * 256 → << 8)
-        processed = Self::mul_pow2_to_shift(&processed);
+        if self.options.mul_to_shift {
+            processed = Self::mul_pow2_to_shift(&processed);
+        }
 
         // B-10: while( true ) / while(true) → for (;;)
-        processed = Self::while_true_to_for_ever(&processed);
+        if self.options.while_to_for {
+            processed = Self::while_true_to_for_ever(&processed);
+        }
 
         // Apply DWARF variable/parameter name substitution
-        if self.dwarf_info.is_some() {
+        if self.options.dwarf_names && self.dwarf_info.is_some() {
             processed = self.apply_dwarf_names(&processed);
         }
 

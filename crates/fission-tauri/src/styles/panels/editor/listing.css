@@ -30,7 +30,8 @@
 }
 
 /* ============================================================
-   Listing View
+   Listing View — Professional Disassembly Styling
+   Inspired by Ghidra / x64dbg / radare2
    ============================================================ */
 
 .listing-view {
@@ -38,16 +39,18 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--base);
+    background: var(--bg-primary);
     font-family: var(--font-mono);
 }
+
+/* ---- Toolbar ---- */
 
 .listing-view__toolbar {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 4px 8px;
-    background: var(--surface1);
+    background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
     flex-wrap: wrap;
@@ -70,8 +73,8 @@
     padding: 2px 6px;
     font-family: var(--font-mono);
     font-size: var(--font-size-sm);
-    background: var(--base);
-    color: var(--fg);
+    background: var(--bg-primary);
+    color: var(--text-primary);
     border: 1px solid var(--border-color);
     border-radius: 3px;
     outline: none;
@@ -95,63 +98,195 @@
     opacity: 0.85;
 }
 
+/* ---- Scroll body ---- */
+
 .listing-view__body {
     flex: 1;
     overflow-y: auto;
     overflow-x: auto;
 }
 
+/* ---- Table base ---- */
+
 .listing-view__table {
     border-collapse: collapse;
     width: 100%;
     font-size: 12.5px;
-    line-height: 1.5;
+    line-height: 1.6;
+    table-layout: fixed;
 }
 
-/* Label rows (function entry points) */
+/* ---- Function label / separator rows ---- */
+
 .listing-row--label td {
-    padding: 6px 8px 2px;
-    color: var(--accent);
-    font-weight: 600;
-    font-size: 12px;
+    padding: 12px 8px 4px;
     user-select: text;
     white-space: nowrap;
+    border-top: 1px solid var(--ctp-surface2);
 }
 
-/* Instruction rows */
-.listing-row--insn:hover {
-    background: var(--surface1);
+.listing-row--label .listing-row__label {
+    color: var(--ctp-blue);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.02em;
 }
+
+/* Decorative function icon */
+.listing-row__label::before {
+    content: "ƒ ";
+    color: var(--ctp-mauve);
+    font-weight: 700;
+    margin-right: 2px;
+}
+
+/* ---- Instruction rows ---- */
 
 .listing-row--insn td {
     padding: 0 6px;
     white-space: nowrap;
     user-select: text;
+    vertical-align: baseline;
 }
+
+/* Alternating row stripe (every other instruction) */
+.listing-row--insn:nth-child(even) {
+    background: rgba(49, 50, 68, 0.25); /* ctp-surface0 @ 25% */
+}
+
+/* Hover */
+.listing-row--insn:hover {
+    background: var(--ctp-surface1);
+}
+
+/* ---- Address column ---- */
 
 .listing-row__addr {
-    color: var(--text-muted);
-    min-width: 90px;
+    color: var(--ctp-overlay1);
+    min-width: 110px;
+    width: 110px;
+    letter-spacing: 0.03em;
+    opacity: 0.85;
 }
+
+/* ---- Bytes column ---- */
 
 .listing-row__bytes {
-    color: #6a9fb5;
-    min-width: 160px;
+    color: var(--ctp-sapphire);
+    min-width: 170px;
+    width: 170px;
+    letter-spacing: 0.06em;
+    opacity: 0.75;
+    font-size: 11.5px;
 }
+
+/* ---- Mnemonic column ---- */
 
 .listing-row__mnem {
-    color: #ac4142;
     min-width: 80px;
+    width: 80px;
+    font-weight: 500;
 }
+
+/* Default mnemonic color */
+.listing-row__mnem {
+    color: var(--ctp-red);
+}
+
+/* -- Mnemonic type classes (x64dbg-inspired) -- */
+
+.listing-row__mnem--call {
+    color: var(--ctp-green);
+    font-weight: 600;
+}
+
+.listing-row__mnem--jmp {
+    color: var(--ctp-yellow);
+    font-weight: 600;
+}
+
+.listing-row__mnem--cjmp {
+    color: var(--ctp-peach);
+    font-weight: 600;
+}
+
+.listing-row__mnem--ret {
+    color: var(--ctp-maroon);
+    font-weight: 600;
+}
+
+.listing-row__mnem--nop {
+    color: var(--ctp-overlay0);
+    font-weight: 400;
+    opacity: 0.6;
+}
+
+.listing-row__mnem--push_pop {
+    color: var(--ctp-blue);
+}
+
+.listing-row__mnem--mov {
+    color: var(--ctp-sky);
+}
+
+.listing-row__mnem--cmp {
+    color: var(--ctp-mauve);
+}
+
+.listing-row__mnem--int {
+    color: var(--ctp-flamingo);
+    font-weight: 600;
+}
+
+/* ---- Operands column ---- */
 
 .listing-row__ops {
-    color: var(--fg);
+    color: var(--ctp-text);
 }
 
-.listing-row__comment {
-    color: #90a959;
-    font-style: italic;
+/* Operand token colors (Ghidra/x64dbg-inspired) */
+.listing-tok--reg {
+    color: var(--ctp-yellow);
 }
+
+.listing-tok--imm {
+    color: var(--ctp-peach);
+}
+
+.listing-tok--mem-bracket {
+    color: var(--ctp-overlay2);
+}
+
+.listing-tok--mem-size {
+    color: var(--ctp-overlay1);
+    font-size: 11px;
+}
+
+.listing-tok--label {
+    color: var(--ctp-green);
+    text-decoration: underline;
+    text-decoration-color: rgba(166, 227, 161, 0.35);
+    text-underline-offset: 2px;
+}
+
+.listing-tok--seg {
+    color: var(--ctp-pink);
+}
+
+.listing-tok--punc {
+    color: var(--ctp-overlay1);
+}
+
+/* ---- Comment ---- */
+
+.listing-row__comment {
+    color: var(--ctp-overlay0);
+    font-style: italic;
+    opacity: 0.85;
+    margin-left: 16px;
+}
+
+/* ---- Sentinel / loading ---- */
 
 .listing-view__sentinel {
     padding: 8px 0;
@@ -163,6 +298,8 @@
     font-size: var(--font-size-sm);
     color: var(--text-muted);
 }
+
+/* ---- Empty / error states ---- */
 
 .listing-empty {
     display: flex;
@@ -179,5 +316,5 @@
 }
 
 .listing-empty--error {
-    color: #ac4142;
+    color: var(--ctp-red);
 }

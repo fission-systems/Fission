@@ -203,19 +203,19 @@ BinaryInfo BinaryDetector::parse_pe(const uint8_t* data, size_t size) {
             char raw_name[9] = {};
             memcpy(raw_name, data + sec_off, 8);
             sec.name      = raw_name;                                     // e.g. ".text\0\0\0"
-            sec.va_size   = *(const uint32_t*)(data + sec_off + 8);      // VirtualSize
+            sec.virtual_size   = *(const uint32_t*)(data + sec_off + 8);      // VirtualSize
             uint32_t rva  = *(const uint32_t*)(data + sec_off + 12);     // VirtualAddress (RVA)
-            sec.va_addr   = info.image_base + rva;
+            sec.virtual_address   = info.image_base + rva;
             uint32_t raw_data_size   = *(const uint32_t*)(data + sec_off + 16); // SizeOfRawData
             uint32_t raw_data_offset = *(const uint32_t*)(data + sec_off + 20); // PointerToRawData
             sec.file_offset = raw_data_offset;
             sec.file_size   = raw_data_size;
-            if (sec.va_size == 0)
-                sec.va_size = raw_data_size;                              // SizeOfRawData fallback
+            if (sec.virtual_size == 0)
+                sec.virtual_size = raw_data_size;                              // SizeOfRawData fallback
             uint32_t ch   = *(const uint32_t*)(data + sec_off + 36);     // Characteristics
             sec.is_executable = ((ch & 0x20000000u) != 0)                // IMAGE_SCN_MEM_EXECUTE
                              || ((ch & 0x00000020u) != 0);               // IMAGE_SCN_CNT_CODE
-            if (!sec.name.empty() && sec.va_size > 0)
+            if (!sec.name.empty() && sec.virtual_size > 0)
                 info.sections.push_back(std::move(sec));
         }
     }
@@ -328,8 +328,8 @@ BinaryInfo BinaryDetector::parse_elf(const uint8_t* data, size_t size) {
                     const char* raw = (const char*)(data + name_pos);
                     SectionInfo sec;
                     sec.name          = std::string(raw, strnlen(raw, name_max));
-                    sec.va_addr       = sh_addr;
-                    sec.va_size       = sh_size;
+                    sec.virtual_address       = sh_addr;
+                    sec.virtual_size       = sh_size;
                     sec.file_offset   = sh_offset;
                     sec.file_size     = sh_size;
                     sec.is_executable = (sh_flags & 0x4u) != 0; // SHF_EXECINSTR
@@ -534,8 +534,8 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
                 char raw[17] = {};
                 memcpy(raw, segname, 16);
                 sec.name          = raw;
-                sec.va_addr       = vmaddr;
-                sec.va_size       = vmsize;
+                sec.virtual_address       = vmaddr;
+                sec.virtual_size       = vmsize;
                 sec.file_offset   = fileoff;
                 sec.file_size     = filesize;
                 sec.is_executable = (std::strncmp(segname, "__TEXT", 6) == 0);
@@ -569,8 +569,8 @@ BinaryInfo BinaryDetector::parse_macho(const uint8_t* data, size_t size) {
                 char raw[17] = {};
                 memcpy(raw, segname, 16);
                 sec.name          = raw;
-                sec.va_addr       = (uint64_t)vmaddr32;
-                sec.va_size       = (uint64_t)vmsize32;
+                sec.virtual_address       = (uint64_t)vmaddr32;
+                sec.virtual_size       = (uint64_t)vmsize32;
                 sec.file_offset   = (uint64_t)fileoff32;
                 sec.file_size     = (uint64_t)filesize32;
                 sec.is_executable = (std::strncmp(segname, "__TEXT", 6) == 0);

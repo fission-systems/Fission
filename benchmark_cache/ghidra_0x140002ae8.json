@@ -1,0 +1,7 @@
+{
+  "name": "_initterm",
+  "address": "0x140002ae8",
+  "code": "\nvoid _initterm(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002ae8. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  _initterm();\n  return;\n}\n\n",
+  "asm": "  0x140002AE8      JMP      qword ptr [0x140008358]\n",
+  "decomp_sec": 0.000409
+}

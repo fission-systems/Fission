@@ -490,9 +490,9 @@ void DecompilationPipeline::run_preanalysis(
         uint64_t data_start = image_base + (bin_bytes.size() / 2);
         uint64_t data_end   = image_base + bin_bytes.size();
         for (const auto& sec : bin_info.sections) {
-            if (!sec.is_executable && sec.va_size > 0) {
-                data_start = sec.va_addr;
-                data_end   = sec.va_addr + sec.va_size;
+            if (!sec.is_executable && sec.virtual_size > 0) {
+                data_start = sec.virtual_address;
+                data_end   = sec.virtual_address + sec.virtual_size;
                 break;
             }
         }
@@ -503,9 +503,9 @@ void DecompilationPipeline::run_preanalysis(
         // Stash executable ranges for callgraph reanalysis in handle_decompile().
         state.executable_ranges.clear();
         for (const auto& sec : bin_info.sections) {
-            if (sec.is_executable && sec.va_size > 0) {
+            if (sec.is_executable && sec.virtual_size > 0) {
                 state.executable_ranges.emplace_back(
-                    sec.va_addr, sec.va_addr + sec.va_size);
+                    sec.virtual_address, sec.virtual_address + sec.virtual_size);
             }
         }
 
@@ -568,13 +568,13 @@ void DecompilationPipeline::run_preanalysis(
 
                 fission::utils::log_stream()
                     << "[fission_decomp] Scanning section: " << sec.name
-                    << " VA=0x" << std::hex << sec.va_addr
+                    << " VA=0x" << std::hex << sec.virtual_address
                     << " file_offset=0x" << sec.file_offset
                     << " size=" << std::dec << sec.file_size << std::endl;
 
                 auto symbols = scanner.scanDataSection(
                     bin_bytes.data() + sec.file_offset,
-                    sec.va_addr,
+                    sec.virtual_address,
                     sec.file_size
                 );
 

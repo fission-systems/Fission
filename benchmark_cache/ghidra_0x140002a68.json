@@ -1,0 +1,7 @@
+{
+  "name": "strncmp",
+  "address": "0x140002a68",
+  "code": "\nint __cdecl strncmp(char *_Str1,char *_Str2,size_t _MaxCount)\n\n{\n  int iVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002a68. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  iVar1 = strncmp(_Str1,_Str2,_MaxCount);\n  return iVar1;\n}\n\n",
+  "asm": "  0x140002A68      JMP      qword ptr [0x1400083d0]\n",
+  "decomp_sec": 0.000636
+}

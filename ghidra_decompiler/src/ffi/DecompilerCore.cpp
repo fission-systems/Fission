@@ -54,6 +54,37 @@ void fission::ffi::set_feature(DecompContext* ctx, const char* feature, bool ena
         ctx->disable_toomanyinstructions_error = !enabled;
     } else if (feat == "allow_inline" || feat == "inline") {
         ctx->allow_inline = enabled;
+    // ── Post-processing options (pp_ prefix) ──
+    } else if (feat == "pp_apply_struct_definitions") {
+        ctx->post_process_options.apply_struct_definitions = enabled;
+    } else if (feat == "pp_iat_symbols") {
+        ctx->post_process_options.iat_symbols = enabled;
+    } else if (feat == "pp_strip_shadow_params") {
+        ctx->post_process_options.strip_shadow_params = enabled;
+    } else if (feat == "pp_smart_constants") {
+        ctx->post_process_options.smart_constants = enabled;
+    } else if (feat == "pp_inline_strings") {
+        ctx->post_process_options.inline_strings = enabled;
+    } else if (feat == "pp_constants") {
+        ctx->post_process_options.constants = enabled;
+    } else if (feat == "pp_guids") {
+        ctx->post_process_options.guids = enabled;
+    } else if (feat == "pp_unicode_strings") {
+        ctx->post_process_options.unicode_strings = enabled;
+    } else if (feat == "pp_interlocked_patterns") {
+        ctx->post_process_options.interlocked_patterns = enabled;
+    } else if (feat == "pp_xunknown_types") {
+        ctx->post_process_options.xunknown_types = enabled;
+    } else if (feat == "pp_seh_cleanup") {
+        ctx->post_process_options.seh_cleanup = enabled;
+    } else if (feat == "pp_global_symbols") {
+        ctx->post_process_options.global_symbols = enabled;
+    } else if (feat == "pp_internal_names") {
+        ctx->post_process_options.internal_names = enabled;
+    } else if (feat == "pp_struct_offsets") {
+        ctx->post_process_options.struct_offsets = enabled;
+    } else if (feat == "pp_fid_names") {
+        ctx->post_process_options.fid_names = enabled;
     } else {
         return;
     }

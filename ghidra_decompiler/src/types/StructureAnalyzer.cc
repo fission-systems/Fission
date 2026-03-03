@@ -416,10 +416,45 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
                 std::string field_type = "undefined";
                 if (iter->type) {
                     field_type = iter->type->getName();
+
+                    // Handle pointer types — getName() may return empty or
+                    // an internal Ghidra name; produce readable C type instead
+                    if (field_type.empty()) {
+                        // Detect pointer by field name prefix or type metatype
+                        if (iter->name.substr(0, 4) == "ptr_") {
+                            field_type = "void *";
+                        } else {
+                            field_type = "undefined";
+                        }
+                    } else if (iter->type->getMetatype() == ghidra::TYPE_PTR) {
+                        // Ghidra pointer type — ensure proper C-formatted name
+                        // e.g., "void *" instead of internal representation
+                        const ghidra::TypePointer* ptr_type =
+                            dynamic_cast<const ghidra::TypePointer*>(iter->type);
+                        if (ptr_type) {
+                            ghidra::Datatype* pointed = ptr_type->getPtrTo();
+                            if (pointed) {
+                                std::string pointed_name = pointed->getName();
+                                if (pointed_name.empty() || pointed_name == "undefined" ||
+                                    pointed->getMetatype() == ghidra::TYPE_VOID) {
+                                    field_type = "void *";
+                                } else {
+                                    field_type = pointed_name + " *";
+                                }
+                            } else {
+                                field_type = "void *";
+                            }
+                        }
+                    }
                 }
                 
-                // Indent
-                ss << "    " << field_type << " " << iter->name << "; // Offset " << std::hex << iter->offset << std::dec << "\n";
+                // Indent — handle "TYPE *" vs "TYPE" spacing
+                if (field_type.back() == '*') {
+                    // Already has pointer suffix like "void *", no extra space needed
+                    ss << "    " << field_type << iter->name << "; // Offset " << iter->offset << "\n";
+                } else {
+                    ss << "    " << field_type << " " << iter->name << "; // Offset " << iter->offset << "\n";
+                }
             }
             
             ss << "} " << name << ";\n\n";

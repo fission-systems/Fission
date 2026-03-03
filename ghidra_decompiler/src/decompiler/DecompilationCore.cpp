@@ -421,14 +421,8 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     // ========================================================================
     // Full Post-Processing Chain
     // ========================================================================
-    // Configure default options for standalone decompilation
-    PostProcessOptions options;
-    options.iat_symbols = true;
-    options.unicode_strings = true;
-    options.struct_offsets = true;
-    options.smart_constants = true;
-    options.interlocked_patterns = true;
-    options.seh_cleanup = true;
+    // Use per-context configurable options (set via set_feature with pp_ prefix)
+    const PostProcessOptions& options = ctx->post_process_options;
 
     // Use the analysis artifacts gathered earlier for post-processing
     result = run_post_processing(ctx, fd, result, analysis, options);

@@ -1,0 +1,7 @@
+{
+  "name": "calculate_discount",
+  "address": "0x1400015e2",
+  "code": "\nint calculate_discount(int param_1,double param_2)\n\n{\n  int iVar1;\n  \n  if (param_1 < 0x12) {\n    iVar1 = (int)(DAT_1400040b8 * param_2);\n  }\n  else if (param_1 < 0x41) {\n    iVar1 = (int)param_2;\n  }\n  else {\n    iVar1 = (int)(DAT_1400040c0 * param_2);\n  }\n  return iVar1;\n}\n\n",
+  "asm": "  0x1400015E2      PUSH     RBP\n  0x1400015E3      MOV      RBP, RSP\n  0x1400015E6      MOV      dword ptr [RBP + 0x10], ECX\n  0x1400015E9      MOVSD    qword ptr [RBP + 0x18], XMM1\n  0x1400015EE      CMP      dword ptr [RBP + 0x10], 0x11\n  0x1400015F2      JG       0x14000160b\n  0x1400015F4      MOVSD    XMM1, qword ptr [RBP + 0x18]\n  0x1400015F9      MOVSD    XMM0, qword ptr [0x1400040b8]\n  0x140001601      MULSD    XMM0, XMM1\n  0x140001605      CVTTSD2SI EAX, XMM0\n  0x140001609      JMP      0x140001631\n  0x14000160B      CMP      dword ptr [RBP + 0x10], 0x40\n  0x14000160F      JLE      0x140001628\n  0x140001611      MOVSD    XMM1, qword ptr [RBP + 0x18]\n  0x140001616      MOVSD    XMM0, qword ptr [0x1400040c0]\n  0x14000161E      MULSD    XMM0, XMM1\n  0x140001622      CVTTSD2SI EAX, XMM0\n  0x140001626      JMP      0x140001631\n  0x140001628      MOVSD    XMM0, qword ptr [RBP + 0x18]\n  0x14000162D      CVTTSD2SI EAX, XMM0\n  0x140001631      POP      RBP\n  0x140001632      RET      \n",
+  "decomp_sec": 0.001432
+}

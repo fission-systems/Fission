@@ -2,15 +2,13 @@
  * Fission Decompiler FFI Implementation
  * 
  * C++ implementation of the FFI interface defined in libdecomp_ffi.h.
- * Refactored to use modular components.
+ * Refactored to use unified DecompilerFFI component.
  */
 
 #include "fission/ffi/libdecomp_ffi.h"
 #include "fission/ffi/DecompContext.h"
-#include "fission/ffi/MemoryManager.h"
-#include "fission/ffi/SymbolManager.h"
+#include "fission/ffi/DecompilerFFI.h"
 #include "fission/ffi/SymbolProviderManager.h"
-#include "fission/ffi/FidManager.h"
 #include "fission/ffi/DecompilerCore.h"
 #include "fission/decompiler/PcodeOptimizationBridge.h"
 

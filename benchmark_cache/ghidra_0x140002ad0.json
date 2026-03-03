@@ -1,0 +1,7 @@
+{
+  "name": "_crt_atexit",
+  "address": "0x140002ad0",
+  "code": "\nvoid _crt_atexit(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002ad0. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  _crt_atexit();\n  return;\n}\n\n",
+  "asm": "  0x140002AD0      JMP      qword ptr [0x140008340]\n",
+  "decomp_sec": 0.000353
+}

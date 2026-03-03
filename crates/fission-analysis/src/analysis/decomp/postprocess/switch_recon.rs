@@ -1,38 +1,6 @@
 use super::PostProcessor;
-use once_cell::sync::Lazy;
+use crate::utils::patterns::*;
 use regex::Regex;
-
-/// Pattern for sequential equality checks with return (flat or BST)
-/// Matches: if (var == N) { return expr; }
-static SEQ_EQ_RETURN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"^(\s*)if\s*\(\s*(\w+)\s*==\s*(-?(?:0[xX][0-9a-fA-F]+|\d+))\s*\)\s*\{\s*(return\s+[^;]+;)\s*\}",
-    )
-    .unwrap()
-});
-
-/// Matches reverse form: if (N == var) { return expr; }
-static SEQ_EQ_RETURN_REV: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"^(\s*)if\s*\(\s*(-?(?:0[xX][0-9a-fA-F]+|\d+))\s*==\s*(\w+)\s*\)\s*\{\s*(return\s+[^;]+;)\s*\}",
-    )
-    .unwrap()
-});
-
-/// Matches: if (!var) { return expr; }  (equivalently var == 0)
-static SEQ_NOT_RETURN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(\s*)if\s*\(\s*!(\w+)\s*\)\s*\{\s*(return\s+[^;]+;)\s*\}").unwrap()
-});
-
-/// Range guard: if (var < N) { or if (var > N) { — BST split node
-static RANGE_GUARD_OPEN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^\s*if\s*\(\s*(\w+)\s*[<>]=?\s*(?:0[xX][0-9a-fA-F]+|\d+)\s*\)\s*\{").unwrap()
-});
-
-/// Standalone return statement (potential default case)
-static DEFAULT_RETURN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^\s*(return\s+[^;]+;)\s*$").unwrap()
-});
 
 impl PostProcessor {
     /// Reconstruct switch/case from BST (binary search tree) or sequential
@@ -69,18 +37,6 @@ impl PostProcessor {
         }
 
         let close_brace_only = Regex::new(r"^\s*\}\s*$").unwrap();
-
-        // Multi-line opening patterns
-        static ML_EQ_OPEN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(
-                r"^(\s*)if\s*\(\s*(\w+)\s*==\s*(-?(?:0[xX][0-9a-fA-F]+|\d+))\s*\)\s*\{\s*$",
-            )
-            .unwrap()
-        });
-        static ML_NOT_OPEN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^(\s*)if\s*\(\s*!(\w+)\s*\)\s*\{\s*$").unwrap());
-        static ML_RETURN_LINE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*(return\s+[^;]+;)\s*$").unwrap());
 
         let mut result_lines: Vec<String> = Vec::new();
         let mut i = 0;
@@ -321,40 +277,6 @@ impl PostProcessor {
         //   "  }"
         //   "  return target;"      → return
 
-        // Opening patterns
-        static IF_NOT_OPEN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^(\s*)if\s*\(\s*!(\w+)\s*\)\s*\{\s*$").unwrap()
-        });
-        static IF_EQ_OPEN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(
-                r"^(\s*)if\s*\(\s*(\w+)\s*==\s*(-?(?:0[xX][0-9a-fA-F]+|\d+))\s*\)\s*\{\s*$",
-            )
-            .unwrap()
-        });
-        // else-if arm opening
-        static ELSE_IF_EQ_OPEN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(
-                r"^\s*(?:\}\s*)?else\s+if\s*\(\s*(\w+)\s*==\s*(-?(?:0[xX][0-9a-fA-F]+|\d+))\s*\)\s*\{\s*$",
-            )
-            .unwrap()
-        });
-        // else default opening
-        static ELSE_OPEN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^\s*(?:\}\s*)?else\s*\{\s*$").unwrap()
-        });
-        // Assignment line: target = expr;
-        static ASSIGN_LINE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^\s*(\w+)\s*=\s*([^;]+);\s*$").unwrap()
-        });
-        // Closing brace
-        static CLOSE_BRACE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^\s*\}\s*$").unwrap()
-        });
-        // return target;
-        static RETURN_VAR: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^\s*return\s+(\w+)\s*;\s*$").unwrap()
-        });
-
         let lines: Vec<&str> = code.lines().collect();
         if lines.len() < 6 {
             return code.to_string();
@@ -392,7 +314,7 @@ impl PostProcessor {
             }
             let target_var;
             let first_expr;
-            if let Some(caps) = ASSIGN_LINE.captures(lines[i + 1]) {
+            if let Some(caps) = LOCAL_VAR_ASSIGN.captures(lines[i + 1]) {
                 target_var = caps[1].to_string();
                 first_expr = caps[2].to_string();
             } else {
@@ -444,7 +366,7 @@ impl PostProcessor {
                     if j + 1 >= lines.len() {
                         break;
                     }
-                    if let Some(acaps) = ASSIGN_LINE.captures(lines[j + 1]) {
+                    if let Some(acaps) = LOCAL_VAR_ASSIGN.captures(lines[j + 1]) {
                         let tgt = &acaps[1];
                         if tgt != target_var {
                             break;
@@ -477,7 +399,7 @@ impl PostProcessor {
                     if j + 1 >= lines.len() {
                         break;
                     }
-                    if let Some(acaps) = ASSIGN_LINE.captures(lines[j + 1]) {
+                    if let Some(acaps) = LOCAL_VAR_ASSIGN.captures(lines[j + 1]) {
                         let tgt = &acaps[1];
                         if tgt != target_var {
                             break;

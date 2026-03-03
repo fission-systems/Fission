@@ -112,6 +112,11 @@ pub struct OneShotArgs {
     #[arg(long)]
     pub no_warnings: bool,
 
+    /// Benchmark mode: record per-function decomp_sec timing in JSON output.
+    /// Implies --json. Adds initialization timing metadata.
+    #[arg(long)]
+    pub benchmark: bool,
+
     /// Override binary format detection (auto|pe|elf|macho)
     /// Affects sleigh ID selection for architecture-specific analysis
     #[arg(long, value_name = "FORMAT")]

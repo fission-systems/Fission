@@ -1,0 +1,7 @@
+{
+  "name": "signal",
+  "address": "0x140002b18",
+  "code": "\n/* WARNING: Unknown calling convention -- yet parameter storage is locked */\n\nvoid signal(int param_1)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002b18. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  signal(param_1);\n  return;\n}\n\n",
+  "asm": "  0x140002B18      JMP      qword ptr [0x140008388]\n",
+  "decomp_sec": 0.00046
+}

@@ -1,0 +1,7 @@
+{
+  "name": "_cexit",
+  "address": "0x140002ac0",
+  "code": "\nvoid __cdecl _cexit(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002ac0. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  _cexit();\n  return;\n}\n\n",
+  "asm": "  0x140002AC0      JMP      qword ptr [0x140008330]\n",
+  "decomp_sec": 0.000475
+}

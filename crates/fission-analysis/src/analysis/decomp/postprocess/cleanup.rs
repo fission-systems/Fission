@@ -1,4 +1,5 @@
 use super::PostProcessor;
+use crate::utils::patterns::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
@@ -18,10 +19,7 @@ static RUST_BOUNDS_CHECK_PATTERN: Lazy<Regex> = Lazy::new(|| {
     .unwrap()
 });
 
-/// Pattern for Go panic checks
-static GO_PANIC_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?s)if\s*\([^\{]*\)\s*\{\s*runtime\.gopanic\([^\{]*\);?\s*\}").unwrap()
-});
+
 
 impl PostProcessor {
     /// Insert missing casts for common patterns where the decompiler omits
@@ -37,11 +35,8 @@ impl PostProcessor {
         // Pattern 1: malloc/calloc return without cast
         // `var = malloc(...)` → `var = (void *)malloc(...)`
         // Only when the LHS doesn't already have a cast on the RHS
-        static MALLOC_NO_CAST: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(\w+)\s*=\s*((?:malloc|calloc|realloc)\s*\([^;]*\))\s*;").unwrap()
-        });
 
-        result = MALLOC_NO_CAST
+        result = MALLOC_PATTERN
             .replace_all(&result, |caps: &regex::Captures| {
                 let lhs = &caps[1];
                 let rhs = &caps[2];
@@ -56,12 +51,8 @@ impl PostProcessor {
         // Pattern 2: Bare integer used as pointer in dereference
         // `*(ulong + 0xN)` → `*(void *)(ulong + 0xN)`
         // This fires when a numeric/undefined type is used with pointer arithmetic
-        static BARE_PTR_ARITH: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\*\s*\(\s*((?:ulong|ulonglong|undefined\d*|long|longlong)\s+\w+)\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\)")
-                .unwrap()
-        });
 
-        result = BARE_PTR_ARITH
+        result = LONG_PTR_OFFSET
             .replace_all(&result, |caps: &regex::Captures| {
                 let base_expr = &caps[1];
                 let offset = &caps[2];
@@ -92,7 +83,7 @@ impl PostProcessor {
         let mut result = code.to_string();
 
         // Replace Go gopanic checks
-        result = GO_PANIC_PATTERN
+        result = GO_PANIC
             .replace_all(&result, "/* [Go Panic Check] */")
             .to_string();
 
@@ -105,15 +96,9 @@ impl PostProcessor {
     // =========================================================================
     pub(super) fn deref_to_array_index(code: &str) -> String {
         // *(var + N)  →  var[N]
-        static DEREF_ADD: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\*\s*\(\s*(?P<base>[\w\->\.]+)\s*\+\s*(?P<idx>[\w\->\.0-9]+)\s*\)").unwrap()
-        });
         // *(N + var)  →  var[N]  (commutative)
-        static DEREF_ADD_REV: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"\*\s*\(\s*(?P<idx>\d+|0x[0-9a-fA-F]+)\s*\+\s*(?P<base>[\w\->\.]+)\s*\)").unwrap()
-        });
 
-        let mut result = DEREF_ADD
+        let mut result = BASE_ARRAY_ACCESS
             .replace_all(code, |caps: &regex::Captures| {
                 let base = &caps["base"];
                 let idx = &caps["idx"];
@@ -125,7 +110,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        result = DEREF_ADD_REV
+        result = REV_ARRAY_ACCESS
             .replace_all(&result, |caps: &regex::Captures| {
                 let base = &caps["base"];
                 let idx = &caps["idx"];
@@ -192,9 +177,6 @@ impl PostProcessor {
             s.contains('{') || s.contains('}')
         }
 
-        static WHILE_FALSE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\bwhile\s*\(\s*(?:false|0)\s*\)\s*\{(?P<body>[^}]*)\}").unwrap()
-        });
         result = WHILE_FALSE
             .replace_all(&result, |caps: &regex::Captures| {
                 if has_nested_braces(&caps["body"]) {
@@ -205,10 +187,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static IF_FALSE_WITH_ELSE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\bif\s*\(\s*(?:false|0)\s*\)\s*\{[^}]*\}\s*else\s*\{(?P<else_body>[^}]*)\}").unwrap()
-        });
-        result = IF_FALSE_WITH_ELSE
+        result = IF_FALSE_ELSE
             .replace_all(&result, |caps: &regex::Captures| {
                 let else_body = &caps["else_body"];
                 if has_nested_braces(else_body) {
@@ -219,9 +198,6 @@ impl PostProcessor {
             })
             .to_string();
 
-        static IF_FALSE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\bif\s*\(\s*(?:false|0)\s*\)\s*\{(?P<body>[^}]*)\}").unwrap()
-        });
         result = IF_FALSE
             .replace_all(&result, |caps: &regex::Captures| {
                 if has_nested_braces(&caps["body"]) {
@@ -232,10 +208,7 @@ impl PostProcessor {
             })
             .to_string();
 
-        static IF_TRUE_WITH_ELSE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\bif\s*\(\s*(?:true|1)\s*\)\s*\{(?P<body>[^}]*)\}\s*else\s*\{[^}]*\}").unwrap()
-        });
-        result = IF_TRUE_WITH_ELSE
+        result = IF_TRUE_ELSE
             .replace_all(&result, |caps: &regex::Captures| {
                 let body = &caps["body"];
                 if has_nested_braces(body) {
@@ -246,9 +219,6 @@ impl PostProcessor {
             })
             .to_string();
 
-        static IF_TRUE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?s)\bif\s*\(\s*(?:true|1)\s*\)\s*\{(?P<body>[^}]*)\}").unwrap()
-        });
         result = IF_TRUE
             .replace_all(&result, |caps: &regex::Captures| {
                 let body = &caps["body"];
@@ -273,15 +243,9 @@ impl PostProcessor {
     // Run twice to handle cascading dead assignments.
     // =========================================================================
     pub(super) fn remove_dead_local_assigns(code: &str) -> String {
-        static VAR_PATTERN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"\b(local_\w+|[a-z]Var\d+)\b").unwrap());
-        static ASSIGN_LINE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*(local_\w+|[a-z]Var\d+)\s*=\s*(.+?)\s*;\s*$").unwrap());
-        static FUNC_CALL: Lazy<Regex> = Lazy::new(|| Regex::new(r"\w+\s*\(").unwrap());
-
         let mut var_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
-        for cap in VAR_PATTERN.find_iter(code) {
+        for cap in LOCAL_VAR_PATTERN.find_iter(code) {
             *var_counts.entry(cap.as_str().to_string()).or_insert(0) += 1;
         }
 
@@ -290,7 +254,7 @@ impl PostProcessor {
         let mut changed = false;
 
         for line in &lines {
-            if let Some(caps) = ASSIGN_LINE.captures(line) {
+            if let Some(caps) = LOCAL_VAR_ASSIGN.captures(line) {
                 let lhs = &caps[1];
                 let rhs = &caps[2];
 

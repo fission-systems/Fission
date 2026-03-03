@@ -1,0 +1,7 @@
+{
+  "name": "free",
+  "address": "0x140002b60",
+  "code": "\nvoid __cdecl free(void *_Memory)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002b60. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  free(_Memory);\n  return;\n}\n\n",
+  "asm": "  0x140002B60      JMP      qword ptr [0x1400082d0]\n",
+  "decomp_sec": 0.000472
+}

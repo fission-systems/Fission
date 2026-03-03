@@ -154,6 +154,155 @@ export interface AppSettings {
     font_size: number;
     decompile_style: "c-like" | "pseudo" | "verbose";
     simplify_level: number;
+    decompiler_options?: DecompilerOptions;
+}
+
+// ============================================================================
+// Decompiler Options (Ghidra-level configuration)
+// ============================================================================
+
+export interface DecompilerOptions {
+    analysis: AnalysisOptions;
+    cpp_postprocess: CppPostProcessOptions;
+    rust_postprocess: RustPostProcessOptions;
+    display: DisplayOptions;
+    performance: PerformanceOptions;
+}
+
+/** Ghidra engine analysis options (controlled via FFI set_feature). */
+export interface AnalysisOptions {
+    infer_pointers: boolean;
+    analyze_loops: boolean;
+    readonly_propagate: boolean;
+    record_jumploads: boolean;
+    allow_inline: boolean;
+    disable_toomanyinstructions_error: boolean;
+}
+
+/** C++ side post-processing options (controlled via FFI set_feature with "pp_" prefix). */
+export interface CppPostProcessOptions {
+    apply_struct_definitions: boolean;
+    iat_symbols: boolean;
+    strip_shadow_params: boolean;
+    smart_constants: boolean;
+    inline_strings: boolean;
+    constants: boolean;
+    guids: boolean;
+    unicode_strings: boolean;
+    interlocked_patterns: boolean;
+    xunknown_types: boolean;
+    seh_cleanup: boolean;
+    global_symbols: boolean;
+    internal_names: boolean;
+    struct_offsets: boolean;
+    fid_names: boolean;
+}
+
+/** Rust side post-processing options (individual pass toggles). */
+export interface RustPostProcessOptions {
+    clean_rust: boolean;
+    clean_go: boolean;
+    swift_demangle: boolean;
+    field_offsets: boolean;
+    insert_casts: boolean;
+    arithmetic_idioms: boolean;
+    deref_to_array: boolean;
+    bitop_to_logicop: boolean;
+    remove_dead_branches: boolean;
+    simplify_if: boolean;
+    while_to_for: boolean;
+    dead_assign_removal: boolean;
+    rename_induction_vars: boolean;
+    rename_semantic_vars: boolean;
+    loop_idioms: boolean;
+    switch_reconstruction: boolean;
+    mul_to_shift: boolean;
+    dwarf_names: boolean;
+}
+
+/** Display/formatting options for decompiler output. */
+export interface DisplayOptions {
+    max_line_width: number;
+    indent_width: number;
+    integer_format: "hex" | "decimal" | "best_fit";
+    comment_style: "c_style" | "cpp_style";
+    show_casts: boolean;
+    show_namespaces: boolean;
+    show_line_numbers: boolean;
+}
+
+/** Performance/limits options for the decompiler engine. */
+export interface PerformanceOptions {
+    timeout_ms: number;
+    max_function_size: number;
+    max_instructions: number;
+    cache_size: number;
+}
+
+/** Creates default DecompilerOptions matching Rust defaults. */
+export function defaultDecompilerOptions(): DecompilerOptions {
+    return {
+        analysis: {
+            infer_pointers: true,
+            analyze_loops: true,
+            readonly_propagate: true,
+            record_jumploads: true,
+            allow_inline: false,
+            disable_toomanyinstructions_error: true,
+        },
+        cpp_postprocess: {
+            apply_struct_definitions: true,
+            iat_symbols: true,
+            strip_shadow_params: true,
+            smart_constants: true,
+            inline_strings: true,
+            constants: true,
+            guids: true,
+            unicode_strings: true,
+            interlocked_patterns: true,
+            xunknown_types: true,
+            seh_cleanup: true,
+            global_symbols: true,
+            internal_names: true,
+            struct_offsets: true,
+            fid_names: true,
+        },
+        rust_postprocess: {
+            clean_rust: true,
+            clean_go: true,
+            swift_demangle: true,
+            field_offsets: true,
+            insert_casts: true,
+            arithmetic_idioms: true,
+            deref_to_array: true,
+            bitop_to_logicop: true,
+            remove_dead_branches: true,
+            simplify_if: true,
+            while_to_for: true,
+            dead_assign_removal: true,
+            rename_induction_vars: true,
+            rename_semantic_vars: true,
+            loop_idioms: true,
+            switch_reconstruction: true,
+            mul_to_shift: true,
+            dwarf_names: true,
+        },
+        display: {
+            max_line_width: 100,
+            indent_width: 2,
+            integer_format: "best_fit",
+            comment_style: "c_style",
+            show_casts: true,
+            show_namespaces: false,
+            show_line_numbers: true,
+        },
+        performance: {
+            timeout_ms: 30000,
+            max_function_size: 65536,
+            max_instructions: 100000,
+            cache_size: 10,
+        },
+    };
 }
 
 // CFG types
@@ -193,6 +342,8 @@ export interface ListingRow {
     label: string | null;
     comment: string | null;
     row_type: "instruction" | "label" | "section";
+    /** Mnemonic category for syntax highlighting */
+    mnemonic_type: "call" | "jmp" | "cjmp" | "ret" | "nop" | "push_pop" | "mov" | "cmp" | "int" | "normal" | "";
 }
 
 export interface ListingInfo {
