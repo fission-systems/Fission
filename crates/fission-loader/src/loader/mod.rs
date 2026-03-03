@@ -3,6 +3,7 @@
 //! Parses PE/ELF/Mach-O executables using parsers.
 
 use crate::prelude::*;
+use fission_core::constants::binary_format::*;
 use std::path::Path;
 
 pub mod cpp;
@@ -57,7 +58,7 @@ impl LoadedBinary {
                 "ELF"
             } else {
                 let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                if matches!(magic, 0xfeedface | 0xfeedfacf | 0xcefaedfe | 0xcffaedfe) {
+                if matches!(magic, MACHO_MAGIC_32_BE | MACHO_MAGIC_64_BE | MACHO_MAGIC_32_LE | MACHO_MAGIC_64_LE) {
                     "Mach-O"
                 } else {
                     "Unknown"
@@ -67,7 +68,7 @@ impl LoadedBinary {
             "ELF"
         } else {
             let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-            if matches!(magic, 0xfeedface | 0xfeedfacf | 0xcefaedfe | 0xcffaedfe) {
+            if matches!(magic, MACHO_MAGIC_32_BE | MACHO_MAGIC_64_BE | MACHO_MAGIC_32_LE | MACHO_MAGIC_64_LE) {
                 "Mach-O"
             } else {
                 "Unknown"

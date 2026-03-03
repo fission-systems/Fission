@@ -4,6 +4,7 @@ use crate::loader::types::{
 };
 use crate::prelude::*;
 use binrw::BinRead;
+use fission_core::constants::binary_format::*;
 use std::io::{Cursor, Seek, SeekFrom};
 
 pub mod apple;
@@ -22,18 +23,18 @@ impl MachoLoader {
 
         // Detect Props
         let (is_64, _is_swap) = match magic {
-            MH_MAGIC => (false, false),
-            MH_CIGAM => (false, true),
-            MH_MAGIC_64 => (true, false),
-            MH_CIGAM_64 => (true, true),
+            MACHO_MAGIC_32_BE => (false, false),
+            MACHO_MAGIC_32_LE => (false, true),
+            MACHO_MAGIC_64_BE => (true, false),
+            MACHO_MAGIC_64_LE => (true, true),
             _ => return Err(err!(loader, "Not a Mach-O binary (magic: {:x})", magic)),
         };
 
         let endian = match magic {
-            0xFEEDFACE => binrw::Endian::Big,
-            0xFEEDFACF => binrw::Endian::Big,
-            0xCEFAEDFE => binrw::Endian::Little,
-            0xCFFAEDFE => binrw::Endian::Little,
+            MACHO_MAGIC_32_BE => binrw::Endian::Big,
+            MACHO_MAGIC_64_BE => binrw::Endian::Big,
+            MACHO_MAGIC_32_LE => binrw::Endian::Little,
+            MACHO_MAGIC_64_LE => binrw::Endian::Little,
             _ => return Err(err!(loader, "Unknown Magic")),
         };
 

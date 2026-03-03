@@ -1,11 +1,7 @@
 use binrw::BinRead;
+use fission_core::constants::binary_format::*;
 
-// Constants (copied from mach-o/loader.h concepts)
-pub const MH_MAGIC: u32 = 0xFEEDFACE;
-pub const MH_CIGAM: u32 = 0xCEFAEDFE;
-pub const MH_MAGIC_64: u32 = 0xFEEDFACF;
-pub const MH_CIGAM_64: u32 = 0xCFFAEDFE;
-
+// Load command types (from mach-o/loader.h)
 pub const LC_SEGMENT: u32 = 0x1;
 pub const LC_SYMTAB: u32 = 0x2;
 pub const LC_DYSYMTAB: u32 = 0xB;

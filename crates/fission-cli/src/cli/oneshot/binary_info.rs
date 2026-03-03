@@ -122,7 +122,8 @@ pub(super) fn print_sections(binary: &LoadedBinary, json: bool) -> io::Result<()
         writeln!(
             stdout,
             "{}",
-            serde_json::to_string_pretty(&sections).unwrap()
+            serde_json::to_string_pretty(&sections)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?
         )?;
     } else {
         writeln!(stdout, "Sections ({}):", binary.sections.len())?;
