@@ -38,8 +38,8 @@ pub mod base_types {
     /// Load all base types from compiled-in JSON data.
     pub fn all() -> Vec<TypeInfo> {
         let json_str = include_str!("../data/win_types/base_types.json");
-        let items: Vec<JsonTypeInfo> =
-            serde_json::from_str(json_str).expect("Failed to parse base_types.json");
+        let items: Vec<JsonTypeInfo> = serde_json::from_str(json_str)
+            .expect("Failed to parse base_types.json - this is compile-time embedded data, check syntax in data/win_types/base_types.json");
         items
             .into_iter()
             .map(|j| TypeInfo {
@@ -104,8 +104,8 @@ pub struct WindowsStructures {
 impl WindowsStructures {
     pub fn new() -> Self {
         let json_str = include_str!("../data/win_types/structures.json");
-        let items: Vec<JsonStructDef> =
-            serde_json::from_str(json_str).expect("Failed to parse structures.json");
+        let items: Vec<JsonStructDef> = serde_json::from_str(json_str)
+            .expect("Failed to parse structures.json - this is compile-time embedded data, check syntax in data/win_types/structures.json");
 
         let mut structures = HashMap::with_capacity(items.len());
         for item in items {

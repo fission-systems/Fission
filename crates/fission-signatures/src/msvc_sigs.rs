@@ -17,8 +17,8 @@ struct JsonMsvcSignature {
 /// Load all MSVC/CRT signatures into the provided vector
 pub fn load_msvc_signatures(signatures: &mut Vec<FunctionSignature>) {
     let json_str = include_str!("../data/signatures/msvc.json");
-    let items: Vec<JsonMsvcSignature> =
-        serde_json::from_str(json_str).expect("Failed to parse msvc.json");
+    let items: Vec<JsonMsvcSignature> = serde_json::from_str(json_str)
+        .expect("Failed to parse msvc.json - this is a compile-time embedded file, please check data/signatures/msvc.json syntax");
 
     for item in items {
         signatures.push(FunctionSignature::from_hex(&item.name, &item.pattern));

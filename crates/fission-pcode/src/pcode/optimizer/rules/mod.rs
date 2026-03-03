@@ -176,8 +176,8 @@ impl OptimizationRules {
 
         // x | -1 => -1
         if op.inputs[1].is_all_ones() || op.inputs[0].is_all_ones() {
-            let all_ones = if op.output.is_some() {
-                op.output.as_ref().unwrap().size
+            let all_ones = if let Some(out) = &op.output {
+                out.size
             } else {
                 4
             };

@@ -276,11 +276,12 @@ pub(super) fn run_decompilation(
     let functions = collect_target_functions(binary, cli.address, cli.all);
 
     if functions.is_empty() && cli.address.is_some() {
-        // Safe unwrap: we just checked is_some()
-        let addr = cli.address.unwrap();
-        eprintln!("Warning: No function found at address 0x{:x}", addr);
-        // Try to decompile anyway
-        decompile_and_output(cli, &decomp, addr, &format!("sub_{:x}", addr))?;
+        // Use if-let for safer unwrapping
+        if let Some(addr) = cli.address {
+            eprintln!("Warning: No function found at address 0x{:x}", addr);
+            // Try to decompile anyway
+            decompile_and_output(cli, &decomp, addr, &format!("sub_{:x}", addr))?;
+        }
         return Ok(());
     }
 

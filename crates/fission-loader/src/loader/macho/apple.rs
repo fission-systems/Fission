@@ -617,7 +617,8 @@ fn decode_objc_type(encoding: &str) -> String {
         return "id".to_string();
     }
 
-    let first_char = encoding.chars().next().unwrap();
+    // Safe: We just checked encoding is not empty
+    let first_char = encoding.chars().next().unwrap_or('@');
     match first_char {
         'c' => "char".to_string(),
         'i' => "int".to_string(),
