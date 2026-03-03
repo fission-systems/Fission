@@ -20,7 +20,7 @@ impl PostProcessor {
                 r"(?P<if_block>if\s*\([^)]+\)\s*\{[^}]*\breturn\b[^}]*\})",
                 r"\s*else\s*\{(?P<else_body>[^}]*)\}",
             ))
-            .unwrap()
+            .unwrap_or_else(|e| panic!("invalid IF_RETURN_ELSE regex: {e}"))
         });
 
         result = IF_RETURN_ELSE
@@ -58,7 +58,7 @@ impl PostProcessor {
                 r"(?P<body>(?s).*?)",
                 r"\n(?P<close_indent>\s*)\}",
             ))
-            .unwrap()
+            .unwrap_or_else(|e| panic!("invalid WHILE_TRUE_BREAK regex: {e}"))
         });
 
         WHILE_TRUE_BREAK

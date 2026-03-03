@@ -8,7 +8,7 @@ static RUST_OVERFLOW_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r"(?s)if\s*\([^\{]*overflow[^\{]*\)\s*\{\s*panic_const_(add|sub|mul)_overflow\(\);?\s*\}",
     )
-    .unwrap()
+    .unwrap_or_else(|e| panic!("invalid RUST_OVERFLOW_PATTERN regex: {e}"))
 });
 
 /// Pattern for Rust bounds checks
@@ -16,7 +16,7 @@ static RUST_BOUNDS_CHECK_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r"(?s)if\s*\([^\{]*(?:index|len)[^\{]*\)\s*\{\s*panic_bounds_check\([^\{]*\);?\s*\}",
     )
-    .unwrap()
+    .unwrap_or_else(|e| panic!("invalid RUST_BOUNDS_CHECK_PATTERN regex: {e}"))
 });
 
 
@@ -136,7 +136,7 @@ impl PostProcessor {
                 r"\s*&\s*",
                 r"\(\s*(?P<rhs>[^()]+?)\s*(?:==|!=|<=|>=|<|>)\s*[^()]+?\s*\)",
             ))
-            .unwrap()
+            .unwrap_or_else(|e| panic!("invalid BIT_AND_TO_LOG_AND regex: {e}"))
         });
         // Match (comparison) | (comparison)  →  (comparison) || (comparison)
         static BIT_OR_TO_LOG_OR: Lazy<Regex> = Lazy::new(|| {
@@ -145,7 +145,7 @@ impl PostProcessor {
                 r"\s*\|\s*",
                 r"\(\s*(?P<rhs>[^()]+?)\s*(?:==|!=|<=|>=|<|>)\s*[^()]+?\s*\)",
             ))
-            .unwrap()
+            .unwrap_or_else(|e| panic!("invalid BIT_OR_TO_LOG_OR regex: {e}"))
         });
 
         let result = BIT_AND_TO_LOG_AND

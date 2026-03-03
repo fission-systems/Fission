@@ -30,9 +30,9 @@ impl DisassembledInstruction {
     /// Format detailed string with bytes
     pub fn format_full(&self) -> String {
         let mut bytes_str = String::new();
+        use std::fmt::Write;
         for b in &self.bytes {
-            use std::fmt::Write;
-            write!(bytes_str, "{:02X} ", b).unwrap();
+            let _ = write!(bytes_str, "{:02X} ", b);
         }
         format!(
             "{:08X} | {:<24} | {:<6} {}",

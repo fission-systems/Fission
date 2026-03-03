@@ -138,6 +138,32 @@ match data.get(i..i + 4) {
 - 바이트 변환: 경계 검사 실패시 안전하게 처리
 - 전체적으로 14개 unwrap/expect 제거
 
+### 2.6 시각화/후처리 Unwrap 추가 제거 ✅
+
+**대상 영역:**
+- Pcode DOT 그래프 생성기
+- Decomp postprocess 정규식 초기화
+- Disasm 문자열 포맷팅
+
+**수정 세부사항:**
+
+1. **Pcode 그래프 생성** (`crates/fission-pcode/src/pcode/graph.rs`):
+  - `write!/writeln!` 결과의 `.unwrap()` 제거
+  - `let _ = write!(...)` / `let _ = writeln!(...)` 패턴으로 변경
+  - DOT 노드/엣지 생성과 op 라벨 포맷팅 경로 안정화
+
+2. **후처리 정규식 초기화**
+  - `crates/fission-analysis/src/analysis/decomp/postprocess/cleanup.rs`
+  - `crates/fission-analysis/src/analysis/decomp/postprocess/structure.rs`
+  - 하드코딩 정규식의 `.unwrap()` 제거
+  - `unwrap_or_else(|e| panic!(...))`로 패턴/오류 컨텍스트 명시
+
+3. **디스어셈블 문자열 포맷팅** (`crates/fission-disasm/src/lib.rs`):
+  - 바이트 출력 루프의 `.unwrap()` 제거
+  - `let _ = write!(...)` 패턴 적용
+
+**총 제거**: 32개
+
 ### 2.3 새로운 에러 타입 추가 계획
 
 ```rust
@@ -183,7 +209,7 @@ pub enum CliError {
 
 ## 메트릭
 
-**현재 진행률**: ~25% (Phase 1-2 완료 / 총 8 Phase)
+**현재 진행률**: ~35% (Phase 1-2 심화 진행 / 총 8 Phase)
 
 **완료 항목:**
 - ✅ Constants library (150+ magic numbers 준비)
@@ -193,7 +219,8 @@ pub enum CliError {
 - ✅ 분석 엔진 & FFI unwrap 제거 (18개)
 - ✅ Pcode & Signatures unwrap 제거 (4개)
 - ✅ Tauri debugging (Mutex 4개)
-- **총 52개 unwrap/expect 제거** (목표 200+의 26%)
+- ✅ Graph/Postprocess/Disasm unwrap 제거 (32개)
+- **총 84개 unwrap/expect 제거** (목표 200+의 42%)
 
 **예상 완료 시간**: 4-8주
 

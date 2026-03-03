@@ -17,21 +17,20 @@ impl PcodeGraph {
     /// Generate DOT graph for a Pcode function
     pub fn to_dot(func: &PcodeFunction, def_use: Option<&DefUseTracker>) -> String {
         let mut dot = String::new();
-        writeln!(dot, "digraph PcodeFunction {{").unwrap();
-        writeln!(dot, "  node [shape=box, fontname=\"Courier New\"];").unwrap();
-        writeln!(dot, "  rankdir=TB;").unwrap();
+        let _ = writeln!(dot, "digraph PcodeFunction {{");
+        let _ = writeln!(dot, "  node [shape=box, fontname=\"Courier New\"];");
+        let _ = writeln!(dot, "  rankdir=TB;");
 
         // Generate nodes for blocks
         for block in &func.blocks {
-            writeln!(dot, "  subgraph cluster_block_{} {{", block.index).unwrap();
-            writeln!(
+            let _ = writeln!(dot, "  subgraph cluster_block_{} {{", block.index);
+            let _ = writeln!(
                 dot,
                 "    label=\"Block {} @ 0x{:X}\";",
                 block.index, block.start_address
-            )
-            .unwrap();
-            writeln!(dot, "    style=filled;").unwrap();
-            writeln!(dot, "    color=lightgrey;").unwrap();
+            );
+            let _ = writeln!(dot, "    style=filled;");
+            let _ = writeln!(dot, "    color=lightgrey;");
 
             // Generate nodes for operations
             for op in &block.ops {
@@ -53,12 +52,11 @@ impl PcodeGraph {
                     _ => "#ccccff", // Arithmetic/Logic: Light Blue
                 };
 
-                writeln!(
+                let _ = writeln!(
                     dot,
                     "    {} [label=\"{}\", style=filled, fillcolor=\"{}\"];",
                     op_id, label, color
-                )
-                .unwrap();
+                );
 
                 // Connect operations within block (sequential flow)
                 // This is implicit in the cluster, but we can add invisible edges to enforce order
@@ -68,15 +66,14 @@ impl PcodeGraph {
             for i in 0..block.ops.len().saturating_sub(1) {
                 let op1 = &block.ops[i];
                 let op2 = &block.ops[i + 1];
-                writeln!(
+                let _ = writeln!(
                     dot,
                     "    op_{}_{} -> op_{}_{} [style=invis];",
                     block.index, op1.seq_num, block.index, op2.seq_num
-                )
-                .unwrap();
+                );
             }
 
-            writeln!(dot, "  }}").unwrap();
+            let _ = writeln!(dot, "  }}");
         }
 
         // Generate edges for control flow
@@ -105,8 +102,7 @@ impl PcodeGraph {
                                     } else {
                                         ""
                                     };
-                                    writeln!(dot, "    {} -> {}{};", src_id, dst_id, label)
-                                        .unwrap();
+                                    let _ = writeln!(dot, "    {} -> {}{};", src_id, dst_id, label);
                                 }
                             }
                         }
@@ -122,12 +118,11 @@ impl PcodeGraph {
                                 if let Some(first_op) = next_block.ops.first() {
                                     let dst_id =
                                         format!("op_{}_{}", next_block.index, first_op.seq_num);
-                                    writeln!(
+                                    let _ = writeln!(
                                         dot,
                                         "    {} -> {} [label=\"False\", style=dashed];",
                                         src_id, dst_id
-                                    )
-                                    .unwrap();
+                                    );
                                 }
                             }
                         }
@@ -141,8 +136,7 @@ impl PcodeGraph {
                             if let Some(first_op) = next_block.ops.first() {
                                 let dst_id =
                                     format!("op_{}_{}", next_block.index, first_op.seq_num);
-                                writeln!(dot, "    {} -> {} [style=dashed];", src_id, dst_id)
-                                    .unwrap();
+                                let _ = writeln!(dot, "    {} -> {} [style=dashed];", src_id, dst_id);
                             }
                         }
                     }
@@ -175,7 +169,7 @@ impl PcodeGraph {
                                         let dst_id = format!("op_{}_{}", block.index, op.seq_num);
 
                                         // Use a different color for data flow
-                                        writeln!(dot, "    {} -> {} [color=blue, constraint=false, style=dotted];", src_id, dst_id).unwrap();
+                                        let _ = writeln!(dot, "    {} -> {} [color=blue, constraint=false, style=dotted];", src_id, dst_id);
                                     }
                                 }
                             }
@@ -185,7 +179,7 @@ impl PcodeGraph {
             }
         }
 
-        writeln!(dot, "}}").unwrap();
+        let _ = writeln!(dot, "}}");
         dot
     }
 
@@ -194,36 +188,36 @@ impl PcodeGraph {
 
         // Assembly instruction (if available)
         if let Some(ref asm) = op.asm_mnemonic {
-            write!(s, "[0x{:X}] {}\\l", op.address, asm).unwrap();
+            let _ = write!(s, "[0x{:X}] {}\\l", op.address, asm);
         } else {
-            write!(s, "[0x{:X}]\\l", op.address).unwrap();
+            let _ = write!(s, "[0x{:X}]\\l", op.address);
         }
 
         // Output
         if let Some(out) = &op.output {
-            write!(s, "{}", Self::format_varnode(out)).unwrap();
+            let _ = write!(s, "{}", Self::format_varnode(out));
             if let Some(tracker) = def_use {
                 let mask = tracker.get_nz_mask(out);
                 if mask != u64::MAX {
-                    write!(s, "\\nNZ:{:X}", mask).unwrap();
+                    let _ = write!(s, "\\nNZ:{:X}", mask);
                 }
             }
-            write!(s, " = ").unwrap();
+            let _ = write!(s, " = ");
         }
 
         // Opcode
-        write!(s, "{:?}", op.opcode).unwrap();
+        let _ = write!(s, "{:?}", op.opcode);
 
         // Inputs
         if !op.inputs.is_empty() {
-            write!(s, "(").unwrap();
+            let _ = write!(s, "(");
             for (i, input) in op.inputs.iter().enumerate() {
                 if i > 0 {
-                    write!(s, ", ").unwrap();
+                    let _ = write!(s, ", ");
                 }
-                write!(s, "{}", Self::format_varnode(input)).unwrap();
+                let _ = write!(s, "{}", Self::format_varnode(input));
             }
-            write!(s, ")").unwrap();
+            let _ = write!(s, ")");
         }
 
         s
