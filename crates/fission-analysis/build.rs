@@ -18,7 +18,8 @@ fn build_libdecomp() {
     use std::path::PathBuf;
     use std::process::Command;
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .unwrap_or_else(|e| panic!("CARGO_MANIFEST_DIR should be set: {}", e));
     let decomp_dir = PathBuf::from(&manifest_dir)
         .join("..")
         .join("..")
@@ -26,7 +27,8 @@ fn build_libdecomp() {
     let build_dir = decomp_dir.join("build");
 
     // Ensure build directory exists
-    std::fs::create_dir_all(&build_dir).expect("Failed to create build directory");
+    std::fs::create_dir_all(&build_dir)
+        .unwrap_or_else(|e| panic!("Failed to create build directory: {}", e));
 
     // Build CMake configure arguments
     let mut cmake_args: Vec<String> = vec!["..".to_string()];
@@ -67,7 +69,7 @@ fn build_libdecomp() {
         .args(&cmake_args)
         .current_dir(&build_dir)
         .status()
-        .expect("Failed to run cmake configure");
+        .unwrap_or_else(|e| panic!("Failed to run cmake configure: {}", e));
 
     if !cmake_status.success() {
         panic!("CMake configure failed");
@@ -78,7 +80,7 @@ fn build_libdecomp() {
         .args(["--build", ".", "--target", "decomp", "--parallel", "4"])
         .current_dir(&build_dir)
         .status()
-        .expect("Failed to build decomp target");
+        .unwrap_or_else(|e| panic!("Failed to build decomp target: {}", e));
 
     if !build_status.success() {
         panic!("Failed to build libdecomp");

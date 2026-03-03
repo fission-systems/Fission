@@ -239,6 +239,9 @@ mod tests {
         fn example_fn() -> Result<i32> {
             Ok(42)
         }
-        assert_eq!(example_fn().unwrap(), 42);
+        let Ok(value) = example_fn() else {
+            panic!("example_fn should return Ok")
+        };
+        assert_eq!(value, 42);
     }
 }

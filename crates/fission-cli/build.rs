@@ -1,14 +1,15 @@
 fn main() {
     // Only add rpath if the native_decomp feature is enabled
     if std::env::var("CARGO_FEATURE_NATIVE_DECOMP").is_ok() {
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|e| panic!("CARGO_MANIFEST_DIR should be set: {}", e));
         let manifest_path = std::path::Path::new(&manifest_dir);
 
         // Find project root (fission/crates/fission-cli -> fission/)
         let root_dir = manifest_path
             .parent() // crates/
             .and_then(|p| p.parent()) // fission/
-            .expect("Failed to find project root directory");
+            .unwrap_or_else(|| panic!("Failed to find project root directory"));
 
         let lib_path = root_dir.join("ghidra_decompiler").join("build");
 

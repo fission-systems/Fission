@@ -140,5 +140,5 @@ pub fn run() {
             commands::toggle_devtools,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| panic!("error while running tauri application: {}", e));
 }

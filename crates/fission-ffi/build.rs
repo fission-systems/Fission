@@ -1,7 +1,8 @@
 fn main() {
     // Only modify search path if the native_decomp feature is enabled
     if std::env::var("CARGO_FEATURE_NATIVE_DECOMP").is_ok() {
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|e| panic!("CARGO_MANIFEST_DIR should be set: {}", e));
         let manifest_path = std::path::Path::new(&manifest_dir);
 
         // Assuming directory structure:
@@ -11,7 +12,7 @@ fn main() {
         let root_dir = manifest_path
             .parent() // crates
             .and_then(|p| p.parent()) // root
-            .expect("Failed to find project root directory");
+            .unwrap_or_else(|| panic!("Failed to find project root directory"));
 
         let lib_path = root_dir.join("ghidra_decompiler").join("build");
 
@@ -91,7 +92,9 @@ fn main() {
                                     for entry in entries.flatten() {
                                         let path = entry.path();
                                         if path.extension().and_then(|e| e.to_str()) == Some("dll") {
-                                            let fname = path.file_name().unwrap();
+                                            let Some(fname) = path.file_name() else {
+                                                continue;
+                                            };
                                             let dst = target_dir.join(fname);
                                             let _ = std::fs::copy(&path, &dst);
                                         }

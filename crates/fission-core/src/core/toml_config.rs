@@ -298,7 +298,9 @@ level = "debug"
 [decompiler]
 timeout_ms = 60000
 "#;
-        let config: TomlConfig = toml::from_str(toml_str).unwrap();
+        let Ok(config): std::result::Result<TomlConfig, _> = toml::from_str(toml_str) else {
+            panic!("toml parse should succeed")
+        };
         assert_eq!(config.logging.level, "debug");
         assert_eq!(config.decompiler.timeout_ms, 60000);
     }

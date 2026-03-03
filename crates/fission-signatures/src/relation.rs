@@ -225,7 +225,9 @@ mod tests {
         cg.set_function_name(0x2000, "malloc".to_string());
         cg.set_function_name(0x3000, "free".to_string());
 
-        let callees = cg.get_callees(0x1000).unwrap();
+        let Some(callees) = cg.get_callees(0x1000) else {
+            panic!("callees for caller 0x1000 should exist")
+        };
         assert!(callees.contains(&0x2000));
         assert!(callees.contains(&0x3000));
 
