@@ -172,7 +172,7 @@ fn function_category(f: &fission_loader::loader::FunctionInfo) -> &'static str {
 }
 
 /// Map every function in `binary` to a [`FunctionDto`], applying any renames.
-pub(super) fn functions_to_dtos(
+pub(crate) fn functions_to_dtos(
     binary: &fission_loader::loader::LoadedBinary,
     renames: &std::collections::HashMap<u64, String>,
 ) -> Vec<FunctionDto> {

@@ -35,7 +35,7 @@ pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<Func
     inner.loaded_binary = Some(binary_arc.clone());
     let _ = found; // delta surfaced to the frontend via the returned slice length
 
-    let functions = super::binary::functions_to_dtos(&binary_arc, &renames);
+    let functions = crate::commands::binary::functions_to_dtos(&binary_arc, &renames);
 
     Ok(functions)
 }
@@ -60,7 +60,7 @@ pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<Fu
     let binary_arc = std::sync::Arc::new(binary);
     inner.loaded_binary = Some(binary_arc.clone());
 
-    let functions = super::binary::functions_to_dtos(&binary_arc, &renames);
+    let functions = crate::commands::binary::functions_to_dtos(&binary_arc, &renames);
 
     Ok(functions)
 }

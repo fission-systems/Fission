@@ -12,6 +12,9 @@ mod cleanup;
 mod condition;
 mod loops;
 mod naming;
+pub mod pass;
+pub mod passes;
+pub mod registry;
 mod structure;
 mod switch_recon;
 #[cfg(test)]
@@ -102,7 +105,101 @@ impl PostProcessor {
         self
     }
 
-    /// Process the decompiler output to remove boilerplate
+    /// Process using the new trait-based pass system
+    ///
+    /// This is the recommended method - it uses the PassRegistry
+    /// for dynamic pass management and automatic dependency resolution.
+    pub fn process_with_registry(&self, code: &str) -> Result<String, String> {
+        use pass::PassContext;
+        
+        // Create a pass context with our configuration
+        let mut context = PassContext::new();
+        
+        // Add type information if available
+        if !self.inferred_types.is_empty() {
+            context.inferred_types = self.inferred_types.clone();
+        }
+        
+        // Add DWARF info if available
+        if let Some(ref dwarf) = self.dwarf_info {
+            context.dwarf_info = Some(dwarf.clone());
+        }
+        
+        // Create a registry with all passes
+        let mut pass_registry = registry::create_default_registry()?;
+        
+        // Disable passes based on options
+        if !self.options.clean_rust {
+            pass_registry.disable("remove_rust_boilerplate");
+        }
+        if !self.options.clean_go {
+            pass_registry.disable("remove_go_boilerplate");
+        }
+        if !self.options.swift_demangle {
+            pass_registry.disable("swift_demangle");
+        }
+        if !self.options.field_offsets {
+            pass_registry.disable("field_offset_replacement");
+        }
+        if !self.options.insert_casts {
+            pass_registry.disable("insert_missing_casts");
+        }
+        if !self.options.arithmetic_idioms {
+            pass_registry.disable("arithmetic_idioms");
+        }
+        if !self.options.deref_to_array {
+            pass_registry.disable("deref_to_array_index");
+        }
+        if !self.options.bitop_to_logicop {
+            pass_registry.disable("bitop_to_logicop");
+        }
+        if !self.options.remove_dead_branches {
+            pass_registry.disable("remove_constant_conditions");
+        }
+        if !self.options.simplify_if {
+            pass_registry.disable("simplify_if_structure");
+        }
+        if !self.options.while_to_for {
+            pass_registry.disable("while_true_to_cond");
+            pass_registry.disable("while_true_to_for");
+            pass_registry.disable("while_cond_to_for");
+            pass_registry.disable("do_while_to_for");
+            pass_registry.disable("while_true_to_for_ever");
+        }
+        if !self.options.dead_assign_removal {
+            pass_registry.disable("remove_dead_assignments");
+        }
+        if !self.options.rename_induction_vars {
+            pass_registry.disable("rename_induction_vars");
+        }
+        if !self.options.rename_semantic_vars {
+            pass_registry.disable("rename_semantic_vars");
+        }
+        if !self.options.loop_idioms {
+            pass_registry.disable("loop_idioms");
+        }
+        if !self.options.switch_reconstruction {
+            pass_registry.disable("switch_reconstruction");
+            pass_registry.disable("switch_from_if_else_assign");
+        }
+        if !self.options.mul_to_shift {
+            pass_registry.disable("mul_pow2_to_shift");
+        }
+        if !self.options.dwarf_names {
+            pass_registry.disable("apply_dwarf_names");
+        }
+        
+        // Execute all enabled passes with dependency resolution
+        pass_registry
+            .execute_all(code, &context)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Process the decompiler output to remove boilerplate (legacy method)
+    ///
+    /// This method uses the original direct method calling approach.
+    /// For new code, prefer [`process_with_registry`] which provides
+    /// better dependency management and extensibility.
     pub fn process(&self, code: &str) -> String {
         let mut processed = code.to_string();
 

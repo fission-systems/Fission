@@ -45,43 +45,55 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            // ===================================================================
+            // Binary Analysis Domain
+            // ===================================================================
+            // Binary loading & info
             commands::open_file,
-            commands::get_functions,
-            commands::decompile_function,
-            commands::get_assembly,
-            commands::get_strings,
             commands::get_binary_info,
-            // Phase 1: new commands
+            // Metadata extraction
+            commands::get_functions,
             commands::get_imports,
             commands::get_exports,
             commands::get_sections,
+            commands::get_strings,
+            // Hex editing
+            commands::get_hex_view,
+            commands::patch_bytes,
+            commands::save_patched_binary,
+            // Listing view
+            commands::get_listing_info,
+            commands::get_listing_chunk,
+            
+            // ===================================================================
+            // Code Analysis Domain
+            // ===================================================================
+            // Assembly & decompilation
+            commands::get_assembly,
+            commands::decompile_function,
+            // Control flow graph
+            commands::get_cfg,
+            commands::export_cfg_dot,
+            // Cross-references
+            commands::get_xrefs,
+            commands::get_string_xrefs,
+            // User annotations
             commands::rename_function,
             commands::add_comment,
             commands::get_comments,
             commands::toggle_bookmark,
             commands::get_bookmarks,
             commands::goto_address,
-            // Phase 2: hex / search / xrefs
-            commands::get_hex_view,
-            commands::patch_bytes,
-            commands::save_patched_binary,
-            commands::search_binary,
-            commands::get_xrefs,
-            // Phase 1b: project save/load + settings
-            commands::save_project,
-            commands::load_project,
-            commands::get_settings,
-            commands::save_settings,
-            commands::get_decompiler_options,
-            commands::apply_decompiler_options,
-            commands::clear_decompiler_cache,
-            // Phase 2: CFG analysis
-            commands::get_cfg,
-            commands::export_cfg_dot,
-            // Phase 3: Listing view
-            commands::get_listing_info,
-            commands::get_listing_chunk,
-            // Phase 4: Debug
+            // Function analysis & scanning
+            commands::analyze_functions,
+            commands::deep_scan_functions,
+            commands::run_fid,
+            commands::export_analysis_json,
+            
+            // ===================================================================
+            // Debugging Domain
+            // ===================================================================
+            // Runtime debugging
             commands::debug_get_state,
             commands::debug_attach,
             commands::debug_detach,
@@ -89,36 +101,43 @@ pub fn run() {
             commands::debug_step,
             commands::debug_add_breakpoint,
             commands::debug_remove_breakpoint,
-            // Phase 5: String XRefs
-            commands::get_string_xrefs,
-            // Phase 6: Analyze / Deep Scan
-            commands::analyze_functions,
-            commands::deep_scan_functions,
+            commands::debug_read_memory,
+            // Time-travel debugging
+            commands::ttd_start,
+            commands::ttd_stop,
+            commands::ttd_status,
+            commands::ttd_seek,
+            commands::ttd_step,
+            
+            // ===================================================================
+            // Workspace Domain
+            // ===================================================================
+            // Project management
+            commands::save_project,
+            commands::load_project,
+            commands::save_snapshot,
+            commands::load_snapshot,
+            commands::get_git_branch,
+            // Search
+            commands::search_binary,
+            // Settings
+            commands::get_settings,
+            commands::save_settings,
+            commands::get_decompiler_options,
+            commands::apply_decompiler_options,
+            commands::clear_decompiler_cache,
+            
+            // ===================================================================
+            // Extensions Domain
+            // ===================================================================
             // Plugin system
             commands::load_plugin,
             commands::unload_plugin,
             commands::list_plugins,
             commands::enable_plugin,
             commands::disable_plugin,
-            // Snapshot
-            commands::save_snapshot,
-            commands::load_snapshot,
-            // System utilities
-            commands::get_git_branch,
             // DevTools
             commands::toggle_devtools,
-            // Phase 3: Function Identification (FID)
-            commands::run_fid,
-            // Phase 8: Analysis JSON Export
-            commands::export_analysis_json,
-            // Phase 4: Debug Memory Dump
-            commands::debug_read_memory,
-            // Phase 5: TTD (Time Travel Debugging)
-            commands::ttd_start,
-            commands::ttd_stop,
-            commands::ttd_status,
-            commands::ttd_seek,
-            commands::ttd_step,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

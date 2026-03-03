@@ -93,3 +93,69 @@
 - 디버거/다이내믹 분석: `docs/idea/debugger.md`
 - GUI 전환/UX: `docs/gui/GUI_GUIDE.md`, `docs/idea/gui.md`
 
+---
+
+## 6. 아키텍처 개선 프로젝트 (완료)
+
+### Phase 1-4: 모듈화 및 중앙화 ✅ (완료 - 2024)
+
+- ✅ **Phase 1**: PostProcessors.cc 모듈화 (C++ → Rust 이전 준비)
+- ✅ **Phase 2.1**: CFG 분석 모듈화 (핵심 로직 분리)
+- ✅ **Phase 2.2**: FFI 레이어 단순화 (안정적인 경계)
+- ✅ **Phase 3.1**: DWARF 파서 모듈화 (타입 정보 처리 개선)
+- ✅ **Phase 3.2**: FFI crate 모듈화 (관심사 분리)
+- ✅ **Phase 4**: Regex 패턴 라이브러리 중앙화 (일관성 및 재사용성)
+
+**Commit**: `0217f44` - 167 files changed, 9112 insertions(+), 5382 deletions(-)
+
+### Phase 5: 확장 가능한 인터페이스 ✅ (완료 - 2024)
+
+- ✅ **Phase 5.1**: Tauri 커맨드 그룹화
+  - 17개 명령 파일 → 5개 도메인으로 정리:
+    - `binary/` (4 files): binary, metadata, hex, listing
+    - `analysis/` (5 files): assembly, cfg, xrefs, annotations, analysis
+    - `debugging/` (2 files): debug, ttd
+    - `workspace/` (3 files): project, search, settings
+    - `extensions/` (2 files): plugins, devtools
+  - 51개 커맨드를 도메인별로 체계화
+  
+- ✅ **Phase 5.2**: Pass Trait 시스템
+  - **핵심 구현**:
+    - `PostProcessPass` trait: 모든 후처리 패스의 공통 인터페이스
+    - `PassRegistry`: 의존성 해결 및 실행 순서 관리 (Topological Sort)
+    - `PassContext`: 타입 정보, DWARF 데이터 등 공유 상태 관리
+    - `PassCategory`: 6가지 카테고리 (Arithmetic, ControlFlow, Naming, Cleanup, LanguageSpecific, TypeBased)
+  - **22개 Concrete Pass 구현**:
+    - Language-Specific (3): Rust/Go boilerplate 제거, Swift 디맹글링
+    - Type-Based (3): 필드 오프셋 교체, 타입 캐스트 삽입, DWARF 이름 적용
+    - Arithmetic (2): 산술 관용구 인식, 2의 거듭제곱 곱셈 → 쉬프트
+    - Cleanup (4): 배열 인덱싱, 비트 연산 → 논리 연산, 상수 조건 제거, 데드 코드 제거
+    - Control Flow (8): while → for 변환, switch 재구성, if 구조 단순화
+    - Naming (3): 귀납 변수명 변경, 의미론적 변수명 변경, 루프 관용구 인식
+  - **통합**:
+    - `PostProcessor::process_with_registry()`: 새로운 trait 기반 실행 (권장)
+    - `PostProcessor::process()`: 레거시 호환성 유지
+    - 런타임 pass 활성화/비활성화 지원
+    - 자동 의존성 해결 및 실행 순서 최적화
+  - **문서화**: [`docs/analysis/PASS_SYSTEM.md`](analysis/PASS_SYSTEM.md) 추가
+  - **테스트**: 모든 유닛 테스트 통과 (pass, registry 모듈)
+
+**향후 가능성**:
+- 플러그인 아키텍처: 동적 라이브러리에서 패스 로드
+- 설정 파일: TOML/JSON 기반 pass 구성
+- 메트릭 수집: 패스 실행 시간 통계
+- 병렬 실행: 독립적인 패스를 병렬로 실행
+- 캐싱: 변경되지 않은 코드에 대한 패스 결과 캐싱
+
+### Phase 6-7: 품질 및 문서화 (예정)
+
+- ⬜ **Phase 6**: 테스트 인프라
+  - 통합 테스트 확장
+  - 벤치마크 및 성능 테스트
+  - 회귀 테스트 자동화
+  
+- ⬜ **Phase 7**: 문서 및 메트릭
+  - API 문서 완성
+  - 아키텍처 다이어그램
+  - 성능 메트릭 수집
+
