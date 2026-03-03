@@ -2,6 +2,7 @@ use super::PostProcessor;
 use crate::utils::patterns::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::borrow::Cow;
 
 /// Pattern for Rust overflow checks
 static RUST_OVERFLOW_PATTERN: Lazy<Regex> = Lazy::new(|| {
@@ -94,31 +95,44 @@ impl PostProcessor {
     // A-1: Deref → Array Index (RetDec deref_to_array_index_optimizer.cpp)
     //   *(a + N)  →  a[N]     *(N + a)  →  a[N]
     // =========================================================================
-    pub(super) fn deref_to_array_index(code: &str) -> String {
+    pub(super) fn deref_to_array_index_cow<'a>(code: &'a str) -> Cow<'a, str> {
         // *(var + N)  →  var[N]
         // *(N + var)  →  var[N]  (commutative)
 
-        let mut result = BASE_ARRAY_ACCESS
-            .replace_all(code, |caps: &regex::Captures| {
-                let base = &caps["base"];
-                let idx = &caps["idx"];
-                // Don't transform if base looks like a cast expression
-                if base.starts_with('(') {
-                    return caps[0].to_string();
-                }
-                format!("{}[{}]", base, idx)
-            })
-            .to_string();
+        let mut result = Cow::Borrowed(code);
 
-        result = REV_ARRAY_ACCESS
-            .replace_all(&result, |caps: &regex::Captures| {
-                let base = &caps["base"];
-                let idx = &caps["idx"];
-                format!("{}[{}]", base, idx)
-            })
-            .to_string();
+        if BASE_ARRAY_ACCESS.is_match(result.as_ref()) {
+            result = Cow::Owned(
+                BASE_ARRAY_ACCESS
+                    .replace_all(result.as_ref(), |caps: &regex::Captures| {
+                        let base = &caps["base"];
+                        let idx = &caps["idx"];
+                        if base.starts_with('(') {
+                            return caps[0].to_string();
+                        }
+                        format!("{}[{}]", base, idx)
+                    })
+                    .to_string(),
+            );
+        }
+
+        if REV_ARRAY_ACCESS.is_match(result.as_ref()) {
+            result = Cow::Owned(
+                REV_ARRAY_ACCESS
+                    .replace_all(result.as_ref(), |caps: &regex::Captures| {
+                        let base = &caps["base"];
+                        let idx = &caps["idx"];
+                        format!("{}[{}]", base, idx)
+                    })
+                    .to_string(),
+            );
+        }
 
         result
+    }
+
+    pub(super) fn deref_to_array_index(code: &str) -> String {
+        Self::deref_to_array_index_cow(code).into_owned()
     }
 
     // =========================================================================
@@ -128,7 +142,7 @@ impl PostProcessor {
     // Only when both sides are comparison expressions.
     // (RetDec bit_op_to_log_op_optimizer.cpp)
     // =========================================================================
-    pub(super) fn bitop_to_logicop(code: &str) -> String {
+    pub(super) fn bitop_to_logicop_cow<'a>(code: &'a str) -> Cow<'a, str> {
         // Match (comparison) & (comparison)  →  (comparison) && (comparison)
         static BIT_AND_TO_LOG_AND: Lazy<Regex> = Lazy::new(|| {
             Regex::new(concat!(
@@ -148,19 +162,35 @@ impl PostProcessor {
             .unwrap_or_else(|e| panic!("invalid BIT_OR_TO_LOG_OR regex: {e}"))
         });
 
-        let result = BIT_AND_TO_LOG_AND
-            .replace_all(code, |caps: &regex::Captures| {
-                let full = &caps[0];
-                full.replacen(") &", ") &&", 1)
-            })
-            .to_string();
+        let mut result = Cow::Borrowed(code);
 
-        BIT_OR_TO_LOG_OR
-            .replace_all(&result, |caps: &regex::Captures| {
-                let full = &caps[0];
-                full.replacen(") |", ") ||", 1)
-            })
-            .to_string()
+        if BIT_AND_TO_LOG_AND.is_match(result.as_ref()) {
+            result = Cow::Owned(
+                BIT_AND_TO_LOG_AND
+                    .replace_all(result.as_ref(), |caps: &regex::Captures| {
+                        let full = &caps[0];
+                        full.replacen(") &", ") &&", 1)
+                    })
+                    .to_string(),
+            );
+        }
+
+        if BIT_OR_TO_LOG_OR.is_match(result.as_ref()) {
+            result = Cow::Owned(
+                BIT_OR_TO_LOG_OR
+                    .replace_all(result.as_ref(), |caps: &regex::Captures| {
+                        let full = &caps[0];
+                        full.replacen(") |", ") ||", 1)
+                    })
+                    .to_string(),
+            );
+        }
+
+        result
+    }
+
+    pub(super) fn bitop_to_logicop(code: &str) -> String {
+        Self::bitop_to_logicop_cow(code).into_owned()
     }
 
     // =========================================================================
@@ -170,7 +200,7 @@ impl PostProcessor {
     //   while (false)        → remove
     //   Empty else { }       → remove
     // =========================================================================
-    pub(super) fn remove_constant_conditions(code: &str) -> String {
+    pub(super) fn remove_constant_conditions_cow<'a>(code: &'a str) -> Cow<'a, str> {
         let mut result = code.to_string();
 
         fn has_nested_braces(s: &str) -> bool {
@@ -230,7 +260,15 @@ impl PostProcessor {
             })
             .to_string();
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
+    pub(super) fn remove_constant_conditions(code: &str) -> String {
+        Self::remove_constant_conditions_cow(code).into_owned()
     }
 
     // =========================================================================
@@ -242,7 +280,7 @@ impl PostProcessor {
     // no side effects (no function call), the assignment is dead and removed.
     // Run twice to handle cascading dead assignments.
     // =========================================================================
-    pub(super) fn remove_dead_local_assigns(code: &str) -> String {
+    pub(super) fn remove_dead_local_assigns_cow<'a>(code: &'a str) -> Cow<'a, str> {
         let mut var_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for cap in LOCAL_VAR_PATTERN.find_iter(code) {
@@ -270,8 +308,12 @@ impl PostProcessor {
         }
 
         if !changed {
-            return code.to_string();
+            return Cow::Borrowed(code);
         }
-        result_lines.join("\n")
+        Cow::Owned(result_lines.join("\n"))
+    }
+
+    pub(super) fn remove_dead_local_assigns(code: &str) -> String {
+        Self::remove_dead_local_assigns_cow(code).into_owned()
     }
 }

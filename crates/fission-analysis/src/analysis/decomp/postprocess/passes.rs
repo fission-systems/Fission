@@ -77,7 +77,7 @@ impl PostProcessPass for WhileTrueToCondPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::while_true_to_while_cond(code))
+        Ok(PostProcessor::while_true_to_while_cond_cow(code))
     }
 }
 
@@ -175,7 +175,7 @@ impl PostProcessPass for SimplifyIfStructurePass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::simplify_if_structure(code))
+        Ok(PostProcessor::simplify_if_structure_cow(code))
     }
 }
 
@@ -237,7 +237,7 @@ impl PostProcessPass for RemoveConstantConditionsPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::remove_constant_conditions(code))
+        Ok(PostProcessor::remove_constant_conditions_cow(code))
     }
 }
 
@@ -264,11 +264,20 @@ impl PostProcessPass for RemoveDeadAssignmentsPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        let mut result = code.to_string();
-        for _ in 0..self.iterations {
-            result = PostProcessor::remove_dead_local_assigns(&result);
+        if self.iterations == 0 {
+            return Ok(Cow::Borrowed(code));
         }
-        pass_output(code, result)
+
+        let first = PostProcessor::remove_dead_local_assigns_cow(code);
+        if self.iterations == 1 {
+            return Ok(first);
+        }
+
+        let mut owned = first.into_owned();
+        for _ in 1..self.iterations {
+            owned = PostProcessor::remove_dead_local_assigns_cow(&owned).into_owned();
+        }
+        pass_output(code, owned)
     }
 }
 
@@ -286,7 +295,7 @@ impl PostProcessPass for DerefToArrayIndexPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::deref_to_array_index(code))
+        Ok(PostProcessor::deref_to_array_index_cow(code))
     }
 }
 
@@ -304,7 +313,7 @@ impl PostProcessPass for BitopToLogicopPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::bitop_to_logicop(code))
+        Ok(PostProcessor::bitop_to_logicop_cow(code))
     }
 }
 

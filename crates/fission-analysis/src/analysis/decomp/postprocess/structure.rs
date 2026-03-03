@@ -3,6 +3,7 @@ use super::condition::negate_condition;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use crate::utils::patterns::*;
+use std::borrow::Cow;
 
 impl PostProcessor {
     // =========================================================================
@@ -10,7 +11,7 @@ impl PostProcessor {
     //   Pattern 1: if (c) { return X; } else { S; }  →  if (c) { return X; } S;
     //   Pattern 2: Empty else removal:  } else { }  →  }
     // =========================================================================
-    pub(super) fn simplify_if_structure(code: &str) -> String {
+    pub(super) fn simplify_if_structure_cow<'a>(code: &'a str) -> Cow<'a, str> {
         let mut result = code.to_string();
 
         // Pattern 1: if (c) { ... return ...; } else { BODY }  →  if (c) { ... return ...; } BODY
@@ -41,7 +42,15 @@ impl PostProcessor {
 
         result = EMPTY_ELSE.replace_all(&result, "}").to_string();
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
+    pub(super) fn simplify_if_structure(code: &str) -> String {
+        Self::simplify_if_structure_cow(code).into_owned()
     }
 
     // =========================================================================
@@ -50,7 +59,7 @@ impl PostProcessor {
     //   Only when the break-if is the FIRST statement in the loop body.
     // (RetDec while_true_to_while_cond_optimizer.cpp)
     // =========================================================================
-    pub(super) fn while_true_to_while_cond(code: &str) -> String {
+    pub(super) fn while_true_to_while_cond_cow<'a>(code: &'a str) -> Cow<'a, str> {
         static WHILE_TRUE_BREAK: Lazy<Regex> = Lazy::new(|| {
             Regex::new(concat!(
                 r"(?P<indent>\s*)while\s*\(\s*(?:true|1)\s*\)\s*\{\s*\n",
@@ -61,15 +70,25 @@ impl PostProcessor {
             .unwrap_or_else(|e| panic!("invalid WHILE_TRUE_BREAK regex: {e}"))
         });
 
-        WHILE_TRUE_BREAK
-            .replace_all(code, |caps: &regex::Captures| {
-                let indent = &caps["indent"];
-                let cond = caps["cond"].trim();
-                let body = &caps["body"];
-                let close_indent = &caps["close_indent"];
-                let negated = negate_condition(cond);
-                format!("{}while ({}) {{\n{}\n{}}}", indent, negated, body, close_indent)
-            })
-            .to_string()
+        if !WHILE_TRUE_BREAK.is_match(code) {
+            return Cow::Borrowed(code);
+        }
+
+        Cow::Owned(
+            WHILE_TRUE_BREAK
+                .replace_all(code, |caps: &regex::Captures| {
+                    let indent = &caps["indent"];
+                    let cond = caps["cond"].trim();
+                    let body = &caps["body"];
+                    let close_indent = &caps["close_indent"];
+                    let negated = negate_condition(cond);
+                    format!("{}while ({}) {{\n{}\n{}}}", indent, negated, body, close_indent)
+                })
+                .to_string(),
+        )
+    }
+
+    pub(super) fn while_true_to_while_cond(code: &str) -> String {
+        Self::while_true_to_while_cond_cow(code).into_owned()
     }
 }
