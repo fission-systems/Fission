@@ -335,7 +335,7 @@ impl PostProcessPass for RenameInductionVarsPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::rename_induction_vars(code))
+        Ok(PostProcessor::rename_induction_vars_cow(code))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -357,7 +357,7 @@ impl PostProcessPass for RenameSemanticVarsPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        pass_output(code, PostProcessor::rename_semantic_vars(code))
+        Ok(PostProcessor::rename_semantic_vars_cow(code))
     }
 }
 

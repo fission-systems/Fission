@@ -1,6 +1,7 @@
 use crate::analysis::decomp::postprocess::PostProcessor;
 use crate::utils::patterns::*;
 use fission_loader::loader::types::DwarfLocation;
+use std::borrow::Cow;
 
 impl PostProcessor {
     /// Replace pointer offset accesses with field names
@@ -161,7 +162,7 @@ impl PostProcessor {
     // in for-loop headers to i, j, k, l, m, n based on nesting order.
     // Avoids collision with already-used identifiers.
     // =========================================================================
-    pub(super) fn rename_induction_vars(code: &str) -> String {
+    pub(super) fn rename_induction_vars_cow<'a>(code: &'a str) -> Cow<'a, str> {
         let candidate_names = ["i", "j", "k", "l", "m", "n"];
 
         let mut used_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -178,7 +179,7 @@ impl PostProcessor {
         }
 
         if induction_vars.is_empty() {
-            return code.to_string();
+            return Cow::Borrowed(code);
         }
 
         let mut result = code.to_string();
@@ -210,7 +211,15 @@ impl PostProcessor {
             }
         }
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
+    pub(super) fn rename_induction_vars(code: &str) -> String {
+        Self::rename_induction_vars_cow(code).into_owned()
     }
 
     // =========================================================================
@@ -221,7 +230,7 @@ impl PostProcessor {
     //  2. Single return-value temp → "result"
     //  3. API result naming: var = malloc(...) → ptr, strlen() → len, etc.
     // =========================================================================
-    pub(super) fn rename_semantic_vars(code: &str) -> String {
+    pub(super) fn rename_semantic_vars_cow<'a>(code: &'a str) -> Cow<'a, str> {
         let mut result = code.to_string();
 
         if MAIN_FUNC.is_match(&result) {
@@ -318,7 +327,15 @@ impl PostProcessor {
             }
         }
 
-        result
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
+    pub(super) fn rename_semantic_vars(code: &str) -> String {
+        Self::rename_semantic_vars_cow(code).into_owned()
     }
 
     /// Apply DWARF debug info to substitute parameter and local variable names.
