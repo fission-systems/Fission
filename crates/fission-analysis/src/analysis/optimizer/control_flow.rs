@@ -202,7 +202,9 @@ mod tests {
             left: Box::new(Expr::Var("x".to_string())),
             right: Box::new(Expr::Var("y".to_string())),
         };
-        let inverted = try_invert_comparison(&expr).unwrap();
+        let Some(inverted) = try_invert_comparison(&expr) else {
+            panic!("comparison inversion should succeed")
+        };
         if let Expr::BinOp { op, .. } = inverted {
             assert_eq!(op, BinOpKind::Ge);
         } else {

@@ -334,9 +334,15 @@ mod tests {
     fn test_dependency_resolution() {
         let mut registry = PassRegistry::new();
         
-        registry.register(Box::new(TestPass { id: "a", deps: vec![] })).unwrap();
-        registry.register(Box::new(TestPass { id: "b", deps: vec!["a"] })).unwrap();
-        registry.register(Box::new(TestPass { id: "c", deps: vec!["b"] })).unwrap();
+        assert!(registry
+            .register(Box::new(TestPass { id: "a", deps: vec![] }))
+            .is_ok());
+        assert!(registry
+            .register(Box::new(TestPass { id: "b", deps: vec!["a"] }))
+            .is_ok());
+        assert!(registry
+            .register(Box::new(TestPass { id: "c", deps: vec!["b"] }))
+            .is_ok());
         
         assert_eq!(registry.execution_order, vec!["a", "b", "c"]);
     }
@@ -347,7 +353,9 @@ mod tests {
         
         // This would create a cycle, but our simplified test doesn't allow it
         // In real implementation, we'd need to detect this
-        registry.register(Box::new(TestPass { id: "a", deps: vec![] })).unwrap();
+        assert!(registry
+            .register(Box::new(TestPass { id: "a", deps: vec![] }))
+            .is_ok());
         
         // Can't easily test circular deps with current structure without
         // more complex setup, so this is a placeholder

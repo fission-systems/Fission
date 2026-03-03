@@ -433,9 +433,15 @@ mod tests {
         let order = cfg.bfs();
         assert_eq!(order[0], 0); // Entry first
         // Blocks 1 and 2 should come before 3
-        let idx_1 = order.iter().position(|&x| x == 1).unwrap();
-        let idx_2 = order.iter().position(|&x| x == 2).unwrap();
-        let idx_3 = order.iter().position(|&x| x == 3).unwrap();
+        let Some(idx_1) = order.iter().position(|&x| x == 1) else {
+            panic!("block 1 should be present in BFS order")
+        };
+        let Some(idx_2) = order.iter().position(|&x| x == 2) else {
+            panic!("block 2 should be present in BFS order")
+        };
+        let Some(idx_3) = order.iter().position(|&x| x == 3) else {
+            panic!("block 3 should be present in BFS order")
+        };
         assert!(idx_1 < idx_3);
         assert!(idx_2 < idx_3);
     }

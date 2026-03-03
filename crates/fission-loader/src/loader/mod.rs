@@ -302,7 +302,9 @@ mod tests {
     #[test]
     fn test_parse_self() {
         // Parse the test executable itself
-        let exe_path = std::env::current_exe().unwrap();
+        let Ok(exe_path) = std::env::current_exe() else {
+            panic!("current_exe should be available in tests")
+        };
         let result = LoadedBinary::from_file(&exe_path);
 
         if let Ok(binary) = result {
@@ -349,7 +351,9 @@ mod tests {
                     is_writable: false,
                 });
 
-        let binary = builder.build().expect("Failed to build LoadedBinary");
+        let Ok(binary) = builder.build() else {
+            panic!("Failed to build LoadedBinary")
+        };
 
         assert_eq!(binary.path, "test.bin");
         assert_eq!(binary.data.as_slice().len(), 100);
@@ -360,7 +364,9 @@ mod tests {
         assert_eq!(binary.sections.len(), 1);
         assert!(binary.global_symbols.is_empty());
 
-        let func = binary.find_function("main").unwrap();
+        let Some(func) = binary.find_function("main") else {
+            panic!("main function should exist")
+        };
         assert_eq!(func.address, 0x1000);
     }
 
@@ -405,7 +411,9 @@ mod tests {
                     is_writable: false,
                 });
 
-        let binary = builder.build().expect("Failed to build LoadedBinary");
+        let Ok(binary) = builder.build() else {
+            panic!("Failed to build LoadedBinary")
+        };
 
         // Test find_function by name (O(1) lookup)
         assert!(binary.find_function("func_a").is_some());
@@ -415,17 +423,37 @@ mod tests {
 
         // Test function_at_exact (O(1) lookup)
         assert!(binary.function_at_exact(0x1000).is_some());
-        assert_eq!(binary.function_at_exact(0x1000).unwrap().name, "func_a");
+        if let Some(func) = binary.function_at_exact(0x1000) {
+            assert_eq!(func.name, "func_a");
+        } else {
+            panic!("function_at_exact(0x1000) should return func_a");
+        }
         assert!(binary.function_at_exact(0x1100).is_some());
-        assert_eq!(binary.function_at_exact(0x1100).unwrap().name, "func_b");
+        if let Some(func) = binary.function_at_exact(0x1100) {
+            assert_eq!(func.name, "func_b");
+        } else {
+            panic!("function_at_exact(0x1100) should return func_b");
+        }
         assert!(binary.function_at_exact(0x1050).is_none()); // Not at start of function
 
         // Test function_at with range check (exact match is O(1), range check is O(N))
         assert!(binary.function_at(0x1000).is_some());
-        assert_eq!(binary.function_at(0x1000).unwrap().name, "func_a");
+        if let Some(func) = binary.function_at(0x1000) {
+            assert_eq!(func.name, "func_a");
+        } else {
+            panic!("function_at(0x1000) should return func_a");
+        }
         assert!(binary.function_at(0x1020).is_some()); // Inside func_a (size=50)
-        assert_eq!(binary.function_at(0x1020).unwrap().name, "func_a");
+        if let Some(func) = binary.function_at(0x1020) {
+            assert_eq!(func.name, "func_a");
+        } else {
+            panic!("function_at(0x1020) should return func_a");
+        }
         assert!(binary.function_at(0x1150).is_some()); // Inside func_b (size=100)
-        assert_eq!(binary.function_at(0x1150).unwrap().name, "func_b");
+        if let Some(func) = binary.function_at(0x1150) {
+            assert_eq!(func.name, "func_b");
+        } else {
+            panic!("function_at(0x1150) should return func_b");
+        }
     }
 }

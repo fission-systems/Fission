@@ -363,7 +363,9 @@ mod tests {
     #[test]
     fn test_dominator_computation() {
         let cfg = create_diamond_cfg();
-        let dom_tree = DominatorTree::compute(&cfg).unwrap();
+        let Ok(dom_tree) = DominatorTree::compute(&cfg) else {
+            panic!("dominator tree computation should succeed")
+        };
 
         // Block 0 dominates all blocks
         assert!(dom_tree.dominates(0, 0));
@@ -384,7 +386,9 @@ mod tests {
     #[test]
     fn test_dominance_frontier() {
         let cfg = create_diamond_cfg();
-        let dom_tree = DominatorTree::compute(&cfg).unwrap();
+        let Ok(dom_tree) = DominatorTree::compute(&cfg) else {
+            panic!("dominator tree computation should succeed")
+        };
 
         // Block 3 should be in the dominance frontier of blocks 1 and 2
         let df1 = dom_tree.get_dominance_frontier(1);

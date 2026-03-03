@@ -192,7 +192,7 @@ mod tests {
                 .image_base(0)
                 .is_64bit(true)
                 .build()
-                .expect("failed to build test LoadedBinary");
+                .unwrap_or_else(|_| panic!("failed to build test LoadedBinary"));
 
         let analyzer = DwarfAnalyzer::new(&binary);
         assert!(!analyzer.has_debug_info());

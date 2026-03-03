@@ -586,7 +586,9 @@ mod tests {
         }
 
         assert!(result.is_ok());
-        let bin = result.unwrap();
+        let Ok(bin) = result else {
+            panic!("PE parsing should succeed")
+        };
         assert_eq!(bin.format, "PE (binrw)");
         assert_eq!(bin.sections.len(), 1);
         assert_eq!(bin.sections[0].name, ".text");

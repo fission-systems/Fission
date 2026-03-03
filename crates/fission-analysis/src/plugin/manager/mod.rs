@@ -48,7 +48,7 @@ mod tests {
 
         // Note: register_native_plugin calls on_load ONLY if API is set.
         // For this test we just register it and check it exists.
-        pm.register_native_plugin(Box::new(plugin)).unwrap();
+        assert!(pm.register_native_plugin(Box::new(plugin)).is_ok());
 
         assert_eq!(pm.plugin_count(), 1);
         assert!(pm.get_plugin("mock").is_some());
@@ -79,16 +79,16 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_clone = counter.clone();
 
-        let hook_id = pm
-            .register_hook(
-                &plugin_id,
-                FissionEventType::AppStarted,
-                HookPriority::Normal,
-                move |_| {
-                    counter_clone.fetch_add(1, Ordering::SeqCst);
-                },
-            )
-            .unwrap();
+        let Ok(hook_id) = pm.register_hook(
+            &plugin_id,
+            FissionEventType::AppStarted,
+            HookPriority::Normal,
+            move |_| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+            },
+        ) else {
+            panic!("register_hook should succeed")
+        };
 
         assert_eq!(pm.hook_count(), 1);
 
@@ -97,7 +97,7 @@ mod tests {
         assert_eq!(counter.load(Ordering::SeqCst), 1);
 
         // Unregister hook
-        pm.unregister_hook(hook_id).unwrap();
+        assert!(pm.unregister_hook(hook_id).is_ok());
         assert_eq!(pm.hook_count(), 0);
     }
 
@@ -170,7 +170,7 @@ mod tests {
         let plugin = EventBusPlugin {
             id: "eb_plugin".into(),
         };
-        pm.register_native_plugin(Box::new(plugin)).unwrap();
+        assert!(pm.register_native_plugin(Box::new(plugin)).is_ok());
 
         assert_eq!(counter.load(Ordering::SeqCst), 1);
     }

@@ -36,7 +36,8 @@ impl PostProcessor {
             stmt: String,
         }
 
-        let close_brace_only = Regex::new(r"^\s*\}\s*$").unwrap();
+        let close_brace_only = Regex::new(r"^\s*\}\s*$")
+            .unwrap_or_else(|e| panic!("close_brace_only regex should compile: {}", e));
 
         let mut result_lines: Vec<String> = Vec::new();
         let mut i = 0;

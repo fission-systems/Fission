@@ -220,7 +220,8 @@ impl PostProcessor {
                 r"(?P<magic>0x[0-9a-fA-F]+)\s*>>\s*0x20\s*\)\s*",
                 r"(?:>>\s*(?P<shift>0x[0-9a-fA-F]+|\d+)\s*)?",
                 r"\+\s*\(\s*(?P<v2>[\w\->\.\*]+)\s*>>\s*0x1[fF]\s*\)",
-            )).unwrap()
+            ))
+            .unwrap_or_else(|e| panic!("SIGNED_MAGIC_DIV regex should compile: {}", e))
         });
 
         result = SIGNED_MAGIC_DIV
@@ -259,7 +260,8 @@ impl PostProcessor {
                 r"\+\s*(?P<v2>[\w\->\.\*]+)\s*\)\s*",
                 r">>\s*(?P<shift>0x[0-9a-fA-F]+|\d+)\s*",
                 r"\+\s*\(\s*(?P<v3>[\w\->\.\*]+)\s*>>\s*0x1[fF]\s*\)",
-            )).unwrap()
+            ))
+            .unwrap_or_else(|e| panic!("SIGNED_MAGIC_DIV_FIXUP regex should compile: {}", e))
         });
 
         result = SIGNED_MAGIC_DIV_FIXUP

@@ -353,7 +353,9 @@ mod tests {
         cfg.entry_block = 0;
         cfg.exit_blocks = vec![3];
 
-        let dom_tree = DominatorTree::compute(&cfg).unwrap();
+        let Ok(dom_tree) = DominatorTree::compute(&cfg) else {
+            panic!("dominator tree computation should succeed")
+        };
         (cfg, dom_tree)
     }
 

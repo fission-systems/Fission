@@ -536,7 +536,9 @@ if (x > 0) {
         assert_eq!(stmts.len(), 1);
         if let Stmt::If { then_block, else_block, .. } = &stmts[0] {
             assert_eq!(then_block.len(), 1);
-            let eb = else_block.as_ref().expect("should have else block");
+            let Some(eb) = else_block.as_ref() else {
+                panic!("should have else block")
+            };
             assert_eq!(eb.len(), 1);
         } else {
             panic!("Expected If statement");

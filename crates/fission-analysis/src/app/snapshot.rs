@@ -85,10 +85,12 @@ mod tests {
         let path = temp_dir.join("fission_test_snapshot.rkyv");
 
         // Save
-        save_snapshot(&binary, &path).expect("Failed to save snapshot");
+        assert!(save_snapshot(&binary, &path).is_ok());
 
         // Load
-        let loaded = load_snapshot(&path).expect("Failed to load snapshot");
+        let Ok(loaded) = load_snapshot(&path) else {
+            panic!("Failed to load snapshot")
+        };
 
         // Verify key fields
         assert_eq!(loaded.inner().path, inner.path);

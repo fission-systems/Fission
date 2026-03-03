@@ -119,7 +119,9 @@ mod tests {
         let registry = create_default_registry();
         assert!(registry.is_ok());
         
-        let registry = registry.unwrap();
+        let Ok(registry) = registry else {
+            panic!("default registry creation should succeed")
+        };
         let passes = registry.list_passes();
         
         // Should have all passes registered

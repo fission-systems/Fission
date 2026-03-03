@@ -26,7 +26,10 @@ impl PostProcessor {
 
         // Regex patterns
         static INIT_ASSIGN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$").unwrap());
+            Lazy::new(|| {
+                Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
+                    .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
+            });
 
         while i < lines.len() {
             // Check for while(true) { preceded by init assignment
@@ -163,10 +166,13 @@ impl PostProcessor {
             Regex::new(
                 r"^(\s*)while\s*\((.+?)\s*(<=|<|>=|>|!=)\s*(.+?)\)\s*\{\s*$",
             )
-            .unwrap()
+            .unwrap_or_else(|e| panic!("WHILE_COND regex should compile: {}", e))
         });
         static INIT_ASSIGN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$").unwrap());
+            Lazy::new(|| {
+                Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
+                    .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
+            });
 
         let lines: Vec<&str> = code.lines().collect();
         let mut result_lines: Vec<String> = Vec::new();
@@ -328,7 +334,7 @@ impl PostProcessor {
                 r"while\s*\(\s*\*\s*(?P<ptr>[\w\->\.\[\]]+)\s*!=\s*(?:0|'\\0')\s*\)\s*\{\s*",
                 r"(?P<upd>[\w\->\.\[\]]+)\s*=\s*(?P<upd2>[\w\->\.\[\]]+)\s*\+\s*1\s*;\s*\}",
             ))
-            .unwrap()
+            .unwrap_or_else(|e| panic!("STRLEN_LOOP regex should compile: {}", e))
         });
 
         result = STRLEN_LOOP
@@ -354,7 +360,7 @@ impl PostProcessor {
                 r"(?P<val2>\w+)\s*=\s*(?P<val3>\w+)\s*&\s*",
                 r"(?:(?P<val4>\w+)\s*-\s*1|\(\s*(?P<val5>\w+)\s*-\s*1\s*\))\s*;\s*\}",
             ))
-            .unwrap()
+            .unwrap_or_else(|e| panic!("POPCOUNT_LOOP regex should compile: {}", e))
         });
 
         result = POPCOUNT_LOOP
@@ -389,7 +395,7 @@ impl PostProcessor {
                 r"(?P<iv3>\w+)\s*(?:\+\+|=\s*(?P<iv4>\w+)\s*\+\s*1)\s*\)\s*\{\s*",
                 r"(?P<buf>\w+)\s*\[\s*(?P<iv5>\w+)\s*\]\s*=\s*(?P<val>0|'\\0')\s*;\s*\}",
             ))
-            .unwrap()
+            .unwrap_or_else(|e| panic!("MEMSET_LOOP regex should compile: {}", e))
         });
 
         result = MEMSET_LOOP
@@ -423,7 +429,10 @@ impl PostProcessor {
     /// → for (VAR = INIT; VAR op LIMIT; VAR++) { BODY; }
     pub(super) fn do_while_to_for(code: &str) -> String {
         static INIT_ASSIGN: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^(\s*)(\w+)\s*=\s*([^;]+);\s*$").unwrap());
+            Lazy::new(|| {
+                Regex::new(r"^(\s*)(\w+)\s*=\s*([^;]+);\s*$")
+                    .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
+            });
 
         let lines: Vec<&str> = code.lines().collect();
         if lines.len() < 4 {
@@ -485,9 +494,9 @@ impl PostProcessor {
                 let mut inc_expr = String::new(); // the full increment expression for the for-header
                 // Pattern for incrementing with indent (compile-time constants)
                 let inc_pp_local = Regex::new(r"^(\s*)(\w+)\+\+;\s*$")
-                    .expect("hardcoded regex should compile");
+                    .unwrap_or_else(|e| panic!("inc_pp_local regex should compile: {}", e));
                 let inc_pe_local = Regex::new(r"^(\s*)(\w+)\s*\+=\s*([^;]+);\s*$")
-                    .expect("hardcoded regex should compile");
+                    .unwrap_or_else(|e| panic!("inc_pe_local regex should compile: {}", e));
                 for k in (body_start..body_end).rev() {
                     if let Some(c) = inc_pp_local.captures(lines[k])
                         && c[2] == cond_var
