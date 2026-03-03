@@ -3,7 +3,7 @@
 //! Provides convenient functions to create a fully-configured PassRegistry
 //! with all available passes registered.
 
-use super::pass::{PassContext, PassRegistry};
+use super::pass::{PassContext, PassExecutionStats, PassRegistry};
 use super::passes::*;
 
 /// Create a PassRegistry with all available passes registered
@@ -90,6 +90,18 @@ pub fn execute_default_passes(code: &str, context: &PassContext) -> Result<Strin
         .map_err(|e| e.to_string())
 }
 
+/// Execute all passes using the default configuration and return execution stats.
+pub fn execute_default_passes_with_stats(
+    code: &str,
+    context: &PassContext,
+) -> Result<(String, PassExecutionStats), String> {
+    let registry = create_default_registry()?;
+    registry
+        .execute_all_with_stats(code, context)
+        .map(|(output, stats)| (output.into_owned(), stats))
+        .map_err(|e| e.to_string())
+}
+
 /// Create a PassRegistry with only specific categories enabled
 pub fn create_registry_for_categories(
     categories: &[super::pass::PassCategory],
@@ -158,5 +170,18 @@ int test() {
         
         assert!(result.is_ok());
         // Should have transformed while(true) to for loop or while(x <= 10)
+    }
+
+    #[test]
+    fn test_execute_default_passes_with_stats() {
+        let code = "int noop(){ return 0; }";
+        let context = PassContext::new();
+        let result = execute_default_passes_with_stats(code, &context);
+
+        assert!(result.is_ok());
+        let Ok((_output, stats)) = result else {
+            panic!("execute_default_passes_with_stats should succeed")
+        };
+        assert!(stats.executed_passes > 0);
     }
 }

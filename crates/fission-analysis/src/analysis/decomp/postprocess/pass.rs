@@ -43,6 +43,32 @@ pub enum PassCategory {
 /// Result type for pass execution
 pub type PassResult<'a> = Result<Cow<'a, str>, PassError>;
 
+/// Aggregated statistics from a pass pipeline execution.
+#[derive(Debug, Clone, Default)]
+pub struct PassExecutionStats {
+    /// Number of passes that actually ran (not skipped)
+    pub executed_passes: usize,
+    /// Number of passes skipped because they were disabled
+    pub skipped_disabled: usize,
+    /// Number of passes skipped by `should_run` condition
+    pub skipped_should_run: usize,
+    /// Number of executed passes that returned `Cow::Borrowed`
+    pub borrowed_outputs: usize,
+    /// Number of executed passes that returned `Cow::Owned`
+    pub owned_outputs: usize,
+}
+
+impl PassExecutionStats {
+    /// Ratio of borrowed outputs among executed passes.
+    pub fn borrowed_ratio(&self) -> f64 {
+        if self.executed_passes == 0 {
+            0.0
+        } else {
+            self.borrowed_outputs as f64 / self.executed_passes as f64
+        }
+    }
+}
+
 /// Errors that can occur during pass execution
 #[derive(Debug, thiserror::Error)]
 pub enum PassError {
@@ -199,10 +225,22 @@ impl PassRegistry {
     
     /// Execute all enabled passes in dependency order
     pub fn execute_all<'a>(&self, code: &'a str, context: &PassContext) -> PassResult<'a> {
+        let (output, _) = self.execute_all_with_stats(code, context)?;
+        Ok(output)
+    }
+
+    /// Execute all enabled passes in dependency order with execution statistics.
+    pub fn execute_all_with_stats<'a>(
+        &self,
+        code: &'a str,
+        context: &PassContext,
+    ) -> Result<(Cow<'a, str>, PassExecutionStats), PassError> {
         let mut current: Cow<'a, str> = Cow::Borrowed(code);
+        let mut stats = PassExecutionStats::default();
         
         for pass_id in &self.execution_order {
             if !self.is_enabled(pass_id) {
+                stats.skipped_disabled += 1;
                 continue;
             }
             
@@ -213,16 +251,24 @@ impl PassRegistry {
                 ))?;
             
             if !pass.should_run(context) {
+                stats.skipped_should_run += 1;
                 continue;
             }
             
+            stats.executed_passes += 1;
             let next = pass.run(current.as_ref(), context)?;
-            if let Cow::Owned(s) = next {
-                current = Cow::Owned(s);
+            match next {
+                Cow::Borrowed(_) => {
+                    stats.borrowed_outputs += 1;
+                }
+                Cow::Owned(s) => {
+                    stats.owned_outputs += 1;
+                    current = Cow::Owned(s);
+                }
             }
         }
         
-        Ok(current)
+        Ok((current, stats))
     }
     
     /// Get a list of all registered pass IDs
@@ -305,6 +351,10 @@ mod tests {
         id: &'static str,
         deps: Vec<&'static str>,
     }
+
+    struct BorrowPass {
+        id: &'static str,
+    }
     
     impl PostProcessPass for TestPass {
         fn metadata(&self) -> PassMetadata {
@@ -322,6 +372,21 @@ mod tests {
         
         fn dependencies(&self) -> &[&'static str] {
             &self.deps
+        }
+    }
+
+    impl PostProcessPass for BorrowPass {
+        fn metadata(&self) -> PassMetadata {
+            PassMetadata {
+                id: self.id,
+                name: self.id,
+                description: "Borrow pass",
+                category: PassCategory::Cleanup,
+            }
+        }
+
+        fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+            Ok(Cow::Borrowed(code))
         }
     }
     
@@ -363,5 +428,34 @@ mod tests {
         
         // Can't easily test circular deps with current structure without
         // more complex setup, so this is a placeholder
+    }
+
+    #[test]
+    fn test_execute_all_with_stats_counts_borrowed_and_owned() {
+        let mut registry = PassRegistry::new();
+        assert!(registry
+            .register(Box::new(BorrowPass { id: "borrow" }))
+            .is_ok());
+        assert!(registry
+            .register(Box::new(TestPass {
+                id: "owned",
+                deps: vec!["borrow"],
+            }))
+            .is_ok());
+
+        let context = PassContext::new();
+        let result = registry.execute_all_with_stats("x", &context);
+        assert!(result.is_ok());
+
+        let Ok((output, stats)) = result else {
+            panic!("execute_all_with_stats should succeed")
+        };
+        assert_eq!(output.as_ref(), "owned:x");
+        assert_eq!(stats.executed_passes, 2);
+        assert_eq!(stats.borrowed_outputs, 1);
+        assert_eq!(stats.owned_outputs, 1);
+        assert_eq!(stats.skipped_disabled, 0);
+        assert_eq!(stats.skipped_should_run, 0);
+        assert!((stats.borrowed_ratio() - 0.5).abs() < f64::EPSILON);
     }
 }
