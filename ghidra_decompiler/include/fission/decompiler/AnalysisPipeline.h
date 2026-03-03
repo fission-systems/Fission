@@ -46,6 +46,9 @@ struct AnalysisArtifacts {
     // Dynamic field-offset map: offset-key → "struct_name.field_name"
     // Used by annotate_structure_offsets() for field annotation
     std::map<std::string, std::string> type_replacements;
+    // GAP-4: addresses discovered from resolved jump/switch tables.
+    // These should be enqueued for decompilation on the Rust side.
+    std::vector<uint64_t> jump_table_targets;
 };
 
 // ===========================================================================

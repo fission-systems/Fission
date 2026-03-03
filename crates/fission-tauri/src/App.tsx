@@ -69,6 +69,7 @@ function App() {
         sections, strings, imports, bookmarks, setBookmarks,
         patches, hexData, xrefs,
         loading, progress, fidRunning,
+        lastFidResult,
         decompileCache, asmCache, asmHasMore, asmLoadingMore,
         handleOpenFile, handleLoadBinary, handleRunFid,
         handleFunctionClick, handleAsmLoadMore,
@@ -481,6 +482,12 @@ function App() {
                                     >
                                         {fidRunning ? "Identifying…" : "🔍 Function ID (FID)"}
                                     </button>
+                                    {lastFidResult && (
+                                        <div className="explorer__action-meta" title="Latest FID database load stats">
+                                            DB {lastFidResult.fidbf_loaded}/{lastFidResult.fidbf_attempted}
+                                            {lastFidResult.fidbf_failed > 0 ? ` (fail ${lastFidResult.fidbf_failed})` : ""}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             <FunctionsList

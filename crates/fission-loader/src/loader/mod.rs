@@ -117,6 +117,22 @@ impl LoadedBinary {
                 }
                 binary.rebuild_indices();
             }
+
+            // GAP-6: Go non-null-terminated string struct detection.
+            // Equivalent to Ghidra's GolangStringAnalyzer which scans .rodata
+            // for {ptr, len} GoString structs and creates labeled data entries.
+            {
+                let analyzer = golang::GoAnalyzer::new(&binary);
+                let go_strings = analyzer.scan_go_strings();
+                if !go_strings.is_empty() {
+                    tracing::info!("[Loader] GoString scanner found {} string structs", go_strings.len());
+                    for (addr, content) in go_strings {
+                        binary.inner_mut().global_symbols
+                            .entry(addr)
+                            .or_insert(content);
+                    }
+                }
+            }
         }
 
         // Apple (ObjC/Swift) Analysis
@@ -179,6 +195,28 @@ impl LoadedBinary {
                         .inner_mut()
                         .inferred_types
                         .push(class_info.to_inferred_type());
+                }
+            }
+
+            // GAP-7: ObjC objc_msgSend selector resolution
+            // Registers each __objc_selrefs slot as a named "sel_<method>" global
+            // symbol so the decompiler shows resolved selector names instead of raw
+            // pointer values (mirrors Ghidra's ObjectiveC2_MessageAnalyzer).
+            {
+                let analyzer = macho::apple::AppleAnalyzer::new(&binary);
+                let selectors = analyzer.resolve_msg_send_selectors();
+                if !selectors.is_empty() {
+                    tracing::info!(
+                        "[Loader] ObjC selector resolution: {} selrefs resolved",
+                        selectors.len()
+                    );
+                    for (addr, name) in selectors {
+                        binary
+                            .inner_mut()
+                            .global_symbols
+                            .entry(addr)
+                            .or_insert(name);
+                    }
                 }
             }
         }

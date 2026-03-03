@@ -364,6 +364,9 @@ export interface FidMatchDto {
 export interface FidResultDto {
     matched: number;
     total_scanned: number;
+    fidbf_attempted: number;
+    fidbf_loaded: number;
+    fidbf_failed: number;
     matches: FidMatchDto[];
 }
 

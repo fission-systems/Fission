@@ -7,6 +7,7 @@
 #include "fission/analysis/TypePropagator.h"
 #include "fission/analysis/CallGraphAnalyzer.h"
 #include "fission/analysis/TypeSharing.h"
+#include "fission/analysis/NoReturnDetector.h"
 #include "fission/types/StructureAnalyzer.h"
 #include "fission/types/GlobalTypeRegistry.h"
 #include "fission/decompiler/PcodeOptimizationBridge.h"
@@ -17,6 +18,7 @@
 #include "libdecomp.hh"
 #include "address.hh"
 #include "funcdata.hh"
+#include "jumptable.hh"
 #include "op.hh"
 #include "varnode.hh"
 #include "type.hh"
@@ -688,6 +690,7 @@ AnalysisArtifacts run_analysis_passes(
             ghidra::Scope*     global_scope = arch->symboltab->getGlobalScope();
             ghidra::AddrSpace* data_space   = arch->getDefaultDataSpace();
             if (global_scope && data_space) {
+                // --- Structured globals ---
                 for (const auto& gs : global_analyzer.get_structures()) {
                     if (gs.name.empty()) continue;
                     ghidra::Datatype* dt = arch->types->findByName(gs.name);
@@ -711,6 +714,58 @@ AnalysisArtifacts run_analysis_passes(
                         needs_rerun_stage1 = true;
                     }
                 }
+
+                // --- GAP-1 FIX: Scalar float/double DAT_ symbol registration ---
+                // Ghidra's ConstantPropagationAnalyzer creates typed data symbols
+                // for scalar float/double globals so that ActionInferTypes can
+                // propagate the type through LOAD opcodes, replacing raw hex
+                // constants (e.g. 0x4048feb851eb851f) with named DAT_ symbols.
+                ghidra::TypeFactory* tf = arch->types;
+                for (const auto& sf : global_analyzer.get_scalar_floats()) {
+                    ghidra::Address sf_addr(data_space, sf.address);
+                    // Skip if a symbol already exists at this address
+                    if (global_scope->findAddr(sf_addr, fd->getAddress()))
+                        continue;
+
+                    // Build a DAT_<hex> name consistent with Ghidra convention
+                    char dat_name[32];
+                    std::snprintf(dat_name, sizeof(dat_name), "DAT_%08llx",
+                        (unsigned long long)sf.address);
+
+                    ghidra::Datatype* scalar_type =
+                        (sf.size == 4)
+                            ? tf->getBase(4, ghidra::TYPE_FLOAT)
+                            : tf->getBase(8, ghidra::TYPE_FLOAT);
+
+                    if (!scalar_type) continue;
+
+                    try {
+                        if (global_scope->addSymbol(dat_name, scalar_type,
+                                sf_addr, fd->getAddress())) {
+                            fission::utils::log_stream()
+                                << "[AnalysisPipeline] Registered scalar "
+                                << (sf.size == 4 ? "float" : "double")
+                                << " symbol " << dat_name << " at 0x"
+                                << std::hex << sf.address << std::dec << "\n";
+                            needs_rerun_stage1 = true;
+                        }
+                    } catch (const ghidra::RecovError&) {}
+                }
+            }
+        }
+
+        // --- GAP-2: No-return evidence collection per function ---
+        // Collect evidence that this function's callees may be no-return.
+        // Accumulated evidence is applied below at the Stage-1 barrier.
+        {
+            static NoReturnDetector s_noret_detector;
+            s_noret_detector.collect_evidence(fd);
+            int marked = s_noret_detector.apply(arch);
+            if (marked > 0) {
+                fission::utils::log_stream()
+                    << "[AnalysisPipeline] NoReturnDetector: marked "
+                    << marked << " function(s) noreturn\n";
+                needs_rerun_stage1 = true;
             }
         }
 
@@ -902,6 +957,49 @@ AnalysisArtifacts run_analysis_passes(
     {
         TypePropagator double_merger(arch, struct_registry);
         double_merger.merge_split_double_args(fd);
+    }
+
+    // ========================================================================
+    // GAP-4: Jump/switch table target registration
+    // After all Ghidra action passes, BRANCHIND switch tables have been
+    // resolved by ActionSwitchNorm.  Collect their targets, register any
+    // unknown ones as functions in the global scope so that cross-reference
+    // analysis finds them, and surface the list in AnalysisArtifacts so the
+    // Rust side can enqueue them for decompilation.
+    // ========================================================================
+    if (arch->symboltab) {
+        ghidra::Scope* global_scope = arch->symboltab->getGlobalScope();
+        if (global_scope) {
+            int num_jt = fd->numJumpTables();
+            for (int ti = 0; ti < num_jt; ++ti) {
+                ghidra::JumpTable* jt = fd->getJumpTable(ti);
+                if (!jt || !jt->isRecovered()) continue;
+                int num_entries = jt->numEntries();
+                for (int ei = 0; ei < num_entries; ++ei) {
+                    ghidra::Address target = jt->getAddressByIndex(ei);
+                    if (target.isInvalid()) continue;
+                    uint64_t target_va = target.getOffset();
+                    artifacts.jump_table_targets.push_back(target_va);
+                    // Register as a named function stub if not already known
+                    if (!global_scope->findAddr(target, fd->getAddress())) {
+                        char jmp_name[32];
+                        std::snprintf(jmp_name, sizeof(jmp_name),
+                                      "case_%08llx",
+                                      (unsigned long long)target_va);
+                        try {
+                            global_scope->addFunction(target, jmp_name);
+                        } catch (const ghidra::RecovError&) {}
+                    }
+                }
+            }
+            if (!artifacts.jump_table_targets.empty()) {
+                fission::utils::log_stream()
+                    << "[AnalysisPipeline] Registered "
+                    << artifacts.jump_table_targets.size()
+                    << " jump-table target(s) from "
+                    << num_jt << " table(s)." << std::endl;
+            }
+        }
     }
 
     return artifacts;

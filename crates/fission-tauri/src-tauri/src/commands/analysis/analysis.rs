@@ -74,11 +74,10 @@ pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<Fu
 pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
     use fission_signatures::SignatureDatabase;
 
-    let mut inner = state.inner.lock().await;
-
     // Collect everything we need from `binary` inside a block so the immutable
-    // borrow of `inner` ends before we mutably update `renamed_functions`.
-    let (data, image_base, func_list, prev_names) = {
+    // borrow of `inner` ends before further mutable work.
+    let (data, image_base, is_64bit, func_list, func_lengths, prev_names) = {
+        let inner = state.inner.lock().await;
         let binary = inner
             .loaded_binary
             .as_ref()
@@ -86,6 +85,9 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
 
         let mut prev_names: std::collections::HashMap<u64, String> =
             std::collections::HashMap::new();
+        let mut func_lengths: std::collections::HashMap<u64, usize> =
+            std::collections::HashMap::new();
+
         let func_list: Vec<(u64, String)> = binary
             .functions
             .iter()
@@ -96,19 +98,21 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
                     .cloned()
                     .unwrap_or_else(|| f.name.clone());
                 prev_names.insert(f.address, current.clone());
+                func_lengths.insert(f.address, f.size as usize);
                 (f.address, current)
             })
             .collect();
 
         let data: Vec<u8> = binary.inner().data.as_slice().to_vec();
         let image_base = binary.image_base;
+        let is_64bit = binary.is_64bit;
 
-        (data, image_base, func_list, prev_names)
-    }; // `binary` (and immutable borrow of `inner`) dropped here
+        (data, image_base, is_64bit, func_list, func_lengths, prev_names)
+    };
 
     let total_scanned = func_list.len();
 
-    // Run identification in a blocking thread (CPU-bound).
+    // Run built-in byte-pattern identification in a blocking thread (CPU-bound).
     let identified = tokio::task::spawn_blocking(move || {
         let db = SignatureDatabase::new();
         db.identify_functions_in_binary(&data, &func_list, image_base)
@@ -116,7 +120,59 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
     .await
     .map_err(|e| CmdError::other(format!("FID task failed: {e}")))?;
 
+    // Optionally augment with native Ghidra FID matching backed by .fidbf databases.
+    #[cfg(feature = "native_decomp")]
+    let (identified, fidbf_attempted, fidbf_loaded, fidbf_failed) = {
+        use fission_signatures::discover_fidbf_paths;
+
+        let fid_paths = discover_fidbf_paths(is_64bit);
+        let fidbf_attempted = fid_paths.len();
+        let mut fidbf_loaded = 0usize;
+        let mut fidbf_failed = 0usize;
+        let mut identified = identified;
+        let mut decomp_lock = state.decompiler.lock().await;
+        if let Some(decomp) = decomp_lock.as_mut() {
+            let native = decomp.inner_mut();
+
+            for path in &fid_paths {
+                match native.load_fid_database(&path.to_string_lossy()) {
+                    Ok(_) => fidbf_loaded += 1,
+                    Err(_) => fidbf_failed += 1,
+                }
+            }
+
+            for (addr, _name) in &func_list {
+                if identified.contains_key(addr) {
+                    continue;
+                }
+
+                let mut len = *func_lengths.get(addr).unwrap_or(&0);
+                if len == 0 {
+                    len = 64;
+                }
+
+                if let Some(fid_name) = native.match_function_by_fid(*addr, len) {
+                    identified.insert(*addr, fid_name);
+                }
+            }
+
+            if !identified.is_empty() {
+                native.add_symbols(&identified);
+                native.add_global_symbols(&identified);
+            }
+        }
+        (identified, fidbf_attempted, fidbf_loaded, fidbf_failed)
+    };
+
+    #[cfg(not(feature = "native_decomp"))]
+    let (identified, fidbf_attempted, fidbf_loaded, fidbf_failed) = {
+        let _ = is_64bit;
+        let _ = &func_lengths;
+        (identified, 0usize, 0usize, 0usize)
+    };
+
     // Apply renames to the state and collect match details.
+    let mut inner = state.inner.lock().await;
     let mut matches = Vec::new();
     for (addr, new_name) in &identified {
         let prev_name = prev_names.get(addr).cloned().unwrap_or_default();
@@ -130,30 +186,12 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
 
     let matched = matches.len();
 
-    // Release inner lock before acquiring the decompiler lock to prevent
-    // priority-inversion with other commands that may hold locks in the
-    // opposite order.
-    drop(inner);
-
-    // Feed FID-identified names into the Ghidra decompiler so that future
-    // decompilations use the resolved function names at call sites.
-    #[cfg(feature = "native_decomp")]
-    {
-        let fid_symbols: std::collections::HashMap<u64, String> =
-            identified.iter().map(|(a, n)| (*a, n.clone())).collect();
-
-        if !fid_symbols.is_empty() {
-            let mut decomp_lock = state.decompiler.lock().await;
-            if let Some(decomp) = decomp_lock.as_mut() {
-                let native = decomp.inner_mut();
-                native.add_symbols(&fid_symbols);
-                native.add_global_symbols(&fid_symbols);
-            }
-        }
-    }
     Ok(FidResultDto {
         matched,
         total_scanned,
+        fidbf_attempted,
+        fidbf_loaded,
+        fidbf_failed,
         matches,
     })
 }

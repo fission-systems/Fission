@@ -296,6 +296,9 @@ fn scan_prologue_functions(
         X86_PROLOGUES
     };
 
+    // Standard PE/disk sector size in bytes; used to skip zero-filled padding blocks.
+    const PE_SECTOR_SIZE: usize = 512;
+
     // Minimum prologue length needed (used to avoid out-of-bounds)
     let min_pat_len = prologues.iter().map(|(p, _)| p.len()).min().unwrap_or(2);
 
@@ -314,13 +317,13 @@ fn scan_prologue_functions(
     }
 
     // Pre-build a zero page for quick skip
-    let zero_block = [0u8; 512];
+    let zero_block = [0u8; PE_SECTOR_SIZE];
 
     let mut i = 0usize;
     while i + min_pat_len <= len {
         // Skip 512-byte zero blocks (common in padding areas)
-        if i + 512 <= len && sec_bytes[i..i + 512] == zero_block[..] {
-            i += 512;
+        if i + PE_SECTOR_SIZE <= len && sec_bytes[i..i + PE_SECTOR_SIZE] == zero_block[..] {
+            i += PE_SECTOR_SIZE;
             continue;
         }
 

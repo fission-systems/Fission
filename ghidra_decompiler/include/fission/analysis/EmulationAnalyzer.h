@@ -25,6 +25,18 @@ private:
     /// Evaluate a simple constant condition if possible
     bool try_evaluate_condition(ghidra::PcodeOp* cbranch_op, bool& result);
 
+    /// GAP-5: Symbolic constant propagation — trace backwards through def-use
+    /// chain (COPY, INT_ADD, INT_SUB, INT_AND, ZEXT, SEXT) up to `max_depth`
+    /// hops.  Returns true if the Varnode can be resolved to a constant.
+    /// \param vn      varnode to resolve
+    /// \param out_val receives the constant value on success
+    /// \param depth   current recursion depth (caller passes 0)
+    bool try_propagate_constant(ghidra::Varnode* vn, ghidra::uintb& out_val,
+                                int depth = 0);
+
+    /// Set of addresses registered as function stubs during this pass
+    std::set<ghidra::uintb> registered_callind_targets_;
+
 public:
     EmulationAnalyzer();
     ~EmulationAnalyzer();
@@ -39,6 +51,10 @@ public:
     
     /// Get collected tags for external use
     const std::map<ghidra::Address, std::string>& getTags() const { return meta_tags; }
+
+    /// Get the set of CALLIND constant targets discovered during this pass
+    const std::set<ghidra::uintb>& getResolvedCallinds() const
+        { return registered_callind_targets_; }
 };
 
 } // namespace analysis

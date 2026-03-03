@@ -3,6 +3,9 @@ use fission_loader::loader::pe::PeLoader;
 use fission_loader::loader::types::{DataBuffer, LoadedBinary};
 use std::sync::Arc;
 
+/// Fallback PE headers size (1 KB) — used when `SizeOfHeaders` cannot be read
+const PE_MIN_HEADER_SIZE: usize = 0x400;
+
 /// OS Loader Simulator - Maps binaries as they would appear in process memory.
 ///
 /// TitanLoader wraps `PeLoader` and adds OS-level memory mapping simulation:
@@ -143,7 +146,7 @@ impl TitanLoader {
                 .iter()
                 .map(|s| s.file_offset as usize)
                 .min()
-                .unwrap_or(0x400)
+                .unwrap_or(PE_MIN_HEADER_SIZE)
                 .min(data.len());
         }
 
@@ -159,7 +162,7 @@ impl TitanLoader {
                 .iter()
                 .map(|s| s.file_offset as usize)
                 .min()
-                .unwrap_or(0x400)
+                .unwrap_or(PE_MIN_HEADER_SIZE)
                 .min(data.len());
         }
 
@@ -180,7 +183,7 @@ impl TitanLoader {
                 .iter()
                 .map(|s| s.file_offset as usize)
                 .min()
-                .unwrap_or(0x400)
+                .unwrap_or(PE_MIN_HEADER_SIZE)
                 .min(data.len())
         }
     }

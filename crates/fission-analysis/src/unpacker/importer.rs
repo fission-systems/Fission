@@ -48,53 +48,68 @@ impl ImportReconstructor {
 
     #[cfg(target_os = "windows")]
     pub fn update_modules(&mut self) -> Result<(), String> {
-        let mut modules = [HMODULE::default(); 1024];
-        let mut cb_needed = 0;
+        // Dynamically resize the module buffer using cb_needed:
+        // if cb_needed > cb the buffer was too small — double and retry.
+        let mut capacity = 256usize;
+        let mut cb_needed: u32 = 0;
+        let modules: Vec<HMODULE> = loop {
+            let mut buf = vec![HMODULE::default(); capacity];
+            let cb = (capacity * std::mem::size_of::<HMODULE>()) as u32;
+            let ok = unsafe {
+                EnumProcessModules(
+                    self.process_handle,
+                    buf.as_mut_ptr(),
+                    cb,
+                    &mut cb_needed,
+                )
+                .as_bool()
+            };
+            if !ok {
+                return Err("EnumProcessModules failed".to_string());
+            }
+            if cb_needed > cb {
+                capacity = (cb_needed as usize)
+                    .div_ceil(std::mem::size_of::<HMODULE>())
+                    .max(capacity * 2);
+                continue;
+            }
+            break buf;
+        };
+
+        let count = cb_needed as usize / std::mem::size_of::<HMODULE>();
 
         unsafe {
-            if EnumProcessModules(
-                self.process_handle,
-                modules.as_mut_ptr(),
-                (modules.len() * std::mem::size_of::<HMODULE>()) as u32,
-                &mut cb_needed,
-            )
-            .as_bool()
-            {
-                let count = cb_needed as usize / std::mem::size_of::<HMODULE>();
-                for i in 0..count {
-                    let h_mod = modules[i];
-                    let base_addr = h_mod.0 as u64;
+            for i in 0..count {
+                let h_mod = modules[i];
+                let base_addr = h_mod.0 as u64;
 
-                    if !self.module_cache.contains_key(&base_addr) {
-                        let mut name_buf = [0u16; 256];
-                        let len = GetModuleBaseNameW(self.process_handle, h_mod, &mut name_buf);
-                        let name = String::from_utf16_lossy(&name_buf[..len as usize]);
+                if !self.module_cache.contains_key(&base_addr) {
+                    let mut name_buf = [0u16; 256];
+                    let len = GetModuleBaseNameW(self.process_handle, h_mod, &mut name_buf);
+                    let name = String::from_utf16_lossy(&name_buf[..len as usize]);
 
-                        let mut mod_info = MODULEINFO::default();
-                        if GetModuleInformation(
-                            self.process_handle,
-                            h_mod,
-                            &mut mod_info,
-                            std::mem::size_of::<MODULEINFO>() as u32,
-                        )
-                        .as_bool()
-                        {
-                            self.module_cache.insert(
-                                base_addr,
-                                ModuleInfo {
-                                    name,
-                                    size: mod_info.SizeOfImage,
-                                    exports: None,
-                                },
-                            );
-                        }
+                    let mut mod_info = MODULEINFO::default();
+                    if GetModuleInformation(
+                        self.process_handle,
+                        h_mod,
+                        &mut mod_info,
+                        std::mem::size_of::<MODULEINFO>() as u32,
+                    )
+                    .as_bool()
+                    {
+                        self.module_cache.insert(
+                            base_addr,
+                            ModuleInfo {
+                                name,
+                                size: mod_info.SizeOfImage,
+                                exports: None,
+                            },
+                        );
                     }
                 }
-                Ok(())
-            } else {
-                Err("EnumProcessModules failed".to_string())
             }
         }
+        Ok(())
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -164,7 +179,7 @@ impl ImportReconstructor {
         let size = (end_addr - start_addr) as usize;
         // Read in chunks to avoid massive allocation, but for now let's try 4KB pages or just read all if small enough.
         // Let's read 4KB at a time.
-        let page_size = 4096;
+        let page_size = fission_core::PAGE_SIZE;
         let mut current_addr = start_addr;
 
         let mut best_iat_start = 0;

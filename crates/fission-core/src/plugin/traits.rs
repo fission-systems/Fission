@@ -1,4 +1,5 @@
 use crate::common::types::{BinaryInfo, FunctionInfo};
+use crate::core::constants::FISSION_VERSION;
 use anyhow::Result;
 use std::any::Any;
 use std::sync::Arc;
@@ -60,7 +61,7 @@ pub trait FissionPlugin: Send + Sync + Any {
 
     /// Get plugin version
     fn version(&self) -> &str {
-        "0.1.0"
+        FISSION_VERSION
     }
 
     /// Get plugin description

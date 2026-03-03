@@ -1,5 +1,7 @@
 //! Plugin Types
 
+use crate::core::constants::FISSION_VERSION;
+
 /// Plugin metadata
 #[derive(Debug, Clone)]
 pub struct PluginInfo {
@@ -33,7 +35,7 @@ impl Default for PluginInfo {
         Self {
             id: String::new(),
             name: String::from("Unknown Plugin"),
-            version: String::from("0.1.0"),
+            version: FISSION_VERSION.to_string(),
             author: String::from("Unknown"),
             description: String::new(),
             plugin_type: PluginType::Native,

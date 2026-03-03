@@ -79,6 +79,8 @@ impl MachoLoader {
         // Store symbol table info for later use
         let mut symtab_info: Option<SymtabCommand> = None;
         let mut dysymtab_info: Option<DysymtabCommand> = None;
+        // GAP-8: LC_FUNCTION_STARTS blob location (file_offset, size)
+        let mut function_starts_info: Option<(u32, u32)> = None;
 
         // First pass: collect segment/section info and load commands
         for _ in 0..header.ncmds {
@@ -148,6 +150,15 @@ impl MachoLoader {
                     .map_err(|e| err!(loader, "Failed to read entry point command: {}", e))?;
                 // entryoff is offset from __TEXT segment start
                 entry_point = text_segment_vmaddr + entry_cmd.entryoff;
+            } else if cmd_header.cmd == LC_FUNCTION_STARTS {
+                // GAP-8: Parse LC_FUNCTION_STARTS — ULEB128-encoded function addresses.
+                // Equivalent to Ghidra's MachoFunctionStartsAnalyzer which uses this
+                // table to discover all functions including unsymbolicated ones.
+                let lc = LinkeditDataCommand::read_options(&mut reader, endian, ())
+                    .map_err(|e| err!(loader, "Failed to read LC_FUNCTION_STARTS: {}", e))?;
+                if lc.datasize > 0 {
+                    function_starts_info = Some((lc.dataoff, lc.datasize));
+                }
             }
 
             // Skip command
@@ -191,6 +202,59 @@ impl MachoLoader {
                 stub_size,
                 &mut iat_symbols,
             );
+        }
+
+        // GAP-8: Decode LC_FUNCTION_STARTS ULEB128 address table.
+        // This mirrors Ghidra's MachoFunctionStartsAnalyzer which recovers
+        // function boundaries for unsymbolicated / stripped binaries.
+        if let Some((fs_offset, fs_size)) = function_starts_info {
+            let fs_end = (fs_offset as usize).saturating_add(fs_size as usize);
+            if fs_end <= bytes.len() {
+                let fs_data = &bytes[fs_offset as usize..fs_end];
+                let mut current_addr = image_base; // first entry is absolute VA
+                let mut i = 0usize;
+                let mut new_count = 0usize;
+                while i < fs_data.len() {
+                    // Decode one ULEB128 value
+                    let mut delta: u64 = 0;
+                    let mut shift = 0u64;
+                    let mut consumed = 0usize;
+                    loop {
+                        if i + consumed >= fs_data.len() {
+                            break;
+                        }
+                        let b = fs_data[i + consumed];
+                        consumed += 1;
+                        delta |= ((b & 0x7f) as u64) << shift;
+                        shift += 7;
+                        if b & 0x80 == 0 {
+                            break;
+                        }
+                    }
+                    i += consumed;
+                    if delta == 0 {
+                        break; // terminator
+                    }
+                    current_addr = current_addr.wrapping_add(delta);
+                    // Only add if not already known
+                    let already_known = functions_info
+                        .iter()
+                        .any(|f| f.address == current_addr);
+                    if !already_known && current_addr > image_base {
+                        functions_info.push(FunctionInfo {
+                            name: String::new(),
+                            address: current_addr,
+                            size: 0,
+                            is_export: false,
+                            is_import: false,
+                        });
+                        new_count += 1;
+                    }
+                }
+                if new_count > 0 {
+                    eprintln!("[MachoLoader] LC_FUNCTION_STARTS: added {} function entry points", new_count);
+                }
+            }
         }
 
         LoadedBinaryBuilder::new(path, data)

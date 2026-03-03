@@ -149,6 +149,9 @@ pub const GB: usize = 1024 * 1024 * 1024;
 /// Page size (4KB)
 pub const PAGE_SIZE: usize = 4096;
 
+/// Maximum function body size for analysis / disassembly (64 KB)
+pub const MAX_FUNCTION_SIZE: usize = 64 * KB;
+
 /// Maximum supported binary size (1 GB)
 pub const MAX_BINARY_SIZE: usize = GB;
 
@@ -202,6 +205,19 @@ pub const MAX_XREF_INCOMING: usize = 2_000;
 
 /// Maximum outgoing cross-reference results returned per query
 pub const MAX_XREF_OUTGOING: usize = 4_000;
+
+// ============================================================================
+// Analysis Defaults
+// ============================================================================
+
+/// Disassembly byte read window (1 KB)
+pub const DISASM_READ_WINDOW: usize = KB;
+
+/// Minimum printable string length for string extraction
+pub const MIN_STRING_LENGTH: usize = 4;
+
+/// Maximum instructions per function before aborting decompilation / analysis
+pub const MAX_INSTRUCTIONS_PER_FUNCTION: u32 = 100_000;
 
 // ============================================================================
 // Fallback Strings

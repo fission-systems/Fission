@@ -5,6 +5,7 @@ use crate::cli::oneshot::common::{
 };
 use crate::cli::output::OutputSilencer;
 use fission_analysis::analysis::decomp::postprocess::PostProcessor;
+use fission_core::PATHS;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use std::collections::BTreeMap;
@@ -122,43 +123,21 @@ fn register_known_functions(decomp: &mut DecompilerNative, binary: &LoadedBinary
 }
 
 fn load_fid_databases(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
-    let target_suffix = if binary.is_64bit {
-        "_x64.fidbf"
-    } else {
-        "_x86.fidbf"
-    };
-
-    let fid_paths = vec![
-        format!("utils/signatures/fid/vs2019{}", target_suffix),
-        format!("utils/signatures/fid/vs2017{}", target_suffix),
-        format!("utils/signatures/fid/vs2015{}", target_suffix),
-        format!("utils/signatures/fid/vs2012{}", target_suffix),
-        format!("utils/signatures/fid/vsOlder{}", target_suffix),
-        format!("utils/signatures/fid/gcc13{}", target_suffix),
-        format!("utils/signatures/fid/gcc12{}", target_suffix),
-        format!("utils/signatures/fid/gcc11{}", target_suffix),
-        format!("utils/signatures/fid/mingw{}", target_suffix),
-    ];
-
     let mut fid_loaded_count = 0;
-    for fid_path in &fid_paths {
-        if let Ok(full_path) = std::env::current_dir() {
-            let fid_full = full_path.join(fid_path);
-            if fid_full.exists() {
-                if verbose {
-                    eprintln!("[*] Loading FID database: {}", fid_full.display());
-                }
-                let _silencer = OutputSilencer::new_if(!verbose);
-                if let Err(e) = decomp.load_fid_database(&fid_full.to_string_lossy()) {
-                    if verbose {
-                        eprintln!("[!] Warning: Failed to load FID database: {}", e);
-                    }
-                } else {
-                    fid_loaded_count += 1;
-                    if verbose {
-                        eprintln!("[✓] FID database loaded");
-                    }
-                }
+    let fid_paths = PATHS.get_all_fid_paths(binary.is_64bit);
+    for fid_full in &fid_paths {
+        if verbose {
+            eprintln!("[*] Loading FID database: {}", fid_full.display());
+        }
+        let _silencer = OutputSilencer::new_if(!verbose);
+        if let Err(e) = decomp.load_fid_database(&fid_full.to_string_lossy()) {
+            if verbose {
+                eprintln!("[!] Warning: Failed to load FID database: {}", e);
+            }
+        } else {
+            fid_loaded_count += 1;
+            if verbose {
+                eprintln!("[✓] FID database loaded");
             }
         }
     }

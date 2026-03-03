@@ -8,7 +8,7 @@
 //   /pattern/    — JavaScript regex match (client-side filter)
 
 import { useState, useCallback, useMemo, useRef } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import type { StringXrefDto } from "../../types";
 
@@ -104,7 +104,7 @@ export function StringXrefsPanel({
         getScrollElement: () => scrollRef.current,
         estimateSize: () => 32, // collapsed header height
         overscan: 10,
-        measureElement: (el) => el.getBoundingClientRect().height,
+        measureElement: (el: HTMLElement) => el.getBoundingClientRect().height,
     });
 
     return (
@@ -153,7 +153,7 @@ export function StringXrefsPanel({
             {results.length > 0 && (
                 <div ref={scrollRef} className="string-xrefs-panel__results">
                     <div style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}>
-                        {rowVirtualizer.getVirtualItems().map((vRow) => {
+                        {rowVirtualizer.getVirtualItems().map((vRow: VirtualItem) => {
                             const item = results[vRow.index];
                             const isOpen = expanded.has(item.string_address);
                             return (

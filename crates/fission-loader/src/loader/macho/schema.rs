@@ -6,6 +6,10 @@ pub const LC_SYMTAB: u32 = 0x2;
 pub const LC_DYSYMTAB: u32 = 0xB;
 pub const LC_SEGMENT_64: u32 = 0x19;
 pub const LC_MAIN: u32 = 0x80000028; // LC_REQ_DYLD | 0x28
+/// LC_FUNCTION_STARTS: compressed table of function start addresses.
+/// Ghidra's MachoFunctionStartsAnalyzer uses this to discover all functions
+/// defined in a Mach-O binary, including those not exported or symbolicated.
+pub const LC_FUNCTION_STARTS: u32 = 0x26;
 
 #[derive(BinRead, Debug, Clone)]
 pub struct MachHeader64 {
@@ -161,4 +165,14 @@ pub struct EntryPointCommand {
     pub cmdsize: u32,
     pub entryoff: u64,  // file (__TEXT) offset of main()
     pub stacksize: u64, // initial stack size (usually 0)
+}
+
+/// Generic linkedit-data command (LC_FUNCTION_STARTS, LC_CODE_SIGNATURE, …).
+/// The actual data sits at `dataoff` bytes from the start of the file.
+#[derive(BinRead, Debug, Clone)]
+pub struct LinkeditDataCommand {
+    pub cmd: u32,
+    pub cmdsize: u32,
+    pub dataoff: u32,  // file offset of the data blob
+    pub datasize: u32, // size of the data blob
 }

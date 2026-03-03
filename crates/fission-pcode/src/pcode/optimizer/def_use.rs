@@ -8,6 +8,9 @@
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::collections::HashMap;
 
+/// Default varnode size (4 bytes = 32-bit) used when size cannot be determined
+pub(super) const DEFAULT_VARNODE_SIZE: u32 = 4;
+
 /// Unique identifier for a varnode across all blocks
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct VarnodeId {
@@ -211,7 +214,7 @@ impl DefUseTracker {
 
     /// Compute NZ mask for an operation's output
     fn compute_op_nz_mask(&self, op: &PcodeOp) -> u64 {
-        let out_size = op.output.as_ref().map(|v| v.size).unwrap_or(4);
+        let out_size = op.output.as_ref().map(|v| v.size).unwrap_or(DEFAULT_VARNODE_SIZE);
         let mask = self.size_mask(out_size);
 
         match op.opcode {

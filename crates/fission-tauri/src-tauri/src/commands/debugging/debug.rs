@@ -15,6 +15,7 @@ use tauri::State;
 /// both locks at the same time.
 #[cfg(target_os = "windows")]
 async fn drain_events_into_state(state: &AppState) {
+    use fission_analysis::debug::traits::Debugger;
     use fission_analysis::debug::types::DebugEvent;
 
     // Step 1: non-blocking drain into a local Vec (very short lock)
@@ -96,8 +97,9 @@ async fn drain_events_into_state(state: &AppState) {
     // Trim log to avoid unbounded growth
     if ds.events.len() + events.len() > 500 {
         let keep = ds.events.len().saturating_sub(events.len());
-        ds.events
-            .drain(..ds.events.len() - keep.min(ds.events.len()));
+        let current_len = ds.events.len();
+        let drain_end = current_len - keep.min(current_len);
+        ds.events.drain(..drain_end);
     }
     for evt in events {
         match evt {
@@ -403,8 +405,8 @@ pub async fn debug_read_memory(
     let addr = u64::from_str_radix(address.trim_start_matches("0x"), 16)
         .map_err(|_| CmdError::other(format!("Invalid address: {address}")))?;
 
-    if size == 0 || size > 4096 {
-        return Err(CmdError::other("Size must be 1–4096 bytes"));
+    if size == 0 || size > fission_core::MAX_HEX_READ {
+        return Err(CmdError::other(format!("Size must be 1–{} bytes", fission_core::MAX_HEX_READ)));
     }
 
     #[cfg(target_os = "windows")]

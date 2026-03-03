@@ -38,6 +38,7 @@ bool GlobalDataAnalyzer::is_in_data_section(uint64_t addr) const {
 void GlobalDataAnalyzer::clear() {
     accesses.clear();
     inferred_globals.clear();
+    scalar_floats_.clear();
 }
 
 void GlobalDataAnalyzer::analyze_function(ghidra::Funcdata* fd) {
@@ -142,6 +143,7 @@ std::map<uint64_t, std::vector<GlobalAccess>> GlobalDataAnalyzer::cluster_by_bas
 }
 
 void GlobalDataAnalyzer::infer_structures() {
+    scalar_floats_.clear();
     auto clusters = cluster_by_base();
     
     for (auto& [base, cluster_accesses] : clusters) {
@@ -154,7 +156,25 @@ void GlobalDataAnalyzer::infer_structures() {
             }
         }
         
-        if (!has_offsets && cluster_accesses.size() == 1) continue;
+        if (!has_offsets && cluster_accesses.size() == 1) {
+            // GAP-1 FIX: Instead of discarding scalar float/double accesses,
+            // record them so the pipeline can register typed DAT_ symbols.
+            // This mirrors Ghidra's ConstantPropagationAnalyzer which creates
+            // float/double data symbols that then propagate via LOAD type
+            // inference, replacing raw hex constants in decompiler output.
+            const GlobalAccess& a = cluster_accesses[0];
+            if (a.is_float && (a.size == 4 || a.size == 8)) {
+                ScalarFloatEntry entry;
+                entry.address = a.address;
+                entry.size    = a.size;
+                scalar_floats_.push_back(entry);
+                fission::utils::log_stream()
+                    << "[GlobalDataAnalyzer] Scalar "
+                    << (a.size == 4 ? "float" : "double")
+                    << " at 0x" << std::hex << a.address << std::dec << "\n";
+            }
+            continue;
+        }
         
         GlobalStructure gs;
         gs.address = base;

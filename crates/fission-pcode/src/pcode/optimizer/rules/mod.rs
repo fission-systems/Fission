@@ -7,7 +7,7 @@
 //! - Comparison operations (EQUAL, LESS, etc.)
 //! - Constant folding for all operation types
 
-use super::def_use::{DefUseTracker, OpRef};
+use super::def_use::{DefUseTracker, OpRef, DEFAULT_VARNODE_SIZE};
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
 mod dead_bit;
@@ -690,7 +690,7 @@ impl OptimizationRules {
 
         // Check if all non-zero bits would be shifted out
         let input_nz = tracker.get_nz_mask(&op.inputs[0]);
-        let out_size = op.output.as_ref().map(|v| v.size).unwrap_or(4);
+        let out_size = op.output.as_ref().map(|v| v.size).unwrap_or(DEFAULT_VARNODE_SIZE);
         let out_mask = match out_size {
             1 => 0xFF,
             2 => 0xFFFF,

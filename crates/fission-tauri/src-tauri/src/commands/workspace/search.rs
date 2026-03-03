@@ -53,7 +53,7 @@ pub async fn search_binary(
 
     // Search strings in readable sections (using view_bytes)
     if results.len() < limit {
-        let min_len = 4;
+        let min_len = fission_core::MIN_STRING_LENGTH;
         for section in &binary.sections {
             if results.len() >= limit {
                 break;

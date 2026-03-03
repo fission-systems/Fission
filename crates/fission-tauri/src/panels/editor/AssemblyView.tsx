@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import type { AsmInstructionDto } from "../../types";
 
 // Mnemonic color categories
@@ -142,7 +142,7 @@ export default function AssemblyView({
                             <tr><td style={{ height: paddingTop }} colSpan={5} /></tr>
                         )}
 
-                        {virtualItems.map((vRow) => {
+                        {virtualItems.map((vRow: VirtualItem) => {
                             const insn = instructions[vRow.index];
                             return (
                                 <tr

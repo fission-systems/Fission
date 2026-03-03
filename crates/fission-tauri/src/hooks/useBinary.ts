@@ -36,6 +36,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
     const [loading, setLoading] = useState(false);
     const [progress, setProgress] = useState<{ value: number; message: string } | null>(null);
     const [fidRunning, setFidRunning] = useState(false);
+    const [lastFidResult, setLastFidResult] = useState<FidResultDto | null>(null);
 
     // Caches
     const [decompileCache, setDecompileCache] = useState<Record<string, string>>({});
@@ -63,6 +64,26 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
             });
             invoke<SectionDto[]>("get_sections").then(setSections);
             invoke<BookmarkDto[]>("get_bookmarks").then(setBookmarks);
+
+            // Auto-run FID so identified names are available before first decompile.
+            try {
+                setFidRunning(true);
+                const fidResult = await invoke<FidResultDto>("run_fid");
+                setLastFidResult(fidResult);
+                log(
+                    `Auto FID: ${fidResult.matched} / ${fidResult.total_scanned} functions identified`,
+                );
+                log(
+                    `Auto FID DB: attempted=${fidResult.fidbf_attempted}, loaded=${fidResult.fidbf_loaded}, failed=${fidResult.fidbf_failed}`,
+                );
+                const refreshed = await invoke<FunctionDto[]>("get_functions");
+                setFunctions(refreshed);
+            } catch (err) {
+                log(`Auto FID skipped: ${err}`);
+            } finally {
+                setFidRunning(false);
+            }
+
             return info;
         },
         [log],
@@ -120,7 +141,11 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
         setFidRunning(true);
         try {
             const result = await invoke<FidResultDto>("run_fid");
+            setLastFidResult(result);
             log(`FID: ${result.matched} / ${result.total_scanned} functions identified`);
+            log(
+                `FID DB: attempted=${result.fidbf_attempted}, loaded=${result.fidbf_loaded}, failed=${result.fidbf_failed}`,
+            );
             const funcs = await invoke<FunctionDto[]>("get_functions");
             setFunctions(funcs);
             setAsmCache({});
@@ -277,6 +302,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
         loading,
         progress,
         fidRunning,
+        lastFidResult,
         decompileCache,
         asmCache,
         asmHasMore,

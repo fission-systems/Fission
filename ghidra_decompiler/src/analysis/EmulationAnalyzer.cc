@@ -1,6 +1,8 @@
 #include "fission/analysis/EmulationAnalyzer.h"
+#include "architecture.hh"
 #include <iostream>
 #include <sstream>
+#include <cstdio>
 
 namespace fission {
 namespace analysis {
@@ -15,6 +17,86 @@ EmulationAnalyzer::EmulationAnalyzer() {
 }
 
 EmulationAnalyzer::~EmulationAnalyzer() {
+}
+
+// ============================================================================
+// GAP-5: Symbolic constant propagation
+// ============================================================================
+// Walk backwards through the definition chain of a Varnode, applying simple
+// arithmetic/bitwise evaluation, to determine if it reduces to a constant.
+// Supports: COPY, ZEXT, SEXT, INT_ADD, INT_SUB, INT_AND, INT_OR, INT_XOR.
+// Maximum recursion depth: 4 hops (prevents infinite loops on phi-nodes etc.)
+// ============================================================================
+bool EmulationAnalyzer::try_propagate_constant(Varnode* vn, uintb& out_val, int depth) {
+    if (!vn) return false;
+    if (depth > 4) return false;   // cap recursion
+
+    // Already a constant — base case
+    if (vn->isConstant()) {
+        out_val = vn->getOffset();
+        return true;
+    }
+
+    if (!vn->isWritten()) return false;
+
+    PcodeOp* def = vn->getDef();
+    if (!def) return false;
+
+    OpCode opc = def->code();
+
+    // Handle single-input transparent operations
+    switch (opc) {
+        case CPUI_COPY:
+        case CPUI_INT_ZEXT:
+        case CPUI_INT_SEXT:
+        case CPUI_CAST: {
+            Varnode* in0 = def->getIn(0);
+            uintb v;
+            if (try_propagate_constant(in0, v, depth + 1)) {
+                if (opc == CPUI_INT_SEXT) {
+                    // sign-extend to output size
+                    int in_bits  = in0->getSize() * 8;
+                    int out_bits = vn->getSize() * 8;
+                    if (in_bits < out_bits) {
+                        uintb sign_bit = (uintb)1 << (in_bits - 1);
+                        if (v & sign_bit)
+                            v |= (~((uintb)0)) << in_bits;
+                    }
+                }
+                out_val = v;
+                return true;
+            }
+            break;
+        }
+        // Two-input arithmetic / bitwise
+        case CPUI_INT_ADD:
+        case CPUI_INT_SUB:
+        case CPUI_INT_AND:
+        case CPUI_INT_OR:
+        case CPUI_INT_XOR:
+        case CPUI_INT_LEFT:
+        case CPUI_INT_RIGHT: {
+            if (def->numInput() < 2) break;
+            uintb v0, v1;
+            if (!try_propagate_constant(def->getIn(0), v0, depth + 1)) break;
+            if (!try_propagate_constant(def->getIn(1), v1, depth + 1)) break;
+            switch (opc) {
+                case CPUI_INT_ADD:   out_val = v0 + v1;    return true;
+                case CPUI_INT_SUB:   out_val = v0 - v1;    return true;
+                case CPUI_INT_AND:   out_val = v0 & v1;    return true;
+                case CPUI_INT_OR:    out_val = v0 | v1;    return true;
+                case CPUI_INT_XOR:   out_val = v0 ^ v1;    return true;
+                case CPUI_INT_LEFT:  out_val = v0 << v1;   return true;
+                case CPUI_INT_RIGHT: out_val = v0 >> v1;   return true;
+                default: break;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    return false;
 }
 
 bool EmulationAnalyzer::try_evaluate_condition(PcodeOp* cbranch_op, bool& result) {
@@ -83,6 +165,7 @@ bool EmulationAnalyzer::analyze(Funcdata* fd) {
     if (!fd) return false;
     
     meta_tags.clear();
+    registered_callind_targets_.clear();
 
     // Get the basic block structure
     const BlockGraph& bblocks = fd->getBasicBlocks();
@@ -120,13 +203,56 @@ bool EmulationAnalyzer::analyze(Funcdata* fd) {
             }
         }
         else if (opc == CPUI_BRANCHIND || opc == CPUI_CALLIND) {
-            // Check if indirect target is constant
+            // Check if indirect target can be resolved to a constant (directly
+            // or via symbolic constant propagation — GAP-5)
             Varnode* target_vn = last_op->getIn(0);
-            if (target_vn && target_vn->isConstant()) {
+            if (!target_vn) continue;
+
+            uintb resolved_target = 0;
+            bool target_known = false;
+
+            if (target_vn->isConstant()) {
+                resolved_target = target_vn->getOffset();
+                target_known    = true;
+            } else {
+                // GAP-5: try up to 4-hop backward walk
+                target_known = try_propagate_constant(target_vn, resolved_target, 0);
+            }
+
+            if (target_known) {
                 std::stringstream ss;
-                ss << "[FISSION_META] Indirect target is constant: 0x" 
-                   << std::hex << target_vn->getOffset();
+                ss << "[FISSION_META] "
+                   << (opc == CPUI_CALLIND ? "Indirect call" : "Indirect branch")
+                   << " target resolves to constant: 0x"
+                   << std::hex << resolved_target;
                 meta_tags[last_op->getAddr()] = ss.str();
+
+                // GAP-5: register the resolved callee as a function stub so
+                // the decompiler knows about the target address for future passes.
+                if (opc == CPUI_CALLIND
+                    && resolved_target != 0
+                    && registered_callind_targets_.find(resolved_target) ==
+                       registered_callind_targets_.end())
+                {
+                    Architecture* arch   = fd->getArch();
+                    AddrSpace*    cs     = arch ? arch->getDefaultCodeSpace() : nullptr;
+                    Scope* global_scope  = (arch && arch->symboltab)
+                                              ? arch->symboltab->getGlobalScope()
+                                              : nullptr;
+                    if (cs && global_scope) {
+                        Address target_addr(cs, resolved_target);
+                        if (!global_scope->findAddr(target_addr, fd->getAddress())) {
+                            char stub_name[32];
+                            std::snprintf(stub_name, sizeof(stub_name),
+                                          "indirect_%08llx",
+                                          (unsigned long long)resolved_target);
+                            try {
+                                global_scope->addFunction(target_addr, stub_name);
+                            } catch (...) {}
+                        }
+                        registered_callind_targets_.insert(resolved_target);
+                    }
+                }
             }
         }
     }

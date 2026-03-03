@@ -12,20 +12,25 @@ use windows::Win32::System::Threading::{
 /// Enumerate all running processes
 pub fn enumerate_processes() -> Vec<ProcessInfo> {
     let mut processes = Vec::new();
-    let mut pids: [u32; 4096] = [0; 4096];
-    let mut bytes_returned: u32 = 0;
 
     unsafe {
-        // Get list of all PIDs
-        if EnumProcesses(
-            pids.as_mut_ptr(),
-            (pids.len() * std::mem::size_of::<u32>()) as u32,
-            &mut bytes_returned,
-        )
-        .is_err()
-        {
-            return processes;
-        }
+        // Dynamically grow the PID buffer until EnumProcesses has room for all PIDs.
+        // The API fills the buffer and sets bytes_returned; if bytes_returned >= cb
+        // the buffer may have been truncated — double the capacity and retry.
+        let mut capacity = 512usize;
+        let mut bytes_returned: u32 = 0;
+        let pids: Vec<u32> = loop {
+            let mut buf = vec![0u32; capacity];
+            let cb = (capacity * std::mem::size_of::<u32>()) as u32;
+            if EnumProcesses(buf.as_mut_ptr(), cb, &mut bytes_returned).is_err() {
+                return processes;
+            }
+            if bytes_returned >= cb {
+                capacity = capacity.saturating_mul(2);
+                continue;
+            }
+            break buf;
+        };
 
         let num_processes = bytes_returned as usize / std::mem::size_of::<u32>();
 

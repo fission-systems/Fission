@@ -1,5 +1,6 @@
 //! Fission Tauri — DTO types for JSON serialization over Tauri IPC.
 
+use fission_core::{DEFAULT_DECOMP_TIMEOUT_MS, DEFAULT_L1_CACHE_SIZE, MAX_FUNCTION_SIZE, MAX_INSTRUCTIONS_PER_FUNCTION};
 use serde::{Deserialize, Serialize};
 
 /// Binary metadata sent to the frontend after loading.
@@ -371,10 +372,10 @@ pub struct PerformanceOptions {
 impl Default for PerformanceOptions {
     fn default() -> Self {
         Self {
-            timeout_ms: 30000,
-            max_function_size: 65536,
-            max_instructions: 100000,
-            cache_size: 10,
+            timeout_ms: DEFAULT_DECOMP_TIMEOUT_MS,
+            max_function_size: MAX_FUNCTION_SIZE as u32,
+            max_instructions: MAX_INSTRUCTIONS_PER_FUNCTION,
+            cache_size: DEFAULT_L1_CACHE_SIZE as u32,
         }
     }
 }
@@ -646,6 +647,9 @@ pub struct FidMatchDto {
 pub struct FidResultDto {
     pub matched: usize,
     pub total_scanned: usize,
+    pub fidbf_attempted: usize,
+    pub fidbf_loaded: usize,
+    pub fidbf_failed: usize,
     pub matches: Vec<FidMatchDto>,
 }
 

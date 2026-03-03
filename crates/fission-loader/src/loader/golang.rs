@@ -457,6 +457,77 @@ impl<'a> GoAnalyzer<'a> {
             _ => None,
         }
     }
+
+    /// Scan .rodata / __rodata for inline GoString structs {*data, len}.
+    ///
+    /// Equivalent to Ghidra's GolangStringAnalyzer which detects non-null-
+    /// terminated Go strings so decompiled code shows string content instead
+    /// of raw pointer/length pairs.
+    ///
+    /// Returns a map of struct_address → string_content for all detected
+    /// GoString instances.  Callers should register these in `global_symbols`
+    /// so the decompiler can emit readable names.
+    pub fn scan_go_strings(&self) -> std::collections::HashMap<u64, String> {
+        let mut results = std::collections::HashMap::new();
+        let image_base  = self.binary.image_base;
+        let is_64bit    = self.binary.is_64bit;
+        let ptr_size    = if is_64bit { 8usize } else { 4usize };
+        let struct_size = ptr_size * 2; // {ptr, len}
+
+        for section in &self.binary.sections {
+            // Only scan readable, non-executable data sections
+            if section.is_executable { continue; }
+            let name = section.name.as_str();
+            let is_rodata = name.contains("rodata") || name == ".rdata"
+                || name == "__rodata" || name == ".data";
+            if !is_rodata { continue; }
+
+            let va    = section.virtual_address;
+            let vsize = section.virtual_size as usize;
+            if vsize < struct_size { continue; }
+
+            let Some(data) = self.binary.view_bytes(va, vsize) else { continue };
+
+            let mut offset = 0usize;
+            while offset + struct_size <= data.len() {
+                // Read pointer and length
+                let (ptr_val, len_val): (u64, u64) = if is_64bit {
+                    let p = u64::from_le_bytes(data[offset..offset+8].try_into().unwrap_or([0;8]));
+                    let l = u64::from_le_bytes(data[offset+8..offset+16].try_into().unwrap_or([0;8]));
+                    (p, l)
+                } else {
+                    let p = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap_or([0;4])) as u64;
+                    let l = u32::from_le_bytes(data[offset+4..offset+8].try_into().unwrap_or([0;4])) as u64;
+                    (p, l)
+                };
+
+                // Sanity-check: ptr must point somewhere in the binary, len reasonable
+                let ptr_valid = ptr_val >= image_base
+                    && ptr_val < image_base + 0x1000_0000
+                    && ptr_val != 0;
+                let len_valid = len_val >= 4 && len_val < 4096;
+
+                if ptr_valid && len_valid {
+                    // Try to read the string content
+                    if let Some(str_bytes) = self.binary.get_bytes(ptr_val, len_val as usize) {
+                        if let Ok(s) = std::str::from_utf8(&str_bytes) {
+                            // Valid UTF-8 GoString found
+                            let struct_addr = va + offset as u64;
+                            let label = format!("GoStr_{:x}", struct_addr);
+                            // Store as "GoStr_<addr>":"<content>" entry
+                            let display = format!("\"{}\"", s.escape_default());
+                            results.insert(struct_addr, display);
+                            let _ = label; // will be used by caller as key
+                        }
+                    }
+                }
+
+                offset += ptr_size; // slide by pointer-size for overlapping scan
+            }
+        }
+
+        results
+    }
 }
 
 /// Go type information

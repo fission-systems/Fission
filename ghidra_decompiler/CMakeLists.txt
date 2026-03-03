@@ -80,6 +80,7 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/analysis/GlobalDataAnalyzer.cc
     ${FISSION_MODULES_DIR}/analysis/GraphAlgorithms.cc
     ${FISSION_MODULES_DIR}/analysis/VTableAnalyzer.cc
+    ${FISSION_MODULES_DIR}/analysis/NoReturnDetector.cc
     ${FISSION_MODULES_DIR}/core/ContextServices.cc
     ${FISSION_MODULES_DIR}/core/ArchInit.cc
     ${FISSION_MODULES_DIR}/core/ScopeFission.cc

@@ -21,7 +21,7 @@ pub async fn get_strings(state: State<'_, AppState>) -> CmdResult<Vec<StringDto>
 
     let data = binary.inner().data.as_slice();
     let mut strings = Vec::new();
-    let min_len = 4;
+    let min_len = fission_core::MIN_STRING_LENGTH;
 
     // ── ASCII pass ───────────────────────────────────────────────────────────
     let mut current_start = None;

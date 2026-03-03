@@ -554,6 +554,112 @@ impl<'a> AppleAnalyzer<'a> {
         Ok(functions)
     }
 
+    /// Resolve ObjC `objc_msgSend` selector references.
+    ///
+    /// Ghidra's `ObjectiveC2_MessageAnalyzer` does the same: it finds all
+    /// `__objc_selrefs` slots (each is a pointer into `__objc_methnames`)
+    /// and annotates them with the resolved selector name so the decompiler
+    /// can show `objc_msgSend(self, "viewDidLoad")` instead of raw pointers.
+    ///
+    /// Returns `selref_va → "sel_<name>"` for insertion into `global_symbols`.
+    pub fn resolve_msg_send_selectors(&self) -> std::collections::HashMap<u64, String> {
+        let mut result = std::collections::HashMap::new();
+
+        let ptr_size = if self.binary.is_64bit { 8usize } else { 4usize };
+
+        // ── Step 1: build methname_va → selector_name from __objc_methnames ──
+        // The section is a blob of null-terminated C strings packed back-to-back.
+        let Some(methnames_sec) = self
+            .binary
+            .sections
+            .iter()
+            .find(|s| s.name == "__objc_methnames")
+        else {
+            return result;
+        };
+
+        let Some(methnames_data) = self.binary.get_bytes(
+            methnames_sec.virtual_address,
+            methnames_sec.virtual_size as usize,
+        ) else {
+            return result;
+        };
+
+        let mut name_map: std::collections::HashMap<u64, String> =
+            std::collections::HashMap::new();
+        let mut offset = 0usize;
+        while offset < methnames_data.len() {
+            // Find the end of this null-terminated string
+            let start = offset;
+            while offset < methnames_data.len() && methnames_data[offset] != 0 {
+                offset += 1;
+            }
+            if offset > start {
+                if let Ok(name) =
+                    std::str::from_utf8(&methnames_data[start..offset])
+                {
+                    let va = methnames_sec.virtual_address + start as u64;
+                    name_map.insert(va, name.to_string());
+                }
+            }
+            offset += 1; // skip the null terminator
+        }
+
+        if name_map.is_empty() {
+            return result;
+        }
+
+        // ── Step 2: scan __objc_selrefs (array of pointers into methnames) ──
+        let Some(selrefs_sec) = self
+            .binary
+            .sections
+            .iter()
+            .find(|s| s.name == "__objc_selrefs")
+        else {
+            return result;
+        };
+
+        let Some(selrefs_data) = self.binary.get_bytes(
+            selrefs_sec.virtual_address,
+            selrefs_sec.virtual_size as usize,
+        ) else {
+            return result;
+        };
+
+        let num_entries = selrefs_data.len() / ptr_size;
+        for i in 0..num_entries {
+            let selref_va = selrefs_sec.virtual_address + (i * ptr_size) as u64;
+            let target_va = self.read_ptr(&selrefs_data, i * ptr_size, ptr_size);
+            if target_va == 0 {
+                continue;
+            }
+            // Look for an exact match or any entry that starts at/before target_va
+            // with the string spanning over it (handles partial offsets)
+            if let Some(name) = name_map.get(&target_va) {
+                let symbol_name = format!("sel_{}", name);
+                result.insert(selref_va, symbol_name);
+            } else {
+                // Fall back: walk backwards to find the string that contains target_va
+                // (target_va may point into the middle of a string — rare but possible)
+                for (&str_va, name) in &name_map {
+                    if str_va <= target_va && target_va < str_va + name.len() as u64 + 1 {
+                        let symbol_name = format!("sel_{}", name);
+                        result.insert(selref_va, symbol_name);
+                        break;
+                    }
+                }
+            }
+        }
+
+        tracing::debug!(
+            "[ObjCAnalyzer] resolve_msgSend_selectors: {} selrefs → {} resolved",
+            num_entries,
+            result.len()
+        );
+
+        result
+    }
+
     fn read_ptr(&self, data: &[u8], offset: usize, size: usize) -> u64 {
         if offset + size > data.len() {
             return 0;

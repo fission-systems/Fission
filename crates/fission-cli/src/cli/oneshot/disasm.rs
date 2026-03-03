@@ -1,3 +1,4 @@
+use fission_core::{DISASM_READ_WINDOW, PAGE_SIZE};
 use fission_loader::loader::LoadedBinary;
 use std::io::{self, Write};
 
@@ -23,7 +24,7 @@ pub(super) fn disassemble(
         let file_offset = sec.file_offset as usize + offset;
         let remaining = (sec.virtual_size as usize).saturating_sub(offset);
         let len = remaining
-            .min(1024)
+            .min(DISASM_READ_WINDOW)
             .min(data.len().saturating_sub(file_offset));
 
         if file_offset + len <= data.len() {
@@ -130,7 +131,7 @@ pub(super) fn disassemble_function(
             func_size = next_func.address - func_start;
         } else {
             // No next function, use a reasonable limit
-            func_size = 4096;
+            func_size = PAGE_SIZE as u64;
         }
     }
 

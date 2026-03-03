@@ -2,6 +2,7 @@ use super::core::PluginManager;
 use super::types::LoadedPlugin;
 use crate::plugin::api::{PluginInfo, PluginType};
 use crate::plugin::{FissionPlugin, PluginContext};
+use fission_core::FISSION_VERSION;
 use std::path::Path;
 
 impl PluginManager {
@@ -75,7 +76,7 @@ impl PluginManager {
         let info = PluginInfo {
             id: plugin_id.clone(),
             name: plugin_id.clone(),
-            version: "0.1.0".into(),
+            version: FISSION_VERSION.into(),
             author: "Unknown".into(),
             description: format!("Loaded from {:?}", path),
             plugin_type,

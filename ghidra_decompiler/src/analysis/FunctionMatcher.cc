@@ -256,15 +256,37 @@ std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes
     if (size < 8) {
         return "";
     }
-    
-    // Calculate FID hash
-    uint64_t hash = FidHasher::calculate_full_hash(bytes, std::min(size, (size_t)64));
-    
+
+    // =========================================================================
+    // GAP-3 FIX: Multi-tier hash matching (mirrors Ghidra's FidProgramSeeker)
+    //
+    // Ghidra chooses one of three hash tiers based on code_unit_size:
+    //   Short  (<  5 code units): use full_hash + specific_hash mandatory
+    //   Medium (< 30 code units): use full_hash, verify specific_hash
+    //   Full   (>= 30 code units): full_hash alone is sufficient
+    //
+    // "code units" ≈ number of instructions; 1 instr ≈ 3-6 bytes on x86-64.
+    // We approximate via byte size: short < ~20 B, medium < ~180 B.
+    //
+    // Specific-hash scoring prevents false-positives on tiny stub functions.
+    // =========================================================================
+
+    // Use all available bytes (up to 256) for a more accurate hash
+    size_t hash_bytes = std::min(size, (size_t)256);
+    uint64_t full_hash     = FidHasher::calculate_full_hash(bytes, hash_bytes);
+    uint64_t specific_hash = FidHasher::calculate_specific_hash(bytes, std::min(size, (size_t)16));
+
+    // Approximate code-unit count (Ghidra uses actual instruction count;
+    // we estimate: x86 avg instruction size ≈ 4 bytes)
+    int approx_units = static_cast<int>(size / 4);
+    bool need_specific_verify = (approx_units < 30);  // short + medium tiers
+    bool need_strict_specific  = (approx_units <  5);  // short tier only
+
     // Debug: Print first 3 computed hashes
     if (debug_hash_count < 3) {
         fission::utils::log_stream() << "[FunctionMatcher] Computed hash at 0x" << std::hex << address 
-                  << ": 0x" << hash << std::dec;
-        // Show first few bytes
+                  << ": full=0x" << full_hash << " specific=0x" << specific_hash
+                  << " units≈" << std::dec << approx_units;
         fission::utils::log_stream() << " bytes=[";
         for (size_t i = 0; i < std::min(size, (size_t)8); ++i) {
             fission::utils::log_stream() << std::hex << (int)bytes[i] << " ";
@@ -278,16 +300,74 @@ std::string FunctionMatcher::match_by_fid(uint64_t address, const uint8_t* bytes
         ? std::vector<const FidDatabase*>{fid_db}
         : fid_dbs_;
 
+    // Best match: track highest score
+    std::string best_name;
+    int         best_score = -1;
+
     for (const auto* db : dbs_to_search) {
         if (!db || !db->is_loaded()) continue;
-        std::vector<std::string> matches = db->lookup_by_hash(hash);
-        if (!matches.empty()) {
-            std::string name = matches[0];
-            matched_funcs[address] = name;
-            fission::utils::log_stream() << "[FunctionMatcher] FID MATCH! 0x" << std::hex << address
-                      << " -> " << name << " (hash=0x" << hash << ")" << std::dec << std::endl;
-            return name;
+
+        // Use record-level lookup so we can access code_unit_size, specific_hash,
+        // and relation data for scoring.
+        std::vector<const FidFunctionRecord*> records =
+            db->lookup_records_by_hash(full_hash);
+
+        for (const FidFunctionRecord* rec : records) {
+            if (!rec || rec->name.empty()) continue;
+
+            int score = 10; // base score for full_hash match
+
+            // ---- Tier-based specific hash verification -------------------
+            if (need_specific_verify) {
+                // Medium tier: specific hash must match or score drops
+                if (rec->specific_hash != 0 && rec->specific_hash != specific_hash) {
+                    if (need_strict_specific) {
+                        // Short tier: must match — disqualify
+                        continue;
+                    }
+                    // Medium tier: penalise but don't disqualify
+                    score -= 5;
+                } else {
+                    score += 3; // bonus for specific hash match
+                }
+            }
+
+            // ---- code_unit_size sanity: filter cross-tier collisions -----
+            // If DB record says the function has e.g. 200 code units but our
+            // function is only ~5 instructions, the hash is a false positive.
+            if (rec->code_unit_size > 0) {
+                int db_units = static_cast<int>(rec->code_unit_size);
+                // Allow ±50% tolerance
+                if (approx_units > 0) {
+                    int ratio_pct = (approx_units * 100) / (db_units > 0 ? db_units : 1);
+                    if (ratio_pct < 50 || ratio_pct > 200) {
+                        score -= 7; // size mismatch penalty
+                    }
+                }
+            }
+
+            // ---- Child relation bonus ------------------------------------
+            // If this function has a known callee relation (child), and the
+            // callee matches something we've already identified, add bonus.
+            // (Child = callee of the candidate function.)
+            // Check via has_relation(rec->function_id, callee_full_hash).
+            // We don't have callee hashes here, so skip for now; the
+            // full implementation would look up matched callees from context.
+
+            if (score > best_score) {
+                best_score = score;
+                best_name  = rec->name;
+            }
         }
+    }
+
+    if (!best_name.empty() && best_score >= 0) {
+        matched_funcs[address] = best_name;
+        fission::utils::log_stream() << "[FunctionMatcher] FID MATCH! 0x" << std::hex << address
+                  << " -> " << best_name
+                  << " (score=" << std::dec << best_score
+                  << ", hash=0x" << std::hex << full_hash << ")" << std::dec << std::endl;
+        return best_name;
     }
 
     return "";  // No match across all DBs

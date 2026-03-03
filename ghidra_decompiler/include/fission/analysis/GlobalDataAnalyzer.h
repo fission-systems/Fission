@@ -41,61 +41,69 @@ struct GlobalStructure {
 };
 
 /**
- * GlobalDataAnalyzer - Analyze global variable access patterns
- * 
+ * GlobalDataAnalyzer - Analyze global variable access patterns.
+ *
  * Scans all decompiled functions to find accesses to global memory
- * (.data, .bss sections) and infers structure layouts.
+ * (.data, .bss, .rdata sections) and infers:
+ *   - Struct layouts from multi-field access clusters
+ *   - Scalar float/double symbols (GAP-1 fix: prevents raw hex emission)
  */
 class GlobalDataAnalyzer {
 public:
     GlobalDataAnalyzer();
     ~GlobalDataAnalyzer();
 
-    /**
-     * Set the data section range (from binary loader)
-     */
+    /// Set the data section range (from binary loader)
     void set_data_section(uint64_t start, uint64_t end);
-    
-    /**
-     * Analyze a decompiled function for global accesses
-     */
+
+    /// Analyze a decompiled function for global accesses
     void analyze_function(ghidra::Funcdata* fd);
-    
-    /**
-     * After analyzing all functions, cluster accesses into structures
-     */
+
+    /// After analyzing all functions, cluster accesses into structures and
+    /// discover scalar float/double globals.
     void infer_structures();
-    
-    /**
-     * Create types in the type factory
-     * @return Number of structures created
-     */
+
+    /// Create typed struct entries in the Ghidra type factory.
+    /// @return Number of new struct types created.
     int create_types(ghidra::TypeFactory* factory, int ptr_size);
-    
-    /**
-     * Get inferred structures for debugging/reporting
-     */
-    const std::vector<GlobalStructure>& get_structures() const { return inferred_globals; }
-    
-    /**
-     * Clear all collected data
-     */
+
+    /// Get inferred global structures (for debugging/reporting).
+    const std::vector<GlobalStructure>& get_structures() const {
+        return inferred_globals;
+    }
+
+    // -------------------------------------------------------------------------
+    // GAP-1: Scalar float/double global symbol support
+    // -------------------------------------------------------------------------
+
+    /// A scalar (non-struct) float or double global.
+    /// address: VA of the value in .rdata/.data
+    /// size:    4 = float, 8 = double
+    struct ScalarFloatEntry {
+        uint64_t address;
+        int      size;
+    };
+
+    /// All scalar float/double globals found during the most recent
+    /// infer_structures() call.  These should be registered as typed
+    /// DAT_<addr> symbols in the global scope so that Ghidra's LOAD
+    /// type-propagation can replace raw hex constants with named values.
+    const std::vector<ScalarFloatEntry>& get_scalar_floats() const {
+        return scalar_floats_;
+    }
+
+    /// Clear all collected data (call before reusing the analyzer).
     void clear();
 
 private:
     uint64_t data_section_start = 0;
-    uint64_t data_section_end = 0;
-    
-    // All collected global accesses
-    std::vector<GlobalAccess> accesses;
-    
-    // Inferred global structures
+    uint64_t data_section_end   = 0;
+
+    std::vector<GlobalAccess>    accesses;
     std::vector<GlobalStructure> inferred_globals;
-    
-    // Check if address is in data section
+    std::vector<ScalarFloatEntry> scalar_floats_;
+
     bool is_in_data_section(uint64_t addr) const;
-    
-    // Cluster accesses by base address
     std::map<uint64_t, std::vector<GlobalAccess>> cluster_by_base();
 };
 
