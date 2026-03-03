@@ -548,7 +548,9 @@ mod tests {
         let mut tracker = DefUseTracker::new();
         tracker.build(&func);
 
-        let v1 = &func.blocks[0].ops[0].output.as_ref().unwrap();
+        let Some(v1) = func.blocks[0].ops[0].output.as_ref() else {
+            panic!("test setup requires op output")
+        };
         assert!(tracker.is_written(v1));
         assert_eq!(tracker.get_uses(v1).len(), 1);
     }

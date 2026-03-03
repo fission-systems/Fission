@@ -30,7 +30,9 @@ fn test_xor_with_zero() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert_eq!(optimized.inputs.len(), 1);
 }
@@ -63,7 +65,9 @@ fn test_and_with_zero() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 0);
@@ -97,7 +101,9 @@ fn test_add_with_zero() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
 }
 
@@ -129,7 +135,9 @@ fn test_trivial_arith_equal() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 1); // true
@@ -161,7 +169,9 @@ fn test_trivial_arith_notequal() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 0); // false
@@ -193,7 +203,9 @@ fn test_trivial_arith_less() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 0); // false
 }
@@ -226,7 +238,9 @@ fn test_trivial_bool_and_true() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert_eq!(optimized.inputs[0], vn);
 }
@@ -257,7 +271,9 @@ fn test_trivial_bool_and_false() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 0); // false
@@ -289,7 +305,9 @@ fn test_trivial_bool_or_true() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 1); // true
@@ -321,7 +339,9 @@ fn test_trivial_bool_xor_true() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::BoolNegate);
     assert_eq!(optimized.inputs[0], vn);
 }
@@ -347,7 +367,9 @@ fn test_collapse_constants_add() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 8);
@@ -372,7 +394,9 @@ fn test_collapse_constants_mult() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 42);
@@ -397,7 +421,9 @@ fn test_collapse_constants_comparison() {
         asm_mnemonic: None,
     };
 
-    let optimized = optimizer.rules.try_optimize(&op).unwrap();
+    let Some(optimized) = optimizer.rules.try_optimize(&op) else {
+        panic!("optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 1); // 5 < 10 is true
@@ -463,7 +489,9 @@ fn test_shift_bitops_left_zero() {
     let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker, &func);
 
     assert!(result.is_some());
-    let optimized = result.unwrap();
+    let Some(optimized) = result else {
+        panic!("tracker optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 0);
@@ -528,7 +556,9 @@ fn test_shift_bitops_right_zero() {
     let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker, &func);
 
     assert!(result.is_some());
-    let optimized = result.unwrap();
+    let Some(optimized) = result else {
+        panic!("tracker optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 0);
@@ -593,7 +623,9 @@ fn test_and_mask_always_zero() {
     let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker, &func);
 
     assert!(result.is_some());
-    let optimized = result.unwrap();
+    let Some(optimized) = result else {
+        panic!("tracker optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].constant_val, 0);
@@ -673,7 +705,9 @@ fn test_and_mask_noop() {
     let result = rules.try_optimize_with_tracker(&func.blocks[0].ops[1], &tracker, &func);
 
     assert!(result.is_some());
-    let optimized = result.unwrap();
+    let Some(optimized) = result else {
+        panic!("tracker optimization should succeed")
+    };
     assert_eq!(optimized.opcode, PcodeOpcode::Copy);
     assert!(!optimized.inputs[0].is_constant);
     assert_eq!(optimized.inputs[0].offset, 0x100); // Should copy V
