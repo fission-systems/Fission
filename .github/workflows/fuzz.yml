@@ -1,0 +1,87 @@
+name: Fuzz
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "crates/fission-loader/**"
+  schedule:
+    # Run nightly at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzz_duration:
+        description: "Fuzz duration per target (seconds)"
+        default: "120"
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_DURATION: ${{ github.event.inputs.fuzz_duration || '60' }}
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_pe_parser
+          - fuzz_elf_parser
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo-fuzz
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ runner.os }}-v1
+
+      - name: Install cargo-fuzz
+        run: |
+          if ! command -v cargo-fuzz &> /dev/null; then
+            cargo install cargo-fuzz --locked
+          fi
+
+      - name: Generate seed corpus
+        run: |
+          chmod +x scripts/test/gen_fuzz_corpus.sh
+          ./scripts/test/gen_fuzz_corpus.sh
+
+      - name: Run fuzzer — ${{ matrix.target }}
+        working-directory: crates/fission-loader
+        run: |
+          cargo fuzz run ${{ matrix.target }} -- \
+            -max_total_time=${{ env.FUZZ_DURATION }} \
+            -max_len=65536 \
+            -print_final_stats=1
+        # libfuzzer exits 0 on timeout, non-zero on crash
+        continue-on-error: false
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            crates/fission-loader/fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+
+      - name: Upload corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            crates/fission-loader/fuzz/corpus/${{ matrix.target }}/
+          retention-days: 7
+          if-no-files-found: ignore
