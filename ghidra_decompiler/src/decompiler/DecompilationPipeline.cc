@@ -1,3 +1,4 @@
+#include <cstring>
 #include "fission/decompiler/DecompilationPipeline.h"
 #include "fission/decompiler/AnalysisPipeline.h"
 #include "fission/decompiler/Limits.h"

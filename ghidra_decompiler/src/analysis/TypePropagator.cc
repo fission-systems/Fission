@@ -1,3 +1,4 @@
+#include <cstring>
 #include "fission/analysis/TypePropagator.h"
 #include "fission/analysis/StackFrameAnalyzer.h"
 #include "fission/types/TypeResolver.h"

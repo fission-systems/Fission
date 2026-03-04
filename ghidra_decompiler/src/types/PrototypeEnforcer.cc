@@ -1,3 +1,4 @@
+#include <cstring>
 #include "fission/types/PrototypeEnforcer.h"
 
 // Ghidra includes

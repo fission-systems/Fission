@@ -1,3 +1,4 @@
+#include <cstring>
 #include "fission/decompiler/PostProcessor.h"
 #include "fission/decompiler/CFGStructurizer.h"
 #include <vector>

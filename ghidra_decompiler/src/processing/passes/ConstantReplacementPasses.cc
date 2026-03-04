@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 
 namespace fission {
 namespace processing {

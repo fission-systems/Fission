@@ -1,3 +1,4 @@
+#include <cstring>
 #include "fission/processing/Constants.h"
 #include <algorithm>
 
