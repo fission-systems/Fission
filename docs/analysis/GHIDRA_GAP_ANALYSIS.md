@@ -28,17 +28,17 @@
 ┌─────────────────────────────────────────────────────┐
 │  Fission C++ 레이어                                  │
 │                                                     │
-│  TypePropagator.cc   (1917줄) — Ghidra 보완 타입전파 │
-│  StructureAnalyzer.cc (477줄) — 구조체 복원          │
-│  CallingConvDetector  (406줄) — 호출 규약 검증       │
-│  FidDatabase.cc       (586줄) — FID 시그니처 매칭    │
-│  FunctionMatcher.cc   (348줄) — 패턴 기반 매칭       │
+│  TypePropagator.cc   (2075줄) — Ghidra 보완 타입전파 │
+│  StructureAnalyzer.cc (535줄) — 구조체 복원          │
+│  CallingConvDetector  (453줄) — 호출 규약 검증       │
+│  FidDatabase.cc       (617줄) — FID 시그니처 매칭    │
+│  FunctionMatcher.cc   (377줄) — 패턴 기반 매칭       │
 │  NoReturnDetector.cc          — noreturn 감지        │
 │  VTableAnalyzer.cc            — vtable 분석          │
 │  EmulationAnalyzer.cc         — 에뮬레이션 분석      │
 │                                                     │
 │  PostProcessor.cc    (10패스) — C 텍스트 후처리      │
-│  CFGStructurizer.cc  (13패스) — 제어흐름 구조화      │
+│  CFGStructurizer.cc  (12패스) — 제어흐름 구조화      │
 │  SwitchReconstructor  (4패턴) — switch 복원          │
 │                                                     │
 └──────────────────────┬──────────────────────────────┘
@@ -63,10 +63,10 @@
 | 항목 | Fission | Ghidra |
 |------|---------|--------|
 | C++ 소스 라인 (decompiler) | ~19,259 | ~129,533 |
-| Rust 소스 라인 (추가) | ~22,000 | — |
+| Rust 소스 라인 (추가) | ~45,000 | — |
 | Rule/Action 서브클래스 | 212개 (Ghidra 코어, 이미 실행) | 212개 |
 | Fission 자체 Pcode 룰 (Rust) | 30개 | — |
-| Fission TypePropagator 처리 opcode | 27개 | — |
+| Fission TypePropagator 처리 opcode | 16개 | — |
 
 ---
 
@@ -185,7 +185,7 @@ Ghidra: 38개 ISA 지원.
 | 자동화 | CLI + Rust API 배치 처리 |
 | 커스터마이징 | C++/Rust 직접 수정 (Java 플러그인 불필요) |
 | FFI 인프라 | Rust ↔ Ghidra C++ 직접 연동 (업계 유일) |
-| 후처리 파이프라인 | PostProcessor 10패스 + CFGStructurizer 13패스 |
+| 후처리 파이프라인 | PostProcessor 10패스 + CFGStructurizer 12패스 |
 | FID 매칭 | 자체 `.fidbf` 파서 + JSON 패턴 매칭 |
 
 ---
