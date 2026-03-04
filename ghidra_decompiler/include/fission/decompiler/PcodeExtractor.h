@@ -1,6 +1,7 @@
 #ifndef FISSION_PCODE_EXTRACTOR_H
 #define FISSION_PCODE_EXTRACTOR_H
 
+#include <cstdint>
 #include "libdecomp.hh"
 #include <string>
 #include <vector>

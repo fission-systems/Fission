@@ -1,6 +1,7 @@
 #ifndef __TYPE_PROPAGATOR_H__
 #define __TYPE_PROPAGATOR_H__
 
+#include <cstdint>
 #include <map>
 #include <set>
 #include <unordered_map>

@@ -1,6 +1,7 @@
 #ifndef FISSION_FFI_SYMBOL_PROVIDER_FFI_H
 #define FISSION_FFI_SYMBOL_PROVIDER_FFI_H
 
+#include <cstdint>
 #include <stddef.h>
 #include <stdint.h>
 

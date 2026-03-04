@@ -1,6 +1,7 @@
 #ifndef __TYPE_SHARING_H__
 #define __TYPE_SHARING_H__
 
+#include <cstdint>
 #include <map>
 #include <set>
 #include <vector>

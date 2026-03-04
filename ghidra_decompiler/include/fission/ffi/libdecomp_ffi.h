@@ -8,6 +8,7 @@
 #ifndef FISSION_LIBDECOMP_FFI_H
 #define FISSION_LIBDECOMP_FFI_H
 
+#include <cstdint>
 #include <stdint.h>
 #include <stddef.h>
 #include "fission/ffi/SymbolProviderFfi.h"

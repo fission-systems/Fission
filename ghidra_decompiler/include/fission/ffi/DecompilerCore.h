@@ -9,6 +9,7 @@
 #ifndef FISSION_FFI_DECOMPILER_CORE_H
 #define FISSION_FFI_DECOMPILER_CORE_H
 
+#include <cstdint>
 #include "fission/ffi/DecompContext.h"
 #include <string>
 

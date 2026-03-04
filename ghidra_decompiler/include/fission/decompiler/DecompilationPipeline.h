@@ -1,6 +1,7 @@
 #ifndef FISSION_DECOMPILER_DECOMPILATION_PIPELINE_H
 #define FISSION_DECOMPILER_DECOMPILATION_PIPELINE_H
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include "fission/core/DecompilerContext.h"

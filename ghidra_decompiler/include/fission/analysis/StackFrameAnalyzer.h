@@ -1,6 +1,7 @@
 #ifndef __STACK_FRAME_ANALYZER_H__
 #define __STACK_FRAME_ANALYZER_H__
 
+#include <cstdint>
 #include <map>
 #include <vector>
 #include <string>

@@ -12,6 +12,7 @@
 #ifndef FISSION_FFI_DECOMPILER_FFI_H
 #define FISSION_FFI_DECOMPILER_FFI_H
 
+#include <cstdint>
 #include "fission/ffi/DecompContext.h"
 #include "fission/ffi/libdecomp_ffi.h"
 
