@@ -5,7 +5,10 @@
 
 use std::sync::LazyLock;
 
-use super::constants::{DEFAULT_DECOMP_TIMEOUT_MS, DEFAULT_L1_CACHE_SIZE, MAX_FUNCTION_SIZE, MAX_HEX_READ, MB, PAGE_SIZE};
+use super::constants::{
+    DEFAULT_DECOMP_TIMEOUT_MS, DEFAULT_L1_CACHE_SIZE, MAX_FUNCTION_SIZE, MAX_HEX_READ, MB,
+    PAGE_SIZE,
+};
 
 /// Global configuration instance
 pub static CONFIG: LazyLock<Config> = LazyLock::new(Config::load);
@@ -244,7 +247,7 @@ impl Default for DecompilerConfig {
         Self {
             num_workers: 1, // 1 = serialize requests (C++ server is single-threaded)
             max_workers: 8,
-            default_function_size: PAGE_SIZE,  // 4KB
+            default_function_size: PAGE_SIZE,     // 4KB
             max_function_size: MAX_FUNCTION_SIZE, // 64KB
             min_function_size: 16,
             timeout_ms: DEFAULT_DECOMP_TIMEOUT_MS,

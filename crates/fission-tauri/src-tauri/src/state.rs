@@ -14,9 +14,9 @@ use tokio::sync::Mutex;
 use fission_analysis::analysis::decomp::CachingDecompiler;
 
 #[cfg(target_os = "windows")]
-use fission_analysis::debug::{types::DebugEvent, windows::WindowsDebugger};
-#[cfg(target_os = "windows")]
 use crossbeam_channel::{Receiver, Sender};
+#[cfg(target_os = "windows")]
+use fission_analysis::debug::{types::DebugEvent, windows::WindowsDebugger};
 
 /// Inner mutable state behind a Mutex.
 /// Does NOT contain the decompiler — that lives in its own Mutex to

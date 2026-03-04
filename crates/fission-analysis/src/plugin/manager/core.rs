@@ -34,7 +34,10 @@ impl PluginManager {
         let mut search_paths = vec![PathBuf::from(PLUGIN_DIR_NAME)];
         if let Some(home) = dirs::home_dir() {
             // ~/.fission/plugins (properly expanded – PathBuf does NOT auto-expand ~)
-            search_paths.push(home.join(format!(".{}", APP_DIR_NAME)).join(PLUGIN_DIR_NAME));
+            search_paths.push(
+                home.join(format!(".{}", APP_DIR_NAME))
+                    .join(PLUGIN_DIR_NAME),
+            );
         }
 
         Self {

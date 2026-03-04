@@ -2,9 +2,9 @@
 //!
 //! This module provides debugging capabilities on Linux using the ptrace system call.
 
-use fission_core::{FissionError, Result as FissionResult};
 use super::traits::Debugger;
 use super::types::{DebugState, DebugStatus, ProcessInfo, RegisterState};
+use fission_core::{FissionError, Result as FissionResult};
 
 /// Linux debugger implementation using ptrace
 pub struct LinuxDebugger {
@@ -82,8 +82,9 @@ impl Debugger for LinuxDebugger {
 
         self.state.status = DebugStatus::Attaching;
 
-        ptrace::attach(Pid::from_raw(pid as i32))
-            .map_err(|e| FissionError::debug(format!("Failed to attach to process {}: {}", pid, e)))?;
+        ptrace::attach(Pid::from_raw(pid as i32)).map_err(|e| {
+            FissionError::debug(format!("Failed to attach to process {}: {}", pid, e))
+        })?;
 
         self.target_pid = Some(pid);
         self.state.attached_pid = Some(pid);
@@ -101,8 +102,9 @@ impl Debugger for LinuxDebugger {
             .target_pid
             .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
 
-        ptrace::detach(Pid::from_raw(pid as i32), None)
-            .map_err(|e| FissionError::debug(format!("Failed to detach from process {}: {}", pid, e)))?;
+        ptrace::detach(Pid::from_raw(pid as i32), None).map_err(|e| {
+            FissionError::debug(format!("Failed to detach from process {}: {}", pid, e))
+        })?;
 
         self.target_pid = None;
         self.state.attached_pid = None;
@@ -124,7 +126,9 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
 
         ptrace::cont(Pid::from_raw(pid as i32), None)
             .map_err(|e| FissionError::debug(format!("Continue failed: {}", e)))?;
@@ -137,7 +141,9 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
 
         ptrace::step(Pid::from_raw(pid as i32), None)
             .map_err(|e| FissionError::debug(format!("Single step failed: {}", e)))?;
@@ -150,12 +156,15 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
 
         // Read original byte using ptrace PEEKDATA
         let original_word =
-            ptrace::read(Pid::from_raw(pid as i32), address as *mut std::ffi::c_void)
-                .map_err(|e| FissionError::debug(format!("Failed to read memory at 0x{:x}: {}", address, e)))?;
+            ptrace::read(Pid::from_raw(pid as i32), address as *mut std::ffi::c_void).map_err(
+                |e| FissionError::debug(format!("Failed to read memory at 0x{:x}: {}", address, e)),
+            )?;
 
         let original_byte = (original_word & 0xFF) as u8;
 
@@ -167,7 +176,12 @@ impl Debugger for LinuxDebugger {
                 address as *mut std::ffi::c_void,
                 new_word as *mut std::ffi::c_void,
             )
-            .map_err(|e| FissionError::debug(format!("Failed to write breakpoint at 0x{:x}: {}", address, e)))?;
+            .map_err(|e| {
+                FissionError::debug(format!(
+                    "Failed to write breakpoint at 0x{:x}: {}",
+                    address, e
+                ))
+            })?;
         }
 
         let bp = super::types::Breakpoint {
@@ -185,7 +199,9 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
 
         let bp = self
             .state
@@ -195,8 +211,9 @@ impl Debugger for LinuxDebugger {
 
         // Read current word
         let current_word =
-            ptrace::read(Pid::from_raw(pid as i32), address as *mut std::ffi::c_void)
-                .map_err(|e| FissionError::debug(format!("Failed to read memory at 0x{:x}: {}", address, e)))?;
+            ptrace::read(Pid::from_raw(pid as i32), address as *mut std::ffi::c_void).map_err(
+                |e| FissionError::debug(format!("Failed to read memory at 0x{:x}: {}", address, e)),
+            )?;
 
         // Restore original byte
         let new_word = (current_word & !0xFF) | (bp.original_byte as i64);
@@ -206,7 +223,12 @@ impl Debugger for LinuxDebugger {
                 address as *mut std::ffi::c_void,
                 new_word as *mut std::ffi::c_void,
             )
-            .map_err(|e| FissionError::debug(format!("Failed to restore breakpoint at 0x{:x}: {}", address, e)))?;
+            .map_err(|e| {
+                FissionError::debug(format!(
+                    "Failed to restore breakpoint at 0x{:x}: {}",
+                    address, e
+                ))
+            })?;
         }
 
         self.state.breakpoints.remove(&address);
@@ -216,7 +238,9 @@ impl Debugger for LinuxDebugger {
     }
 
     fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
-        let pid = self.target_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
 
         // Read from /proc/[pid]/mem
         use std::io::{Read, Seek, SeekFrom};
@@ -225,18 +249,25 @@ impl Debugger for LinuxDebugger {
         let mut file = std::fs::File::open(&mem_path)
             .map_err(|e| FissionError::debug(format!("Failed to open {}: {}", mem_path, e)))?;
 
-        file.seek(SeekFrom::Start(address))
-            .map_err(|e| FissionError::debug(format!("Failed to seek to 0x{:x}: {}", address, e)))?;
+        file.seek(SeekFrom::Start(address)).map_err(|e| {
+            FissionError::debug(format!("Failed to seek to 0x{:x}: {}", address, e))
+        })?;
 
         let mut buffer = vec![0u8; size];
-        file.read_exact(&mut buffer)
-            .map_err(|e| FissionError::debug(format!("Failed to read {} bytes at 0x{:x}: {}", size, address, e)))?;
+        file.read_exact(&mut buffer).map_err(|e| {
+            FissionError::debug(format!(
+                "Failed to read {} bytes at 0x{:x}: {}",
+                size, address, e
+            ))
+        })?;
 
         Ok(buffer)
     }
 
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
-        let pid = self.target_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
 
         // Write to /proc/[pid]/mem
         use std::fs::OpenOptions;
@@ -246,10 +277,13 @@ impl Debugger for LinuxDebugger {
         let mut file = OpenOptions::new()
             .write(true)
             .open(&mem_path)
-            .map_err(|e| FissionError::debug(format!("Failed to open {} for writing: {}", mem_path, e)))?;
+            .map_err(|e| {
+                FissionError::debug(format!("Failed to open {} for writing: {}", mem_path, e))
+            })?;
 
-        file.seek(SeekFrom::Start(address))
-            .map_err(|e| FissionError::debug(format!("Failed to seek to 0x{:x}: {}", address, e)))?;
+        file.seek(SeekFrom::Start(address)).map_err(|e| {
+            FissionError::debug(format!("Failed to seek to 0x{:x}: {}", address, e))
+        })?;
 
         file.write_all(data).map_err(|e| {
             format!(
@@ -267,7 +301,9 @@ impl Debugger for LinuxDebugger {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
 
-        let pid = self.target_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .target_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
 
         // Get registers using ptrace GETREGS
         let regs = ptrace::getregs(Pid::from_raw(pid as i32))

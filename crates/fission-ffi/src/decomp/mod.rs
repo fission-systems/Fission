@@ -19,9 +19,9 @@
 //! - [`DecompContext`](types::DecompContext) - Opaque context handle
 //! - [`DecompFieldInfo`](types::DecompFieldInfo) - Field information for type registration
 
-mod types;
 mod ffi;
 mod symbols;
+mod types;
 pub mod wrapper;
 
 // Re-export public API

@@ -8,7 +8,10 @@
 /// - Decimal: `4198400`
 pub fn parse_address(s: &str) -> Option<u64> {
     let trimmed = s.trim();
-    if let Some(hex) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
         u64::from_str_radix(hex, 16).ok()
     } else if trimmed.len() >= 4 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
         u64::from_str_radix(trimmed, 16).ok()

@@ -65,7 +65,10 @@ fn strip_inferred_structs(code: &str) -> String {
 
 fn register_memory_sections(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
     if verbose {
-        eprintln!("[*] Registering {} memory sections...", binary.sections.len());
+        eprintln!(
+            "[*] Registering {} memory sections...",
+            binary.sections.len()
+        );
     }
 
     let _silencer = OutputSilencer::new_if(!verbose);
@@ -87,7 +90,10 @@ fn register_memory_sections(decomp: &mut DecompilerNative, binary: &LoadedBinary
 
 fn register_known_functions(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
     if verbose {
-        eprintln!("[*] Registering {} known functions...", binary.functions.len());
+        eprintln!(
+            "[*] Registering {} known functions...",
+            binary.functions.len()
+        );
     }
 
     let _silencer = OutputSilencer::new_if(!verbose);
@@ -208,7 +214,10 @@ pub(super) fn run_decompilation(
             "[!] Unknown --profile '{}', using balanced (quality|speed|balanced)",
             other
         );
-        warn!(profile = other, "unknown decompilation profile, using balanced");
+        warn!(
+            profile = other,
+            "unknown decompilation profile, using balanced"
+        );
     }
     apply_profile(&mut decomp, selected_profile);
 
@@ -217,13 +226,17 @@ pub(super) fn run_decompilation(
     }
 
     {
-        let (compiler_id, unknown_compiler) = resolve_compiler_id(binary, cli.compiler_id.as_deref());
+        let (compiler_id, unknown_compiler) =
+            resolve_compiler_id(binary, cli.compiler_id.as_deref());
         if let Some(user_compiler) = unknown_compiler {
             eprintln!(
                 "[!] Unknown --compiler-id '{}', falling back to auto detection",
                 user_compiler
             );
-            warn!(compiler_id = user_compiler, "unknown compiler-id, falling back to auto detection");
+            warn!(
+                compiler_id = user_compiler,
+                "unknown compiler-id, falling back to auto detection"
+            );
         }
         if cli.verbose {
             eprintln!(
@@ -245,7 +258,10 @@ pub(super) fn run_decompilation(
 
     let init_elapsed = init_start.elapsed();
     if cli.verbose {
-        eprintln!("[✓] Decompiler ready (init: {:.3}s)", init_elapsed.as_secs_f64());
+        eprintln!(
+            "[✓] Decompiler ready (init: {:.3}s)",
+            init_elapsed.as_secs_f64()
+        );
     }
 
     // Collect functions to decompile and deduplicate by address.
@@ -287,8 +303,8 @@ pub(super) fn run_decompilation(
                 let decomp_sec = func_start.elapsed().as_secs_f64();
                 total_decomp_secs += decomp_sec;
                 // Apply Rust-side post-processing (switch reconstruction, while→for, etc.)
-                let postprocessor = PostProcessor::new()
-                    .with_inferred_types(binary.inferred_types.clone());
+                let postprocessor =
+                    PostProcessor::new().with_inferred_types(binary.inferred_types.clone());
                 let code = postprocessor.process(&code);
                 // Apply output filters
                 let mut filtered = code.clone();
@@ -306,9 +322,8 @@ pub(super) fn run_decompilation(
                         "code": filtered
                     });
                     if cli.benchmark {
-                        entry["decomp_sec"] = serde_json::json!(
-                            (decomp_sec * 1_000_000.0).round() / 1_000_000.0
-                        );
+                        entry["decomp_sec"] =
+                            serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
                     }
                     json_results.push(entry);
                 } else {
@@ -334,9 +349,8 @@ pub(super) fn run_decompilation(
                         "error": e.to_string()
                     });
                     if cli.benchmark {
-                        entry["decomp_sec"] = serde_json::json!(
-                            (decomp_sec * 1_000_000.0).round() / 1_000_000.0
-                        );
+                        entry["decomp_sec"] =
+                            serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
                     }
                     json_results.push(entry);
                 } else {
@@ -384,7 +398,11 @@ pub(super) fn run_decompilation(
         let mut file = fs::File::create(output_path).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
-                format!("Failed to create output file '{}': {}", output_path.display(), e)
+                format!(
+                    "Failed to create output file '{}': {}",
+                    output_path.display(),
+                    e
+                ),
             )
         })?;
         file.write_all(final_output.as_bytes())?;

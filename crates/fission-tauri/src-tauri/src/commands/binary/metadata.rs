@@ -35,9 +35,7 @@ pub async fn get_strings(state: State<'_, AppState>) -> CmdResult<Vec<StringDto>
             current_str.push(byte);
         } else {
             if current_str.len() >= min_len {
-                if let (Some(start), Ok(s)) =
-                    (current_start, std::str::from_utf8(&current_str))
-                {
+                if let (Some(start), Ok(s)) = (current_start, std::str::from_utf8(&current_str)) {
                     strings.push(StringDto {
                         offset: format!("0x{:x}", start),
                         value: s.to_string(),
@@ -61,10 +59,7 @@ pub async fn get_strings(state: State<'_, AppState>) -> CmdResult<Vec<StringDto>
             if data[i] >= 0x20 && data[i] < 0x7f && data[i + 1] == 0x00 {
                 let start = i;
                 let mut chars: Vec<char> = Vec::new();
-                while i + 1 < data.len()
-                    && data[i] >= 0x20
-                    && data[i] < 0x7f
-                    && data[i + 1] == 0x00
+                while i + 1 < data.len() && data[i] >= 0x20 && data[i] < 0x7f && data[i + 1] == 0x00
                 {
                     chars.push(data[i] as char);
                     i += 2;
@@ -83,7 +78,12 @@ pub async fn get_strings(state: State<'_, AppState>) -> CmdResult<Vec<StringDto>
     }
 
     // Sort by offset for consistent ordering
-    strings.sort_by(|a, b| a.offset.len().cmp(&b.offset.len()).then(a.offset.cmp(&b.offset)));
+    strings.sort_by(|a, b| {
+        a.offset
+            .len()
+            .cmp(&b.offset.len())
+            .then(a.offset.cmp(&b.offset))
+    });
 
     Ok(strings)
 }
@@ -192,4 +192,3 @@ pub async fn get_sections(state: State<'_, AppState>) -> CmdResult<Vec<SectionDt
 
     Ok(sections)
 }
-

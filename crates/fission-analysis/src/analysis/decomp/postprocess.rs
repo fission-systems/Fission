@@ -111,23 +111,23 @@ impl PostProcessor {
     /// for dynamic pass management and automatic dependency resolution.
     pub fn process_with_registry(&self, code: &str) -> Result<String, String> {
         use pass::PassContext;
-        
+
         // Create a pass context with our configuration
         let mut context = PassContext::new();
-        
+
         // Add type information if available
         if !self.inferred_types.is_empty() {
             context.inferred_types = self.inferred_types.clone();
         }
-        
+
         // Add DWARF info if available
         if let Some(ref dwarf) = self.dwarf_info {
             context.dwarf_info = Some(dwarf.clone());
         }
-        
+
         // Create a registry with all passes
         let mut pass_registry = registry::create_default_registry()?;
-        
+
         // Disable passes based on options
         if !self.options.clean_rust {
             pass_registry.disable("remove_rust_boilerplate");
@@ -188,7 +188,7 @@ impl PostProcessor {
         if !self.options.dwarf_names {
             pass_registry.disable("apply_dwarf_names");
         }
-        
+
         // Execute all enabled passes with dependency resolution
         pass_registry
             .execute_all(code, &context)
@@ -331,7 +331,6 @@ impl PostProcessor {
 
         processed
     }
-
 }
 impl Default for PostProcessor {
     fn default() -> Self {

@@ -30,7 +30,10 @@ pub unsafe extern "C" fn fission_optimize_pcode_json(
         match std::str::from_utf8(slice) {
             Ok(s) => s.to_owned(),
             Err(e) => {
-                eprintln!("[fission_optimize_pcode_json] UTF-8 error (len-based): {}", e);
+                eprintln!(
+                    "[fission_optimize_pcode_json] UTF-8 error (len-based): {}",
+                    e
+                );
                 return std::ptr::null_mut();
             }
         }

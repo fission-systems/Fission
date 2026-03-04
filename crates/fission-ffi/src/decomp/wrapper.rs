@@ -4,7 +4,7 @@
 
 use super::ffi::*;
 use super::symbols::{
-    symbol_provider_find_function, symbol_provider_find_symbol, SymbolProviderState,
+    SymbolProviderState, symbol_provider_find_function, symbol_provider_find_symbol,
 };
 use super::types::*;
 use fission_core::prelude::*;

@@ -88,7 +88,8 @@ impl MachoLoader {
             let cmd_header = LoadCommand::read_options(&mut reader, endian, ())
                 .map_err(|e| err!(loader, "Failed to read Mach-O load command: {}", e))?;
 
-            reader.seek(SeekFrom::Start(cmd_start))
+            reader
+                .seek(SeekFrom::Start(cmd_start))
                 .map_err(|e| err!(loader, "Failed to seek to load command start: {}", e))?;
 
             if cmd_header.cmd == LC_SEGMENT_64 {
@@ -237,9 +238,7 @@ impl MachoLoader {
                     }
                     current_addr = current_addr.wrapping_add(delta);
                     // Only add if not already known
-                    let already_known = functions_info
-                        .iter()
-                        .any(|f| f.address == current_addr);
+                    let already_known = functions_info.iter().any(|f| f.address == current_addr);
                     if !already_known && current_addr > image_base {
                         functions_info.push(FunctionInfo {
                             name: String::new(),
@@ -252,7 +251,10 @@ impl MachoLoader {
                     }
                 }
                 if new_count > 0 {
-                    eprintln!("[MachoLoader] LC_FUNCTION_STARTS: added {} function entry points", new_count);
+                    eprintln!(
+                        "[MachoLoader] LC_FUNCTION_STARTS: added {} function entry points",
+                        new_count
+                    );
                 }
             }
         }

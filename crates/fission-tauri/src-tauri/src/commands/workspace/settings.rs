@@ -1,6 +1,6 @@
 //! Application settings — load and persist user preferences.
 
-use crate::dto::{DecompilerOptions, CppPostProcessOptions, AnalysisOptions};
+use crate::dto::{AnalysisOptions, CppPostProcessOptions, DecompilerOptions};
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 use fission_core::SETTINGS_FILENAME;
@@ -37,7 +37,10 @@ pub async fn get_settings(app_handle: tauri::AppHandle) -> CmdResult<crate::dto:
         .map_err(|e| CmdError::other(format!("Read settings failed: {e}")))?;
     // If schema is corrupt or outdated, fall back to defaults silently
     Ok(serde_json::from_str(&json).unwrap_or_else(|_| {
-        warn!(file = SETTINGS_FILENAME, "settings invalid or schema changed, using defaults");
+        warn!(
+            file = SETTINGS_FILENAME,
+            "settings invalid or schema changed, using defaults"
+        );
         crate::dto::AppSettings::default()
     }))
 }
@@ -58,9 +61,7 @@ pub async fn save_settings(
 
 /// Get current decompiler options (returns defaults if not yet configured).
 #[tauri::command]
-pub async fn get_decompiler_options(
-    app_handle: tauri::AppHandle,
-) -> CmdResult<DecompilerOptions> {
+pub async fn get_decompiler_options(app_handle: tauri::AppHandle) -> CmdResult<DecompilerOptions> {
     let settings = get_settings(app_handle).await?;
     Ok(settings.decompiler_options.unwrap_or_default())
 }
@@ -131,16 +132,16 @@ pub async fn apply_decompiler_options(
 // ============================================================================
 
 #[cfg(feature = "native_decomp")]
-fn apply_analysis_options(
-    decomp: &mut fission_ffi::DecompilerNative,
-    opts: &AnalysisOptions,
-) {
+fn apply_analysis_options(decomp: &mut fission_ffi::DecompilerNative, opts: &AnalysisOptions) {
     decomp.set_feature("infer_pointers", opts.infer_pointers);
     decomp.set_feature("analyze_loops", opts.analyze_loops);
     decomp.set_feature("readonly_propagate", opts.readonly_propagate);
     decomp.set_feature("record_jumploads", opts.record_jumploads);
     decomp.set_feature("allow_inline", opts.allow_inline);
-    decomp.set_feature("disable_toomanyinstructions_error", opts.disable_toomanyinstructions_error);
+    decomp.set_feature(
+        "disable_toomanyinstructions_error",
+        opts.disable_toomanyinstructions_error,
+    );
 }
 
 #[cfg(feature = "native_decomp")]

@@ -102,7 +102,10 @@ fn main() {
                             if dll_src.exists() {
                                 let dst = target_dir.join("decomp.dll");
                                 if std::fs::copy(&dll_src, &dst).is_ok() {
-                                    println!("cargo:warning=Copied decomp.dll to {}", dst.display());
+                                    println!(
+                                        "cargo:warning=Copied decomp.dll to {}",
+                                        dst.display()
+                                    );
                                 }
                                 break;
                             }
@@ -124,7 +127,8 @@ fn main() {
                                 if let Ok(entries) = std::fs::read_dir(&sub_dir) {
                                     for entry in entries.flatten() {
                                         let path = entry.path();
-                                        if path.extension().and_then(|e| e.to_str()) == Some("dll") {
+                                        if path.extension().and_then(|e| e.to_str()) == Some("dll")
+                                        {
                                             let Some(fname) = path.file_name() else {
                                                 continue;
                                             };
@@ -177,10 +181,9 @@ fn main() {
                                     "cargo:warning=Copied libdecomp.dylib to {}",
                                     dst.display()
                                 ),
-                                Err(e) => println!(
-                                    "cargo:warning=Failed to copy libdecomp.dylib: {}",
-                                    e
-                                ),
+                                Err(e) => {
+                                    println!("cargo:warning=Failed to copy libdecomp.dylib: {}", e)
+                                }
                             }
                         }
                         // Also handle libdecomp.so for Linux

@@ -5,10 +5,10 @@ use crate::prelude::*;
 use binrw::BinRead;
 use std::io::Cursor;
 
-pub mod schema;
 mod coff;
 mod imports;
 mod pdata;
+pub mod schema;
 use schema::*;
 
 pub struct PeLoader;
@@ -216,12 +216,7 @@ impl PeLoader {
                 let sec_bytes = &bytes[file_start..file_end];
                 let sec_va = section.virtual_address;
 
-                let swept = scan_prologue_functions(
-                    sec_bytes,
-                    sec_va,
-                    is_64bit,
-                    &known_addrs,
-                );
+                let swept = scan_prologue_functions(sec_bytes, sec_va, is_64bit, &known_addrs);
                 for func in swept {
                     functions_info.push(func);
                 }
@@ -272,10 +267,10 @@ const X64_PROLOGUES: &[(&[u8], &str)] = &[
     // push rbp variants (REX prefix)
     (&[0x40, 0x55], "REX push rbp"),
     (&[0x48, 0x55], "REX.W push rbp"),
-    // sub rsp variants  
+    // sub rsp variants
     (&[0x48, 0x83, 0xEC], "sub rsp,imm8"),
     (&[0x48, 0x81, 0xEC], "sub rsp,imm32"),
-    // non-REX push rbp  
+    // non-REX push rbp
     (&[0x55, 0x48, 0x8B, 0xEC], "push rbp; mov rbp,rsp"),
     (&[0x55, 0x48, 0x89, 0xE5], "push rbp; mov rbp,rsp (GCC)"),
 ];

@@ -3,7 +3,7 @@
 use crate::cli::output::OutputSilencer;
 use crate::ui::cli::handlers::CliState;
 use colored::Colorize;
-use fission_core::{find_sla_dir, DEFAULT_DECOMP_MEMORY_LIMIT};
+use fission_core::{DEFAULT_DECOMP_MEMORY_LIMIT, find_sla_dir};
 use fission_loader::loader::LoadedBinary;
 
 pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {

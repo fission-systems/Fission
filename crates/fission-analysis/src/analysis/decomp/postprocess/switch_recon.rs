@@ -218,7 +218,9 @@ impl PostProcessor {
             let mut has_default = false;
             let mut default_stmt = String::new();
             let after = block_end + 1;
-            if after < lines.len() && let Some(caps) = DEFAULT_RETURN.captures(lines[after]) {
+            if after < lines.len()
+                && let Some(caps) = DEFAULT_RETURN.captures(lines[after])
+            {
                 default_stmt = caps[1].to_string();
                 has_default = true;
                 block_end = after;
@@ -314,7 +316,11 @@ impl PostProcessor {
                 if let Some(caps) = IF_NOT_OPEN.captures(line) {
                     (caps[2].to_string(), "0".to_string(), caps[1].to_string())
                 } else if let Some(caps) = IF_EQ_OPEN.captures(line) {
-                    (caps[2].to_string(), caps[3].to_string(), caps[1].to_string())
+                    (
+                        caps[2].to_string(),
+                        caps[3].to_string(),
+                        caps[1].to_string(),
+                    )
                 } else {
                     result_lines.push(line.to_string());
                     i += 1;
@@ -486,9 +492,7 @@ impl PostProcessor {
         result_lines.join("\n")
     }
 
-    pub(super) fn reconstruct_switch_from_if_else_assign_cow<'a>(
-        code: &'a str,
-    ) -> Cow<'a, str> {
+    pub(super) fn reconstruct_switch_from_if_else_assign_cow<'a>(code: &'a str) -> Cow<'a, str> {
         if !code.contains("if") || !code.contains("else") {
             return Cow::Borrowed(code);
         }

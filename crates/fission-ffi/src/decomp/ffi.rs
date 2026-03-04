@@ -27,9 +27,16 @@ unsafe extern "C" {
     pub(super) fn decomp_clear_symbols(ctx: *mut DecompContext);
     pub(super) fn decomp_add_global_symbol(ctx: *mut DecompContext, addr: u64, name: *const c_char);
     pub(super) fn decomp_clear_global_symbols(ctx: *mut DecompContext);
-    pub(super) fn decomp_set_symbol_provider(ctx: *mut DecompContext, provider: *const DecompSymbolProvider);
+    pub(super) fn decomp_set_symbol_provider(
+        ctx: *mut DecompContext,
+        provider: *const DecompSymbolProvider,
+    );
     pub(super) fn decomp_reset_symbol_provider(ctx: *mut DecompContext);
-    pub(super) fn decomp_add_function(ctx: *mut DecompContext, addr: u64, name: *const c_char) -> DecompError;
+    pub(super) fn decomp_add_function(
+        ctx: *mut DecompContext,
+        addr: u64,
+        name: *const c_char,
+    ) -> DecompError;
     pub(super) fn decomp_add_memory_block(
         ctx: *mut DecompContext,
         name: *const c_char,
@@ -45,9 +52,20 @@ unsafe extern "C" {
     pub(super) fn decomp_free_string(s: *mut c_char);
     pub(super) fn decomp_get_last_error(ctx: *mut DecompContext) -> *const c_char;
     pub(super) fn decomp_set_gdt(ctx: *mut DecompContext, gdt_path: *const c_char) -> DecompError;
-    pub(super) fn decomp_set_feature(ctx: *mut DecompContext, feature: *const c_char, enabled: c_int);
-    pub(super) fn decomp_load_fid_db(ctx: *mut DecompContext, db_path: *const c_char) -> DecompError;
-    pub(super) fn decomp_get_fid_match(ctx: *mut DecompContext, addr: u64, len: usize) -> *mut c_char;
+    pub(super) fn decomp_set_feature(
+        ctx: *mut DecompContext,
+        feature: *const c_char,
+        enabled: c_int,
+    );
+    pub(super) fn decomp_load_fid_db(
+        ctx: *mut DecompContext,
+        db_path: *const c_char,
+    ) -> DecompError;
+    pub(super) fn decomp_get_fid_match(
+        ctx: *mut DecompContext,
+        addr: u64,
+        len: usize,
+    ) -> *mut c_char;
 
     // Pcode optimization bridge initialisation.
     // Registers Rust function pointers with the C++ side so dlsym is not needed.

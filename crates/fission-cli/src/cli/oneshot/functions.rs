@@ -17,8 +17,14 @@ pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Resu
                 })
             })
             .collect();
-        writeln!(stdout, "{}", serde_json::to_string_pretty(&funcs)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?)?;
+        writeln!(
+            stdout,
+            "{}",
+            serde_json::to_string_pretty(&funcs).map_err(|e| io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e)
+            ))?
+        )?;
     } else {
         writeln!(stdout, "Functions ({}):", binary.functions.len())?;
         writeln!(stdout, "{:>18}  {:>8}  Name", "Address", "Size")?;

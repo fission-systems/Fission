@@ -107,7 +107,14 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
         let image_base = binary.image_base;
         let is_64bit = binary.is_64bit;
 
-        (data, image_base, is_64bit, func_list, func_lengths, prev_names)
+        (
+            data,
+            image_base,
+            is_64bit,
+            func_list,
+            func_lengths,
+            prev_names,
+        )
     };
 
     let total_scanned = func_list.len();

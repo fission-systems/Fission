@@ -85,8 +85,7 @@ pub async fn get_listing_chunk(
         .iter()
         .filter(|s| s.is_executable)
         .find(|s| {
-            start_address >= s.virtual_address
-                && start_address < s.virtual_address + s.virtual_size
+            start_address >= s.virtual_address && start_address < s.virtual_address + s.virtual_size
         })
         .or_else(|| {
             // Pick the first executable section that starts after start_address
@@ -109,12 +108,7 @@ pub async fn get_listing_chunk(
 
     let bytes = binary
         .get_bytes(effective_start, decode_size)
-        .ok_or_else(|| {
-            CmdError::other(format!(
-                "Cannot read bytes at 0x{:x}",
-                effective_start
-            ))
-        })?;
+        .ok_or_else(|| CmdError::other(format!("Cannot read bytes at 0x{:x}", effective_start)))?;
 
     let bitness: u32 = if binary.is_64bit { 64 } else { 32 };
     let mut decoder = Decoder::with_ip(bitness, &bytes, effective_start, DecoderOptions::NONE);
@@ -173,8 +167,14 @@ pub async fn get_listing_chunk(
                 let m = mnemonic.as_str();
                 if m == "nop" || m.starts_with("nop") {
                     "nop"
-                } else if m == "push" || m == "pop" || m == "pusha" || m == "popa"
-                    || m == "pushf" || m == "popf" || m == "pushfq" || m == "popfq"
+                } else if m == "push"
+                    || m == "pop"
+                    || m == "pusha"
+                    || m == "popa"
+                    || m == "pushf"
+                    || m == "popf"
+                    || m == "pushfq"
+                    || m == "popfq"
                 {
                     "push_pop"
                 } else if m.starts_with("mov") || m == "lea" || m == "xchg" {

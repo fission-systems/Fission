@@ -4,8 +4,7 @@
 
 use crate::loader::types::{InferredFieldInfo, InferredTypeInfo};
 use gimli::{
-    AttributeValue, DebuggingInformationEntry, DwAt, DwTag, EndianSlice, RunTimeEndian,
-    UnitOffset,
+    AttributeValue, DebuggingInformationEntry, DwAt, DwTag, EndianSlice, RunTimeEndian, UnitOffset,
 };
 use std::collections::HashMap;
 
@@ -199,9 +198,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         match entry.tag() {
             DwTag(0x0f) => {
                 // DW_TAG_pointer_type → resolve base type + "*"
-                if let Some(AttributeValue::UnitRef(ref_offset)) =
-                    entry.attr_value(DwAt(0x49))?
-                {
+                if let Some(AttributeValue::UnitRef(ref_offset)) = entry.attr_value(DwAt(0x49))? {
                     if let Some(base_name) = cache.get(&ref_offset) {
                         Ok(Some(format!("{}*", base_name)))
                     } else {

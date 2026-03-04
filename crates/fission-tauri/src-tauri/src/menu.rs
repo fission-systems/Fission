@@ -79,10 +79,20 @@ impl MenuHandles {
 /// Build the full native menu bar.  Returns `(Menu, MenuHandles)`.
 pub fn build_menu(app: &AppHandle) -> Result<(Menu<Wry>, MenuHandles), tauri::Error> {
     // ── File ──────────────────────────────────────────────────────────
-    let open_binary =
-        MenuItem::with_id(app, ids::OPEN_BINARY, "Open Binary…", true, Some("CmdOrCtrl+O"))?;
-    let save_project =
-        MenuItem::with_id(app, ids::SAVE_PROJECT, "Save Project", false, Some("CmdOrCtrl+S"))?;
+    let open_binary = MenuItem::with_id(
+        app,
+        ids::OPEN_BINARY,
+        "Open Binary…",
+        true,
+        Some("CmdOrCtrl+O"),
+    )?;
+    let save_project = MenuItem::with_id(
+        app,
+        ids::SAVE_PROJECT,
+        "Save Project",
+        false,
+        Some("CmdOrCtrl+S"),
+    )?;
     let load_project = MenuItem::with_id(
         app,
         ids::LOAD_PROJECT,
@@ -90,16 +100,36 @@ pub fn build_menu(app: &AppHandle) -> Result<(Menu<Wry>, MenuHandles), tauri::Er
         true,
         Some("CmdOrCtrl+Shift+O"),
     )?;
-    let save_snapshot =
-        MenuItem::with_id(app, ids::SAVE_SNAPSHOT, "Save Snapshot…", true, None::<&str>)?;
-    let load_snapshot =
-        MenuItem::with_id(app, ids::LOAD_SNAPSHOT, "Load Snapshot…", true, None::<&str>)?;
-    let export_json =
-        MenuItem::with_id(app, ids::EXPORT_JSON, "Export Analysis JSON…", false, None::<&str>)?;
+    let save_snapshot = MenuItem::with_id(
+        app,
+        ids::SAVE_SNAPSHOT,
+        "Save Snapshot…",
+        true,
+        None::<&str>,
+    )?;
+    let load_snapshot = MenuItem::with_id(
+        app,
+        ids::LOAD_SNAPSHOT,
+        "Load Snapshot…",
+        true,
+        None::<&str>,
+    )?;
+    let export_json = MenuItem::with_id(
+        app,
+        ids::EXPORT_JSON,
+        "Export Analysis JSON…",
+        false,
+        None::<&str>,
+    )?;
     let clear_console =
         MenuItem::with_id(app, ids::CLEAR_CONSOLE, "Clear Console", true, None::<&str>)?;
-    let clear_cache =
-        MenuItem::with_id(app, ids::CLEAR_CACHE, "Clear Decompile Cache", false, None::<&str>)?;
+    let clear_cache = MenuItem::with_id(
+        app,
+        ids::CLEAR_CACHE,
+        "Clear Decompile Cache",
+        false,
+        None::<&str>,
+    )?;
 
     let file_menu = Submenu::with_items(
         app,
@@ -128,8 +158,7 @@ pub fn build_menu(app: &AppHandle) -> Result<(Menu<Wry>, MenuHandles), tauri::Er
         MenuItem::with_id(app, ids::GOTO_ADDRESS, "Go to Address…", false, Some("G"))?;
     let rename_symbol =
         MenuItem::with_id(app, ids::RENAME_SYMBOL, "Rename Symbol", false, Some("N"))?;
-    let add_comment =
-        MenuItem::with_id(app, ids::ADD_COMMENT, "Add Comment", false, Some(";"))?;
+    let add_comment = MenuItem::with_id(app, ids::ADD_COMMENT, "Add Comment", false, Some(";"))?;
     let decompiler_options = MenuItem::with_id(
         app,
         ids::DECOMPILER_OPTIONS,
@@ -164,10 +193,20 @@ pub fn build_menu(app: &AppHandle) -> Result<(Menu<Wry>, MenuHandles), tauri::Er
     let debug_menu = Submenu::with_items(app, "Debug", true, &[&toggle_dynamic])?;
 
     // ── View ──────────────────────────────────────────────────────────
-    let assembly_view =
-        MenuItem::with_id(app, ids::ASSEMBLY_VIEW, "Assembly View", false, None::<&str>)?;
-    let decompile_view =
-        MenuItem::with_id(app, ids::DECOMPILE_VIEW, "Decompile View", false, None::<&str>)?;
+    let assembly_view = MenuItem::with_id(
+        app,
+        ids::ASSEMBLY_VIEW,
+        "Assembly View",
+        false,
+        None::<&str>,
+    )?;
+    let decompile_view = MenuItem::with_id(
+        app,
+        ids::DECOMPILE_VIEW,
+        "Decompile View",
+        false,
+        None::<&str>,
+    )?;
     let listing_view =
         MenuItem::with_id(app, ids::LISTING_VIEW, "Listing View", false, None::<&str>)?;
     let toggle_sidebar = CheckMenuItem::with_id(

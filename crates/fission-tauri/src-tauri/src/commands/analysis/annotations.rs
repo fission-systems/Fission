@@ -38,11 +38,7 @@ pub async fn rename_function(
 
 /// Add or update a comment at the given address.
 #[tauri::command]
-pub async fn add_comment(
-    address: u64,
-    text: String,
-    state: State<'_, AppState>,
-) -> CmdResult<()> {
+pub async fn add_comment(address: u64, text: String, state: State<'_, AppState>) -> CmdResult<()> {
     let mut inner = state.inner.lock().await;
 
     if text.trim().is_empty() {
@@ -114,10 +110,7 @@ pub async fn get_bookmarks(state: State<'_, AppState>) -> CmdResult<Vec<Bookmark
 
 /// Resolve a goto input (hex address or symbol name) to a concrete address.
 #[tauri::command]
-pub async fn goto_address(
-    input: String,
-    state: State<'_, AppState>,
-) -> CmdResult<GotoResult> {
+pub async fn goto_address(input: String, state: State<'_, AppState>) -> CmdResult<GotoResult> {
     let inner = state.inner.lock().await;
     let binary = inner
         .loaded_binary

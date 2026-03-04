@@ -4,7 +4,7 @@
 //! from DWARF debug information.
 
 use crate::loader::types::{DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo};
-use gimli::{DebuggingInformationEntry, DwAt, DwTag, EndianSlice, RunTimeEndian,  UnitOffset};
+use gimli::{DebuggingInformationEntry, DwAt, DwTag, EndianSlice, RunTimeEndian, UnitOffset};
 use std::collections::HashMap;
 
 /// Internal helper for building DwarfFunctionInfo during DFS
@@ -211,9 +211,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         let mut ops = expr.operations(unit.encoding());
         if let Ok(Some(op)) = ops.next() {
             match op {
-                gimli::Operation::FrameOffset { offset } => {
-                    Ok(DwarfLocation::StackOffset(offset))
-                }
+                gimli::Operation::FrameOffset { offset } => Ok(DwarfLocation::StackOffset(offset)),
                 gimli::Operation::Register { register } => {
                     Ok(DwarfLocation::Register(format!("reg{}", register.0)))
                 }

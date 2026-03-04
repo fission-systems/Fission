@@ -5,16 +5,16 @@ use std::sync::Arc;
 // Re-export common types from fission-core to maintain API compatibility
 pub use fission_core::common::types::{FunctionInfo, SectionInfo};
 
-#[path = "types_string_utils.rs"]
-mod string_utils;
+#[path = "types_builder.rs"]
+mod builder_methods;
+#[path = "types_discovery.rs"]
+mod discovery;
 #[path = "types_patching.rs"]
 mod patching;
 #[path = "types_query.rs"]
 mod query;
-#[path = "types_discovery.rs"]
-mod discovery;
-#[path = "types_builder.rs"]
-mod builder_methods;
+#[path = "types_string_utils.rs"]
+mod string_utils;
 pub use string_utils::{extract_cstring, extract_fixed_string};
 
 // ============================================================================
@@ -360,7 +360,3 @@ pub struct LoadedBinaryBuilder {
     iat_symbols: std::collections::HashMap<u64, String>,
     global_symbols: std::collections::HashMap<u64, String>,
 }
-
-
-
-

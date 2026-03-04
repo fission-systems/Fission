@@ -3,9 +3,9 @@
 //! Provides the main DwarfAnalyzer interface for extracting type and function
 //! information from DWARF debug sections.
 
-use crate::loader::LoadedBinary;
 use super::sections::SectionData;
 use super::types::DwarfTypeInfo;
+use crate::loader::LoadedBinary;
 use crate::loader::types::DwarfFunctionInfo;
 use gimli::{AttributeValue, DebuggingInformationEntry, DwAt, EndianSlice, RunTimeEndian};
 
@@ -89,7 +89,8 @@ impl<'a> DwarfAnalyzer<'a> {
         };
 
         let debug_ranges = gimli::DebugRanges::new(sections.get(".debug_ranges", data), endian);
-        let debug_rnglists = gimli::DebugRngLists::new(sections.get(".debug_rnglists", data), endian);
+        let debug_rnglists =
+            gimli::DebugRngLists::new(sections.get(".debug_rnglists", data), endian);
         let ranges = gimli::RangeLists::new(debug_ranges, debug_rnglists);
 
         let debug_loc = gimli::DebugLoc::new(&[], endian);
@@ -101,10 +102,7 @@ impl<'a> DwarfAnalyzer<'a> {
             debug_info: gimli::DebugInfo::new(sections.get(".debug_info", data), endian),
             debug_str: gimli::DebugStr::new(sections.get(".debug_str", data), endian),
             debug_line: gimli::DebugLine::new(sections.get(".debug_line", data), endian),
-            debug_line_str: gimli::DebugLineStr::new(
-                sections.get(".debug_line_str", data),
-                endian,
-            ),
+            debug_line_str: gimli::DebugLineStr::new(sections.get(".debug_line_str", data), endian),
             debug_types: gimli::DebugTypes::new(sections.get(".debug_types", data), endian),
             ranges,
             locations,
@@ -184,15 +182,14 @@ mod tests {
 
     #[test]
     fn test_analyzer_no_debug_info() {
-        let binary =
-            LoadedBinaryBuilder::new("test".to_string(), DataBuffer::Heap(Vec::new()))
-                .format("test")
-                .arch_spec("x86:LE:64:default")
-                .entry_point(0)
-                .image_base(0)
-                .is_64bit(true)
-                .build()
-                .unwrap_or_else(|_| panic!("failed to build test LoadedBinary"));
+        let binary = LoadedBinaryBuilder::new("test".to_string(), DataBuffer::Heap(Vec::new()))
+            .format("test")
+            .arch_spec("x86:LE:64:default")
+            .entry_point(0)
+            .image_base(0)
+            .is_64bit(true)
+            .build()
+            .unwrap_or_else(|_| panic!("failed to build test LoadedBinary"));
 
         let analyzer = DwarfAnalyzer::new(&binary);
         assert!(!analyzer.has_debug_info());

@@ -13,11 +13,11 @@
 //! - [`functions`] - Function information extraction (params, locals)
 //! - [`sections`] - Section data loading helper
 
+pub mod analyzer;
+mod functions;
 mod sections;
 mod types;
-mod functions;
-pub mod analyzer;
 
 // Re-export public API
 pub use analyzer::DwarfAnalyzer;
-pub use types::{DwarfTypeInfo, DwarfMemberInfo};
+pub use types::{DwarfMemberInfo, DwarfTypeInfo};

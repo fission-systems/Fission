@@ -4,10 +4,10 @@ mod process;
 
 pub use process::enumerate_processes;
 
-use fission_core::{FissionError, Result as FissionResult};
 use super::traits::Debugger;
 use super::ttd::Timeline;
 use super::types::{Breakpoint, DebugState, DebugStatus, ProcessInfo, RegisterState};
+use fission_core::{FissionError, Result as FissionResult};
 
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -82,7 +82,10 @@ impl WindowsDebugger {
         if let Some(h) = self.process_handle {
             return Ok(h);
         }
-        let pid = self.state.attached_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .state
+            .attached_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
         unsafe {
             let h = OpenProcess(PROCESS_ALL_ACCESS, false, pid)
                 .map_err(|e| FissionError::debug(format!("OpenProcess failed: {:?}", e)))?;
@@ -193,8 +196,9 @@ impl Debugger for WindowsDebugger {
         self.state.status = DebugStatus::Attaching;
 
         unsafe {
-            DebugActiveProcess(pid)
-                .map_err(|e| FissionError::debug(format!("Failed to attach to process {}: {:?}", pid, e)))?;
+            DebugActiveProcess(pid).map_err(|e| {
+                FissionError::debug(format!("Failed to attach to process {}: {:?}", pid, e))
+            })?;
         }
 
         self.state.attached_pid = Some(pid);
@@ -214,8 +218,9 @@ impl Debugger for WindowsDebugger {
             .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
 
         unsafe {
-            DebugActiveProcessStop(pid)
-                .map_err(|e| FissionError::debug(format!("Failed to detach from process {}: {:?}", pid, e)))?;
+            DebugActiveProcessStop(pid).map_err(|e| {
+                FissionError::debug(format!("Failed to detach from process {}: {:?}", pid, e))
+            })?;
         }
 
         if let Some(h) = self.process_handle.take() {
@@ -242,7 +247,10 @@ impl Debugger for WindowsDebugger {
     }
 
     fn continue_execution(&mut self) -> FissionResult<()> {
-        let pid = self.state.attached_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .state
+            .attached_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
         let tid = self
             .state
             .last_thread_id
@@ -304,7 +312,10 @@ impl Debugger for WindowsDebugger {
         }
 
         // Continue to let the CPU execute one instruction and hit the trap
-        let pid = self.state.attached_pid.ok_or_else(|| FissionError::debug("Not attached"))?;
+        let pid = self
+            .state
+            .attached_pid
+            .ok_or_else(|| FissionError::debug("Not attached"))?;
         let tid = self
             .state
             .last_thread_id
@@ -323,7 +334,9 @@ impl Debugger for WindowsDebugger {
         // Read original byte
         let original_byte = self.read_memory(address, 1)?[0];
         if original_byte == 0xCC {
-            return Err(FissionError::debug("Breakpoint already exists at this address"));
+            return Err(FissionError::debug(
+                "Breakpoint already exists at this address",
+            ));
         }
 
         // Patch with INT3 (0xCC)
@@ -355,7 +368,9 @@ impl Debugger for WindowsDebugger {
     }
 
     fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
-        let h_process = self.process_handle.ok_or_else(|| FissionError::debug("Process handle not available"))?;
+        let h_process = self
+            .process_handle
+            .ok_or_else(|| FissionError::debug("Process handle not available"))?;
         unsafe {
             let mut buffer = vec![0u8; size];
             let mut bytes_read = 0;
@@ -368,7 +383,12 @@ impl Debugger for WindowsDebugger {
                 Some(&mut bytes_read),
             );
 
-            res.map_err(|e| FissionError::debug(format!("ReadProcessMemory failed at 0x{:x}: {:?}", address, e)))?;
+            res.map_err(|e| {
+                FissionError::debug(format!(
+                    "ReadProcessMemory failed at 0x{:x}: {:?}",
+                    address, e
+                ))
+            })?;
 
             buffer.truncate(bytes_read);
             Ok(buffer)
@@ -408,7 +428,12 @@ impl Debugger for WindowsDebugger {
                 &mut _unused,
             );
 
-            res.map_err(|e| FissionError::debug(format!("WriteProcessMemory failed at 0x{:x}: {:?}", address, e)))?;
+            res.map_err(|e| {
+                FissionError::debug(format!(
+                    "WriteProcessMemory failed at 0x{:x}: {:?}",
+                    address, e
+                ))
+            })?;
 
             if bytes_written != data.len() {
                 return Err(FissionError::debug(format!(

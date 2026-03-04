@@ -136,7 +136,8 @@ impl PcodeGraph {
                             if let Some(first_op) = next_block.ops.first() {
                                 let dst_id =
                                     format!("op_{}_{}", next_block.index, first_op.seq_num);
-                                let _ = writeln!(dot, "    {} -> {} [style=dashed];", src_id, dst_id);
+                                let _ =
+                                    writeln!(dot, "    {} -> {} [style=dashed];", src_id, dst_id);
                             }
                         }
                     }
@@ -169,7 +170,11 @@ impl PcodeGraph {
                                         let dst_id = format!("op_{}_{}", block.index, op.seq_num);
 
                                         // Use a different color for data flow
-                                        let _ = writeln!(dot, "    {} -> {} [color=blue, constraint=false, style=dotted];", src_id, dst_id);
+                                        let _ = writeln!(
+                                            dot,
+                                            "    {} -> {} [color=blue, constraint=false, style=dotted];",
+                                            src_id, dst_id
+                                        );
                                     }
                                 }
                             }

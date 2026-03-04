@@ -42,7 +42,13 @@ pub async fn get_hex_view(
         let hex: Vec<String> = chunk.iter().map(|b| format!("{:02x}", b)).collect();
         let ascii: String = chunk
             .iter()
-            .map(|&b| if b >= 0x20 && b < 0x7f { b as char } else { '.' })
+            .map(|&b| {
+                if b >= 0x20 && b < 0x7f {
+                    b as char
+                } else {
+                    '.'
+                }
+            })
             .collect();
 
         rows.push(HexRow {
@@ -71,14 +77,12 @@ pub async fn patch_bytes(
         .as_ref()
         .clone();
 
-    let original = binary
-        .patch_bytes_va(address, &bytes)
-        .ok_or_else(|| {
-            CmdError::other(format!(
-                "Patch failed: address 0x{:x} out of range",
-                address
-            ))
-        })?;
+    let original = binary.patch_bytes_va(address, &bytes).ok_or_else(|| {
+        CmdError::other(format!(
+            "Patch failed: address 0x{:x} out of range",
+            address
+        ))
+    })?;
 
     inner.loaded_binary = Some(std::sync::Arc::new(binary));
     Ok(original)

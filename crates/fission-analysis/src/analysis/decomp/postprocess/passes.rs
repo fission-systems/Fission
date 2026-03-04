@@ -3,8 +3,8 @@
 //! This module provides trait implementations for all the existing
 //! post-processing passes, wrapping the methods from PostProcessor.
 
-use super::pass::{PassCategory, PassContext, PassMetadata, PassResult, PostProcessPass};
 use super::PostProcessor;
+use super::pass::{PassCategory, PassContext, PassMetadata, PassResult, PostProcessPass};
 use std::borrow::Cow;
 
 fn pass_output<'a>(input: &'a str, output: String) -> PassResult<'a> {
@@ -211,7 +211,9 @@ impl PostProcessPass for SwitchFromIfElseAssignPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        Ok(PostProcessor::reconstruct_switch_from_if_else_assign_cow(code))
+        Ok(PostProcessor::reconstruct_switch_from_if_else_assign_cow(
+            code,
+        ))
     }
 
     fn dependencies(&self) -> &[&'static str] {
@@ -465,9 +467,8 @@ impl PostProcessPass for FieldOffsetReplacementPass {
         if context.inferred_types.is_empty() {
             return Ok(Cow::Borrowed(code));
         }
-        
-        let processor = PostProcessor::new()
-            .with_inferred_types(context.inferred_types.clone());
+
+        let processor = PostProcessor::new().with_inferred_types(context.inferred_types.clone());
         Ok(processor.replace_field_offsets_cow(code))
     }
 
@@ -511,9 +512,8 @@ impl PostProcessPass for ApplyDwarfNamesPass {
         if context.dwarf_info.is_none() {
             return Ok(Cow::Borrowed(code));
         }
-        
-        let processor = PostProcessor::new()
-            .with_dwarf_info(context.dwarf_info.clone());
+
+        let processor = PostProcessor::new().with_dwarf_info(context.dwarf_info.clone());
         Ok(processor.apply_dwarf_names_cow(code))
     }
 

@@ -10,7 +10,10 @@ use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::constants::{CONFIG_FILENAME, DEFAULT_DECOMP_TIMEOUT_MS, DEFAULT_L1_CACHE_SIZE, MAX_HEX_READ, MAX_SCAN_PER_SECTION, MB};
+use super::constants::{
+    CONFIG_FILENAME, DEFAULT_DECOMP_TIMEOUT_MS, DEFAULT_L1_CACHE_SIZE, MAX_HEX_READ,
+    MAX_SCAN_PER_SECTION, MB,
+};
 
 use crate::core::config::{
     AnalysisConfig, Config, DebugConfig, DecompilerConfig, LogConfig, LogLevel, UiConfig,

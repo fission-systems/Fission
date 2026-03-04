@@ -5,9 +5,9 @@
 
 mod binary_info;
 #[cfg(feature = "native_decomp")]
-mod common;
-#[cfg(feature = "native_decomp")]
 mod cfg;
+#[cfg(feature = "native_decomp")]
+mod common;
 #[cfg(feature = "native_decomp")]
 mod decompile;
 mod disasm;
@@ -230,7 +230,9 @@ fn print_help() {
     println!("  \x1b[1m-o\x1b[0m, --output <FILE> Write results to file");
     println!("  \x1b[1m-j\x1b[0m, --json          JSON output format");
     println!("  \x1b[1m-v\x1b[0m, --verbose       Show detailed progress");
-    println!("      --compiler-id <ID> Override compiler ABI hint (auto/windows/gcc/clang/default)");
+    println!(
+        "      --compiler-id <ID> Override compiler ABI hint (auto/windows/gcc/clang/default)"
+    );
     println!("      --profile <P>     Decomp profile: balanced|quality|speed");
     println!();
     println!("\x1b[1;33m📚 Examples:\x1b[0m");

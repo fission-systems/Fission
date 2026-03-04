@@ -131,7 +131,9 @@ impl<'a> CppAnalyzer<'a> {
                     for i in (0..(data.len().saturating_sub(24))).step_by(step) {
                         // Safe: loop bounds ensure i+4 is valid
                         let signature = match data.get(i..i + 4) {
-                            Some(bytes) => u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+                            Some(bytes) => {
+                                u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+                            }
                             None => continue, // Skip if bounds check fails
                         };
                         if signature == 0 || signature == 1 {

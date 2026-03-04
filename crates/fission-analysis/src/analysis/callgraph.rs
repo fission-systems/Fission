@@ -59,8 +59,8 @@ impl CallGraph {
                 None => continue,
             };
 
-            let callee =
-                find_function_addr(&functions, xref.to_addr, fallback_range).unwrap_or(xref.to_addr);
+            let callee = find_function_addr(&functions, xref.to_addr, fallback_range)
+                .unwrap_or(xref.to_addr);
 
             callers_map
                 .entry(callee)
@@ -103,11 +103,7 @@ fn finalize_edges(map: HashMap<u64, HashMap<u64, usize>>) -> HashMap<u64, Vec<Ca
     out
 }
 
-fn find_function_addr(
-    functions: &[FunctionInfo],
-    addr: u64,
-    fallback_range: u64,
-) -> Option<u64> {
+fn find_function_addr(functions: &[FunctionInfo], addr: u64, fallback_range: u64) -> Option<u64> {
     if functions.is_empty() {
         return None;
     }
@@ -118,7 +114,11 @@ fn find_function_addr(
     };
 
     let func = &functions[idx];
-    let size = if func.size > 0 { func.size } else { fallback_range };
+    let size = if func.size > 0 {
+        func.size
+    } else {
+        fallback_range
+    };
     let end = func.address.saturating_add(size);
     if addr >= func.address && addr < end {
         Some(func.address)

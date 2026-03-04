@@ -64,8 +64,7 @@ impl PostProcessor {
                 let base = &caps[1];
                 let offset_str = &caps[2];
 
-                let offset: u32 =
-                    u32::from_str_radix(&offset_str[2..], 16).unwrap_or(0);
+                let offset: u32 = u32::from_str_radix(&offset_str[2..], 16).unwrap_or(0);
 
                 if let Some(field_name) = offset_map.get(&offset) {
                     format!("{}->{}/* @{} */", base, field_name, offset_str)
@@ -440,8 +439,7 @@ impl PostProcessor {
                             let ghidra_name = format!("in_{}", reg_name);
                             let pattern = format!(r"\b{}\b", regex::escape(&ghidra_name));
                             if let Ok(re) = regex::Regex::new(&pattern) {
-                                result =
-                                    re.replace_all(&result, param.name.as_str()).to_string();
+                                result = re.replace_all(&result, param.name.as_str()).to_string();
                             }
                         }
                     }

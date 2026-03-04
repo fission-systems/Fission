@@ -585,8 +585,7 @@ impl<'a> AppleAnalyzer<'a> {
             return result;
         };
 
-        let mut name_map: std::collections::HashMap<u64, String> =
-            std::collections::HashMap::new();
+        let mut name_map: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
         let mut offset = 0usize;
         while offset < methnames_data.len() {
             // Find the end of this null-terminated string
@@ -595,9 +594,7 @@ impl<'a> AppleAnalyzer<'a> {
                 offset += 1;
             }
             if offset > start {
-                if let Ok(name) =
-                    std::str::from_utf8(&methnames_data[start..offset])
-                {
+                if let Ok(name) = std::str::from_utf8(&methnames_data[start..offset]) {
                     let va = methnames_sec.virtual_address + start as u64;
                     name_map.insert(va, name.to_string());
                 }

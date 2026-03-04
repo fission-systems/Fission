@@ -1,8 +1,8 @@
 use super::PostProcessor;
 use super::condition::negate_condition;
+use crate::utils::patterns::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use crate::utils::patterns::*;
 use std::borrow::Cow;
 
 impl PostProcessor {
@@ -82,7 +82,10 @@ impl PostProcessor {
                     let body = &caps["body"];
                     let close_indent = &caps["close_indent"];
                     let negated = negate_condition(cond);
-                    format!("{}while ({}) {{\n{}\n{}}}", indent, negated, body, close_indent)
+                    format!(
+                        "{}while ({}) {{\n{}\n{}}}",
+                        indent, negated, body, close_indent
+                    )
                 })
                 .to_string(),
         )

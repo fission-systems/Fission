@@ -18,12 +18,12 @@ mod visualization;
 
 pub use basic_block::{BasicBlock, BlockEdge, EdgeKind};
 pub use dominator::DominatorTree;
+use fission_pcode::PcodeFunction;
 pub use graph::{CfgBuilder, ControlFlowGraph};
 pub use loops::{Loop, LoopAnalyzer, LoopKind};
 pub use metrics::{CfgMetrics, ComplexityAnalyzer};
 pub use summary::*;
 pub use visualization::{CfgVisualizer, DotOptions};
-use fission_pcode::PcodeFunction;
 
 /// Error types for CFG analysis
 #[derive(Debug, Clone)]

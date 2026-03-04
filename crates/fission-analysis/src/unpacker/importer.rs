@@ -56,13 +56,8 @@ impl ImportReconstructor {
             let mut buf = vec![HMODULE::default(); capacity];
             let cb = (capacity * std::mem::size_of::<HMODULE>()) as u32;
             let ok = unsafe {
-                EnumProcessModules(
-                    self.process_handle,
-                    buf.as_mut_ptr(),
-                    cb,
-                    &mut cb_needed,
-                )
-                .as_bool()
+                EnumProcessModules(self.process_handle, buf.as_mut_ptr(), cb, &mut cb_needed)
+                    .as_bool()
             };
             if !ok {
                 return Err("EnumProcessModules failed".to_string());

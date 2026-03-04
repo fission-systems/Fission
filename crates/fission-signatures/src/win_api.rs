@@ -3,9 +3,9 @@
 //! Contains type information for common Windows API functions
 //! to improve decompiler output quality.
 
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use serde::Deserialize;
 
 /// Global lazily-initialized Windows API database for efficient reuse.
 /// This avoids recreating the database with 100+ signatures on each use.

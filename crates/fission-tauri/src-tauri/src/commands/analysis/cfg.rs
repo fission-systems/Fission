@@ -113,10 +113,7 @@ pub async fn get_cfg(address: String, state: State<'_, AppState>) -> CmdResult<C
     }
 
     // Sorted list of leader addresses
-    let mut sorted_leaders: Vec<u64> = leaders
-        .into_iter()
-        .filter(|&a| a < end_addr)
-        .collect();
+    let mut sorted_leaders: Vec<u64> = leaders.into_iter().filter(|&a| a < end_addr).collect();
     sorted_leaders.sort_unstable();
 
     // Leader address → block id

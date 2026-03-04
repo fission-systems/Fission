@@ -214,7 +214,11 @@ impl DefUseTracker {
 
     /// Compute NZ mask for an operation's output
     fn compute_op_nz_mask(&self, op: &PcodeOp) -> u64 {
-        let out_size = op.output.as_ref().map(|v| v.size).unwrap_or(DEFAULT_VARNODE_SIZE);
+        let out_size = op
+            .output
+            .as_ref()
+            .map(|v| v.size)
+            .unwrap_or(DEFAULT_VARNODE_SIZE);
         let mask = self.size_mask(out_size);
 
         match op.opcode {

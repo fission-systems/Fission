@@ -26,8 +26,8 @@
 //! dbg.continue_execution()?;
 //! ```
 
-use fission_core::Result as FissionResult;
 use super::types::{ProcessInfo, RegisterState};
+use fission_core::Result as FissionResult;
 
 /// Platform-agnostic debugger trait
 ///

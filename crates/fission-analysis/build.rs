@@ -49,7 +49,10 @@ fn build_libdecomp() {
 
     fn find_vcpkg_toolchain() -> Option<PathBuf> {
         for root in collect_vcpkg_roots() {
-            let toolchain = root.join("scripts").join("buildsystems").join("vcpkg.cmake");
+            let toolchain = root
+                .join("scripts")
+                .join("buildsystems")
+                .join("vcpkg.cmake");
             if toolchain.exists() {
                 return Some(toolchain);
             }
@@ -84,11 +87,11 @@ fn build_libdecomp() {
     let mut cmake_args: Vec<String> = vec!["..".to_string()];
 
     if let Some(toolchain) = find_vcpkg_toolchain() {
-        cmake_args.push(format!(
-            "-DCMAKE_TOOLCHAIN_FILE={}",
+        cmake_args.push(format!("-DCMAKE_TOOLCHAIN_FILE={}", toolchain.display()));
+        println!(
+            "cargo:warning=Using vcpkg toolchain: {}",
             toolchain.display()
-        ));
-        println!("cargo:warning=Using vcpkg toolchain: {}", toolchain.display());
+        );
     }
 
     // Run cmake configure
@@ -120,8 +123,14 @@ fn build_libdecomp() {
     #[cfg(target_os = "windows")]
     {
         // On Windows, MSVC builds produce decomp.lib / decomp.dll
-        println!("cargo:rustc-link-search=native={}\\Debug", build_dir.display());
-        println!("cargo:rustc-link-search=native={}\\Release", build_dir.display());
+        println!(
+            "cargo:rustc-link-search=native={}\\Debug",
+            build_dir.display()
+        );
+        println!(
+            "cargo:rustc-link-search=native={}\\Release",
+            build_dir.display()
+        );
         println!("cargo:rustc-link-lib=dylib=decomp");
 
         // Link against zlib from discovered vcpkg installation

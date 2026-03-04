@@ -29,8 +29,7 @@ impl TitanEngine {
         unsafe {
             // Clean Room: TitanEngine calls DebugActiveProcess(pid).
             // We do the same via windows-rs.
-            DebugActiveProcess(pid)
-                .map_err(|e| format!("DebugActiveProcess failed: {:?}", e))?;
+            DebugActiveProcess(pid).map_err(|e| format!("DebugActiveProcess failed: {:?}", e))?;
             Ok(())
         }
     }

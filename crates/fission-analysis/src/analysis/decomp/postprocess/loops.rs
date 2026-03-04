@@ -39,11 +39,10 @@ impl PostProcessor {
         let mut i = 0;
 
         // Regex patterns
-        static INIT_ASSIGN: Lazy<Regex> =
-            Lazy::new(|| {
-                Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
-                    .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
-            });
+        static INIT_ASSIGN: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
+                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
+        });
 
         while i < lines.len() {
             // Check for while(true) { preceded by init assignment
@@ -177,16 +176,13 @@ impl PostProcessor {
     // =========================================================================
     pub(super) fn while_cond_to_for(code: &str) -> String {
         static WHILE_COND: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(
-                r"^(\s*)while\s*\((.+?)\s*(<=|<|>=|>|!=)\s*(.+?)\)\s*\{\s*$",
-            )
-            .unwrap_or_else(|e| panic!("WHILE_COND regex should compile: {}", e))
+            Regex::new(r"^(\s*)while\s*\((.+?)\s*(<=|<|>=|>|!=)\s*(.+?)\)\s*\{\s*$")
+                .unwrap_or_else(|e| panic!("WHILE_COND regex should compile: {}", e))
         });
-        static INIT_ASSIGN: Lazy<Regex> =
-            Lazy::new(|| {
-                Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
-                    .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
-            });
+        static INIT_ASSIGN: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
+                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
+        });
 
         let lines: Vec<&str> = code.lines().collect();
         let mut result_lines: Vec<String> = Vec::new();
@@ -243,7 +239,9 @@ impl PostProcessor {
                         let inc_idx = close_idx - 1;
 
                         // Detect increment pattern
-                        let inc_str = if let Some(c) = crate::utils::patterns::INC_PP.captures(lines[inc_idx]) {
+                        let inc_str = if let Some(c) =
+                            crate::utils::patterns::INC_PP.captures(lines[inc_idx])
+                        {
                             if &c[1] == var {
                                 Some(format!("{}++", var))
                             } else {
@@ -337,7 +335,9 @@ impl PostProcessor {
             return code.to_string();
         }
         WHILE_TRUE_ML
-            .replace_all(code, |caps: &regex::Captures| format!("{}for (;;) {{", &caps[1]))
+            .replace_all(code, |caps: &regex::Captures| {
+                format!("{}for (;;) {{", &caps[1])
+            })
             .into_owned()
     }
 
@@ -439,11 +439,7 @@ impl PostProcessor {
                 let buf = &caps["buf"];
                 let sz = &caps["sz"];
                 let iv4 = caps.name("iv4").map(|m| m.as_str()).unwrap_or(iv);
-                if iv == &caps["iv2"]
-                    && iv == &caps["iv3"]
-                    && iv == iv4
-                    && iv == &caps["iv5"]
-                {
+                if iv == &caps["iv2"] && iv == &caps["iv3"] && iv == iv4 && iv == &caps["iv5"] {
                     format!("memset({}, 0, {})", buf, sz.trim())
                 } else {
                     caps[0].to_string()
@@ -476,11 +472,10 @@ impl PostProcessor {
     ///   } while (VAR op LIMIT);
     /// → for (VAR = INIT; VAR op LIMIT; VAR++) { BODY; }
     pub(super) fn do_while_to_for(code: &str) -> String {
-        static INIT_ASSIGN: Lazy<Regex> =
-            Lazy::new(|| {
-                Regex::new(r"^(\s*)(\w+)\s*=\s*([^;]+);\s*$")
-                    .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
-            });
+        static INIT_ASSIGN: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"^(\s*)(\w+)\s*=\s*([^;]+);\s*$")
+                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
+        });
 
         let lines: Vec<&str> = code.lines().collect();
         if lines.len() < 4 {
@@ -522,18 +517,19 @@ impl PostProcessor {
                 };
 
                 // Safe: close_idx was found by matching DO_WHILE_CLOSE, but use if-let for robustness
-                let (cond_var, cond_op, cond_lim) = if let Some(close_caps) = DO_WHILE_CLOSE.captures(lines[close_idx]) {
-                    (
-                        close_caps[2].to_string(),
-                        close_caps[3].to_string(),
-                        close_caps[4].trim().to_string(),
-                    )
-                } else {
-                    // Fallback: shouldn't happen, but skip transformation
-                    result.push(lines[i].to_string());
-                    i += 1;
-                    continue;
-                };
+                let (cond_var, cond_op, cond_lim) =
+                    if let Some(close_caps) = DO_WHILE_CLOSE.captures(lines[close_idx]) {
+                        (
+                            close_caps[2].to_string(),
+                            close_caps[3].to_string(),
+                            close_caps[4].trim().to_string(),
+                        )
+                    } else {
+                        // Fallback: shouldn't happen, but skip transformation
+                        result.push(lines[i].to_string());
+                        i += 1;
+                        continue;
+                    };
 
                 // Find increment line among the body (last occurrence of VAR++ or VAR += ...)
                 let body_start = i + 1;
@@ -607,10 +603,17 @@ impl PostProcessor {
 
                                 let for_line = format!(
                                     "{}for ({}; {} {} {}; {}) {{",
-                                    do_indent, flipped_init, rhs_var, cond_op, cond_var, rhs_inc_expr
+                                    do_indent,
+                                    flipped_init,
+                                    rhs_var,
+                                    cond_op,
+                                    cond_var,
+                                    rhs_inc_expr
                                 );
                                 result.push(for_line);
-                                for (k, line) in lines.iter().enumerate().take(body_end).skip(body_start) {
+                                for (k, line) in
+                                    lines.iter().enumerate().take(body_end).skip(body_start)
+                                {
                                     if k != rhs_idx {
                                         result.push((*line).to_string());
                                     }

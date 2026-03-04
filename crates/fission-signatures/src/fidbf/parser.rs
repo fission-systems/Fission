@@ -1,6 +1,4 @@
-use super::types::{
-    FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfRelation, FidbfRelationType,
-};
+use super::types::{FidbfDatabase, FidbfFunction, FidbfLibrary, FidbfRelation, FidbfRelationType};
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 use thiserror::Error;

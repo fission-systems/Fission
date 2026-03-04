@@ -469,42 +469,58 @@ impl<'a> GoAnalyzer<'a> {
     /// so the decompiler can emit readable names.
     pub fn scan_go_strings(&self) -> std::collections::HashMap<u64, String> {
         let mut results = std::collections::HashMap::new();
-        let image_base  = self.binary.image_base;
-        let is_64bit    = self.binary.is_64bit;
-        let ptr_size    = if is_64bit { 8usize } else { 4usize };
+        let image_base = self.binary.image_base;
+        let is_64bit = self.binary.is_64bit;
+        let ptr_size = if is_64bit { 8usize } else { 4usize };
         let struct_size = ptr_size * 2; // {ptr, len}
 
         for section in &self.binary.sections {
             // Only scan readable, non-executable data sections
-            if section.is_executable { continue; }
+            if section.is_executable {
+                continue;
+            }
             let name = section.name.as_str();
-            let is_rodata = name.contains("rodata") || name == ".rdata"
-                || name == "__rodata" || name == ".data";
-            if !is_rodata { continue; }
+            let is_rodata = name.contains("rodata")
+                || name == ".rdata"
+                || name == "__rodata"
+                || name == ".data";
+            if !is_rodata {
+                continue;
+            }
 
-            let va    = section.virtual_address;
+            let va = section.virtual_address;
             let vsize = section.virtual_size as usize;
-            if vsize < struct_size { continue; }
+            if vsize < struct_size {
+                continue;
+            }
 
-            let Some(data) = self.binary.view_bytes(va, vsize) else { continue };
+            let Some(data) = self.binary.view_bytes(va, vsize) else {
+                continue;
+            };
 
             let mut offset = 0usize;
             while offset + struct_size <= data.len() {
                 // Read pointer and length
                 let (ptr_val, len_val): (u64, u64) = if is_64bit {
-                    let p = u64::from_le_bytes(data[offset..offset+8].try_into().unwrap_or([0;8]));
-                    let l = u64::from_le_bytes(data[offset+8..offset+16].try_into().unwrap_or([0;8]));
+                    let p =
+                        u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap_or([0; 8]));
+                    let l = u64::from_le_bytes(
+                        data[offset + 8..offset + 16].try_into().unwrap_or([0; 8]),
+                    );
                     (p, l)
                 } else {
-                    let p = u32::from_le_bytes(data[offset..offset+4].try_into().unwrap_or([0;4])) as u64;
-                    let l = u32::from_le_bytes(data[offset+4..offset+8].try_into().unwrap_or([0;4])) as u64;
+                    let p =
+                        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap_or([0; 4]))
+                            as u64;
+                    let l = u32::from_le_bytes(
+                        data[offset + 4..offset + 8].try_into().unwrap_or([0; 4]),
+                    ) as u64;
                     (p, l)
                 };
 
                 // Sanity-check: ptr must point somewhere in the binary, len reasonable
-                let ptr_valid = ptr_val >= image_base
-                    && ptr_val < image_base + 0x1000_0000
-                    && ptr_val != 0;
+                let ptr_valid =
+                    ptr_val >= image_base && ptr_val < image_base + 0x1000_0000 && ptr_val != 0;
                 let len_valid = len_val >= 4 && len_val < 4096;
 
                 if ptr_valid && len_valid {

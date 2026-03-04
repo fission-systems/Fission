@@ -31,7 +31,9 @@ pub(super) fn parse_imports(
             break;
         }
 
-        let name_offset = loader.rva_to_file_offset(desc.name, image_base).unwrap_or(0);
+        let name_offset = loader
+            .rva_to_file_offset(desc.name, image_base)
+            .unwrap_or(0);
         let dll_name = {
             let name = loader.read_string_at(name_offset);
             if name.is_empty() {
@@ -46,7 +48,9 @@ pub(super) fn parse_imports(
         } else {
             desc.first_thunk
         };
-        let thunk_offset = loader.rva_to_file_offset(thunk_rva, image_base).unwrap_or(0);
+        let thunk_offset = loader
+            .rva_to_file_offset(thunk_rva, image_base)
+            .unwrap_or(0);
 
         let iat_base_rva = desc.first_thunk;
 

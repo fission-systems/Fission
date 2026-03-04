@@ -78,7 +78,7 @@ impl ElfLoader {
             for _ in 0..header.shnum {
                 shdrs.push(
                     Elf64Shdr::read_options(&mut reader, endian, ())
-                        .map_err(|_| err!(loader, "Failed to read ELF64 section header"))?
+                        .map_err(|_| err!(loader, "Failed to read ELF64 section header"))?,
                 );
             }
 
@@ -187,7 +187,7 @@ impl ElfLoader {
             for _ in 0..header.shnum {
                 shdrs.push(
                     Elf32Shdr::read_options(&mut reader, endian, ())
-                        .map_err(|_| err!(loader, "Failed to read ELF32 section header"))?
+                        .map_err(|_| err!(loader, "Failed to read ELF32 section header"))?,
                 );
             }
 
@@ -291,8 +291,16 @@ impl ElfLoader {
             return;
         };
 
-        let entry_size = if entsize > 0 { entsize as usize } else { std::mem::size_of::<Elf64Sym>() };
-        let count = if entry_size > 0 { size as usize / entry_size } else { 0 };
+        let entry_size = if entsize > 0 {
+            entsize as usize
+        } else {
+            std::mem::size_of::<Elf64Sym>()
+        };
+        let count = if entry_size > 0 {
+            size as usize / entry_size
+        } else {
+            0
+        };
 
         let sym_start = offset as usize;
         let sym_end = sym_start + size as usize;
@@ -365,8 +373,16 @@ impl ElfLoader {
             return;
         };
 
-        let entry_size = if entsize > 0 { entsize as usize } else { std::mem::size_of::<Elf32Sym>() };
-        let count = if entry_size > 0 { size as usize / entry_size } else { 0 };
+        let entry_size = if entsize > 0 {
+            entsize as usize
+        } else {
+            std::mem::size_of::<Elf32Sym>()
+        };
+        let count = if entry_size > 0 {
+            size as usize / entry_size
+        } else {
+            0
+        };
 
         let sym_start = offset as usize;
         let sym_end = sym_start + size as usize;

@@ -26,11 +26,7 @@ fn parse_lines_to_stmts(lines: &[&str], start: usize) -> (Vec<Stmt>, usize) {
         }
 
         // Skip empty lines, comments, opening braces, and function signatures
-        if line.is_empty()
-            || line.starts_with("//")
-            || line.starts_with("/*")
-            || line == "{"
-        {
+        if line.is_empty() || line.starts_with("//") || line.starts_with("/*") || line == "{" {
             i += 1;
             continue;
         }
@@ -515,7 +511,12 @@ if (x > 0) {
 "#;
         let stmts = parse_c_to_ast(code);
         assert_eq!(stmts.len(), 1);
-        if let Stmt::If { then_block, else_block, .. } = &stmts[0] {
+        if let Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } = &stmts[0]
+        {
             assert_eq!(then_block.len(), 1, "then_block should have 1 statement");
             assert!(else_block.is_none());
         } else {
@@ -534,7 +535,12 @@ if (x > 0) {
 "#;
         let stmts = parse_c_to_ast(code);
         assert_eq!(stmts.len(), 1);
-        if let Stmt::If { then_block, else_block, .. } = &stmts[0] {
+        if let Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } = &stmts[0]
+        {
             assert_eq!(then_block.len(), 1);
             let Some(eb) = else_block.as_ref() else {
                 panic!("should have else block")
@@ -551,6 +557,9 @@ if (x > 0) {
         let stmts = parse_c_to_ast(code);
         let output = ast_to_c(&stmts);
         assert!(output.contains("if"), "roundtrip must contain if");
-        assert!(output.contains("y = 1"), "roundtrip must contain assignment");
+        assert!(
+            output.contains("y = 1"),
+            "roundtrip must contain assignment"
+        );
     }
 }

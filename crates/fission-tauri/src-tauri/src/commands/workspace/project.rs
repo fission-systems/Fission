@@ -4,8 +4,8 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 use fission_core::parse_address;
-use tauri::State;
 use std::path::{Path, PathBuf};
+use tauri::State;
 
 fn validated_read_path(path: &str) -> CmdResult<PathBuf> {
     if path.trim().is_empty() || path.contains('\0') {
@@ -89,8 +89,7 @@ pub async fn save_project(path: String, state: State<'_, AppState>) -> CmdResult
     let json = serde_json::to_string_pretty(&project)
         .map_err(|e| CmdError::other(format!("Serialise failed: {e}")))?;
 
-    std::fs::write(&path, json)
-        .map_err(|e| CmdError::other(format!("Write failed: {e}")))?;
+    std::fs::write(&path, json).map_err(|e| CmdError::other(format!("Write failed: {e}")))?;
 
     Ok(())
 }
@@ -105,11 +104,11 @@ pub async fn load_project(
 ) -> CmdResult<crate::dto::FissionProject> {
     let path = validated_read_path(&path)?;
 
-    let json = std::fs::read_to_string(&path)
-        .map_err(|e| CmdError::other(format!("Read failed: {e}")))?;
+    let json =
+        std::fs::read_to_string(&path).map_err(|e| CmdError::other(format!("Read failed: {e}")))?;
 
-    let project: crate::dto::FissionProject = serde_json::from_str(&json)
-        .map_err(|e| CmdError::other(format!("Parse failed: {e}")))?;
+    let project: crate::dto::FissionProject =
+        serde_json::from_str(&json).map_err(|e| CmdError::other(format!("Parse failed: {e}")))?;
 
     // Apply user annotations to current state
     let mut inner = state.inner.lock().await;
@@ -164,24 +163,20 @@ pub async fn save_snapshot(path: String, state: State<'_, AppState>) -> CmdResul
 
     let json = serde_json::to_string_pretty(&snapshot)
         .map_err(|e| CmdError::other(format!("Serialise failed: {e}")))?;
-    std::fs::write(&path, json)
-        .map_err(|e| CmdError::other(format!("Write failed: {e}")))?;
+    std::fs::write(&path, json).map_err(|e| CmdError::other(format!("Write failed: {e}")))?;
     Ok(())
 }
 
 /// Load a snapshot file and restore annotations.
 /// Returns the binary_path stored in the snapshot so the frontend can reload it.
 #[tauri::command]
-pub async fn load_snapshot(
-    path: String,
-    state: State<'_, AppState>,
-) -> CmdResult<FissionProject> {
+pub async fn load_snapshot(path: String, state: State<'_, AppState>) -> CmdResult<FissionProject> {
     let path = validated_read_path(&path)?;
 
-    let json = std::fs::read_to_string(&path)
-        .map_err(|e| CmdError::other(format!("Read failed: {e}")))?;
-    let snapshot: FissionProject = serde_json::from_str(&json)
-        .map_err(|e| CmdError::other(format!("Parse failed: {e}")))?;
+    let json =
+        std::fs::read_to_string(&path).map_err(|e| CmdError::other(format!("Read failed: {e}")))?;
+    let snapshot: FissionProject =
+        serde_json::from_str(&json).map_err(|e| CmdError::other(format!("Parse failed: {e}")))?;
 
     let mut inner = state.inner.lock().await;
     inner.comments = snapshot
@@ -280,8 +275,7 @@ pub async fn export_analysis_json(path: String, state: State<'_, AppState>) -> C
     let json = serde_json::to_string_pretty(&export)
         .map_err(|e| CmdError::other(format!("JSON serialisation failed: {e}")))?;
 
-    std::fs::write(&path, json)
-        .map_err(|e| CmdError::other(format!("Write failed: {e}")))?;
+    std::fs::write(&path, json).map_err(|e| CmdError::other(format!("Write failed: {e}")))?;
 
     Ok(())
 }

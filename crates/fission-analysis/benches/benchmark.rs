@@ -1,7 +1,7 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use fission_analysis::analysis::cfg::CfgAnalysis;
-use fission_analysis::analysis::optimizer::integration::optimize_c_code;
 use fission_analysis::analysis::optimizer::OptimizerConfig;
+use fission_analysis::analysis::optimizer::integration::optimize_c_code;
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
 /// Build a synthetic PcodeFunction with `n` blocks forming a diamond CFG.
@@ -66,10 +66,7 @@ fn optimizer_benchmark(c: &mut Criterion) {
 "#;
     c.bench_function("optimizer_simple", |b| {
         b.iter(|| {
-            let result = optimize_c_code(
-                black_box(sample_code),
-                OptimizerConfig::default(),
-            );
+            let result = optimize_c_code(black_box(sample_code), OptimizerConfig::default());
             black_box(result)
         })
     });
@@ -93,5 +90,10 @@ fn binary_load_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, cfg_analysis_benchmark, optimizer_benchmark, binary_load_benchmark);
+criterion_group!(
+    benches,
+    cfg_analysis_benchmark,
+    optimizer_benchmark,
+    binary_load_benchmark
+);
 criterion_main!(benches);

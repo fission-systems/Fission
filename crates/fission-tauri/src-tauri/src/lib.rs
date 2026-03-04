@@ -64,7 +64,6 @@ pub fn run() {
             // Listing view
             commands::get_listing_info,
             commands::get_listing_chunk,
-            
             // ===================================================================
             // Code Analysis Domain
             // ===================================================================
@@ -89,7 +88,6 @@ pub fn run() {
             commands::deep_scan_functions,
             commands::run_fid,
             commands::export_analysis_json,
-            
             // ===================================================================
             // Debugging Domain
             // ===================================================================
@@ -108,7 +106,6 @@ pub fn run() {
             commands::ttd_status,
             commands::ttd_seek,
             commands::ttd_step,
-            
             // ===================================================================
             // Workspace Domain
             // ===================================================================
@@ -126,7 +123,6 @@ pub fn run() {
             commands::get_decompiler_options,
             commands::apply_decompiler_options,
             commands::clear_decompiler_cache,
-            
             // ===================================================================
             // Extensions Domain
             // ===================================================================

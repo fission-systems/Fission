@@ -149,10 +149,7 @@ async fn drain_events_into_state(state: &AppState) {
                 first_chance,
             } => {
                 let chance = if first_chance { "1st" } else { "2nd" };
-                let msg = format!(
-                    "[exc] 0x{:x} @ 0x{:x} ({})",
-                    code, address, chance
-                );
+                let msg = format!("[exc] 0x{:x} @ 0x{:x} ({})", code, address, chance);
                 ds.last_event = Some(msg.clone());
                 ds.events.push(msg);
             }
@@ -205,10 +202,16 @@ pub async fn debug_attach(pid: u32, state: State<'_, AppState>) -> CmdResult<()>
             crossbeam_channel::unbounded::<fission_analysis::debug::types::DebugEvent>();
         let (tx_stop, rx_stop) = crossbeam_channel::bounded::<()>(1);
         start_event_loop(pid, tx_events, rx_stop);
-        
+
         // Safe: Handle poisoned mutex by recovering
-        *state.debug_event_rx.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx_events);
-        *state.debug_stop_tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx_stop);
+        *state
+            .debug_event_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(rx_events);
+        *state
+            .debug_stop_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(tx_stop);
 
         // Update DTO
         let mut ds = state.debug_state.lock().await;
@@ -242,10 +245,16 @@ pub async fn debug_detach(state: State<'_, AppState>) -> CmdResult<()> {
                 }
             }
         }
-        
+
         // Safe: Handle poisoned mutex by recovering
-        *state.debug_stop_tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        *state.debug_event_rx.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *state
+            .debug_stop_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+        *state
+            .debug_event_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
 
         // Detach debugger
         {
@@ -284,7 +293,9 @@ pub async fn debug_continue(state: State<'_, AppState>) -> CmdResult<()> {
         use fission_analysis::debug::traits::Debugger;
 
         let mut dbg = state.debugger.lock().await;
-        let d = dbg.as_mut().ok_or_else(|| CmdError::other("Not attached"))?;
+        let d = dbg
+            .as_mut()
+            .ok_or_else(|| CmdError::other("Not attached"))?;
         d.continue_execution().map_err(CmdError::from)?;
         drop(dbg);
 
@@ -311,15 +322,16 @@ pub async fn debug_step(state: State<'_, AppState>) -> CmdResult<()> {
         use fission_analysis::debug::traits::Debugger;
 
         let mut dbg = state.debugger.lock().await;
-        let d = dbg.as_mut().ok_or_else(|| CmdError::other("Not attached"))?;
+        let d = dbg
+            .as_mut()
+            .ok_or_else(|| CmdError::other("Not attached"))?;
         d.single_step().map_err(CmdError::from)?;
         drop(dbg);
 
         let mut ds = state.debug_state.lock().await;
         ds.last_event = Some("Single-step issued".to_string());
-        ds.events.push(
-            "[step] Single-step issued (waiting for SINGLE_STEP event)".to_string(),
-        );
+        ds.events
+            .push("[step] Single-step issued (waiting for SINGLE_STEP event)".to_string());
         Ok(())
     }
     #[cfg(not(target_os = "windows"))]
@@ -339,7 +351,9 @@ pub async fn debug_add_breakpoint(address: u64, state: State<'_, AppState>) -> C
         use fission_analysis::debug::traits::Debugger;
 
         let mut dbg = state.debugger.lock().await;
-        let d = dbg.as_mut().ok_or_else(|| CmdError::other("Not attached"))?;
+        let d = dbg
+            .as_mut()
+            .ok_or_else(|| CmdError::other("Not attached"))?;
         d.set_sw_breakpoint(address).map_err(CmdError::from)?;
         drop(dbg);
 
@@ -371,7 +385,9 @@ pub async fn debug_remove_breakpoint(address: u64, state: State<'_, AppState>) -
         use fission_analysis::debug::traits::Debugger;
 
         let mut dbg = state.debugger.lock().await;
-        let d = dbg.as_mut().ok_or_else(|| CmdError::other("Not attached"))?;
+        let d = dbg
+            .as_mut()
+            .ok_or_else(|| CmdError::other("Not attached"))?;
         d.remove_sw_breakpoint(address).map_err(CmdError::from)?;
         drop(dbg);
 
@@ -406,7 +422,10 @@ pub async fn debug_read_memory(
         .map_err(|_| CmdError::other(format!("Invalid address: {address}")))?;
 
     if size == 0 || size > fission_core::MAX_HEX_READ {
-        return Err(CmdError::other(format!("Size must be 1–{} bytes", fission_core::MAX_HEX_READ)));
+        return Err(CmdError::other(format!(
+            "Size must be 1–{} bytes",
+            fission_core::MAX_HEX_READ
+        )));
     }
 
     #[cfg(target_os = "windows")]

@@ -14,13 +14,9 @@ static RUST_OVERFLOW_PATTERN: Lazy<Regex> = Lazy::new(|| {
 
 /// Pattern for Rust bounds checks
 static RUST_BOUNDS_CHECK_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"(?s)if\s*\([^\{]*(?:index|len)[^\{]*\)\s*\{\s*panic_bounds_check\([^\{]*\);?\s*\}",
-    )
-    .unwrap_or_else(|e| panic!("invalid RUST_BOUNDS_CHECK_PATTERN regex: {e}"))
+    Regex::new(r"(?s)if\s*\([^\{]*(?:index|len)[^\{]*\)\s*\{\s*panic_bounds_check\([^\{]*\);?\s*\}")
+        .unwrap_or_else(|e| panic!("invalid RUST_BOUNDS_CHECK_PATTERN regex: {e}"))
 });
-
-
 
 impl PostProcessor {
     /// Insert missing casts for common patterns where the decompiler omits

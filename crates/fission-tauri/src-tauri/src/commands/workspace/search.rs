@@ -159,8 +159,7 @@ pub async fn get_string_xrefs(
     // ── Step 1: collect strings from all sections ────────────────────────────
     let mut string_map: HashMap<u64, String> = HashMap::new();
     for section in &binary.sections {
-        let Some(bytes) =
-            binary.get_bytes(section.virtual_address, section.virtual_size as usize)
+        let Some(bytes) = binary.get_bytes(section.virtual_address, section.virtual_size as usize)
         else {
             continue;
         };
@@ -219,9 +218,7 @@ pub async fn get_string_xrefs(
                     }
                     if chars.len() >= min_len {
                         let content: String = chars.into_iter().collect();
-                        if search_lc.is_empty()
-                            || content.to_lowercase().contains(&search_lc)
-                        {
+                        if search_lc.is_empty() || content.to_lowercase().contains(&search_lc) {
                             let va = section.virtual_address + start as u64;
                             string_map.insert(va, content);
                         }
@@ -245,8 +242,7 @@ pub async fn get_string_xrefs(
         if !section.is_executable {
             continue;
         }
-        let Some(bytes) =
-            binary.get_bytes(section.virtual_address, section.virtual_size as usize)
+        let Some(bytes) = binary.get_bytes(section.virtual_address, section.virtual_size as usize)
         else {
             continue;
         };

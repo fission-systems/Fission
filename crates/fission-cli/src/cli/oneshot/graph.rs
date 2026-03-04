@@ -28,7 +28,10 @@ pub fn generate_pcode_graph(
     if verbose {
         eprintln!("[*] Generating Pcode graph for function at 0x{:X}", addr);
     } else {
-        debug!(addr = format_args!("0x{:X}", addr), "generating pcode graph");
+        debug!(
+            addr = format_args!("0x{:X}", addr),
+            "generating pcode graph"
+        );
     }
 
     // 1. Decompile to get Pcode
@@ -168,7 +171,10 @@ pub fn generate_pcode_graph(
         }
         Err(e) => {
             if verbose {
-                eprintln!("Warning: Could not run 'dot' command (is Graphviz installed?): {}", e);
+                eprintln!(
+                    "Warning: Could not run 'dot' command (is Graphviz installed?): {}",
+                    e
+                );
             } else {
                 warn!(error = %e, "could not run 'dot' (is Graphviz installed?)");
             }

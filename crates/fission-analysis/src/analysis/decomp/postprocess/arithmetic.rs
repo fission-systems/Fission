@@ -147,14 +147,20 @@ impl PostProcessor {
             .to_string();
 
         result = CONCAT_INPUT_FIRST
-            .replace_all(&result, |caps: &regex::Captures| caps["real1"].trim().to_string())
+            .replace_all(&result, |caps: &regex::Captures| {
+                caps["real1"].trim().to_string()
+            })
             .to_string();
         result = CONCAT_INPUT_SECOND
-            .replace_all(&result, |caps: &regex::Captures| caps["real2"].trim().to_string())
+            .replace_all(&result, |caps: &regex::Captures| {
+                caps["real2"].trim().to_string()
+            })
             .to_string();
 
         result = CONCAT_CAP_INPUT
-            .replace_all(&result, |caps: &regex::Captures| caps["lo_val"].trim().to_string())
+            .replace_all(&result, |caps: &regex::Captures| {
+                caps["lo_val"].trim().to_string()
+            })
             .to_string();
 
         result = MODULO_TO_SUB
@@ -187,9 +193,14 @@ impl PostProcessor {
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
                 let sh: u32 = caps["sh"].parse().unwrap_or(0);
-                if sh > 0 && sh < 32
-                    && val != "if" && val != "while" && val != "for"
-                    && val != "return" && val != "int" && val != "uint"
+                if sh > 0
+                    && sh < 32
+                    && val != "if"
+                    && val != "while"
+                    && val != "for"
+                    && val != "return"
+                    && val != "int"
+                    && val != "uint"
                 {
                     let multiplier = 1u64 << sh;
                     format!("{} * {}", val, multiplier)
@@ -205,8 +216,12 @@ impl PostProcessor {
                 let mask_str = &caps["mask"];
                 let mask = u64::from_str_radix(&mask_str[2..], 16).unwrap_or(0);
                 let modulus = mask.wrapping_add(1);
-                if mask > 0 && modulus > 0 && modulus.is_power_of_two()
-                    && val != "if" && val != "while" && val != "return"
+                if mask > 0
+                    && modulus > 0
+                    && modulus.is_power_of_two()
+                    && val != "if"
+                    && val != "while"
+                    && val != "return"
                 {
                     format!("({} % {})", val, modulus)
                 } else {

@@ -34,8 +34,7 @@ pub struct CliRunArgs {
 /// Parse address from string (supports 0x prefix and decimal)
 /// Convenience wrapper that converts Option → Result for ? operator.
 fn parse_address_result(addr_str: &str) -> Result<u64> {
-    parse_address(addr_str)
-        .ok_or_else(|| FissionError::Other("Invalid address format".to_string()))
+    parse_address(addr_str).ok_or_else(|| FissionError::Other("Invalid address format".to_string()))
 }
 
 /// Print section header with title
@@ -106,7 +105,7 @@ pub fn run_cli_with_args(args: CliRunArgs) -> Result<()> {
         }
 
         if let Some(ref addr_str) = show_xrefs {
-            let address = parse_address_result(addr_str)?;;
+            let address = parse_address_result(addr_str)?;
             print_section_header(&format!("Cross-References for: 0x{:x}", address));
             handlers::cmd_xrefs(&state, address);
             return Ok(());

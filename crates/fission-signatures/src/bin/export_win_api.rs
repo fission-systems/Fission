@@ -6,10 +6,7 @@ fn main() -> io::Result<()> {
     sigs.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut out = io::BufWriter::new(io::stdout());
-    writeln!(
-        out,
-        "# name|return_type|param_name:type,param_name:type"
-    )?;
+    writeln!(out, "# name|return_type|param_name:type,param_name:type")?;
 
     for sig in sigs {
         let mut params = String::new();
@@ -22,13 +19,7 @@ fn main() -> io::Result<()> {
             params.push_str(&param.type_name);
         }
 
-        writeln!(
-            out,
-            "{}|{}|{}",
-            sig.name,
-            sig.return_type,
-            params
-        )?;
+        writeln!(out, "{}|{}|{}", sig.name, sig.return_type, params)?;
     }
 
     Ok(())

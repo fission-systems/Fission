@@ -58,7 +58,10 @@ impl LoadedBinary {
                 "ELF"
             } else {
                 let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                if matches!(magic, MACHO_MAGIC_32_BE | MACHO_MAGIC_64_BE | MACHO_MAGIC_32_LE | MACHO_MAGIC_64_LE) {
+                if matches!(
+                    magic,
+                    MACHO_MAGIC_32_BE | MACHO_MAGIC_64_BE | MACHO_MAGIC_32_LE | MACHO_MAGIC_64_LE
+                ) {
                     "Mach-O"
                 } else {
                     "Unknown"
@@ -68,7 +71,10 @@ impl LoadedBinary {
             "ELF"
         } else {
             let magic = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-            if matches!(magic, MACHO_MAGIC_32_BE | MACHO_MAGIC_64_BE | MACHO_MAGIC_32_LE | MACHO_MAGIC_64_LE) {
+            if matches!(
+                magic,
+                MACHO_MAGIC_32_BE | MACHO_MAGIC_64_BE | MACHO_MAGIC_32_LE | MACHO_MAGIC_64_LE
+            ) {
                 "Mach-O"
             } else {
                 "Unknown"
@@ -125,9 +131,14 @@ impl LoadedBinary {
                 let analyzer = golang::GoAnalyzer::new(&binary);
                 let go_strings = analyzer.scan_go_strings();
                 if !go_strings.is_empty() {
-                    tracing::info!("[Loader] GoString scanner found {} string structs", go_strings.len());
+                    tracing::info!(
+                        "[Loader] GoString scanner found {} string structs",
+                        go_strings.len()
+                    );
                     for (addr, content) in go_strings {
-                        binary.inner_mut().global_symbols
+                        binary
+                            .inner_mut()
+                            .global_symbols
                             .entry(addr)
                             .or_insert(content);
                     }
@@ -278,8 +289,7 @@ impl LoadedBinary {
 
                 // Update function names from DWARF if better than symbol table names
                 for func_info in &dwarf_funcs {
-                    if let Some(idx) = binary.function_addr_index.get(&func_info.address).copied()
-                    {
+                    if let Some(idx) = binary.function_addr_index.get(&func_info.address).copied() {
                         let current_name = &binary.functions[idx].name;
                         if current_name.is_empty()
                             || current_name.starts_with("FUN_")
@@ -292,9 +302,7 @@ impl LoadedBinary {
 
                 // Store DWARF function info for post-processing (param/local name substitution)
                 for func_info in dwarf_funcs {
-                    binary
-                        .dwarf_functions
-                        .insert(func_info.address, func_info);
+                    binary.dwarf_functions.insert(func_info.address, func_info);
                 }
             }
         }

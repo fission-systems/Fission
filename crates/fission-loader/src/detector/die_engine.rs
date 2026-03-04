@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use fission_core::PAGE_SIZE;
 use super::{Confidence, Detection, DetectionResult, DetectionType};
 use crate::loader::LoadedBinary;
+use fission_core::PAGE_SIZE;
 
 /// A single rule within a signature
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -233,7 +233,8 @@ impl DieMatcher {
             SignatureRule::RichHeader { present } => {
                 // Check for Rich header in PE
                 let has_rich = Self::contains_string(
-                    &binary.data.as_slice()[..std::cmp::min(PAGE_SIZE, binary.data.as_slice().len())],
+                    &binary.data.as_slice()
+                        [..std::cmp::min(PAGE_SIZE, binary.data.as_slice().len())],
                     "Rich",
                 );
                 has_rich == *present

@@ -14,10 +14,7 @@ use tauri::State;
 /// Scans all executable sections with iced-x86 to find CALL/JMP/Jcc instructions
 /// that target `address`, and returns both incoming (callers) and outgoing refs.
 #[tauri::command]
-pub async fn get_xrefs(
-    address: u64,
-    state: State<'_, AppState>,
-) -> CmdResult<Vec<XrefDto>> {
+pub async fn get_xrefs(address: u64, state: State<'_, AppState>) -> CmdResult<Vec<XrefDto>> {
     use iced_x86::{Decoder, DecoderOptions, FlowControl};
 
     let inner = state.inner.lock().await;
@@ -30,14 +27,17 @@ pub async fn get_xrefs(
     let mut results: Vec<XrefDto> = Vec::new();
 
     for section in binary.executable_sections() {
-        let Some(bytes) =
-            binary.get_bytes(section.virtual_address, section.virtual_size as usize)
+        let Some(bytes) = binary.get_bytes(section.virtual_address, section.virtual_size as usize)
         else {
             continue;
         };
 
-        let mut decoder =
-            Decoder::with_ip(bitness, &bytes, section.virtual_address, DecoderOptions::NONE);
+        let mut decoder = Decoder::with_ip(
+            bitness,
+            &bytes,
+            section.virtual_address,
+            DecoderOptions::NONE,
+        );
 
         while decoder.can_decode() {
             let insn = decoder.decode();
@@ -63,8 +63,7 @@ pub async fn get_xrefs(
                 .functions
                 .iter()
                 .find(|f| {
-                    from_addr >= f.address
-                        && from_addr < f.address.saturating_add(f.size.max(1))
+                    from_addr >= f.address && from_addr < f.address.saturating_add(f.size.max(1))
                 })
                 .map(|f| {
                     inner
@@ -96,7 +95,11 @@ pub async fn get_xrefs(
     // Also find outgoing refs FROM this address (what does this function call?)
     let func = binary.functions.iter().find(|f| f.address == address);
     if let Some(func) = func {
-        let size = if func.size > 0 { func.size as usize } else { 256 };
+        let size = if func.size > 0 {
+            func.size as usize
+        } else {
+            256
+        };
         if let Some(bytes) = binary.get_bytes(address, size.min(MAX_XREF_DECODE)) {
             let mut decoder = Decoder::with_ip(bitness, &bytes, address, DecoderOptions::NONE);
             while decoder.can_decode() {

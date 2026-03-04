@@ -20,7 +20,10 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
                 "imports": binary.imports().count(),
                 "exports": binary.exports().count(),
             }))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?
+            .map_err(|e| io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e)
+            ))?
         )?;
     } else {
         writeln!(
@@ -122,8 +125,10 @@ pub(super) fn print_sections(binary: &LoadedBinary, json: bool) -> io::Result<()
         writeln!(
             stdout,
             "{}",
-            serde_json::to_string_pretty(&sections)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?
+            serde_json::to_string_pretty(&sections).map_err(|e| io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e)
+            ))?
         )?;
     } else {
         writeln!(stdout, "Sections ({}):", binary.sections.len())?;
@@ -172,8 +177,10 @@ pub(super) fn print_imports(binary: &LoadedBinary, json: bool) -> io::Result<()>
         writeln!(
             stdout,
             "{}",
-            serde_json::to_string_pretty(&funcs)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?
+            serde_json::to_string_pretty(&funcs).map_err(|e| io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e)
+            ))?
         )?;
     } else {
         writeln!(stdout, "Imported Functions ({}):", imports.len())?;
@@ -204,8 +211,10 @@ pub(super) fn print_exports(binary: &LoadedBinary, json: bool) -> io::Result<()>
         writeln!(
             stdout,
             "{}",
-            serde_json::to_string_pretty(&funcs)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("JSON serialization failed: {}", e)))?
+            serde_json::to_string_pretty(&funcs).map_err(|e| io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e)
+            ))?
         )?;
     } else {
         writeln!(stdout, "Exported Functions ({}):", exports.len())?;
