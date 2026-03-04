@@ -51,7 +51,7 @@ impl AnalysisProject {
     /// Load project from a JSON file
     pub fn load(path: &Path) -> Result<Self> {
         let json = fs::read_to_string(path).context("Failed to read project file")?;
-        let project: AnalysisProject =
+        let project: Self =
             serde_json::from_str(&json).context("Failed to parse project JSON")?;
         Ok(project)
     }

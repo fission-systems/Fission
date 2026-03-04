@@ -29,8 +29,8 @@ pub struct BasicBlock {
 
 impl BasicBlock {
     /// Create a new basic block
-    pub fn new(index: usize, start_address: u64) -> Self {
-        BasicBlock {
+    pub const fn new(index: usize, start_address: u64) -> Self {
+        Self {
             index,
             start_address,
             end_address: start_address,
@@ -44,11 +44,10 @@ impl BasicBlock {
 
     /// Add an operation to this block
     pub fn add_operation(&mut self, op: PcodeOp) {
-        if let Some(addr) = op.address.checked_add(1) {
-            if addr > self.end_address {
+        if let Some(addr) = op.address.checked_add(1)
+            && addr > self.end_address {
                 self.end_address = addr;
             }
-        }
         self.operations.push(op);
     }
 
@@ -89,7 +88,7 @@ impl BasicBlock {
     }
 
     /// Get number of instructions in the block
-    pub fn instruction_count(&self) -> usize {
+    pub const fn instruction_count(&self) -> usize {
         self.operations.len()
     }
 
@@ -127,44 +126,44 @@ pub enum EdgeKind {
 
 impl EdgeKind {
     /// Check if this edge completes a loop
-    pub fn is_back_edge(&self) -> bool {
-        matches!(self, EdgeKind::BackEdge)
+    pub const fn is_back_edge(&self) -> bool {
+        matches!(self, Self::BackEdge)
     }
 
     /// Get color for visualization
-    pub fn color(&self) -> &'static str {
+    pub const fn color(&self) -> &'static str {
         match self {
-            EdgeKind::Unconditional => "black",
-            EdgeKind::ConditionalTrue => "green",
-            EdgeKind::ConditionalFalse => "red",
-            EdgeKind::Fallthrough => "gray",
-            EdgeKind::Call => "blue",
-            EdgeKind::Return => "purple",
-            EdgeKind::Exception => "orange",
-            EdgeKind::BackEdge => "brown",
+            Self::Unconditional => "black",
+            Self::ConditionalTrue => "green",
+            Self::ConditionalFalse => "red",
+            Self::Fallthrough => "gray",
+            Self::Call => "blue",
+            Self::Return => "purple",
+            Self::Exception => "orange",
+            Self::BackEdge => "brown",
         }
     }
 
     /// Get edge style for visualization
-    pub fn style(&self) -> &'static str {
+    pub const fn style(&self) -> &'static str {
         match self {
-            EdgeKind::BackEdge => "dashed",
-            EdgeKind::Fallthrough => "dotted",
+            Self::BackEdge => "dashed",
+            Self::Fallthrough => "dotted",
             _ => "solid",
         }
     }
 
     /// Get edge label for visualization
-    pub fn label(&self) -> &'static str {
+    pub const fn label(&self) -> &'static str {
         match self {
-            EdgeKind::Unconditional => "",
-            EdgeKind::ConditionalTrue => "T",
-            EdgeKind::ConditionalFalse => "F",
-            EdgeKind::Fallthrough => "fall",
-            EdgeKind::Call => "call",
-            EdgeKind::Return => "ret",
-            EdgeKind::Exception => "exc",
-            EdgeKind::BackEdge => "back",
+            Self::Unconditional => "",
+            Self::ConditionalTrue => "T",
+            Self::ConditionalFalse => "F",
+            Self::Fallthrough => "fall",
+            Self::Call => "call",
+            Self::Return => "ret",
+            Self::Exception => "exc",
+            Self::BackEdge => "back",
         }
     }
 }
@@ -182,8 +181,8 @@ pub struct BlockEdge {
 
 impl BlockEdge {
     /// Create a new edge
-    pub fn new(target: usize, kind: EdgeKind) -> Self {
-        BlockEdge {
+    pub const fn new(target: usize, kind: EdgeKind) -> Self {
+        Self {
             target,
             kind,
             target_address: None,
@@ -191,8 +190,8 @@ impl BlockEdge {
     }
 
     /// Create a new edge with target address
-    pub fn with_address(target: usize, kind: EdgeKind, address: u64) -> Self {
-        BlockEdge {
+    pub const fn with_address(target: usize, kind: EdgeKind, address: u64) -> Self {
+        Self {
             target,
             kind,
             target_address: Some(address),

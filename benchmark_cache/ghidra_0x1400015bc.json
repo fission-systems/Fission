@@ -1,7 +1,0 @@
-{
-  "name": "destroy_item",
-  "address": "0x1400015bc",
-  "code": "\nvoid destroy_item(void *param_1)\n\n{\n  if (param_1 != (void *)0x0) {\n    free(param_1);\n  }\n  return;\n}\n\n",
-  "asm": "  0x1400015BC      PUSH     RBP\n  0x1400015BD      MOV      RBP, RSP\n  0x1400015C0      SUB      RSP, 0x20\n  0x1400015C4      MOV      qword ptr [RBP + 0x10], RCX\n  0x1400015C8      CMP      qword ptr [RBP + 0x10], 0x0\n  0x1400015CD      JZ       0x1400015db\n  0x1400015CF      MOV      RAX, qword ptr [RBP + 0x10]\n  0x1400015D3      MOV      RCX, RAX\n  0x1400015D6      CALL     0x140002b60\n  0x1400015DB      NOP      \n  0x1400015DC      ADD      RSP, 0x20\n  0x1400015E0      POP      RBP\n  0x1400015E1      RET      \n",
-  "decomp_sec": 0.000943
-}

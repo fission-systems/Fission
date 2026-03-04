@@ -1,7 +1,0 @@
-{
-  "name": "__p___initenv",
-  "address": "0x1400029c0",
-  "code": "\n/* WARNING: Unknown calling convention */\n\nchar *** __p___initenv(void)\n\n{\n  return *(char ****)_refptr___imp___initenv;\n}\n\n",
-  "asm": "  0x1400029C0      MOV      RAX, qword ptr [0x1400044b0]\n  0x1400029C7      MOV      RAX, qword ptr [RAX]\n  0x1400029CA      RET      \n",
-  "decomp_sec": 0.000457
-}

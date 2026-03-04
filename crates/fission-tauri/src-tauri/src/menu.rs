@@ -56,8 +56,11 @@ pub struct MenuHandles {
     pub listing_view: MenuItem<Wry>,
 
     // Check-menu items
+    #[allow(dead_code)]
     pub toggle_dynamic: CheckMenuItem<Wry>,
+    #[allow(dead_code)]
     pub toggle_sidebar: CheckMenuItem<Wry>,
+    #[allow(dead_code)]
     pub toggle_bottom: CheckMenuItem<Wry>,
 }
 

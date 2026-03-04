@@ -1,7 +1,0 @@
-{
-  "name": "_initialize_narrow_environment",
-  "address": "0x140002ae0",
-  "code": "\nvoid _initialize_narrow_environment(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002ae0. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  _initialize_narrow_environment();\n  return;\n}\n\n",
-  "asm": "  0x140002AE0      JMP      qword ptr [0x140008350]\n",
-  "decomp_sec": 0.000452
-}

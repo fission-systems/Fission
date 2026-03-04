@@ -77,7 +77,7 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
             let native = decompiler.inner_mut();
 
             // Try to detect compiler
-            let detection = fission_loader::detect(&binary);
+            let detection = fission_loader::detect(binary);
             let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
             let compiler_id = detection
                 .compiler()

@@ -1,7 +1,0 @@
-{
-  "name": "__p__commode",
-  "address": "0x140002a88",
-  "code": "\nvoid __p__commode(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002a88. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  __p__commode();\n  return;\n}\n\n",
-  "asm": "  0x140002A88      JMP      qword ptr [0x1400083a0]\n",
-  "decomp_sec": 0.000367
-}

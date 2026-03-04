@@ -2,7 +2,7 @@
 //!
 //! This module provides infrastructure for:
 //! - Tracking which operations define and use each varnode
-//! - Computing non-zero masks (NZMask) for values
+//! - Computing non-zero masks (`NZMask`) for values
 //! - Enabling advanced optimizations like CSE
 
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
@@ -53,6 +53,12 @@ pub struct DefUseInfo {
 pub struct DefUseTracker {
     /// Map from varnode ID to its def-use info
     def_use: HashMap<VarnodeId, DefUseInfo>,
+}
+
+impl Default for DefUseTracker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DefUseTracker {
@@ -145,11 +151,10 @@ impl DefUseTracker {
     /// Get non-zero mask for a varnode
     pub fn get_nz_mask(&self, vn: &Varnode) -> u64 {
         if vn.is_constant {
-            return self.constant_nz_mask(vn);
+            return Self::constant_nz_mask(vn);
         }
         self.get_info(vn)
-            .map(|info| info.nz_mask)
-            .unwrap_or(u64::MAX)
+            .map_or(u64::MAX, |info| info.nz_mask)
     }
 
     /// Get consume mask for a varnode
@@ -158,26 +163,24 @@ impl DefUseTracker {
             return u64::MAX; // Constants are always fully consumed
         }
         self.get_info(vn)
-            .map(|info| info.consume_mask)
-            .unwrap_or(u64::MAX)
+            .map_or(u64::MAX, |info| info.consume_mask)
     }
 
     /// Compute non-zero mask for a constant
-    fn constant_nz_mask(&self, vn: &Varnode) -> u64 {
+    fn constant_nz_mask( vn: &Varnode) -> u64 {
         if !vn.is_constant {
             return u64::MAX;
         }
-        let mask = self.size_mask(vn.size);
+        let mask = Self::size_mask(vn.size);
         (vn.constant_val as u64) & mask
     }
 
     /// Get mask for a given size
-    fn size_mask(&self, size: u32) -> u64 {
+    fn size_mask(size: u32) -> u64 {
         match size {
             1 => 0xFF,
             2 => 0xFFFF,
             4 => 0xFFFF_FFFF,
-            8 => u64::MAX,
             _ => u64::MAX,
         }
     }
@@ -217,12 +220,11 @@ impl DefUseTracker {
         let out_size = op
             .output
             .as_ref()
-            .map(|v| v.size)
-            .unwrap_or(DEFAULT_VARNODE_SIZE);
-        let mask = self.size_mask(out_size);
+            .map_or(DEFAULT_VARNODE_SIZE, |v| v.size);
+        let mask = Self::size_mask(out_size);
 
         match op.opcode {
-            PcodeOpcode::Copy => {
+            PcodeOpcode::Copy | PcodeOpcode::IntZExt => {
                 if op.inputs.is_empty() {
                     return mask;
                 }
@@ -236,14 +238,7 @@ impl DefUseTracker {
                 self.get_nz_mask(&op.inputs[0]) & self.get_nz_mask(&op.inputs[1])
             }
 
-            PcodeOpcode::IntOr => {
-                if op.inputs.len() < 2 {
-                    return mask;
-                }
-                self.get_nz_mask(&op.inputs[0]) | self.get_nz_mask(&op.inputs[1])
-            }
-
-            PcodeOpcode::IntXor => {
+            PcodeOpcode::IntOr | PcodeOpcode::IntXor => {
                 if op.inputs.len() < 2 {
                     return mask;
                 }
@@ -272,13 +267,6 @@ impl DefUseTracker {
                     return mask; // Unknown shift
                 };
                 self.get_nz_mask(&op.inputs[0]) >> shift_amt
-            }
-
-            PcodeOpcode::IntZExt => {
-                if op.inputs.is_empty() {
-                    return mask;
-                }
-                self.get_nz_mask(&op.inputs[0])
             }
 
             // For other operations, assume all bits can be set
@@ -412,10 +400,8 @@ impl DefUseTracker {
                                     {
                                         changed = true;
                                     }
-                                } else {
-                                    if self.add_consume(&op.inputs[0], u64::MAX) {
-                                        changed = true;
-                                    }
+                                } else if self.add_consume(&op.inputs[0], u64::MAX) {
+                                    changed = true;
                                 }
                                 if self.add_consume(&op.inputs[1], u64::MAX) {
                                     changed = true;
@@ -447,7 +433,7 @@ impl DefUseTracker {
                             if !op.inputs.is_empty() {
                                 // Mask input_consume_req to B's size
                                 let b_size = op.inputs[0].size;
-                                let b_mask = self.size_mask(b_size);
+                                let b_mask = Self::size_mask(b_size);
                                 if self.add_consume(&op.inputs[0], input_consume_req & b_mask) {
                                     changed = true;
                                 }

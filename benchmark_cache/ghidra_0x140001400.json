@@ -1,7 +1,0 @@
-{
-  "name": "mainCRTStartup",
-  "address": "0x140001400",
-  "code": "\n/* WARNING: Unknown calling convention */\n\nint mainCRTStartup(void)\n\n{\n  int iVar1;\n  \n  *(undefined4 *)_refptr___mingw_app_type = 0;\n  iVar1 = __tmainCRTStartup();\n  return iVar1;\n}\n\n",
-  "asm": "  0x140001400      SUB      RSP, 0x28\n  0x140001404      MOV      RAX, qword ptr [0x1400044c0]\n  0x14000140B      MOV      dword ptr [RAX], 0x0\n  0x140001411      CALL     0x140001010\n  0x140001416      NOP      \n  0x140001417      NOP      \n  0x140001418      ADD      RSP, 0x28\n  0x14000141C      RET      \n",
-  "decomp_sec": 0.001037
-}

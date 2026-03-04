@@ -1,7 +1,0 @@
-{
-  "name": "_GetPEImageBase",
-  "address": "0x1400026f0",
-  "code": "\n/* WARNING: Unknown calling convention */\n\nPBYTE _GetPEImageBase(void)\n\n{\n  PBYTE pBVar1;\n  \n  if ((*(short *)_refptr___ImageBase == 0x5a4d) &&\n     (*(int *)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)) == 0x4550)) {\n    pBVar1 = (PBYTE)0x0;\n    if ((short)*(int *)((longlong)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)) +\n                       0x18) == 0x20b) {\n      pBVar1 = _refptr___ImageBase;\n    }\n    return pBVar1;\n  }\n  return (PBYTE)0x0;\n}\n\n",
-  "asm": "  0x1400026F0      MOV      RAX, qword ptr [0x140004460]\n  0x1400026F7      XOR      EDX, EDX\n  0x1400026F9      CMP      word ptr [RAX], 0x5a4d\n  0x1400026FE      JNZ      0x14000270f\n  0x140002700      MOVSXD   RCX, dword ptr [RAX + 0x3c]\n  0x140002704      ADD      RCX, RAX\n  0x140002707      CMP      dword ptr [RCX], 0x4550\n  0x14000270D      JZ       0x140002718\n  0x14000270F      MOV      RAX, RDX\n  0x140002712      RET      \n  0x140002718      CMP      word ptr [RCX + 0x18], 0x20b\n  0x14000271E      CMOVZ    RDX, RAX\n  0x140002722      MOV      RAX, RDX\n  0x140002725      RET      \n",
-  "decomp_sec": 0.001553
-}

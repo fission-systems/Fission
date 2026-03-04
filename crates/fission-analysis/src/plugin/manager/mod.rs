@@ -114,7 +114,7 @@ mod tests {
         }
         fn on_load(&mut self, ctx: &PluginContext) -> Result<()> {
             if let Some(bus) = ctx.get_extension::<EventBus>() {
-                bus.publish(FissionEvent::LogMessage {
+                bus.publish(&FissionEvent::LogMessage {
                     level: "info".into(),
                     message: "Plugin loaded".into(),
                     target: "plugin".into(),

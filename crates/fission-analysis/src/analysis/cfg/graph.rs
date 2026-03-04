@@ -24,8 +24,8 @@ pub struct ControlFlowGraph {
 
 impl ControlFlowGraph {
     /// Create a new empty CFG
-    pub fn new() -> Self {
-        ControlFlowGraph {
+    pub const fn new() -> Self {
+        Self {
             blocks: Vec::new(),
             entry_block: 0,
             exit_blocks: Vec::new(),
@@ -50,7 +50,7 @@ impl ControlFlowGraph {
     }
 
     /// Get number of blocks
-    pub fn block_count(&self) -> usize {
+    pub const fn block_count(&self) -> usize {
         self.blocks.len()
     }
 
@@ -79,8 +79,7 @@ impl ControlFlowGraph {
     pub fn has_edge(&self, source: usize, target: usize) -> bool {
         self.blocks
             .get(source)
-            .map(|b| b.successors.iter().any(|e| e.target == target))
-            .unwrap_or(false)
+            .is_some_and(|b| b.successors.iter().any(|e| e.target == target))
     }
 
     /// Get edge between two blocks
@@ -144,9 +143,6 @@ impl ControlFlowGraph {
 
     /// Compute reverse post-order (topological order for acyclic parts)
     pub fn reverse_postorder(&self) -> Vec<usize> {
-        let mut visited = HashSet::new();
-        let mut postorder = Vec::new();
-
         fn dfs_postorder(
             cfg: &ControlFlowGraph,
             block_idx: usize,
@@ -165,6 +161,9 @@ impl ControlFlowGraph {
             }
             postorder.push(block_idx);
         }
+
+        let mut visited = HashSet::new();
+        let mut postorder = Vec::new();
 
         dfs_postorder(self, self.entry_block, &mut visited, &mut postorder);
         postorder.reverse();
@@ -243,7 +242,7 @@ impl CfgBuilder {
             .collect();
 
         // Build edges based on control flow operations
-        Self::build_edges(&mut cfg, &addr_to_block)?;
+        Self::build_edges(&mut cfg, &addr_to_block);
 
         // Build predecessor lists
         Self::build_predecessors(&mut cfg);
@@ -252,10 +251,11 @@ impl CfgBuilder {
     }
 
     /// Build edges between blocks
+    #[allow(clippy::similar_names)]
     fn build_edges(
         cfg: &mut ControlFlowGraph,
         addr_to_block: &HashMap<u64, usize>,
-    ) -> CfgResult<()> {
+    ) {
         let block_count = cfg.blocks.len();
 
         for idx in 0..block_count {
@@ -272,27 +272,25 @@ impl CfgBuilder {
                 match op.opcode {
                     PcodeOpcode::Branch => {
                         // Unconditional branch - target is first input
-                        if let Some(target_addr) = Self::get_branch_target(op) {
-                            if let Some(&target_idx) = addr_to_block.get(&target_addr) {
+                        if let Some(target_addr) = Self::get_branch_target(op)
+                            && let Some(&target_idx) = addr_to_block.get(&target_addr) {
                                 edges.push(BlockEdge::with_address(
                                     target_idx,
                                     EdgeKind::Unconditional,
                                     target_addr,
                                 ));
                             }
-                        }
                     }
                     PcodeOpcode::CBranch => {
                         // Conditional branch - has true and false paths
-                        if let Some(target_addr) = Self::get_branch_target(op) {
-                            if let Some(&target_idx) = addr_to_block.get(&target_addr) {
+                        if let Some(target_addr) = Self::get_branch_target(op)
+                            && let Some(&target_idx) = addr_to_block.get(&target_addr) {
                                 edges.push(BlockEdge::with_address(
                                     target_idx,
                                     EdgeKind::ConditionalTrue,
                                     target_addr,
                                 ));
                             }
-                        }
                         // Fallthrough for false case
                         if idx + 1 < block_count {
                             edges.push(BlockEdge::new(idx + 1, EdgeKind::ConditionalFalse));
@@ -308,27 +306,21 @@ impl CfgBuilder {
                             }
                         }
                     }
-                    PcodeOpcode::Return | PcodeOpcode::BranchInd => {
-                        // No successor edges for return or indirect branch (computed)
-                    }
                     _ => {}
                 }
             }
 
             // Add fallthrough edge if block doesn't end with unconditional control flow
-            if !has_branch && !has_return && !has_cbranch {
-                if idx + 1 < block_count {
+            if !has_branch && !has_return && !has_cbranch
+                && idx + 1 < block_count {
                     let next_idx = idx + 1;
                     if !edges.iter().any(|e| e.target == next_idx) {
                         edges.push(BlockEdge::new(next_idx, EdgeKind::Fallthrough));
                     }
                 }
-            }
 
             cfg.blocks[idx].successors = edges;
         }
-
-        Ok(())
     }
 
     /// Get branch target address from a branch operation

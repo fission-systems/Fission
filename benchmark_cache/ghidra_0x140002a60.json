@@ -1,7 +1,0 @@
-{
-  "name": "strlen",
-  "address": "0x140002a60",
-  "code": "\nsize_t __cdecl strlen(char *_Str)\n\n{\n  size_t sVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002a60. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  sVar1 = strlen(_Str);\n  return sVar1;\n}\n\n",
-  "asm": "  0x140002A60      JMP      qword ptr [0x1400083c8]\n",
-  "decomp_sec": 0.000787
-}

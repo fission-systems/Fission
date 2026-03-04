@@ -14,7 +14,7 @@ impl PluginManager {
         let id = plugin.id().to_string();
 
         if self.plugins.contains_key(&id) {
-            return Err(format!("Plugin '{}' already loaded", id));
+            return Err(format!("Plugin '{id}' already loaded"));
         }
 
         // Initialize plugin logic
@@ -25,7 +25,7 @@ impl PluginManager {
                 .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
             let ctx = PluginContext::new(api.clone(), extension);
             if let Err(e) = plugin.on_load(&ctx) {
-                return Err(format!("Failed to load plugin '{}': {:?}", id, e));
+                return Err(format!("Failed to load plugin '{id}': {e:?}"));
             }
         }
 
@@ -56,7 +56,7 @@ impl PluginManager {
 
         // Determine plugin type from extension
         let plugin_type = match path.extension().and_then(|e| e.to_str()) {
-            Some("so") | Some("dll") | Some("dylib") => PluginType::Native,
+            Some("so" | "dll" | "dylib") => PluginType::Native,
             Some(ext) => return Err(format!("Unsupported plugin type: .{ext}")),
             _ => return Err("Unknown plugin type".into()),
         };
@@ -64,13 +64,11 @@ impl PluginManager {
         // Generate plugin ID from filename
         let plugin_id = path
             .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("plugin_{}", self.plugins.len()));
+            .and_then(|s| s.to_str()).map_or_else(|| format!("plugin_{}", self.plugins.len()), std::string::ToString::to_string);
 
         // Check if already loaded
         if self.plugins.contains_key(&plugin_id) {
-            return Err(format!("Plugin '{}' already loaded", plugin_id));
+            return Err(format!("Plugin '{plugin_id}' already loaded"));
         }
 
         let info = PluginInfo {
@@ -78,7 +76,7 @@ impl PluginManager {
             name: plugin_id.clone(),
             version: FISSION_VERSION.into(),
             author: "Unknown".into(),
-            description: format!("Loaded from {:?}", path),
+            description: format!("Loaded from {}", path.display()),
             plugin_type,
             enabled: true,
         };
@@ -100,8 +98,8 @@ impl PluginManager {
     pub fn unload_plugin(&mut self, plugin_id: &str) -> Result<(), String> {
         if let Some(mut plugin) = self.plugins.remove(plugin_id) {
             // Call on_unload if it's a native plugin
-            if let Some(mut instance) = plugin.instance.take() {
-                if let Some(api) = &self.api {
+            if let Some(mut instance) = plugin.instance.take()
+                && let Some(api) = &self.api {
                     let extension = self
                         .event_bus
                         .clone()
@@ -109,7 +107,6 @@ impl PluginManager {
                     let ctx = PluginContext::new(api.clone(), extension);
                     let _ = instance.on_unload(&ctx);
                 }
-            }
 
             // Remove all hooks registered by this plugin
             for hook_id in plugin.hooks {
@@ -118,7 +115,7 @@ impl PluginManager {
 
             Ok(())
         } else {
-            Err(format!("Plugin '{}' not found", plugin_id))
+            Err(format!("Plugin '{plugin_id}' not found"))
         }
     }
 }

@@ -1,7 +1,0 @@
-{
-  "name": "sum_array",
-  "address": "0x140001633",
-  "code": "\nint sum_array(longlong param_1,int param_2)\n\n{\n  undefined4 local_10;\n  undefined4 local_c;\n  \n  local_c = 0;\n  for (local_10 = 0; local_10 < param_2; local_10 = local_10 + 1) {\n    local_c = local_c + *(int *)(param_1 + (longlong)local_10 * 4);\n  }\n  return local_c;\n}\n\n",
-  "asm": "  0x140001633      PUSH     RBP\n  0x140001634      MOV      RBP, RSP\n  0x140001637      SUB      RSP, 0x10\n  0x14000163B      MOV      qword ptr [RBP + 0x10], RCX\n  0x14000163F      MOV      dword ptr [RBP + 0x18], EDX\n  0x140001642      MOV      dword ptr [RBP + -0x4], 0x0\n  0x140001649      MOV      dword ptr [RBP + -0x8], 0x0\n  0x140001650      JMP      0x14000166f\n  0x140001652      MOV      EAX, dword ptr [RBP + -0x8]\n  0x140001655      CDQE     \n  0x140001657      LEA      RDX, [RAX*0x4]\n  0x14000165F      MOV      RAX, qword ptr [RBP + 0x10]\n  0x140001663      ADD      RAX, RDX\n  0x140001666      MOV      EAX, dword ptr [RAX]\n  0x140001668      ADD      dword ptr [RBP + -0x4], EAX\n  0x14000166B      ADD      dword ptr [RBP + -0x8], 0x1\n  0x14000166F      MOV      EAX, dword ptr [RBP + -0x8]\n  0x140001672      CMP      EAX, dword ptr [RBP + 0x18]\n  0x140001675      JL       0x140001652\n  0x140001677      MOV      EAX, dword ptr [RBP + -0x4]\n  0x14000167A      ADD      RSP, 0x10\n  0x14000167E      POP      RBP\n  0x14000167F      RET      \n",
-  "decomp_sec": 0.001779
-}

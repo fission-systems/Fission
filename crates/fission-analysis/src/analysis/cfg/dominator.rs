@@ -9,9 +9,9 @@ use std::collections::{HashMap, HashSet};
 /// Dominator Tree structure
 #[derive(Debug, Clone)]
 pub struct DominatorTree {
-    /// Immediate dominator for each block (block_idx -> idom)
+    /// Immediate dominator for each block (`block_idx` -> idom)
     pub idom: HashMap<usize, usize>,
-    /// Children in the dominator tree (block_idx -> children)
+    /// Children in the dominator tree (`block_idx` -> children)
     pub children: HashMap<usize, Vec<usize>>,
     /// Dominance frontier for each block
     pub dominance_frontier: HashMap<usize, HashSet<usize>>,
@@ -99,7 +99,7 @@ impl DominatorTree {
         // Compute dominance frontier
         let dominance_frontier = Self::compute_dominance_frontier(cfg, &idom);
 
-        Ok(DominatorTree {
+        Ok(Self {
             idom,
             children,
             dominance_frontier,
@@ -304,8 +304,6 @@ impl DominatorTree {
 
 impl std::fmt::Display for DominatorTree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Dominator Tree (root: BB{}):", self.root)?;
-
         fn print_tree(
             f: &mut std::fmt::Formatter<'_>,
             tree: &DominatorTree,
@@ -321,6 +319,7 @@ impl std::fmt::Display for DominatorTree {
             Ok(())
         }
 
+        writeln!(f, "Dominator Tree (root: BB{}):", self.root)?;
         print_tree(f, self, self.root, 0)
     }
 }

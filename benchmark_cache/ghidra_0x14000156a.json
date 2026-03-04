@@ -1,7 +1,0 @@
-{
-  "name": "create_item",
-  "address": "0x14000156a",
-  "code": "\nundefined4 * create_item(undefined4 param_1,char *param_2,undefined8 param_3)\n\n{\n  undefined4 *puVar1;\n  \n  puVar1 = (undefined4 *)malloc(0x30);\n  if (puVar1 != (undefined4 *)0x0) {\n    init_item(puVar1,param_1,param_2,param_3);\n  }\n  return puVar1;\n}\n\n",
-  "asm": "  0x14000156A      PUSH     RBP\n  0x14000156B      MOV      RBP, RSP\n  0x14000156E      SUB      RSP, 0x30\n  0x140001572      MOV      dword ptr [RBP + 0x10], ECX\n  0x140001575      MOV      qword ptr [RBP + 0x18], RDX\n  0x140001579      MOVSD    qword ptr [RBP + 0x20], XMM2\n  0x14000157E      MOV      ECX, 0x30\n  0x140001583      CALL     0x140002b68\n  0x140001588      MOV      qword ptr [RBP + -0x8], RAX\n  0x14000158C      CMP      qword ptr [RBP + -0x8], 0x0\n  0x140001591      JZ       0x1400015b2\n  0x140001593      MOVSD    XMM0, qword ptr [RBP + 0x20]\n  0x140001598      MOV      RCX, qword ptr [RBP + 0x18]\n  0x14000159C      MOV      EDX, dword ptr [RBP + 0x10]\n  0x14000159F      MOV      RAX, qword ptr [RBP + -0x8]\n  0x1400015A3      MOVAPD   XMM3, XMM0\n  0x1400015A7      MOV      R8, RCX\n  0x1400015AA      MOV      RCX, RAX\n  0x1400015AD      CALL     0x14000149d\n  0x1400015B2      MOV      RAX, qword ptr [RBP + -0x8]\n  0x1400015B6      ADD      RSP, 0x30\n  0x1400015BA      POP      RBP\n  0x1400015BB      RET      \n",
-  "decomp_sec": 0.00163
-}

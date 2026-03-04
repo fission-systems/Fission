@@ -3,7 +3,8 @@
 //! This library provides the core functionality for binary analysis,
 //! debugging, and decompilation.
 
-#![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
+#![warn(clippy::pedantic, clippy::nursery)]
+#![allow(clippy::cargo_common_metadata)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::missing_errors_doc)]

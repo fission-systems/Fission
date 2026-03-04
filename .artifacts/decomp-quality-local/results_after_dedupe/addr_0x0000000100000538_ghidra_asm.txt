@@ -1,8 +1,0 @@
-0x100000538      sub      sp, sp, #0x10
-  0x10000053C      str      w0, [sp, #0xc]
-  0x100000540      str      w1, [sp, #0x8]
-  0x100000544      ldr      w8, [sp, #0xc]
-  0x100000548      ldr      w9, [sp, #0x8]
-  0x10000054C      add      w0, w8, w9
-  0x100000550      add      sp, sp, #0x10
-  0x100000554      ret

@@ -1,7 +1,0 @@
-{
-  "name": "exit",
-  "address": "0x140002b10",
-  "code": "\nvoid __cdecl exit(int _Code)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002b10. Too many branches */\n                    /* WARNING: Subroutine does not return */\n                    /* WARNING: Treating indirect jump as call */\n  exit(_Code);\n  return;\n}\n\n",
-  "asm": "  0x140002B10      JMP      qword ptr [0x140008380]\n",
-  "decomp_sec": 0.000529
-}

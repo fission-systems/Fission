@@ -57,11 +57,10 @@ pub fn analyze_cfg(
                 section.file_size,
                 section.is_executable,
                 section.is_writable,
-            ) {
-                if verbose {
+            )
+                && verbose {
                     eprintln!("Warning: Failed to add section {}: {}", section.name, e);
                 }
-            }
         }
     }
 

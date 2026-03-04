@@ -67,7 +67,7 @@ pub use linux::LinuxDebugger as PlatformDebugger;
 #[cfg(target_os = "linux")]
 pub use linux::enumerate_processes;
 
-/// macOS: Use MacOSDebugger as the platform debugger (stub)
+/// macOS: Use `MacOSDebugger` as the platform debugger (stub)
 #[cfg(target_os = "macos")]
 pub use macos::MacOSDebugger as PlatformDebugger;
 

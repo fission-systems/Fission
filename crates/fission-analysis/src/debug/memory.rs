@@ -94,7 +94,7 @@ pub struct MemoryManager {
 
 impl MemoryManager {
     /// Create a new memory manager
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             platform: PlatformMemoryImpl::new(),
             regions: Vec::new(),
@@ -144,7 +144,7 @@ impl MemoryManager {
 
         String::from_utf8(buffer[..null_pos].to_vec()).map_err(|e| MemoryError::ReadFailed {
             address,
-            reason: format!("Invalid UTF-8: {}", e),
+            reason: format!("Invalid UTF-8: {e}"),
         })
     }
 

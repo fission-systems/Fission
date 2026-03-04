@@ -1,10 +1,10 @@
 use super::PostProcessor;
-use crate::utils::patterns::*;
+use crate::utils::patterns::{SEQ_EQ_RETURN, SEQ_EQ_RETURN_REV, SEQ_NOT_RETURN, ML_EQ_OPEN, ML_RETURN_LINE, ML_NOT_OPEN, RANGE_GUARD_OPEN, DEFAULT_RETURN, IF_NOT_OPEN, IF_EQ_OPEN, ASSIGNMENT, CLOSE_BRACE, ELSE_IF_EQ_OPEN, ELSE_OPEN, RETURN_VAR};
 use regex::Regex;
 use std::borrow::Cow;
 
 impl PostProcessor {
-    pub(super) fn reconstruct_switch_from_bst_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn reconstruct_switch_from_bst_cow(code: &str) -> Cow<'_, str> {
         if !code.contains("if") || !code.contains("return") {
             return Cow::Borrowed(code);
         }
@@ -40,18 +40,18 @@ impl PostProcessor {
     ///    return default;
     ///    ```
     pub(super) fn reconstruct_switch_from_bst(code: &str) -> String {
-        let lines: Vec<&str> = code.lines().collect();
-        if lines.len() < 4 {
-            return code.to_string();
-        }
-
         struct CaseEntry {
             value: String,
             stmt: String,
         }
 
+        let lines: Vec<&str> = code.lines().collect();
+        if lines.len() < 4 {
+            return code.to_string();
+        }
+
         let close_brace_only = Regex::new(r"^\s*\}\s*$")
-            .unwrap_or_else(|e| panic!("close_brace_only regex should compile: {}", e));
+            .unwrap_or_else(|e| panic!("close_brace_only regex should compile: {e}"));
 
         let mut result_lines: Vec<String> = Vec::new();
         let mut i = 0;
@@ -237,10 +237,10 @@ impl PostProcessor {
                 result_lines.push(format!("{}    {}", base_indent, c.stmt));
             }
             if has_default {
-                result_lines.push(format!("{}default:", base_indent));
-                result_lines.push(format!("{}    {}", base_indent, default_stmt));
+                result_lines.push(format!("{base_indent}default:"));
+                result_lines.push(format!("{base_indent}    {default_stmt}"));
             }
-            result_lines.push(format!("{}}}", base_indent));
+            result_lines.push(format!("{base_indent}}}"));
 
             changed = true;
             i = block_end + 1;
@@ -294,14 +294,14 @@ impl PostProcessor {
         //   "  }"
         //   "  return target;"      → return
 
-        let lines: Vec<&str> = code.lines().collect();
-        if lines.len() < 6 {
-            return code.to_string();
-        }
-
         struct AssignCase {
             value: String,
             expr: String,
+        }
+
+        let lines: Vec<&str> = code.lines().collect();
+        if lines.len() < 6 {
+            return code.to_string();
         }
 
         let mut result_lines: Vec<String> = Vec::new();
@@ -451,7 +451,7 @@ impl PostProcessor {
             let has_return = if j < lines.len() {
                 RETURN_VAR
                     .captures(lines[j])
-                    .map_or(false, |c| &c[1] == target_var)
+                    .is_some_and(|c| c[1] == target_var)
             } else {
                 false
             };
@@ -460,26 +460,26 @@ impl PostProcessor {
             }
 
             // Build switch
-            result_lines.push(format!("{}switch ({}) {{", base_indent, switch_var));
+            result_lines.push(format!("{base_indent}switch ({switch_var}) {{"));
             for c in &cases {
                 result_lines.push(format!("{}case {}:", base_indent, c.value));
                 if has_return {
                     result_lines.push(format!("{}    return {};", base_indent, c.expr));
                 } else {
                     result_lines.push(format!("{}    {} = {};", base_indent, target_var, c.expr));
-                    result_lines.push(format!("{}    break;", base_indent));
+                    result_lines.push(format!("{base_indent}    break;"));
                 }
             }
             if let Some(ref def) = default_expr {
-                result_lines.push(format!("{}default:", base_indent));
+                result_lines.push(format!("{base_indent}default:"));
                 if has_return {
-                    result_lines.push(format!("{}    return {};", base_indent, def));
+                    result_lines.push(format!("{base_indent}    return {def};"));
                 } else {
-                    result_lines.push(format!("{}    {} = {};", base_indent, target_var, def));
-                    result_lines.push(format!("{}    break;", base_indent));
+                    result_lines.push(format!("{base_indent}    {target_var} = {def};"));
+                    result_lines.push(format!("{base_indent}    break;"));
                 }
             }
-            result_lines.push(format!("{}}}", base_indent));
+            result_lines.push(format!("{base_indent}}}"));
 
             changed = true;
             i = j;
@@ -492,7 +492,7 @@ impl PostProcessor {
         result_lines.join("\n")
     }
 
-    pub(super) fn reconstruct_switch_from_if_else_assign_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn reconstruct_switch_from_if_else_assign_cow(code: &str) -> Cow<'_, str> {
         if !code.contains("if") || !code.contains("else") {
             return Cow::Borrowed(code);
         }

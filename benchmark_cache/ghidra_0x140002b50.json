@@ -1,7 +1,0 @@
-{
-  "name": "_set_new_mode",
-  "address": "0x140002b50",
-  "code": "\nvoid _set_new_mode(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002b50. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  _set_new_mode();\n  return;\n}\n\n",
-  "asm": "  0x140002B50      JMP      qword ptr [0x1400082c0]\n",
-  "decomp_sec": 0.000411
-}

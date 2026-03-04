@@ -75,7 +75,7 @@ impl std::fmt::Debug for RRDebugger {
             .field("state", &self.state)
             .field("current_position", &self.current_position)
             .field("max_position", &self.max_position)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -96,7 +96,7 @@ impl RRDebugger {
     }
 
     /// Check if rr is available on this system
-    pub fn is_available() -> bool {
+    pub const fn is_available() -> bool {
         #[cfg(target_os = "linux")]
         {
             Command::new("rr")
@@ -225,10 +225,10 @@ impl RRDebugger {
 
         stdin
             .write_all(full_cmd.as_bytes())
-            .map_err(|e| format!("Failed to write command: {}", e))?;
+            .map_err(|e| format!("Failed to write command: {e}"))?;
         stdin
             .flush()
-            .map_err(|e| format!("Failed to flush: {}", e))?;
+            .map_err(|e| format!("Failed to flush: {e}"))?;
 
         // Read responses until we get a result
         self.read_until_result()
@@ -261,7 +261,7 @@ impl RRDebugger {
                             }
                         }
                     }
-                    Err(e) => return Err(format!("Read error: {}", e)),
+                    Err(e) => return Err(format!("Read error: {e}")),
                 }
             } else {
                 return Err("No GDB reader".to_string());
@@ -275,15 +275,14 @@ impl RRDebugger {
         match resp {
             MiResponse::Result { results, .. } | MiResponse::ExecAsync { results, .. } => {
                 // Update RIP/position from 'frame' or 'when' if present
-                if let Some(MiValue::Const(when)) = results.get("when") {
-                    if let Ok(pos) = when.parse::<u64>() {
+                if let Some(MiValue::Const(when)) = results.get("when")
+                    && let Ok(pos) = when.parse::<u64>() {
                         self.current_position = pos;
                     }
-                }
 
                 // If it's a register list response
                 if results.contains_key("register-values") {
-                    self.last_registers = self.parse_registers(results);
+                    self.last_registers = Self::parse_registers(results);
                 }
             }
             _ => {}
@@ -292,7 +291,6 @@ impl RRDebugger {
 
     /// Parse register state from GDB/MI response
     fn parse_registers(
-        &self,
         results: &std::collections::HashMap<String, MiValue>,
     ) -> RegisterState {
         let mut state = RegisterState::default();
@@ -344,7 +342,7 @@ impl RRDebugger {
     }
 
     /// Get current execution state
-    pub fn state(&self) -> RRState {
+    pub const fn state(&self) -> RRState {
         self.state
     }
 
@@ -398,7 +396,7 @@ impl TimeTravelDebugger for RRDebugger {
 
         // Use rr's "when" command to get current event, and "run <N>" to seek
         // Note: 'run N' in rr-gdb is a custom command to jump to event N
-        let cmd = format!("interpreter-exec mi \"run {}\"", position);
+        let cmd = format!("interpreter-exec mi \"run {position}\"");
         let _responses = self.send_command(&cmd)?;
 
         // Fetch registers after seek

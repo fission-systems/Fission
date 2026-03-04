@@ -9,7 +9,7 @@
 //! This is a stub implementation. Full support would require:
 //! - Code signing with `com.apple.security.cs.debugger` entitlement
 //! - Or running with `sudo`
-//! - Implementation using mach_vm_* APIs
+//! - Implementation using `mach_vm`_* APIs
 
 use super::{MemoryError, MemoryRegion, PlatformMemory};
 
@@ -17,7 +17,7 @@ use super::{MemoryError, MemoryRegion, PlatformMemory};
 ///
 /// Currently unimplemented. macOS memory operations require:
 /// - Special entitlements for process access
-/// - Mach API (task_for_pid, mach_vm_read, etc.)
+/// - Mach API (`task_for_pid`, `mach_vm_read`, etc.)
 pub struct MacOSMemory {
     /// Target process ID (stored but not used in stub)
     _target_pid: Option<u32>,
@@ -25,7 +25,7 @@ pub struct MacOSMemory {
 
 impl MacOSMemory {
     /// Create a new macOS memory manager
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { _target_pid: None }
     }
 }

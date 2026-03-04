@@ -156,11 +156,11 @@ fn load_fid_databases(decomp: &mut DecompilerNative, binary: &LoadedBinary, verb
     }
 }
 
-fn collect_target_functions<'a>(
-    binary: &'a LoadedBinary,
+fn collect_target_functions(
+    binary: &LoadedBinary,
     address: Option<u64>,
     all: bool,
-) -> Vec<&'a FunctionInfo> {
+) -> Vec<&FunctionInfo> {
     if let Some(addr) = address {
         let mut best: Option<&FunctionInfo> = None;
         for func in &binary.functions {
@@ -378,15 +378,13 @@ pub(super) fn run_decompilation(
             "functions": json_results
         });
         serde_json::to_string_pretty(&envelope).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("JSON serialization failed: {}", e),
             )
         })?
     } else if effective_json {
         serde_json::to_string_pretty(&json_results).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("JSON serialization failed: {}", e),
             )
         })?
@@ -396,8 +394,7 @@ pub(super) fn run_decompilation(
 
     if let Some(ref output_path) = cli.output {
         let mut file = fs::File::create(output_path).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!(
                     "Failed to create output file '{}': {}",
                     output_path.display(),
@@ -448,8 +445,7 @@ pub(super) fn decompile_and_output(
                     "code": filtered
                 }))
                 .map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
+                    io::Error::other(
                         format!("JSON serialization failed: {}", e),
                     )
                 })?;

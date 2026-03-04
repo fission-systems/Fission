@@ -21,6 +21,7 @@ use fission_analysis::debug::{types::DebugEvent, windows::WindowsDebugger};
 /// Inner mutable state behind a Mutex.
 /// Does NOT contain the decompiler — that lives in its own Mutex to
 /// prevent long-running decompilations from blocking all other commands.
+#[derive(Default)]
 pub struct InnerState {
     /// Currently loaded binary
     pub loaded_binary: Option<Arc<LoadedBinary>>,
@@ -38,17 +39,6 @@ pub struct InnerState {
     pub bookmarks: Vec<BookmarkDto>,
 }
 
-impl Default for InnerState {
-    fn default() -> Self {
-        Self {
-            loaded_binary: None,
-            decompiler_loaded: false,
-            comments: HashMap::new(),
-            renamed_functions: HashMap::new(),
-            bookmarks: Vec::new(),
-        }
-    }
-}
 
 /// Thread-safe application state wrapper.
 ///

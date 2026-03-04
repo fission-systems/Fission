@@ -226,12 +226,11 @@ impl DecompilerNative {
         let mut names_cstr: Vec<CString> = Vec::with_capacity(symbols.len());
 
         for (addr, name) in symbols {
-            if !name.is_empty() {
-                if let Ok(cstr) = CString::new(name.as_str()) {
+            if !name.is_empty()
+                && let Ok(cstr) = CString::new(name.as_str()) {
                     addrs.push(*addr);
                     names_cstr.push(cstr);
                 }
-            }
         }
 
         if addrs.is_empty() {
@@ -270,12 +269,11 @@ impl DecompilerNative {
         let mut names_cstr: Vec<CString> = Vec::with_capacity(symbols.len());
 
         for (addr, name) in symbols {
-            if !name.is_empty() {
-                if let Ok(cstr) = CString::new(name.as_str()) {
+            if !name.is_empty()
+                && let Ok(cstr) = CString::new(name.as_str()) {
                     addrs.push(*addr);
                     names_cstr.push(cstr);
                 }
-            }
         }
 
         if addrs.is_empty() {
@@ -393,6 +391,7 @@ impl DecompilerNative {
     ///
     /// This distinguishes between code and data sections, improving
     /// analysis accuracy. Should be called after load_binary().
+    #[allow(clippy::too_many_arguments)]
     pub fn add_memory_block(
         &mut self,
         name: &str,

@@ -45,8 +45,7 @@ pub(super) fn print_strings(data: &[u8], min_len: usize, json: bool) -> io::Resu
         writeln!(
             stdout,
             "{}",
-            serde_json::to_string_pretty(&str_json).map_err(|e| io::Error::new(
-                io::ErrorKind::Other,
+            serde_json::to_string_pretty(&str_json).map_err(|e| io::Error::other(
                 format!("JSON serialization failed: {}", e)
             ))?
         )?;

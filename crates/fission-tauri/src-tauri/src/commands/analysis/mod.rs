@@ -1,5 +1,6 @@
 //! Code analysis commands — assembly, CFG, xrefs, annotations, scanning
 
+#[allow(clippy::module_inception)]
 pub mod analysis;
 pub mod annotations;
 pub mod assembly;

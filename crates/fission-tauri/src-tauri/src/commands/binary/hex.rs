@@ -43,7 +43,7 @@ pub async fn get_hex_view(
         let ascii: String = chunk
             .iter()
             .map(|&b| {
-                if b >= 0x20 && b < 0x7f {
+                if (0x20..0x7f).contains(&b) {
                     b as char
                 } else {
                     '.'

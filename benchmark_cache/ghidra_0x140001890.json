@@ -1,7 +1,0 @@
-{
-  "name": "__main",
-  "address": "0x140001890",
-  "code": "\n/* WARNING: Unknown calling convention -- yet parameter storage is locked */\n\nvoid __main(void)\n\n{\n  if (initialized != 0) {\n    return;\n  }\n  initialized = 1;\n  __do_global_ctors();\n  return;\n}\n\n",
-  "asm": "  0x140001890      MOV      EAX, dword ptr [0x140007030]\n  0x140001896      TEST     EAX, EAX\n  0x140001898      JZ       0x1400018a0\n  0x14000189A      RET      \n  0x1400018A0      MOV      dword ptr [0x140007030], 0x1\n  0x1400018AA      JMP      0x140001810\n",
-  "decomp_sec": 0.000747
-}

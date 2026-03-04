@@ -1,12 +1,19 @@
 use super::PostProcessor;
 use super::condition::negate_condition;
-use crate::utils::patterns::*;
-use once_cell::sync::Lazy;
+use crate::utils::patterns::{WHILE_TRUE, IF_BREAK, INC_DEC, COMPOUND_ASSIGN, LOOP_ASSIGN, CAST_VAR, ADD_ASSIGN, ADD_PATTERN, WHILE_TRUE_ML, DO_OPEN, DO_WHILE_CLOSE, SINGLE_IDENT};
 use regex::Regex;
 use std::borrow::Cow;
+use std::sync::LazyLock;
+
+static RE_PLUSPLUS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\s*)(\w+)\+\+;\s*$").expect("RE_PLUSPLUS regex should compile")
+});
+static RE_PLUS_ASSIGN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\s*)(\w+)\s*\+=\s*([^;]+);\s*$").expect("RE_PLUS_ASSIGN regex should compile")
+});
 
 impl PostProcessor {
-    pub(super) fn while_true_to_for_loop_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn while_true_to_for_loop_cow(code: &str) -> Cow<'_, str> {
         if !code.contains("while") {
             return Cow::Borrowed(code);
         }
@@ -33,16 +40,16 @@ impl PostProcessor {
     //   for (init_var = start; !exit_cond; init_var = init_var OP step) { body; }
     // =========================================================================
     pub(super) fn while_true_to_for_loop(code: &str) -> String {
+        // Regex patterns
+        static INIT_ASSIGN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+            Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
+                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {e}"))
+        });
+
         let lines: Vec<&str> = code.lines().collect();
         let mut result_lines: Vec<String> = Vec::new();
         let mut changed = false;
         let mut i = 0;
-
-        // Regex patterns
-        static INIT_ASSIGN: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
-                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
-        });
 
         while i < lines.len() {
             // Check for while(true) { preceded by init assignment
@@ -86,19 +93,21 @@ impl PostProcessor {
 
                         // Check last body line for update of init_var
                         let last_body = body_lines[body_lines.len() - 1];
-                        let update_info = if let Some(caps) = INC_DEC.captures(last_body) {
+                        let update_info = INC_DEC.captures(last_body).map_or_else(|| {
+                            COMPOUND_ASSIGN.captures(last_body).map_or_else(|| {
+                                LOOP_ASSIGN.captures(last_body).map(|caps| {
+                                    let v = caps[1].to_string();
+                                    (v, caps[2].to_string())
+                                })
+                            }, |caps| {
+                                let v = caps[1].to_string();
+                                Some((v, format!("{} {} {}", &caps[1], &caps[2], &caps[3])))
+                            })
+                        }, |caps| {
                             let v = caps[1].to_string();
                             let op = caps[2].to_string();
                             Some((v, format!("{}{}", &caps[1], op)))
-                        } else if let Some(caps) = COMPOUND_ASSIGN.captures(last_body) {
-                            let v = caps[1].to_string();
-                            Some((v, format!("{} {} {}", &caps[1], &caps[2], &caps[3])))
-                        } else if let Some(caps) = LOOP_ASSIGN.captures(last_body) {
-                            let v = caps[1].to_string();
-                            Some((v, caps[2].to_string()))
-                        } else {
-                            None
-                        };
+                        });
 
                         if let (Some(break_caps), Some((update_var, update_expr))) =
                             (break_cond, update_info)
@@ -120,12 +129,11 @@ impl PostProcessor {
                                 {
                                     update_expr
                                 } else {
-                                    format!("{} = {}", update_var, update_expr)
+                                    format!("{update_var} = {update_expr}")
                                 };
 
                                 result_lines.push(format!(
-                                    "{}for ({} = {}; {}; {}) {{",
-                                    while_indent, init_var, init_expr, negated, update_str
+                                    "{while_indent}for ({init_var} = {init_expr}; {negated}; {update_str}) {{"
                                 ));
 
                                 // Body lines: skip first (if-break) and last (update)
@@ -175,13 +183,13 @@ impl PostProcessor {
     // the init isn't immediately before the while.
     // =========================================================================
     pub(super) fn while_cond_to_for(code: &str) -> String {
-        static WHILE_COND: Lazy<Regex> = Lazy::new(|| {
+        static WHILE_COND: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
             Regex::new(r"^(\s*)while\s*\((.+?)\s*(<=|<|>=|>|!=)\s*(.+?)\)\s*\{\s*$")
-                .unwrap_or_else(|e| panic!("WHILE_COND regex should compile: {}", e))
+                .unwrap_or_else(|e| panic!("WHILE_COND regex should compile: {e}"))
         });
-        static INIT_ASSIGN: Lazy<Regex> = Lazy::new(|| {
+        static INIT_ASSIGN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
             Regex::new(r"^(\s*)(\w+)\s*=\s*(.+?)\s*;\s*$")
-                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
+                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {e}"))
         });
 
         let lines: Vec<&str> = code.lines().collect();
@@ -239,53 +247,50 @@ impl PostProcessor {
                         let inc_idx = close_idx - 1;
 
                         // Detect increment pattern
-                        let inc_str = if let Some(c) =
-                            crate::utils::patterns::INC_PP.captures(lines[inc_idx])
-                        {
-                            if &c[1] == var {
-                                Some(format!("{}++", var))
-                            } else {
-                                None
-                            }
-                        } else if let Some(c) = ADD_ASSIGN.captures(lines[inc_idx]) {
-                            if &c[1] == var {
-                                Some(format!("{} += {}", var, &c[2]))
-                            } else {
-                                None
-                            }
-                        } else if let Some(c) = ADD_PATTERN.captures(lines[inc_idx]) {
-                            if &c[1] == var && &c[2] == var {
-                                let step = &c[3];
-                                if step.trim() == "1" {
-                                    Some(format!("{}++", var))
+                        let inc_str = crate::utils::patterns::INC_PP.captures(lines[inc_idx]).map_or_else(|| {
+                            ADD_ASSIGN.captures(lines[inc_idx]).map_or_else(|| {
+                                ADD_PATTERN.captures(lines[inc_idx]).and_then(|c| {
+                                    if &c[1] == var && &c[2] == var {
+                                        let step = &c[3];
+                                        if step.trim() == "1" {
+                                            Some(format!("{var}++"))
+                                        } else {
+                                            Some(format!("{var} += {step}"))
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                })
+                            }, |c| {
+                                if &c[1] == var {
+                                    Some(format!("{} += {}", var, &c[2]))
                                 } else {
-                                    Some(format!("{} += {}", var, step))
+                                    None
                                 }
+                            })
+                        }, |c| {
+                            if &c[1] == var {
+                                Some(format!("{var}++"))
                             } else {
                                 None
                             }
-                        } else {
-                            None
-                        };
+                        });
 
                         if let Some(inc) = inc_str {
                             // Build for loop
                             let init_part = if has_init {
                                 // Safe: has_init was set when INIT_ASSIGN matched, but use if-let for safety
-                                if let Some(icaps) = INIT_ASSIGN.captures(lines[i - 1]) {
+                                INIT_ASSIGN.captures(lines[i - 1]).map_or_else(String::new, |icaps| {
                                     // Remove the init line we already pushed
                                     result_lines.pop();
                                     format!("{} = {}", var, &icaps[3])
-                                } else {
-                                    String::new()
-                                }
+                                })
                             } else {
                                 String::new()
                             };
 
                             let for_line = format!(
-                                "{}for ({}; {} {} {}; {}) {{",
-                                indent, init_part, lhs_raw, op, rhs, inc
+                                "{indent}for ({init_part}; {lhs_raw} {op} {rhs}; {inc}) {{"
                             );
                             result_lines.push(for_line);
 
@@ -293,7 +298,7 @@ impl PostProcessor {
                             for body_line in lines.iter().take(inc_idx).skip(i + 1) {
                                 result_lines.push((*body_line).to_string());
                             }
-                            result_lines.push(format!("{}}}", indent));
+                            result_lines.push(format!("{indent}}}"));
 
                             changed = true;
                             skip_until = close_idx + 1;
@@ -315,7 +320,7 @@ impl PostProcessor {
         result_lines.join("\n")
     }
 
-    pub(super) fn while_cond_to_for_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn while_cond_to_for_cow(code: &str) -> Cow<'_, str> {
         if !code.contains("while") {
             return Cow::Borrowed(code);
         }
@@ -341,7 +346,7 @@ impl PostProcessor {
             .into_owned()
     }
 
-    pub(super) fn while_true_to_for_ever_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn while_true_to_for_ever_cow(code: &str) -> Cow<'_, str> {
         if !WHILE_TRUE_ML.is_match(code) {
             return Cow::Borrowed(code);
         }
@@ -360,34 +365,18 @@ impl PostProcessor {
     //                 →  memset(buf, 0, N)
     // =========================================================================
     pub(super) fn recognize_loop_idioms(code: &str) -> String {
-        let mut result = code.to_string();
-
         // 1. strlen: while (*ptr != 0) { ptr = ptr + 1; }
         //        or: while (*(ptr + off) != 0) { off = off + 1; }
-        static STRLEN_LOOP: Lazy<Regex> = Lazy::new(|| {
+        static STRLEN_LOOP: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
             Regex::new(concat!(
-                r"while\s*\(\s*\*\s*(?P<ptr>[\w\->\.\[\]]+)\s*!=\s*(?:0|'\\0')\s*\)\s*\{\s*",
-                r"(?P<upd>[\w\->\.\[\]]+)\s*=\s*(?P<upd2>[\w\->\.\[\]]+)\s*\+\s*1\s*;\s*\}",
+                r"while\s*\(\s*\*\s*(?P<ptr>[\w\->.\[\]]+)\s*!=\s*(?:0|'\\0')\s*\)\s*\{\s*",
+                r"(?P<upd>[\w\->.\[\]]+)\s*=\s*(?P<upd2>[\w\->.\[\]]+)\s*\+\s*1\s*;\s*\}",
             ))
-            .unwrap_or_else(|e| panic!("STRLEN_LOOP regex should compile: {}", e))
+            .unwrap_or_else(|e| panic!("STRLEN_LOOP regex should compile: {e}"))
         });
-
-        result = STRLEN_LOOP
-            .replace_all(&result, |caps: &regex::Captures| {
-                let ptr = &caps["ptr"];
-                let upd = &caps["upd"];
-                let upd2 = &caps["upd2"];
-                if upd == upd2 {
-                    format!("/* strlen loop detected */ {} += strlen({})", upd, ptr)
-                } else {
-                    caps[0].to_string()
-                }
-            })
-            .to_string();
-
         // 2. popcount: cnt = 0; while (val != 0) { cnt = cnt + 1; val = val & val - 1; }
         //   Also variant: val = val & (val - 1);
-        static POPCOUNT_LOOP: Lazy<Regex> = Lazy::new(|| {
+        static POPCOUNT_LOOP: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
             Regex::new(concat!(
                 r"(?P<cnt>\w+)\s*=\s*0\s*;\s*",
                 r"while\s*\(\s*(?P<val>\w+)\s*!=\s*0\s*\)\s*\{\s*",
@@ -395,8 +384,34 @@ impl PostProcessor {
                 r"(?P<val2>\w+)\s*=\s*(?P<val3>\w+)\s*&\s*",
                 r"(?:(?P<val4>\w+)\s*-\s*1|\(\s*(?P<val5>\w+)\s*-\s*1\s*\))\s*;\s*\}",
             ))
-            .unwrap_or_else(|e| panic!("POPCOUNT_LOOP regex should compile: {}", e))
+            .unwrap_or_else(|e| panic!("POPCOUNT_LOOP regex should compile: {e}"))
         });
+        // 3. memset: for (i = 0; i < N; i++) { buf[i] = 0; }
+        //   or: for (i = 0; i < N; i = i + 1) { buf[i] = 0; }
+        static MEMSET_LOOP: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+            Regex::new(concat!(
+                r"for\s*\(\s*(?P<iv>\w+)\s*=\s*0\s*;\s*",
+                r"(?P<iv2>\w+)\s*<\s*(?P<sz>[^;]+?)\s*;\s*",
+                r"(?P<iv3>\w+)\s*(?:\+\+|=\s*(?P<iv4>\w+)\s*\+\s*1)\s*\)\s*\{\s*",
+                r"(?P<buf>\w+)\s*\[\s*(?P<iv5>\w+)\s*\]\s*=\s*(?P<val>0|'\\0')\s*;\s*\}",
+            ))
+            .unwrap_or_else(|e| panic!("MEMSET_LOOP regex should compile: {e}"))
+        });
+
+        let mut result = code.to_string();
+
+        result = STRLEN_LOOP
+            .replace_all(&result, |caps: &regex::Captures| {
+                let ptr = &caps["ptr"];
+                let upd = &caps["upd"];
+                let upd2 = &caps["upd2"];
+                if upd == upd2 {
+                    format!("/* strlen loop detected */ {upd} += strlen({ptr})")
+                } else {
+                    caps[0].to_string()
+                }
+            })
+            .to_string();
 
         result = POPCOUNT_LOOP
             .replace_all(&result, |caps: &regex::Captures| {
@@ -406,39 +421,26 @@ impl PostProcessor {
                 let val_minus = caps
                     .name("val4")
                     .or_else(|| caps.name("val5"))
-                    .map(|m| m.as_str())
-                    .unwrap_or("");
+                    .map_or("", |m| m.as_str());
                 if cnt == &caps["cnt2"]
                     && cnt == &caps["cnt3"]
                     && val == &caps["val2"]
                     && val == val3
                     && val == val_minus
                 {
-                    format!("{} = __builtin_popcount({})", cnt, val)
+                    format!("{cnt} = __builtin_popcount({val})")
                 } else {
                     caps[0].to_string()
                 }
             })
             .to_string();
 
-        // 3. memset: for (i = 0; i < N; i++) { buf[i] = 0; }
-        //   or: for (i = 0; i < N; i = i + 1) { buf[i] = 0; }
-        static MEMSET_LOOP: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(concat!(
-                r"for\s*\(\s*(?P<iv>\w+)\s*=\s*0\s*;\s*",
-                r"(?P<iv2>\w+)\s*<\s*(?P<sz>[^;]+?)\s*;\s*",
-                r"(?P<iv3>\w+)\s*(?:\+\+|=\s*(?P<iv4>\w+)\s*\+\s*1)\s*\)\s*\{\s*",
-                r"(?P<buf>\w+)\s*\[\s*(?P<iv5>\w+)\s*\]\s*=\s*(?P<val>0|'\\0')\s*;\s*\}",
-            ))
-            .unwrap_or_else(|e| panic!("MEMSET_LOOP regex should compile: {}", e))
-        });
-
         result = MEMSET_LOOP
             .replace_all(&result, |caps: &regex::Captures| {
                 let iv = &caps["iv"];
                 let buf = &caps["buf"];
                 let sz = &caps["sz"];
-                let iv4 = caps.name("iv4").map(|m| m.as_str()).unwrap_or(iv);
+                let iv4 = caps.name("iv4").map_or(iv, |m| m.as_str());
                 if iv == &caps["iv2"] && iv == &caps["iv3"] && iv == iv4 && iv == &caps["iv5"] {
                     format!("memset({}, 0, {})", buf, sz.trim())
                 } else {
@@ -450,7 +452,7 @@ impl PostProcessor {
         result
     }
 
-    pub(super) fn recognize_loop_idioms_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn recognize_loop_idioms_cow(code: &str) -> Cow<'_, str> {
         if !code.contains("while") && !code.contains("for") {
             return Cow::Borrowed(code);
         }
@@ -472,9 +474,9 @@ impl PostProcessor {
     ///   } while (VAR op LIMIT);
     /// → for (VAR = INIT; VAR op LIMIT; VAR++) { BODY; }
     pub(super) fn do_while_to_for(code: &str) -> String {
-        static INIT_ASSIGN: Lazy<Regex> = Lazy::new(|| {
+        static INIT_ASSIGN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
             Regex::new(r"^(\s*)(\w+)\s*=\s*([^;]+);\s*$")
-                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {}", e))
+                .unwrap_or_else(|e| panic!("INIT_ASSIGN regex should compile: {e}"))
         });
 
         let lines: Vec<&str> = code.lines().collect();
@@ -507,13 +509,10 @@ impl PostProcessor {
                     }
                 }
 
-                let close_idx = match close_idx {
-                    Some(c) => c,
-                    None => {
-                        result.push(lines[i].to_string());
-                        i += 1;
-                        continue;
-                    }
+                let Some(close_idx) = close_idx else {
+                    result.push(lines[i].to_string());
+                    i += 1;
+                    continue;
                 };
 
                 // Safe: close_idx was found by matching DO_WHILE_CLOSE, but use if-let for robustness
@@ -536,20 +535,16 @@ impl PostProcessor {
                 let body_end = close_idx;
                 let mut inc_idx = None;
                 let mut inc_expr = String::new(); // the full increment expression for the for-header
-                // Pattern for incrementing with indent (compile-time constants)
-                let inc_pp_local = Regex::new(r"^(\s*)(\w+)\+\+;\s*$")
-                    .unwrap_or_else(|e| panic!("inc_pp_local regex should compile: {}", e));
-                let inc_pe_local = Regex::new(r"^(\s*)(\w+)\s*\+=\s*([^;]+);\s*$")
-                    .unwrap_or_else(|e| panic!("inc_pe_local regex should compile: {}", e));
+                // Pattern for incrementing with indent - use static regex to avoid recompilation
                 for k in (body_start..body_end).rev() {
-                    if let Some(c) = inc_pp_local.captures(lines[k])
+                    if let Some(c) = RE_PLUSPLUS.captures(lines[k])
                         && c[2] == cond_var
                     {
                         inc_idx = Some(k);
-                        inc_expr = format!("{}++", cond_var);
+                        inc_expr = format!("{cond_var}++");
                         break;
                     }
-                    if let Some(c) = inc_pe_local.captures(lines[k])
+                    if let Some(c) = RE_PLUS_ASSIGN.captures(lines[k])
                         && c[2] == cond_var
                     {
                         inc_idx = Some(k);
@@ -558,81 +553,70 @@ impl PostProcessor {
                     }
                 }
 
-                let inc_idx = match inc_idx {
-                    Some(idx) => idx,
-                    None => {
-                        // Also try: RHS of while condition is the counter
-                        // e.g. `} while (limit != counter);`
-                        // where counter is the variable being incremented
-                        if SINGLE_IDENT.is_match(cond_lim.trim()) {
-                            let rhs_var = cond_lim.trim().to_string();
-                            let mut found_rhs_idx = None;
-                            let mut rhs_inc_expr = String::new();
-                            for k in (body_start..body_end).rev() {
-                                if let Some(c) = inc_pp_local.captures(lines[k])
-                                    && c[2] == rhs_var
-                                {
-                                    found_rhs_idx = Some(k);
-                                    rhs_inc_expr = format!("{}++", rhs_var);
-                                    break;
-                                }
-                                if let Some(c) = inc_pe_local.captures(lines[k])
-                                    && c[2] == rhs_var
-                                {
-                                    found_rhs_idx = Some(k);
-                                    rhs_inc_expr = format!("{} += {}", rhs_var, c[3].trim());
-                                    break;
-                                }
+                let Some(inc_idx) = inc_idx else {
+                    // Also try: RHS of while condition is the counter
+                    // e.g. `} while (limit != counter);`
+                    // where counter is the variable being incremented
+                    if SINGLE_IDENT.is_match(cond_lim.trim()) {
+                        let rhs_var = cond_lim.trim().to_string();
+                        let mut found_rhs_idx = None;
+                        let mut rhs_inc_expr = String::new();
+                        for k in (body_start..body_end).rev() {
+                            if let Some(c) = RE_PLUSPLUS.captures(lines[k])
+                                && c[2] == rhs_var
+                            {
+                                found_rhs_idx = Some(k);
+                                rhs_inc_expr = format!("{rhs_var}++");
+                                break;
                             }
-                            if let Some(rhs_idx) = found_rhs_idx {
-                                // Rebuild with swapped cond_var and cond_lim
-                                let flipped_init = if i > 0 {
-                                    if let Some(ic) = INIT_ASSIGN.captures(lines[i - 1]) {
-                                        if ic[2].trim() == rhs_var {
-                                            result.pop();
-                                            format!("{} = {}", rhs_var, ic[3].trim())
-                                        } else {
-                                            String::new()
-                                        }
+                            if let Some(c) = RE_PLUS_ASSIGN.captures(lines[k])
+                                && c[2] == rhs_var
+                            {
+                                found_rhs_idx = Some(k);
+                                rhs_inc_expr = format!("{} += {}", rhs_var, c[3].trim());
+                                break;
+                            }
+                        }
+                        if let Some(rhs_idx) = found_rhs_idx {
+                            // Rebuild with swapped cond_var and cond_lim
+                            let flipped_init = if i > 0 {
+                                INIT_ASSIGN.captures(lines[i - 1]).map_or_else(String::new, |ic| {
+                                    if ic[2].trim() == rhs_var {
+                                        result.pop();
+                                        format!("{} = {}", rhs_var, ic[3].trim())
                                     } else {
                                         String::new()
                                     }
-                                } else {
-                                    String::new()
-                                };
+                                })
+                            } else {
+                                String::new()
+                            };
 
-                                let for_line = format!(
-                                    "{}for ({}; {} {} {}; {}) {{",
-                                    do_indent,
-                                    flipped_init,
-                                    rhs_var,
-                                    cond_op,
-                                    cond_var,
-                                    rhs_inc_expr
-                                );
-                                result.push(for_line);
-                                for (k, line) in
-                                    lines.iter().enumerate().take(body_end).skip(body_start)
-                                {
-                                    if k != rhs_idx {
-                                        result.push((*line).to_string());
-                                    }
+                            let for_line = format!(
+                                "{do_indent}for ({flipped_init}; {rhs_var} {cond_op} {cond_var}; {rhs_inc_expr}) {{"
+                            );
+                            result.push(for_line);
+                            for (k, line) in
+                                lines.iter().enumerate().take(body_end).skip(body_start)
+                            {
+                                if k != rhs_idx {
+                                    result.push((*line).to_string());
                                 }
-                                result.push(format!("{}}}", do_indent));
-                                changed = true;
-                                i = close_idx + 1;
-                                continue;
                             }
+                            result.push(format!("{do_indent}}}"));
+                            changed = true;
+                            i = close_idx + 1;
+                            continue;
                         }
-                        result.push(lines[i].to_string());
-                        i += 1;
-                        continue;
                     }
+                    result.push(lines[i].to_string());
+                    i += 1;
+                    continue;
                 };
 
                 // Check for init assignment immediately before `do {`
                 let init_part = if i > 0 {
-                    if let Some(ic) = INIT_ASSIGN.captures(lines[i - 1]) {
+                    INIT_ASSIGN.captures(lines[i - 1]).map_or_else(String::new, |ic| {
                         if ic[2] == cond_var {
                             // Remove the init line we already pushed
                             result.pop();
@@ -640,16 +624,13 @@ impl PostProcessor {
                         } else {
                             String::new()
                         }
-                    } else {
-                        String::new()
-                    }
+                    })
                 } else {
                     String::new()
                 };
 
                 let for_line = format!(
-                    "{}for ({}; {} {} {}; {}) {{",
-                    do_indent, init_part, cond_var, cond_op, cond_lim, inc_expr
+                    "{do_indent}for ({init_part}; {cond_var} {cond_op} {cond_lim}; {inc_expr}) {{"
                 );
                 result.push(for_line);
 
@@ -659,7 +640,7 @@ impl PostProcessor {
                         result.push((*line).to_string());
                     }
                 }
-                result.push(format!("{}}}", do_indent));
+                result.push(format!("{do_indent}}}"));
 
                 changed = true;
                 i = close_idx + 1;
@@ -676,7 +657,7 @@ impl PostProcessor {
         result.join("\n")
     }
 
-    pub(super) fn do_while_to_for_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn do_while_to_for_cow(code: &str) -> Cow<'_, str> {
         if !code.contains("do") || !code.contains("while") {
             return Cow::Borrowed(code);
         }

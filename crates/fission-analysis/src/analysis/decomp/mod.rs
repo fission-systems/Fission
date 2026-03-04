@@ -100,7 +100,7 @@ impl CachingDecompiler {
     }
 
     /// Access the underlying native decompiler
-    pub fn inner_mut(&mut self) -> &mut DecompilerNative {
+    pub const fn inner_mut(&mut self) -> &mut DecompilerNative {
         &mut self.inner
     }
 
@@ -110,16 +110,16 @@ impl CachingDecompiler {
     }
 
     /// Set Rust post-processing options
-    pub fn set_rust_postprocess_options(&mut self, options: RustPostProcessOptions) {
+    pub const fn set_rust_postprocess_options(&mut self, options: RustPostProcessOptions) {
         self.rust_postprocess_options = options;
     }
 
     /// Get current Rust post-processing options
-    pub fn rust_postprocess_options(&self) -> &RustPostProcessOptions {
+    pub const fn rust_postprocess_options(&self) -> &RustPostProcessOptions {
         &self.rust_postprocess_options
     }
 }
 
-/// Recommended decompiler type (CachingDecompiler when native is available)
+/// Recommended decompiler type (`CachingDecompiler` when native is available)
 #[cfg(feature = "native_decomp")]
 pub type RecommendedDecompiler = CachingDecompiler;

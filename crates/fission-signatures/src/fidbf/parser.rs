@@ -76,9 +76,13 @@ fn parse_functions(connection: &Connection) -> Result<Vec<FidbfFunction>, rusqli
     )?;
 
     let rows = statement.query_map([], |row| {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let full_hash = row.get::<_, Option<i64>>(3)?.unwrap_or_default() as u64;
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let specific_hash = row.get::<_, Option<i64>>(4)?.unwrap_or_default() as u64;
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let code_unit_size = row.get::<_, Option<i64>>(5)?.unwrap_or_default() as u32;
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let entry_point = row.get::<_, Option<i64>>(6)?.unwrap_or_default() as u64;
         let has_terminator = row.get::<_, Option<i64>>(7)?.unwrap_or_default() != 0;
 

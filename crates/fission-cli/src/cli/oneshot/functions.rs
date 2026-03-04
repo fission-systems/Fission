@@ -20,8 +20,7 @@ pub(super) fn print_function_list(binary: &LoadedBinary, json: bool) -> io::Resu
         writeln!(
             stdout,
             "{}",
-            serde_json::to_string_pretty(&funcs).map_err(|e| io::Error::new(
-                io::ErrorKind::Other,
+            serde_json::to_string_pretty(&funcs).map_err(|e| io::Error::other(
                 format!("JSON serialization failed: {}", e)
             ))?
         )?;

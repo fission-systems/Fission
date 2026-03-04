@@ -1,7 +1,0 @@
-{
-  "name": "print_message",
-  "address": "0x140001477",
-  "code": "\nvoid print_message(undefined8 param_1)\n\n{\n  printf(\"Message: %s\\n\",param_1);\n  return;\n}\n\n",
-  "asm": "  0x140001477      PUSH     RBP\n  0x140001478      MOV      RBP, RSP\n  0x14000147B      SUB      RSP, 0x20\n  0x14000147F      MOV      qword ptr [RBP + 0x10], RCX\n  0x140001483      MOV      RAX, qword ptr [RBP + 0x10]\n  0x140001487      LEA      RCX, [0x140004000]\n  0x14000148E      MOV      RDX, RAX\n  0x140001491      CALL     0x140002900\n  0x140001496      NOP      \n  0x140001497      ADD      RSP, 0x20\n  0x14000149B      POP      RBP\n  0x14000149C      RET      \n",
-  "decomp_sec": 0.001177
-}

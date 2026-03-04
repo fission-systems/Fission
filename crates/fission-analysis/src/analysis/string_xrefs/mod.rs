@@ -21,8 +21,14 @@ pub struct StringWithXrefs {
 pub struct StringXrefAnalysis {
     /// All strings with their references
     pub strings: Vec<StringWithXrefs>,
-    /// Quick lookup: string content -> StringWithXrefs
+    /// Quick lookup: string content -> `StringWithXrefs`
     pub by_content: HashMap<String, Vec<usize>>,
+}
+
+impl Default for StringXrefAnalysis {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StringXrefAnalysis {
@@ -42,7 +48,7 @@ impl StringXrefAnalysis {
         self.strings.push(StringWithXrefs { string, xrefs });
         self.by_content
             .entry(content)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(index);
     }
 

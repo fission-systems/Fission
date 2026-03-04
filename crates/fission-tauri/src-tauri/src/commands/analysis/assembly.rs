@@ -47,7 +47,7 @@ pub async fn decompile_function(
             });
         drop(decomp_lock);
 
-        return match decomp_result {
+        match decomp_result {
             Ok(code) => Ok(DecompileResult {
                 code,
                 function_name: func_name,
@@ -61,7 +61,7 @@ pub async fn decompile_function(
                 function_name: func_name,
                 address: format!("0x{:x}", address),
             }),
-        };
+        }
     }
 
     #[cfg(not(feature = "native_decomp"))]

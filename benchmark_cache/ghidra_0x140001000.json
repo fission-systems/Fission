@@ -1,7 +1,0 @@
-{
-  "name": "__mingw_invalidParameterHandler",
-  "address": "0x140001000",
-  "code": "\n/* WARNING: Unknown calling convention */\n\nvoid __mingw_invalidParameterHandler\n               (wchar_t *expression,wchar_t *function,wchar_t *file,uint line,uintptr_t pReserved)\n\n{\n  return;\n}\n\n",
-  "asm": "  0x140001000      RET      \n",
-  "decomp_sec": 0.007002
-}

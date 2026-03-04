@@ -1,7 +1,0 @@
-{
-  "name": "atexit",
-  "address": "0x140001420",
-  "code": "\nint __cdecl atexit(_func_5014 *param_1)\n\n{\n  int iVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002ad0. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  iVar1 = _crt_atexit();\n  return iVar1;\n}\n\n",
-  "asm": "  0x140001420      JMP      0x140002ad0\n",
-  "decomp_sec": 0.000906
-}

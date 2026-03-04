@@ -1,7 +1,0 @@
-{
-  "name": "__set_app_type",
-  "address": "0x140002af8",
-  "code": "\nvoid __set_app_type(void)\n\n{\n                    /* WARNING: Could not recover jumptable at 0x000140002af8. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  _set_app_type();\n  return;\n}\n\n",
-  "asm": "  0x140002AF8      JMP      qword ptr [0x140008368]\n",
-  "decomp_sec": 0.000342
-}

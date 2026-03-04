@@ -1,6 +1,0 @@
-{
-  "name": "cpp_create_item",
-  "address": "0x1000006a4",
-  "code": "\n/* WARNING: Variable defined which should be unmapped: id_local */\n\nItem * cpp_create_item(int id,char *name,double value)\n\n{\n  Item *item_00;\n  Item *item;\n  int id_local;\n  \n  item_00 = (Item *)_malloc(0x30);\n  if (item_00 != (Item *)0x0) {\n    cpp_init_item(item_00,id,name,value);\n  }\n  return item_00;\n}\n\n",
-  "asm": "  0x1000006A4      sub      sp, sp, #0x30\n  0x1000006A8      stp      x29, x30, [sp, #0x20]\n  0x1000006AC      add      x29, sp, #0x20\n  0x1000006B0      stur     w0, [x29, #-0x4]\n  0x1000006B4      str      x1, [sp, #0x10]\n  0x1000006B8      str      d0, [sp, #0x8]\n  0x1000006BC      mov      x0, #0x30\n  0x1000006C0      bl       0x100000aec\n  0x1000006C4      str      x0, [sp]\n  0x1000006C8      ldr      x8, [sp]\n  0x1000006CC      cbz      x8, 0x1000006ec\n  0x1000006D0      b        0x1000006d4\n  0x1000006D4      ldr      x0, [sp]\n  0x1000006D8      ldur     w1, [x29, #-0x4]\n  0x1000006DC      ldr      x2, [sp, #0x10]\n  0x1000006E0      ldr      d0, [sp, #0x8]\n  0x1000006E4      bl       0x100000634\n  0x1000006E8      b        0x1000006ec\n  0x1000006EC      ldr      x0, [sp]\n  0x1000006F0      ldp      x29, x30, [sp, #0x20]\n  0x1000006F4      add      sp, sp, #0x30\n  0x1000006F8      ret      \n"
-}

@@ -85,7 +85,7 @@ use super::ttd::ExecutionSnapshot;
 /// backends including:
 /// - **RR (Record and Replay)**: Linux-only, uses GDB/MI protocol
 /// - **TTD (Internal)**: Cross-platform, snapshot-based
-/// - **Windows TTD**: Windows-only (future integration with WinDbg)
+/// - **Windows TTD**: Windows-only (future integration with `WinDbg`)
 ///
 /// # Example
 ///
@@ -136,7 +136,7 @@ pub trait TimeTravelDebugger: Send {
     /// Get current execution snapshot
     fn current_snapshot(&self) -> Option<&ExecutionSnapshot>;
 
-    /// Get timeline range (min_step, max_step)
+    /// Get timeline range (`min_step`, `max_step`)
     fn timeline_range(&self) -> Option<(u64, u64)>;
 
     /// Get total number of recorded steps

@@ -1,5 +1,6 @@
 //! Binary analysis commands — loading, metadata, hex editing, listing
 
+#[allow(clippy::module_inception)]
 pub mod binary;
 pub mod hex;
 pub mod listing;

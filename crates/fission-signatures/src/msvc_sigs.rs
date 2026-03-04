@@ -19,8 +19,7 @@ pub fn load_msvc_signatures(signatures: &mut Vec<FunctionSignature>) {
     let json_str = include_str!("../data/signatures/msvc.json");
     let items: Vec<JsonMsvcSignature> = serde_json::from_str(json_str)
         .unwrap_or_else(|e| panic!(
-            "Failed to parse msvc.json - this is a compile-time embedded file, please check data/signatures/msvc.json syntax: {}",
-            e
+            "Failed to parse msvc.json - this is a compile-time embedded file, please check data/signatures/msvc.json syntax: {e}"
         ));
 
     for item in items {

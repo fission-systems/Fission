@@ -1,7 +1,0 @@
-{
-  "name": "_fpreset",
-  "address": "0x140002480",
-  "code": "\nvoid __cdecl _fpreset(void)\n\n{\n  return;\n}\n\n",
-  "asm": "  0x140002480      FNINIT   \n  0x140002482      RET      \n",
-  "decomp_sec": 0.000553
-}

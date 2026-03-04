@@ -1,32 +1,27 @@
 use super::PostProcessor;
-use crate::utils::patterns::*;
-use once_cell::sync::Lazy;
+use crate::utils::patterns::{SIGN_EXT_INT64_CONCAT, SIGN_EXT_INT32, ALIGNED_DIV, SIGN_BIT, MAGIC_DIV, CONCAT44_SIGN, CONCAT44_ZERO, CONCAT_INPUT_FIRST, CONCAT_INPUT_SECOND, CONCAT_CAP_INPUT, MODULO_TO_SUB, UNSIGNED_RSHIFT, LEFT_SHIFT, BITWISE_AND_MASK, XOR_SIGN_BIT, BITWISE_CTX, MULT_CONTEXT};
 use regex::Regex;
 use std::borrow::Cow;
 
 impl PostProcessor {
     /// Try to recover a divisor from a magic number multiplication and shift
-    /// Based on algorithms from RetDec and angr
-    fn recover_divisor(&self, magic: u64, shift: u32, is_64bit_mul: bool) -> Option<u64> {
+    /// Based on algorithms from `RetDec` and angr
+    fn recover_divisor(magic: u64, shift: u32, is_64bit_mul: bool) -> Option<u64> {
         let base_bits = if is_64bit_mul { 64 } else { 32 };
 
-        let pow_val = (base_bits as u64) + (shift as u64);
+        let pow_val = (base_bits as u64) + u64::from(shift);
         if pow_val >= 128 {
             return None;
         }
 
-        let dividend = if pow_val < 64 {
-            1u128 << pow_val
-        } else {
-            1u128 << pow_val
-        };
+        let dividend = 1u128 << pow_val;
 
-        let divisor = (dividend / (magic as u128)) as u64;
+        let divisor = (dividend / u128::from(magic)) as u64;
 
         let test_cases = [100u64, 1000, 10000];
         for &x in &test_cases {
             let expected = x / (divisor.max(1));
-            let actual = (((x as u128 * magic as u128) >> base_bits) >> shift) as u64;
+            let actual = (((u128::from(x) * u128::from(magic)) >> base_bits) >> shift) as u64;
             if expected != actual {
                 if x / (divisor + 1) == actual {
                     return Some(divisor + 1);
@@ -40,7 +35,27 @@ impl PostProcessor {
 
     /// Apply arithmetic idiom recovery
     /// Simplifies common compiler-generated bit-twiddling patterns
+    #[allow(clippy::unused_self)]
     pub(super) fn apply_arithmetic_idioms(&self, code: &str) -> String {
+        static SIGNED_MAGIC_DIV: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+            Regex::new(concat!(
+                r"\(int\)\s*\(\s*\(longlong\)\s*(?P<val>[\w\->\.*]+)\s*\*\s*",
+                r"(?P<magic>0x[0-9a-fA-F]+)\s*>>\s*0x20\s*\)\s*",
+                r"(?:>>\s*(?P<shift>0x[0-9a-fA-F]+|\d+)\s*)?",
+                r"\+\s*\(\s*(?P<v2>[\w\->\.*]+)\s*>>\s*0x1[fF]\s*\)",
+            ))
+            .unwrap_or_else(|e| panic!("SIGNED_MAGIC_DIV regex should compile: {e}"))
+        });
+        static SIGNED_MAGIC_DIV_FIXUP: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+            Regex::new(concat!(
+                r"\(\s*\(longlong\)\s*(?P<val>[\w\->\.*]+)\s*\*\s*",
+                r"(?P<magic>0x[0-9a-fA-F]+)\s*>>\s*0x20\s*",
+                r"\+\s*(?P<v2>[\w\->\.*]+)\s*\)\s*",
+                r">>\s*(?P<shift>0x[0-9a-fA-F]+|\d+)\s*",
+                r"\+\s*\(\s*(?P<v3>[\w\->\.*]+)\s*>>\s*0x1[fF]\s*\)",
+            ))
+            .unwrap_or_else(|e| panic!("SIGNED_MAGIC_DIV_FIXUP regex should compile: {e}"))
+        });
         let mut result = code.to_string();
 
         result = SIGN_EXT_INT64_CONCAT
@@ -57,7 +72,7 @@ impl PostProcessor {
                     && md == &caps["m2"]
                     && md == &caps["m3"]
                 {
-                    format!("return (longlong){} % 2;", low)
+                    format!("return (longlong){low} % 2;")
                 } else {
                     caps[0].to_string()
                 }
@@ -71,7 +86,7 @@ impl PostProcessor {
                 let out = &caps["out"];
 
                 if sign == &caps["s2"] && sign == &caps["s3"] {
-                    format!("{} = abs({}); // sign: {}", out, val, sign)
+                    format!("{out} = abs({val}); // sign: {sign}")
                 } else {
                     caps[0].to_string()
                 }
@@ -110,20 +125,16 @@ impl PostProcessor {
                 let magic: u64 = u64::from_str_radix(&magic_str[2..], 16).unwrap_or(0);
                 let shift: u32 = caps
                     .name("shift")
-                    .map(|s| {
+                    .map_or(0, |s| {
                         if s.as_str().starts_with("0x") {
                             u32::from_str_radix(&s.as_str()[2..], 16).unwrap_or(0)
                         } else {
                             s.as_str().parse().unwrap_or(0)
                         }
-                    })
-                    .unwrap_or(0);
+                    });
 
-                if let Some(divisor) = self.recover_divisor(magic, shift, false) {
-                    format!("({} / {})", val, divisor)
-                } else {
-                    caps[0].to_string()
-                }
+                Self::recover_divisor(magic, shift, false)
+                    .map_or_else(|| caps[0].to_string(), |divisor| format!("({val} / {divisor})"))
             })
             .to_string();
 
@@ -132,7 +143,7 @@ impl PostProcessor {
                 let hi = &caps["hi"];
                 let lo = &caps["lo"];
                 if hi == lo {
-                    format!("(longlong){}", lo)
+                    format!("(longlong){lo}")
                 } else {
                     caps[0].to_string()
                 }
@@ -142,7 +153,7 @@ impl PostProcessor {
         result = CONCAT44_ZERO
             .replace_all(&result, |caps: &regex::Captures| {
                 let lo = caps["lo"].trim();
-                format!("(ulonglong){}", lo)
+                format!("(ulonglong){lo}")
             })
             .to_string();
 
@@ -169,7 +180,7 @@ impl PostProcessor {
                 let v2 = &caps["v2"];
                 if val == v2 {
                     let divisor = &caps["divisor"];
-                    format!("({} % {})", val, divisor)
+                    format!("({val} % {divisor})")
                 } else {
                     caps[0].to_string()
                 }
@@ -182,7 +193,7 @@ impl PostProcessor {
                 let sh: u32 = caps["sh"].parse().unwrap_or(0);
                 if sh > 0 && sh < 32 {
                     let divisor = 1u64 << sh;
-                    format!("({} / {})", val, divisor)
+                    format!("({val} / {divisor})")
                 } else {
                     caps[0].to_string()
                 }
@@ -203,7 +214,7 @@ impl PostProcessor {
                     && val != "uint"
                 {
                     let multiplier = 1u64 << sh;
-                    format!("{} * {}", val, multiplier)
+                    format!("{val} * {multiplier}")
                 } else {
                     caps[0].to_string()
                 }
@@ -223,22 +234,13 @@ impl PostProcessor {
                     && val != "while"
                     && val != "return"
                 {
-                    format!("({} % {})", val, modulus)
+                    format!("({val} % {modulus})")
                 } else {
                     caps[0].to_string()
                 }
             })
             .to_string();
 
-        static SIGNED_MAGIC_DIV: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(concat!(
-                r"\(int\)\s*\(\s*\(longlong\)\s*(?P<val>[\w\->\.\*]+)\s*\*\s*",
-                r"(?P<magic>0x[0-9a-fA-F]+)\s*>>\s*0x20\s*\)\s*",
-                r"(?:>>\s*(?P<shift>0x[0-9a-fA-F]+|\d+)\s*)?",
-                r"\+\s*\(\s*(?P<v2>[\w\->\.\*]+)\s*>>\s*0x1[fF]\s*\)",
-            ))
-            .unwrap_or_else(|e| panic!("SIGNED_MAGIC_DIV regex should compile: {}", e))
-        });
 
         result = SIGNED_MAGIC_DIV
             .replace_all(&result, |caps: &regex::Captures| {
@@ -251,34 +253,19 @@ impl PostProcessor {
                 let magic = u64::from_str_radix(&magic_str[2..], 16).unwrap_or(0);
                 let shift: u32 = caps
                     .name("shift")
-                    .map(|s| {
+                    .map_or(0, |s| {
                         let s = s.as_str();
-                        if s.starts_with("0x") {
-                            u32::from_str_radix(&s[2..], 16).unwrap_or(0)
-                        } else {
-                            s.parse().unwrap_or(0)
-                        }
-                    })
-                    .unwrap_or(0);
+                        s.strip_prefix("0x").map_or_else(
+                            || s.parse().unwrap_or(0),
+                            |stripped| u32::from_str_radix(stripped, 16).unwrap_or(0)
+                        )
+                    });
 
-                if let Some(divisor) = self.recover_divisor(magic, shift, false) {
-                    format!("({} / {})", val, divisor)
-                } else {
-                    caps[0].to_string()
-                }
+                Self::recover_divisor(magic, shift, false)
+                    .map_or_else(|| caps[0].to_string(), |divisor| format!("({val} / {divisor})"))
             })
             .to_string();
 
-        static SIGNED_MAGIC_DIV_FIXUP: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(concat!(
-                r"\(\s*\(longlong\)\s*(?P<val>[\w\->\.\*]+)\s*\*\s*",
-                r"(?P<magic>0x[0-9a-fA-F]+)\s*>>\s*0x20\s*",
-                r"\+\s*(?P<v2>[\w\->\.\*]+)\s*\)\s*",
-                r">>\s*(?P<shift>0x[0-9a-fA-F]+|\d+)\s*",
-                r"\+\s*\(\s*(?P<v3>[\w\->\.\*]+)\s*>>\s*0x1[fF]\s*\)",
-            ))
-            .unwrap_or_else(|e| panic!("SIGNED_MAGIC_DIV_FIXUP regex should compile: {}", e))
-        });
 
         result = SIGNED_MAGIC_DIV_FIXUP
             .replace_all(&result, |caps: &regex::Captures| {
@@ -291,26 +278,22 @@ impl PostProcessor {
                 let magic = u64::from_str_radix(&caps["magic"][2..], 16).unwrap_or(0);
                 let shift: u32 = {
                     let s = &caps["shift"];
-                    if s.starts_with("0x") {
-                        u32::from_str_radix(&s[2..], 16).unwrap_or(0)
-                    } else {
-                        s.parse().unwrap_or(0)
-                    }
+                    s.strip_prefix("0x").map_or_else(
+                        || s.parse().unwrap_or(0),
+                        |stripped| u32::from_str_radix(stripped, 16).unwrap_or(0)
+                    )
                 };
 
                 let effective_magic = magic.wrapping_add(1u64 << 32);
-                if let Some(divisor) = self.recover_divisor(effective_magic, shift, false) {
-                    format!("({} / {})", val, divisor)
-                } else {
-                    caps[0].to_string()
-                }
+                Self::recover_divisor(effective_magic, shift, false)
+                    .map_or_else(|| caps[0].to_string(), |divisor| format!("({val} / {divisor})"))
             })
             .to_string();
 
         result = XOR_SIGN_BIT
             .replace_all(&result, |caps: &regex::Captures| {
                 let val = &caps["val"];
-                format!("-{}", val)
+                format!("-{val}")
             })
             .to_string();
 
@@ -360,10 +343,10 @@ impl PostProcessor {
                     let numstr = caps[1].trim();
                     if let Some(v) = parse_int(numstr) {
                         // Only replace powers of 2 in range [4, 2^24]
-                        if v >= 4 && v <= (1 << 24) && (v & (v - 1)) == 0 {
+                        if (4..=(1 << 24)).contains(&v) && v.is_power_of_two() {
                             let shift = v.trailing_zeros();
                             changed = true;
-                            return format!("<< {}", shift);
+                            return format!("<< {shift}");
                         }
                     }
                     caps[0].to_string()

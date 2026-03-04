@@ -4,7 +4,7 @@ use crate::pcode::{PcodeOp, PcodeOpcode};
 /// Rule: Dead Bit Elimination
 ///
 /// Removes bitwise operations that do not affect the consumed bits of the output.
-/// Returns Some(new_op) if optimization is applied.
+/// Returns `Some(new_op)` if optimization is applied.
 pub fn try_dead_bit_elimination(op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
     let out = op.output.as_ref()?;
     let consume_mask = tracker.get_consume_mask(out);

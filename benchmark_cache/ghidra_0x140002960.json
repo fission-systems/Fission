@@ -1,7 +1,0 @@
-{
-  "name": "fprintf",
-  "address": "0x140002960",
-  "code": "\nint __cdecl fprintf(FILE *_File,char *_Format,...)\n\n{\n  int iVar1;\n  ulonglong *puVar2;\n  undefined8 in_R8;\n  undefined8 in_R9;\n  undefined8 local_res18;\n  undefined8 local_res20;\n  char *ap;\n  \n  local_res18 = in_R8;\n  local_res20 = in_R9;\n  puVar2 = __local_stdio_printf_options();\n  iVar1 = __stdio_common_vfprintf(*puVar2,_File,_Format,0,&local_res18);\n  return iVar1;\n}\n\n",
-  "asm": "  0x140002960      PUSH     RDI\n  0x140002961      PUSH     RSI\n  0x140002962      PUSH     RBX\n  0x140002963      SUB      RSP, 0x40\n  0x140002967      LEA      RDI, [RSP + 0x70]\n  0x14000296C      MOV      RBX, RCX\n  0x14000296F      MOV      RSI, RDX\n  0x140002972      MOV      qword ptr [RSP + 0x70], R8\n  0x140002977      MOV      qword ptr [RSP + 0x78], R9\n  0x14000297C      MOV      qword ptr [RSP + 0x38], RDI\n  0x140002981      CALL     0x1400029b0\n  0x140002986      XOR      R9D, R9D\n  0x140002989      MOV      R8, RSI\n  0x14000298C      MOV      RDX, RBX\n  0x14000298F      MOV      RCX, qword ptr [RAX]\n  0x140002992      MOV      qword ptr [RSP + 0x20], RDI\n  0x140002997      CALL     0x140002a98\n  0x14000299C      ADD      RSP, 0x40\n  0x1400029A0      POP      RBX\n  0x1400029A1      POP      RSI\n  0x1400029A2      POP      RDI\n  0x1400029A3      RET      \n",
-  "decomp_sec": 0.001986
-}

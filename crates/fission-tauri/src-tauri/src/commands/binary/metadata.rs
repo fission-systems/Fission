@@ -28,7 +28,7 @@ pub async fn get_strings(state: State<'_, AppState>) -> CmdResult<Vec<StringDto>
     let mut current_str = Vec::new();
 
     for (i, &byte) in data.iter().enumerate() {
-        if byte >= 0x20 && byte < 0x7f {
+        if (0x20..0x7f).contains(&byte) {
             if current_start.is_none() {
                 current_start = Some(i);
             }

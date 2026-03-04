@@ -27,16 +27,13 @@ impl DecompilerCache {
 
         if !cache_dir.exists() {
             fs::create_dir_all(&cache_dir).map_err(|e| {
-                FissionError::other(format!("Failed to create cache directory: {}", e))
+                FissionError::other(format!("Failed to create cache directory: {e}"))
             })?;
         }
 
         info!("[*] Initialized decompiler cache at {:?}", cache_dir);
 
-        let default_l1 = match NonZeroUsize::new(DEFAULT_L1_CACHE_SIZE) {
-            Some(v) => v,
-            None => NonZeroUsize::MIN,
-        };
+        let default_l1 = NonZeroUsize::new(DEFAULT_L1_CACHE_SIZE).unwrap_or(NonZeroUsize::MIN);
         let l1_cap = NonZeroUsize::new(l1_size).unwrap_or(default_l1);
 
         Ok(Self {
@@ -56,14 +53,13 @@ impl DecompilerCache {
 
         // 2. Check L2 (Disk)
         let file_path = self.get_file_path(address);
-        if file_path.exists() {
-            if let Ok(code) = fs::read_to_string(&file_path) {
+        if file_path.exists()
+            && let Ok(code) = fs::read_to_string(&file_path) {
                 debug!("L2 cache hit for 0x{:x}", address);
                 // Backfill L1
                 self.l1.put(address, code.clone());
                 return Some(code);
             }
-        }
 
         None
     }
@@ -94,7 +90,7 @@ impl DecompilerCache {
 
     /// Get path to cached file for a given address
     fn get_file_path(&self, address: u64) -> PathBuf {
-        self.l2_root.join(format!("0x{:x}.c", address))
+        self.l2_root.join(format!("0x{address:x}.c"))
     }
 
     /// Get the binary hash associated with this cache

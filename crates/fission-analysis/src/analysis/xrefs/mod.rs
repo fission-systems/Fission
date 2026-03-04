@@ -36,7 +36,7 @@ pub struct XrefDatabase {
     /// References FROM an address (key = source address)
     refs_from: HashMap<u64, Vec<Xref>>,
     /// Cached total reference count for O(1) lookup
-    /// Updated incrementally on each add_xref call
+    /// Updated incrementally on each `add_xref` call
     total_count: usize,
 }
 
@@ -49,7 +49,7 @@ impl XrefDatabase {
     /// Add a cross-reference
     ///
     /// Performance: Uses Copy trait for efficient duplication. Also updates
-    /// total_count incrementally for O(1) total_refs() lookup.
+    /// `total_count` incrementally for O(1) `total_refs()` lookup.
     pub fn add_xref(&mut self, xref: Xref) {
         // Store copy in refs_to (Xref is Copy, so this is a cheap memcpy)
         self.refs_to.entry(xref.to_addr).or_default().push(xref);
@@ -61,21 +61,20 @@ impl XrefDatabase {
 
     /// Get all references TO an address (who calls/references this address?)
     pub fn get_refs_to(&self, addr: u64) -> &[Xref] {
-        self.refs_to.get(&addr).map(|v| v.as_slice()).unwrap_or(&[])
+        self.refs_to.get(&addr).map_or(&[], std::vec::Vec::as_slice)
     }
 
     /// Get all references FROM an address (what does this address call/reference?)
     pub fn get_refs_from(&self, addr: u64) -> &[Xref] {
         self.refs_from
             .get(&addr)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+            .map_or(&[], std::vec::Vec::as_slice)
     }
 
     /// Total number of cross-references
     ///
     /// Performance: O(1) using cached count instead of O(N) iteration
-    pub fn total_refs(&self) -> usize {
+    pub const fn total_refs(&self) -> usize {
         self.total_count
     }
 
@@ -116,8 +115,8 @@ impl XrefDatabase {
     ///
     /// Performance optimizations:
     /// - Pre-computes address bounds once instead of per-instruction
-    /// - Uses batch insertion approach to reduce HashMap overhead
-    /// - Tracks refs count before iteration to avoid redundant total_refs() call
+    /// - Uses batch insertion approach to reduce `HashMap` overhead
+    /// - Tracks refs count before iteration to avoid redundant `total_refs()` call
     fn analyze_code(&mut self, code: &[u8], base_addr: u64) {
         use iced_x86::{Decoder, DecoderOptions, FlowControl, OpKind};
 
@@ -141,8 +140,8 @@ impl XrefDatabase {
                 match instr.flow_control() {
                     FlowControl::Call | FlowControl::IndirectCall => {
                         // Direct call target
-                        if instr.op_count() > 0 {
-                            if let OpKind::NearBranch16
+                        if instr.op_count() > 0
+                            && let OpKind::NearBranch16
                             | OpKind::NearBranch32
                             | OpKind::NearBranch64 = instr.op0_kind()
                             {
@@ -153,12 +152,11 @@ impl XrefDatabase {
                                     xref_type: XrefType::Call,
                                 });
                             }
-                        }
                     }
                     FlowControl::UnconditionalBranch | FlowControl::ConditionalBranch => {
                         // Jump target
-                        if instr.op_count() > 0 {
-                            if let OpKind::NearBranch16
+                        if instr.op_count() > 0
+                            && let OpKind::NearBranch16
                             | OpKind::NearBranch32
                             | OpKind::NearBranch64 = instr.op0_kind()
                             {
@@ -169,7 +167,6 @@ impl XrefDatabase {
                                     xref_type: XrefType::Jump,
                                 });
                             }
-                        }
                     }
                     _ => {
                         // Check for memory references (LEA, MOV with immediate addresses)

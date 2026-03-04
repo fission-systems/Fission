@@ -192,6 +192,7 @@ impl Default for AppSettings {
 ///
 /// Divided into four categories: Analysis, Post-Processing, Display, Performance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct DecompilerOptions {
     pub analysis: AnalysisOptions,
     pub cpp_postprocess: CppPostProcessOptions,
@@ -200,17 +201,6 @@ pub struct DecompilerOptions {
     pub performance: PerformanceOptions,
 }
 
-impl Default for DecompilerOptions {
-    fn default() -> Self {
-        Self {
-            analysis: AnalysisOptions::default(),
-            cpp_postprocess: CppPostProcessOptions::default(),
-            rust_postprocess: RustPostProcessOptions::default(),
-            display: DisplayOptions::default(),
-            performance: PerformanceOptions::default(),
-        }
-    }
-}
 
 /// Ghidra engine analysis options (controlled via FFI set_feature).
 #[derive(Debug, Clone, Serialize, Deserialize)]

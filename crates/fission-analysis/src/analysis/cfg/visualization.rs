@@ -5,9 +5,11 @@
 
 use super::{BasicBlock, ControlFlowGraph, EdgeKind, Loop};
 use std::collections::HashSet;
+use std::fmt::Write;
 
 /// Options for DOT visualization
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct DotOptions {
     /// Include instruction details in blocks
     pub show_instructions: bool,
@@ -31,7 +33,7 @@ pub struct DotOptions {
 
 impl Default for DotOptions {
     fn default() -> Self {
-        DotOptions {
+        Self {
             show_instructions: false,
             show_addresses: true,
             highlight_loops: true,
@@ -48,7 +50,7 @@ impl Default for DotOptions {
 impl DotOptions {
     /// Create options for detailed view
     pub fn detailed() -> Self {
-        DotOptions {
+        Self {
             show_instructions: true,
             show_addresses: true,
             highlight_loops: true,
@@ -59,7 +61,7 @@ impl DotOptions {
 
     /// Create options for minimal view
     pub fn minimal() -> Self {
-        DotOptions {
+        Self {
             show_instructions: false,
             show_addresses: false,
             highlight_loops: false,
@@ -82,15 +84,15 @@ impl CfgVisualizer {
 
         // Graph attributes
         let rankdir = if options.horizontal { "LR" } else { "TB" };
-        dot.push_str(&format!("  rankdir={};\n", rankdir));
-        dot.push_str(&format!("  fontname=\"{}\";\n", options.font));
-        dot.push_str(&format!("  fontsize={};\n", options.font_size));
+        writeln!(dot, "  rankdir={rankdir};").expect("write to String never fails");
+        writeln!(dot, "  fontname=\"{}\";", options.font).expect("write to String never fails");
+        writeln!(dot, "  fontsize={};", options.font_size).expect("write to String never fails");
         dot.push_str("  node [shape=box, fontname=\"Courier\", fontsize=10];\n");
         dot.push_str("  edge [fontname=\"Courier\", fontsize=8];\n");
 
         // Title
         if let Some(ref title) = options.title {
-            dot.push_str(&format!("  label=\"{}\";\n", Self::escape_dot(title)));
+            writeln!(dot, "  label=\"{}\";", Self::escape_dot(title)).expect("write to String never fails");
             dot.push_str("  labelloc=t;\n");
         }
 
@@ -107,20 +109,15 @@ impl CfgVisualizer {
         for block in &cfg.blocks {
             let node_label = Self::format_block_label(block, options);
             let style = Self::get_node_style(block, &loop_blocks, &loop_headers, cfg);
-            dot.push_str(&format!(
-                "  BB{} [label=\"{}\"{}];\n",
-                block.index,
-                Self::escape_dot(&node_label),
-                style
-            ));
+            writeln!(dot, "  BB{} [label=\"{}\"{}];", block.index, Self::escape_dot(&node_label), style).expect("write to String never fails");
         }
 
-        dot.push_str("\n");
+        dot.push('\n');
 
         // Generate edges
         for block in &cfg.blocks {
             for edge in &block.successors {
-                let edge_style = Self::get_edge_style(block.index, edge.target, &edge.kind, loops);
+                let edge_style = Self::get_edge_style(block.index, edge.target, edge.kind, loops);
                 let edge_label = if options.show_edge_labels {
                     edge.kind.label()
                 } else {
@@ -128,18 +125,9 @@ impl CfgVisualizer {
                 };
 
                 if edge_label.is_empty() {
-                    dot.push_str(&format!(
-                        "  BB{} -> BB{}{};\n",
-                        block.index, edge.target, edge_style
-                    ));
+                    writeln!(dot, "  BB{} -> BB{}{};", block.index, edge.target, edge_style).expect("write to String never fails");
                 } else {
-                    dot.push_str(&format!(
-                        "  BB{} -> BB{} [label=\"{}\"{}];\n",
-                        block.index,
-                        edge.target,
-                        edge_label,
-                        edge_style.replace("[", ", ").replace("]", "")
-                    ));
+                    writeln!(dot, "  BB{} -> BB{} [label=\"{}\"{}];", block.index, edge.target, edge_label, edge_style.replace('[', ", ").replace(']', "")).expect("write to String never fails");
                 }
             }
         }
@@ -147,15 +135,12 @@ impl CfgVisualizer {
         // Add loop subgraphs for visual grouping
         if options.highlight_loops {
             for (i, loop_info) in loops.iter().enumerate() {
-                dot.push_str(&format!("\n  subgraph cluster_loop_{} {{\n", i));
-                dot.push_str(&format!(
-                    "    label=\"Loop {} (header: BB{})\";\n",
-                    i, loop_info.header
-                ));
+                write!(dot, "\n  subgraph cluster_loop_{i} {{\n").expect("write to String never fails");
+                writeln!(dot, "    label=\"Loop {} (header: BB{})\";", i, loop_info.header).expect("write to String never fails");
                 dot.push_str("    style=dashed;\n");
                 dot.push_str("    color=blue;\n");
                 for &block_idx in &loop_info.body {
-                    dot.push_str(&format!("    BB{};\n", block_idx));
+                    writeln!(dot, "    BB{block_idx};").expect("write to String never fails");
                 }
                 dot.push_str("  }\n");
             }
@@ -170,11 +155,11 @@ impl CfgVisualizer {
         let mut label = String::new();
 
         // Block identifier
-        label.push_str(&format!("BB{}", block.index));
+        write!(label, "BB{}", block.index).expect("write to String never fails");
 
         // Address
         if options.show_addresses {
-            label.push_str(&format!("\\n0x{:x}", block.start_address));
+            write!(label, "\\n0x{:x}", block.start_address).expect("write to String never fails");
         }
 
         // Instructions
@@ -182,13 +167,13 @@ impl CfgVisualizer {
             label.push_str("\\n---");
             for op in block.operations.iter().take(10) {
                 if let Some(ref mnemonic) = op.asm_mnemonic {
-                    label.push_str(&format!("\\n{}", mnemonic));
+                    write!(label, "\\n{mnemonic}").expect("write to String never fails");
                 } else {
-                    label.push_str(&format!("\\n{:?}", op.opcode));
+                    write!(label, "\\n{:?}", op.opcode).expect("write to String never fails");
                 }
             }
             if block.operations.len() > 10 {
-                label.push_str(&format!("\\n... ({} more)", block.operations.len() - 10));
+                write!(label, "\\n... ({} more)", block.operations.len() - 10).expect("write to String never fails");
             }
         }
 
@@ -234,7 +219,7 @@ impl CfgVisualizer {
     }
 
     /// Get edge style based on edge kind
-    fn get_edge_style(from: usize, to: usize, kind: &EdgeKind, loops: &[Loop]) -> String {
+    fn get_edge_style(from: usize, to: usize, kind: EdgeKind, loops: &[Loop]) -> String {
         let mut attrs = Vec::new();
 
         // Color based on edge kind
@@ -243,7 +228,7 @@ impl CfgVisualizer {
         // Style based on edge kind
         let style = kind.style();
         if style != "solid" {
-            attrs.push(format!("style={}", style));
+            attrs.push(format!("style={style}"));
         }
 
         // Check if this is a back edge
@@ -286,10 +271,7 @@ impl CfgVisualizer {
                 .collect::<Vec<_>>()
                 .join("|");
 
-            dot.push_str(&format!(
-                "  BB{} [label=\"{{BB{} @ 0x{:x}|{}}}\"];\n",
-                block.index, block.index, block.start_address, ops_str
-            ));
+            writeln!(dot, "  BB{} [label=\"{{BB{} @ 0x{:x}|{}}}\"];", block.index, block.index, block.start_address, ops_str).expect("write to String never fails");
         }
 
         dot.push_str("}\n");
@@ -313,19 +295,16 @@ impl CfgVisualizer {
                 ""
             };
 
-            output.push_str(&format!(
-                "BB{} @ 0x{:x} {}\n",
-                block.index, block.start_address, marker
-            ));
+            writeln!(output, "BB{} @ 0x{:x} {}", block.index, block.start_address, marker).expect("write to String never fails");
 
             // Predecessors
             if !block.predecessors.is_empty() {
                 let preds: Vec<String> = block
                     .predecessors
                     .iter()
-                    .map(|p| format!("BB{}", p))
+                    .map(|p| format!("BB{p}"))
                     .collect();
-                output.push_str(&format!("  <- {}\n", preds.join(", ")));
+                writeln!(output, "  <- {}", preds.join(", ")).expect("write to String never fails");
             }
 
             // Successors
@@ -335,7 +314,7 @@ impl CfgVisualizer {
                     .iter()
                     .map(|e| format!("BB{} ({})", e.target, e.kind.label()))
                     .collect();
-                output.push_str(&format!("  -> {}\n", succs.join(", ")));
+                writeln!(output, "  -> {}", succs.join(", ")).expect("write to String never fails");
             }
 
             output.push('\n');

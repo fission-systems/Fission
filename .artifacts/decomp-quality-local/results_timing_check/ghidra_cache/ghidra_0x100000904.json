@@ -1,7 +1,0 @@
-{
-  "name": "main",
-  "address": "0x100000904",
-  "code": "\n/* WARNING: Unknown calling convention */\n\nint main(void)\n\n{\n  int iVar1;\n  \n  iVar1 = cpp_main_like();\n  return iVar1;\n}\n\n",
-  "asm": "  0x100000904      sub      sp, sp, #0x20\n  0x100000908      stp      x29, x30, [sp, #0x10]\n  0x10000090C      add      x29, sp, #0x10\n  0x100000910      stur     wzr, [x29, #-0x4]\n  0x100000914      bl       0x1000007d4\n  0x100000918      ldp      x29, x30, [sp, #0x10]\n  0x10000091C      add      sp, sp, #0x20\n  0x100000920      ret      \n",
-  "decomp_sec": 0.001245
-}

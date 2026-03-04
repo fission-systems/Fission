@@ -69,7 +69,7 @@ pub async fn search_binary(
                 let mut current_str = Vec::new();
 
                 for (i, &byte) in data.iter().enumerate() {
-                    if byte >= 0x20 && byte < 0x7f {
+                    if (0x20..0x7f).contains(&byte) {
                         if current_start.is_none() {
                             current_start = Some(i);
                         }
@@ -168,7 +168,7 @@ pub async fn get_string_xrefs(
         let mut c_start: Option<usize> = None;
         let mut acc: Vec<u8> = Vec::new();
         for (i, &byte) in bytes.iter().enumerate() {
-            if byte >= 0x20 && byte < 0x7f {
+            if (0x20..0x7f).contains(&byte) {
                 if c_start.is_none() {
                     c_start = Some(i);
                 }

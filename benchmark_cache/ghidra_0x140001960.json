@@ -1,7 +1,0 @@
-{
-  "name": "__tlregdtor",
-  "address": "0x140001960",
-  "code": "\n/* WARNING: Unknown calling convention */\n\nint __tlregdtor(_PVFV func)\n\n{\n  return 0;\n}\n\n",
-  "asm": "  0x140001960      XOR      EAX, EAX\n  0x140001962      RET      \n",
-  "decomp_sec": 0.00061
-}

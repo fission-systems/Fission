@@ -1,7 +1,0 @@
-{
-  "name": "_setargv",
-  "address": "0x1400018b0",
-  "code": "\nint __cdecl _setargv(void)\n\n{\n  return 0;\n}\n\n",
-  "asm": "  0x1400018B0      XOR      EAX, EAX\n  0x1400018B2      RET      \n",
-  "decomp_sec": 0.00037
-}

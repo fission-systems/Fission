@@ -79,7 +79,7 @@ impl CfgSummary {
         };
 
         Self {
-            function_address: addr.map(|a| format!("0x{:x}", a)).unwrap_or_default(),
+            function_address: addr.map(|a| format!("0x{a:x}")).unwrap_or_default(),
             block_count: analysis.cfg.block_count(),
             edge_count: analysis.cfg.edge_count(),
             cyclomatic_complexity: analysis.metrics.cyclomatic_complexity,

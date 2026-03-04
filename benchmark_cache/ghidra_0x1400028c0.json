@@ -1,7 +1,0 @@
-{
-  "name": "vfprintf",
-  "address": "0x1400028c0",
-  "code": "\nint __cdecl vfprintf(FILE *_File,char *_Format,va_list _ArgList)\n\n{\n  int iVar1;\n  ulonglong *puVar2;\n  \n  puVar2 = __local_stdio_printf_options();\n  iVar1 = __stdio_common_vfprintf(*puVar2,_File,_Format,0,_ArgList);\n  return iVar1;\n}\n\n",
-  "asm": "  0x1400028C0      PUSH     RDI\n  0x1400028C1      PUSH     RSI\n  0x1400028C2      PUSH     RBX\n  0x1400028C3      SUB      RSP, 0x30\n  0x1400028C7      MOV      RBX, RCX\n  0x1400028CA      MOV      RSI, RDX\n  0x1400028CD      MOV      RDI, R8\n  0x1400028D0      CALL     0x1400029b0\n  0x1400028D5      XOR      R9D, R9D\n  0x1400028D8      MOV      R8, RSI\n  0x1400028DB      MOV      RDX, RBX\n  0x1400028DE      MOV      RCX, qword ptr [RAX]\n  0x1400028E1      MOV      qword ptr [RSP + 0x20], RDI\n  0x1400028E6      CALL     0x140002a98\n  0x1400028EB      ADD      RSP, 0x30\n  0x1400028EF      POP      RBX\n  0x1400028F0      POP      RSI\n  0x1400028F1      POP      RDI\n  0x1400028F2      RET      \n",
-  "decomp_sec": 0.001491
-}

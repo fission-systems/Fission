@@ -1,7 +1,0 @@
-{
-  "name": "strncpy",
-  "address": "0x140002a70",
-  "code": "\nchar * __cdecl strncpy(char *_Dest,char *_Source,size_t _Count)\n\n{\n  char *pcVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002a70. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  pcVar1 = strncpy(_Dest,_Source,_Count);\n  return pcVar1;\n}\n\n",
-  "asm": "  0x140002A70      JMP      qword ptr [0x1400083d8]\n",
-  "decomp_sec": 0.000554
-}

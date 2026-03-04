@@ -1,7 +1,0 @@
-{
-  "name": "puts",
-  "address": "0x140002aa0",
-  "code": "\nint __cdecl puts(char *_Str)\n\n{\n  int iVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140002aa0. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  iVar1 = puts(_Str);\n  return iVar1;\n}\n\n",
-  "asm": "  0x140002AA0      JMP      qword ptr [0x1400083b8]\n",
-  "decomp_sec": 0.000468
-}

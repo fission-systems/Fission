@@ -3,6 +3,9 @@
 //! Categorized enum values for context-aware constant substitution.
 //! Each group contains constants that belong to a specific API parameter context.
 
+// Windows API constants use conventional hex notation without separators
+#![allow(clippy::unreadable_literal)]
+
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -18,6 +21,7 @@ pub struct EnumGroup {
 }
 
 impl EnumGroup {
+    #[must_use]
     pub fn new(name: &str, values: &[(&str, u64)]) -> Self {
         Self {
             name: name.to_string(),
@@ -33,7 +37,7 @@ impl EnumGroup {
             .map(|(n, _)| n.as_str())
     }
 
-    /// Try to resolve a combined flags value (e.g., MEM_COMMIT | MEM_RESERVE)
+    /// Try to resolve a combined flags value (e.g., `MEM_COMMIT` | `MEM_RESERVE`)
     pub fn resolve_flags(&self, value: u64) -> Option<String> {
         if value == 0 {
             return Some("0".to_string());
@@ -87,6 +91,7 @@ impl WinConstantsDb {
         self.groups.insert(group.name.clone(), group);
     }
 
+    #[allow(clippy::too_many_lines)]
     fn init_all_groups(&mut self) {
         // PAGE_PROTECT - VirtualAlloc/VirtualProtect flProtect parameter
         self.add_group(EnumGroup::new(
@@ -238,7 +243,7 @@ impl WinConstantsDb {
         self.add_group(EnumGroup::new(
             "WH_HOOK",
             &[
-                ("WH_MSGFILTER", -1_i32 as u64),
+                ("WH_MSGFILTER", u64::MAX), // -1 as u64
                 ("WH_JOURNALRECORD", 0),
                 ("WH_JOURNALPLAYBACK", 1),
                 ("WH_KEYBOARD", 2),

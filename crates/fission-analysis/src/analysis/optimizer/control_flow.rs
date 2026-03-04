@@ -1,6 +1,6 @@
 //! Control Flow Normalization
 //!
-//! Implements Ghidra's ActionNormalizeBranches:
+//! Implements Ghidra's `ActionNormalizeBranches`:
 //! - Converts double negatives to positive conditions
 //! - Normalizes condition order (constant on right)
 //! - Simplifies redundant boolean operations
@@ -53,11 +53,9 @@ fn normalize_condition(expr: Expr) -> Expr {
         op: UnaryOpKind::Not,
         operand,
     } = &expr
-    {
-        if let Some(inverted) = try_invert_comparison(operand) {
+        && let Some(inverted) = try_invert_comparison(operand) {
             return inverted;
         }
-    }
 
     expr
 }
@@ -117,7 +115,7 @@ fn normalize_expr(expr: Expr) -> Expr {
 
             // Normalize constant position: (5 == x) → (x == 5)
             if is_const(&left) && !is_const(&right) {
-                if is_commutative(&op) {
+                if is_commutative(op) {
                     return Expr::BinOp {
                         op,
                         left: right,
@@ -125,7 +123,7 @@ fn normalize_expr(expr: Expr) -> Expr {
                     };
                 }
                 // For non-commutative: (5 < x) → (x > 5)
-                if let Some(flipped_op) = flip_comparison(&op) {
+                if let Some(flipped_op) = flip_comparison(op) {
                     return Expr::BinOp {
                         op: flipped_op,
                         left: right,
@@ -152,11 +150,11 @@ fn normalize_expr(expr: Expr) -> Expr {
     }
 }
 
-fn is_const(expr: &Expr) -> bool {
+const fn is_const(expr: &Expr) -> bool {
     matches!(expr, Expr::Const(_))
 }
 
-fn is_commutative(op: &BinOpKind) -> bool {
+const fn is_commutative(op: BinOpKind) -> bool {
     matches!(
         op,
         BinOpKind::Add
@@ -169,7 +167,7 @@ fn is_commutative(op: &BinOpKind) -> bool {
     )
 }
 
-fn flip_comparison(op: &BinOpKind) -> Option<BinOpKind> {
+const fn flip_comparison(op: BinOpKind) -> Option<BinOpKind> {
     match op {
         BinOpKind::Lt => Some(BinOpKind::Gt),
         BinOpKind::Le => Some(BinOpKind::Ge),

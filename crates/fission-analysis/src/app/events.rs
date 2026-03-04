@@ -95,21 +95,21 @@ pub enum FissionEventType {
 
 impl FissionEvent {
     /// Get the event type for filtering
-    pub fn event_type(&self) -> FissionEventType {
+    pub const fn event_type(&self) -> FissionEventType {
         match self {
-            FissionEvent::AppStarted => FissionEventType::AppStarted,
-            FissionEvent::AppShutdown => FissionEventType::AppShutdown,
-            FissionEvent::BinaryLoaded(_) => FissionEventType::BinaryLoaded,
-            FissionEvent::BinaryLoadFailed(_) => FissionEventType::BinaryLoadFailed,
-            FissionEvent::DecompilationStarted { .. } => FissionEventType::DecompilationStarted,
-            FissionEvent::DecompilationSuccess { .. } => FissionEventType::DecompilationSuccess,
-            FissionEvent::DecompilationFailed { .. } => FissionEventType::DecompilationFailed,
-            FissionEvent::BreakpointHit { .. } => FissionEventType::BreakpointHit,
-            FissionEvent::DebugStep { .. } => FissionEventType::DebugStep,
-            FissionEvent::CommandExecuted { .. } => FissionEventType::CommandExecuted,
-            FissionEvent::SelectionChanged { .. } => FissionEventType::SelectionChanged,
-            FissionEvent::LogMessage { .. } => FissionEventType::LogMessage,
-            FissionEvent::Progress { .. } => FissionEventType::Progress,
+            Self::AppStarted => FissionEventType::AppStarted,
+            Self::AppShutdown => FissionEventType::AppShutdown,
+            Self::BinaryLoaded(_) => FissionEventType::BinaryLoaded,
+            Self::BinaryLoadFailed(_) => FissionEventType::BinaryLoadFailed,
+            Self::DecompilationStarted { .. } => FissionEventType::DecompilationStarted,
+            Self::DecompilationSuccess { .. } => FissionEventType::DecompilationSuccess,
+            Self::DecompilationFailed { .. } => FissionEventType::DecompilationFailed,
+            Self::BreakpointHit { .. } => FissionEventType::BreakpointHit,
+            Self::DebugStep { .. } => FissionEventType::DebugStep,
+            Self::CommandExecuted { .. } => FissionEventType::CommandExecuted,
+            Self::SelectionChanged { .. } => FissionEventType::SelectionChanged,
+            Self::LogMessage { .. } => FissionEventType::LogMessage,
+            Self::Progress { .. } => FissionEventType::Progress,
         }
     }
 }
@@ -135,7 +135,7 @@ impl EventBus {
     where
         F: Fn(&FissionEvent) + Send + Sync + 'static,
     {
-        let mut id_guard = self.next_id.write().unwrap_or_else(|e| e.into_inner());
+        let mut id_guard = self.next_id.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         let id = *id_guard;
         *id_guard += 1;
         drop(id_guard);
@@ -153,10 +153,10 @@ impl EventBus {
     }
 
     /// Publish an event to all subscribers
-    pub fn publish(&self, event: FissionEvent) {
+    pub fn publish(&self, event: &FissionEvent) {
         let subs = self.subscribers.read().unwrap_or_else(|e| e.into_inner());
         for handler in subs.values() {
-            handler(&event);
+            handler(event);
         }
     }
 }
@@ -184,7 +184,7 @@ mod tests {
             }
         });
 
-        bus.publish(FissionEvent::LogMessage {
+        bus.publish(&FissionEvent::LogMessage {
             level: "info".into(),
             message: "test".into(),
             target: "test".into(),

@@ -1,7 +1,0 @@
-{
-  "name": "_ValidateImageBase",
-  "address": "0x140002490",
-  "code": "\nBOOL __cdecl _ValidateImageBase(PBYTE pImageBase)\n\n{\n  if ((*(short *)pImageBase == 0x5a4d) &&\n     (*(int *)(pImageBase + *(int *)(pImageBase + 0x3c)) == 0x4550)) {\n    return (BOOL)((short)*(int *)((longlong)(pImageBase + *(int *)(pImageBase + 0x3c)) + 0x18) ==\n                 0x20b);\n  }\n  return 0;\n}\n\n",
-  "asm": "  0x140002490      XOR      EAX, EAX\n  0x140002492      CMP      word ptr [RCX], 0x5a4d\n  0x140002497      JNZ      0x1400024a8\n  0x140002499      MOVSXD   RDX, dword ptr [RCX + 0x3c]\n  0x14000249D      ADD      RCX, RDX\n  0x1400024A0      CMP      dword ptr [RCX], 0x4550\n  0x1400024A6      JZ       0x1400024b0\n  0x1400024A8      RET      \n  0x1400024B0      XOR      EAX, EAX\n  0x1400024B2      CMP      word ptr [RCX + 0x18], 0x20b\n  0x1400024B8      SETZ     AL\n  0x1400024BB      RET      \n",
-  "decomp_sec": 0.001331
-}

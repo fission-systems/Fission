@@ -10,6 +10,7 @@ pub mod die_engine;
 mod signatures;
 
 use crate::loader::LoadedBinary;
+use std::fmt::Write;
 
 /// Helper function to search for byte pattern in data.
 /// Uses sliding window search which is efficient for small patterns.
@@ -117,9 +118,9 @@ impl Detection {
     pub fn display(&self) -> String {
         let mut s = format!("{}: {}", self.detection_type, self.name);
         if let Some(ref ver) = self.version {
-            s.push_str(&format!(" {}", ver));
+            write!(s, " {}", ver).expect("write to String never fails");
         }
-        s.push_str(&format!(" ({})", self.confidence));
+        write!(s, " ({})", self.confidence).expect("write to String never fails");
         s
     }
 }

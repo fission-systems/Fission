@@ -1,5 +1,5 @@
 use crate::analysis::decomp::postprocess::PostProcessor;
-use crate::utils::patterns::*;
+use crate::utils::patterns::{PTR_OFFSET, CAST_PTR_OFFSET, ARRAY_INDEX, FIELD_OFFSET, DOUBLE_PTR_DEREF, XMM_FIELD, MANGLED_NAME, IDENTIFIER, FOR_INIT, GENERIC_VAR, MAIN_FUNC, RETURN_STMT, FUNC_CALL_ASSIGN, UNDEF_TYPE_DECL};
 use fission_loader::loader::types::DwarfLocation;
 use std::borrow::Cow;
 
@@ -32,11 +32,10 @@ impl PostProcessor {
                     offset_str.parse().unwrap_or(0)
                 };
 
-                if let Some(field_name) = offset_map.get(&offset) {
-                    format!("{}->{}/* @{} */", base, field_name, offset_str)
-                } else {
-                    caps[0].to_string()
-                }
+                offset_map.get(&offset).map_or_else(
+                    || caps[0].to_string(),
+                    |field_name| format!("{base}->{field_name}/* @{offset_str} */")
+                )
             })
             .to_string();
 
@@ -51,11 +50,10 @@ impl PostProcessor {
                     offset_str.parse().unwrap_or(0)
                 };
 
-                if let Some(field_name) = offset_map.get(&offset) {
-                    format!("{}->{}/* @{} */", base, field_name, offset_str)
-                } else {
-                    caps[0].to_string()
-                }
+                offset_map.get(&offset).map_or_else(
+                    || caps[0].to_string(),
+                    |field_name| format!("{base}->{field_name}/* @{offset_str} */")
+                )
             })
             .to_string();
 
@@ -66,11 +64,10 @@ impl PostProcessor {
 
                 let offset: u32 = u32::from_str_radix(&offset_str[2..], 16).unwrap_or(0);
 
-                if let Some(field_name) = offset_map.get(&offset) {
-                    format!("{}->{}/* @{} */", base, field_name, offset_str)
-                } else {
-                    caps[0].to_string()
-                }
+                offset_map.get(&offset).map_or_else(
+                    || caps[0].to_string(),
+                    |field_name| format!("{base}->{field_name}/* @{offset_str} */")
+                )
             })
             .to_string();
 
@@ -80,11 +77,10 @@ impl PostProcessor {
                 let offset: u32 = caps[2].parse().unwrap_or(0);
                 let _size: u32 = caps[3].parse().unwrap_or(0);
 
-                if let Some(field_name) = offset_map.get(&offset) {
-                    format!("{}.{}/* @{} */", base, field_name, offset)
-                } else {
-                    caps[0].to_string()
-                }
+                offset_map.get(&offset).map_or_else(
+                    || caps[0].to_string(),
+                    |field_name| format!("{base}.{field_name}/* @{offset} */")
+                )
             })
             .to_string();
 
@@ -102,7 +98,7 @@ impl PostProcessor {
     }
 
     /// Recognize Swift accessor patterns and convert to field access
-    /// Swift uses VTable calls for property access:
+    /// Swift uses `VTable` calls for property access:
     /// getter: (**(ptr + 0x88))(buffer) -> ptr->get_fieldName()
     /// setter: (**(ptr + 0x90))(value, buffer) -> ptr->set_fieldName(value)
     pub(super) fn recognize_swift_accessors_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
@@ -117,11 +113,10 @@ impl PostProcessor {
                 let base = &caps[1];
                 let vtable_offset_str = &caps[2];
 
-                let vtable_offset: u32 = if vtable_offset_str.starts_with("0x") {
-                    u32::from_str_radix(&vtable_offset_str[2..], 16).unwrap_or(0)
-                } else {
-                    vtable_offset_str.parse().unwrap_or(0)
-                };
+                let vtable_offset: u32 = vtable_offset_str.strip_prefix("0x").map_or_else(
+                    || vtable_offset_str.parse().unwrap_or(0),
+                    |stripped| u32::from_str_radix(stripped, 16).unwrap_or(0)
+                );
 
                 let accessor_type = match vtable_offset & 0x0f {
                     0x8 => "get",
@@ -135,13 +130,10 @@ impl PostProcessor {
                     .inferred_types
                     .iter()
                     .flat_map(|t| t.fields.iter())
-                    .nth(estimated_field_index as usize)
-                    .map(|f| f.name.clone())
-                    .unwrap_or_else(|| format!("property_{}", estimated_field_index));
+                    .nth(estimated_field_index as usize).map_or_else(|| format!("property_{estimated_field_index}"), |f| f.name.clone());
 
                 format!(
-                    "/* Swift {} {} via VTable@{} */(**(void**)(*{} + {}))",
-                    accessor_type, field_hint, vtable_offset_str, base, vtable_offset_str
+                    "/* Swift {accessor_type} {field_hint} via VTable@{vtable_offset_str} */(**(void**)(*{base} + {vtable_offset_str}))"
                 )
             })
             .to_string();
@@ -149,7 +141,7 @@ impl PostProcessor {
         result = XMM_FIELD
             .replace_all(&result, |caps: &regex::Captures| {
                 let var = &caps[1];
-                format!("{}->value/* Swift property value */", var)
+                format!("{var}->value/* Swift property value */")
             })
             .to_string();
 
@@ -160,7 +152,7 @@ impl PostProcessor {
         }
     }
 
-    pub(super) fn demangle_swift_symbols_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
+    pub(super) fn demangle_swift_symbols_cow(code: &str) -> Cow<'_, str> {
         if !MANGLED_NAME.is_match(code) {
             return Cow::Borrowed(code);
         }
@@ -175,8 +167,8 @@ impl PostProcessor {
         )
     }
 
-    pub(super) fn demangle_swift_symbols(&self, code: &str) -> String {
-        self.demangle_swift_symbols_cow(code).into_owned()
+    pub(super) fn demangle_swift_symbols(code: &str) -> String {
+        Self::demangle_swift_symbols_cow(code).into_owned()
     }
 
     // =========================================================================
@@ -187,7 +179,7 @@ impl PostProcessor {
     // in for-loop headers to i, j, k, l, m, n based on nesting order.
     // Avoids collision with already-used identifiers.
     // =========================================================================
-    pub(super) fn rename_induction_vars_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn rename_induction_vars_cow(code: &str) -> Cow<'_, str> {
         let candidate_names = ["i", "j", "k", "l", "m", "n"];
 
         let mut used_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -215,11 +207,10 @@ impl PostProcessor {
         for var in &induction_vars {
             while name_idx < candidate_names.len() {
                 let name = candidate_names[name_idx];
-                if !used_ids.contains(name) || name == var.as_str() {
-                    if !assigned_names.contains(name) {
+                if (!used_ids.contains(name) || name == var.as_str())
+                    && !assigned_names.contains(name) {
                         break;
                     }
-                }
                 name_idx += 1;
             }
             if name_idx >= candidate_names.len() {
@@ -255,20 +246,18 @@ impl PostProcessor {
     //  2. Single return-value temp → "result"
     //  3. API result naming: var = malloc(...) → ptr, strlen() → len, etc.
     // =========================================================================
-    pub(super) fn rename_semantic_vars_cow<'a>(code: &'a str) -> Cow<'a, str> {
+    pub(super) fn rename_semantic_vars_cow(code: &str) -> Cow<'_, str> {
         let mut result = code.to_string();
 
         if MAIN_FUNC.is_match(&result) {
-            if let Ok(re) = regex::Regex::new(r"\bparam_1\b") {
-                if re.is_match(&result) {
+            if let Ok(re) = regex::Regex::new(r"\bparam_1\b")
+                && re.is_match(&result) {
                     result = re.replace_all(&result, "argc").to_string();
                 }
-            }
-            if let Ok(re) = regex::Regex::new(r"\bparam_2\b") {
-                if re.is_match(&result) {
+            if let Ok(re) = regex::Regex::new(r"\bparam_2\b")
+                && re.is_match(&result) {
                     result = re.replace_all(&result, "argv").to_string();
                 }
-            }
         }
 
         {
@@ -282,14 +271,13 @@ impl PostProcessor {
             }
             if return_vars.len() == 1 {
                 // Safe: We just confirmed len == 1, so next() will return Some
-                if let Some(var) = return_vars.into_iter().next() {
-                    if !result.contains("result") || result.contains(&var) {
+                if let Some(var) = return_vars.into_iter().next()
+                    && (!result.contains("result") || result.contains(&var)) {
                         let pat = format!(r"\b{}\b", regex::escape(&var));
                         if let Ok(re) = regex::Regex::new(&pat) {
                             result = re.replace_all(&result, "result").to_string();
                         }
                     }
-                }
             }
         }
 
@@ -327,14 +315,13 @@ impl PostProcessor {
         .collect();
 
         let mut renames: Vec<(String, String)> = Vec::new();
-        for caps in FUNC_CALL_ASSIGN.captures_iter(&result.clone()) {
+        for caps in FUNC_CALL_ASSIGN.captures_iter(&result) {
             let var = caps[1].to_string();
             let func = &caps[2];
-            if let Some(&new_base) = api_map.get(func) {
-                if var != "result" && !renames.iter().any(|(o, _)| o == &var) {
+            if let Some(&new_base) = api_map.get(func)
+                && var != "result" && !renames.iter().any(|(o, _)| o == &var) {
                     renames.push((var, new_base.to_string()));
                 }
-            }
         }
 
         let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -342,7 +329,7 @@ impl PostProcessor {
             let mut new_name = new_base.clone();
             let mut suffix = 2u32;
             while used.contains(&new_name) {
-                new_name = format!("{}{}", new_base, suffix);
+                new_name = format!("{new_base}{suffix}");
                 suffix += 1;
             }
             used.insert(new_name.clone());
@@ -400,7 +387,7 @@ impl PostProcessor {
             if let DwarfLocation::StackOffset(offset) = &var.location {
                 let abs_offset = offset.unsigned_abs();
                 if abs_offset > 0 {
-                    let ghidra_name = format!("local_{:x}", abs_offset);
+                    let ghidra_name = format!("local_{abs_offset:x}");
                     let pattern = format!(r"\b{}\b", regex::escape(&ghidra_name));
                     if let Ok(re) = regex::Regex::new(&pattern) {
                         result = re.replace_all(&result, var.name.as_str()).to_string();
@@ -432,19 +419,16 @@ impl PostProcessor {
         };
 
         for param in &dwarf.params {
-            if let DwarfLocation::Register(ref reg_str) = param.location {
-                if let Some(num_str) = reg_str.strip_prefix("reg") {
-                    if let Ok(reg_num) = num_str.parse::<u16>() {
-                        if let Some(reg_name) = x86_64_dwarf_to_name(reg_num) {
-                            let ghidra_name = format!("in_{}", reg_name);
+            if let DwarfLocation::Register(ref reg_str) = param.location
+                && let Some(num_str) = reg_str.strip_prefix("reg")
+                    && let Ok(reg_num) = num_str.parse::<u16>()
+                        && let Some(reg_name) = x86_64_dwarf_to_name(reg_num) {
+                            let ghidra_name = format!("in_{reg_name}");
                             let pattern = format!(r"\b{}\b", regex::escape(&ghidra_name));
                             if let Ok(re) = regex::Regex::new(&pattern) {
                                 result = re.replace_all(&result, param.name.as_str()).to_string();
                             }
                         }
-                    }
-                }
-            }
         }
 
         if let Some(ref ret_type) = dwarf.return_type {

@@ -1,7 +1,0 @@
-{
-  "name": "__do_global_dtors",
-  "address": "0x1400017c0",
-  "code": "\n/* WARNING: Unknown calling convention -- yet parameter storage is locked */\n\nvoid __do_global_dtors(void)\n\n{\n  func_ptr p_Var1;\n  \n  p_Var1 = *__do_global_dtors::p;\n  while (p_Var1 != (func_ptr)0x0) {\n    (*p_Var1)();\n    p_Var1 = __do_global_dtors::p[1];\n    __do_global_dtors::p = __do_global_dtors::p + 1;\n  }\n  return;\n}\n\n",
-  "asm": "  0x1400017C0      SUB      RSP, 0x28\n  0x1400017C4      MOV      RAX, qword ptr [0x140003000]\n  0x1400017CB      MOV      RAX, qword ptr [RAX]\n  0x1400017CE      TEST     RAX, RAX\n  0x1400017D1      JZ       0x1400017fd\n  0x1400017D3      NOP      \n  0x1400017D5      NOP      dword ptr CS:[RAX + RAX*0x1]\n  0x1400017E0      CALL     RAX\n  0x1400017E2      MOV      RAX, qword ptr [0x140003000]\n  0x1400017E9      LEA      RDX, [RAX + 0x8]\n  0x1400017ED      MOV      RAX, qword ptr [RAX + 0x8]\n  0x1400017F1      MOV      qword ptr [0x140003000], RDX\n  0x1400017F8      TEST     RAX, RAX\n  0x1400017FB      JNZ      0x1400017e0\n  0x1400017FD      ADD      RSP, 0x28\n  0x140001801      RET      \n",
-  "decomp_sec": 0.001836
-}

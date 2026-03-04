@@ -8,20 +8,17 @@ pub use crate::app::events::{FissionEvent, FissionEventType};
 
 /// Hook priority (lower = earlier execution)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default)]
 pub enum HookPriority {
     /// Run first
     High = 0,
     /// Default priority
+    #[default]
     Normal = 50,
     /// Run last
     Low = 100,
 }
 
-impl Default for HookPriority {
-    fn default() -> Self {
-        HookPriority::Normal
-    }
-}
 
 /// A plugin hook registration
 #[derive(Debug, Clone)]

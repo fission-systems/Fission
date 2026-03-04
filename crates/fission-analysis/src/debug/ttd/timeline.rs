@@ -131,11 +131,11 @@ impl Timeline {
         }
     }
 
-    pub fn exit_replay_mode(&mut self) {
+    pub const fn exit_replay_mode(&mut self) {
         self.replay_mode = false;
     }
 
-    pub fn is_replay_mode(&self) -> bool {
+    pub const fn is_replay_mode(&self) -> bool {
         self.replay_mode
     }
 
@@ -161,8 +161,8 @@ impl Timeline {
                 }
 
                 let snapshots = rec.snapshots();
-                let min_step = snapshots.first().map(|s| s.step_index).unwrap_or(0);
-                let max_step = snapshots.last().map(|s| s.step_index).unwrap_or(0);
+                let min_step = snapshots.first().map_or(0, |s| s.step_index);
+                let max_step = snapshots.last().map_or(0, |s| s.step_index);
 
                 if step_index < min_step || step_index > max_step {
                     return SeekResult::OutOfBounds {
@@ -213,12 +213,10 @@ impl Timeline {
             }
         }
 
-        if let Some(pos) = self.current_position {
+        self.current_position.map_or(SeekResult::Empty, |pos| {
             let target = pos.saturating_sub(steps);
             self.seek_to(target)
-        } else {
-            SeekResult::Empty
-        }
+        })
     }
 
     pub fn forward(&mut self, steps: u64) -> SeekResult {
@@ -236,12 +234,10 @@ impl Timeline {
             }
         }
 
-        if let Some(pos) = self.current_position {
+        self.current_position.map_or(SeekResult::Empty, |pos| {
             let target = pos.saturating_add(steps);
             self.seek_to(target)
-        } else {
-            SeekResult::Empty
-        }
+        })
     }
 
     pub fn seek_start(&mut self) -> SeekResult {
@@ -251,11 +247,7 @@ impl Timeline {
             Backend::RR(_) => Some(0),
         };
 
-        if let Some(t) = target {
-            self.seek_to(t)
-        } else {
-            SeekResult::Empty
-        }
+        target.map_or(SeekResult::Empty, |t| self.seek_to(t))
     }
 
     pub fn seek_end(&mut self) -> SeekResult {
@@ -265,14 +257,10 @@ impl Timeline {
             Backend::RR(rr) => Some(rr.step_count() as u64),
         };
 
-        if let Some(t) = target {
-            self.seek_to(t)
-        } else {
-            SeekResult::Empty
-        }
+        target.map_or(SeekResult::Empty, |t| self.seek_to(t))
     }
 
-    pub fn current_position(&self) -> Option<u64> {
+    pub const fn current_position(&self) -> Option<u64> {
         self.current_position
     }
 
@@ -291,8 +279,8 @@ impl Timeline {
                 if snapshots.is_empty() {
                     return None;
                 }
-                let min = snapshots.first().map(|s| s.step_index).unwrap_or(0);
-                let max = snapshots.last().map(|s| s.step_index).unwrap_or(0);
+                let min = snapshots.first().map_or(0, |s| s.step_index);
+                let max = snapshots.last().map_or(0, |s| s.step_index);
                 Some((min, max))
             }
             #[cfg(target_os = "linux")]

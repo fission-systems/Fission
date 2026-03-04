@@ -77,8 +77,7 @@ pub(super) fn disassemble(
             })
             .collect();
         let json_output = serde_json::to_string_pretty(&instr_json).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("JSON serialization failed: {}", e),
             )
         })?;
@@ -222,8 +221,7 @@ pub(super) fn disassemble_function(
                 .collect::<Vec<_>>(),
         });
         let json_output = serde_json::to_string_pretty(&result).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("JSON serialization failed: {}", e),
             )
         })?;
