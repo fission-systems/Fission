@@ -137,6 +137,11 @@ static void apply_feature_flags(DecompContext* ctx) {
             ctx->arch->options->set(ghidra::ELEM_JUMPLOAD.getId(), ctx->record_jumploads ? "on" : "off", "", "");
             ctx->arch->options->set(ghidra::ELEM_ERRORTOOMANYINSTRUCTIONS.getId(), ctx->disable_toomanyinstructions_error ? "off" : "on", "", "");
             ctx->arch->options->set(ghidra::ELEM_INLINE.getId(), ctx->allow_inline ? "on" : "off", "", "");
+            // Phase 1: output quality options
+            ctx->arch->options->set(ghidra::ELEM_NULLPRINTING.getId(),       ctx->null_printing       ? "on" : "off", "", "");
+            ctx->arch->options->set(ghidra::ELEM_INPLACEOPS.getId(),         ctx->inplace_ops         ? "on" : "off", "", "");
+            ctx->arch->options->set(ghidra::ELEM_NOCASTPRINTING.getId(),     ctx->no_cast_printing    ? "on" : "off", "", "");
+            ctx->arch->options->set(ghidra::ELEM_CONVENTIONPRINTING.getId(), ctx->convention_printing ? "on" : "off", "", "");
         } catch (const std::exception& e) {
             fission::utils::log_stream() << "[DecompilerCore] apply_feature_flags: option sync failed: "
                       << e.what() << std::endl;

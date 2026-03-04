@@ -23,6 +23,7 @@
 #include "fission/analysis/FunctionMatcher.h"
 #include "fission/analysis/RelationValidator.h"
 #include "fission/analysis/CallingConvDetector.h"
+#include "fission/analysis/EnumInferrer.h"
 #include "fission/analysis/VTableAnalyzer.h"
 #include "fission/analysis/GlobalDataAnalyzer.h"
 #include "fission/analysis/CallGraphAnalyzer.h"
@@ -1071,6 +1072,14 @@ std::string DecompilationPipeline::handle_decompile(
         fission::utils::log_stream() << "[fission_decomp] Step 4c: Emulation meta-tags added!" << std::endl;
     }
 
+    // Step 4d: Enum inference — detect comparison/jump-table enums and apply types
+    {
+        StepTimer timer("Step 4d: Enum inference");
+        int enums_created = fission::analysis::EnumInferrer::infer_and_apply(fd);
+        if (enums_created > 0)
+            fission::utils::log_stream() << "[fission_decomp] Step 4d: " << enums_created << " enum(s) inferred" << std::endl;
+    }
+
     fission::utils::log_stream() << "[fission_decomp] Step 5: Generating output" << std::endl;
     std::ostringstream c_stream;
     arch->print->setOutputStream(&c_stream);
@@ -1083,6 +1092,10 @@ std::string DecompilationPipeline::handle_decompile(
     if (!analysis_artifacts.inferred_struct_definitions.empty()) {
         c_code = analysis_artifacts.inferred_struct_definitions + "\n" + c_code;
         c_code = TypePropagator::apply_struct_types(c_code, fd, analysis_artifacts.captured_structs);
+    }
+    // Inject inferred union definitions (Phase 2)
+    if (!analysis_artifacts.inferred_union_definitions.empty()) {
+        c_code = analysis_artifacts.inferred_union_definitions + "\n" + c_code;
     }
 
     c_code = post_process_iat_calls(c_code, state.iat_symbols);
@@ -1128,6 +1141,7 @@ std::string DecompilationPipeline::handle_decompile(
     c_code = normalize_msvc_crt_printf(c_code);
     c_code = improve_internal_function_names(c_code);
     c_code = annotate_structure_offsets(c_code);
+    c_code = annotate_bitfield_extractions(c_code);  // Phase 4: bitfield annotations
     c_code = apply_fid_names(c_code, state.fid_function_names);
     c_code = PostProcessor::process(c_code);
     

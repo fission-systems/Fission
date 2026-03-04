@@ -638,6 +638,7 @@ AnalysisArtifacts run_analysis_passes(
                 fission::utils::log_stream() << "[AnalysisPipeline] Inferred structures, flagging stage-1 re-run."
                     << std::endl;
                 artifacts.inferred_struct_definitions = struct_analyzer.generate_struct_definitions();
+                artifacts.inferred_union_definitions  = struct_analyzer.generate_union_definitions();
                 artifacts.captured_structs            = struct_analyzer.get_inferred_structs();
                 artifacts.type_replacements           = struct_analyzer.get_type_replacements();
                 needs_rerun_stage1 = true;

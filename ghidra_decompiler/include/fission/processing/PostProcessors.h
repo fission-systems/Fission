@@ -80,6 +80,9 @@ std::string normalize_cpp_virtual_calls(
     const std::map<int, uint64_t>& vcall_slot_target_hints
 );
 
+// Phase 4: Annotate (VAR >> SHIFT) & MASK bitfield extractions
+std::string annotate_bitfield_extractions(const std::string& code);
+
 } // namespace processing
 } // namespace fission
 

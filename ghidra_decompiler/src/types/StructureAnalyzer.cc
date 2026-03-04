@@ -8,6 +8,7 @@
 #include "type.hh"
 #include "op.hh"
 #include "address.hh"
+#include "unionresolve.hh"
 
 #include <iostream>
 #include "fission/utils/logger.h"
@@ -95,6 +96,8 @@ bool StructureAnalyzer::analyze_function_structures(ghidra::Funcdata* fd) {
 
     access_map.clear();
     inferred_structs.clear();
+    size_variants.clear();
+    inferred_unions.clear();
 
     ghidra::Architecture* arch = fd->getArch();
     int ptr_size = ArchPolicy::getPointerSize(arch);
@@ -108,6 +111,10 @@ bool StructureAnalyzer::analyze_function_structures(ghidra::Funcdata* fd) {
     // 2. Infer Structures
     ghidra::TypeFactory* factory = fd->getArch()->types;
     bool new_types_created = infer_structures(factory, func_entry, ptr_size);
+
+    // 2b. Infer Unions (overlapping field accesses)
+    bool unions_created = infer_unions(factory, func_entry, ptr_size);
+    new_types_created = new_types_created || unions_created;
 
     if (inferred_structs.empty()) return false;
 
@@ -281,6 +288,9 @@ void StructureAnalyzer::collect_accesses(ghidra::Funcdata* fd) {
             }
             if (is_float) info.is_float = true;
             if (is_pointer) info.is_pointer = true;
+
+            // Track all distinct sizes per (base, offset) for union detection
+            size_variants[base_storage][(int)offset].insert(access_size);
         }
     }
 }
@@ -530,6 +540,114 @@ void StructureAnalyzer::apply_structures(ghidra::Funcdata* fd, int ptr_size) {
 
         return replacements;
     }
+
+bool StructureAnalyzer::infer_unions(ghidra::TypeFactory* factory,
+                                      uint64_t func_entry,
+                                      int ptr_size) {
+    if (!factory) return false;
+    bool created = false;
+
+    // For each base varnode, check if any two fields have overlapping byte ranges.
+    // Overlapping fields that all start at the same base offset are strong union candidates.
+    for (auto& [base_key, offset_size_map] : size_variants) {
+        // Skip bases that are already fully described by a struct (no overlap needed)
+        // Collect (offset, size) pairs sorted by offset
+        std::vector<std::pair<int, int>> ranges; // (offset, size)
+        for (auto& [off, sizes] : offset_size_map) {
+            for (int sz : sizes) {
+                if (sz > 0) ranges.push_back({off, sz});
+            }
+        }
+        if (ranges.size() < 2) continue;
+
+        // Detect any overlap: field A covers [oa, oa+sa), field B covers [ob, ob+sb)
+        // => overlap if oa < ob+sb && ob < oa+sa
+        bool has_overlap = false;
+        for (size_t i = 0; i < ranges.size() && !has_overlap; ++i) {
+            for (size_t j = i + 1; j < ranges.size() && !has_overlap; ++j) {
+                int oa = ranges[i].first,  sa = ranges[i].second;
+                int ob = ranges[j].first,  sb = ranges[j].second;
+                if (oa < ob + sb && ob < oa + sa) {
+                    has_overlap = true;
+                }
+            }
+        }
+        if (!has_overlap) continue;
+
+        // Build a union name
+        std::stringstream ss;
+        if (base_key & 0x8000000000000000ULL) {
+            uint64_t space  = (base_key >> 56) & 0x7f;
+            uint64_t offset = base_key & 0x00FFFFFFFFFFFFFFULL;
+            ss << "u_" << std::hex << func_entry << "_local_" << space << "_" << offset;
+        } else {
+            ss << "u_" << std::hex << func_entry << "_arg_" << base_key;
+        }
+        std::string union_name = ss.str();
+
+        // Reuse if already exists
+        ghidra::Datatype* existing = factory->findByName(union_name);
+        if (existing != nullptr) {
+            if (existing->getMetatype() == ghidra::TYPE_UNION) {
+                inferred_unions[base_key] = dynamic_cast<ghidra::TypeUnion*>(existing);
+            }
+            continue;
+        }
+
+        // Compute union size = max end byte across all ranges
+        int union_size = 0;
+        for (auto& [off, sz] : ranges) {
+            union_size = std::max(union_size, off + sz);
+        }
+        // Align to pointer size
+        if (union_size % ptr_size != 0) {
+            union_size += ptr_size - (union_size % ptr_size);
+        }
+
+        // Create union fields (one per unique (offset, size) pair to avoid duplicates)
+        std::set<std::pair<int,int>> seen_range;
+        std::vector<ghidra::TypeField> fields;
+        int fid = 0;
+        for (auto& [off, sz] : ranges) {
+            if (!seen_range.insert({off, sz}).second) continue;
+            std::stringstream fss;
+            fss << "var_" << std::hex << off << "_" << sz;
+            ghidra::Datatype* ft = factory->getBase(sz, ghidra::TYPE_UNKNOWN);
+            if (!ft) ft = factory->getBase(1, ghidra::TYPE_UNKNOWN);
+            // For union fields all start at offset 0 (union semantics)
+            fields.push_back(ghidra::TypeField(fid++, 0, fss.str(), ft));
+        }
+
+        ghidra::TypeUnion* new_union = factory->getTypeUnion(union_name);
+        factory->setFields(fields, new_union, union_size, ptr_size, 0);
+        inferred_unions[base_key] = new_union;
+        created = true;
+
+        fission::utils::log_stream() << "[StructureAnalyzer] Created union " << union_name
+                  << " (" << union_size << " bytes, " << fields.size() << " variants)\n";
+    }
+    return created;
+}
+
+std::string StructureAnalyzer::generate_union_definitions() const {
+    std::stringstream ss;
+    if (inferred_unions.empty()) return "";
+    ss << "// Inferred Union Definitions\n";
+    for (auto const& [addr, type] : inferred_unions) {
+        if (!type) continue;
+        ss << "typedef union " << type->getName() << " {\n";
+        int nf = type->numDepend();
+        for (int i = 0; i < nf; ++i) {
+            const ghidra::TypeField* f = type->getField(i);
+            if (!f) continue;
+            std::string ft = f->type ? f->type->getName() : "undefined";
+            if (ft.empty()) ft = "undefined";
+            ss << "    " << ft << " " << f->name << ";\n";
+        }
+        ss << "} " << type->getName() << ";\n\n";
+    }
+    return ss.str();
+}
 
 } // namespace types
 } // namespace fission

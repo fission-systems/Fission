@@ -91,6 +91,12 @@ struct DecompContext {
     bool disable_toomanyinstructions_error = true;
     bool allow_inline = false;
 
+    // Output quality options (Phase 1 — Ghidra option activation)
+    bool null_printing    = true;   ///< Print pointer 0 as NULL
+    bool inplace_ops      = true;   ///< x = x+1 → x += 1
+    bool no_cast_printing = false;  ///< Suppress safe casts (aggressive; off by default)
+    bool convention_printing = false; ///< Show calling convention names
+
     // Post-processing options (configurable via set_feature with "pp_" prefix)
     fission::decompiler::PostProcessOptions post_process_options;
     

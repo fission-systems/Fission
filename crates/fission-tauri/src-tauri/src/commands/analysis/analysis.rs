@@ -113,9 +113,11 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
     let total_scanned = func_list.len();
 
     // Run built-in byte-pattern identification in a blocking thread (CPU-bound).
+    // Clone func_list so it remains available after the closure consumes its capture.
+    let func_list_for_fid = func_list.clone();
     let identified = tokio::task::spawn_blocking(move || {
         let db = SignatureDatabase::new();
-        db.identify_functions_in_binary(&data, &func_list, image_base)
+        db.identify_functions_in_binary(&data, &func_list_for_fid, image_base)
     })
     .await
     .map_err(|e| CmdError::other(format!("FID task failed: {e}")))?;

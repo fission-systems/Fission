@@ -42,6 +42,7 @@ namespace decompiler {
 
 struct AnalysisArtifacts {
     std::string inferred_struct_definitions;
+    std::string inferred_union_definitions;   ///< Phase 2: union type declarations
     std::map<unsigned long long, ghidra::TypeStruct*> captured_structs;
     // Dynamic field-offset map: offset-key → "struct_name.field_name"
     // Used by annotate_structure_offsets() for field annotation

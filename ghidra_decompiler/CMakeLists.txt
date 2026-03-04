@@ -81,6 +81,7 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/analysis/GraphAlgorithms.cc
     ${FISSION_MODULES_DIR}/analysis/VTableAnalyzer.cc
     ${FISSION_MODULES_DIR}/analysis/NoReturnDetector.cc
+    ${FISSION_MODULES_DIR}/analysis/EnumInferrer.cc
     ${FISSION_MODULES_DIR}/core/ContextServices.cc
     ${FISSION_MODULES_DIR}/core/ArchInit.cc
     ${FISSION_MODULES_DIR}/core/ScopeFission.cc
@@ -97,6 +98,7 @@ set(FISSION_SOURCES
     ${FISSION_MODULES_DIR}/processing/passes/ConstantReplacementPasses.cc
     ${FISSION_MODULES_DIR}/processing/passes/SymbolApplicationPasses.cc
     ${FISSION_MODULES_DIR}/processing/passes/CodeCleanupPasses.cc
+    ${FISSION_MODULES_DIR}/processing/passes/BitfieldPasses.cc
     ${FISSION_MODULES_DIR}/processing/StringScanner.cc
     ${FISSION_MODULES_DIR}/loader/SymbolLoader.cc
     ${FISSION_MODULES_DIR}/loader/BinaryDetector.cc
