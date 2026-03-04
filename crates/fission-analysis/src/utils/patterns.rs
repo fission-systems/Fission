@@ -237,16 +237,6 @@ pub static UNDEF_TYPE_DECL: Lazy<Regex> = Lazy::new(|| {
 // Control Flow Patterns
 // ============================================================================
 
-/// If statement with goto pattern
-pub static IF_GOTO: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(concat!(
-        r"(?s)if\s*\(\s*([^\{]+?)\s*\)\s*\{\s*",
-        r"(?P<body>(?:(?!(?:if|while|for|switch|goto|break|continue|return)\b)[^\{])*?)",
-        r"goto\s+(?P<label>\w+);\s*\}"
-    ))
-    .unwrap_or_else(|e| panic!("regex should compile: {}", e))
-});
-
 /// Empty else block pattern
 pub static EMPTY_ELSE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\}\s*else\s*\{\s*\}").unwrap_or_else(|e| panic!("regex should compile: {}", e))

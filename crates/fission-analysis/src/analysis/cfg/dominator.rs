@@ -109,6 +109,7 @@ impl DominatorTree {
     }
 
     /// Find intersection of two dominators in the dominator tree
+    #[allow(clippy::while_immutable_condition)]
     fn intersect(
         idom: &HashMap<usize, usize>,
         rpo_num: &HashMap<usize, usize>,

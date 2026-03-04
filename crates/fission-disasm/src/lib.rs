@@ -124,12 +124,10 @@ impl DisasmEngine {
         while decoder.can_decode() {
             decoder.decode_out(&mut instruction);
 
-            if instruction.mnemonic() == Mnemonic::Call {
-                if instruction.is_call_near() {
-                    let target = instruction.near_branch_target();
-                    if target != 0 && target >= base_address {
-                        targets.insert(target);
-                    }
+            if instruction.mnemonic() == Mnemonic::Call && instruction.is_call_near() {
+                let target = instruction.near_branch_target();
+                if target != 0 && target >= base_address {
+                    targets.insert(target);
                 }
             }
         }
