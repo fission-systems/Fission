@@ -42,7 +42,7 @@ pub fn format_hex(bytes: &[u8]) -> String {
 /// Parse a hex string (with or without spaces/0x) into bytes
 pub fn parse_hex(s: &str) -> Option<Vec<u8>> {
     let clean = s.replace("0x", "").replace(' ', "");
-    if clean.len() % 2 != 0 {
+    if !clean.len().is_multiple_of(2) {
         return None;
     }
 

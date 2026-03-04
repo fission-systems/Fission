@@ -288,7 +288,7 @@ impl PathConfig {
                 entries
                     .filter_map(|e| e.ok())
                     .map(|e| e.path())
-                    .filter(|p| p.extension().map_or(false, |ext| ext == "json"))
+                    .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
                     .collect()
             })
             .unwrap_or_default()
@@ -360,13 +360,13 @@ pub fn find_sla_dir() -> String {
     }
 
     // 3. Exe-relative
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            for candidate in RELATIVE_CANDIDATES {
-                let path = exe_dir.join(candidate);
-                if path.is_dir() {
-                    return path.to_string_lossy().into_owned();
-                }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        for candidate in RELATIVE_CANDIDATES {
+            let path = exe_dir.join(candidate);
+            if path.is_dir() {
+                return path.to_string_lossy().into_owned();
             }
         }
     }

@@ -123,19 +123,14 @@ pub struct LogConfig {
 }
 
 /// Log level enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum LogLevel {
     Trace,
     Debug,
+    #[default]
     Info,
     Warn,
     Error,
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::Info
-    }
 }
 
 impl std::fmt::Display for LogLevel {
@@ -152,7 +147,7 @@ impl std::fmt::Display for LogLevel {
 
 impl LogLevel {
     /// Parse log level from string (case-insensitive)
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "trace" => Some(LogLevel::Trace),
             "debug" => Some(LogLevel::Debug),
@@ -180,7 +175,7 @@ impl Default for LogConfig {
         // Check environment variables for configuration
         let level = std::env::var("FISSION_LOG_LEVEL")
             .ok()
-            .and_then(|s| LogLevel::from_str(&s))
+            .and_then(|s| LogLevel::parse(&s))
             .unwrap_or(LogLevel::Info);
 
         let file_path = std::env::var("FISSION_LOG_FILE").unwrap_or_default();

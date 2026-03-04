@@ -268,7 +268,7 @@ impl From<TomlConfig> for Config {
                 hex_rows_per_page: toml.ui.hex_rows_per_page,
             },
             logging: LogConfig {
-                level: LogLevel::from_str(&toml.logging.level).unwrap_or_default(),
+                level: LogLevel::parse(&toml.logging.level).unwrap_or_default(),
                 file_path: toml.logging.file,
                 console_enabled: toml.logging.console_enabled,
                 file_enabled: false, // Will be set based on file_path
