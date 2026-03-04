@@ -11,7 +11,7 @@ env:
 
 jobs:
   build:
-    name: Build and Test
+    name: Build and Test (Linux)
     runs-on: ubuntu-latest
 
     steps:
@@ -34,8 +34,8 @@ jobs:
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
 
-      - name: Security advisory check (Rust)
-        run: cargo deny check advisories
+      - name: Security advisory check (Rust — advisories, bans, licenses, sources)
+        run: cargo deny check all
 
       - name: Security advisory check (Node)
         run: |
@@ -63,12 +63,45 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Lint with Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Check Documentation
+        run: cargo doc --workspace --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
 
       - name: Run Tests
-        run: cargo test --verbose
+        run: cargo test --workspace --verbose
 
       - name: Fission decompilation smoke test
         run: |
           chmod +x scripts/test/decomp_smoke_ci.sh
           ./scripts/test/decomp_smoke_ci.sh
+
+  build-macos:
+    name: Build and Test (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Build Decompiler
+        run: |
+          chmod +x scripts/build/build_decompiler.sh
+          ./scripts/build/build_decompiler.sh
+
+      - name: Check Formatting
+        run: cargo fmt -- --check
+
+      - name: Lint with Clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Run Tests
+        run: cargo test --workspace --verbose
