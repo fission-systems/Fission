@@ -1,6 +1,7 @@
 #ifndef __PROTOTYPE_ENFORCER_H__
 #define __PROTOTYPE_ENFORCER_H__
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
