@@ -227,10 +227,11 @@ impl DecompilerNative {
 
         for (addr, name) in symbols {
             if !name.is_empty()
-                && let Ok(cstr) = CString::new(name.as_str()) {
-                    addrs.push(*addr);
-                    names_cstr.push(cstr);
-                }
+                && let Ok(cstr) = CString::new(name.as_str())
+            {
+                addrs.push(*addr);
+                names_cstr.push(cstr);
+            }
         }
 
         if addrs.is_empty() {
@@ -270,10 +271,11 @@ impl DecompilerNative {
 
         for (addr, name) in symbols {
             if !name.is_empty()
-                && let Ok(cstr) = CString::new(name.as_str()) {
-                    addrs.push(*addr);
-                    names_cstr.push(cstr);
-                }
+                && let Ok(cstr) = CString::new(name.as_str())
+            {
+                addrs.push(*addr);
+                names_cstr.push(cstr);
+            }
         }
 
         if addrs.is_empty() {
@@ -435,20 +437,50 @@ impl DecompilerNative {
     pub fn decompile(&self, addr: u64) -> Result<String> {
         self.check_valid()?;
 
-        let result_ptr = unsafe { decomp_function(self.ctx, addr) };
-
-        if result_ptr.is_null() {
-            return Err(FissionError::decompiler(self.get_last_error()));
+        struct OutputCtx {
+            output: String,
+            called: bool,
         }
 
-        let result = unsafe {
-            let cstr = CStr::from_ptr(result_ptr);
-            let string = cstr.to_string_lossy().into_owned();
-            decomp_free_string(result_ptr);
-            string
+        let mut out_ctx = OutputCtx {
+            output: String::new(),
+            called: false,
         };
+        let userdata = std::ptr::addr_of_mut!(out_ctx).cast::<std::ffi::c_void>();
 
-        Ok(result)
+        unsafe extern "C" fn output_callback(
+            userdata: *mut std::ffi::c_void,
+            data: *const c_char,
+            len: usize,
+        ) {
+            unsafe {
+                let ctx = &mut *userdata.cast::<OutputCtx>();
+                ctx.called = true;
+                if data.is_null() || len == 0 {
+                    return;
+                }
+                let slice = std::slice::from_raw_parts(data.cast::<u8>(), len);
+                if let Ok(s) = std::str::from_utf8(slice) {
+                    ctx.output.push_str(s);
+                } else {
+                    ctx.output.push_str(&String::from_utf8_lossy(slice));
+                }
+            }
+        }
+
+        unsafe {
+            decomp_function_cb(self.ctx, addr, userdata, output_callback);
+        }
+
+        // If not called or empty string returned, check for errors.
+        if !out_ctx.called || out_ctx.output.is_empty() {
+            let error = self.get_last_error();
+            if !error.is_empty() && error != "Unknown error" {
+                return Err(FissionError::decompiler(error));
+            }
+        }
+
+        Ok(out_ctx.output)
     }
 
     /// Get Pcode JSON for a function at the given address

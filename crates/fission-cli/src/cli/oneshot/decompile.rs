@@ -377,30 +377,22 @@ pub(super) fn run_decompilation(
             },
             "functions": json_results
         });
-        serde_json::to_string_pretty(&envelope).map_err(|e| {
-            io::Error::other(
-                format!("JSON serialization failed: {}", e),
-            )
-        })?
+        serde_json::to_string_pretty(&envelope)
+            .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?
     } else if effective_json {
-        serde_json::to_string_pretty(&json_results).map_err(|e| {
-            io::Error::other(
-                format!("JSON serialization failed: {}", e),
-            )
-        })?
+        serde_json::to_string_pretty(&json_results)
+            .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?
     } else {
         all_output
     };
 
     if let Some(ref output_path) = cli.output {
         let mut file = fs::File::create(output_path).map_err(|e| {
-            io::Error::other(
-                format!(
-                    "Failed to create output file '{}': {}",
-                    output_path.display(),
-                    e
-                ),
-            )
+            io::Error::other(format!(
+                "Failed to create output file '{}': {}",
+                output_path.display(),
+                e
+            ))
         })?;
         file.write_all(final_output.as_bytes())?;
         if cli.verbose {
@@ -444,11 +436,7 @@ pub(super) fn decompile_and_output(
                     "name": name,
                     "code": filtered
                 }))
-                .map_err(|e| {
-                    io::Error::other(
-                        format!("JSON serialization failed: {}", e),
-                    )
-                })?;
+                .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?;
                 writeln!(stdout, "{}", json_output)?;
             } else {
                 if !effective_no_header {

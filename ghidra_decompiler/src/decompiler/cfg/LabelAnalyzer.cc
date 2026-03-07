@@ -181,24 +181,70 @@ bool LabelAnalyzer::is_loop_header(const std::string& label,
 }
 
 std::string LabelAnalyzer::remove_unused_labels(const std::string& c_code) {
-    std::string result = c_code;
-    
-    std::vector<Label> labels = find_labels(c_code);
-    std::vector<GotoInfo> gotos = find_gotos(c_code);
-    
+    // Early exit: if no labels at all, nothing to do.
+    if (c_code.find(':') == std::string::npos) return c_code;
+
+    std::vector<Label>    labels = find_labels(c_code);
+    if (labels.empty()) return c_code;
+
+    std::vector<GotoInfo> gotos  = find_gotos(c_code);
+
     std::set<std::string> used_labels;
-    for (const auto& g : gotos) {
-        used_labels.insert(g.target_label);
-    }
-    
-    for (const auto& label : labels) {
-        if (used_labels.find(label.name) == used_labels.end()) {
-            std::regex label_pattern(R"(\n\s*)" + label.name + R"(\s*:\s*\n)");
-            result = std::regex_replace(result, label_pattern, "\n");
+    for (const auto& g : gotos) used_labels.insert(g.target_label);
+
+    // Build set of unused label names
+    std::set<std::string> unused;
+    for (const auto& label : labels)
+        if (used_labels.find(label.name) == used_labels.end())
+            unused.insert(label.name);
+
+    if (unused.empty()) return c_code;
+
+    // Manual line-by-line scan: drop lines that are purely an unused label.
+    // A label line looks like: (optional whitespace) NAME : (optional whitespace)
+    // We do NOT use per-label regex to avoid O(L) compilations.
+    bool ends_nl = !c_code.empty() && c_code.back() == '\n';
+    std::string out;
+    out.reserve(c_code.size());
+
+    size_t i = 0;
+    while (i < c_code.size()) {
+        size_t line_end = c_code.find('\n', i);
+        bool has_newline = (line_end != std::string::npos);
+        size_t line_len  = has_newline ? line_end - i : c_code.size() - i;
+
+        // Trim leading whitespace to check if line is "LABEL:"
+        size_t s = i;
+        while (s < i + line_len && (c_code[s] == ' ' || c_code[s] == '\t')) s++;
+        // scan identifier
+        size_t id_start = s;
+        while (s < i + line_len && (std::isalnum(static_cast<unsigned char>(c_code[s])) || c_code[s] == '_')) s++;
+        size_t id_end = s;
+        // skip whitespace
+        while (s < i + line_len && (c_code[s] == ' ' || c_code[s] == '\t')) s++;
+
+        bool drop = false;
+        if (id_end > id_start && s < i + line_len && c_code[s] == ':') {
+            // Check nothing else meaningful on this line after the colon
+            size_t after = s + 1;
+            while (after < i + line_len && (c_code[after] == ' ' || c_code[after] == '\t')) after++;
+            if (after == i + line_len) {
+                // Pure label line
+                std::string name(c_code, id_start, id_end - id_start);
+                if (unused.count(name)) drop = true;
+            }
         }
+
+        if (!drop) {
+            out.append(c_code, i, line_len);
+            if (has_newline) out.push_back('\n');
+        }
+
+        i = has_newline ? line_end + 1 : c_code.size();
     }
-    
-    return result;
+
+    if (ends_nl && !out.empty() && out.back() != '\n') out.push_back('\n');
+    return out;
 }
 
 } // namespace cfg

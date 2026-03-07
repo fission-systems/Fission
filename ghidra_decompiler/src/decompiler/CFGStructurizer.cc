@@ -65,6 +65,15 @@ static int brace_balance(const std::string& code) {
 std::string CFGStructurizer::structurize(const std::string& c_code) {
     std::string result = c_code;
 
+    // ── Early exit: if no goto keyword at all, there's nothing to structurize ──
+    // This is the most impactful optimization: most functions have no gotos.
+    // Saves running all 13 passes on code that doesn't need them.
+    if (c_code.find("goto ") == std::string::npos) {
+        // Still run label cleanup in case Ghidra emits orphan labels
+        result = LabelAnalyzer::remove_unused_labels(result);
+        return result;
+    }
+
     int goto_count_before = 0;
     size_t pos = 0;
     while ((pos = result.find("goto ", pos)) != std::string::npos) {

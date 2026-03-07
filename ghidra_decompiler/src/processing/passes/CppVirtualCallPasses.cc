@@ -25,7 +25,7 @@ std::string demangle_cpp_names(const std::string& code) {
     // 1. Demangle symbols starting with _Z (Itanium ABI) or ? (MSVC)
 #ifdef _MSC_VER
     // MSVC: Demangle ?-prefixed symbols using UnDecorateSymbolName
-    std::regex mangled_regex(R"(\b(\?[a-zA-Z0-9_@$]+)\b)");
+    static const std::regex mangled_regex(R"(\b(\?[a-zA-Z0-9_@$]+)\b)", std::regex::optimize);
     std::map<std::string, std::string> demangle_cache;
     
     auto words_begin = std::sregex_iterator(code.begin(), code.end(), mangled_regex);
@@ -55,7 +55,7 @@ std::string demangle_cpp_names(const std::string& code) {
     }
 #else
     // GCC/Clang: Demangle _Z-prefixed symbols using __cxa_demangle
-    std::regex mangled_regex(R"(\b(_Z[a-zA-Z0-9_]+)\b)");
+    static const std::regex mangled_regex(R"(\b(_Z[a-zA-Z0-9_]+)\b)", std::regex::optimize);
     std::map<std::string, std::string> demangle_cache;
     
     auto words_begin = std::sregex_iterator(code.begin(), code.end(), mangled_regex);
@@ -96,7 +96,7 @@ std::string demangle_cpp_names(const std::string& code) {
     // Find function headers like "Type Class::Func(..., longlong param_1, ...)"
     // And also replace param_1 with 'this' in the body of those functions.
     
-    std::regex member_func_regex(R"(\b([a-zA-Z0-9_]+::[a-zA-Z0-9_~]+)\s*\(([^\)]*)\))");
+    static const std::regex member_func_regex(R"(\b([a-zA-Z0-9_]+::[a-zA-Z0-9_~]+)\s*\(([^\)]*)\))", std::regex::optimize);
     
     std::string final_code;
     size_t last_pos = 0;
@@ -159,7 +159,8 @@ std::string demangle_cpp_names(const std::string& code) {
             if (depth == 0) {
                 std::string body = result.substr(body_start, body_end - body_start);
                 // Replace \bparam_1\b with this
-                body = std::regex_replace(body, std::regex(R"(\bparam_1\b)"), "this");
+                static const std::regex param1_regex(R"(\bparam_1\b)", std::regex::optimize);
+                body = std::regex_replace(body, param1_regex, "this");
                 
                 final_code += result.substr(match.position() + match.length(), body_start - (match.position() + match.length()));
                 final_code += body;

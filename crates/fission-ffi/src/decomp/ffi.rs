@@ -9,6 +9,9 @@ use std::os::raw::{c_char, c_int};
 // External FFI Function Declarations
 // ============================================================================
 
+pub(super) type DecompOutputCallback =
+    unsafe extern "C" fn(*mut std::ffi::c_void, *const c_char, usize);
+
 #[cfg(feature = "native_decomp")]
 #[link(name = "decomp")]
 unsafe extern "C" {
@@ -47,7 +50,13 @@ unsafe extern "C" {
         is_executable: c_int,
         is_writable: c_int,
     ) -> DecompError;
-    pub(super) fn decomp_function(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
+
+    pub(super) fn decomp_function_cb(
+        ctx: *mut DecompContext,
+        addr: u64,
+        userdata: *mut std::ffi::c_void,
+        cb: DecompOutputCallback,
+    );
     pub(super) fn decomp_function_pcode(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
     pub(super) fn decomp_free_string(s: *mut c_char);
     pub(super) fn decomp_get_last_error(ctx: *mut DecompContext) -> *const c_char;

@@ -97,6 +97,13 @@ struct DecompContext {
     bool no_cast_printing = false;  ///< Suppress safe casts (aggressive; off by default)
     bool convention_printing = false; ///< Show calling convention names
 
+    // Global symbols optimization flag
+    bool global_symbols_applied = false;
+
+    // Cache of callee addresses already analyzed by pointer-return inference.
+    // Prevents redundant followFlow+perform for callees across decompilations.
+    std::set<uint64_t> analyzed_callees;
+
     // Post-processing options (configurable via set_feature with "pp_" prefix)
     fission::decompiler::PostProcessOptions post_process_options;
     

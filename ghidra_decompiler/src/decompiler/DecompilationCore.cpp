@@ -19,6 +19,7 @@
 
 #include <iostream>
 #include <set>
+#include <chrono>
 #include "fission/utils/logger.h"
 using namespace fission::ffi;
 using namespace fission::core;
@@ -234,10 +235,18 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         fd->getFuncProto().setInline(false);
     }
     
-    // Check if function is already being decompiled (recursive call)
+    // Check if function is already being decompiled (recursive call).
+    // In --decomp-all mode, callee analysis can trigger A→B→A cycles.
+    // Instead of propagating an exception (which aborts the outer function),
+    // return a forward-declaration stub so the caller can still complete.
     if (fd->isProcStarted()) {
-        fission::utils::log_stream() << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec << " is already being processed" << std::endl;
-        throw std::runtime_error("Function is already being decompiled (recursive decompilation detected)");
+        std::ostringstream hex;
+        hex << std::hex << addr;
+        fission::utils::log_stream() << "[DecompilerCore] NOTE: Recursive entry for 0x"
+                  << hex.str() << " — returning stub" << std::endl;
+        // Mark as analyzed so we don't retry
+        if (ctx) ctx->analyzed_callees.insert(addr);
+        return "// [recursive] void sub_" + hex.str() + "(void);\n";
     }
     
     // Clear only this function's data for fresh analysis
@@ -323,13 +332,23 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("No current action group");
     }
 
-    // Enforce GDT-based and built-in prototypes before action reset.
-    {
+    // Global initializations that scan all symbols: run only once
+    if (!ctx->global_symbols_applied) {
         fission::types::PrototypeEnforcer proto_enforcer;
         if (!ctx->symbols.empty()) {
             proto_enforcer.enforce_iat_prototypes(ctx->arch.get(), ctx->symbols);
         }
+        
+        mark_noreturn_functions(ctx, ctx->symbols);
+        mark_noreturn_functions(ctx, ctx->global_symbols);
+        
+        ctx->global_symbols_applied = true;
+        fission::utils::log_stream() << "[DecompilerCore] Global symbols and noreturn hints applied." << std::endl;
+    }
 
+    // Per-function prototype enforcement before action reset
+    {
+        fission::types::PrototypeEnforcer proto_enforcer;
         std::string func_name;
         auto it = ctx->symbols.find(addr);
         if (it != ctx->symbols.end()) {
@@ -352,19 +371,13 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         }
     }
 
-    // ========================================================================
-    // noreturn auto-marking — must run AFTER prototype enforcement, BEFORE
-    // clearAnalysis/reset so that FlowInfo sees the flags during perform().
-    // ========================================================================
-    {
-        mark_noreturn_functions(ctx, ctx->symbols);
-        mark_noreturn_functions(ctx, ctx->global_symbols);
-    }
-
     // CRITICAL: Reset action state for this function AFTER prototypes are applied
     fission::utils::log_stream() << "[DecompilerCore] Resetting action state..." << std::endl;
     ctx->arch->clearAnalysis(fd);
     current_action->reset(*fd);
+
+    // ===== TIMING INSTRUMENTATION =====
+    auto t0 = std::chrono::steady_clock::now();
 
     // P1-A: Seed Ghidra's type recommendation system BEFORE action->perform()
     // so that ActionInferTypes picks up API-derived types in its own loop.
@@ -373,6 +386,8 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         seeder.set_compiler_id(ctx->compiler_id.empty() ? "windows" : ctx->compiler_id);
         seeder.seed_before_action(fd);
     }
+
+    auto t1 = std::chrono::steady_clock::now();
 
     fission::utils::log_stream() << "[DecompilerCore] Performing decompilation..." << std::endl;
     
@@ -401,10 +416,12 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Unknown error during decompilation");
     }
 
+    auto t2 = std::chrono::steady_clock::now();
+
     fission::decompiler::AnalysisArtifacts analysis =
         fission::decompiler::run_analysis_passes(ctx, fd, current_action, MAX_FUNCTION_SIZE);
-    
-    fission::utils::log_stream() << "[DecompilerCore] Generating output..." << std::endl;
+
+    auto t3 = std::chrono::steady_clock::now();
     
     // Check print language
     if (!ctx->arch->print) {
@@ -417,6 +434,8 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     ctx->arch->print->docFunction(fd);
     
     std::string result = ss.str();
+
+    auto t4 = std::chrono::steady_clock::now();
     
     // ========================================================================
     // Full Post-Processing Chain
@@ -426,8 +445,18 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
 
     // Use the analysis artifacts gathered earlier for post-processing
     result = run_post_processing(ctx, fd, result, analysis, options);
-    
-    fission::utils::log_stream() << "[DecompilerCore] Decompilation complete, " << result.size() << " bytes after post-processing" << std::endl;
+
+    auto t5 = std::chrono::steady_clock::now();
+
+    // ===== TIMING REPORT =====
+    auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+    fission::utils::log_stream()
+        << "[PERF] seed=" << ms(t0, t1)
+        << "ms  perform=" << ms(t1, t2)
+        << "ms  analysis=" << ms(t2, t3)
+        << "ms  print=" << ms(t3, t4)
+        << "ms  postproc=" << ms(t4, t5)
+        << "ms  TOTAL=" << ms(t0, t5) << "ms" << std::endl;
     
     return result;
 }

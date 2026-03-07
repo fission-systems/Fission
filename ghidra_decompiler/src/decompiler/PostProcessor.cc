@@ -7,6 +7,7 @@
 #include <map>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
 
 namespace fission {
 namespace decompiler {
@@ -118,23 +119,147 @@ std::string PostProcessor::convert_integer_constants(std::string c_code) {
 }
 
 std::string PostProcessor::convert_while_to_for(std::string c_code) {
-    // Static regex objects — compiled once at first call (C++11 magic statics)
-    static const std::regex increment_pattern(R"((\.\w+|\w+)\s*=\s*\1\s*\+\s*1\s*;)");
-    static const std::regex decrement_pattern(R"((\.\w+|\w+)\s*=\s*\1\s*-\s*1\s*;)");
-    static const std::regex add_assign_pattern(R"((\w+)\s*=\s*\1\s*\+\s*([^;]+);)");
-    static const std::regex sub_assign_pattern(R"((\w+)\s*=\s*\1\s*-(?!>)\s*([^;]+);)");
-    static const std::regex mul_assign_pattern(R"((\w+)\s*=\s*\1\s*\*\s*([^;]+);)");
-    static const std::regex or_assign_pattern(R"((\w+)\s*=\s*\1\s*\|\s*([^;]+);)");
-    static const std::regex and_assign_pattern(R"((\w+)\s*=\s*\1\s*\&\s*([^;]+);)");
+    // Single-pass compound-operator conversion.
+    // Replaces: X = X + 1;  → X++;
+    //           X = X - 1;  → X--;
+    //           X = X + Y;  → X += Y;  (and -, *, |, &)
+    //
+    // Previous implementation used 7 sequential regex_replace calls,
+    // each scanning the entire string. This version does one pass.
 
-    c_code = std::regex_replace(c_code, increment_pattern, "$1++;");
-    c_code = std::regex_replace(c_code, decrement_pattern, "$1--;");
-    c_code = std::regex_replace(c_code, add_assign_pattern, "$1 += $2;");
-    c_code = std::regex_replace(c_code, sub_assign_pattern, "$1 -= $2;");
-    c_code = std::regex_replace(c_code, mul_assign_pattern, "$1 *= $2;");
-    c_code = std::regex_replace(c_code, or_assign_pattern, "$1 |= $2;");
-    c_code = std::regex_replace(c_code, and_assign_pattern, "$1 &= $2;");
-    return c_code;
+    std::string out;
+    out.reserve(c_code.size());
+
+    size_t pos = 0;
+    while (pos < c_code.size()) {
+        // Find next '=' that could be an assignment
+        size_t eq = c_code.find('=', pos);
+        if (eq == std::string::npos || eq == 0) {
+            out.append(c_code, pos, std::string::npos);
+            break;
+        }
+
+        // Skip == and !=, <=, >=
+        if ((eq > 0 && (c_code[eq-1] == '!' || c_code[eq-1] == '<' || c_code[eq-1] == '>' ||
+                        c_code[eq-1] == '+' || c_code[eq-1] == '-' || c_code[eq-1] == '*' ||
+                        c_code[eq-1] == '|' || c_code[eq-1] == '&'))
+            || (eq + 1 < c_code.size() && c_code[eq+1] == '=')) {
+            out.append(c_code, pos, eq + 1 - pos);
+            pos = eq + 1;
+            continue;
+        }
+
+        // Extract LHS identifier: scan backward from '=' skipping whitespace
+        size_t lhs_end = eq;
+        while (lhs_end > pos && (c_code[lhs_end-1] == ' ' || c_code[lhs_end-1] == '\t'))
+            lhs_end--;
+        size_t lhs_start = lhs_end;
+        while (lhs_start > pos && (std::isalnum(static_cast<unsigned char>(c_code[lhs_start-1])) ||
+                                     c_code[lhs_start-1] == '_' || c_code[lhs_start-1] == '.'))
+            lhs_start--;
+        
+        std::string lhs(c_code, lhs_start, lhs_end - lhs_start);
+        if (lhs.empty() || !(std::isalpha(static_cast<unsigned char>(lhs[0])) || lhs[0] == '_' || lhs[0] == '.')) {
+            out.append(c_code, pos, eq + 1 - pos);
+            pos = eq + 1;
+            continue;
+        }
+
+        // Check that LHS is preceded by a word boundary
+        if (lhs_start > 0) {
+            char prev = c_code[lhs_start - 1];
+            if (std::isalnum(static_cast<unsigned char>(prev)) || prev == '_') {
+                out.append(c_code, pos, eq + 1 - pos);
+                pos = eq + 1;
+                continue;
+            }
+        }
+
+        // Skip whitespace after '='
+        size_t rhs_start = eq + 1;
+        while (rhs_start < c_code.size() && (c_code[rhs_start] == ' ' || c_code[rhs_start] == '\t'))
+            rhs_start++;
+
+        // Check if RHS starts with the same identifier
+        if (rhs_start + lhs.size() > c_code.size() ||
+            c_code.compare(rhs_start, lhs.size(), lhs) != 0) {
+            out.append(c_code, pos, eq + 1 - pos);
+            pos = eq + 1;
+            continue;
+        }
+
+        // Check word boundary after the repeated identifier
+        size_t after_id = rhs_start + lhs.size();
+        if (after_id < c_code.size() &&
+            (std::isalnum(static_cast<unsigned char>(c_code[after_id])) || c_code[after_id] == '_')) {
+            out.append(c_code, pos, eq + 1 - pos);
+            pos = eq + 1;
+            continue;
+        }
+
+        // Skip whitespace to find operator
+        size_t op_pos = after_id;
+        while (op_pos < c_code.size() && (c_code[op_pos] == ' ' || c_code[op_pos] == '\t'))
+            op_pos++;
+
+        if (op_pos >= c_code.size()) {
+            out.append(c_code, pos, eq + 1 - pos);
+            pos = eq + 1;
+            continue;
+        }
+
+        char op_ch = c_code[op_pos];
+        // Handle '->' (not subtraction!)
+        if (op_ch == '-' && op_pos + 1 < c_code.size() && c_code[op_pos+1] == '>') {
+            out.append(c_code, pos, eq + 1 - pos);
+            pos = eq + 1;
+            continue;
+        }
+
+        if (op_ch != '+' && op_ch != '-' && op_ch != '*' && op_ch != '|' && op_ch != '&') {
+            out.append(c_code, pos, eq + 1 - pos);
+            pos = eq + 1;
+            continue;
+        }
+
+        // Skip whitespace after operator
+        size_t val_start = op_pos + 1;
+        while (val_start < c_code.size() && (c_code[val_start] == ' ' || c_code[val_start] == '\t'))
+            val_start++;
+
+        // Find the semicolon
+        size_t semi = c_code.find(';', val_start);
+        if (semi == std::string::npos) {
+            out.append(c_code, pos, eq + 1 - pos);
+            pos = eq + 1;
+            continue;
+        }
+
+        std::string value(c_code, val_start, semi - val_start);
+        // Trim trailing whitespace
+        while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+            value.pop_back();
+
+        // Emit the text before LHS unchanged
+        out.append(c_code, pos, lhs_start - pos);
+
+        // Special case: X = X + 1 → X++, X = X - 1 → X--
+        if (value == "1" && (op_ch == '+' || op_ch == '-')) {
+            out.append(lhs);
+            out.append(op_ch == '+' ? "++;" : "--;");
+        } else {
+            out.append(lhs);
+            out.push_back(' ');
+            out.push_back(op_ch);
+            out.append("= ");
+            out.append(value);
+            out.push_back(';');
+        }
+
+        pos = semi + 1;
+    }
+
+    return out;
 }
 
 std::string PostProcessor::simplify_nested_if(std::string c_code) {
@@ -706,36 +831,55 @@ std::string PostProcessor::convert_while_to_for_struct(std::string c_code) {
 std::string PostProcessor::process(const std::string& c_code) {
     std::string result = c_code;
     
-    // Apply all optimization passes in order
+    auto t0 = std::chrono::steady_clock::now();
+    auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+
     // 1. Extract string literals from integer constants
     result = convert_integer_constants(result);
+    auto t1 = std::chrono::steady_clock::now();
     
     // 2. Structurize control flow (eliminate gotos, normalize loops)
     result = structurize_control_flow(result);
+    auto t2 = std::chrono::steady_clock::now();
 
     // 3. Convert to compound operators (i++ etc) — must run before while→for struct pass
     result = convert_while_to_for(result);
+    auto t3 = std::chrono::steady_clock::now();
 
     // 4. Convert while+init+increment → for loops (sees already-normalised ++ / -- etc.)
     result = convert_while_to_for_struct(result);
+    auto t4 = std::chrono::steady_clock::now();
 
     // 5. Simplify conditions
     result = simplify_nested_if(result);
+    auto t5 = std::chrono::steady_clock::now();
     
     // 6. Detect array initializations
     result = fold_array_init(result);
+    auto t6 = std::chrono::steady_clock::now();
 
     // 7. Pointer arithmetic → array subscript ( *(T*)(ptr+i*sz) → ptr[i] )
     result = rewrite_pointer_arithmetic_to_array(result);
+    auto t7 = std::chrono::steady_clock::now();
 
     // 8. Remove redundant / widening casts and replace (void*)0 with NULL
     result = eliminate_redundant_casts(result);
+    auto t8 = std::chrono::steady_clock::now();
 
     // 9. Drop self-assignment lines (x = x;)
     result = eliminate_dead_stores(result);
+    auto t9 = std::chrono::steady_clock::now();
 
     // 10. Improve variable names
     result = improve_variable_names(result);
+    auto t10 = std::chrono::steady_clock::now();
+
+    fprintf(stderr, "[CORE-PP] intconst=%.2f cfg=%.2f compound=%.2f while2for=%.2f "
+                    "simplify=%.2f arrayinit=%.2f ptr2arr=%.2f casts=%.2f "
+                    "deadstore=%.2f varnames=%.2f TOTAL=%.2fms\n",
+            ms(t0,t1), ms(t1,t2), ms(t2,t3), ms(t3,t4),
+            ms(t4,t5), ms(t5,t6), ms(t6,t7), ms(t7,t8),
+            ms(t8,t9), ms(t9,t10), ms(t0,t10));
     
     return result;
 }

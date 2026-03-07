@@ -4,6 +4,97 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-07
+
+### 디컴파일러 성능 최적화 + 성공률 개선
+
+putty.exe(2,756개 함수) 전체 벤치마크 기준 **성공률 61% → 87%**, 단일 함수 디컴파일 시간 **207ms → 44ms** 달성.
+
+#### Performance: PostProcessPipeline 계측 및 병목 제거
+
+pass별 `std::chrono` 타이밍 계측을 추가하여 병목을 정밀 식별 후 최적화.
+
+| Pass | Before | After | 개선 |
+|------|--------|-------|------|
+| compound ops (`+=`, `++` 등) | 22.9ms | 0.01ms | **2,290x** |
+| GUID 치환 | 34ms | ~0ms† | O(M·N) → O(N) 스캔 |
+| CFGStructurizer (goto 없는 함수) | 48ms | 0.12ms | **400x** |
+| PostProcessor::process 합계 | 83ms | 1.4ms | **59x** |
+
+† GUID 로딩은 첫 호출에서만 파일 I/O 발생 (~27ms 일회성)
+
+#### Performance: `convert_while_to_for` — 7 regex → 단일 패스 수동 매칭
+
+`x = x + 1;` → `x++;` 류의 복합 대입 변환을 7개 `regex_replace` 순차 실행에서
+O(N) 단일 패스 수동 파서로 전환.
+
+- **수정 위치**: `ghidra_decompiler/src/decompiler/PostProcessor.cc`
+
+#### Performance: GUID 치환 O(M·N) → O(N)
+
+전체 GUID 맵(수천 개)을 순회하며 `string::find`를 반복하는 방식에서,
+코드에서 GUID 패턴(8-4-4-4-12)을 먼저 스캔 후 해시맵 한 번 lookup으로 전환.
+
+- **수정 위치**: `ghidra_decompiler/src/processing/passes/ConstantReplacementPasses.cc`
+
+#### Performance: CFGStructurizer Early Exit
+
+`goto` 키워드가 없는 함수에서 13개 CFG 변환 pass를 전부 스킵.
+대부분의 함수에는 goto가 없으므로 가장 임팩트가 큰 최적화.
+
+- **수정 위치**: `ghidra_decompiler/src/decompiler/CFGStructurizer.cc`
+
+#### Performance: `LabelAnalyzer::remove_unused_labels` — 동적 regex 제거
+
+미사용 라벨마다 `std::regex`를 새로 컴파일하던 방식에서
+O(N·L) 수동 라인 스캐너로 전환.
+
+- **수정 위치**: `ghidra_decompiler/src/decompiler/cfg/LabelAnalyzer.cc`
+
+#### Fix: Recursive Decompilation 에러 715건 수정 (성공률 61% → 87%)
+
+`--decomp-all` 모드에서 callee 분석 시 A→B→A 순환 참조가 발생하면
+`isProcStarted()` 체크가 예외를 던져 외부 함수 전체 실패하던 버그 수정.
+
+예외 전파 대신 순환 진입 탐지 시 forward-declaration 스텁을 반환하도록 변경.
+
+- **수정 위치**: `ghidra_decompiler/src/decompiler/DecompilationCore.cpp`
+- `ctx->analyzed_callees`에 순환 주소 즉시 등록하여 재시도 방지
+
+#### Infra: 공정 배치 벤치마크 시스템 구축
+
+단일 프로세스 `--decomp-all --benchmark` 모드를 활용, 초기화 비용을 분리한
+공정한 Fission vs PyGhidra 비교 스크립트.
+
+- **추가 위치**: `scripts/test/batch_benchmark/runner_fission.py`, `main.py`
+
+#### 전체 변경 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `ghidra_decompiler/src/decompiler/PostProcessPipeline.cpp` | pass별 chrono 타이밍 계측 추가 |
+| `ghidra_decompiler/src/decompiler/PostProcessor.cc` | `convert_while_to_for` 수동 패스 전환, 내부 pass 타이밍 추가 |
+| `ghidra_decompiler/src/decompiler/CFGStructurizer.cc` | goto early exit 추가 |
+| `ghidra_decompiler/src/decompiler/cfg/LabelAnalyzer.cc` | `remove_unused_labels` 동적 regex 제거 |
+| `ghidra_decompiler/src/decompiler/DecompilationCore.cpp` | recursive decompilation throw → stub 반환 |
+| `ghidra_decompiler/src/processing/passes/ConstantReplacementPasses.cc` | GUID 치환 O(N) 스캔 전환 |
+| `ghidra_decompiler/src/processing/passes/NamingStandardizers.cc` | non-static regex → `static const` |
+| `ghidra_decompiler/src/processing/passes/CppVirtualCallPasses.cc` | non-static regex → `static const` |
+| `ghidra_decompiler/include/fission/ffi/DecompContext.h` | `analyzed_callees` 캐시 추가 |
+| `ghidra_decompiler/src/decompiler/AnalysisPipeline.cpp` | callee 재분석 캐시 적용 |
+| `scripts/test/batch_benchmark/runner_fission.py` | 단일 프로세스 배치 모드 재작성 |
+| `scripts/test/batch_benchmark/main.py` | 공정 비교 출력 포맷 업데이트 |
+
+#### 벤치마크 결과 (putty.exe, 2,756 functions)
+
+| 지표 | Before | After |
+|------|--------|-------|
+| 성공률 | 1,693/2,756 (61%) | **2,408/2,756 (87%)** |
+| 단일 함수 TOTAL | 207ms | **44ms** |
+| postproc TOTAL | 125ms | **32ms** |
+
+---
+
 ## 2026-03-03
 
 ### 보안 취약점 대응 (2차: 정책 기준선/CI 게이트 정착)
@@ -14,16 +105,16 @@ All notable changes to the Fission project (November 2025 – Present).
 #### Added
 
 - `docs/build/SECURITY_ADVISORIES.md` 추가
-   - Rust/Node 보안 점검 명령, no-fix advisory 기준선 운영 원칙, 재검토 조건 문서화
+  - Rust/Node 보안 점검 명령, no-fix advisory 기준선 운영 원칙, 재검토 조건 문서화
 
 #### Changed
 
 - `deny.toml`
-   - no safe upgrade가 없는 생태계 advisory를 `advisories.ignore` 기준선으로 명시
-   - 신규/패치 가능한 advisory는 CI 실패로 triage 강제
+  - no safe upgrade가 없는 생태계 advisory를 `advisories.ignore` 기준선으로 명시
+  - 신규/패치 가능한 advisory는 CI 실패로 triage 강제
 - `.github/workflows/ci.yml`
-   - Rust advisory 단계의 non-blocking 설정 제거(`continue-on-error` 제거)
-   - 기준선 외 신규 취약점은 build failure로 처리
+  - Rust advisory 단계의 non-blocking 설정 제거(`continue-on-error` 제거)
+  - 기준선 외 신규 취약점은 build failure로 처리
 
 #### Security Notes
 
@@ -37,29 +128,29 @@ All notable changes to the Fission project (November 2025 – Present).
 #### Added
 
 - Postprocess 실행 통계 API 추가
-   - `PassExecutionStats` (`executed_passes`, `borrowed_outputs`, `owned_outputs`, skip 카운트)
-   - `PassRegistry::execute_all_with_stats(...)`
-   - `execute_default_passes_with_stats(...)`
+  - `PassExecutionStats` (`executed_passes`, `borrowed_outputs`, `owned_outputs`, skip 카운트)
+  - `PassRegistry::execute_all_with_stats(...)`
+  - `execute_default_passes_with_stats(...)`
 
 #### Changed
 
 - **Phase 2 (`unwrap/expect` 제거):**
-   - analysis/loader/pcode/disasm/core/ffi/tauri 전반 panic-prone 경로 제거
-   - 실패 경로를 명시적 분기/에러 전파로 통일
+  - analysis/loader/pcode/disasm/core/ffi/tauri 전반 panic-prone 경로 제거
+  - 실패 경로를 명시적 분기/에러 전파로 통일
 - **Phase 3 (`Cow` 기반 문자열 최적화):**
-   - pass pipeline을 `Result<Cow<str>, PassError>` 중심으로 전환
-   - cleanup/structure/naming/type/dwarf/arithmetic/loop/switch/casts/boilerplate 패스에 no-op `Borrowed` fast path 확장
-   - 불필요한 `String` 할당 감소
+  - pass pipeline을 `Result<Cow<str>, PassError>` 중심으로 전환
+  - cleanup/structure/naming/type/dwarf/arithmetic/loop/switch/casts/boilerplate 패스에 no-op `Borrowed` fast path 확장
+  - 불필요한 `String` 할당 감소
 - **Phase 4 (하드코딩 경로 제거):**
-   - `build.rs`의 Windows 절대 경로(`C:\\...`) fallback 제거
-   - `VCPKG_ROOT`/`VCPKG_INSTALLATION_ROOT` + 환경 기반 탐색으로 통일
-   - DIE 시그니처 로딩을 고정 상대경로 배열 대신 실행경로 기반 상향 탐색으로 변경
+  - `build.rs`의 Windows 절대 경로(`C:\\...`) fallback 제거
+  - `VCPKG_ROOT`/`VCPKG_INSTALLATION_ROOT` + 환경 기반 탐색으로 통일
+  - DIE 시그니처 로딩을 고정 상대경로 배열 대신 실행경로 기반 상향 탐색으로 변경
 
 #### Fixed
 
 - `switch` 재구성 회귀 수정:
-   - `result = ...` 같은 일반 대입 타깃도 인식하도록 패턴 매칭 보완
-   - 실패하던 `test_switch_from_if_else_assign_multiline` 복구
+  - `result = ...` 같은 일반 대입 타깃도 인식하도록 패턴 매칭 보완
+  - 실패하던 `test_switch_from_if_else_assign_multiline` 복구
 
 #### 검증
 

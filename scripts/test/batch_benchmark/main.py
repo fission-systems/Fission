@@ -77,11 +77,11 @@ def main():
     print(f"[*] Selected {len(target_functions)} functions for benchmark.")
     
     # ---------------------------------------------------------
-    # 1. Run Fission Benchmark
+    # 1. Run Fission Benchmark (single-process batch mode)
     # ---------------------------------------------------------
-    print(f"\n[*] Starting Fission Batch Analysis...")
-    fission_results = run_fission_batch(binary_path, target_functions, fission_dir)
-    f_total, f_avg, f_succ = print_table("Fission Results (CLI Overhead Included)", fission_results)
+    print(f"\n[*] Starting Fission Batch Analysis (single-process mode)...")
+    fission_init, fission_results = run_fission_batch(binary_path, target_functions, fission_dir)
+    f_total, f_avg, f_succ = print_table("Fission Results (Single-Process Batch)", fission_results, engine_time=fission_init)
 
     # ---------------------------------------------------------
     # 2. Run Ghidra Benchmark
@@ -99,15 +99,16 @@ def main():
     print(f" Target Binary: {os.path.basename(binary_path)}")
     print(f" Functions Measured: {len(target_functions)}")
     print(f"")
-    print(f" [Fission]")
+    print(f" [Fission] (single-process batch)")
     print(f"   - Success Rate: {f_succ}/{len(target_functions)}")
-    print(f"   - Total Time:   {f_total:.4f} s")
-    print(f"   - Avg Time:     {f_avg:.4f} s/func (Includes process overhead)")
+    print(f"   - Init Time:    {fission_init:.4f} s")
+    print(f"   - Total Decomp: {f_total:.4f} s (pure decompilation)")
+    print(f"   - Avg Time:     {f_avg:.4f} s/func")
     print(f"")
-    print(f" [Ghidra]")
+    print(f" [Ghidra] (single-process batch)")
     print(f"   - Success Rate: {g_succ}/{len(target_functions)}")
     print(f"   - Init Time:    {ghidra_load:.4f} s")
-    print(f"   - Total Time:   {g_total:.4f} s (Pure decompilation)")
+    print(f"   - Total Decomp: {g_total:.4f} s (pure decompilation)")
     print(f"   - Avg Time:     {g_avg:.4f} s/func")
     print(f"{'='*70}\n")
 
