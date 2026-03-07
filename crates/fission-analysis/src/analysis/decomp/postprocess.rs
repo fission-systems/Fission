@@ -25,7 +25,6 @@ mod tests;
 /// Each flag corresponds to one pass in [`PostProcessor::process`].
 /// All default to `true` (enabled).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct RustPostProcessOptions {
     pub clean_rust: bool,
     pub clean_go: bool,
@@ -89,21 +88,18 @@ impl PostProcessor {
     }
 
     /// Configure post-processing passes via options struct
-    #[must_use]
-    pub const fn with_options(mut self, options: RustPostProcessOptions) -> Self {
+    pub fn with_options(mut self, options: RustPostProcessOptions) -> Self {
         self.options = options;
         self
     }
 
     /// Set inferred types for field name resolution
-    #[must_use]
     pub fn with_inferred_types(mut self, types: Vec<InferredTypeInfo>) -> Self {
         self.inferred_types = types;
         self
     }
 
     /// Set DWARF function info for variable/parameter name substitution
-    #[must_use]
     pub fn with_dwarf_info(mut self, info: Option<DwarfFunctionInfo>) -> Self {
         self.dwarf_info = info;
         self
@@ -111,7 +107,7 @@ impl PostProcessor {
 
     /// Process using the new trait-based pass system
     ///
-    /// This is the recommended method - it uses the `PassRegistry`
+    /// This is the recommended method - it uses the PassRegistry
     /// for dynamic pass management and automatic dependency resolution.
     pub fn process_with_registry(&self, code: &str) -> Result<String, String> {
         use pass::PassContext;
@@ -121,7 +117,7 @@ impl PostProcessor {
 
         // Add type information if available
         if !self.inferred_types.is_empty() {
-            context.inferred_types.clone_from(&self.inferred_types);
+            context.inferred_types = self.inferred_types.clone();
         }
 
         // Add DWARF info if available
@@ -196,7 +192,7 @@ impl PostProcessor {
         // Execute all enabled passes with dependency resolution
         pass_registry
             .execute_all(code, &context)
-            .map(std::borrow::Cow::into_owned)
+            .map(|output| output.into_owned())
             .map_err(|e| e.to_string())
     }
 
@@ -209,16 +205,16 @@ impl PostProcessor {
         let mut processed = code.to_string();
 
         if self.options.clean_rust {
-            processed = Self::remove_rust_boilerplate(&processed);
+            processed = self.remove_rust_boilerplate(&processed);
         }
 
         if self.options.clean_go {
-            processed = Self::remove_go_boilerplate(&processed);
+            processed = self.remove_go_boilerplate(&processed);
         }
 
         // Demangle Swift symbols
         if self.options.swift_demangle {
-            processed = Self::demangle_swift_symbols(&processed);
+            processed = self.demangle_swift_symbols(&processed);
         }
 
         // Apply field offset replacement if we have type info

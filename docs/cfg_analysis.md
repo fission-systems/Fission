@@ -46,17 +46,17 @@ Fission's CFG analysis module provides comprehensive control flow graph analysis
 
 ```bash
 # Generate CFG summary
-fission binary.exe --cfg 0x140001000
+fission_cli binary.exe --cfg 0x140001000
 
 # Export to DOT format and render to PNG
-fission binary.exe --cfg 0x140001000 --cfg-format dot -o function.dot
+fission_cli binary.exe --cfg 0x140001000 --cfg-format dot -o function.dot
 # Automatically generates function.png if Graphviz is installed
 
 # Export to JSON
-fission binary.exe --cfg 0x140001000 --cfg-format json -o function.json
+fission_cli binary.exe --cfg 0x140001000 --cfg-format json -o function.json
 
 # ASCII art in terminal
-fission binary.exe --cfg 0x140001000 --cfg-format ascii
+fission_cli binary.exe --cfg 0x140001000 --cfg-format ascii
 ```
 
 ### Programmatic API

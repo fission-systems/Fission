@@ -3,7 +3,7 @@
 use super::super::types::RegisterState;
 use super::snapshot::{ExecutionSnapshot, MemoryDelta, SnapshotStats};
 use crate::config::CONFIG;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 /// Recording status
@@ -19,17 +19,17 @@ pub enum RecordingStatus {
 
 /// TTD Recorder - Records execution snapshots
 ///
-/// Performance: Uses `VecDeque` for O(1) removal from front and `HashSet` for O(1) lookup by step index.
-/// The `HashSet` stores `step_index` directly (not Vec index) to avoid rebuilding on removal.
+/// Performance: Uses VecDeque for O(1) removal from front and HashMap for O(1) lookup by step index.
+/// The HashMap stores step_index directly (not Vec index) to avoid rebuilding on removal.
 #[derive(Debug)]
 pub struct TTDRecorder {
     /// Current recording status
     status: RecordingStatus,
-    /// All recorded snapshots in order (`VecDeque` for O(1) front removal)
+    /// All recorded snapshots in order (VecDeque for O(1) front removal)
     snapshots: VecDeque<ExecutionSnapshot>,
-    /// Index for O(1) lookup: `step_index` -> snapshot reference via `step_index` (not vec index)
-    /// We store `step_index` as the key and use the snapshots `VecDeque` for actual data
-    snapshot_steps: HashSet<u64>,
+    /// Index for O(1) lookup: step_index -> snapshot reference via step_index (not vec index)
+    /// We store step_index as the key and use the snapshots VecDeque for actual data
+    snapshot_steps: HashMap<u64, ()>,
     /// Current step index
     current_step: u64,
     /// Recording start time
@@ -46,7 +46,7 @@ impl TTDRecorder {
         Self {
             status: RecordingStatus::Idle,
             snapshots: VecDeque::new(),
-            snapshot_steps: HashSet::new(),
+            snapshot_steps: HashMap::new(),
             current_step: 0,
             start_time: None,
             max_snapshots: CONFIG.debug.max_snapshots,
@@ -73,7 +73,7 @@ impl TTDRecorder {
     }
 
     /// Stop recording
-    pub const fn stop_recording(&mut self) {
+    pub fn stop_recording(&mut self) {
         self.status = RecordingStatus::Idle;
     }
 
@@ -93,10 +93,11 @@ impl TTDRecorder {
 
     /// Helper: Enforce max snapshots limit by removing oldest - O(1) operation
     fn enforce_max_snapshots(&mut self) {
-        if self.snapshots.len() >= self.max_snapshots
-            && let Some(oldest) = self.snapshots.pop_front() {
+        if self.snapshots.len() >= self.max_snapshots {
+            if let Some(oldest) = self.snapshots.pop_front() {
                 self.snapshot_steps.remove(&oldest.step_index);
             }
+        }
     }
 
     /// Record a step with the current register state
@@ -111,7 +112,7 @@ impl TTDRecorder {
         // O(1) removal from front of VecDeque
         self.enforce_max_snapshots();
 
-        self.snapshot_steps.insert(step_index);
+        self.snapshot_steps.insert(step_index, ());
         self.snapshots.push_back(snapshot);
         self.prev_registers = Some(registers);
         self.current_step += 1;
@@ -140,7 +141,7 @@ impl TTDRecorder {
         // O(1) removal from front of VecDeque
         self.enforce_max_snapshots();
 
-        self.snapshot_steps.insert(step_index);
+        self.snapshot_steps.insert(step_index, ());
         self.snapshots.push_back(snapshot);
         self.prev_registers = Some(registers);
         self.current_step += 1;
@@ -148,13 +149,13 @@ impl TTDRecorder {
         Some(step_index)
     }
 
-    /// Get a snapshot by step index using O(1) `HashSet` check + binary search
+    /// Get a snapshot by step index using O(1) HashMap check + binary search
     ///
-    /// Since snapshots are stored in order by `step_index`, we can use binary search
+    /// Since snapshots are stored in order by step_index, we can use binary search
     /// after verifying the step exists in our index.
     pub fn get_snapshot(&self, step_index: u64) -> Option<&ExecutionSnapshot> {
         // O(1) check if step exists
-        if !self.snapshot_steps.contains(&step_index) {
+        if !self.snapshot_steps.contains_key(&step_index) {
             return None;
         }
 
@@ -172,19 +173,19 @@ impl TTDRecorder {
 
     /// Get all snapshots as a slice
     ///
-    /// Note: `VecDeque` uses `make_contiguous` internally for slicing operations.
+    /// Note: VecDeque uses make_contiguous internally for slicing operations.
     /// For iteration, prefer using the iterator directly: `recorder.snapshots_iter()`
     pub fn snapshots(&self) -> Vec<&ExecutionSnapshot> {
         self.snapshots.iter().collect()
     }
 
-    /// Get an iterator over all snapshots (more efficient than `snapshots()` for iteration)
+    /// Get an iterator over all snapshots (more efficient than snapshots() for iteration)
     pub fn snapshots_iter(&self) -> impl Iterator<Item = &ExecutionSnapshot> {
         self.snapshots.iter()
     }
 
     /// Get current recording status
-    pub const fn status(&self) -> RecordingStatus {
+    pub fn status(&self) -> RecordingStatus {
         self.status
     }
 
@@ -194,11 +195,11 @@ impl TTDRecorder {
     }
 
     /// Get current step count
-    pub const fn step_count(&self) -> u64 {
+    pub fn step_count(&self) -> u64 {
         self.current_step
     }
 
-    /// Get snapshot count (may be less than `step_count` due to max limit)
+    /// Get snapshot count (may be less than step_count due to max limit)
     pub fn snapshot_count(&self) -> usize {
         self.snapshots.len()
     }
@@ -211,15 +212,13 @@ impl TTDRecorder {
     /// Get statistics about the recording
     pub fn stats(&self) -> SnapshotStats {
         let count = self.snapshots.len() as u64;
-        let memory_bytes: usize = self.snapshots.iter().map(super::snapshot::ExecutionSnapshot::memory_usage).sum();
+        let memory_bytes: usize = self.snapshots.iter().map(|s| s.memory_usage()).sum();
         let avg_deltas = if count > 0 {
-            #[allow(clippy::cast_precision_loss)]
-            let val = self.snapshots
+            self.snapshots
                 .iter()
                 .map(|s| s.memory_deltas.len())
                 .sum::<usize>() as f64
-                / count as f64;
-            val
+                / count as f64
         } else {
             0.0
         };

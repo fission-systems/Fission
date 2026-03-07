@@ -1,4 +1,4 @@
-//! Common CLI argument parsing utilities
+﻿//! Common CLI argument parsing utilities
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -11,12 +11,12 @@ pub fn parse_hex_address(s: &str) -> Result<u64, String> {
 
 /// One-shot CLI arguments (for fission_cli binary)
 #[derive(Parser, Debug)]
-#[command(name = "fission")]
+#[command(name = "fission_cli")]
 #[command(author = "Fission Dev Team")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "🔬 Next-Gen Binary Analysis & Decompilation")]
+#[command(about = "Next-Gen Binary Analysis & Decompilation")]
 #[command(
-    long_about = "Fission - A powerful binary analysis tool with native Ghidra decompilation support.\n\nQuick Start:\n  fission binary.exe -i              # Show info\n  fission binary.exe -l              # List functions\n  fission binary.exe --decomp 0x1400 # Decompile function\n  fission binary.exe --asm 0x1400    # Disassemble\n"
+    long_about = "Fission - A powerful binary analysis tool with native Ghidra decompilation support.\n\nQuick Start:\n  fission_cli binary.exe -i              # Show info\n  fission_cli binary.exe -l              # List functions\n  fission_cli binary.exe --decomp 0x1400 # Decompile function\n  fission_cli binary.exe --asm 0x1400    # Disassemble\n"
 )]
 pub struct OneShotArgs {
     /// Path to the binary file to analyze
@@ -26,12 +26,8 @@ pub struct OneShotArgs {
     #[arg(short, long, alias = "decomp", value_parser = parse_hex_address)]
     pub address: Option<u64>,
 
-    /// Decompile all discovered functions
-    #[arg(short = 'A', long, alias = "decomp-all")]
-    pub all: bool,
-
     /// List all discovered functions
-    #[arg(short, long)]
+    #[arg(short, long, alias = "funcs")]
     pub list: bool,
 
     /// Show binary information
@@ -61,18 +57,6 @@ pub struct OneShotArgs {
     /// Disassemble entire function at address (function boundaries)
     #[arg(long, alias = "asm-func", value_parser = parse_hex_address)]
     pub disasm_function: Option<u64>,
-
-    /// Generate Pcode DOT graph for function at address
-    #[arg(short = 'g', long, alias = "graph", value_parser = parse_hex_address)]
-    pub graph: Option<u64>,
-
-    /// Analyze CFG (Control Flow Graph) for function at address
-    #[arg(long, alias = "cfg", value_parser = parse_hex_address)]
-    pub cfg_address: Option<u64>,
-
-    /// CFG output format: summary, dot, ascii (default: summary)
-    #[arg(long, default_value = "summary")]
-    pub cfg_format: String,
 
     /// Number of instructions to disassemble
     #[arg(short = 'n', long, default_value = "20")]
@@ -117,27 +101,12 @@ pub struct OneShotArgs {
     #[arg(long)]
     pub benchmark: bool,
 
+    /// Decompile all discovered functions (batch mode)
+    #[arg(long, alias = "all")]
+    pub decomp_all: bool,
+
     /// Override binary format detection (auto|pe|elf|macho)
     /// Affects sleigh ID selection for architecture-specific analysis
     #[arg(long, value_name = "FORMAT")]
     pub format: Option<String>,
-}
-
-/// TUI CLI arguments (for fission_tui binary)
-#[derive(Parser, Debug)]
-#[command(name = "fission-tui")]
-#[command(author = "Fission Dev Team")]
-#[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "Terminal UI for Binary Analysis")]
-pub struct TuiArgs {
-    /// Path to the binary file to analyze
-    pub binary: PathBuf,
-
-    /// Override decompiler compiler ID (auto|windows|gcc|clang|default)
-    #[arg(long, value_name = "ID")]
-    pub compiler_id: Option<String>,
-
-    /// Decompilation profile (balanced|quality|speed)
-    #[arg(long, value_name = "PROFILE")]
-    pub profile: Option<String>,
 }

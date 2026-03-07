@@ -68,6 +68,22 @@ DECOMP_API DecompContext* decomp_create(const char* sla_dir);
  */
 DECOMP_API void decomp_destroy(DecompContext* ctx);
 
+/**
+ * Enable or disable C++ diagnostic log output (log_output() vs null_stream).
+ *
+ * @param ctx Decompiler context (can be NULL; then no-op)
+ * @param verbose Non-zero to enable log output, 0 to suppress
+ */
+DECOMP_API void decomp_set_log_verbose(DecompContext* ctx, int verbose);
+
+/**
+ * Set decompiler log file path (append). Process-wide; empty path disables file logging.
+ *
+ * @param ctx Decompiler context (unused; can be NULL)
+ * @param path File path, or NULL / empty to disable file logging
+ */
+DECOMP_API void decomp_set_log_file(DecompContext* ctx, const char* path);
+
 // ============================================================================
 // Binary Loading
 // ============================================================================

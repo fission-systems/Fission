@@ -22,15 +22,15 @@ pub enum Expr {
     /// Binary operation
     BinOp {
         op: BinOpKind,
-        left: Box<Self>,
-        right: Box<Self>,
+        left: Box<Expr>,
+        right: Box<Expr>,
     },
     /// Unary operation
-    UnaryOp { op: UnaryOpKind, operand: Box<Self> },
+    UnaryOp { op: UnaryOpKind, operand: Box<Expr> },
     /// Function call
-    Call { name: String, args: Vec<Self> },
+    Call { name: String, args: Vec<Expr> },
     /// Assignment (for statement-level optimizations)
-    Assign { target: String, value: Box<Self> },
+    Assign { target: String, value: Box<Expr> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,12 +72,12 @@ pub enum Stmt {
     Expr(Expr),
     If {
         condition: Expr,
-        then_block: Vec<Self>,
-        else_block: Option<Vec<Self>>,
+        then_block: Vec<Stmt>,
+        else_block: Option<Vec<Stmt>>,
     },
     While {
         condition: Expr,
-        body: Vec<Self>,
+        body: Vec<Stmt>,
     },
     Return(Option<Expr>),
 }
@@ -190,7 +190,7 @@ impl Optimizer {
 
     fn count_expr_usage(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => self.count_in_expr(expr),
+            Stmt::Expr(expr) => self.count_in_expr(expr),
             Stmt::If {
                 condition,
                 then_block,
@@ -212,6 +212,7 @@ impl Optimizer {
                     self.count_expr_usage(s);
                 }
             }
+            Stmt::Return(Some(expr)) => self.count_in_expr(expr),
             Stmt::Return(None) => {}
         }
     }

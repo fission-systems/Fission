@@ -9,7 +9,7 @@ repository = "https://github.com/sjkim1127/Fission"
 readme = "../../README.md"
 keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]
 categories = ["development-tools::debugging"]
-default-run = "fission"
+default-run = "fission_cli"
 
 [lib]
 name = "fission_cli"
@@ -17,12 +17,8 @@ path = "src/lib.rs"
 test = false
 
 [features]
-default = ["cli", "native_decomp"]
-cli = ["dep:reedline", "dep:clap"]
-tui = ["dep:ratatui", "dep:crossterm", "dep:clap"]
+default = []
 native_decomp = ["fission-analysis/native_decomp", "dep:fission-ffi"]
-
-tokio-console = ["dep:console-subscriber"]
 
 [dependencies]
 fission-core = { path = "../fission-core" }
@@ -30,36 +26,13 @@ fission-loader = { path = "../fission-loader" }
 fission-analysis = { path = "../fission-analysis" }
 fission-ffi = { path = "../fission-ffi", optional = true }
 tracing = "0.1"
-reedline = { version = "0.30", optional = true }
-clap = { version = "4.5", features = ["derive"], optional = true }
-ratatui = { version = "0.30", optional = true }
-crossterm = { version = "0.28", optional = true }
-colored = "2.1"
+clap = { version = "4.5", features = ["derive"] }
 iced-x86 = { version = "1.21", features = ["std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 libc = "0.2"
-console-subscriber = { version = "0.2", optional = true }
-
-[[bin]]
-name = "fission"
-path = "src/main.rs"
-test = false
-required-features = ["cli"]
-
-[[bin]]
-name = "fission_tui"
-path = "src/bin/fission_tui.rs"
-required-features = ["tui"]
-test = false
 
 [[bin]]
 name = "fission_cli"
 path = "src/bin/fission_cli.rs"
-required-features = ["cli"]
-test = false
-
-[[bin]]
-name = "ffi_test"
-path = "src/bin/ffi_test.rs"
 test = false

@@ -4,7 +4,6 @@
 //! apply optimizations, and regenerate improved C code.
 
 use super::{BinOpKind, Expr, Optimizer, OptimizerConfig, Stmt, UnaryOpKind};
-use std::fmt::Write;
 
 /// Parse decompiled C code into statements
 pub fn parse_c_to_ast(c_code: &str) -> Vec<Stmt> {
@@ -78,7 +77,10 @@ fn parse_if_block(lines: &[&str], start: usize) -> (Option<Stmt>, usize) {
     let line = lines[start].trim();
 
     // Extract condition from "if (condition) {"  or  "if (condition)"
-    let Some(condition) = extract_if_condition(line) else { return (None, 1) };
+    let condition = match extract_if_condition(line) {
+        Some(c) => c,
+        None => return (None, 1),
+    };
 
     let mut i = start + 1;
 
@@ -181,7 +183,7 @@ fn try_parse_assignment(line: &str) -> Option<Stmt> {
         let rhs = line[eq_pos + 1..].trim().trim_end_matches(';').trim();
 
         // Skip if it looks like a declaration (has type keywords)
-        if lhs.contains(' ')
+        if lhs.contains(" ")
             && (lhs.contains("int") || lhs.contains("char") || lhs.contains("void"))
         {
             return None;
@@ -245,7 +247,8 @@ pub fn parse_expr(s: &str) -> Expr {
         let is_number = stripped
             .chars()
             .next()
-            .is_some_and(char::is_numeric);
+            .map(|c| c.is_numeric())
+            .unwrap_or(false);
         if !stripped.is_empty() && !is_number {
             return Expr::UnaryOp {
                 op: UnaryOpKind::Neg,
@@ -260,10 +263,11 @@ pub fn parse_expr(s: &str) -> Expr {
     }
 
     // Hex literals
-    if (s.starts_with("0x") || s.starts_with("0X"))
-        && let Ok(val) = i64::from_str_radix(&s[2..], 16) {
+    if s.starts_with("0x") || s.starts_with("0X") {
+        if let Ok(val) = i64::from_str_radix(&s[2..], 16) {
             return Expr::Const(val);
         }
+    }
 
     // Variable reference
     Expr::Var(s.to_string())
@@ -348,25 +352,26 @@ fn stmt_to_c(stmt: &Stmt, indent: usize) -> String {
             for stmt in then_block {
                 s.push_str(&stmt_to_c(stmt, indent + 1));
             }
-            write!(s, "{ind}}}").expect("write to String never fails");
+            s.push_str(&format!("{}}}", ind));
 
             if let Some(else_stmts) = else_block {
                 s.push_str(" else {\n");
                 for stmt in else_stmts {
                     s.push_str(&stmt_to_c(stmt, indent + 1));
                 }
-                write!(s, "{ind}}}").expect("write to String never fails");
+                s.push_str(&format!("{}}}", ind));
             }
             s.push('\n');
             s
         }
         Stmt::Return(expr) => {
-            expr.as_ref().map_or_else(
-                || format!("{ind}return;\n"),
-                |e| format!("{}return {};\n", ind, expr_to_c(e)),
-            )
+            if let Some(e) = expr {
+                format!("{}return {};\n", ind, expr_to_c(e))
+            } else {
+                format!("{}return;\n", ind)
+            }
         }
-        Stmt::While { .. } => format!("{ind}/* unsupported statement */\n"),
+        _ => format!("{}/* unsupported statement */\n", ind),
     }
 }
 
@@ -374,9 +379,9 @@ fn expr_to_c(expr: &Expr) -> String {
     match expr {
         Expr::Const(val) => {
             if *val >= 0 && *val <= 9 {
-                format!("{val}")
+                format!("{}", val)
             } else {
-                format!("0x{val:x}")
+                format!("0x{:x}", val)
             }
         }
         Expr::Var(name) => name.clone(),
@@ -397,15 +402,15 @@ fn expr_to_c(expr: &Expr) -> String {
         Expr::Call { name, args } => {
             let args_str = args
                 .iter()
-                .map(expr_to_c)
+                .map(|a| expr_to_c(a))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{name}({args_str})")
+            format!("{}({})", name, args_str)
         }
     }
 }
 
-const fn binop_to_str(op: &BinOpKind) -> &str {
+fn binop_to_str(op: &BinOpKind) -> &str {
     match op {
         BinOpKind::Add => "+",
         BinOpKind::Sub => "-",
@@ -428,7 +433,7 @@ const fn binop_to_str(op: &BinOpKind) -> &str {
     }
 }
 
-const fn unaryop_to_str(op: &UnaryOpKind) -> &str {
+fn unaryop_to_str(op: &UnaryOpKind) -> &str {
     match op {
         UnaryOpKind::Neg => "-",
         UnaryOpKind::Not => "!",
@@ -442,8 +447,8 @@ pub fn optimize_c_code(c_code: &str, config: OptimizerConfig) -> String {
     let stmts = parse_c_to_ast(c_code);
 
     // Apply optimizer
-    let mut opt = Optimizer::with_config(config);
-    let optimized = opt.optimize_stmts(stmts);
+    let mut optimizer = Optimizer::with_config(config);
+    let optimized = optimizer.optimize_stmts(stmts);
 
     // Convert back to C
     ast_to_c(&optimized)

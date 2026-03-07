@@ -1,12 +1,12 @@
 //! Pass registry builder and default configuration
 //!
-//! Provides convenient functions to create a fully-configured `PassRegistry`
+//! Provides convenient functions to create a fully-configured PassRegistry
 //! with all available passes registered.
 
 use super::pass::{PassContext, PassExecutionStats, PassRegistry};
-use super::passes::{RemoveRustBoilerplatePass, RemoveGoBoilerplatePass, SwiftDemanglePass, FieldOffsetReplacementPass, InsertMissingCastsPass, ArithmeticIdiomsPass, DerefToArrayIndexPass, BitopToLogicopPass, RemoveConstantConditionsPass, RemoveDeadAssignmentsPass, SimplifyIfStructurePass, WhileTrueToCondPass, WhileTrueToForPass, WhileCondToForPass, DoWhileToForPass, WhileTrueToForEverPass, SwitchReconstructionPass, SwitchFromIfElseAssignPass, RenameInductionVarsPass, RenameSemanticVarsPass, LoopIdiomsPass, MulPow2ToShiftPass, ApplyDwarfNamesPass};
+use super::passes::*;
 
-/// Create a `PassRegistry` with all available passes registered
+/// Create a PassRegistry with all available passes registered
 ///
 /// All passes are enabled by default. Use the returned registry to
 /// selectively disable passes as needed.
@@ -87,7 +87,7 @@ pub fn execute_default_passes(code: &str, context: &PassContext) -> Result<Strin
     let registry = create_default_registry()?;
     registry
         .execute_all(code, context)
-        .map(std::borrow::Cow::into_owned)
+        .map(|output| output.into_owned())
         .map_err(|e| e.to_string())
 }
 
@@ -103,7 +103,7 @@ pub fn execute_default_passes_with_stats(
         .map_err(|e| e.to_string())
 }
 
-/// Create a `PassRegistry` with only specific categories enabled
+/// Create a PassRegistry with only specific categories enabled
 pub fn create_registry_for_categories(
     categories: &[super::pass::PassCategory],
 ) -> Result<PassRegistry, String> {
@@ -114,10 +114,11 @@ pub fn create_registry_for_categories(
 
     // Disable passes not in the specified categories
     for pass_id in all_passes {
-        if let Some(metadata) = registry.get_metadata(&pass_id)
-            && !categories.contains(&metadata.category) {
+        if let Some(metadata) = registry.get_metadata(&pass_id) {
+            if !categories.contains(&metadata.category) {
                 registry.disable(&pass_id);
             }
+        }
     }
 
     Ok(registry)

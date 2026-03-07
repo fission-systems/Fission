@@ -17,7 +17,7 @@ pub struct ParamInfo {
     pub name: String,
     pub type_name: String,
     /// Optional enum group for context-aware constant substitution
-    /// e.g., "`PAGE_PROTECT`" for `VirtualAlloc`'s flProtect parameter
+    /// e.g., "PAGE_PROTECT" for VirtualAlloc's flProtect parameter
     pub enum_group: Option<String>,
 }
 
@@ -50,9 +50,9 @@ struct JsonApiSignature {
 }
 
 impl WinApiDatabase {
-    /// Create a new `WinApiDatabase` with all built-in signatures
+    /// Create a new WinApiDatabase with all built-in signatures
     ///
-    /// Performance: Pre-allocates `HashMap` capacity based on known API count
+    /// Performance: Pre-allocates HashMap capacity based on known API count
     /// to avoid rehashing during loading (~130 APIs across all DLLs)
     pub fn new() -> Self {
         let mut db = Self {
@@ -77,7 +77,7 @@ impl WinApiDatabase {
 
     fn load_from_json_str(&mut self, json_str: &str, source: &str) {
         let signatures: Vec<JsonApiSignature> = serde_json::from_str(json_str)
-            .unwrap_or_else(|e| panic!("failed to parse win_api JSON '{source}': {e}"));
+            .unwrap_or_else(|e| panic!("failed to parse win_api JSON '{}': {}", source, e));
 
         for sig in signatures {
             let params = sig

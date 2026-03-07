@@ -57,10 +57,11 @@ cmake --build build
 cd ..
 
 # 4. Build Fission
-cargo build --release
+cargo build --release --bin fission_cli
 
 # 5. Run
-./target/release/fission
+./target/release/fission_cli                    # CLI
+# GUI: cd crates/fission-tauri && npm install && npm run tauri dev
 ```
 
 **Build time**: ~5-10 minutes (first build)  
@@ -142,20 +143,23 @@ cargo build --release
 #### Step 6: Run Fission
 
 ```powershell
-# GUI mode
-.\target\release\fission.exe
-
 # CLI mode
-.\target\release\fission.exe --cli test.exe
+.\target\release\fission_cli.exe test.exe
+
+# GUI (Tauri): from repo root
+cd crates\fission-tauri
+npm install
+npm run tauri dev
 ```
 
 #### Windows-Specific Notes
 
-**Dynamic Library Path**: The decompiler library (`libdecomp.dll`) must be in the same directory as `fission.exe` or in PATH.
+**Dynamic Library Path**: The decompiler library (`libdecomp.dll`) must be in the same directory as `fission_cli.exe` or in PATH.
 
 ```powershell
 # Copy DLL to output directory
 copy ghidra_decompiler\build\Release\libdecomp.dll target\release\
+# CLI binary name: fission_cli.exe
 ```
 
 **Antivirus**: Some antivirus software may flag Fission. Add exclusion for the `target/` directory.
@@ -220,14 +224,14 @@ cargo build --release --no-default-features --features cli
 #### Step 5: Run Fission
 
 ```bash
-# GUI mode
-./target/release/fission
-
 # CLI mode
-./target/release/fission --cli test.exe
+./target/release/fission_cli test.exe
 
-# Install system-wide (optional)
-sudo cp target/release/fission /usr/local/bin/
+# GUI (Tauri): from repo root
+cd crates/fission-tauri && npm install && npm run tauri dev
+
+# Install CLI system-wide (optional)
+sudo cp target/release/fission_cli /usr/local/bin/
 ```
 
 #### Ubuntu/Debian-Specific Notes
@@ -346,7 +350,11 @@ cargo build --release
 #### Step 6: Run Fission
 
 ```bash
-./target/release/fission
+# CLI
+./target/release/fission_cli
+
+# GUI (Tauri)
+cd crates/fission-tauri && npm install && npm run tauri dev
 ```
 
 #### macOS-Specific Notes
@@ -355,7 +363,7 @@ cargo build --release
 
 ```bash
 # Remove quarantine attribute
-xattr -d com.apple.quarantine target/release/fission
+xattr -d com.apple.quarantine target/release/fission_cli
 
 # Or disable Gatekeeper temporarily
 sudo spctl --master-disable
@@ -372,29 +380,26 @@ sudo spctl --master-disable
 Customize the build with Cargo features:
 
 ```bash
-# Default build (GUI + CLI + decompiler)
-cargo build --release
+# CLI (recommended for first build)
+cargo build --release --bin fission_cli
 
-# CLI only (minimal dependencies)
-cargo build --release --no-default-features --features cli
+# CLI with native decompiler
+cargo build --release --bin fission_cli --features native_decomp
 
-# GUI only
-cargo build --release --no-default-features --features gui
+# GUI (Tauri): build from Tauri crate
+cd crates/fission-tauri && npm run tauri build
 
-# All features
-cargo build --release --features "gui cli"
-
-# Without native decompiler (use external Ghidra)
-cargo build --release --no-default-features --features "gui cli"
+# Without native decompiler
+cargo build --release --bin fission_cli --no-default-features
 ```
 
 ### Available Features
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `gui` | Tauri 2.x + React 19 desktop GUI (`cd crates/fission-tauri && npm run tauri build`) | ✅ Yes |
-| `cli` | CLI with REPL | ✅ Yes |
-| `native_decomp` | Built-in Ghidra decompiler | ✅ Yes |
+| `native_decomp` | Built-in Ghidra decompiler (fission-cli, fission-ffi) | ✅ in fission-cli |
+| `gui` | Tauri 2.x + React 19 desktop GUI — 빌드: `cd crates/fission-tauri && npm run tauri build` | 별도 앱 |
+| `cli` | CLI 바이너리: `fission_cli` | `cargo build --bin fission_cli` |
 | `tui` | Terminal UI (ratatui) | ❌ No |
 
 ### Optimization Levels
@@ -524,11 +529,11 @@ cargo build --release --no-default-features --features cli
 # Build without optimizations (faster compile)
 cargo build
 
-# Run immediately
-cargo run -- --cli test.exe
+# Run CLI
+cargo run --bin fission_cli -- test.exe
 
 # Run with debug logging
-RUST_LOG=debug cargo run
+RUST_LOG=debug cargo run --bin fission_cli -- test.exe
 ```
 
 ### Watch Mode (Auto-Rebuild)
@@ -663,16 +668,16 @@ cargo build -j 4
 
 ```bash
 # 1. Strip symbols (already done in release profile)
-strip target/release/fission
+strip target/release/fission_cli
 
 # 2. Use UPX compression
-upx --best --lzma target/release/fission
+upx --best --lzma target/release/fission_cli
 
 # 3. Build with size optimization
 RUSTFLAGS="-C opt-level=z" cargo build --release
 
-# 4. Remove unnecessary features
-cargo build --release --no-default-features --features cli
+# 4. CLI only (smaller binary)
+cargo build --release --bin fission_cli
 ```
 
 ---
@@ -742,25 +747,62 @@ cargo test test_loader
 ### Verify Decompiler
 
 ```bash
-# Test FFI integration
-cargo run --bin ffi_test
-
-# Or manually
-./target/release/fission --cli examples/struct_test.exe --info
+# Test CLI
+./target/release/fission_cli --info examples/struct_test.exe
+# Or with path to a PE/ELF/Mach-O sample
+./target/release/fission_cli --info <path-to-binary>
 ```
 
 ### Check Dependencies
 
 ```bash
 # Linux
-ldd target/release/fission
+ldd target/release/fission_cli
 
 # macOS
-otool -L target/release/fission
+otool -L target/release/fission_cli
 
 # Windows (PowerShell)
-dumpbin /dependents target\release\fission.exe
+dumpbin /dependents target\release\fission_cli.exe
 ```
+
+---
+
+## Rust 워크스페이스 / rust-analyzer
+
+### `failed to read .../fission-tauri/src-tauri/Cargo.toml` (No such file or directory)
+
+- **원인**: 루트 `Cargo.toml`의 워크스페이스 멤버 `crates/fission-tauri/src-tauri` 경로에 `Cargo.toml`이 없을 때 발생합니다.
+- **조치**:
+  1. **전체 클론/동기화 확인**: `git status`, `git pull` 후 `ls crates/fission-tauri/src-tauri/Cargo.toml`로 파일 존재 여부 확인.
+  2. **GUI 없이 작업할 때**:  
+     - 루트 `Cargo.toml`에서 `"crates/fission-tauri/src-tauri",` 한 줄을 **주석 처리**하거나,  
+     - `cp Cargo.toml.workspace-cli-only Cargo.toml` 로 CLI 전용 워크스페이스로 교체할 수 있습니다.  
+     GUI 빌드가 필요해지면 `git checkout Cargo.toml` 로 원복하고 해당 경로가 있는지 확인하세요.
+  3. **rust-analyzer 재시작**: 수정 후 `Ctrl+Shift+P` → "Rust-analyzer: Restart server".
+
+### `file not found: .../fission-cli/src/bin/ffi_test.rs`
+
+- **원인**: 예전에 있던 `ffi_test` 바이너리가 제거된 뒤에도 IDE/rust-analyzer가 해당 파일을 열거나 인덱스에 남아 있을 때 발생할 수 있습니다.
+- **조치**:
+  1. `ffi_test.rs` 탭이 열려 있으면 **닫기**.
+  2. **Rust-analyzer 재시작**: `Ctrl+Shift+P` → "Rust-analyzer: Restart server".
+  3. 현재 `fission-cli`에는 `fission_cli` 바이너리만 정의되어 있으므로, `ffi_test` 참조는 제거된 상태가 정상입니다.
+
+---
+
+## Decompiler logging
+
+디컴파일러 준비(바이너리 로드·섹션·심볼·FID 등)는 fission-analysis의 `prepare_native_decompiler_for_binary` 한 경로만 사용하며, CLI와 GUI가 동일한 진입점을 호출한다. 구조는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)의 "Per-binary decompiler preparation" 참고. 초기화 비용은 `--benchmark` 시 JSON `_meta.prepare_timings`로 단계별 확인 가능하다.
+
+디컴파일러(C++) 진단 로그는 다음으로만 제어합니다.
+
+- **설정**: `fission.toml`의 `[decompiler]`에서 `log_verbose`(기본 `false`), `log_file`(기본 `""`). 비어 있지 않으면 해당 경로에 append.
+- **CLI**: `--verbose` 플래그로 오버라이드. 실제 적용값은 `config.decompiler.log_verbose || cli.verbose`.
+- **에러**: 실패 시 항상 `last_error` → Rust `Result`로 전달되며, 로그 스트림과 별개입니다.
+- **OutputSilencer**: CLI에서 verbose가 아닐 때 stderr를 `/dev/null`로 리다이렉트해, C++에서 로그를 꺼도 서드파티가 쓴 stderr를 막습니다.
+
+자세한 계약은 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)의 "Decompiler Logging and Errors"를 참고하세요.
 
 ---
 
@@ -784,9 +826,9 @@ dumpbin /dependents target\release\fission.exe
 
 **Minimum steps**:
 1. Install Rust + CMake + C++ compiler + zlib
-2. Build decompiler: `cmake -B build && cmake --build build`
-3. Build Fission: `cargo build --release`
-4. Run: `./target/release/fission`
+2. Build decompiler: `cd ghidra_decompiler && cmake -B build && cmake --build build && cd ..`
+3. Build Fission CLI: `cargo build --release --bin fission_cli`
+4. Run: `./target/release/fission_cli` (GUI는 `crates/fission-tauri`에서 `npm run tauri dev`)
 
 **Most common issues**:
 - ❌ CMake not found → Install CMake

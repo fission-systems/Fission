@@ -322,12 +322,6 @@ static bool infer_callee_pointer_returns(
     }
 
     for (uint64_t addr : callee_addrs) {
-        // Skip already-analyzed callees (cached across decompilations)
-        if (ctx->analyzed_callees.count(addr)) {
-            continue;
-        }
-        ctx->analyzed_callees.insert(addr);
-
         ghidra::Address func_addr(ctx->arch->getDefaultCodeSpace(), addr);
         ghidra::Funcdata* callee = global_scope->findFunction(func_addr);
         if (!callee) {

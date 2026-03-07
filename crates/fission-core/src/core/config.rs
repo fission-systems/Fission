@@ -62,6 +62,10 @@ pub struct DecompilerConfig {
     pub prefetch_count: usize,
     /// SLA (Sleigh) directory override (if empty, resolve from environment)
     pub sla_dir: String,
+    /// Enable C++ decompiler diagnostic log output (stderr). When false, native logs are suppressed.
+    pub log_verbose: bool,
+    /// If non-empty, append decompiler logs to this file (in addition to or instead of stderr when verbose).
+    pub log_file: String,
 }
 
 /// Analysis configuration
@@ -249,6 +253,8 @@ impl Default for DecompilerConfig {
             enable_prefetch: true,
             prefetch_count: 3,
             sla_dir: String::new(),
+            log_verbose: false,
+            log_file: String::new(),
         }
     }
 }

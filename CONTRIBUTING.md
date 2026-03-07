@@ -62,7 +62,7 @@ Before creating bug reports, please check existing issues to avoid duplicates.
 
 **Environment:**
 - OS: Ubuntu 22.04
-- Rust: 1.75.0
+- Rust: 1.85+
 - Fission: 0.1.0
 
 **Steps:**
@@ -462,9 +462,9 @@ use assert_cmd::Command;
 
 #[test]
 fn test_cli_info() {
-    Command::cargo_bin("fission")
+    Command::cargo_bin("fission_cli")
         .unwrap()
-        .args(&["--cli", "test/struct_test.exe", "--info"])
+        .args(&["--info", "test/struct_test.exe"])
         .assert()
         .success()
         .stdout(predicates::str::contains("Binary Information"));

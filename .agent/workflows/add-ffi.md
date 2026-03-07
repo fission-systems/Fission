@@ -144,7 +144,7 @@ cargo test -p fission-ffi
 // turbo
 
 ```bash
-cargo run -p fission-cli -- --cli tests/binaries/test_swift_bin info
+cargo run -p fission-cli -- tests/binaries/test_swift_bin --info
 ```
 
 ---

@@ -31,8 +31,12 @@
 
 pub mod cache;
 pub mod postprocess;
+#[cfg(feature = "native_decomp")]
+pub mod prepare;
 
 pub use postprocess::RustPostProcessOptions;
+#[cfg(feature = "native_decomp")]
+pub use prepare::{prepare_native_decompiler_for_binary, PrepareOptions, PrepareTimings};
 
 #[cfg(feature = "native_decomp")]
 use self::cache::DecompilerCache;
@@ -61,7 +65,12 @@ impl CachingDecompiler {
         sla_dir: &str,
         cache_size: usize,
     ) -> fission_core::Result<Self> {
-        let inner = DecompilerNative::new(sla_dir)?;
+        let mut inner = DecompilerNative::new(sla_dir)?;
+        let config = fission_core::config::Config::default();
+        inner.set_log_verbose(config.decompiler.log_verbose);
+        if !config.decompiler.log_file.is_empty() {
+            inner.set_log_file(&config.decompiler.log_file);
+        }
         let cache = DecompilerCache::new(&binary.hash, cache_size)?;
         let inferred_types = binary.inferred_types.clone();
         let dwarf_functions = binary.dwarf_functions.clone();
@@ -100,7 +109,7 @@ impl CachingDecompiler {
     }
 
     /// Access the underlying native decompiler
-    pub const fn inner_mut(&mut self) -> &mut DecompilerNative {
+    pub fn inner_mut(&mut self) -> &mut DecompilerNative {
         &mut self.inner
     }
 
@@ -110,16 +119,16 @@ impl CachingDecompiler {
     }
 
     /// Set Rust post-processing options
-    pub const fn set_rust_postprocess_options(&mut self, options: RustPostProcessOptions) {
+    pub fn set_rust_postprocess_options(&mut self, options: RustPostProcessOptions) {
         self.rust_postprocess_options = options;
     }
 
     /// Get current Rust post-processing options
-    pub const fn rust_postprocess_options(&self) -> &RustPostProcessOptions {
+    pub fn rust_postprocess_options(&self) -> &RustPostProcessOptions {
         &self.rust_postprocess_options
     }
 }
 
-/// Recommended decompiler type (`CachingDecompiler` when native is available)
+/// Recommended decompiler type (CachingDecompiler when native is available)
 #[cfg(feature = "native_decomp")]
 pub type RecommendedDecompiler = CachingDecompiler;

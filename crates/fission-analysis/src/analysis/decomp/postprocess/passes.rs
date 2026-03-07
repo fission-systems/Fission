@@ -1,17 +1,17 @@
 //! Concrete implementations of post-processing passes
 //!
 //! This module provides trait implementations for all the existing
-//! post-processing passes, wrapping the methods from `PostProcessor`.
+//! post-processing passes, wrapping the methods from PostProcessor.
 
 use super::PostProcessor;
 use super::pass::{PassCategory, PassContext, PassMetadata, PassResult, PostProcessPass};
 use std::borrow::Cow;
 
-fn pass_output(input: &str, output: String) -> Cow<'_, str> {
+fn pass_output<'a>(input: &'a str, output: String) -> PassResult<'a> {
     if output == input {
-        Cow::Borrowed(input)
+        Ok(Cow::Borrowed(input))
     } else {
-        Cow::Owned(output)
+        Ok(Cow::Owned(output))
     }
 }
 
@@ -55,7 +55,7 @@ impl PostProcessPass for MulPow2ToShiftPass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        Ok(pass_output(code, PostProcessor::mul_pow2_to_shift(code)))
+        pass_output(code, PostProcessor::mul_pow2_to_shift(code))
     }
 }
 
@@ -250,7 +250,7 @@ pub struct RemoveDeadAssignmentsPass {
 }
 
 impl RemoveDeadAssignmentsPass {
-    pub const fn new(iterations: usize) -> Self {
+    pub fn new(iterations: usize) -> Self {
         Self { iterations }
     }
 }
@@ -279,7 +279,7 @@ impl PostProcessPass for RemoveDeadAssignmentsPass {
         for _ in 1..self.iterations {
             owned = PostProcessor::remove_dead_local_assigns_cow(&owned).into_owned();
         }
-        Ok(pass_output(code, owned))
+        pass_output(code, owned)
     }
 }
 
@@ -403,7 +403,8 @@ impl PostProcessPass for RemoveRustBoilerplatePass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        Ok(PostProcessor::remove_rust_boilerplate_cow(code))
+        let processor = PostProcessor::new();
+        Ok(processor.remove_rust_boilerplate_cow(code))
     }
 }
 
@@ -421,7 +422,8 @@ impl PostProcessPass for RemoveGoBoilerplatePass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        Ok(PostProcessor::remove_go_boilerplate_cow(code))
+        let processor = PostProcessor::new();
+        Ok(processor.remove_go_boilerplate_cow(code))
     }
 }
 
@@ -439,7 +441,8 @@ impl PostProcessPass for SwiftDemanglePass {
     }
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
-        Ok(PostProcessor::demangle_swift_symbols_cow(code))
+        let processor = PostProcessor::new();
+        Ok(processor.demangle_swift_symbols_cow(code))
     }
 }
 

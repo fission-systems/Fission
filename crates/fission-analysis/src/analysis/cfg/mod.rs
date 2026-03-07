@@ -24,7 +24,6 @@ pub use loops::{Loop, LoopAnalyzer, LoopKind};
 pub use metrics::{CfgMetrics, ComplexityAnalyzer};
 pub use summary::*;
 pub use visualization::{CfgVisualizer, DotOptions};
-use std::fmt::Write;
 
 /// Error types for CFG analysis
 #[derive(Debug, Clone)]
@@ -44,11 +43,11 @@ pub enum CfgError {
 impl std::fmt::Display for CfgError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NoEntryPoint => write!(f, "No entry point found in function"),
-            Self::InvalidBlockIndex(idx) => write!(f, "Invalid block index: {idx}"),
-            Self::InvalidEdge(from, to) => write!(f, "Invalid edge: {from} -> {to}"),
-            Self::IrreducibleGraph => write!(f, "Graph contains irreducible loops"),
-            Self::AnalysisFailed(msg) => write!(f, "CFG analysis failed: {msg}"),
+            CfgError::NoEntryPoint => write!(f, "No entry point found in function"),
+            CfgError::InvalidBlockIndex(idx) => write!(f, "Invalid block index: {}", idx),
+            CfgError::InvalidEdge(from, to) => write!(f, "Invalid edge: {} -> {}", from, to),
+            CfgError::IrreducibleGraph => write!(f, "Graph contains irreducible loops"),
+            CfgError::AnalysisFailed(msg) => write!(f, "CFG analysis failed: {}", msg),
         }
     }
 }
@@ -81,12 +80,16 @@ impl CfgAnalysis {
         let dominator_tree = DominatorTree::compute(&cfg).ok();
 
         // Detect loops
-        let loops = dominator_tree.as_ref().map_or_else(Vec::new, |dom_tree| LoopAnalyzer::detect_loops(&cfg, dom_tree));
+        let loops = if let Some(ref dom_tree) = dominator_tree {
+            LoopAnalyzer::detect_loops(&cfg, dom_tree)
+        } else {
+            Vec::new()
+        };
 
         // Compute metrics
         let metrics = ComplexityAnalyzer::compute(&cfg, &loops);
 
-        Ok(Self {
+        Ok(CfgAnalysis {
             cfg,
             dominator_tree,
             loops,
@@ -103,27 +106,36 @@ impl CfgAnalysis {
     pub fn summary(&self) -> String {
         let mut report = String::new();
 
-        report.push_str("=== CFG Analysis Summary ===\n");
-        writeln!(report, "Basic Blocks: {}", self.cfg.blocks.len()).expect("write to String never fails");
-        writeln!(report, "Edges: {}", self.cfg.edge_count()).expect("write to String never fails");
-        writeln!(report, "Entry Block: {}", self.cfg.entry_block).expect("write to String never fails");
-        writeln!(report, "Exit Blocks: {:?}", self.cfg.exit_blocks).expect("write to String never fails");
-        report.push('\n');
+        report.push_str(&format!("=== CFG Analysis Summary ===\n"));
+        report.push_str(&format!("Basic Blocks: {}\n", self.cfg.blocks.len()));
+        report.push_str(&format!("Edges: {}\n", self.cfg.edge_count()));
+        report.push_str(&format!("Entry Block: {}\n", self.cfg.entry_block));
+        report.push_str(&format!("Exit Blocks: {:?}\n", self.cfg.exit_blocks));
+        report.push_str(&format!("\n"));
 
-        report.push_str("=== Metrics ===\n");
-        writeln!(report, "Cyclomatic Complexity: {}", self.metrics.cyclomatic_complexity).expect("write to String never fails");
-        writeln!(report, "Max Nesting Depth: {}", self.metrics.max_nesting_depth).expect("write to String never fails");
-        writeln!(report, "Number of Loops: {}", self.loops.len()).expect("write to String never fails");
+        report.push_str(&format!("=== Metrics ===\n"));
+        report.push_str(&format!(
+            "Cyclomatic Complexity: {}\n",
+            self.metrics.cyclomatic_complexity
+        ));
+        report.push_str(&format!(
+            "Max Nesting Depth: {}\n",
+            self.metrics.max_nesting_depth
+        ));
+        report.push_str(&format!("Number of Loops: {}\n", self.loops.len()));
 
         if !self.loops.is_empty() {
-            report.push_str("\n=== Detected Loops ===\n");
+            report.push_str(&format!("\n=== Detected Loops ===\n"));
             for (i, loop_info) in self.loops.iter().enumerate() {
-                writeln!(report, "Loop {}: Header={}, Kind={:?}, Blocks={:?}", i, loop_info.header, loop_info.kind, loop_info.body).expect("write to String never fails");
+                report.push_str(&format!(
+                    "Loop {}: Header={}, Kind={:?}, Blocks={:?}\n",
+                    i, loop_info.header, loop_info.kind, loop_info.body
+                ));
             }
         }
 
         if let Some(ref dom_tree) = self.dominator_tree {
-            report.push_str("\n=== Dominator Tree ===\n");
+            report.push_str(&format!("\n=== Dominator Tree ===\n"));
             report.push_str(&dom_tree.to_string());
         }
 

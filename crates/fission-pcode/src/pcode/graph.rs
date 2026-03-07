@@ -54,7 +54,8 @@ impl PcodeGraph {
 
                 let _ = writeln!(
                     dot,
-                    "    {op_id} [label=\"{label}\", style=filled, fillcolor=\"{color}\"];"
+                    "    {} [label=\"{}\", style=filled, fillcolor=\"{}\"];",
+                    op_id, label, color
                 );
 
                 // Connect operations within block (sequential flow)
@@ -101,7 +102,7 @@ impl PcodeGraph {
                                     } else {
                                         ""
                                     };
-                                    let _ = writeln!(dot, "    {src_id} -> {dst_id}{label};");
+                                    let _ = writeln!(dot, "    {} -> {}{};", src_id, dst_id, label);
                                 }
                             }
                         }
@@ -119,7 +120,8 @@ impl PcodeGraph {
                                         format!("op_{}_{}", next_block.index, first_op.seq_num);
                                     let _ = writeln!(
                                         dot,
-                                        "    {src_id} -> {dst_id} [label=\"False\", style=dashed];"
+                                        "    {} -> {} [label=\"False\", style=dashed];",
+                                        src_id, dst_id
                                     );
                                 }
                             }
@@ -135,7 +137,7 @@ impl PcodeGraph {
                                 let dst_id =
                                     format!("op_{}_{}", next_block.index, first_op.seq_num);
                                 let _ =
-                                    writeln!(dot, "    {src_id} -> {dst_id} [style=dashed];");
+                                    writeln!(dot, "    {} -> {} [style=dashed];", src_id, dst_id);
                             }
                         }
                     }
@@ -156,13 +158,13 @@ impl PcodeGraph {
                 for op in &block.ops {
                     // For each input, find its definition
                     for input in &op.inputs {
-                        if !input.is_constant
-                            && let Some(def_op_ref) = tracker.get_def(input) {
+                        if !input.is_constant {
+                            if let Some(def_op_ref) = tracker.get_def(input) {
                                 // Find the defining op
                                 // We need seq_num for the ID.
                                 // OpRef has block_idx and op_idx (index in vec)
-                                if let Some(def_block) = func.blocks.get(def_op_ref.block_idx)
-                                    && let Some(def_op) = def_block.ops.get(def_op_ref.op_idx) {
+                                if let Some(def_block) = func.blocks.get(def_op_ref.block_idx) {
+                                    if let Some(def_op) = def_block.ops.get(def_op_ref.op_idx) {
                                         let src_id =
                                             format!("op_{}_{}", def_block.index, def_op.seq_num);
                                         let dst_id = format!("op_{}_{}", block.index, op.seq_num);
@@ -170,10 +172,13 @@ impl PcodeGraph {
                                         // Use a different color for data flow
                                         let _ = writeln!(
                                             dot,
-                                            "    {src_id} -> {dst_id} [color=blue, constraint=false, style=dotted];"
+                                            "    {} -> {} [color=blue, constraint=false, style=dotted];",
+                                            src_id, dst_id
                                         );
                                     }
+                                }
                             }
+                        }
                     }
                 }
             }
@@ -199,7 +204,7 @@ impl PcodeGraph {
             if let Some(tracker) = def_use {
                 let mask = tracker.get_nz_mask(out);
                 if mask != u64::MAX {
-                    let _ = write!(s, "\\nNZ:{mask:X}");
+                    let _ = write!(s, "\\nNZ:{:X}", mask);
                 }
             }
             let _ = write!(s, " = ");

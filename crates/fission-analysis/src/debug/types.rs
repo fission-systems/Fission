@@ -49,7 +49,7 @@ pub enum DebugEvent {
 }
 
 /// Debug session status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum DebugStatus {
     #[default]
     Detached,

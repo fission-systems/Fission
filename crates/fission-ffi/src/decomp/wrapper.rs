@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
+#[cfg(debug_assertions)]
 use tracing::warn;
 
 // ============================================================================
@@ -126,6 +127,27 @@ impl DecompilerNative {
         })
     }
 
+    /// Enable or disable C++ diagnostic log output.
+    /// When disabled, the native decompiler uses null_stream(); when enabled, log_stream() (stderr).
+    pub fn set_log_verbose(&mut self, enabled: bool) {
+        if self.is_valid && !self.ctx.is_null() {
+            unsafe {
+                decomp_set_log_verbose(self.ctx, if enabled { 1 } else { 0 });
+            }
+        }
+    }
+
+    /// Set decompiler log file path (append). Process-wide; empty path disables file logging.
+    pub fn set_log_file(&mut self, path: &str) {
+        if self.is_valid && !self.ctx.is_null() {
+            if let Ok(cpath) = CString::new(path) {
+                unsafe {
+                    decomp_set_log_file(self.ctx, cpath.as_ptr());
+                }
+            }
+        }
+    }
+
     /// Check if the decompiler context is still valid
     ///
     /// This is called at the start of every public method to prevent
@@ -226,11 +248,11 @@ impl DecompilerNative {
         let mut names_cstr: Vec<CString> = Vec::with_capacity(symbols.len());
 
         for (addr, name) in symbols {
-            if !name.is_empty()
-                && let Ok(cstr) = CString::new(name.as_str())
-            {
-                addrs.push(*addr);
-                names_cstr.push(cstr);
+            if !name.is_empty() {
+                if let Ok(cstr) = CString::new(name.as_str()) {
+                    addrs.push(*addr);
+                    names_cstr.push(cstr);
+                }
             }
         }
 
@@ -270,11 +292,11 @@ impl DecompilerNative {
         let mut names_cstr: Vec<CString> = Vec::with_capacity(symbols.len());
 
         for (addr, name) in symbols {
-            if !name.is_empty()
-                && let Ok(cstr) = CString::new(name.as_str())
-            {
-                addrs.push(*addr);
-                names_cstr.push(cstr);
+            if !name.is_empty() {
+                if let Ok(cstr) = CString::new(name.as_str()) {
+                    addrs.push(*addr);
+                    names_cstr.push(cstr);
+                }
             }
         }
 
@@ -393,7 +415,6 @@ impl DecompilerNative {
     ///
     /// This distinguishes between code and data sections, improving
     /// analysis accuracy. Should be called after load_binary().
-    #[allow(clippy::too_many_arguments)]
     pub fn add_memory_block(
         &mut self,
         name: &str,
@@ -437,50 +458,20 @@ impl DecompilerNative {
     pub fn decompile(&self, addr: u64) -> Result<String> {
         self.check_valid()?;
 
-        struct OutputCtx {
-            output: String,
-            called: bool,
+        let result_ptr = unsafe { decomp_function(self.ctx, addr) };
+
+        if result_ptr.is_null() {
+            return Err(FissionError::decompiler(self.get_last_error()));
         }
 
-        let mut out_ctx = OutputCtx {
-            output: String::new(),
-            called: false,
+        let result = unsafe {
+            let cstr = CStr::from_ptr(result_ptr);
+            let string = cstr.to_string_lossy().into_owned();
+            decomp_free_string(result_ptr);
+            string
         };
-        let userdata = std::ptr::addr_of_mut!(out_ctx).cast::<std::ffi::c_void>();
 
-        unsafe extern "C" fn output_callback(
-            userdata: *mut std::ffi::c_void,
-            data: *const c_char,
-            len: usize,
-        ) {
-            unsafe {
-                let ctx = &mut *userdata.cast::<OutputCtx>();
-                ctx.called = true;
-                if data.is_null() || len == 0 {
-                    return;
-                }
-                let slice = std::slice::from_raw_parts(data.cast::<u8>(), len);
-                if let Ok(s) = std::str::from_utf8(slice) {
-                    ctx.output.push_str(s);
-                } else {
-                    ctx.output.push_str(&String::from_utf8_lossy(slice));
-                }
-            }
-        }
-
-        unsafe {
-            decomp_function_cb(self.ctx, addr, userdata, output_callback);
-        }
-
-        // If not called or empty string returned, check for errors.
-        if !out_ctx.called || out_ctx.output.is_empty() {
-            let error = self.get_last_error();
-            if !error.is_empty() && error != "Unknown error" {
-                return Err(FissionError::decompiler(error));
-            }
-        }
-
-        Ok(out_ctx.output)
+        Ok(result)
     }
 
     /// Get Pcode JSON for a function at the given address

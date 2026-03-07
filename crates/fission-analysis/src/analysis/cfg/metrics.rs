@@ -1,7 +1,7 @@
 //! CFG Metrics and Complexity Analysis
 //!
 //! Computes various metrics for control flow graphs:
-//! - Cyclomatic complexity (`McCabe`'s metric)
+//! - Cyclomatic complexity (McCabe's metric)
 //! - Nesting depth
 //! - Essential complexity
 //! - Block-level metrics
@@ -11,7 +11,7 @@ use super::{ControlFlowGraph, Loop};
 /// Collected CFG metrics
 #[derive(Debug, Clone, Default)]
 pub struct CfgMetrics {
-    /// `McCabe`'s cyclomatic complexity (M = E - N + 2P)
+    /// McCabe's cyclomatic complexity (M = E - N + 2P)
     pub cyclomatic_complexity: usize,
     /// Essential complexity (after removing structured constructs)
     pub essential_complexity: usize,
@@ -37,17 +37,17 @@ pub struct CfgMetrics {
 
 impl CfgMetrics {
     /// Check if complexity is considered high
-    pub const fn is_high_complexity(&self) -> bool {
+    pub fn is_high_complexity(&self) -> bool {
         self.cyclomatic_complexity > 10
     }
 
     /// Check if complexity is considered very high
-    pub const fn is_very_high_complexity(&self) -> bool {
+    pub fn is_very_high_complexity(&self) -> bool {
         self.cyclomatic_complexity > 20
     }
 
     /// Get complexity rating as string
-    pub const fn complexity_rating(&self) -> &'static str {
+    pub fn complexity_rating(&self) -> &'static str {
         match self.cyclomatic_complexity {
             0..=5 => "Low",
             6..=10 => "Moderate",
@@ -58,7 +58,7 @@ impl CfgMetrics {
     }
 
     /// Get recommended action based on complexity
-    pub const fn recommendation(&self) -> &'static str {
+    pub fn recommendation(&self) -> &'static str {
         match self.cyclomatic_complexity {
             0..=5 => "Simple function, good testability",
             6..=10 => "Moderate complexity, consider breaking down if it grows",
@@ -124,7 +124,7 @@ impl ComplexityAnalyzer {
         }
     }
 
-    /// Calculate cyclomatic complexity using `McCabe`'s formula
+    /// Calculate cyclomatic complexity using McCabe's formula
     /// M = E - N + 2P where:
     /// - E = number of edges
     /// - N = number of nodes (blocks)
@@ -203,7 +203,7 @@ impl ComplexityAnalyzer {
     /// Calculate Halstead complexity metrics (simplified)
     pub fn halstead_volume(cfg: &ControlFlowGraph) -> f64 {
         // Simplified: use instruction count as proxy
-        let n: usize = cfg.blocks.iter().map(super::basic_block::BasicBlock::instruction_count).sum();
+        let n: usize = cfg.blocks.iter().map(|b| b.instruction_count()).sum();
         if n == 0 {
             return 0.0;
         }
@@ -216,7 +216,7 @@ impl ComplexityAnalyzer {
     /// Based on Halstead Volume, Cyclomatic Complexity, and Lines of Code
     pub fn maintainability_index(cfg: &ControlFlowGraph, _loops: &[Loop]) -> f64 {
         let cc = Self::cyclomatic_complexity(cfg) as f64;
-        let loc: usize = cfg.blocks.iter().map(super::basic_block::BasicBlock::instruction_count).sum();
+        let loc: usize = cfg.blocks.iter().map(|b| b.instruction_count()).sum();
         let hv = Self::halstead_volume(cfg);
 
         if loc == 0 {
@@ -225,7 +225,7 @@ impl ComplexityAnalyzer {
 
         // MI = 171 - 5.2 * ln(HV) - 0.23 * CC - 16.2 * ln(LOC)
         // Normalized to 0-100 scale
-        let mi = 16.2f64.mul_add(-(loc as f64).ln_1p(), 0.23f64.mul_add(-cc, 5.2f64.mul_add(-hv.ln_1p(), 171.0)));
+        let mi = 171.0 - 5.2 * (hv + 1.0).ln() - 0.23 * cc - 16.2 * (loc as f64 + 1.0).ln();
 
         // Normalize to 0-100
         (mi * 100.0 / 171.0).clamp(0.0, 100.0)

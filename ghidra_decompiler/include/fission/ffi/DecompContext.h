@@ -58,6 +58,8 @@ struct DecompContext {
     std::string sla_dir;
     std::string last_error;
     std::string gdt_path;
+    /// When false, C++ diagnostic log output is suppressed (log_output() returns null_stream).
+    bool log_verbose = false;
     
     // Memory image (using fission::loader::SectionAwareLoadImage)
     std::unique_ptr<fission::loader::SectionAwareLoadImage> memory_image;
@@ -96,13 +98,6 @@ struct DecompContext {
     bool inplace_ops      = true;   ///< x = x+1 → x += 1
     bool no_cast_printing = false;  ///< Suppress safe casts (aggressive; off by default)
     bool convention_printing = false; ///< Show calling convention names
-
-    // Global symbols optimization flag
-    bool global_symbols_applied = false;
-
-    // Cache of callee addresses already analyzed by pointer-return inference.
-    // Prevents redundant followFlow+perform for callees across decompilations.
-    std::set<uint64_t> analyzed_callees;
 
     // Post-processing options (configurable via set_feature with "pp_" prefix)
     fission::decompiler::PostProcessOptions post_process_options;

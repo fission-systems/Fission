@@ -10,7 +10,7 @@ trigger: manual
 
 ```bash
 # 단일 함수 시간 측정
-time ./target/release/fission --cli <binary> <address>
+time ./target/release/fission_cli <binary> --decomp <address>
 
 # 복수 함수 벤치마크
 python3 scripts/run_complex_tests.py
@@ -22,13 +22,13 @@ python3 scripts/run_complex_tests.py
 
 ```bash
 cargo install flamegraph
-cargo flamegraph --bin fission -- --cli <binary> <address>
+cargo flamegraph --bin fission_cli -- <binary> --decomp <address>
 ```
 
 ### perf (Linux)
 
 ```bash
-perf record ./target/release/fission --cli <binary> <address>
+perf record ./target/release/fission_cli <binary> --decomp <address>
 perf report
 ```
 

@@ -98,7 +98,7 @@ impl LoadedBinary {
             );
         }
 
-        if detection.language().is_some_and(|d| d.name == "Go") {
+        if detection.language().map_or(false, |d| d.name == "Go") {
             let analyzer = golang::GoAnalyzer::new(&binary);
             if let Ok(go_functions) = analyzer.analyze() {
                 // Merge Go functions into binary using a map for O(N) performance
@@ -233,7 +233,7 @@ impl LoadedBinary {
         }
 
         // Go Type Analysis (works for any format with Go reflection data)
-        if detection.language().is_some_and(|d| d.name == "Go") {
+        if detection.language().map_or(false, |d| d.name == "Go") {
             let analyzer = golang::GoAnalyzer::new(&binary);
             let go_types = analyzer.analyze_types();
             for ty in go_types {
@@ -245,7 +245,7 @@ impl LoadedBinary {
         }
 
         // Rust VTable Analysis
-        if detection.language().is_some_and(|d| d.name == "Rust") {
+        if detection.language().map_or(false, |d| d.name == "Rust") {
             let analyzer = rust::RustAnalyzer::new(&binary);
             let rust_vtables = analyzer.analyze_vtables();
             for vtable in rust_vtables {

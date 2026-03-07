@@ -57,28 +57,24 @@ impl FunctionSignature {
     }
 
     /// Create a signature with expected callees for relation validation
-    #[must_use]
     pub fn with_callees(mut self, callees: &[&str]) -> Self {
-        self.expected_callees = callees.iter().map(std::string::ToString::to_string).collect();
+        self.expected_callees = callees.iter().map(|s| s.to_string()).collect();
         self
     }
 
     /// Create a signature with expected callers for relation validation
-    #[must_use]
     pub fn with_callers(mut self, callers: &[&str]) -> Self {
-        self.expected_callers = callers.iter().map(std::string::ToString::to_string).collect();
+        self.expected_callers = callers.iter().map(|s| s.to_string()).collect();
         self
     }
 
-    /// Set `force_relation` flag - require at least one expected callee to be found
-    #[must_use]
+    /// Set force_relation flag - require at least one expected callee to be found
     pub fn force_relation(mut self) -> Self {
         self.force_relation = true;
         self
     }
 
     /// Set confidence score
-    #[must_use]
     pub fn with_confidence(mut self, score: u8) -> Self {
         self.confidence = score;
         self
@@ -91,10 +87,11 @@ impl FunctionSignature {
         }
 
         for (i, &pat_byte) in self.pattern.iter().enumerate() {
-            if let Some(expected) = pat_byte
-                && bytes[i] != expected {
+            if let Some(expected) = pat_byte {
+                if bytes[i] != expected {
                     return false;
                 }
+            }
         }
         true
     }

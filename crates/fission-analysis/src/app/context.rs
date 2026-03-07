@@ -22,7 +22,7 @@ pub struct FissionContext {
 }
 
 impl FissionContext {
-    /// Create a new `FissionContext` with default settings
+    /// Create a new FissionContext with default settings
     pub fn new() -> Self {
         let event_bus = Arc::new(EventBus::new());
         let mut plugin_manager = PluginManager::default();
@@ -34,7 +34,7 @@ impl FissionContext {
         }
     }
 
-    /// Create a new `FissionContext` with an existing event bus
+    /// Create a new FissionContext with an existing event bus
     pub fn with_event_bus(event_bus: Arc<EventBus>) -> Self {
         let mut plugin_manager = PluginManager::default();
         plugin_manager.set_event_bus(event_bus.clone());
@@ -46,19 +46,19 @@ impl FissionContext {
     }
 
     /// Publish an event to all subscribers
-    pub fn publish(&self, event: &crate::app::events::FissionEvent) {
-        self.event_bus.publish(event);
+    pub fn publish(&self, event: crate::app::events::FissionEvent) {
+        self.event_bus.publish(event.clone());
 
         // Also dispatch to plugins
         if let Ok(pm) = self.plugin_manager.read() {
-            pm.emit_event(event);
+            pm.emit_event(&event);
         }
     }
 
     /// Log a message through the event system
     pub fn log(&self, level: &str, message: impl Into<String>, target: impl Into<String>) {
         self.event_bus
-            .publish(&crate::app::events::FissionEvent::LogMessage {
+            .publish(crate::app::events::FissionEvent::LogMessage {
                 level: level.to_string(),
                 message: message.into(),
                 target: target.into(),

@@ -1,14 +1,14 @@
 use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::common::{
-    apply_profile, init_decompiler, load_binary_into_decompiler, resolve_compiler_id,
-    resolve_profile,
+    apply_profile, init_decompiler, resolve_compiler_id, resolve_profile,
 };
 use crate::cli::output::OutputSilencer;
 use fission_analysis::analysis::decomp::postprocess::PostProcessor;
-use fission_core::PATHS;
+use fission_analysis::analysis::decomp::{
+    prepare_native_decompiler_for_binary, PrepareOptions, PrepareTimings,
+};
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use tracing::warn;
@@ -63,104 +63,15 @@ fn strip_inferred_structs(code: &str) -> String {
     result
 }
 
-fn register_memory_sections(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
-    if verbose {
-        eprintln!(
-            "[*] Registering {} memory sections...",
-            binary.sections.len()
-        );
-    }
-
-    let _silencer = OutputSilencer::new_if(!verbose);
-    for section in &binary.sections {
-        if let Err(e) = decomp.add_memory_block(
-            &section.name,
-            section.virtual_address,
-            section.virtual_size,
-            section.file_offset,
-            section.file_size,
-            section.is_executable,
-            section.is_writable,
-        ) && verbose
-        {
-            eprintln!("[!] Failed to register section {}: {}", section.name, e);
-        }
-    }
-}
-
-fn register_known_functions(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
-    if verbose {
-        eprintln!(
-            "[*] Registering {} known functions...",
-            binary.functions.len()
-        );
-    }
-
-    let _silencer = OutputSilencer::new_if(!verbose);
-    let mut by_addr: BTreeMap<u64, &FunctionInfo> = BTreeMap::new();
-    for func in &binary.functions {
-        if func.address == 0 || func.name.is_empty() {
-            continue;
-        }
-        match by_addr.get(&func.address) {
-            None => {
-                by_addr.insert(func.address, func);
-            }
-            Some(current) => {
-                if prefer_function_name(&func.name, &current.name) {
-                    by_addr.insert(func.address, func);
-                }
-            }
-        }
-    }
-
-    for func in by_addr.values() {
-        if func.address != 0
-            && !func.name.is_empty()
-            && let Err(e) = decomp.add_function(func.address, Some(&func.name))
-            && verbose
-        {
-            eprintln!(
-                "[!] Failed to register function at 0x{:x}: {}",
-                func.address, e
-            );
-        }
-    }
-}
-
-fn load_fid_databases(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
-    let mut fid_loaded_count = 0;
-    let fid_paths = PATHS.get_all_fid_paths(binary.is_64bit);
-    for fid_full in &fid_paths {
-        if verbose {
-            eprintln!("[*] Loading FID database: {}", fid_full.display());
-        }
-        let _silencer = OutputSilencer::new_if(!verbose);
-        if let Err(e) = decomp.load_fid_database(&fid_full.to_string_lossy()) {
-            if verbose {
-                eprintln!("[!] Warning: Failed to load FID database: {}", e);
-            }
-        } else {
-            fid_loaded_count += 1;
-            if verbose {
-                eprintln!("[✓] FID database loaded");
-            }
-        }
-    }
-
-    if verbose && fid_loaded_count > 0 {
-        eprintln!(
-            "[✓] Loaded {} FID database(s) for function matching",
-            fid_loaded_count
-        );
-    }
-}
-
-fn collect_target_functions(
-    binary: &LoadedBinary,
+fn collect_target_functions<'a>(
+    binary: &'a LoadedBinary,
     address: Option<u64>,
-    all: bool,
-) -> Vec<&FunctionInfo> {
+    decomp_all: bool,
+) -> Vec<&'a FunctionInfo> {
+    if decomp_all {
+        return binary.functions.iter().collect();
+    }
+
     if let Some(addr) = address {
         let mut best: Option<&FunctionInfo> = None;
         for func in &binary.functions {
@@ -177,23 +88,6 @@ fn collect_target_functions(
             }
         }
         return best.into_iter().collect();
-    }
-
-    if all {
-        let mut by_addr: BTreeMap<u64, &FunctionInfo> = BTreeMap::new();
-        for func in binary.functions.iter().filter(|f| !f.is_import) {
-            match by_addr.get(&func.address) {
-                None => {
-                    by_addr.insert(func.address, func);
-                }
-                Some(current) => {
-                    if prefer_function_name(&func.name, &current.name) {
-                        by_addr.insert(func.address, func);
-                    }
-                }
-            }
-        }
-        return by_addr.into_values().collect();
     }
 
     vec![]
@@ -225,6 +119,7 @@ pub(super) fn run_decompilation(
         eprintln!("[*] Decompilation profile = {}", selected_profile);
     }
 
+    let mut prepare_timings = PrepareTimings::default();
     {
         let (compiler_id, unknown_compiler) =
             resolve_compiler_id(binary, cli.compiler_id.as_deref());
@@ -244,17 +139,28 @@ pub(super) fn run_decompilation(
                 compiler_id.unwrap_or("default")
             );
         }
-        load_binary_into_decompiler(&mut decomp, binary, binary_data, compiler_id, cli.verbose);
+        let config = fission_core::config::Config::default();
+        let gdt_path_owned = fission_core::PATHS
+            .get_gdt_path(binary.is_64bit)
+            .and_then(|p| p.to_str().map(String::from));
+        let mut options = PrepareOptions {
+            verbose: cli.verbose,
+            compiler_id,
+            gdt_path: gdt_path_owned.as_deref(),
+            timeout_ms: Some(config.decompiler.timeout_ms),
+            timings: if cli.benchmark {
+                Some(&mut prepare_timings)
+            } else {
+                None
+            },
+        };
+        if let Err(e) =
+            prepare_native_decompiler_for_binary(&mut decomp, binary, binary_data, &mut options)
+        {
+            eprintln!("Error: Failed to prepare decompiler: {}", e);
+            std::process::exit(1);
+        }
     }
-
-    // Add IAT symbols
-    decomp.add_symbols(&binary.iat_symbols);
-    decomp.add_global_symbols(&binary.global_symbols);
-    decomp.set_symbol_provider(&binary.functions, &binary.global_symbols, &binary.sections);
-
-    register_memory_sections(&mut decomp, binary, cli.verbose);
-    register_known_functions(&mut decomp, binary, cli.verbose);
-    load_fid_databases(&mut decomp, binary, cli.verbose);
 
     let init_elapsed = init_start.elapsed();
     if cli.verbose {
@@ -268,7 +174,7 @@ pub(super) fn run_decompilation(
     // Some loaders may expose multiple aliases for a single address
     // (e.g., sub_xxx + exported symbol), which can trigger duplicate
     // decompile attempts and noisy recursive-guard errors.
-    let functions = collect_target_functions(binary, cli.address, cli.all);
+    let functions = collect_target_functions(binary, cli.address, cli.decomp_all);
 
     if functions.is_empty() && cli.address.is_some() {
         // Use if-let for safer unwrapping
@@ -372,27 +278,39 @@ pub(super) fn run_decompilation(
                 "profile": cli.profile.as_deref().unwrap_or("balanced"),
                 "function_count": functions.len(),
                 "init_sec": (init_elapsed.as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
+                "prepare_timings": &prepare_timings,
                 "total_decomp_sec": (total_decomp_secs * 1_000_000.0).round() / 1_000_000.0,
                 "wall_clock_sec": (init_start.elapsed().as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
             },
             "functions": json_results
         });
-        serde_json::to_string_pretty(&envelope)
-            .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?
+        serde_json::to_string_pretty(&envelope).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e),
+            )
+        })?
     } else if effective_json {
-        serde_json::to_string_pretty(&json_results)
-            .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?
+        serde_json::to_string_pretty(&json_results).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("JSON serialization failed: {}", e),
+            )
+        })?
     } else {
         all_output
     };
 
     if let Some(ref output_path) = cli.output {
         let mut file = fs::File::create(output_path).map_err(|e| {
-            io::Error::other(format!(
-                "Failed to create output file '{}': {}",
-                output_path.display(),
-                e
-            ))
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "Failed to create output file '{}': {}",
+                    output_path.display(),
+                    e
+                ),
+            )
         })?;
         file.write_all(final_output.as_bytes())?;
         if cli.verbose {
@@ -428,21 +346,45 @@ pub(super) fn decompile_and_output(
             if cli.ghidra_compat {
                 filtered = strip_inferred_structs(&filtered);
             }
-
-            let mut stdout = io::stdout().lock();
+            // Prepare final output string (respect --output when provided)
             if cli.json {
                 let json_output = serde_json::to_string_pretty(&serde_json::json!({
                     "address": format!("0x{:x}", addr),
                     "name": name,
                     "code": filtered
                 }))
-                .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?;
-                writeln!(stdout, "{}", json_output)?;
-            } else {
-                if !effective_no_header {
-                    writeln!(stdout, "// Function: {} @ 0x{:x}\n", name, addr)?;
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("JSON serialization failed: {}", e),
+                    )
+                })?;
+                if let Some(ref output_path) = cli.output {
+                    fs::write(output_path, json_output.as_bytes())?;
+                    if cli.verbose {
+                        eprintln!("[✓] Output written to: {}", output_path.display());
+                    }
+                } else {
+                    let mut stdout = io::stdout().lock();
+                    writeln!(stdout, "{}", json_output)?;
                 }
-                writeln!(stdout, "{}", filtered)?;
+            } else {
+                let mut out_buf = String::new();
+                if !effective_no_header {
+                    out_buf.push_str(&format!("// Function: {} @ 0x{:x}\n\n", name, addr));
+                }
+                out_buf.push_str(&filtered);
+                out_buf.push_str("\n");
+
+                if let Some(ref output_path) = cli.output {
+                    fs::write(output_path, out_buf.as_bytes())?;
+                    if cli.verbose {
+                        eprintln!("[✓] Output written to: {}", output_path.display());
+                    }
+                } else {
+                    let mut stdout = io::stdout().lock();
+                    writeln!(stdout, "{}", out_buf)?;
+                }
             }
         }
         Err(e) => {

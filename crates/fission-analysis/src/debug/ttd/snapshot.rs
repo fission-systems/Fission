@@ -16,7 +16,7 @@ pub struct MemoryDelta {
 
 impl MemoryDelta {
     /// Create a new memory delta record
-    pub const fn new(address: u64, old_value: Vec<u8>, new_value: Vec<u8>) -> Self {
+    pub fn new(address: u64, old_value: Vec<u8>, new_value: Vec<u8>) -> Self {
         Self {
             address,
             old_value,
@@ -25,7 +25,7 @@ impl MemoryDelta {
     }
 
     /// Size of the changed region
-    pub const fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.new_value.len()
     }
 }
@@ -63,7 +63,7 @@ impl ExecutionSnapshot {
     }
 
     /// Get the instruction pointer (RIP) at this snapshot
-    pub const fn rip(&self) -> u64 {
+    pub fn rip(&self) -> u64 {
         self.registers.rip
     }
 

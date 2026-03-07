@@ -86,6 +86,7 @@ impl ModuleManager {
 
     /// Initialize all modules with graceful degradation
     pub fn init_all(&mut self) -> Result<()> {
+        let mut all_ok = true;
         for entry in &mut self.modules {
             match entry.module.on_init(&mut self.context) {
                 Ok(()) => {
@@ -102,12 +103,13 @@ impl ModuleManager {
                         entry.module.name(),
                         e
                     ));
+                    all_ok = false;
                     // Continue with other modules (graceful degradation)
                 }
             }
         }
         self.manager_state = ModuleState::Initialized;
-        Ok(()) // Log errors but don't fail startup
+        if all_ok { Ok(()) } else { Ok(()) } // Log errors but don't fail startup
     }
 
     /// Start all initialized modules with graceful degradation
@@ -168,12 +170,12 @@ impl ModuleManager {
     }
 
     /// Get overall manager state
-    pub const fn state(&self) -> ModuleState {
+    pub fn state(&self) -> ModuleState {
         self.manager_state
     }
 
     /// Get context for service lookup
-    pub const fn context(&self) -> &ModuleContext {
+    pub fn context(&self) -> &ModuleContext {
         &self.context
     }
 }

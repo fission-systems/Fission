@@ -182,62 +182,19 @@ std::string post_process_constants(const std::string& code, const std::map<uint6
 std::string substitute_guids(const std::string& code, const std::map<std::string, std::string>& guid_map) {
     if (guid_map.empty() || code.empty()) return code;
     
-    // Scan code for GUID-shaped patterns (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-    // and look them up in the map. This is O(N) in code size instead of O(M*N)
-    // where M = number of GUIDs in the map (typically thousands).
-    std::string result;
-    result.reserve(code.size());
+    std::string result = code;
+    // Iterate through all known GUIDs and simple string replace
     
-    size_t i = 0;
-    while (i < code.size()) {
-        // Quick check: need at least 36 chars remaining for a GUID
-        if (i + 36 <= code.size() && std::isxdigit(static_cast<unsigned char>(code[i]))) {
-            // Check 8-4-4-4-12 pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-            bool looks_like_guid = true;
-            // Check dashes at positions 8, 13, 18, 23
-            if (code[i+8] != '-' || code[i+13] != '-' || code[i+18] != '-' || code[i+23] != '-') {
-                looks_like_guid = false;
-            }
-            
-            if (looks_like_guid) {
-                // Verify all hex digit positions
-                static const int hex_positions[] = {
-                    0,1,2,3,4,5,6,7,  // 8 hex
-                    9,10,11,12,        // 4 hex
-                    14,15,16,17,       // 4 hex
-                    19,20,21,22,       // 4 hex
-                    24,25,26,27,28,29,30,31,32,33,34,35  // 12 hex
-                };
-                bool valid = true;
-                for (int p : hex_positions) {
-                    if (!std::isxdigit(static_cast<unsigned char>(code[i+p]))) {
-                        valid = false;
-                        break;
-                    }
-                }
-                
-                if (valid) {
-                    std::string candidate = code.substr(i, 36);
-                    auto it = guid_map.find(candidate);
-                    if (it != guid_map.end()) {
-                        result.append(it->second);
-                        i += 36;
-                        continue;
-                    }
-                    // Also try uppercase
-                    std::string upper = candidate;
-                    for (auto& c : upper) c = toupper(c);
-                    it = guid_map.find(upper);
-                    if (it != guid_map.end()) {
-                        result.append(it->second);
-                        i += 36;
-                        continue;
-                    }
-                }
-            }
+    for (const auto& pair : guid_map) {
+        const std::string& uuid = pair.first; // e.g., 00000000-0000-0000-C000-000000000046
+        const std::string& name = pair.second; // e.g., IUnknown
+        
+        // Try exact match first
+        size_t pos = 0;
+        while ((pos = result.find(uuid, pos)) != std::string::npos) {
+            result.replace(pos, uuid.length(), name);
+            pos += name.length();
         }
-        result.push_back(code[i]);
-        i++;
     }
     return result;
 }

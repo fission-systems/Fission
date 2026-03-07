@@ -25,7 +25,6 @@ pub use rules::OptimizationRules;
 
 /// Configuration for Pcode optimization
 #[derive(Debug, Clone)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct PcodeOptimizerConfig {
     pub enable_constant_folding: bool,
     pub enable_identity_removal: bool,
@@ -85,10 +84,11 @@ impl PcodeOptimizer {
             }
 
             // Pass 2: Common Subexpression Elimination (CSE)
-            if self.config.enable_cse
-                && self.cse.eliminate(func) {
+            if self.config.enable_cse {
+                if self.cse.eliminate(func) {
                     self.modified = true;
                 }
+            }
 
             // Pass 3: Identity operation removal
             if self.config.enable_identity_removal {
@@ -147,11 +147,13 @@ impl PcodeOptimizer {
 
             block.ops.retain(|op| {
                 // Remove COPY where output == input
-                if op.opcode == PcodeOpcode::Copy && op.inputs.len() == 1
-                    && let Some(out) = &op.output
-                        && &op.inputs[0] == out {
+                if op.opcode == PcodeOpcode::Copy && op.inputs.len() == 1 {
+                    if let Some(out) = &op.output {
+                        if &op.inputs[0] == out {
                             return false; // Remove this op
                         }
+                    }
+                }
                 true
             });
 

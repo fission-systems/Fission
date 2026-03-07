@@ -97,3 +97,6 @@ ghidra_decompiler/.cache/
 # Benchmark results (criterion output)
 benchmark_results/
 **/benchmark_results/
+
+# User-specific utility scripts and tools
+/utils/

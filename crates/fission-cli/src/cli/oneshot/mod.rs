@@ -1,24 +1,17 @@
-//! One-Shot CLI - Single command execution mode
+﻿//! One-Shot CLI - Single command execution mode
 //!
-//! A powerful, user-friendly binary analysis tool with decompilation capabilities.
 //! Executes a single command and exits (non-interactive).
 
 mod binary_info;
-#[cfg(feature = "native_decomp")]
-mod cfg;
 #[cfg(feature = "native_decomp")]
 mod common;
 #[cfg(feature = "native_decomp")]
 mod decompile;
 mod disasm;
 mod functions;
-#[cfg(feature = "native_decomp")]
-pub mod graph;
 mod strings;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
-#[cfg(feature = "native_decomp")]
-use cfg::{CfgOutputFormat, analyze_cfg};
 #[cfg(feature = "native_decomp")]
 use decompile::run_decompilation;
 use disasm::{disassemble, disassemble_function};
@@ -55,7 +48,6 @@ fn run() -> io::Result<()> {
 }
 
 fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
-    // Load binary
     if cli.verbose {
         eprintln!("[*] Loading binary: {}", cli.binary.display());
     }
@@ -81,14 +73,13 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
     if cli.verbose {
         eprintln!(
-            "[✓] Loaded: {} ({}-bit, {} functions)",
+            "[ok] Loaded: {} ({}-bit, {} functions)",
             cli.binary.display(),
             if binary.is_64bit { 64 } else { 32 },
             binary.functions.len()
         );
     }
 
-    // Handle commands (in priority order)
     if cli.info {
         return print_binary_info(&binary, cli.json);
     }
@@ -121,65 +112,7 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
         return disassemble_function(&binary, &binary_data, addr, cli.json);
     }
 
-    // Handle Pcode Graph Generation
-    if let Some(addr) = cli.graph {
-        #[cfg(feature = "native_decomp")]
-        {
-            return graph::generate_pcode_graph(
-                &binary,
-                addr,
-                cli.output.as_ref(),
-                cli.verbose,
-                cli.compiler_id.as_deref(),
-                cli.profile.as_deref(),
-            );
-        }
-
-        #[cfg(not(feature = "native_decomp"))]
-        {
-            eprintln!("Error: Graph generation requires native_decomp feature");
-            eprintln!("Run with: cargo run --bin fission_cli --features native_decomp -- ...");
-            std::process::exit(1);
-        }
-    }
-
-    // Handle CFG Analysis
-    if let Some(addr) = cli.cfg_address {
-        #[cfg(feature = "native_decomp")]
-        {
-            let format = match cli.cfg_format.as_str() {
-                "dot" => CfgOutputFormat::Dot,
-                "ascii" => CfgOutputFormat::Ascii,
-                "json" => CfgOutputFormat::Json,
-                _ => {
-                    if cli.json {
-                        CfgOutputFormat::Json
-                    } else {
-                        CfgOutputFormat::Summary
-                    }
-                }
-            };
-            return analyze_cfg(
-                &binary,
-                addr,
-                format,
-                cli.output.as_ref(),
-                cli.verbose,
-                cli.compiler_id.as_deref(),
-                cli.profile.as_deref(),
-            );
-        }
-
-        #[cfg(not(feature = "native_decomp"))]
-        {
-            eprintln!("Error: CFG analysis requires native_decomp feature");
-            eprintln!("Run with: cargo run --bin fission_cli --features native_decomp -- ...");
-            std::process::exit(1);
-        }
-    }
-
-    // Handle decompilation
-    if cli.address.is_some() || cli.all {
+    if cli.address.is_some() || cli.decomp_all {
         #[cfg(feature = "native_decomp")]
         {
             run_decompilation(cli, &binary, &binary_data)?;
@@ -194,56 +127,45 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
         }
     }
 
-    // Default: show help
     print_help();
     Ok(())
 }
 
 fn print_help() {
-    println!("\x1b[1;36m╔══════════════════════════════════════════════════════════╗\x1b[0m");
-    println!(
-        "\x1b[1;36m║\x1b[0m  \x1b[1;35m🔬 Fission\x1b[0m - Next-Gen Binary Analysis          \x1b[1;36m║\x1b[0m"
-    );
-    println!("\x1b[1;36m╚══════════════════════════════════════════════════════════╝\x1b[0m");
+    println!("Fission CLI - one-shot binary analysis and decompilation");
     println!();
-    println!("\x1b[1;33mUsage:\x1b[0m fission <binary> [OPTIONS]");
+    println!("Usage: fission_cli <binary> [OPTIONS]");
     println!();
-    println!("\x1b[1;32m📊 Information:\x1b[0m");
-    println!("  \x1b[1m-i\x1b[0m, --info          Show binary info (format, arch, entry point)");
-    println!("  \x1b[1m-S\x1b[0m, --sections      Show all sections with permissions");
-    println!("  \x1b[1m-l\x1b[0m, --list          List all discovered functions");
-    println!("  \x1b[1m-I\x1b[0m, --imports       List imported functions");
-    println!("  \x1b[1m-E\x1b[0m, --exports       List exported functions");
+    println!("Information:");
+    println!("  -i, --info                 Show binary info (format, arch, entry point)");
+    println!("  -S, --sections             Show all sections with permissions");
+    println!("  -l, --list, --funcs        List all discovered functions");
+    println!("  -I, --imports              List imported functions");
+    println!("  -E, --exports              List exported functions");
     println!();
-    println!("\x1b[1;34m🔍 Analysis:\x1b[0m");
-    println!("  \x1b[1m-d\x1b[0m, --asm <ADDR>    Disassemble at address (alias: --disasm)");
-    println!("  \x1b[1m-n\x1b[0m, --count <N>     Number of instructions (default: 20)");
-    println!("      --strings [MIN]  Extract strings (min length: 4)");
-    println!("      --cfg <ADDR>     Analyze CFG (Control Flow Graph)");
-    println!("      --cfg-format <F> CFG format: summary, dot, ascii, json");
+    println!("Analysis:");
+    println!("  -d, --disasm, --asm <ADDR> Disassemble at address");
+    println!("      --asm-func <ADDR>      Disassemble full function at address");
+    println!("  -n, --count <N>            Number of instructions (default: 20)");
+    println!("      --strings [MIN]        Extract strings (min length: 4)");
     println!();
-    println!("\x1b[1;35m⚙️  Decompilation:\x1b[0m");
-    println!("  \x1b[1m-a\x1b[0m, --decomp <ADDR> Decompile function (alias: --address)");
-    println!("  \x1b[1m-A\x1b[0m, --decomp-all    Decompile all functions (alias: --all)");
+    println!("Decompilation:");
+    println!("  -a, --address, --decomp <ADDR>  Decompile function");
     println!();
-    println!("\x1b[1;36m💾 Output:\x1b[0m");
-    println!("  \x1b[1m-o\x1b[0m, --output <FILE> Write results to file");
-    println!("  \x1b[1m-j\x1b[0m, --json          JSON output format");
-    println!("  \x1b[1m-v\x1b[0m, --verbose       Show detailed progress");
-    println!(
-        "      --compiler-id <ID> Override compiler ABI hint (auto/windows/gcc/clang/default)"
-    );
-    println!("      --profile <P>     Decomp profile: balanced|quality|speed");
+    println!("Output:");
+    println!("  -o, --output <FILE>        Write results to file");
+    println!("  -j, --json                 JSON output format");
+    println!("  -v, --verbose              Show detailed progress");
+    println!("      --compiler-id <ID>     Override compiler ABI hint");
+    println!("      --profile <P>          Decomp profile: balanced|quality|speed");
+    println!("      --no-header            Suppress function header comments");
+    println!("      --ghidra-compat        Suppress headers/warnings + strip inferred structs");
+    println!("      --no-warnings          Suppress WARNING/NOTICE lines");
+    println!("      --benchmark            Add timing metadata to JSON output");
     println!();
-    println!("\x1b[1;33m📚 Examples:\x1b[0m");
-    println!("  fission app.exe -i                    \x1b[90m# Show binary info\x1b[0m");
-    println!("  fission app.exe -l                    \x1b[90m# List functions\x1b[0m");
-    println!("  fission app.exe --asm 0x140001000     \x1b[90m# Disassemble\x1b[0m");
-    println!("  fission app.exe --decomp 0x140001000  \x1b[90m# Decompile\x1b[0m");
-    println!("  fission app.exe --decomp-all -o out/  \x1b[90m# Decompile all\x1b[0m");
-    println!("  fission app.exe --cfg 0x140001000     \x1b[90m# CFG analysis\x1b[0m");
-    println!(
-        "  fission app.exe --cfg 0x140001000 --cfg-format dot -o out.dot \x1b[90m# CFG graph\x1b[0m"
-    );
-    println!();
+    println!("Examples:");
+    println!("  fission_cli app.exe --info");
+    println!("  fission_cli app.exe --funcs");
+    println!("  fission_cli app.exe --asm 0x140001000");
+    println!("  fission_cli app.exe --decomp 0x140001000");
 }

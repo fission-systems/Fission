@@ -19,7 +19,6 @@
 
 #include <iostream>
 #include <set>
-#include <chrono>
 #include "fission/utils/logger.h"
 using namespace fission::ffi;
 using namespace fission::core;
@@ -101,14 +100,14 @@ static void mark_noreturn_functions(
         if (fd_target && !fd_target->getFuncProto().isNoReturn()) {
             fd_target->getFuncProto().setNoReturn(true);
             ++count;
-            fission::utils::log_stream()
+            fission::utils::log_output()
                 << "[NoReturn] Marked " << name << " @ 0x"
                 << std::hex << addr << std::dec << std::endl;
         }
     }
 
     if (count > 0) {
-        fission::utils::log_stream()
+        fission::utils::log_output()
             << "[NoReturn] Total: " << count << " functions marked" << std::endl;
     }
 }
@@ -164,7 +163,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     
     ensure_architecture(ctx);
     
-    fission::utils::log_stream() << "[DecompilerCore] Starting decompilation at 0x" << std::hex << addr << std::dec << std::endl;
+    fission::utils::log_output() << "[DecompilerCore] Starting decompilation at 0x" << std::hex << addr << std::dec << std::endl;
     
     // Validate architecture components
     if (!ctx->arch) {
@@ -180,7 +179,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Global scope not initialized");
     }
     
-    fission::utils::log_stream() << "[DecompilerCore] Global scope in decompilation: " << (void*)global_scope << std::endl;
+    fission::utils::log_output() << "[DecompilerCore] Global scope in decompilation: " << (void*)global_scope << std::endl;
     
     // Create function address
     ghidra::AddrSpace* code_space = ctx->arch->getDefaultCodeSpace();
@@ -189,11 +188,11 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     }
     ghidra::Address start_addr(code_space, addr);
     
-    fission::utils::log_stream() << "[DecompilerCore] Requesting decompilation for addr: 0x" << std::hex << addr << std::dec << std::endl;
-    fission::utils::log_stream() << "[DecompilerCore] Created Address object: " << start_addr.getShortcut() << std::endl;
-    start_addr.printRaw(fission::utils::log_stream()); fission::utils::log_stream() << std::endl;
+    fission::utils::log_output() << "[DecompilerCore] Requesting decompilation for addr: 0x" << std::hex << addr << std::dec << std::endl;
+    fission::utils::log_output() << "[DecompilerCore] Created Address object: " << start_addr.getShortcut() << std::endl;
+    start_addr.printRaw(fission::utils::log_output()); fission::utils::log_output() << std::endl;
 
-    fission::utils::log_stream() << "[DecompilerCore] Looking up function at code space=" 
+    fission::utils::log_output() << "[DecompilerCore] Looking up function at code space=" 
               << code_space->getName() << ", addr=0x" << std::hex << addr << std::dec << std::endl;
     
     // Check if function exists at address
@@ -204,13 +203,13 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         auto it = ctx->symbols.find(addr);
         if (it != ctx->symbols.end()) {
             func_name = it->second;
-            fission::utils::log_stream() << "[DecompilerCore] Found registered name for 0x" << std::hex << addr << std::dec << ": " << func_name << std::endl;
+            fission::utils::log_output() << "[DecompilerCore] Found registered name for 0x" << std::hex << addr << std::dec << ": " << func_name << std::endl;
         } else {
             // Generate name
             std::ostringstream name_ss;
             name_ss << "sub_" << std::hex << addr;
             func_name = name_ss.str();
-            fission::utils::log_stream() << "[DecompilerCore] No registered name, using: " << func_name << std::endl;
+            fission::utils::log_output() << "[DecompilerCore] No registered name, using: " << func_name << std::endl;
         }
         
         ghidra::FunctionSymbol* sym = global_scope->addFunction(start_addr, func_name);
@@ -218,9 +217,9 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
             throw std::runtime_error("Failed to add function");
         }
         fd = sym->getFunction();
-        fission::utils::log_stream() << "[DecompilerCore] Created new function at 0x" << std::hex << addr << std::dec << " with name: " << func_name << std::endl;
+        fission::utils::log_output() << "[DecompilerCore] Created new function at 0x" << std::hex << addr << std::dec << " with name: " << func_name << std::endl;
     } else {
-        fission::utils::log_stream() << "[DecompilerCore] Found existing function at 0x" << std::hex << addr << std::dec << ": " << fd->getName() << std::endl;
+        fission::utils::log_output() << "[DecompilerCore] Found existing function at 0x" << std::hex << addr << std::dec << ": " << fd->getName() << std::endl;
     }
     
     if (!fd) {
@@ -230,41 +229,33 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     // By default we force standalone decompilation for inline-marked functions,
     // but this can be relaxed via feature: allow_inline / inline.
     if (fd->getFuncProto().isInline() && !ctx->allow_inline) {
-        fission::utils::log_stream() << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec
+        fission::utils::log_output() << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec
                   << " is marked inline; forcing standalone decompilation" << std::endl;
         fd->getFuncProto().setInline(false);
     }
     
-    // Check if function is already being decompiled (recursive call).
-    // In --decomp-all mode, callee analysis can trigger A→B→A cycles.
-    // Instead of propagating an exception (which aborts the outer function),
-    // return a forward-declaration stub so the caller can still complete.
+    // Check if function is already being decompiled (recursive call)
     if (fd->isProcStarted()) {
-        std::ostringstream hex;
-        hex << std::hex << addr;
-        fission::utils::log_stream() << "[DecompilerCore] NOTE: Recursive entry for 0x"
-                  << hex.str() << " — returning stub" << std::endl;
-        // Mark as analyzed so we don't retry
-        if (ctx) ctx->analyzed_callees.insert(addr);
-        return "// [recursive] void sub_" + hex.str() + "(void);\n";
+        fission::utils::log_output() << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec << " is already being processed" << std::endl;
+        throw std::runtime_error("Function is already being decompiled (recursive decompilation detected)");
     }
     
     // Clear only this function's data for fresh analysis
     fd->clear();
     
-    fission::utils::log_stream() << "[DecompilerCore] Following control flow..." << std::endl;
+    fission::utils::log_output() << "[DecompilerCore] Following control flow..." << std::endl;
     
     // Debug: Check if we can read memory at this address
     uint8_t test_byte;
     try {
         ctx->memory_image->loadFill(&test_byte, 1, start_addr);
-        fission::utils::log_stream() << "[DecompilerCore] Successfully read first byte at 0x" << std::hex << addr << ": 0x" << (int)test_byte << std::dec << std::endl;
+        fission::utils::log_output() << "[DecompilerCore] Successfully read first byte at 0x" << std::hex << addr << ": 0x" << (int)test_byte << std::dec << std::endl;
         // If first byte is 0x00, the address is likely not mapped properly
         if (test_byte == 0x00) {
-            fission::utils::log_stream() << "[DecompilerCore] WARNING: First byte is 0x00 at 0x" << std::hex << addr << std::dec << ", address may be unmapped" << std::endl;
+            fission::utils::log_output() << "[DecompilerCore] WARNING: First byte is 0x00 at 0x" << std::hex << addr << std::dec << ", address may be unmapped" << std::endl;
         }
     } catch (const std::exception& e) {
-        fission::utils::log_stream() << "[DecompilerCore] ERROR: Cannot read memory at 0x" << std::hex << addr << std::dec << ": " << e.what() << std::endl;
+        fission::utils::log_output() << "[DecompilerCore] ERROR: Cannot read memory at 0x" << std::hex << addr << std::dec << ": " << e.what() << std::endl;
         return "// Error: Cannot read memory at address 0x" + ([&]() {
             std::ostringstream s; s << std::hex << addr; return s.str();
         })() + "\n// " + e.what() + "\n";
@@ -277,12 +268,12 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     bool follow_flow_ok = false;
     try {
         fd->followFlow(start_addr, end_addr);
-        fission::utils::log_stream() << "[DecompilerCore] Control flow analysis complete" << std::endl;
+        fission::utils::log_output() << "[DecompilerCore] Control flow analysis complete" << std::endl;
         follow_flow_ok = true;
     } catch (const std::exception& e) {
-        fission::utils::log_stream() << "[DecompilerCore] ERROR in followFlow: " << e.what() << std::endl;
+        fission::utils::log_output() << "[DecompilerCore] ERROR in followFlow: " << e.what() << std::endl;
     } catch (...) {
-        fission::utils::log_stream() << "[DecompilerCore] ERROR: Unknown exception in followFlow" << std::endl;
+        fission::utils::log_output() << "[DecompilerCore] ERROR: Unknown exception in followFlow" << std::endl;
     }
 
     // If control flow analysis failed, do NOT proceed to decompilation
@@ -323,7 +314,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         }
         detector.apply(fd, conv);
     } catch (const std::exception& e) {
-        fission::utils::log_stream() << "[DecompilerCore] ERROR applying calling convention: " << e.what() << std::endl;
+        fission::utils::log_output() << "[DecompilerCore] ERROR applying calling convention: " << e.what() << std::endl;
     }
     
     // Check action group
@@ -332,23 +323,13 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("No current action group");
     }
 
-    // Global initializations that scan all symbols: run only once
-    if (!ctx->global_symbols_applied) {
+    // Enforce GDT-based and built-in prototypes before action reset.
+    {
         fission::types::PrototypeEnforcer proto_enforcer;
         if (!ctx->symbols.empty()) {
             proto_enforcer.enforce_iat_prototypes(ctx->arch.get(), ctx->symbols);
         }
-        
-        mark_noreturn_functions(ctx, ctx->symbols);
-        mark_noreturn_functions(ctx, ctx->global_symbols);
-        
-        ctx->global_symbols_applied = true;
-        fission::utils::log_stream() << "[DecompilerCore] Global symbols and noreturn hints applied." << std::endl;
-    }
 
-    // Per-function prototype enforcement before action reset
-    {
-        fission::types::PrototypeEnforcer proto_enforcer;
         std::string func_name;
         auto it = ctx->symbols.find(addr);
         if (it != ctx->symbols.end()) {
@@ -371,13 +352,19 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         }
     }
 
+    // ========================================================================
+    // noreturn auto-marking — must run AFTER prototype enforcement, BEFORE
+    // clearAnalysis/reset so that FlowInfo sees the flags during perform().
+    // ========================================================================
+    {
+        mark_noreturn_functions(ctx, ctx->symbols);
+        mark_noreturn_functions(ctx, ctx->global_symbols);
+    }
+
     // CRITICAL: Reset action state for this function AFTER prototypes are applied
-    fission::utils::log_stream() << "[DecompilerCore] Resetting action state..." << std::endl;
+    fission::utils::log_output() << "[DecompilerCore] Resetting action state..." << std::endl;
     ctx->arch->clearAnalysis(fd);
     current_action->reset(*fd);
-
-    // ===== TIMING INSTRUMENTATION =====
-    auto t0 = std::chrono::steady_clock::now();
 
     // P1-A: Seed Ghidra's type recommendation system BEFORE action->perform()
     // so that ActionInferTypes picks up API-derived types in its own loop.
@@ -387,9 +374,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         seeder.seed_before_action(fd);
     }
 
-    auto t1 = std::chrono::steady_clock::now();
-
-    fission::utils::log_stream() << "[DecompilerCore] Performing decompilation..." << std::endl;
+    fission::utils::log_output() << "[DecompilerCore] Performing decompilation..." << std::endl;
     
     // Perform decompilation
     try {
@@ -397,7 +382,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     } catch (const ghidra::LowlevelError& e) {
         std::string msg = e.explain;
         if (msg.find("Function loaded for inlining") != std::string::npos && !ctx->allow_inline) {
-            fission::utils::log_stream() << "[DecompilerCore] WARNING: Inline-loaded function, clearing analysis and retrying"
+            fission::utils::log_output() << "[DecompilerCore] WARNING: Inline-loaded function, clearing analysis and retrying"
                       << std::endl;
             if (ctx->arch) {
                 ctx->arch->clearAnalysis(fd);
@@ -416,12 +401,10 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Unknown error during decompilation");
     }
 
-    auto t2 = std::chrono::steady_clock::now();
-
     fission::decompiler::AnalysisArtifacts analysis =
         fission::decompiler::run_analysis_passes(ctx, fd, current_action, MAX_FUNCTION_SIZE);
-
-    auto t3 = std::chrono::steady_clock::now();
+    
+    fission::utils::log_output() << "[DecompilerCore] Generating output..." << std::endl;
     
     // Check print language
     if (!ctx->arch->print) {
@@ -434,8 +417,6 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     ctx->arch->print->docFunction(fd);
     
     std::string result = ss.str();
-
-    auto t4 = std::chrono::steady_clock::now();
     
     // ========================================================================
     // Full Post-Processing Chain
@@ -445,18 +426,8 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
 
     // Use the analysis artifacts gathered earlier for post-processing
     result = run_post_processing(ctx, fd, result, analysis, options);
-
-    auto t5 = std::chrono::steady_clock::now();
-
-    // ===== TIMING REPORT =====
-    auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
-    fission::utils::log_stream()
-        << "[PERF] seed=" << ms(t0, t1)
-        << "ms  perform=" << ms(t1, t2)
-        << "ms  analysis=" << ms(t2, t3)
-        << "ms  print=" << ms(t3, t4)
-        << "ms  postproc=" << ms(t4, t5)
-        << "ms  TOTAL=" << ms(t0, t5) << "ms" << std::endl;
+    
+    fission::utils::log_output() << "[DecompilerCore] Decompilation complete, " << result.size() << " bytes after post-processing" << std::endl;
     
     return result;
 }

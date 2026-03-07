@@ -1,8 +1,8 @@
 use crate::cli::output::OutputSilencer;
+use fission_core::config::Config;
 use fission_core::find_sla_dir;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::LoadedBinary;
-use std::fs;
 
 pub(super) fn init_decompiler(verbose: bool) -> DecompilerNative {
     let sla_dir = find_sla_dir();
@@ -12,13 +12,22 @@ pub(super) fn init_decompiler(verbose: bool) -> DecompilerNative {
     }
 
     let _silencer = OutputSilencer::new_if(!verbose);
-    match DecompilerNative::new(&sla_dir) {
+    let mut decomp = match DecompilerNative::new(&sla_dir) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("Error: Failed to create decompiler: {}", e);
             std::process::exit(1);
         }
+    };
+
+    let config = Config::default();
+    let log_verbose = config.decompiler.log_verbose || verbose;
+    decomp.set_log_verbose(log_verbose);
+    if !config.decompiler.log_file.is_empty() {
+        decomp.set_log_file(&config.decompiler.log_file);
     }
+
+    decomp
 }
 
 pub(super) fn resolve_profile(profile: Option<&str>) -> (&'static str, Option<String>) {
@@ -93,34 +102,4 @@ pub(super) fn resolve_compiler_id(
     }
 
     (detect_compiler_id(binary), None)
-}
-
-pub(super) fn load_binary_into_decompiler(
-    decomp: &mut DecompilerNative,
-    binary: &LoadedBinary,
-    binary_data: &[u8],
-    compiler_id: Option<&str>,
-    verbose: bool,
-) {
-    let _silencer = OutputSilencer::new_if(!verbose);
-    if let Err(e) = decomp.load_binary(
-        binary_data,
-        binary.image_base,
-        binary.is_64bit,
-        Some(&binary.arch_spec),
-        compiler_id,
-    ) {
-        eprintln!("Error: Failed to load binary: {}", e);
-        std::process::exit(1);
-    }
-}
-
-pub(super) fn read_binary_data(binary: &LoadedBinary) -> Vec<u8> {
-    match fs::read(&binary.path) {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("Error: Failed to read binary from {}: {}", binary.path, e);
-            std::process::exit(1);
-        }
-    }
 }

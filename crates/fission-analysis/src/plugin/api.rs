@@ -7,7 +7,7 @@ pub use fission_core::plugin::types::{PluginInfo, PluginType};
 
 use fission_loader::loader::LoadedBinary;
 
-/// Helper to create `BinaryInfo` from `LoadedBinary`
+/// Helper to create BinaryInfo from LoadedBinary
 pub fn create_binary_info(binary: &LoadedBinary) -> BinaryInfo {
     BinaryInfo {
         path: binary.path.clone(),

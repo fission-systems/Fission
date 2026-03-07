@@ -25,18 +25,17 @@ impl CallGraph {
     }
 
     pub fn callers_of(&self, addr: u64) -> &[CallEdge] {
-        self.callers.get(&addr).map_or(&[], std::vec::Vec::as_slice)
+        self.callers.get(&addr).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
     pub fn callees_of(&self, addr: u64) -> &[CallEdge] {
-        self.callees.get(&addr).map_or(&[], std::vec::Vec::as_slice)
+        self.callees.get(&addr).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
-    pub const fn total_call_sites(&self) -> usize {
+    pub fn total_call_sites(&self) -> usize {
         self.total_call_sites
     }
 
-    #[allow(clippy::similar_names)]
     pub fn build_from_xrefs(
         functions: &[FunctionInfo],
         xref_db: &XrefDatabase,
@@ -55,7 +54,10 @@ impl CallGraph {
                 continue;
             }
 
-            let Some(caller) = find_function_addr(&functions, xref.from_addr, fallback_range) else { continue };
+            let caller = match find_function_addr(&functions, xref.from_addr, fallback_range) {
+                Some(addr) => addr,
+                None => continue,
+            };
 
             let callee = find_function_addr(&functions, xref.to_addr, fallback_range)
                 .unwrap_or(xref.to_addr);

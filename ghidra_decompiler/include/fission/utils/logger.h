@@ -48,6 +48,18 @@ std::ostream& null_stream();
  */
 std::ostream& log_stream();
 
+/**
+ * Set whether diagnostic log output is enabled (verbose mode).
+ * When false, log_output() returns null_stream(); when true, log_stream().
+ */
+void set_log_verbose(bool enabled);
+
+/**
+ * Get current log output stream: log_stream() if verbose, else null_stream().
+ * Use this instead of log_stream() where output should respect verbose setting.
+ */
+std::ostream& log_output();
+
 } // namespace utils
 } // namespace fission
 

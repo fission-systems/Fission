@@ -46,8 +46,8 @@ pub enum MiResponse {
 #[derive(Debug, Clone)]
 pub enum MiValue {
     Const(String),
-    Tuple(HashMap<String, Self>),
-    List(Vec<Self>),
+    Tuple(HashMap<String, MiValue>),
+    List(Vec<MiValue>),
 }
 
 /// Parser for GDB/MI protocol
@@ -57,7 +57,7 @@ pub struct GdbMiParser {
 }
 
 impl GdbMiParser {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             buffer: String::new(),
         }
@@ -98,24 +98,23 @@ impl GdbMiParser {
         }
 
         // Parse token if present
-        let (token, rest) = Self::extract_token(line);
+        let (token, rest) = self.extract_token(line);
 
         // Parse based on first character
         let first = rest.chars().next()?;
         match first {
-            '^' => Some(self.parse_result_record(token, &rest[1..])),
-            '*' => Some(self.parse_exec_async(token, &rest[1..])),
-            '+' => Some(self.parse_status_async(token, &rest[1..])),
-            '=' => Some(self.parse_notify_async(token, &rest[1..])),
-            '~' => Some(Self::parse_console_stream(&rest[1..])),
-            '@' => Some(Self::parse_target_stream(&rest[1..])),
-            '&' => Some(Self::parse_log_stream(&rest[1..])),
-
+            '^' => self.parse_result_record(token, &rest[1..]),
+            '*' => self.parse_exec_async(token, &rest[1..]),
+            '+' => self.parse_status_async(token, &rest[1..]),
+            '=' => self.parse_notify_async(token, &rest[1..]),
+            '~' => self.parse_console_stream(&rest[1..]),
+            '@' => self.parse_target_stream(&rest[1..]),
+            '&' => self.parse_log_stream(&rest[1..]),
             _ => None,
         }
     }
 
-    fn extract_token(line: &str) -> (Option<u32>, &str) {
+    fn extract_token<'a>(&self, line: &'a str) -> (Option<u32>, &'a str) {
         let mut i = 0;
         for c in line.chars() {
             if c.is_ascii_digit() {
@@ -133,47 +132,56 @@ impl GdbMiParser {
         }
     }
 
-    fn parse_result_record(&self, token: Option<u32>, s: &str) -> MiResponse {
-        let (class, results) = self.parse_class_and_results(s);
-        MiResponse::Result {
+    fn parse_result_record(&self, token: Option<u32>, s: &str) -> Option<MiResponse> {
+        let (class, results) = self.parse_class_and_results(s)?;
+        Some(MiResponse::Result {
             token,
             class,
             results,
-        }
+        })
     }
 
-    fn parse_exec_async(&self, token: Option<u32>, s: &str) -> MiResponse {
-        let (class, results) = self.parse_class_and_results(s);
-        MiResponse::ExecAsync {
+    fn parse_exec_async(&self, token: Option<u32>, s: &str) -> Option<MiResponse> {
+        let (class, results) = self.parse_class_and_results(s)?;
+        Some(MiResponse::ExecAsync {
             token,
             class,
             results,
-        }
+        })
     }
 
-    fn parse_status_async(&self, token: Option<u32>, s: &str) -> MiResponse {
-        let (class, results) = self.parse_class_and_results(s);
-        MiResponse::StatusAsync {
+    fn parse_status_async(&self, token: Option<u32>, s: &str) -> Option<MiResponse> {
+        let (class, results) = self.parse_class_and_results(s)?;
+        Some(MiResponse::StatusAsync {
             token,
             class,
             results,
-        }
+        })
     }
 
-    fn parse_notify_async(&self, token: Option<u32>, s: &str) -> MiResponse {
-        let (class, results) = self.parse_class_and_results(s);
-        MiResponse::NotifyAsync {
+    fn parse_notify_async(&self, token: Option<u32>, s: &str) -> Option<MiResponse> {
+        let (class, results) = self.parse_class_and_results(s)?;
+        Some(MiResponse::NotifyAsync {
             token,
             class,
             results,
-        }
+        })
     }
 
-    fn parse_class_and_results(&self, s: &str) -> (String, HashMap<String, MiValue>) {
+    fn parse_class_and_results(&self, s: &str) -> Option<(String, HashMap<String, MiValue>)> {
         let comma_pos = s.find(',');
-        let class = comma_pos.map_or_else(|| s.to_string(), |pos| s[..pos].to_string());
-        let results = comma_pos.map_or_else(HashMap::new, |pos| self.parse_results(&s[pos + 1..]));
-        (class, results)
+        let class = match comma_pos {
+            Some(pos) => s[..pos].to_string(),
+            None => s.to_string(),
+        };
+
+        let results = if let Some(pos) = comma_pos {
+            self.parse_results(&s[pos + 1..])
+        } else {
+            HashMap::new()
+        };
+
+        Some((class, results))
     }
 
     fn parse_results(&self, s: &str) -> HashMap<String, MiValue> {
@@ -203,19 +211,19 @@ impl GdbMiParser {
 
         if s.starts_with('"') {
             // String constant
-            let end = Self::find_string_end(s);
+            let end = self.find_string_end(s);
             let content = &s[1..end];
-            let content = Self::unescape_string(content);
+            let content = self.unescape_string(content);
             (MiValue::Const(content), &s[end + 1..])
         } else if s.starts_with('{') {
             // Tuple: {name="value",...}
-            let end = Self::find_matching_brace(s, '{', '}').unwrap_or(s.len() - 1);
+            let end = self.find_matching_brace(s, '{', '}').unwrap_or(s.len() - 1);
             let content = &s[1..end];
             let results = self.parse_results(content);
             (MiValue::Tuple(results), &s[end + 1..])
         } else if s.starts_with('[') {
             // List: [value1,value2,...] or [name="value",...]
-            let end = Self::find_matching_brace(s, '[', ']').unwrap_or(s.len() - 1);
+            let end = self.find_matching_brace(s, '[', ']').unwrap_or(s.len() - 1);
             let content = &s[1..end].trim();
 
             let mut list = Vec::new();
@@ -243,7 +251,7 @@ impl GdbMiParser {
         }
     }
 
-    fn find_string_end(s: &str) -> usize {
+    fn find_string_end(&self, s: &str) -> usize {
         let mut escaped = false;
         for (i, c) in s.char_indices().skip(1) {
             if escaped {
@@ -257,7 +265,7 @@ impl GdbMiParser {
         s.len() - 1
     }
 
-    fn find_matching_brace(s: &str, open: char, close: char) -> Option<usize> {
+    fn find_matching_brace(&self, s: &str, open: char, close: char) -> Option<usize> {
         let mut depth = 0;
         for (i, c) in s.char_indices() {
             if c == open {
@@ -272,26 +280,26 @@ impl GdbMiParser {
         None
     }
 
-    fn unescape_string(s: &str) -> String {
+    fn unescape_string(&self, s: &str) -> String {
         s.replace("\\n", "\n")
             .replace("\\t", "\t")
             .replace("\\\"", "\"")
             .replace("\\\\", "\\")
     }
 
-    fn parse_console_stream(s: &str) -> MiResponse {
+    fn parse_console_stream(&self, s: &str) -> Option<MiResponse> {
         let content = s.trim_matches('"');
-        MiResponse::ConsoleStream(Self::unescape_string(content))
+        Some(MiResponse::ConsoleStream(self.unescape_string(content)))
     }
 
-    fn parse_target_stream(s: &str) -> MiResponse {
+    fn parse_target_stream(&self, s: &str) -> Option<MiResponse> {
         let content = s.trim_matches('"');
-        MiResponse::TargetStream(Self::unescape_string(content))
+        Some(MiResponse::TargetStream(self.unescape_string(content)))
     }
 
-    fn parse_log_stream(s: &str) -> MiResponse {
+    fn parse_log_stream(&self, s: &str) -> Option<MiResponse> {
         let content = s.trim_matches('"');
-        MiResponse::LogStream(Self::unescape_string(content))
+        Some(MiResponse::LogStream(self.unescape_string(content)))
     }
 }
 

@@ -127,8 +127,8 @@ if detection.language().map_or(false, |d| d.name == "새언어") {
 // turbo
 
 ```bash
-./target/release/fission --cli tests/binaries/test_newlang_bin info
-./target/release/fission --cli tests/binaries/test_newlang_bin functions
+./target/release/fission_cli tests/binaries/test_newlang_bin --info
+./target/release/fission_cli tests/binaries/test_newlang_bin --funcs
 ```
 
 ---

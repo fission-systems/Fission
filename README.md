@@ -152,10 +152,14 @@ Measured by `scripts/compare/compare_decompilers_v3.py` against Ghidra 11.x on W
 | `main` | 60.0% |
 | **Average** | **92.6%** |
 
+**Batch / large binary (2026-03):** putty.exe(2,756 functions) 기준 성공률 **61% → 87%**, 단일 함수 디컴파일 **207ms → 44ms** (PostProcess pipeline 최적화, recursive decompilation 순환 수정).  
+벤치마크: `scripts/test/batch_benchmark/`.
+
 **Milestone history:**
 
 | Date | x64 | x86 | Key Change |
 |------|-----|-----|------------|
+| 2026-03-07 | — | — | Batch 성공률 87%, PostProcess 59x 속도 개선 |
 | 2026-02-15 | 98.8% | — | MinGW TypePropagator, integer-cast stripping |
 | 2026-02-14 | — | 80.0% | x86 benchmark suite created |
 | 2026-02-24 | — | 90.1% | Track 2/3/4 + Normalizer A-1~A-6 |

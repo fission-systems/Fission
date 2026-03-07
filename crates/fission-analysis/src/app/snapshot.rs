@@ -11,33 +11,33 @@ pub fn save_snapshot(binary: &LoadedBinary, path: &Path) -> Result<()> {
     // Serialize the inner data using rkyv
     // AlignedVec is required for zero-copy deserialization
     let bytes = rkyv::to_bytes::<_, 1024>(binary.inner())
-        .map_err(|e| FissionError::other(format!("Serialization failed: {e}")))?;
+        .map_err(|e| FissionError::other(format!("Serialization failed: {}", e)))?;
 
     // Write to disk
-    fs::write(path, bytes).map_err(FissionError::Io)?;
+    fs::write(path, bytes).map_err(|e| FissionError::Io(e))?;
 
-    crate::core::logging::info(&format!("Saved snapshot to {}", path.display()));
+    crate::core::logging::info(&format!("Saved snapshot to {:?}", path));
     Ok(())
 }
 
 /// Load a snapshot from a file
 pub fn load_snapshot(path: &Path) -> Result<LoadedBinary> {
-    let data = fs::read(path).map_err(FissionError::Io)?;
+    let data = fs::read(path).map_err(|e| FissionError::Io(e))?;
 
     // Validate the archive (now against LoadedBinaryInner)
     let archived = rkyv::check_archived_root::<LoadedBinaryInner>(&data)
-        .map_err(|e| FissionError::other(format!("Snapshot validation failed: {e}")))?;
+        .map_err(|e| FissionError::other(format!("Snapshot validation failed: {}", e)))?;
 
     // Deserialize fully into LoadedBinaryInner (deep copy)
     let mut deserializer = rkyv::Infallible;
     let inner: LoadedBinaryInner = archived
         .deserialize(&mut deserializer)
-        .map_err(|e| FissionError::other(format!("Snapshot deserialize failed: {e:?}")))?;
+        .map_err(|e| FissionError::other(format!("Snapshot deserialize failed: {:?}", e)))?;
 
     // Wrap in LoadedBinary for Arc-based COW semantics
     let binary = LoadedBinary::from_inner(inner);
 
-    crate::core::logging::info(&format!("Loaded snapshot from {}", path.display()));
+    crate::core::logging::info(&format!("Loaded snapshot from {:?}", path));
     Ok(binary)
 }
 

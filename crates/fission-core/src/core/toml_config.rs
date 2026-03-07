@@ -65,6 +65,8 @@ pub struct TomlDecompilerConfig {
     pub enable_prefetch: bool,
     pub prefetch_count: usize,
     pub sla_dir: String,
+    pub log_verbose: bool,
+    pub log_file: String,
 }
 
 impl Default for TomlDecompilerConfig {
@@ -79,6 +81,8 @@ impl Default for TomlDecompilerConfig {
             enable_prefetch: true,
             prefetch_count: 3,
             sla_dir: String::new(),
+            log_verbose: false,
+            log_file: String::new(),
         }
     }
 }
@@ -249,6 +253,8 @@ impl From<TomlConfig> for Config {
                 enable_prefetch: toml.decompiler.enable_prefetch,
                 prefetch_count: toml.decompiler.prefetch_count,
                 sla_dir: toml.decompiler.sla_dir,
+                log_verbose: toml.decompiler.log_verbose,
+                log_file: toml.decompiler.log_file,
             },
             analysis: AnalysisConfig {
                 max_string_search_size: toml.analysis.max_string_search_size,

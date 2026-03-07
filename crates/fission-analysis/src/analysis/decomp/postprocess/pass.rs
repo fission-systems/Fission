@@ -143,7 +143,6 @@ impl PassContext {
     }
 
     /// Set inferred types
-    #[must_use]
     pub fn with_inferred_types(
         mut self,
         types: Vec<fission_loader::loader::types::InferredTypeInfo>,
@@ -153,7 +152,6 @@ impl PassContext {
     }
 
     /// Set DWARF function info
-    #[must_use]
     pub fn with_dwarf_info(
         mut self,
         info: Option<fission_loader::loader::types::DwarfFunctionInfo>,
@@ -169,7 +167,7 @@ impl PassContext {
 
     /// Get a metadata value
     pub fn get_metadata(&self, key: &str) -> Option<&str> {
-        self.metadata.get(key).map(std::string::String::as_str)
+        self.metadata.get(key).map(|s| s.as_str())
     }
 }
 
@@ -204,7 +202,7 @@ impl PassRegistry {
         let id = pass.metadata().id;
 
         if self.passes.contains_key(id) {
-            return Err(format!("Pass '{id}' is already registered"));
+            return Err(format!("Pass '{}' is already registered", id));
         }
 
         self.passes.insert(id.to_string(), pass);
@@ -316,7 +314,8 @@ impl PassRegistry {
     ) -> Result<(), String> {
         if visiting.contains(pass_id) {
             return Err(format!(
-                "Circular dependency detected involving '{pass_id}'"
+                "Circular dependency detected involving '{}'",
+                pass_id
             ));
         }
 
@@ -329,12 +328,13 @@ impl PassRegistry {
         let pass = self
             .passes
             .get(pass_id)
-            .ok_or_else(|| format!("Pass '{pass_id}' not found"))?;
+            .ok_or_else(|| format!("Pass '{}' not found", pass_id))?;
 
         for dep_id in pass.dependencies() {
             if !self.passes.contains_key(*dep_id) {
                 return Err(format!(
-                    "Dependency '{dep_id}' not found for pass '{pass_id}'"
+                    "Dependency '{}' not found for pass '{}'",
+                    dep_id, pass_id
                 ));
             }
 

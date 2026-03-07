@@ -35,7 +35,7 @@ impl PluginManager {
         if let Some(home) = dirs::home_dir() {
             // ~/.fission/plugins (properly expanded – PathBuf does NOT auto-expand ~)
             search_paths.push(
-                home.join(format!(".{APP_DIR_NAME}"))
+                home.join(format!(".{}", APP_DIR_NAME))
                     .join(PLUGIN_DIR_NAME),
             );
         }

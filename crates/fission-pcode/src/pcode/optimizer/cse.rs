@@ -11,12 +11,6 @@ pub struct CommonSubexpressionEliminator {
     available_exprs: HashMap<(PcodeOpcode, Vec<Varnode>), Varnode>,
 }
 
-impl Default for CommonSubexpressionEliminator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CommonSubexpressionEliminator {
     pub fn new() -> Self {
         Self {
@@ -38,7 +32,7 @@ impl CommonSubexpressionEliminator {
                     continue;
                 }
 
-                if !Self::is_pure_arithmetic(op.opcode) {
+                if !self.is_pure_arithmetic(op.opcode) {
                     continue;
                 }
 
@@ -49,7 +43,7 @@ impl CommonSubexpressionEliminator {
 
                 // 1. Check exact match
                 if let Some(existing_output) = self.available_exprs.get(&key) {
-                    Self::apply_cse(op, existing_output);
+                    self.apply_cse(op, existing_output);
                     modified = true;
                     found = true;
                 }
@@ -57,31 +51,32 @@ impl CommonSubexpressionEliminator {
                 else if op.opcode.is_commutative() && op.inputs.len() == 2 {
                     let swapped_key = (op.opcode, vec![op.inputs[1].clone(), op.inputs[0].clone()]);
                     if let Some(existing_output) = self.available_exprs.get(&swapped_key) {
-                        Self::apply_cse(op, existing_output);
+                        self.apply_cse(op, existing_output);
                         modified = true;
                         found = true;
                     }
                 }
 
                 // If not found, register this expression
-                if !found
-                    && let Some(out) = &op.output {
+                if !found {
+                    if let Some(out) = &op.output {
                         self.available_exprs.insert(key, out.clone());
                     }
+                }
             }
         }
 
         modified
     }
 
-    fn apply_cse(op: &mut crate::pcode::PcodeOp, existing_output: &Varnode) {
+    fn apply_cse(&self, op: &mut crate::pcode::PcodeOp, existing_output: &Varnode) {
         // Replace with COPY
         op.opcode = PcodeOpcode::Copy;
         op.inputs = vec![existing_output.clone()];
         // Output remains the same
     }
 
-    fn is_pure_arithmetic(opcode: PcodeOpcode) -> bool {
+    fn is_pure_arithmetic(&self, opcode: PcodeOpcode) -> bool {
         matches!(
             opcode,
             PcodeOpcode::IntAdd

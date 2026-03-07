@@ -117,7 +117,7 @@
     - `debugging/` (2 files): debug, ttd
     - `workspace/` (3 files): project, search, settings
     - `extensions/` (2 files): plugins, devtools
-  - 51개 커맨드를 도메인별로 체계화
+  - 42개 IPC 커맨드 등록 (도메인별 체계화)
   
 - ✅ **Phase 5.2**: Pass Trait 시스템
   - **핵심 구현**:
@@ -146,6 +146,14 @@
 - 메트릭 수집: 패스 실행 시간 통계
 - 병렬 실행: 독립적인 패스를 병렬로 실행
 - 캐싱: 변경되지 않은 코드에 대한 패스 결과 캐싱
+
+### 최근 완료 (2026-03)
+
+- ✅ **디컴파일러 성능 및 배치 성공률**
+  - putty.exe(2,756 함수) 기준: 성공률 61% → 87%, 단일 함수 207ms → 44ms
+  - PostProcess pipeline 계측 및 병목 제거 (compound ops, GUID 치환, CFGStructurizer early exit 등)
+  - Recursive decompilation 순환 참조 시 예외 대신 stub 반환으로 715건 에러 수정
+  - 배치 벤치마크: `scripts/test/batch_benchmark/`
 
 ### Phase 6-7: 품질 및 문서화 (예정)
 

@@ -1,8 +1,8 @@
 # GUI User Guide
 
 > ⚠️ **Legacy Notice:** 이 문서는 **egui 기반 GUI**를 기준으로 작성되었습니다.  
-> 현재 데스크톱 앱의 주 UI는 **Tauri + React**로 전환 중이며,  
-> 최신 UI 플로우는 Tauri 코드(`crates/fission-tauri`)와 `docs/ROADMAP.md`를 함께 참고하는 것을 권장합니다.
+> 현재 공식 데스크톱 앱은 **Tauri 2 + React 19** (`crates/fission-tauri`)이며,  
+> 최신 UI 플로우·IPC·단축키는 **루트 [README.md](../../README.md)**의 "GUI — Tauri Desktop App" 섹션과 `docs/ROADMAP.md`를 참고하세요.
 
 ## Overview
 
@@ -714,7 +714,7 @@ sudo apt install libgtk-3-dev
 
 **Error: "failed to initialize display"**
 - Set `DISPLAY` environment variable
-- Or run with `--cli` flag instead
+- Or use CLI: `fission_cli <binary>` (see [README](../../README.md))
 
 ### Slow Performance
 

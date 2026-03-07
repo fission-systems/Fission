@@ -51,7 +51,7 @@ pub struct Loop {
 impl Loop {
     /// Create a new loop
     pub fn new(header: usize) -> Self {
-        Self {
+        Loop {
             header,
             body: HashSet::new(),
             back_edges: Vec::new(),
@@ -75,7 +75,7 @@ impl Loop {
     }
 
     /// Check if this is an innermost loop (no nested loops)
-    pub const fn is_innermost(&self) -> bool {
+    pub fn is_innermost(&self) -> bool {
         self.children.is_empty()
     }
 
@@ -103,8 +103,7 @@ impl LoopAnalyzer {
         // Create loops for each header
         for (header, edges) in header_to_back_edges {
             let mut loop_info = Loop::new(header);
-            loop_info.back_edges.clone_from(&edges);
-
+            loop_info.back_edges = edges.clone();
 
             // Find natural loop body
             loop_info.body = Self::find_natural_loop_body(cfg, header, &edges);
@@ -163,7 +162,8 @@ impl LoopAnalyzer {
         // BFS backwards to find all blocks in the loop
         while let Some(block) = worklist.pop_front() {
             for &pred in &cfg.blocks[block].predecessors {
-                if body.insert(pred) {
+                if !body.contains(&pred) {
+                    body.insert(pred);
                     worklist.push_back(pred);
                 }
             }
@@ -213,14 +213,15 @@ impl LoopAnalyzer {
         // Check for do-while (exit from latch)
         let latches = loop_info.latches();
         for latch in &latches {
-            if let Some(latch_block) = cfg.blocks.get(*latch)
-                && latch_block.has_conditional_branch() {
+            if let Some(latch_block) = cfg.blocks.get(*latch) {
+                if latch_block.has_conditional_branch() {
                     let exits_from_latch =
                         loop_info.exit_edges.iter().any(|(from, _)| from == latch);
                     if exits_from_latch {
                         return LoopKind::DoWhile;
                     }
                 }
+            }
         }
 
         // Default to natural loop
@@ -228,7 +229,7 @@ impl LoopAnalyzer {
     }
 
     /// Compute nesting relationships between loops
-    fn compute_nesting(loops: &mut [Loop]) {
+    fn compute_nesting(loops: &mut Vec<Loop>) {
         let n = loops.len();
         if n == 0 {
             return;
@@ -269,7 +270,7 @@ impl LoopAnalyzer {
     }
 
     /// Get the innermost loop containing a block
-    pub fn innermost_loop_containing(loops: &[Loop], block: usize) -> Option<&Loop> {
+    pub fn innermost_loop_containing<'a>(loops: &'a [Loop], block: usize) -> Option<&'a Loop> {
         loops
             .iter()
             .filter(|l| l.contains(block))
@@ -291,7 +292,7 @@ impl LoopAnalyzer {
                     continue; // Back edge - OK
                 }
                 if dom_tree.dominates(from_idx, to_idx) {
-                    // Forward edge - OK
+                    continue; // Forward edge - OK
                 }
 
                 // Cross edge - check if it creates multiple entries

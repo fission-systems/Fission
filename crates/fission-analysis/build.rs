@@ -83,8 +83,16 @@ fn build_libdecomp() {
     std::fs::create_dir_all(&build_dir)
         .unwrap_or_else(|e| panic!("Failed to create build directory: {}", e));
 
-    // Build CMake configure arguments
-    let mut cmake_args: Vec<String> = vec!["..".to_string()];
+    // Build CMake configure arguments.
+    // Use --fresh to avoid stale cache collisions when source location changes
+    // (e.g. vendor path -> root path migration).
+    let mut cmake_args: Vec<String> = vec![
+        "-S".to_string(),
+        decomp_dir.to_string_lossy().into_owned(),
+        "-B".to_string(),
+        build_dir.to_string_lossy().into_owned(),
+        "--fresh".to_string(),
+    ];
 
     if let Some(toolchain) = find_vcpkg_toolchain() {
         cmake_args.push(format!("-DCMAKE_TOOLCHAIN_FILE={}", toolchain.display()));
@@ -97,7 +105,6 @@ fn build_libdecomp() {
     // Run cmake configure
     let cmake_status = Command::new("cmake")
         .args(&cmake_args)
-        .current_dir(&build_dir)
         .status()
         .unwrap_or_else(|e| panic!("Failed to run cmake configure: {}", e));
 
@@ -107,8 +114,14 @@ fn build_libdecomp() {
 
     // Build the decomp target (cross-platform: cmake --build instead of make)
     let build_status = Command::new("cmake")
-        .args(["--build", ".", "--target", "decomp", "--parallel", "4"])
-        .current_dir(&build_dir)
+        .args([
+            "--build",
+            &build_dir.to_string_lossy(),
+            "--target",
+            "decomp",
+            "--parallel",
+            "4",
+        ])
         .status()
         .unwrap_or_else(|e| panic!("Failed to build decomp target: {}", e));
 

@@ -1684,9 +1684,11 @@ bool TypePropagator::write_back(Funcdata* fd) {
     
     bool change = false;
     VarnodeLocSet::const_iterator iter;
+    int updated = 0;
     
     for (iter = fd->beginLoc(); iter != fd->endLoc(); ++iter) {
         Varnode* vn = *iter;
+        if (!vn) continue;
         if (vn->isAnnotation()) continue;
         if (!vn->isWritten() && vn->hasNoDescend()) continue;
         
@@ -1697,16 +1699,18 @@ bool TypePropagator::write_back(Funcdata* fd) {
         Datatype* current = vn->getType();
         if (current == ct) continue;
         
-        // Check type ordering (Ghidra's typeOrder)
-        // 0 means same, < 0 means ct is more specific
         if (ct != current) {
             // Update varnode type
             if (vn->updateType(ct)) {
                 change = true;
+                updated++;
             }
         }
     }
     
+    if (updated > 0) {
+        fission::utils::log_stream() << "[TypePropagator] write_back: " << updated << " varnode(s) updated" << std::endl;
+    }
     return change;
 }
 

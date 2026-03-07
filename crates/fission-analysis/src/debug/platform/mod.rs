@@ -14,7 +14,7 @@
 //! └── macos.rs    - macOS implementation (Mach API stub)
 //! ```
 
-use super::memory::{MemoryError, MemoryRegion};
+use super::memory::{MemoryError, MemoryProtection, MemoryRegion};
 
 // Platform-specific modules
 #[cfg(target_os = "windows")]
@@ -104,6 +104,6 @@ pub type PlatformMemoryImpl = LinuxMemory;
 pub type PlatformMemoryImpl = MacOSMemory;
 
 /// Create a new platform-specific memory manager
-pub const fn new_platform_memory() -> PlatformMemoryImpl {
+pub fn new_platform_memory() -> PlatformMemoryImpl {
     PlatformMemoryImpl::new()
 }

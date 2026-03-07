@@ -66,14 +66,16 @@ impl SymbolProviderState {
                 Some(range) => range,
                 None => continue,
             };
-            if let Some(next) = next_addr
-                && next > *addr && next < end {
+            if let Some(next) = next_addr {
+                if next > *addr && next < end {
                     let size = next - *addr;
-                    if let Ok(size_u32) = u32::try_from(size)
-                        && size_u32 > 0 {
+                    if let Ok(size_u32) = u32::try_from(size) {
+                        if size_u32 > 0 {
                             function_sizes.insert(*addr, size_u32);
                         }
+                    }
                 }
+            }
         }
         for func in functions {
             if func.address == 0 || func.name.is_empty() {
@@ -81,20 +83,22 @@ impl SymbolProviderState {
             }
             if let Ok(name) = CString::new(func.name.as_str()) {
                 let mut size = func.size.min(u32::MAX as u64) as u32;
-                if size == 0
-                    && let Some(estimated) = function_sizes.get(&func.address) {
+                if size == 0 {
+                    if let Some(estimated) = function_sizes.get(&func.address) {
                         size = *estimated;
                     }
+                }
                 let mut flags = SYMBOL_FLAG_FUNCTION;
                 if func.is_import {
                     flags |= SYMBOL_FLAG_EXTERNAL;
                 }
                 function_map.insert(func.address, SymbolProviderEntry { name, size, flags });
 
-                if size > 0
-                    && let Some(range) = build_range(func.address, size as u64) {
+                if size > 0 {
+                    if let Some(range) = build_range(func.address, size as u64) {
                         function_ranges.push(range);
                     }
+                }
             }
         }
 
@@ -123,10 +127,11 @@ impl SymbolProviderState {
                     flags |= SYMBOL_FLAG_EXTERNAL;
                 }
                 let mut size = data_sizes.get(addr).copied().unwrap_or(1);
-                if let Some(ptr_size) = pointer_size
-                    && is_import && ptr_size > 0 {
+                if let Some(ptr_size) = pointer_size {
+                    if is_import && ptr_size > 0 {
                         size = ptr_size;
                     }
+                }
                 data_map.insert(
                     *addr,
                     SymbolProviderEntry {
@@ -179,44 +184,48 @@ fn estimate_data_size(
 ) -> Option<u32> {
     let section = find_section_for_address(addr, sections)?;
     let (_, end) = section_range(section)?;
-    if let Some(next) = next_addr
-        && next > addr && next < end {
+    if let Some(next) = next_addr {
+        if next > addr && next < end {
             let delta = next - addr;
-            if let Ok(delta_u32) = u32::try_from(delta)
-                && delta_u32 > 0 {
+            if let Ok(delta_u32) = u32::try_from(delta) {
+                if delta_u32 > 0 {
                     return Some(delta_u32);
                 }
+            }
         }
+    }
     None
 }
 
 /// Find the section containing a given address
-fn find_section_for_address(
+fn find_section_for_address<'a>(
     addr: u64,
-    sections: &[fission_loader::loader::SectionInfo],
-) -> Option<&fission_loader::loader::SectionInfo> {
+    sections: &'a [fission_loader::loader::SectionInfo],
+) -> Option<&'a fission_loader::loader::SectionInfo> {
     for section in sections {
-        if let Some((start, end)) = section_range(section)
-            && addr >= start && addr < end {
+        if let Some((start, end)) = section_range(section) {
+            if addr >= start && addr < end {
                 return Some(section);
             }
+        }
     }
     None
 }
 
 /// Find an executable section containing a given address
-fn find_executable_section_for_address(
+fn find_executable_section_for_address<'a>(
     addr: u64,
-    sections: &[fission_loader::loader::SectionInfo],
-) -> Option<&fission_loader::loader::SectionInfo> {
+    sections: &'a [fission_loader::loader::SectionInfo],
+) -> Option<&'a fission_loader::loader::SectionInfo> {
     for section in sections {
         if !section.is_executable {
             continue;
         }
-        if let Some((start, end)) = section_range(section)
-            && addr >= start && addr < end {
+        if let Some((start, end)) = section_range(section) {
+            if addr >= start && addr < end {
                 return Some(section);
             }
+        }
     }
     None
 }

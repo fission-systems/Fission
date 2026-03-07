@@ -15,25 +15,30 @@ One-shot mode is designed for automation, CI/CD pipelines, and quick single-purp
 
 ### Basic Syntax
 
+바이너리 이름: **`fission_cli`** (`cargo build --release --bin fission_cli`로 빌드).
+
 ```bash
-fission --cli <binary_path> <analysis_flag> [options]
-fission --cli <binary_path> <address> [--asm] [--count N]
+fission_cli <binary_path> [options]              # one-shot: 플래그에 따라 분석 후 종료
+fission_cli <binary_path>                         # REPL: 추가 플래그 없으면 대화형 셸 진입
+fission_cli <binary_path> --decomp <address>      # 디컴파일
+fission_cli <binary_path> --asm <address> [--count N]  # 디스어셈블
 ```
 
-The `--cli` flag is **required** to enter CLI mode. Additional flags determine whether to enter REPL or execute one-shot analysis.
+- **플래그 없이 바이너리만**: REPL 모드 진입 (대화형 셸).
+- **플래그와 함께**: 해당 분석만 수행 후 즉시 종료(one-shot).
 
 ### Behavior
 
-- **Without additional flags**: Enters REPL mode
+- **REPL 모드**
   ```bash
-  fission --cli binary.exe
-  # Enters interactive shell, waits for commands
+  fission_cli binary.exe
+  # 대화형 셸 진입, load/open 후 명령 입력
   ```
 
-- **With analysis flags**: Executes one-shot analysis
+- **One-shot 분석**
   ```bash
-  fission --cli binary.exe --info
-  # Displays binary info and exits immediately
+  fission_cli binary.exe --info
+  # 바이너리 정보 출력 후 즉시 종료
   ```
 
 ---
@@ -55,7 +60,7 @@ Display comprehensive binary information.
 
 **Example**:
 ```bash
-$ fission --cli examples/winapi_test.exe --info
+$ fission_cli examples/winapi_test.exe --info
 
 Binary Information
   Path: examples/winapi_test.exe
@@ -82,7 +87,7 @@ Display section table with permissions.
 
 **Example**:
 ```bash
-$ fission --cli examples/winapi_test.exe --sections
+$ fission_cli examples/winapi_test.exe --sections
 
 Section Information
   Name         Virtual Addr       Size         Flags
@@ -107,38 +112,29 @@ Extract printable ASCII and Unicode strings.
 
 **Example**:
 ```bash
-$ fission --cli binary.exe --strings
-$ fission --cli binary.exe --strings 8
+$ fission_cli binary.exe --strings
+$ fission_cli binary.exe --strings 8
 ```
 
 **Filtering output**:
 ```bash
 # Find specific strings
-fission --cli binary.exe --strings | grep "config"
-fission --cli binary.exe --strings | grep -i "error"
+fission_cli binary.exe --strings | grep "config"
+fission_cli binary.exe --strings | grep -i "error"
 
 # Count strings
-fission --cli binary.exe --strings | wc -l
+fission_cli binary.exe --strings | wc -l
 ```
 
 ---
 
-### `--xrefs <address>`
-Show cross-references to a specific address.
+### Cross-references (REPL)
 
-**Output includes**:
-- Addresses that reference the target
-- Instruction type (call, jmp, mov, etc.)
-- Disassembly of referencing instruction
+One-shot 플래그로는 제공되지 않습니다. **REPL 모드**에서 사용하세요:
 
-**Example**:
 ```bash
-$ fission --cli binary.exe --xrefs 0x140001234
-
-References to 0x140001234:
-  0x140001100: call 0x140001234
-  0x140001500: jmp 0x140001234
-  0x140002000: lea rax, [0x140001234]
+fission_cli binary.exe
+# 프롬프트에서: xrefs 0x140001234  (또는 x)
 ```
 
 **Use cases**:
@@ -157,7 +153,7 @@ Set the number of instructions for disassembly output.
 
 **Example**:
 ```bash
-$ fission --cli binary.exe 0x140001450 --asm --count 100
+$ fission_cli binary.exe --asm 0x140001450 --count 100
 ```
 
 ---
@@ -173,12 +169,12 @@ $ fission --cli binary.exe 0x140001450 --asm --count 100
 BINARY="build/output.exe"
 
 # Extract metadata
-fission --cli $BINARY --info > analysis/info.txt
-fission --cli $BINARY --sections > analysis/sections.txt
-fission --cli $BINARY --strings > analysis/strings.txt
+fission_cli $BINARY --info > analysis/info.txt
+fission_cli $BINARY --sections > analysis/sections.txt
+fission_cli $BINARY --strings > analysis/strings.txt
 
 # Check for suspicious strings
-if fission --cli $BINARY --strings | grep -qi "malware\|keylog"; then
+if fission_cli $BINARY --strings | grep -qi "malware\|keylog"; then
     echo "Suspicious strings detected!"
     exit 1
 fi
@@ -194,7 +190,7 @@ fi
 
 for binary in binaries/*.exe; do
     echo "Analyzing: $binary"
-    fission --cli "$binary" --info >> report.txt
+    fission_cli "$binary" --info >> report.txt
     echo "---" >> report.txt
 done
 ```
@@ -207,16 +203,16 @@ done
 # Rapid binary triage during incident response
 
 # 1. Check file type and architecture
-fission --cli suspicious.exe --info
+fission_cli suspicious.exe --info
 
 # 2. Look for sections (packed binaries have unusual sections)
-fission --cli suspicious.exe --sections
+fission_cli suspicious.exe --sections
 
 # 3. Extract strings for IOCs
-fission --cli suspicious.exe --strings | grep -E "(http|C:\\|\.dll)"
+fission_cli suspicious.exe --strings | grep -E "(http|C:\\|\.dll)"
 
 # 4. Get function count (low count = packed/obfuscated)
-fission --cli suspicious.exe --info
+fission_cli suspicious.exe --info
 ```
 
 ---
@@ -231,7 +227,7 @@ import json
 def analyze_binary(path):
     """Extract binary info using Fission one-shot mode"""
     result = subprocess.run(
-        ['fission', '--cli', path, '--info'],
+        ['fission_cli', path, '--info'],
         capture_output=True,
         text=True
     )
@@ -239,13 +235,14 @@ def analyze_binary(path):
     return parse_fission_output(result.stdout)
 
 def find_references(binary, address):
-    """Find all references to an address"""
+    """Find all references to an address (use REPL or Tauri GUI; one-shot has no --xrefs)"""
+    # REPL: fission_cli binary.exe then "xrefs 0x..."
     result = subprocess.run(
-        ['fission', '--cli', binary, '--xrefs', hex(address)],
+        ['fission_cli', binary, '--info'],  # one-shot; xrefs는 REPL에서
         capture_output=True,
         text=True
     )
-    return parse_xrefs(result.stdout)
+    return parse_fission_output(result.stdout)
 ```
 
 ---
@@ -260,11 +257,11 @@ All flags that accept addresses support multiple formats:
 | Hexadecimal (no prefix) | `140001000` | Interpreted as hex if valid |
 | Decimal | `5368713216` | Plain decimal number |
 
-**Examples**:
+**Examples** (주소는 디컴파일/디스어셈블 등에서 사용):
 ```bash
-fission --cli binary.exe --xrefs 0x140001000
-fission --cli binary.exe --xrefs 140001000      # Same as above
-fission --cli binary.exe --xrefs 5368713216     # Decimal
+fission_cli binary.exe --decomp 0x140001000
+fission_cli binary.exe --asm 0x140001000
+# xrefs는 REPL: fission_cli binary.exe → xrefs 0x140001000
 ```
 
 ---
@@ -273,7 +270,7 @@ fission --cli binary.exe --xrefs 5368713216     # Decimal
 
 | Feature | REPL Mode | One-Shot Mode |
 |---------|-----------|---------------|
-| **Invocation** | `--cli <binary>` | `--cli <binary> <flag>` |
+| **Invocation** | `fission_cli <binary>` | `fission_cli <binary> <flag>` |
 | **Behavior** | Interactive shell | Execute and exit |
 | **Use Case** | Exploratory analysis | Automation |
 | **Multiple Commands** | Yes | No (single command only) |
@@ -286,20 +283,20 @@ fission --cli binary.exe --xrefs 5368713216     # Decimal
 
 ### File Not Found
 ```bash
-$ fission --cli nonexistent.exe --info
-Error: Failed to open binary: No such file or directory
+$ fission_cli nonexistent.exe --info
+Error: Failed to read binary: ...
 ```
 
 ### Invalid Address Format
 ```bash
-$ fission --cli binary.exe --xrefs invalid_addr
-Error: Invalid address format: invalid_addr
+$ fission_cli binary.exe --decomp invalid_addr
+Error: Invalid hex address: invalid_addr
 ```
 
 ### Unsupported Format
 ```bash
-$ fission --cli image.png --info
-Error: Unsupported binary format
+$ fission_cli image.png --info
+Error: Failed to parse binary / Unsupported format
 ```
 
 ---
@@ -320,10 +317,10 @@ One-shot mode is optimized for speed:
 ### Benchmarks
 ```bash
 # Typical execution times (varies by binary size)
-time fission --cli binary.exe --info      # ~0.2s
-time fission --cli binary.exe --sections  # ~0.2s
-time fission --cli binary.exe --strings   # ~0.5s (scans entire binary)
-time fission --cli binary.exe --xrefs 0x  # ~0.3s
+time fission_cli binary.exe --info      # ~0.2s
+time fission_cli binary.exe --sections  # ~0.2s
+time fission_cli binary.exe --strings   # ~0.5s (scans entire binary)
+time fission_cli binary.exe --decomp 0x140001000  # decompilation time
 ```
 
 ---
@@ -331,9 +328,9 @@ time fission --cli binary.exe --xrefs 0x  # ~0.3s
 ## Implementation Details
 
 ### Code Location
-- Main CLI handler: `src/main.rs`
-- One-shot implementations: `src/ui/cli/handlers.rs`
-- Flag parsing: `src/main.rs` (Args struct with clap)
+- Binary entry: `crates/fission-cli/src/bin/fission_cli.rs`
+- One-shot logic: `crates/fission-cli/src/cli/oneshot/mod.rs`
+- Argument parsing: `crates/fission-cli/src/cli/args.rs` (`OneShotArgs` with clap)
 
 ### Flow
 1. Parse arguments with `clap`
@@ -347,26 +344,24 @@ time fission --cli binary.exe --xrefs 0x  # ~0.3s
 
 To add a new one-shot flag:
 
-1. **Add flag to Args struct** (`src/main.rs`):
+1. **Add field to `OneShotArgs`** (`crates/fission-cli/src/cli/args.rs`):
 ```rust
 #[arg(long, help = "New analysis flag")]
 pub new_flag: bool,
 ```
 
-2. **Add handler** (`src/ui/cli/handlers.rs`):
+2. **Add handler** (e.g. in `crates/fission-cli/src/cli/oneshot/` or same mod):
 ```rust
-pub fn cmd_new_analysis(binary: &BinaryInfo) -> Result<()> {
-    println!("New Analysis Results");
+fn print_new_analysis(binary: &LoadedBinary) -> io::Result<()> {
     // Implementation
     Ok(())
 }
 ```
 
-3. **Add dispatch logic** (`src/main.rs`):
+3. **Add dispatch** in `execute_command()` (`crates/fission-cli/src/cli/oneshot/mod.rs`):
 ```rust
-if args.new_flag {
-    cmd_new_analysis(&binary_info)?;
-    return Ok(());
+if cli.new_flag {
+    return print_new_analysis(&binary);
 }
 ```
 
@@ -375,7 +370,8 @@ if args.new_flag {
 ## Related Documentation
 
 - [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) - Overall system architecture
-- [examples/README.md](../examples/README.md) - Test cases and validation
+- [README.md](../../README.md) - CLI reference and quick start
+- [samples/README.md](../../samples/README.md) - Sample binaries
 
 ---
 
@@ -398,36 +394,36 @@ Potential improvements to one-shot mode:
 ### Malware Analysis Workflow
 ```bash
 # 1. Quick triage
-fission --cli malware.exe --info
+fission_cli malware.exe --info
 
 # 2. Check for packing (unusual sections, low function count)
-fission --cli malware.exe --sections
-fission --cli malware.exe --info
+fission_cli malware.exe --sections
+fission_cli malware.exe --info
 
 # 3. Extract IOCs
-fission --cli malware.exe --strings | grep -E "(http|ftp|\.com|\.exe)"
+fission_cli malware.exe --strings | grep -E "(http|ftp|\.com|\.exe)"
 
 # 4. Find suspicious API usage
-fission --cli malware.exe --strings | grep -iE "(virtualalloc|createthread|writeprocessmemory)"
+fission_cli malware.exe --strings | grep -iE "(virtualalloc|createthread|writeprocessmemory)"
 ```
 
 ### Vulnerability Research
 ```bash
-# Find all references to a potentially vulnerable function
-fission --cli app.exe --xrefs 0x140001234
+# Decompile at a given address
+fission_cli app.exe --decomp 0x140001234
 
 # Extract strings to find format string vulnerabilities
-fission --cli app.exe --strings | grep "%"
+fission_cli app.exe --strings | grep "%"
 ```
 
 ### Reverse Engineering
 ```bash
 # Understand binary structure
-fission --cli target.exe --info
-fission --cli target.exe --sections
+fission_cli target.exe --info
+fission_cli target.exe --sections
 
 # Find interesting strings (config files, registry keys)
-fission --cli target.exe --strings | grep -i "software\\\\company"
+fission_cli target.exe --strings | grep -i "software\\\\company"
 ```
 
 ---
@@ -437,13 +433,13 @@ fission --cli target.exe --strings | grep -i "software\\\\company"
 ### Q: One-shot mode hangs
 **A**: Check if binary is corrupted or if decompiler is stuck. Use timeout:
 ```bash
-timeout 30s fission --cli binary.exe --info
+timeout 30s fission_cli binary.exe --info
 ```
 
 ### Q: No output displayed
 **A**: Check if binary loaded successfully. Try verbose mode:
 ```bash
-fission --cli binary.exe --info -vvv
+fission_cli binary.exe --info --verbose
 ```
 
 ### Q: Permission denied

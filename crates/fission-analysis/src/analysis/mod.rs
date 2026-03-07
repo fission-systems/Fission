@@ -20,8 +20,6 @@ pub use fission_loader::{
 pub use fission_pcode as pcode;
 pub use fission_pcode::disasm;
 
-pub use fission_signatures as signatures;
-
 pub use callgraph::{CallEdge, CallGraph};
 pub use cfg::{
     BasicBlock, BlockEdge, CfgAnalysis, CfgBuilder, CfgError, CfgMetrics, CfgResult, CfgVisualizer,

@@ -11,6 +11,7 @@
 #include "fission/ffi/SymbolProviderManager.h"
 #include "fission/ffi/DecompilerCore.h"
 #include "fission/decompiler/PcodeOptimizationBridge.h"
+#include "fission/utils/logger.h"
 
 // Ghidra types for type registration
 #include "type.hh"
@@ -77,6 +78,17 @@ extern "C" DECOMP_API DecompContext* decomp_create(const char* sla_dir) {
 
 extern "C" DECOMP_API void decomp_destroy(DecompContext* ctx) {
     destroy_context(ctx);
+}
+
+extern "C" DECOMP_API void decomp_set_log_verbose(DecompContext* ctx, int verbose) {
+    if (ctx != nullptr) {
+        ctx->log_verbose = (verbose != 0);
+        fission::utils::set_log_verbose(ctx->log_verbose);
+    }
+}
+
+extern "C" DECOMP_API void decomp_set_log_file(DecompContext* /*ctx*/, const char* path) {
+    fission::utils::Logger::initialize(path ? path : "");
 }
 
 // ============================================================================

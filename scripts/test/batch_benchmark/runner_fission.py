@@ -47,7 +47,7 @@ def run_fission_batch(binary_path: str, functions: list[tuple[str, str]], fissio
     """
     # Pre-build to ensure cargo build overhead is eliminated
     subprocess.run(
-        ["cargo", "build", "--release", "-p", "fission-cli"],
+        ["cargo", "build", "--release", "-p", "fission-cli", "--features", "native_decomp"],
         cwd=fission_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
     
@@ -65,6 +65,7 @@ def run_fission_batch(binary_path: str, functions: list[tuple[str, str]], fissio
     cmd = [
         "cargo", "run", "--release",
         "-p", "fission-cli", "--bin", "fission_cli",
+        "--features", "native_decomp",
         "--", binary_path,
         "--decomp-all", "--benchmark",
         "-o", tmp_path

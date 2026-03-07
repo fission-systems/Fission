@@ -34,57 +34,34 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     // Initialize decompiler if native_decomp feature is enabled
     #[cfg(feature = "native_decomp")]
     {
+        use fission_analysis::analysis::decomp::{prepare_native_decompiler_for_binary, PrepareOptions};
+
         let sla_dir = find_sla_dir();
         match fission_analysis::analysis::decomp::CachingDecompiler::new(&binary_arc, &sla_dir, 200)
         {
             Ok(mut decomp) => {
                 let bin_ref = binary_arc.clone();
-                let sleigh_id = bin_ref.arch_spec.clone();
                 let compiler_id = bin_ref.get_ghidra_compiler_id();
-                if let Err(e) = decomp.inner_mut().load_binary(
+                let config = fission_core::config::Config::default();
+                let gdt_path_owned = fission_core::PATHS
+                    .get_gdt_path(bin_ref.is_64bit)
+                    .and_then(|p| p.to_str().map(String::from));
+                let mut options = PrepareOptions {
+                    verbose: false,
+                    compiler_id: compiler_id.as_deref(),
+                    gdt_path: gdt_path_owned.as_deref(),
+                    timeout_ms: Some(config.decompiler.timeout_ms),
+                    timings: None,
+                };
+
+                if let Err(e) = prepare_native_decompiler_for_binary(
+                    decomp.inner_mut(),
+                    &bin_ref,
                     bin_ref.data.as_slice(),
-                    bin_ref.image_base,
-                    bin_ref.is_64bit,
-                    Some(sleigh_id.as_str()),
-                    compiler_id.as_deref(),
+                    &mut options,
                 ) {
-                    warn!(error = %e, "failed to load binary into decompiler");
+                    warn!(error = %e, "failed to prepare decompiler for binary");
                 } else {
-                    let inner_decomp = decomp.inner_mut();
-
-                    // Register PE sections so Ghidra can map virtual addresses to file data
-                    for section in &bin_ref.sections {
-                        let _ = inner_decomp.add_memory_block(
-                            &section.name,
-                            section.virtual_address,
-                            section.virtual_size,
-                            section.file_offset,
-                            section.file_size,
-                            section.is_executable,
-                            section.is_writable,
-                        );
-                    }
-
-                    // Register IAT symbols (import functions)
-                    let iat_symbols: std::collections::HashMap<u64, String> = bin_ref
-                        .imports()
-                        .map(|f| (f.address, f.name.clone()))
-                        .collect();
-                    inner_decomp.add_symbols(&iat_symbols);
-
-                    // Register all functions as global symbols
-                    let global_symbols: std::collections::HashMap<u64, String> = bin_ref
-                        .functions
-                        .iter()
-                        .map(|f| (f.address, f.name.clone()))
-                        .collect();
-                    inner_decomp.add_global_symbols(&global_symbols);
-
-                    // Add function entries so Ghidra knows about them
-                    for func in &bin_ref.functions {
-                        let _ = inner_decomp.add_function(func.address, Some(&func.name));
-                    }
-
                     // Store decompiler in its own separate Mutex
                     let mut decomp_lock = state.decompiler.lock().await;
                     *decomp_lock = Some(decomp);

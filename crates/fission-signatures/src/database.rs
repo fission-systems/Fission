@@ -59,7 +59,7 @@ impl SignatureDatabase {
             if let Some(&Some(first_byte)) = sig.pattern.first() {
                 self.first_byte_index
                     .entry(first_byte)
-                    .or_default()
+                    .or_insert_with(Vec::new)
                     .push(idx);
             } else if sig.pattern.first() == Some(&None) {
                 // Signature starts with wildcard
@@ -82,19 +82,21 @@ impl SignatureDatabase {
         // Use the index to only check signatures that start with the same first byte
         if let Some(indices) = self.first_byte_index.get(&first_byte) {
             for &idx in indices {
-                if let Some(sig) = self.signatures.get(idx)
-                    && sig.matches(bytes) {
+                if let Some(sig) = self.signatures.get(idx) {
+                    if sig.matches(bytes) {
                         return Some(sig);
                     }
+                }
             }
         }
 
         // Check signatures that start with wildcards (pre-indexed, no full scan needed)
         for &idx in &self.wildcard_signatures {
-            if let Some(sig) = self.signatures.get(idx)
-                && sig.matches(bytes) {
+            if let Some(sig) = self.signatures.get(idx) {
+                if sig.matches(bytes) {
                     return Some(sig);
                 }
+            }
         }
 
         None
@@ -105,7 +107,7 @@ impl SignatureDatabase {
     /// This provides Ghidra FID-style matching by:
     /// 1. First matching byte patterns
     /// 2. Then validating call graph relations if signature has constraints
-    /// 3. Rejecting matches that don't pass relation checks (if `force_relation` is set)
+    /// 3. Rejecting matches that don't pass relation checks (if force_relation is set)
     pub fn identify_with_relation(
         &self,
         bytes: &[u8],
@@ -143,18 +145,20 @@ impl SignatureDatabase {
 
         if let Some(indices) = self.first_byte_index.get(&first_byte) {
             for &idx in indices {
-                if let Some(sig) = self.signatures.get(idx)
-                    && sig.matches(bytes) {
+                if let Some(sig) = self.signatures.get(idx) {
+                    if sig.matches(bytes) {
                         matches.push(sig);
                     }
+                }
             }
         }
 
         for &idx in &self.wildcard_signatures {
-            if let Some(sig) = self.signatures.get(idx)
-                && sig.matches(bytes) {
+            if let Some(sig) = self.signatures.get(idx) {
+                if sig.matches(bytes) {
                     matches.push(sig);
                 }
+            }
         }
 
         matches
@@ -172,7 +176,7 @@ impl SignatureDatabase {
         if let Some(&Some(first_byte)) = sig.pattern.first() {
             self.first_byte_index
                 .entry(first_byte)
-                .or_default()
+                .or_insert_with(Vec::new)
                 .push(idx);
         } else if sig.pattern.first() == Some(&None) {
             // Wildcard signature
@@ -195,9 +199,7 @@ impl SignatureDatabase {
             // Calculate file offset from virtual address
             // For memory-mapped data, the address should be usable directly
             let offset = if *addr >= image_base {
-                #[allow(clippy::cast_possible_truncation)]
-                let off = (*addr - image_base) as usize;
-                off
+                (*addr - image_base) as usize
             } else {
                 continue;
             };

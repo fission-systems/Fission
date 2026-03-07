@@ -42,7 +42,7 @@ impl Patch {
     }
 
     /// Size of the patch in bytes
-    pub const fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.patched.len()
     }
 }

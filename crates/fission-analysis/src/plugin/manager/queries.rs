@@ -17,7 +17,7 @@ impl PluginManager {
         let plugin = self
             .plugins
             .get_mut(plugin_id)
-            .ok_or_else(|| format!("Plugin '{plugin_id}' not found"))?;
+            .ok_or_else(|| format!("Plugin '{}' not found", plugin_id))?;
         plugin.info.enabled = true;
         Ok(())
     }
@@ -27,7 +27,7 @@ impl PluginManager {
         let plugin = self
             .plugins
             .get_mut(plugin_id)
-            .ok_or_else(|| format!("Plugin '{plugin_id}' not found"))?;
+            .ok_or_else(|| format!("Plugin '{}' not found", plugin_id))?;
         plugin.info.enabled = false;
         Ok(())
     }

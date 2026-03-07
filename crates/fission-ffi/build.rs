@@ -202,9 +202,7 @@ fn main() {
                 "cargo:warning=Native library path not found: {}",
                 lib_path.display()
             );
-            println!(
-                "cargo:warning=Make sure you have built ghidra_decompiler/build/libdecomp.dylib"
-            );
+            println!("cargo:warning=Build native target first: cmake --build ghidra_decompiler/build --config Release --target decomp");
         }
     }
     println!("cargo:rerun-if-changed=build.rs");

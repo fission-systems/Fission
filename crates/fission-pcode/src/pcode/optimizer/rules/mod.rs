@@ -17,12 +17,6 @@ pub struct OptimizationRules {
     // Can add statistics or configuration here later
 }
 
-impl Default for OptimizationRules {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl OptimizationRules {
     pub fn new() -> Self {
         Self {}
@@ -39,19 +33,19 @@ impl OptimizationRules {
         if let Some(result) = dead_bit::try_dead_bit_elimination(op, tracker) {
             return Some(result);
         }
-        if let Some(result) = Self::try_shift_bitops(op, tracker) {
+        if let Some(result) = self.try_shift_bitops(op, tracker) {
             return Some(result);
         }
-        if let Some(result) = Self::try_and_mask(op, tracker) {
+        if let Some(result) = self.try_and_mask(op, tracker) {
             return Some(result);
         }
-        if let Some(result) = Self::try_ptr_arith(op, tracker, func) {
+        if let Some(result) = self.try_ptr_arith(op, tracker, func) {
             return Some(result);
         }
-        if let Some(result) = Self::try_pull_sub_indirect(op, tracker, func) {
+        if let Some(result) = self.try_pull_sub_indirect(op, tracker, func) {
             return Some(result);
         }
-        if let Some(result) = Self::try_indirect_collapse(op, tracker, func) {
+        if let Some(result) = self.try_indirect_collapse(op, tracker, func) {
             return Some(result);
         }
 
@@ -59,49 +53,48 @@ impl OptimizationRules {
         self.try_optimize(op)
     }
 
-    fn get_op(func: &PcodeFunction, op_ref: OpRef) -> Option<&PcodeOp> {
+    fn get_op<'a>(&self, func: &'a PcodeFunction, op_ref: OpRef) -> Option<&'a PcodeOp> {
         func.blocks.get(op_ref.block_idx)?.ops.get(op_ref.op_idx)
     }
 
     /// Try to optimize a single Pcode operation (Phase 1 rules)
-    #[allow(clippy::unused_self)]
     pub fn try_optimize(&self, op: &PcodeOp) -> Option<PcodeOp> {
         match op.opcode {
             // Bitwise operations
-            PcodeOpcode::IntXor => Self::optimize_xor(op),
-            PcodeOpcode::IntAnd => Self::optimize_and(op),
-            PcodeOpcode::IntOr => Self::optimize_or(op),
+            PcodeOpcode::IntXor => self.optimize_xor(op),
+            PcodeOpcode::IntAnd => self.optimize_and(op),
+            PcodeOpcode::IntOr => self.optimize_or(op),
 
             // Arithmetic operations
-            PcodeOpcode::IntAdd => Self::optimize_add(op),
-            PcodeOpcode::IntSub => Self::optimize_sub(op),
-            PcodeOpcode::IntMult => Self::optimize_mult(op),
-            PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv => Self::optimize_div(op),
-            PcodeOpcode::IntRem | PcodeOpcode::IntSRem => Self::optimize_rem(op),
+            PcodeOpcode::IntAdd => self.optimize_add(op),
+            PcodeOpcode::IntSub => self.optimize_sub(op),
+            PcodeOpcode::IntMult => self.optimize_mult(op),
+            PcodeOpcode::IntDiv | PcodeOpcode::IntSDiv => self.optimize_div(op),
+            PcodeOpcode::IntRem | PcodeOpcode::IntSRem => self.optimize_rem(op),
 
             // Shift operations
-            PcodeOpcode::IntLeft => Self::optimize_left_shift(op),
-            PcodeOpcode::IntRight => Self::optimize_right_shift(op),
-            PcodeOpcode::IntSRight => Self::optimize_sright_shift(op),
+            PcodeOpcode::IntLeft => self.optimize_left_shift(op),
+            PcodeOpcode::IntRight => self.optimize_right_shift(op),
+            PcodeOpcode::IntSRight => self.optimize_sright_shift(op),
 
             // Comparison operations
-            PcodeOpcode::IntEqual => Self::optimize_equal(op),
-            PcodeOpcode::IntNotEqual => Self::optimize_not_equal(op),
-            PcodeOpcode::IntLess => Self::optimize_less(op),
-            PcodeOpcode::IntSLess => Self::optimize_sless(op),
-            PcodeOpcode::IntLessEqual => Self::optimize_less_equal(op),
-            PcodeOpcode::IntSLessEqual => Self::optimize_sless_equal(op),
+            PcodeOpcode::IntEqual => self.optimize_equal(op),
+            PcodeOpcode::IntNotEqual => self.optimize_not_equal(op),
+            PcodeOpcode::IntLess => self.optimize_less(op),
+            PcodeOpcode::IntSLess => self.optimize_sless(op),
+            PcodeOpcode::IntLessEqual => self.optimize_less_equal(op),
+            PcodeOpcode::IntSLessEqual => self.optimize_sless_equal(op),
 
             // Boolean operations
-            PcodeOpcode::BoolAnd | PcodeOpcode::BoolOr => Self::optimize_bool_and_or(op),
-            PcodeOpcode::BoolXor => Self::optimize_bool_xor(op),
+            PcodeOpcode::BoolAnd | PcodeOpcode::BoolOr => self.optimize_bool_and_or(op),
+            PcodeOpcode::BoolXor => self.optimize_bool_xor(op),
 
             // Float comparisons
-            PcodeOpcode::FloatEqual => Self::optimize_float_equal(op),
+            PcodeOpcode::FloatEqual => self.optimize_float_equal(op),
             PcodeOpcode::FloatNotEqual | PcodeOpcode::FloatLess => {
-                Self::optimize_float_not_equal_less(op)
+                self.optimize_float_not_equal_less(op)
             }
-            PcodeOpcode::FloatLessEqual => Self::optimize_float_less_equal(op),
+            PcodeOpcode::FloatLessEqual => self.optimize_float_less_equal(op),
 
             _ => None,
         }
@@ -109,76 +102,76 @@ impl OptimizationRules {
 
     // ===== Bitwise Operations =====
 
-    fn optimize_xor(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_xor(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x ^ 0 => x
         if op.inputs[1].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
         if op.inputs[0].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[1]));
+            return Some(self.make_copy(op, &op.inputs[1]));
         }
 
         // x ^ x => 0
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_constant(op, 0));
+            return Some(self.make_constant(op, 0));
         }
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = op.inputs[0].constant_val ^ op.inputs[1].constant_val;
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
     }
 
-    fn optimize_and(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_and(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x & 0 => 0
         if op.inputs[1].is_zero() || op.inputs[0].is_zero() {
-            return Some(Self::make_constant(op, 0));
+            return Some(self.make_constant(op, 0));
         }
 
         // x & -1 => x
         if op.inputs[1].is_all_ones() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
         if op.inputs[0].is_all_ones() {
-            return Some(Self::make_copy(op, &op.inputs[1]));
+            return Some(self.make_copy(op, &op.inputs[1]));
         }
 
         // x & x => x
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = op.inputs[0].constant_val & op.inputs[1].constant_val;
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
     }
 
-    fn optimize_or(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_or(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x | 0 => x
         if op.inputs[1].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
         if op.inputs[0].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[1]));
+            return Some(self.make_copy(op, &op.inputs[1]));
         }
 
         // x | -1 => -1
@@ -188,18 +181,18 @@ impl OptimizationRules {
             } else {
                 4
             };
-            return Some(Self::make_constant(op, (1i64 << (all_ones * 8)) - 1));
+            return Some(self.make_constant(op, (1i64 << (all_ones * 8)) - 1));
         }
 
         // x | x => x
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = op.inputs[0].constant_val | op.inputs[1].constant_val;
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
@@ -207,17 +200,17 @@ impl OptimizationRules {
 
     // ===== Arithmetic Operations =====
 
-    fn optimize_add(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_add(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x + 0 => x
         if op.inputs[1].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
         if op.inputs[0].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[1]));
+            return Some(self.make_copy(op, &op.inputs[1]));
         }
 
         // Constant folding: const + const
@@ -225,25 +218,25 @@ impl OptimizationRules {
             let result = op.inputs[0]
                 .constant_val
                 .wrapping_add(op.inputs[1].constant_val);
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
     }
 
-    fn optimize_sub(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_sub(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x - 0 => x
         if op.inputs[1].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
 
         // x - x => 0
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_constant(op, 0));
+            return Some(self.make_constant(op, 0));
         }
 
         // Constant folding
@@ -251,28 +244,28 @@ impl OptimizationRules {
             let result = op.inputs[0]
                 .constant_val
                 .wrapping_sub(op.inputs[1].constant_val);
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
     }
 
-    fn optimize_mult(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_mult(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x * 0 => 0
         if op.inputs[1].is_zero() || op.inputs[0].is_zero() {
-            return Some(Self::make_constant(op, 0));
+            return Some(self.make_constant(op, 0));
         }
 
         // x * 1 => x
         if op.inputs[1].is_one() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
         if op.inputs[0].is_one() {
-            return Some(Self::make_copy(op, &op.inputs[1]));
+            return Some(self.make_copy(op, &op.inputs[1]));
         }
 
         // Constant folding
@@ -280,59 +273,59 @@ impl OptimizationRules {
             let result = op.inputs[0]
                 .constant_val
                 .wrapping_mul(op.inputs[1].constant_val);
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
     }
 
-    fn optimize_div(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_div(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x / 1 => x
         if op.inputs[1].is_one() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant && !op.inputs[1].is_zero() {
             let result = if op.opcode == PcodeOpcode::IntDiv {
                 (op.inputs[0].constant_val as u64).wrapping_div(op.inputs[1].constant_val as u64)
-                    .cast_signed()
+                    as i64
             } else {
                 op.inputs[0]
                     .constant_val
                     .wrapping_div(op.inputs[1].constant_val)
             };
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
     }
 
-    fn optimize_rem(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_rem(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x % 1 => 0
         if op.inputs[1].is_one() {
-            return Some(Self::make_constant(op, 0));
+            return Some(self.make_constant(op, 0));
         }
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant && !op.inputs[1].is_zero() {
             let result = if op.opcode == PcodeOpcode::IntRem {
                 (op.inputs[0].constant_val as u64).wrapping_rem(op.inputs[1].constant_val as u64)
-                    .cast_signed()
+                    as i64
             } else {
                 op.inputs[0]
                     .constant_val
                     .wrapping_rem(op.inputs[1].constant_val)
             };
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
@@ -340,14 +333,14 @@ impl OptimizationRules {
 
     // ===== Shift Operations =====
 
-    fn optimize_left_shift(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_left_shift(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x << 0 => x
         if op.inputs[1].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
 
         // Constant folding
@@ -355,41 +348,40 @@ impl OptimizationRules {
             let result = op.inputs[0]
                 .constant_val
                 .wrapping_shl(op.inputs[1].constant_val as u32);
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
     }
 
-    fn optimize_right_shift(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_right_shift(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x >> 0 => x
         if op.inputs[1].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
 
         // Constant folding (unsigned shift)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = (op.inputs[0].constant_val as u64)
-                .wrapping_shr(op.inputs[1].constant_val as u32)
-                .cast_signed();
-            return Some(Self::make_constant(op, result));
+                .wrapping_shr(op.inputs[1].constant_val as u32) as i64;
+            return Some(self.make_constant(op, result));
         }
 
         None
     }
 
-    fn optimize_sright_shift(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_sright_shift(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x >> 0 => x
         if op.inputs[1].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
 
         // Constant folding (signed shift)
@@ -397,7 +389,7 @@ impl OptimizationRules {
             let result = op.inputs[0]
                 .constant_val
                 .wrapping_shr(op.inputs[1].constant_val as u32);
-            return Some(Self::make_constant(op, result));
+            return Some(self.make_constant(op, result));
         }
 
         None
@@ -405,115 +397,115 @@ impl OptimizationRules {
 
     // ===== Comparison Operations =====
 
-    fn optimize_equal(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_equal(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x == x => true
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, true));
+            return Some(self.make_boolean(op, true));
         }
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = op.inputs[0].constant_val == op.inputs[1].constant_val;
-            return Some(Self::make_boolean(op, result));
+            return Some(self.make_boolean(op, result));
         }
 
         None
     }
 
-    fn optimize_not_equal(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_not_equal(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x != x => false
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, false));
+            return Some(self.make_boolean(op, false));
         }
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = op.inputs[0].constant_val != op.inputs[1].constant_val;
-            return Some(Self::make_boolean(op, result));
+            return Some(self.make_boolean(op, result));
         }
 
         None
     }
 
-    fn optimize_less(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_less(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x < x => false
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, false));
+            return Some(self.make_boolean(op, false));
         }
 
         // Constant folding (unsigned)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = (op.inputs[0].constant_val as u64) < (op.inputs[1].constant_val as u64);
-            return Some(Self::make_boolean(op, result));
+            return Some(self.make_boolean(op, result));
         }
 
         None
     }
 
-    fn optimize_sless(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_sless(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x < x => false
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, false));
+            return Some(self.make_boolean(op, false));
         }
 
         // Constant folding (signed)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = op.inputs[0].constant_val < op.inputs[1].constant_val;
-            return Some(Self::make_boolean(op, result));
+            return Some(self.make_boolean(op, result));
         }
 
         None
     }
 
-    fn optimize_less_equal(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_less_equal(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x <= x => true
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, true));
+            return Some(self.make_boolean(op, true));
         }
 
         // Constant folding (unsigned)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = (op.inputs[0].constant_val as u64) <= (op.inputs[1].constant_val as u64);
-            return Some(Self::make_boolean(op, result));
+            return Some(self.make_boolean(op, result));
         }
 
         None
     }
 
-    fn optimize_sless_equal(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_sless_equal(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // x <= x => true
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, true));
+            return Some(self.make_boolean(op, true));
         }
 
         // Constant folding (signed)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = op.inputs[0].constant_val <= op.inputs[1].constant_val;
-            return Some(Self::make_boolean(op, result));
+            return Some(self.make_boolean(op, result));
         }
 
         None
@@ -521,65 +513,65 @@ impl OptimizationRules {
 
     // ===== Boolean Operations =====
 
-    fn optimize_bool_and_or(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_bool_and_or(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // V && V => V, V || V => V
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
 
         if op.opcode == PcodeOpcode::BoolAnd {
             // V && true => V
             if op.inputs[1].is_one() {
-                return Some(Self::make_copy(op, &op.inputs[0]));
+                return Some(self.make_copy(op, &op.inputs[0]));
             }
             if op.inputs[0].is_one() {
-                return Some(Self::make_copy(op, &op.inputs[1]));
+                return Some(self.make_copy(op, &op.inputs[1]));
             }
 
             // V && false => false
             if op.inputs[1].is_zero() || op.inputs[0].is_zero() {
-                return Some(Self::make_boolean(op, false));
+                return Some(self.make_boolean(op, false));
             }
         }
 
         if op.opcode == PcodeOpcode::BoolOr {
             // V || false => V
             if op.inputs[1].is_zero() {
-                return Some(Self::make_copy(op, &op.inputs[0]));
+                return Some(self.make_copy(op, &op.inputs[0]));
             }
             if op.inputs[0].is_zero() {
-                return Some(Self::make_copy(op, &op.inputs[1]));
+                return Some(self.make_copy(op, &op.inputs[1]));
             }
 
             // V || true => true
             if op.inputs[1].is_one() || op.inputs[0].is_one() {
-                return Some(Self::make_boolean(op, true));
+                return Some(self.make_boolean(op, true));
             }
         }
 
         None
     }
 
-    fn optimize_bool_xor(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_bool_xor(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() != 2 {
             return None;
         }
 
         // V ^^ V => false
         if op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, false));
+            return Some(self.make_boolean(op, false));
         }
 
         // V ^^ false => V
         if op.inputs[1].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
         if op.inputs[0].is_zero() {
-            return Some(Self::make_copy(op, &op.inputs[1]));
+            return Some(self.make_copy(op, &op.inputs[1]));
         }
 
         // V ^^ true => !V
@@ -609,23 +601,23 @@ impl OptimizationRules {
 
     // ===== Float Comparisons =====
 
-    fn optimize_float_equal(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_float_equal(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() == 2 && op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, true));
+            return Some(self.make_boolean(op, true));
         }
         None
     }
 
-    fn optimize_float_not_equal_less(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_float_not_equal_less(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() == 2 && op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, false));
+            return Some(self.make_boolean(op, false));
         }
         None
     }
 
-    fn optimize_float_less_equal(op: &PcodeOp) -> Option<PcodeOp> {
+    fn optimize_float_less_equal(&self, op: &PcodeOp) -> Option<PcodeOp> {
         if op.inputs.len() == 2 && op.inputs[0] == op.inputs[1] {
-            return Some(Self::make_boolean(op, true));
+            return Some(self.make_boolean(op, true));
         }
         None
     }
@@ -633,7 +625,7 @@ impl OptimizationRules {
     // ===== Helper Methods =====
 
     /// Create a COPY operation
-    fn make_copy(original: &PcodeOp, source: &Varnode) -> PcodeOp {
+    fn make_copy(&self, original: &PcodeOp, source: &Varnode) -> PcodeOp {
         PcodeOp {
             seq_num: original.seq_num,
             opcode: PcodeOpcode::Copy,
@@ -645,7 +637,7 @@ impl OptimizationRules {
     }
 
     /// Create a constant load operation
-    fn make_constant(original: &PcodeOp, value: i64) -> PcodeOp {
+    fn make_constant(&self, original: &PcodeOp, value: i64) -> PcodeOp {
         let size = if let Some(out) = &original.output {
             out.size
         } else {
@@ -663,22 +655,22 @@ impl OptimizationRules {
     }
 
     /// Create a boolean constant (1 byte size, 0 or 1)
-    fn make_boolean(original: &PcodeOp, value: bool) -> PcodeOp {
+    fn make_boolean(&self, original: &PcodeOp, value: bool) -> PcodeOp {
         PcodeOp {
             seq_num: original.seq_num,
             opcode: PcodeOpcode::Copy,
             address: original.address,
             output: original.output.clone(),
-            inputs: vec![Varnode::constant(i64::from(value), 1)],
+            inputs: vec![Varnode::constant(if value { 1 } else { 0 }, 1)],
             asm_mnemonic: original.asm_mnemonic.clone(),
         }
     }
 
     // ===== Phase 2: Advanced Rules with Def-Use Tracking =====
 
-    /// `RuleShiftBitops`: Optimize shifts where all non-zero bits are shifted out
+    /// RuleShiftBitops: Optimize shifts where all non-zero bits are shifted out
     /// Example: (V & 0xf000) << 4 => #0 (all bits shifted out of range)
-    fn try_shift_bitops(op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
+    fn try_shift_bitops(&self, op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
         // This rule applies to shift operations
         let (is_left, shift_amt) = match op.opcode {
             PcodeOpcode::IntLeft => {
@@ -701,11 +693,13 @@ impl OptimizationRules {
         let out_size = op
             .output
             .as_ref()
-            .map_or(DEFAULT_VARNODE_SIZE, |v| v.size);
+            .map(|v| v.size)
+            .unwrap_or(DEFAULT_VARNODE_SIZE);
         let out_mask = match out_size {
             1 => 0xFF,
             2 => 0xFFFF,
             4 => 0xFFFF_FFFF,
+            8 => u64::MAX,
             _ => u64::MAX,
         };
 
@@ -718,17 +712,17 @@ impl OptimizationRules {
 
         // If all non-zero bits are gone, result is 0
         if shifted_nz == 0 {
-            return Some(Self::make_constant(op, 0));
+            return Some(self.make_constant(op, 0));
         }
 
         None
     }
 
-    /// `RuleAndMask`: Optimize AND operations using NZ masks
+    /// RuleAndMask: Optimize AND operations using NZ masks
     /// Examples:
-    /// - V & 0xff => V when V's `NZMask` is 0x0f (AND has no effect)
-    /// - V & mask => #0 when (V's `NZMask` & mask) == 0
-    fn try_and_mask(op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
+    /// - V & 0xff => V when V's NZMask is 0x0f (AND has no effect)
+    /// - V & mask => #0 when (V's NZMask & mask) == 0
+    fn try_and_mask(&self, op: &PcodeOp, tracker: &DefUseTracker) -> Option<PcodeOp> {
         if op.opcode != PcodeOpcode::IntAnd || op.inputs.len() < 2 {
             return None;
         }
@@ -739,7 +733,7 @@ impl OptimizationRules {
 
         // If result is always 0
         if and_mask == 0 {
-            return Some(Self::make_constant(op, 0));
+            return Some(self.make_constant(op, 0));
         }
 
         // Check consume mask
@@ -747,24 +741,25 @@ impl OptimizationRules {
             let consume = tracker.get_consume_mask(out);
             // If no consumed bits would be affected
             if (and_mask & consume) == 0 {
-                return Some(Self::make_constant(op, 0));
+                return Some(self.make_constant(op, 0));
             }
         }
 
         // If AND doesn't clear any bits (no-op)
         if and_mask == mask1 {
-            return Some(Self::make_copy(op, &op.inputs[0]));
+            return Some(self.make_copy(op, &op.inputs[0]));
         }
         if and_mask == mask2 && !op.inputs[1].is_constant {
-            return Some(Self::make_copy(op, &op.inputs[1]));
+            return Some(self.make_copy(op, &op.inputs[1]));
         }
 
         None
     }
 
-    /// `RulePtrArith`: Optimize pointer arithmetic
+    /// RulePtrArith: Optimize pointer arithmetic
     /// (A + c1) + c2 => A + (c1 + c2)
     fn try_ptr_arith(
+        &self,
         op: &PcodeOp,
         tracker: &DefUseTracker,
         func: &PcodeFunction,
@@ -786,9 +781,9 @@ impl OptimizationRules {
         let var_input = &op.inputs[var_idx];
 
         // Find definition of var_input
-        if let Some(def_ref) = tracker.get_def(var_input)
-            && let Some(def_op) = Self::get_op(func, def_ref)
-                && def_op.opcode == PcodeOpcode::IntAdd && def_op.inputs.len() == 2 {
+        if let Some(def_ref) = tracker.get_def(var_input) {
+            if let Some(def_op) = self.get_op(func, def_ref) {
+                if def_op.opcode == PcodeOpcode::IntAdd && def_op.inputs.len() == 2 {
                     // Check if def_op has a constant input
                     if let Some(c1_idx) = def_op.inputs.iter().position(|v| v.is_constant) {
                         let c1 = def_op.inputs[c1_idx].constant_val;
@@ -813,12 +808,15 @@ impl OptimizationRules {
                         });
                     }
                 }
+            }
+        }
 
         None
     }
 
-    /// `RulePullSubIndirect`: Optimize (ptr + off) - ptr => off
+    /// RulePullSubIndirect: Optimize (ptr + off) - ptr => off
     fn try_pull_sub_indirect(
+        &self,
         op: &PcodeOp,
         tracker: &DefUseTracker,
         func: &PcodeFunction,
@@ -831,25 +829,28 @@ impl OptimizationRules {
         let ptr = &op.inputs[1];
 
         // Check if ptr_plus_off is defined by ADD
-        if let Some(def_ref) = tracker.get_def(ptr_plus_off)
-            && let Some(def_op) = Self::get_op(func, def_ref)
-                && def_op.opcode == PcodeOpcode::IntAdd && def_op.inputs.len() == 2 {
+        if let Some(def_ref) = tracker.get_def(ptr_plus_off) {
+            if let Some(def_op) = self.get_op(func, def_ref) {
+                if def_op.opcode == PcodeOpcode::IntAdd && def_op.inputs.len() == 2 {
                     // Check if one of the inputs matches ptr
                     if def_op.inputs[0] == *ptr {
                         // (ptr + off) - ptr => off
-                        return Some(Self::make_copy(op, &def_op.inputs[1]));
+                        return Some(self.make_copy(op, &def_op.inputs[1]));
                     } else if def_op.inputs[1] == *ptr {
                         // (off + ptr) - ptr => off
-                        return Some(Self::make_copy(op, &def_op.inputs[0]));
+                        return Some(self.make_copy(op, &def_op.inputs[0]));
                     }
                 }
+            }
+        }
 
         None
     }
 
-    /// `RuleIndirectCollapse`: Simplify indirect calculations
+    /// RuleIndirectCollapse: Simplify indirect calculations
     /// PTRSUB(PTRSUB(base, c1), c2) => PTRSUB(base, c1+c2)
     fn try_indirect_collapse(
+        &self,
         op: &PcodeOp,
         tracker: &DefUseTracker,
         func: &PcodeFunction,
@@ -867,9 +868,9 @@ impl OptimizationRules {
         }
         let c2 = offset.constant_val;
 
-        if let Some(def_ref) = tracker.get_def(base)
-            && let Some(def_op) = Self::get_op(func, def_ref)
-                && def_op.opcode == PcodeOpcode::PtrSub && def_op.inputs.len() == 2 {
+        if let Some(def_ref) = tracker.get_def(base) {
+            if let Some(def_op) = self.get_op(func, def_ref) {
+                if def_op.opcode == PcodeOpcode::PtrSub && def_op.inputs.len() == 2 {
                     let inner_base = &def_op.inputs[0];
                     let inner_offset = &def_op.inputs[1];
 
@@ -890,6 +891,8 @@ impl OptimizationRules {
                         });
                     }
                 }
+            }
+        }
 
         None
     }

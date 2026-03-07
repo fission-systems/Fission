@@ -11,6 +11,9 @@ pub static PATHS: LazyLock<PathConfig> = LazyLock::new(PathConfig::detect);
 
 /// Search directories for FID databases (relative to working directory)
 const FID_SEARCH_DIRS: &[&str] = &[
+    "./signatures/fid/",
+    "../signatures/fid/",
+    "../../signatures/fid/",
     "./utils/signatures/fid/",
     "../utils/signatures/fid/",
     "../../utils/signatures/fid/",
@@ -18,6 +21,9 @@ const FID_SEARCH_DIRS: &[&str] = &[
 
 /// Search directories for DIE signatures
 const DIE_SEARCH_DIRS: &[&str] = &[
+    "./signatures/die/",
+    "../signatures/die/",
+    "../../signatures/die/",
     "./utils/signatures/die/",
     "../utils/signatures/die/",
     "../../utils/signatures/die/",
@@ -25,6 +31,10 @@ const DIE_SEARCH_DIRS: &[&str] = &[
 
 /// Search directories for GDT files
 const GDT_SEARCH_PREFIXES: &[&str] = &[
+    "../../signatures/typeinfo/win32/",
+    "../signatures/typeinfo/win32/",
+    "./signatures/typeinfo/win32/",
+    "signatures/typeinfo/win32/",
     "../../utils/signatures/typeinfo/win32/",
     "../utils/signatures/typeinfo/win32/",
     "./utils/signatures/typeinfo/win32/",
@@ -33,6 +43,9 @@ const GDT_SEARCH_PREFIXES: &[&str] = &[
 
 /// Search directories for pattern signatures
 const PATTERN_SEARCH_DIRS: &[&str] = &[
+    "./signatures/patterns/",
+    "../signatures/patterns/",
+    "../../signatures/patterns/",
     "./utils/signatures/patterns/",
     "../utils/signatures/patterns/",
     "../../utils/signatures/patterns/",
@@ -89,10 +102,19 @@ impl PathConfig {
     pub fn detect() -> Self {
         let workspace_root = crate::core::utils::find_workspace_root("FISSION_ROOT");
 
-        let signatures_base = workspace_root
-            .as_ref()
-            .map(|root| root.join("utils").join("signatures"))
-            .filter(|p| p.exists());
+        let signatures_base = workspace_root.as_ref().and_then(|root| {
+            let direct = root.join("signatures");
+            if direct.exists() {
+                return Some(direct);
+            }
+
+            let legacy = root.join("utils").join("signatures");
+            if legacy.exists() {
+                return Some(legacy);
+            }
+
+            None
+        });
 
         let fid_dir = signatures_base
             .as_ref()
@@ -102,13 +124,23 @@ impl PathConfig {
 
         let gdt_dir = workspace_root
             .as_ref()
-            .map(|root| {
-                root.join("utils")
+            .and_then(|root| {
+                let direct = root.join("signatures").join("typeinfo").join("win32");
+                if direct.exists() {
+                    return Some(direct);
+                }
+
+                let legacy = root
+                    .join("utils")
                     .join("signatures")
                     .join("typeinfo")
-                    .join("win32")
+                    .join("win32");
+                if legacy.exists() {
+                    return Some(legacy);
+                }
+
+                None
             })
-            .filter(|p| p.exists())
             .or_else(|| crate::core::utils::find_existing_dir(GDT_SEARCH_PREFIXES));
 
         let die_dir = signatures_base

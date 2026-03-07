@@ -1,7 +1,10 @@
+# CLI 전용 워크스페이스 (Tauri GUI 없이)
+# 사용법: src-tauri 경로가 없어서 "failed to load manifest for workspace member" 에러가 날 때
+#   cp Cargo.toml.workspace-cli-only Cargo.toml
+# 원복: git checkout Cargo.toml
+
 [workspace]
 resolver = "2"
-# Tauri GUI 크레이트: 경로가 없다면 아래 한 줄을 주석 처리하면 cargo/rust-analyzer가 나머지 워크스페이스만 로드합니다.
-# 자세한 내용은 docs/build/BUILD.md "Rust 워크스페이스 / rust-analyzer" 섹션 참고.
 members = [
     "crates/fission-core",
     "crates/fission-disasm",
@@ -11,7 +14,6 @@ members = [
     "crates/fission-analysis",
     "crates/fission-cli",
     "crates/fission-ffi",
-    "crates/fission-tauri/src-tauri",
 ]
 
 [profile.release]

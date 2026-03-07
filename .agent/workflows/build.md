@@ -31,7 +31,7 @@ cargo build --release
 // turbo
 
 ```bash
-ls -la target/release/fission
+ls -la target/release/fission_cli
 ls -la ghidra_decompiler/build/libdecomp.dylib
 ```
 

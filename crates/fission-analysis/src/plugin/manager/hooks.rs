@@ -18,7 +18,7 @@ impl PluginManager {
         let plugin = self
             .plugins
             .get_mut(plugin_id)
-            .ok_or_else(|| format!("Plugin '{plugin_id}' not found"))?;
+            .ok_or_else(|| format!("Plugin '{}' not found", plugin_id))?;
 
         let hook_id = self.next_hook_id;
         self.next_hook_id += 1;
@@ -41,7 +41,7 @@ impl PluginManager {
         let (hook, _) = self
             .hooks
             .remove(&hook_id)
-            .ok_or_else(|| format!("Hook {hook_id} not found"))?;
+            .ok_or_else(|| format!("Hook {} not found", hook_id))?;
 
         // Remove from plugin's hook list
         if let Some(plugin) = self.plugins.get_mut(&hook.plugin_id) {
@@ -70,10 +70,10 @@ impl PluginManager {
                     match event {
                         FissionEvent::BinaryLoaded(binary) => {
                             let info = create_binary_info(binary.as_ref());
-                            instance.on_binary_loaded(&ctx, &info);
+                            instance.on_binary_loaded(&ctx, &info)
                         }
                         FissionEvent::DecompilationSuccess { address, code, .. } => {
-                            instance.on_function_decompiled(&ctx, *address, code);
+                            instance.on_function_decompiled(&ctx, *address, code)
                         }
                         _ => {} // Other events not mapped to trait methods yet
                     }
@@ -90,10 +90,11 @@ impl PluginManager {
             .values()
             .filter(|(hook, _)| {
                 // Check if plugin is enabled
-                if let Some(plugin) = self.plugins.get(&hook.plugin_id)
-                    && !plugin.info.enabled {
+                if let Some(plugin) = self.plugins.get(&hook.plugin_id) {
+                    if !plugin.info.enabled {
                         return false;
                     }
+                }
 
                 hook.event_type == event_type || hook.event_type == FissionEventType::All
             })

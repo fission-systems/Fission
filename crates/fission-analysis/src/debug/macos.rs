@@ -10,7 +10,7 @@ use fission_core::{FissionError, Result as FissionResult};
 /// macOS debugger implementation (stub)
 ///
 /// Note: Full implementation requires:
-/// - `task_for_pid()` which needs the com.apple.security.cs.debugger entitlement
+/// - task_for_pid() which needs the com.apple.security.cs.debugger entitlement
 /// - Code signing with the entitlement
 /// - Running as root or being a debugger registered with the system
 pub struct MacOSDebugger {
@@ -27,7 +27,7 @@ impl MacOSDebugger {
     }
 
     /// Get current state
-    pub const fn state(&self) -> &DebugState {
+    pub fn state(&self) -> &DebugState {
         &self.state
     }
 }
@@ -49,19 +49,22 @@ pub fn enumerate_processes() -> Vec<ProcessInfo> {
     if let Ok(output) = std::process::Command::new("ps")
         .args(["-axo", "pid,comm"])
         .output()
-        && let Ok(stdout) = String::from_utf8(output.stdout) {
+    {
+        if let Ok(stdout) = String::from_utf8(output.stdout) {
             for line in stdout.lines().skip(1) {
                 let parts: Vec<&str> = line.trim().splitn(2, ' ').collect();
-                if parts.len() >= 2
-                    && let Ok(pid) = parts[0].trim().parse::<u32>() {
+                if parts.len() >= 2 {
+                    if let Ok(pid) = parts[0].trim().parse::<u32>() {
                         processes.push(ProcessInfo {
                             pid,
                             name: parts[1].trim().to_string(),
                             exe_path: None, // Would need to use proc_pidpath
                         });
                     }
+                }
             }
         }
+    }
 
     processes.sort_by_key(|p| p.pid);
     processes
@@ -76,8 +79,9 @@ impl Debugger for MacOSDebugger {
         // task_for_pid requires special entitlements on macOS
         Err(FissionError::debug(format!(
             "macOS debugging not yet implemented. \
-            Attaching to PID {pid} requires task_for_pid() which needs \
-            the com.apple.security.cs.debugger entitlement."
+            Attaching to PID {} requires task_for_pid() which needs \
+            the com.apple.security.cs.debugger entitlement.",
+            pid
         )))
     }
 
@@ -103,19 +107,22 @@ impl Debugger for MacOSDebugger {
 
     fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
         Err(FissionError::debug(format!(
-            "Cannot set breakpoint at 0x{address:x}: not attached"
+            "Cannot set breakpoint at 0x{:x}: not attached",
+            address
         )))
     }
 
     fn remove_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
         Err(FissionError::debug(format!(
-            "Cannot remove breakpoint at 0x{address:x}: not attached"
+            "Cannot remove breakpoint at 0x{:x}: not attached",
+            address
         )))
     }
 
     fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
         Err(FissionError::debug(format!(
-            "Cannot read {size} bytes at 0x{address:x}: not attached"
+            "Cannot read {} bytes at 0x{:x}: not attached",
+            size, address
         )))
     }
 
@@ -129,7 +136,8 @@ impl Debugger for MacOSDebugger {
 
     fn fetch_registers(&mut self, thread_id: u32) -> FissionResult<RegisterState> {
         Err(FissionError::debug(format!(
-            "Cannot fetch registers for thread {thread_id}: not attached"
+            "Cannot fetch registers for thread {}: not attached",
+            thread_id
         )))
     }
 }

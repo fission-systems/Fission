@@ -6,4 +6,5 @@ pub use fission_core::prelude::*;
 pub use fission_loader::{FunctionInfo, LoadedBinary, SectionInfo};
 
 // Re-export common debug types
+#[cfg(feature = "interactive_runtime")]
 pub use crate::debug::types::{Breakpoint, DebugEvent, DebugStatus, RegisterState};

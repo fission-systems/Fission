@@ -21,8 +21,6 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
-#include <chrono>
-#include "fission/utils/logger.h"
 
 using namespace fission::processing;
 using namespace fission::analysis;
@@ -68,9 +66,6 @@ std::string run_post_processing(
 
     std::string result = code;
 
-    auto pp_start = std::chrono::steady_clock::now();
-    auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
-
     if (options.apply_struct_definitions && !analysis.inferred_struct_definitions.empty()) {
         std::string with_structs = TypePropagator::apply_struct_types(
             result,
@@ -81,19 +76,16 @@ std::string run_post_processing(
             result = analysis.inferred_struct_definitions + "\n" + with_structs;
         }
     }
-    auto t1 = std::chrono::steady_clock::now();
 
     // Step 1: IAT symbol replacement
     if (options.iat_symbols) {
         result = post_process_iat_calls(result, ctx->symbols);
     }
-    auto t2 = std::chrono::steady_clock::now();
 
     // Step 2: Smart constant replacement
     if (options.smart_constants) {
         result = smart_constant_replace(result);
     }
-    auto t3 = std::chrono::steady_clock::now();
 
     // Step 2.5: String inlining
     if (options.inline_strings) {
@@ -126,14 +118,12 @@ std::string run_post_processing(
             result = inline_strings(result, ctx->cached_string_table);
         }
     }
-    auto t4 = std::chrono::steady_clock::now();
 
     // Step 3: Constant replacement
     if (options.constants) {
         std::map<uint64_t, std::string> enum_values;
         result = post_process_constants(result, enum_values);
     }
-    auto t5 = std::chrono::steady_clock::now();
 
     // Step 4: GUID substitution
     if (options.guids) {
@@ -142,7 +132,6 @@ std::string run_post_processing(
             result = substitute_guids(result, guid_map);
         }
     }
-    auto t6 = std::chrono::steady_clock::now();
 
     // Step 5: Unicode string recovery
     if (options.unicode_strings) {
@@ -158,13 +147,11 @@ std::string run_post_processing(
     {
         result = standardize_variable_names(result);
     }
-    auto t7 = std::chrono::steady_clock::now();
 
     // Step 7: xunknown/undefined type replacement
     if (options.xunknown_types) {
         result = replace_xunknown_types(result);
     }
-    auto t8 = std::chrono::steady_clock::now();
 
     // Step 8: SEH boilerplate cleanup
     if (options.seh_cleanup) {
@@ -190,7 +177,6 @@ std::string run_post_processing(
         result = normalize_msvc_crt_printf(result);
         result = improve_internal_function_names(result);
     }
-    auto t9 = std::chrono::steady_clock::now();
 
     // Step 9.5: Structure offset annotation
     if (options.struct_offsets) {
@@ -200,44 +186,24 @@ std::string run_post_processing(
             result = annotate_structure_offsets(result);
         }
     }
-    auto t10 = std::chrono::steady_clock::now();
 
     // Step 10: Apply FID-resolved function names
     if (options.fid_names && !ctx->fid_databases.empty() && ctx->matcher) {
         std::map<uint64_t, std::string> fid_names;
 
-        // Fast O(N) scan for "sub_" + hex digits (replaces slow std::regex)
+        std::regex func_pattern(R"(sub_([0-9a-fA-F]{8,16}))");
+        std::smatch match;
+        std::string::const_iterator search_start(result.cbegin());
         std::set<uint64_t> found_addrs;
-        {
-            const char* p = result.c_str();
-            const char* end = p + result.size();
-            while (p < end) {
-                p = static_cast<const char*>(memchr(p, 's', end - p));
-                if (!p) break;
-                if (end - p >= 5 && p[1] == 'u' && p[2] == 'b' && p[3] == '_') {
-                    const char* hex_start = p + 4;
-                    const char* hp = hex_start;
-                    while (hp < end && ((*hp >= '0' && *hp <= '9') ||
-                                         (*hp >= 'a' && *hp <= 'f') ||
-                                         (*hp >= 'A' && *hp <= 'F'))) {
-                        ++hp;
-                    }
-                    size_t hex_len = hp - hex_start;
-                    if (hex_len >= 8 && hex_len <= 16) {
-                        char buf[17];
-                        memcpy(buf, hex_start, hex_len);
-                        buf[hex_len] = '\0';
-                        char* ep = nullptr;
-                        uint64_t func_addr = strtoull(buf, &ep, 16);
-                        if (ep == buf + hex_len) {
-                            found_addrs.insert(func_addr);
-                        }
-                    }
-                    p = hp;
-                } else {
-                    ++p;
-                }
+
+        while (std::regex_search(search_start, result.cend(), match, func_pattern)) {
+            try {
+                uint64_t func_addr = std::stoull(match[1].str(), nullptr, 16);
+                found_addrs.insert(func_addr);
+            } catch (...) {
+                // Ignore parse errors
             }
+            search_start = match.suffix().first;
         }
 
         int fid_matches = 0;
@@ -270,36 +236,16 @@ std::string run_post_processing(
             result = apply_fid_names(result, fid_names);
         }
     }
-    auto t11 = std::chrono::steady_clock::now();
 
     // Step 11: Advanced Structurization and Cleanup (Fission Core Improvement)
     {
         result = PostProcessor::process(result);
     }
-    auto t12 = std::chrono::steady_clock::now();
 
     // Step 11.5: Strip Windows x64 MSVC shadow-spill parameters.
     if (options.strip_shadow_params) {
         result = strip_shadow_only_params(result);
     }
-    auto t13 = std::chrono::steady_clock::now();
-
-    // ===== PP TIMING REPORT =====
-    fission::utils::log_stream()
-        << "[PP-PERF] struct=" << ms(pp_start, t1)
-        << "  iat=" << ms(t1, t2)
-        << "  smartconst=" << ms(t2, t3)
-        << "  strings=" << ms(t3, t4)
-        << "  const=" << ms(t4, t5)
-        << "  guid=" << ms(t5, t6)
-        << "  naming=" << ms(t6, t7)
-        << "  xunknown=" << ms(t7, t8)
-        << "  internal=" << ms(t8, t9)
-        << "  struct_off=" << ms(t9, t10)
-        << "  fid=" << ms(t10, t11)
-        << "  postproc=" << ms(t11, t12)
-        << "  shadow=" << ms(t12, t13)
-        << "  TOTAL=" << ms(pp_start, t13) << "ms" << std::endl;
 
     return result;
 }

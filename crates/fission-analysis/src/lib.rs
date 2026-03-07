@@ -3,8 +3,7 @@
 //! This library provides the core functionality for binary analysis,
 //! debugging, and decompilation.
 
-#![warn(clippy::pedantic, clippy::nursery)]
-#![allow(clippy::cargo_common_metadata)]
+#![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::missing_errors_doc)]
@@ -20,8 +19,10 @@
     clippy::cast_precision_loss
 )]
 pub mod analysis;
+#[cfg(feature = "interactive_runtime")]
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
 pub mod app;
+#[cfg(feature = "interactive_runtime")]
 #[allow(
     clippy::too_many_lines,
     clippy::cognitive_complexity,
@@ -29,6 +30,7 @@ pub mod app;
     clippy::cast_sign_loss
 )]
 pub mod debug;
+#[cfg(feature = "interactive_runtime")]
 #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
 pub mod plugin;
 pub mod prelude;

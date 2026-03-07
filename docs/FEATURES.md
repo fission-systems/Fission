@@ -121,18 +121,23 @@ Fission is a next-generation decompiler and reverse engineering platform.
 
 ## 🔧 CLI Features
 
+CLI 바이너리: `fission_cli` (`cargo build --release --bin fission_cli`)
+
 ```bash
 # Basic decompilation
-fission --cli <binary> <address>
+fission_cli --decomp <address> <binary>
 
 # Verbose output
-fission --cli <binary> <address> -v
+fission_cli --decomp <address> --verbose <binary>
 
 # Show binary info
-fission --cli <binary> info
+fission_cli --info <binary>
 
 # List functions
-fission --cli <binary> functions
+fission_cli --funcs <binary>
+
+# Interactive REPL
+fission_cli <binary>
 ```
 
 ---
@@ -173,19 +178,19 @@ fission --cli <binary> functions
 ## 📊 Build & Test
 
 ```bash
-# Build release
-cargo build --release
+# Build CLI
+cargo build --release --bin fission_cli
 
 # Run tests
 cargo test
 
-# Run GUI
-./target/release/fission --gui
-
 # Run CLI
-./target/release/fission --cli <binary> <address>
+./target/release/fission_cli <binary>
+
+# Run GUI (Tauri)
+cd crates/fission-tauri && npm install && npm run tauri dev
 ```
 
 ---
 
-*Last updated: 2026-01-20*
+*Last updated: 2026-03-07*

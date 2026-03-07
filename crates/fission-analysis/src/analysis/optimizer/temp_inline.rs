@@ -3,7 +3,7 @@
 //! Implements single-use temporary variable elimination:
 //! - temp = x + 1; return temp; → return x + 1;
 //! - Reduces intermediate variables for cleaner output
-//! - Similar to Ghidra's `ActionMarkImplied`
+//! - Similar to Ghidra's ActionMarkImplied
 
 use super::{Expr, Stmt};
 use std::collections::HashMap;
@@ -53,7 +53,7 @@ impl<'a, S: BuildHasher> TempInliner<'a, S> {
 
                 if usage_count == 1 && is_temp_var(&target) {
                     // Store the definition for later inlining
-                    self.var_defs.insert(target, value);
+                    self.var_defs.insert(target.clone(), value);
                     // Don't emit this statement
                     None
                 } else {
@@ -96,7 +96,12 @@ impl<'a, S: BuildHasher> TempInliner<'a, S> {
     fn inline_in_expr(&self, expr: Expr) -> Expr {
         match expr {
             Expr::Var(name) => {
-                self.var_defs.get(&name).map_or_else(|| Expr::Var(name.clone()), Clone::clone)
+                // If this is a single-use temp, replace with its definition
+                if let Some(def) = self.var_defs.get(&name) {
+                    def.clone()
+                } else {
+                    Expr::Var(name)
+                }
             }
             Expr::BinOp { op, left, right } => Expr::BinOp {
                 op,
@@ -115,7 +120,7 @@ impl<'a, S: BuildHasher> TempInliner<'a, S> {
                 target,
                 value: Box::new(self.inline_in_expr(*value)),
             },
-            other @ Expr::Const(_) => other,
+            other => other,
         }
     }
 }

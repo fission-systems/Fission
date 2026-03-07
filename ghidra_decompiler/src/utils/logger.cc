@@ -122,6 +122,16 @@ private:
 static TeeBuffer tee_buffer;
 static std::ostream tee_stream(&tee_buffer);
 
+static bool g_log_verbose = false;
+
+void set_log_verbose(bool enabled) {
+    g_log_verbose = enabled;
+}
+
+std::ostream& log_output() {
+    return g_log_verbose ? log_stream() : null_stream_instance;
+}
+
 std::ostream& log_stream() {
     // Update file pointer (in case logger was initialized after first call)
     tee_buffer.set_file(&g_logger.file_stream);

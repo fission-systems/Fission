@@ -11,12 +11,6 @@ pub struct DeadCodeEliminator {
     // Can add configuration or statistics here later
 }
 
-impl Default for DeadCodeEliminator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl DeadCodeEliminator {
     pub fn new() -> Self {
         Self {}

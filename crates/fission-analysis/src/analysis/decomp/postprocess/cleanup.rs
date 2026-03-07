@@ -1,10 +1,11 @@
 use super::PostProcessor;
-use crate::utils::patterns::{MALLOC_PATTERN, LONG_PTR_OFFSET, GO_PANIC, BASE_ARRAY_ACCESS, REV_ARRAY_ACCESS, WHILE_FALSE, IF_FALSE_ELSE, IF_FALSE, IF_TRUE_ELSE, IF_TRUE, LOCAL_VAR_PATTERN, LOCAL_VAR_ASSIGN, FUNC_CALL};
+use crate::utils::patterns::*;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::borrow::Cow;
 
 /// Pattern for Rust overflow checks
-static RUST_OVERFLOW_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+static RUST_OVERFLOW_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
         r"(?s)if\s*\([^\{]*overflow[^\{]*\)\s*\{\s*panic_const_(add|sub|mul)_overflow\(\);?\s*\}",
     )
@@ -12,7 +13,7 @@ static RUST_OVERFLOW_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::
 });
 
 /// Pattern for Rust bounds checks
-static RUST_BOUNDS_CHECK_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+static RUST_BOUNDS_CHECK_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?s)if\s*\([^\{]*(?:index|len)[^\{]*\)\s*\{\s*panic_bounds_check\([^\{]*\);?\s*\}")
         .unwrap_or_else(|e| panic!("invalid RUST_BOUNDS_CHECK_PATTERN regex: {e}"))
 });
@@ -25,7 +26,7 @@ impl PostProcessor {
     /// 1. `malloc(N)` → `(type *)malloc(N)` when assigned to a typed pointer
     /// 2. `*(base + offset)` → `*(type *)(base + offset)` when type is inferrable
     /// 3. Void pointer arithmetic without explicit cast
-    pub(super) fn insert_missing_casts_cow(code: &str) -> Cow<'_, str> {
+    pub(super) fn insert_missing_casts_cow<'a>(code: &'a str) -> Cow<'a, str> {
         if !MALLOC_PATTERN.is_match(code) && !LONG_PTR_OFFSET.is_match(code) {
             return Cow::Borrowed(code);
         }
@@ -44,7 +45,7 @@ impl PostProcessor {
                 if rhs.contains("(void *)") || rhs.contains("(void*)") {
                     return caps[0].to_string();
                 }
-                format!("{lhs} = (void *){rhs};")
+                format!("{} = (void *){};", lhs, rhs)
             })
             .to_string();
 
@@ -56,7 +57,7 @@ impl PostProcessor {
             .replace_all(&result, |caps: &regex::Captures| {
                 let base_expr = &caps[1];
                 let offset = &caps[2];
-                format!("*(void *)({base_expr} + {offset})")
+                format!("*(void *)({} + {})", base_expr, offset)
             })
             .to_string();
 
@@ -71,7 +72,7 @@ impl PostProcessor {
         Self::insert_missing_casts_cow(code).into_owned()
     }
 
-    pub(super) fn remove_rust_boilerplate_cow(code: &str) -> Cow<'_, str> {
+    pub(super) fn remove_rust_boilerplate_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
         if !RUST_OVERFLOW_PATTERN.is_match(code) && !RUST_BOUNDS_CHECK_PATTERN.is_match(code) {
             return Cow::Borrowed(code);
         }
@@ -95,11 +96,11 @@ impl PostProcessor {
         }
     }
 
-    pub(super) fn remove_rust_boilerplate(code: &str) -> String {
-        Self::remove_rust_boilerplate_cow(code).into_owned()
+    pub(super) fn remove_rust_boilerplate(&self, code: &str) -> String {
+        self.remove_rust_boilerplate_cow(code).into_owned()
     }
 
-    pub(super) fn remove_go_boilerplate_cow(code: &str) -> Cow<'_, str> {
+    pub(super) fn remove_go_boilerplate_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
         if !GO_PANIC.is_match(code) {
             return Cow::Borrowed(code);
         }
@@ -118,15 +119,15 @@ impl PostProcessor {
         }
     }
 
-    pub(super) fn remove_go_boilerplate(code: &str) -> String {
-        Self::remove_go_boilerplate_cow(code).into_owned()
+    pub(super) fn remove_go_boilerplate(&self, code: &str) -> String {
+        self.remove_go_boilerplate_cow(code).into_owned()
     }
 
     // =========================================================================
     // A-1: Deref → Array Index (RetDec deref_to_array_index_optimizer.cpp)
     //   *(a + N)  →  a[N]     *(N + a)  →  a[N]
     // =========================================================================
-    pub(super) fn deref_to_array_index_cow(code: &str) -> Cow<'_, str> {
+    pub(super) fn deref_to_array_index_cow<'a>(code: &'a str) -> Cow<'a, str> {
         // *(var + N)  →  var[N]
         // *(N + var)  →  var[N]  (commutative)
 
@@ -141,7 +142,7 @@ impl PostProcessor {
                         if base.starts_with('(') {
                             return caps[0].to_string();
                         }
-                        format!("{base}[{idx}]")
+                        format!("{}[{}]", base, idx)
                     })
                     .to_string(),
             );
@@ -153,7 +154,7 @@ impl PostProcessor {
                     .replace_all(result.as_ref(), |caps: &regex::Captures| {
                         let base = &caps["base"];
                         let idx = &caps["idx"];
-                        format!("{base}[{idx}]")
+                        format!("{}[{}]", base, idx)
                     })
                     .to_string(),
             );
@@ -173,9 +174,9 @@ impl PostProcessor {
     // Only when both sides are comparison expressions.
     // (RetDec bit_op_to_log_op_optimizer.cpp)
     // =========================================================================
-    pub(super) fn bitop_to_logicop_cow(code: &str) -> Cow<'_, str> {
+    pub(super) fn bitop_to_logicop_cow<'a>(code: &'a str) -> Cow<'a, str> {
         // Match (comparison) & (comparison)  →  (comparison) && (comparison)
-        static BIT_AND_TO_LOG_AND: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        static BIT_AND_TO_LOG_AND: Lazy<Regex> = Lazy::new(|| {
             Regex::new(concat!(
                 r"\(\s*(?P<lhs>[^()]+?)\s*(?:==|!=|<=|>=|<|>)\s*[^()]+?\s*\)",
                 r"\s*&\s*",
@@ -184,7 +185,7 @@ impl PostProcessor {
             .unwrap_or_else(|e| panic!("invalid BIT_AND_TO_LOG_AND regex: {e}"))
         });
         // Match (comparison) | (comparison)  →  (comparison) || (comparison)
-        static BIT_OR_TO_LOG_OR: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        static BIT_OR_TO_LOG_OR: Lazy<Regex> = Lazy::new(|| {
             Regex::new(concat!(
                 r"\(\s*(?P<lhs>[^()]+?)\s*(?:==|!=|<=|>=|<|>)\s*[^()]+?\s*\)",
                 r"\s*\|\s*",
@@ -231,12 +232,12 @@ impl PostProcessor {
     //   while (false)        → remove
     //   Empty else { }       → remove
     // =========================================================================
-    pub(super) fn remove_constant_conditions_cow(code: &str) -> Cow<'_, str> {
+    pub(super) fn remove_constant_conditions_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        let mut result = code.to_string();
+
         fn has_nested_braces(s: &str) -> bool {
             s.contains('{') || s.contains('}')
         }
-
-        let mut result = code.to_string();
 
         result = WHILE_FALSE
             .replace_all(&result, |caps: &regex::Captures| {
@@ -311,7 +312,7 @@ impl PostProcessor {
     // no side effects (no function call), the assignment is dead and removed.
     // Run twice to handle cascading dead assignments.
     // =========================================================================
-    pub(super) fn remove_dead_local_assigns_cow(code: &str) -> Cow<'_, str> {
+    pub(super) fn remove_dead_local_assigns_cow<'a>(code: &'a str) -> Cow<'a, str> {
         let mut var_counts: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for cap in LOCAL_VAR_PATTERN.find_iter(code) {

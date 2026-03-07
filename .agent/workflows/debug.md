@@ -15,7 +15,7 @@ Fission 디버깅 및 문제 해결 가이드
 // turbo
 
 ```bash
-./target/release/fission --cli <binary> <address> -v 2>&1 | tee debug.log
+./target/release/fission_cli <binary> --decomp <address> --verbose 2>&1 | tee debug.log
 ```
 
 ### Rust 로그 레벨 설정
@@ -23,7 +23,7 @@ Fission 디버깅 및 문제 해결 가이드
 // turbo
 
 ```bash
-RUST_LOG=debug cargo run -p fission-cli -- --cli <binary> <address>
+RUST_LOG=debug cargo run -p fission-cli -- <binary> --decomp <address>
 ```
 
 ### 특정 모듈 로그
@@ -31,7 +31,7 @@ RUST_LOG=debug cargo run -p fission-cli -- --cli <binary> <address>
 // turbo
 
 ```bash
-RUST_LOG=fission_loader=trace cargo run -p fission-cli -- --cli <binary> info
+RUST_LOG=fission_loader=trace cargo run -p fission-cli -- <binary> --info
 ```
 
 ---
@@ -101,7 +101,7 @@ grep gdt_path crates/fission-ffi/src/decomp.rs
 // turbo
 
 ```bash
-RUST_BACKTRACE=1 cargo run -p fission-cli -- --cli <binary> <address>
+RUST_BACKTRACE=1 cargo run -p fission-cli -- <binary> --decomp <address>
 ```
 
 ### 전체 백트레이스
@@ -109,7 +109,7 @@ RUST_BACKTRACE=1 cargo run -p fission-cli -- --cli <binary> <address>
 // turbo
 
 ```bash
-RUST_BACKTRACE=full cargo run -p fission-cli -- --cli <binary> <address>
+RUST_BACKTRACE=full cargo run -p fission-cli -- <binary> --decomp <address>
 ```
 
 ### Address Sanitizer (C++)
@@ -149,14 +149,14 @@ cargo test -- --list
 // turbo
 
 ```bash
-time ./target/release/fission --cli <binary> <address>
+time ./target/release/fission_cli <binary> --decomp <address>
 ```
 
 ### Flamegraph (선택)
 
 ```bash
 cargo install flamegraph
-cargo flamegraph --bin fission -- --cli <binary> <address>
+cargo flamegraph --bin fission_cli -- <binary> --decomp <address>
 ```
 
 ---
@@ -167,7 +167,7 @@ cargo flamegraph --bin fission -- --cli <binary> <address>
 
 ```bash
 lldb ./target/release/fission
-(lldb) run --cli <binary> <address>
+(lldb) run <binary> --decomp <address>
 (lldb) bt  # 백트레이스
 ```
 
@@ -175,6 +175,6 @@ lldb ./target/release/fission
 
 ```bash
 gdb ./target/release/fission
-(gdb) run --cli <binary> <address>
+(gdb) run <binary> --decomp <address>
 (gdb) bt
 ```

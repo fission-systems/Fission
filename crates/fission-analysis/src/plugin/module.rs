@@ -9,13 +9,13 @@ pub struct PluginModule {
 }
 
 impl PluginModule {
-    pub const fn new(manager: Arc<Mutex<PluginManager>>) -> Self {
+    pub fn new(manager: Arc<Mutex<PluginManager>>) -> Self {
         Self { manager }
     }
 }
 
 impl FissionModule for PluginModule {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "PluginModule"
     }
 
@@ -23,18 +23,19 @@ impl FissionModule for PluginModule {
         // Register PluginManager as a service so others can use it
         ctx.register_service("PluginManager", self.manager.clone());
 
-        // Inject dependencies using set_event_bus (lock immediately used and dropped)
-        self.manager
+        let mut mgr = self
+            .manager
             .lock()
-            .map_err(|e| FissionError::Plugin(format!("Failed to lock plugin manager: {e}")))?
-            .set_event_bus(ctx.event_bus.clone());
+            .map_err(|e| FissionError::Plugin(format!("Failed to lock plugin manager: {}", e)))?;
+        // Inject dependencies using set_event_bus which we added earlier
+        mgr.set_event_bus(ctx.event_bus.clone());
 
         Ok(())
     }
 
     fn on_start(&mut self, ctx: &mut ModuleContext) -> Result<()> {
         ctx.event_bus
-            .publish(&crate::app::events::FissionEvent::LogMessage {
+            .publish(crate::app::events::FissionEvent::LogMessage {
                 level: "info".into(),
                 message: "Plugin System Started".into(),
                 target: "PluginModule".into(),

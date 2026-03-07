@@ -1,7 +1,7 @@
 //! Call Graph Relation Validator
 //!
 //! Validates FID matches by checking call graph relationships,
-//! similar to Ghidra's `FidProgramSeeker` relation matching.
+//! similar to Ghidra's FidProgramSeeker relation matching.
 
 use crate::signature::FunctionSignature;
 use std::collections::{HashMap, HashSet};
@@ -44,16 +44,15 @@ impl CallGraph {
         }
     }
 
-    /// Add a call edge from `caller_addr` to `callee_addr`
-    #[allow(clippy::similar_names)]
+    /// Add a call edge from caller_addr to callee_addr
     pub fn add_call(&mut self, caller_addr: u64, callee_addr: u64) {
         self.callees
             .entry(caller_addr)
-            .or_default()
+            .or_insert_with(HashSet::new)
             .insert(callee_addr);
         self.callers
             .entry(callee_addr)
-            .or_default()
+            .or_insert_with(HashSet::new)
             .insert(caller_addr);
     }
 
@@ -121,11 +120,10 @@ impl Default for CallGraph {
 /// Validate a signature match against the call graph
 ///
 /// This implements Ghidra FID-style relation matching:
-/// 1. If signature has `expected_callees`, check if function calls any of them
-/// 2. If signature has `expected_callers`, check if any expected caller calls this function
-/// 3. If `force_relation` is set and no callees found, reject the match
+/// 1. If signature has expected_callees, check if function calls any of them
+/// 2. If signature has expected_callers, check if any expected caller calls this function
+/// 3. If force_relation is set and no callees found, reject the match
 /// 4. Adjust confidence based on relation matches
-#[allow(clippy::similar_names, clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn validate_relation(
     sig: &FunctionSignature,
     func_addr: u64,
@@ -191,21 +189,19 @@ pub fn validate_relation(
     if callee_check_required {
         let callee_ratio = matched_callees.len() as f32 / sig.expected_callees.len() as f32;
         // Reduce confidence by up to 30% based on callee match ratio
-        confidence = (f32::from(confidence) * (0.7 + 0.3 * callee_ratio))
-            .clamp(0.0, f32::from(u8::MAX)) as u8;
+        confidence = (confidence as f32 * (0.7 + 0.3 * callee_ratio)) as u8;
     }
 
     if caller_check_required {
         let caller_ratio = matched_callers.len() as f32 / sig.expected_callers.len() as f32;
         // Reduce confidence by up to 20% based on caller match ratio
-        confidence = (f32::from(confidence) * (0.8 + 0.2 * caller_ratio))
-            .clamp(0.0, f32::from(u8::MAX)) as u8;
+        confidence = (confidence as f32 * (0.8 + 0.2 * caller_ratio)) as u8;
     }
 
-    let reason = if passed {
-        None
-    } else {
+    let reason = if !passed {
         Some("relation check failed".to_string())
+    } else {
+        None
     };
 
     RelationValidation {
