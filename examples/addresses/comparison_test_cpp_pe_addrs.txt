@@ -1,8 +1,0 @@
-0x140001450 cpp_add
-0x140001464 cpp_switch
-0x1400014a2 cpp_sum_array
-0x1400014ef cpp_init_item
-0x140001550 cpp_create_item
-0x1400015c8 cpp_virtual_compute
-0x14000164c cpp_main_like
-0x140001748 main

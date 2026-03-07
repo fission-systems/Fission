@@ -1,8 +1,0 @@
-0x1000004b0 add
-0x1000004d0 multiply
-0x1000004f0 print_message
-0x1000000524 init_item
-0x1000000614 create_item
-0x10000006a0 calculate_discount
-0x1000000720 sum_array
-0x1000000784 main

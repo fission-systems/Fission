@@ -1,5 +1,0 @@
-0x1400087c0 Circle::area
-0x1400088a0 Rectangle::area
-0x140008850 Document::print
-0x1400086b0 Derived::process
-0x1400085f0 Base::process
