@@ -167,15 +167,17 @@ pub fn cmd_decompile(state: &CliState, addr: Option<u64>) {
         println!("{} Decompiling...", "[*]".blue());
 
         // Decompile via caching wrapper (which handles post-processing)
-        {
+        let result = {
             let _silencer = OutputSilencer::new_if(suppress_native_logs);
-            match decompiler.decompile(addr) {
-                Ok(c_code) => {
-                    println!("{}", c_code);
-                }
-                Err(e) => {
-                    println!("{} Decompilation failed: {}", "[!]".red(), e);
-                }
+            decompiler.decompile(addr)
+        };
+
+        match result {
+            Ok(c_code) => {
+                println!("{}", c_code);
+            }
+            Err(e) => {
+                println!("{} Decompilation failed: {}", "[!]".red(), e);
             }
         }
     }
