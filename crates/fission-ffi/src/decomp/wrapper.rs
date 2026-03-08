@@ -494,6 +494,18 @@ impl DecompilerNative {
         Ok(result)
     }
 
+    /// Get the native timing JSON produced by the most recent decompilation.
+    pub fn get_last_timing_json(&self) -> Result<String> {
+        self.check_valid()?;
+
+        let timing_ptr = unsafe { decomp_get_last_timing_json(self.ctx) };
+        if timing_ptr.is_null() {
+            return Ok("{}".to_string());
+        }
+
+        Ok(unsafe { CStr::from_ptr(timing_ptr).to_string_lossy().into_owned() })
+    }
+
     /// Set GDT (Ghidra Data Type) file for type information
     pub fn set_gdt(&mut self, gdt_path: &str) -> Result<()> {
         self.check_valid()?;

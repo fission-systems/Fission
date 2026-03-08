@@ -6,6 +6,7 @@
 use fission_pcode::{PcodeFunction, PcodeOptimizer, PcodeOptimizerConfig};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Optimize Pcode JSON (called from C++)
 ///
@@ -49,42 +50,52 @@ pub unsafe extern "C" fn fission_optimize_pcode_json(
     };
     let json_str = json_owned.as_str();
 
-    // Parse Pcode
-    let mut pcode = match PcodeFunction::from_json(json_str) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("[fission_optimize_pcode_json] JSON parse error: {}", e);
-            return std::ptr::null_mut();
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // Parse Pcode
+        let mut pcode = match PcodeFunction::from_json(json_str) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[fission_optimize_pcode_json] JSON parse error: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+
+        // Optimize
+        let config = PcodeOptimizerConfig::default();
+        let mut optimizer = PcodeOptimizer::new(config);
+        let num_passes = optimizer.optimize(&mut pcode);
+
+        eprintln!(
+            "[fission_optimize_pcode_json] Applied {} optimization passes",
+            num_passes
+        );
+
+        // Serialize back to JSON
+        let optimized_json = match serde_json::to_string(&pcode) {
+            Ok(json) => json,
+            Err(e) => {
+                eprintln!("[fission_optimize_pcode_json] JSON serialize error: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+
+        // Convert to C string
+        match CString::new(optimized_json) {
+            Ok(c_str) => c_str.into_raw(),
+            Err(e) => {
+                eprintln!(
+                    "[fission_optimize_pcode_json] CString conversion error: {}",
+                    e
+                );
+                std::ptr::null_mut()
+            }
         }
-    };
+    }));
 
-    // Optimize
-    let config = PcodeOptimizerConfig::default();
-    let mut optimizer = PcodeOptimizer::new(config);
-    let num_passes = optimizer.optimize(&mut pcode);
-
-    eprintln!(
-        "[fission_optimize_pcode_json] Applied {} optimization passes",
-        num_passes
-    );
-
-    // Serialize back to JSON
-    let optimized_json = match serde_json::to_string(&pcode) {
-        Ok(json) => json,
-        Err(e) => {
-            eprintln!("[fission_optimize_pcode_json] JSON serialize error: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-
-    // Convert to C string
-    match CString::new(optimized_json) {
-        Ok(c_str) => c_str.into_raw(),
-        Err(e) => {
-            eprintln!(
-                "[fission_optimize_pcode_json] CString conversion error: {}",
-                e
-            );
+    match result {
+        Ok(ptr) => ptr,
+        Err(_) => {
+            eprintln!("[fission_optimize_pcode_json] Panic during optimization");
             std::ptr::null_mut()
         }
     }

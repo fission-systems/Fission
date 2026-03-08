@@ -6,6 +6,11 @@
 namespace fission {
 namespace decompiler {
 
+struct PostProcessorTrace {
+    double cfg_structurizer_ms = 0.0;
+    double loop_normalize_ms = 0.0;
+};
+
 /**
  * @brief Post-processing utilities for decompiled C code
  * 
@@ -164,9 +169,15 @@ public:
      * 7. improve_variable_names - Variable renaming
      * 
      * @param c_code The raw decompiled C code
+     * @param fast_mode Skip readability-focused heavy passes for giant functions
+     * @param trace Optional timing sink for the hottest internal sub-passes
      * @return Processed C code
      */
-    static std::string process(const std::string& c_code);
+    static std::string process(
+        const std::string& c_code,
+        bool fast_mode = false,
+        PostProcessorTrace* trace = nullptr
+    );
 };
 
 } // namespace decompiler

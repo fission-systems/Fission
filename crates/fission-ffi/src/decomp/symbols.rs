@@ -33,6 +33,32 @@ pub(super) struct SymbolProviderState {
     pub data_ranges: Vec<SymbolProviderRange>,
 }
 
+fn sanitize_function_name(name: &str) -> String {
+    let mut sanitized = name.trim().to_string();
+    for suffix in [" [import]", " [export]"] {
+        if let Some(stripped) = sanitized.strip_suffix(suffix) {
+            sanitized = stripped.trim_end().to_string();
+        }
+    }
+
+    if sanitized.starts_with('{') {
+        return sanitized;
+    }
+
+    if let Some(paren) = sanitized.find('(') {
+        let prefix = sanitized[..paren].trim_end();
+        if !prefix.is_empty() {
+            sanitized = prefix
+                .split_whitespace()
+                .last()
+                .unwrap_or(prefix)
+                .to_string();
+        }
+    }
+
+    sanitized
+}
+
 impl SymbolProviderState {
     pub fn new(
         functions: &[fission_loader::loader::FunctionInfo],
@@ -81,7 +107,11 @@ impl SymbolProviderState {
             if func.address == 0 || func.name.is_empty() {
                 continue;
             }
-            if let Ok(name) = CString::new(func.name.as_str()) {
+            let sanitized_name = sanitize_function_name(&func.name);
+            if sanitized_name.is_empty() {
+                continue;
+            }
+            if let Ok(name) = CString::new(sanitized_name.as_str()) {
                 let mut size = func.size.min(u32::MAX as u64) as u32;
                 if size == 0 {
                     if let Some(estimated) = function_sizes.get(&func.address) {

@@ -24,6 +24,7 @@
 #include "type.hh"
 
 #include <cctype>
+#include <chrono>
 #include <iostream>
 #include "fission/utils/logger.h"
 #include <set>
@@ -33,6 +34,12 @@ using namespace fission::types;
 
 namespace fission {
 namespace decompiler {
+
+static double elapsed_ms(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start
+    ).count();
+}
 
 static std::string normalize_symbol_name(const std::string& name) {
     std::string norm = name;
@@ -168,6 +175,113 @@ static bool flows_from_allocator(
     return false;
 }
 
+static bool has_pointer_like_use(ghidra::Varnode* vn, int depth) {
+    if (!vn || depth > 6) {
+        return false;
+    }
+
+    for (auto use_it = vn->beginDescend(); use_it != vn->endDescend(); ++use_it) {
+        ghidra::PcodeOp* use_op = *use_it;
+        if (!use_op) {
+            continue;
+        }
+
+        switch (use_op->code()) {
+            case ghidra::CPUI_LOAD:
+            case ghidra::CPUI_STORE:
+                if (use_op->numInput() > 1 && use_op->getIn(1) == vn) {
+                    return true;
+                }
+                break;
+            case ghidra::CPUI_PTRADD:
+            case ghidra::CPUI_PTRSUB:
+            case ghidra::CPUI_RETURN:
+                if (use_op->numInput() > 0 && use_op->getIn(0) == vn) {
+                    return true;
+                }
+                break;
+            case ghidra::CPUI_CALL:
+            case ghidra::CPUI_CALLIND:
+                for (int slot = 1; slot < use_op->numInput(); ++slot) {
+                    if (use_op->getIn(slot) == vn) {
+                        return true;
+                    }
+                }
+                break;
+            case ghidra::CPUI_COPY:
+            case ghidra::CPUI_CAST:
+            case ghidra::CPUI_INT_ZEXT:
+            case ghidra::CPUI_INT_SEXT:
+            case ghidra::CPUI_MULTIEQUAL:
+            case ghidra::CPUI_SUBPIECE: {
+                ghidra::Varnode* out = use_op->getOut();
+                if (out && has_pointer_like_use(out, depth + 1)) {
+                    return true;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    return false;
+}
+
+static bool has_strong_pointer_like_use(ghidra::Varnode* vn, int depth) {
+    if (!vn || depth > 4) {
+        return false;
+    }
+
+    for (auto use_it = vn->beginDescend(); use_it != vn->endDescend(); ++use_it) {
+        ghidra::PcodeOp* use_op = *use_it;
+        if (!use_op) {
+            continue;
+        }
+
+        switch (use_op->code()) {
+            case ghidra::CPUI_LOAD:
+            case ghidra::CPUI_STORE:
+            case ghidra::CPUI_PTRADD:
+            case ghidra::CPUI_PTRSUB:
+                return true;
+            case ghidra::CPUI_COPY:
+            case ghidra::CPUI_CAST:
+            case ghidra::CPUI_INT_ZEXT:
+            case ghidra::CPUI_INT_SEXT:
+            case ghidra::CPUI_MULTIEQUAL:
+            case ghidra::CPUI_SUBPIECE: {
+                ghidra::Varnode* out = use_op->getOut();
+                if (out && has_strong_pointer_like_use(out, depth + 1)) {
+                    return true;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    return false;
+}
+
+static bool call_result_needs_pointer_inference(
+    ghidra::PcodeOp* call_op,
+    bool giant_caller
+) {
+    if (!call_op) {
+        return false;
+    }
+    ghidra::Varnode* out = call_op->getOut();
+    if (!out) {
+        return false;
+    }
+    if (giant_caller) {
+        return has_strong_pointer_like_use(out, 0);
+    }
+    return has_pointer_like_use(out, 0);
+}
+
 static bool returns_allocator_result(
     ghidra::Funcdata* fd,
     const std::map<uint64_t, std::string>& symbols,
@@ -280,16 +394,28 @@ static bool apply_pointer_return_prototype(ghidra::Architecture* arch, ghidra::F
 static bool infer_callee_pointer_returns(
     fission::ffi::DecompContext* ctx,
     ghidra::Funcdata* caller_fd,
-    ghidra::Action* action
+    ghidra::Action* action,
+    uint64_t* analyzed_count
 ) {
     if (!ctx || !caller_fd || !action || !ctx->arch) {
+        if (analyzed_count != nullptr) {
+            *analyzed_count = 0;
+        }
         return false;
     }
 
     std::set<uint64_t> callee_addrs;
+    uint64_t current_addr = caller_fd->getAddress().getOffset();
+    const bool giant_caller = caller_fd->getSize() > 32768;
+    const size_t helper_budget = giant_caller
+        ? fission::decompiler::k_max_callee_preanalysis_large
+        : fission::decompiler::k_max_callee_preanalysis;
     for (auto iter = caller_fd->beginOpAlive(); iter != caller_fd->endOpAlive(); ++iter) {
         ghidra::PcodeOp* op = *iter;
         if (!op || (op->code() != ghidra::CPUI_CALL && op->code() != ghidra::CPUI_CALLIND)) {
+            continue;
+        }
+        if (!call_result_needs_pointer_inference(op, giant_caller)) {
             continue;
         }
         uint64_t target_addr = 0;
@@ -305,10 +431,16 @@ static bool infer_callee_pointer_returns(
         if (target_addr == 0) {
             continue;
         }
+        if (target_addr == current_addr) {
+            continue;
+        }
         if (!is_address_in_executable(ctx, target_addr)) {
             continue;
         }
         callee_addrs.insert(target_addr);
+        if (callee_addrs.size() >= helper_budget) {
+            break;
+        }
     }
 
     if (callee_addrs.empty()) {
@@ -316,8 +448,12 @@ static bool infer_callee_pointer_returns(
     }
 
     bool updated = false;
+    uint64_t local_analyzed_count = 0;
     ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
     if (!global_scope) {
+        if (analyzed_count != nullptr) {
+            *analyzed_count = 0;
+        }
         return false;
     }
 
@@ -335,7 +471,19 @@ static bool infer_callee_pointer_returns(
             continue;
         }
 
-        if (callee->isProcStarted() || callee->getFuncProto().isInline()) {
+        auto cache_it = ctx->pointer_return_cache.find(addr);
+        if (cache_it != ctx->pointer_return_cache.end()) {
+            if (cache_it->second && !callee->getFuncProto().isInline()) {
+                if (apply_pointer_return_prototype(ctx->arch.get(), callee)) {
+                    updated = true;
+                }
+            }
+            continue;
+        }
+
+        if (ctx->active_decomp_addrs.count(addr) > 0 ||
+            callee->isProcStarted() ||
+            callee->getFuncProto().isInline()) {
             continue;
         }
 
@@ -344,14 +492,22 @@ static bool infer_callee_pointer_returns(
             continue;
         }
 
+        auto cleanup_helper = [&]() {
+            if (ctx->arch) {
+                ctx->arch->clearAnalysis(callee);
+            } else {
+                callee->clear();
+            }
+        };
+
         callee->clear();
         bool flow_ok = true;
         try {
             ghidra::Address start(func_addr);
-            // A-3: Use k_callee_follow_limit (16 KB) instead of the previous
-            // 4 KB hard-coded limit so larger callee functions are fully
-            // covered during pointer-return type inference.
-            ghidra::Address end = start + fission::decompiler::k_callee_follow_limit;
+            size_t helper_follow_limit = giant_caller
+                ? fission::decompiler::k_callee_follow_limit_large
+                : fission::decompiler::k_callee_follow_limit;
+            ghidra::Address end = start + helper_follow_limit;
             callee->followFlow(start, end);
         } catch (const ghidra::LowlevelError& e) {
             fission::utils::log_stream() << "[AnalysisPipeline] followFlow LowlevelError at 0x"
@@ -363,17 +519,43 @@ static bool infer_callee_pointer_returns(
             flow_ok = false;
         }
         if (!flow_ok) {
+            cleanup_helper();
             continue;
         }
 
-        action->reset(*callee);
-        action->perform(*callee);
+        try {
+            action->reset(*callee);
+            action->perform(*callee);
+            ++local_analyzed_count;
+        } catch (const ghidra::LowlevelError& e) {
+            fission::utils::log_stream() << "[AnalysisPipeline] callee perform LowlevelError at 0x"
+                << std::hex << addr << ": " << e.explain << std::endl;
+            cleanup_helper();
+            continue;
+        } catch (const std::exception& e) {
+            fission::utils::log_stream() << "[AnalysisPipeline] callee perform error at 0x"
+                << std::hex << addr << ": " << e.what() << std::endl;
+            cleanup_helper();
+            continue;
+        } catch (...) {
+            fission::utils::log_stream() << "[AnalysisPipeline] callee perform unknown error at 0x"
+                << std::hex << addr << std::endl;
+            cleanup_helper();
+            continue;
+        }
 
-        if (returns_allocator_result(callee, ctx->symbols, ctx->arch.get())) {
+        bool returns_pointer = returns_allocator_result(callee, ctx->symbols, ctx->arch.get());
+        ctx->pointer_return_cache[addr] = returns_pointer;
+        if (returns_pointer) {
             if (apply_pointer_return_prototype(ctx->arch.get(), callee)) {
                 updated = true;
             }
         }
+        cleanup_helper();
+    }
+
+    if (analyzed_count != nullptr) {
+        *analyzed_count = local_analyzed_count;
     }
 
     return updated;
@@ -486,10 +668,14 @@ public:
         return is_address_in_executable(ctx_, addr);
     }
 
+    bool is_top_level_active(uint64_t addr) const override {
+        return ctx_->active_decomp_addrs.count(addr) > 0;
+    }
+
     bool has_pointer_return_inference() const override { return true; }
 
     bool try_infer_pointer_returns(
-        ghidra::Funcdata* fd, ghidra::Action* action) override
+        ghidra::Funcdata* fd, ghidra::Action* action, uint64_t* helper_count) override
     {
         bool updated_self = false;
         try {
@@ -509,7 +695,7 @@ public:
 
         bool updated_callee = false;
         try {
-            updated_callee = infer_callee_pointer_returns(ctx_, fd, action);
+            updated_callee = infer_callee_pointer_returns(ctx_, fd, action, helper_count);
         } catch (const ghidra::LowlevelError& e) {
             fission::utils::log_stream() << "[AnalysisPipeline] Pointer inference (callee) LowlevelError: "
                 << e.explain << std::endl;
@@ -605,6 +791,7 @@ AnalysisArtifacts run_analysis_passes(
     ghidra::Action* action,
     size_t max_function_size
 ) {
+    auto analysis_start = std::chrono::steady_clock::now();
     AnalysisArtifacts artifacts;
     ghidra::Architecture* arch = ctx.get_arch();
     if (!fd || !action || !arch) {
@@ -623,7 +810,11 @@ AnalysisArtifacts run_analysis_passes(
 
     // ---- Pointer-return prototype inference (FFI only) ---------------------
     if (ctx.has_pointer_return_inference()) {
-        bool updated = ctx.try_infer_pointer_returns(fd, action);
+        uint64_t helper_count = 0;
+        auto helper_start = std::chrono::steady_clock::now();
+        bool updated = ctx.try_infer_pointer_returns(fd, action, &helper_count);
+        artifacts.callee_preanalysis_ms = elapsed_ms(helper_start);
+        artifacts.callee_preanalysis_count = helper_count;
         if (updated) {
             needs_rerun_stage1 = true;
         }
@@ -635,15 +826,15 @@ AnalysisArtifacts run_analysis_passes(
             StructureAnalyzer struct_analyzer;
             bool structs_found = struct_analyzer.analyze_function_structures(fd);
             if (structs_found) {
-                fission::utils::log_stream() << "[AnalysisPipeline] Inferred structures, flagging stage-1 re-run."
+                fission::utils::log_stream() << "[AnalysisPipeline] Inferred structures for post-processing/propagation."
                     << std::endl;
                 artifacts.inferred_struct_definitions = struct_analyzer.generate_struct_definitions();
                 artifacts.inferred_union_definitions  = struct_analyzer.generate_union_definitions();
                 artifacts.captured_structs            = struct_analyzer.get_inferred_structs();
                 artifacts.type_replacements           = struct_analyzer.get_type_replacements();
-                needs_rerun_stage1 = true;
 
                 if (struct_registry) {
+                    bool registered_struct_hint = false;
                     const ghidra::FuncProto& proto = fd->getFuncProto();
                     int num = proto.numParams();
                     for (int i = 0; i < num; ++i) {
@@ -651,9 +842,18 @@ AnalysisArtifacts run_analysis_passes(
                         if (!param) continue;
                         uint64_t off = param->getAddress().getOffset();
                         if (artifacts.captured_structs.count(off)) {
-                            (*struct_registry)[fd->getAddress().getOffset()][i] =
+                            std::string inferred_name =
                                 artifacts.captured_structs[off]->getName();
+                            std::string& slot =
+                                (*struct_registry)[fd->getAddress().getOffset()][i];
+                            if (slot != inferred_name) {
+                                slot = inferred_name;
+                                registered_struct_hint = true;
+                            }
                         }
+                    }
+                    if (registered_struct_hint) {
+                        needs_rerun_stage1 = true;
                     }
                 }
             }
@@ -786,7 +986,9 @@ AnalysisArtifacts run_analysis_passes(
     if (needs_rerun_stage1) {
         fission::utils::log_stream() << "[AnalysisPipeline] Stage-1 re-run "
             "(struct/prototype/global-data changes)." << std::endl;
+        auto rerun_start = std::chrono::steady_clock::now();
         rerun_action(fd, action);
+        artifacts.stage1_rerun_ms = elapsed_ms(rerun_start);
     }
 
     bool needs_rerun_stage2 = false;
@@ -802,6 +1004,11 @@ AnalysisArtifacts run_analysis_passes(
             fission::analysis::CallGraphAnalyzer call_analyzer(type_registry);
             call_analyzer.extract_calls(fd);
             int propagated = call_analyzer.propagate_types();
+            bool callgraph_mutated = false;
+            const size_t callgraph_budget =
+                func_size > (max_function_size / 2)
+                    ? fission::decompiler::k_max_callgraph_reanalysis_large
+                    : fission::decompiler::k_max_callgraph_reanalysis;
             if (propagated > 0) {
                 fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: propagated "
                     << propagated << " type hints" << std::endl;
@@ -814,12 +1021,18 @@ AnalysisArtifacts run_analysis_passes(
 
             std::vector<uint64_t> pending =
                 type_registry->consume_pending_reanalysis();
+            auto callgraph_start = std::chrono::steady_clock::now();
             while (!pending.empty() && rounds < max_rounds && global_scope) {
                 ++rounds;
                 for (uint64_t target_addr : pending) {
+                    if (static_cast<size_t>(reanalyzed) >= callgraph_budget) {
+                        break;
+                    }
                     if (processed.count(target_addr)) continue;
                     processed.insert(target_addr);
                     if (!ctx.is_address_executable(target_addr)) continue;
+                    if (target_addr == fd->getAddress().getOffset()) continue;
+                    if (ctx.is_top_level_active(target_addr)) continue;
 
                     ghidra::Address func_addr(arch->getDefaultCodeSpace(),
                         target_addr);
@@ -833,11 +1046,21 @@ AnalysisArtifacts run_analysis_passes(
                         target_fd = sym->getFunction();
                     }
                     if (!target_fd) continue;
+                    if (target_fd->isProcStarted() || target_fd->getFuncProto().isInline()) {
+                        continue;
+                    }
+
+                    auto cleanup_helper = [&]() {
+                        arch->clearAnalysis(target_fd);
+                    };
 
                     try {
                         target_fd->clear();
-                        ghidra::Address end_addr =
-                            func_addr + fission::decompiler::k_callee_follow_limit;
+                        size_t helper_follow_limit =
+                            func_size > (max_function_size / 2)
+                                ? fission::decompiler::k_callee_follow_limit_large
+                                : fission::decompiler::k_callee_follow_limit;
+                        ghidra::Address end_addr = func_addr + helper_follow_limit;
                         target_fd->followFlow(func_addr, end_addr);
                         action->reset(*target_fd);
                         action->perform(*target_fd);
@@ -846,33 +1069,42 @@ AnalysisArtifacts run_analysis_passes(
                             << "[AnalysisPipeline] callgraph LowlevelError at 0x"
                             << std::hex << target_addr << ": " << e.explain
                             << std::endl;
+                        cleanup_helper();
                         continue;
                     } catch (const std::exception& e) {
                         fission::utils::log_stream()
                             << "[AnalysisPipeline] callgraph error at 0x"
                             << std::hex << target_addr << ": " << e.what()
                             << std::endl;
+                        cleanup_helper();
                         continue;
                     } catch (...) {
                         fission::utils::log_stream()
                             << "[AnalysisPipeline] callgraph unknown error at 0x"
                             << std::hex << target_addr << std::endl;
+                        cleanup_helper();
                         continue;
                     }
 
                     ctx.register_function_signature(target_fd);
                     call_analyzer.extract_calls(target_fd);
+                    cleanup_helper();
                     ++reanalyzed;
                 }
                 int newly_propagated = call_analyzer.propagate_types();
                 if (newly_propagated <= 0) break;
+                callgraph_mutated = true;
                 pending = type_registry->consume_pending_reanalysis();
             }
 
+            artifacts.callgraph_reanalysis_ms = elapsed_ms(callgraph_start);
+            artifacts.callgraph_reanalysis_count = reanalyzed;
             if (reanalyzed > 0) {
                 fission::utils::log_stream() << "[AnalysisPipeline] CallGraph: reanalyzed "
                     << reanalyzed << " pending functions." << std::endl;
-                needs_rerun_stage2 = true;
+                if (callgraph_mutated) {
+                    needs_rerun_stage2 = true;
+                }
             }
         }
 
@@ -948,7 +1180,9 @@ AnalysisArtifacts run_analysis_passes(
     if (needs_rerun_stage2) {
         fission::utils::log_stream() << "[AnalysisPipeline] Stage-2 re-run "
             "(callgraph/pcode/type changes)." << std::endl;
+        auto rerun_start = std::chrono::steady_clock::now();
         rerun_action(fd, action);
+        artifacts.stage2_rerun_ms = elapsed_ms(rerun_start);
     }
 
     // Post-barrier: x86 32-bit cdecl double-arg synthesis.
@@ -1003,6 +1237,7 @@ AnalysisArtifacts run_analysis_passes(
         }
     }
 
+    artifacts.analysis_passes_ms = elapsed_ms(analysis_start);
     return artifacts;
 }
 

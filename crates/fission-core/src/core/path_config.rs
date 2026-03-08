@@ -209,6 +209,61 @@ impl PathConfig {
         result
     }
 
+    /// Get preferred FID database paths for a specific target.
+    ///
+    /// This intentionally returns a smaller, target-aware subset than
+    /// [`Self::get_all_fid_paths`] so prepare-time initialization does not
+    /// eagerly load unrelated FID databases.
+    pub fn get_preferred_fid_paths(
+        &self,
+        is_64bit: bool,
+        format: Option<&str>,
+        compiler_id: Option<&str>,
+    ) -> Vec<PathBuf> {
+        let compiler = compiler_id.unwrap_or_default().to_ascii_lowercase();
+        let is_pe = format
+            .map(|value| value.to_ascii_uppercase().starts_with("PE"))
+            .unwrap_or(false);
+
+        if compiler.contains("gcc") || compiler.contains("mingw") {
+            let primary = if is_64bit {
+                GCC_FID_FILES_X64.first().copied()
+            } else {
+                GCC_FID_FILES_X86.first().copied()
+            };
+            return primary
+                .into_iter()
+                .filter_map(|name| self.find_fid_file(name))
+                .collect();
+        }
+
+        if compiler.contains("clang") && !is_pe {
+            let primary = if is_64bit {
+                GCC_FID_FILES_X64.first().copied()
+            } else {
+                GCC_FID_FILES_X86.first().copied()
+            };
+            return primary
+                .into_iter()
+                .filter_map(|name| self.find_fid_file(name))
+                .collect();
+        }
+
+        if let Some(primary) = self.get_fid_path(is_64bit, compiler_id) {
+            return vec![primary];
+        }
+
+        let family = if is_64bit {
+            MSVC_FID_FILES_X64
+        } else {
+            MSVC_FID_FILES_X86
+        };
+        family
+            .iter()
+            .filter_map(|name| self.find_fid_file(name))
+            .collect()
+    }
+
     /// Find a specific FID file
     pub fn find_fid_file(&self, filename: &str) -> Option<PathBuf> {
         if let Some(ref fid_dir) = self.fid_dir {

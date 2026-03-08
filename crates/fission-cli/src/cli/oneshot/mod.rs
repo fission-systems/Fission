@@ -1,4 +1,4 @@
-﻿//! One-Shot CLI - Single command execution mode
+//! One-Shot CLI - Single command execution mode
 //!
 //! Executes a single command and exits (non-interactive).
 
@@ -162,6 +162,7 @@ fn print_help() {
     println!("      --ghidra-compat        Suppress headers/warnings + strip inferred structs");
     println!("      --no-warnings          Suppress WARNING/NOTICE lines");
     println!("      --benchmark            Add timing metadata to JSON output");
+    println!("      --decomp-limit <N>     Limit --decomp-all to first N functions");
     println!();
     println!("Examples:");
     println!("  fission_cli app.exe --info");

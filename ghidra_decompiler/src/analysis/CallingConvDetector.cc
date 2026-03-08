@@ -13,6 +13,24 @@ namespace analysis {
 
 using namespace ghidra;
 
+static ProtoModel* resolve_model(Architecture* arch, std::initializer_list<const char*> names) {
+    if (arch == nullptr) {
+        return nullptr;
+    }
+    for (const char* name : names) {
+        if (name == nullptr || *name == '\0') {
+            continue;
+        }
+        if (ProtoModel* model = arch->getModel(name)) {
+            return model;
+        }
+    }
+    if (arch->defaultfp != nullptr) {
+        return arch->defaultfp;
+    }
+    return nullptr;
+}
+
 CallingConvDetector::CallingConvDetector(Architecture* a) : arch(a) {
     // Determine if 64-bit based on default address size
     is_64bit = (arch->getDefaultDataSpace()->getAddrSize() >= 8);
@@ -405,33 +423,26 @@ void CallingConvDetector::apply(Funcdata* fd, ConvType type) {
     switch (type) {
         case CONV_MS_X64:
             // Windows x64 uses "__fastcall"
-            model = arch->getModel("__fastcall");
+            model = resolve_model(arch, {"__fastcall", "default", "windows", "__cdecl"});
             break;
         case CONV_SYSV_X64:
-            // Linux/Mac x64 System V ABI
-            model = arch->getModel("__sysv_abi");
-            if (!model) {
-                model = arch->getModel("sysv");
-            }
-            if (!model) {
-                model = arch->getModel("__cdecl");
-            }
+            // In Ghidra's x86-64 gcc/clang specs, the default model is System V.
+            model = resolve_model(arch, {"__sysv_abi", "sysv", "__stdcall", "default", "__cdecl"});
             break;
         case CONV_CDECL:
-            model = arch->getModel("__cdecl");
+            model = resolve_model(arch, {"__cdecl", "default"});
             break;
         case CONV_STDCALL:
-            model = arch->getModel("__stdcall");
+            model = resolve_model(arch, {"__stdcall", "__cdecl", "default"});
             break;
         case CONV_FASTCALL:
-            model = arch->getModel("__fastcall");
+            model = resolve_model(arch, {"__fastcall", "default"});
             break;
         case CONV_THISCALL:
-            model = arch->getModel("__thiscall");
+            model = resolve_model(arch, {"__thiscall", "__fastcall", "default"});
             break;
         case CONV_AAPCS64:
-            model = arch->getModel("__aapcs64");
-            if (!model) model = arch->getModel("default");
+            model = resolve_model(arch, {"__aapcs64", "default"});
             break;
         default:
             break;

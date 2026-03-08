@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <regex>
 
 namespace fission {
 namespace processing {
@@ -181,6 +182,13 @@ std::string post_process_constants(const std::string& code, const std::map<uint6
 
 std::string substitute_guids(const std::string& code, const std::map<std::string, std::string>& guid_map) {
     if (guid_map.empty() || code.empty()) return code;
+    static const std::regex guid_candidate_re(
+        R"(\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b)",
+        std::regex::optimize
+    );
+    if (!std::regex_search(code, guid_candidate_re)) {
+        return code;
+    }
     
     std::string result = code;
     // Iterate through all known GUIDs and simple string replace

@@ -17,6 +17,14 @@ pub struct OptimizationRules {
     // Can add statistics or configuration here later
 }
 
+fn safe_shl_u64(value: u64, shift: u32) -> u64 {
+    value.checked_shl(shift).unwrap_or(0)
+}
+
+fn safe_shr_u64(value: u64, shift: u32) -> u64 {
+    value.checked_shr(shift).unwrap_or(0)
+}
+
 impl OptimizationRules {
     pub fn new() -> Self {
         Self {}
@@ -705,9 +713,9 @@ impl OptimizationRules {
 
         // Simulate the shift
         let shifted_nz = if is_left {
-            (input_nz << shift_amt) & out_mask
+            safe_shl_u64(input_nz, shift_amt) & out_mask
         } else {
-            input_nz >> shift_amt
+            safe_shr_u64(input_nz, shift_amt)
         };
 
         // If all non-zero bits are gone, result is 0

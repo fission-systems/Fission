@@ -10,6 +10,7 @@
 namespace fission {
 namespace ffi {
 struct DecompContext;
+struct NativeDecompTiming;
 }
 
 namespace decompiler {
@@ -37,7 +38,8 @@ std::string run_post_processing(
     ghidra::Funcdata* fd,
     const std::string& code,
     const AnalysisArtifacts& analysis,
-    const PostProcessOptions& options
+    const PostProcessOptions& options,
+    fission::ffi::NativeDecompTiming* timing = nullptr
 );
 
 } // namespace decompiler

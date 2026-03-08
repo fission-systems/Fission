@@ -1,4 +1,4 @@
-﻿//! Common CLI argument parsing utilities
+//! Common CLI argument parsing utilities
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -104,6 +104,10 @@ pub struct OneShotArgs {
     /// Decompile all discovered functions (batch mode)
     #[arg(long, alias = "all")]
     pub decomp_all: bool,
+
+    /// With --decomp-all, limit to first N functions (for faster benchmark/testing)
+    #[arg(long, value_name = "N")]
+    pub decomp_limit: Option<usize>,
 
     /// Override binary format detection (auto|pe|elf|macho)
     /// Affects sleigh ID selection for architecture-specific analysis

@@ -979,8 +979,11 @@ std::string DecompilationPipeline::handle_decompile(
                 next_func_addr = kv.first;
         }
         size_t follow_limit = static_cast<size_t>(next_func_addr - address);
-        // Clamp to [0x200 .. k_follow_flow_limit] for safety.
-        follow_limit = std::max<size_t>(follow_limit, 0x200);
+        // Clamp to [k_min_follow_flow_limit .. k_follow_flow_limit] for safety.
+        follow_limit = std::max<size_t>(
+            follow_limit,
+            fission::decompiler::k_min_follow_flow_limit
+        );
         follow_limit = std::min<size_t>(follow_limit, fission::decompiler::k_follow_flow_limit);
 
         fission::utils::log_stream() << "[fission_decomp] followFlow limit: 0x"

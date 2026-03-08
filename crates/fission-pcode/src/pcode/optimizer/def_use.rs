@@ -11,6 +11,14 @@ use std::collections::HashMap;
 /// Default varnode size (4 bytes = 32-bit) used when size cannot be determined
 pub(super) const DEFAULT_VARNODE_SIZE: u32 = 4;
 
+fn safe_shl_u64(value: u64, shift: u32) -> u64 {
+    value.checked_shl(shift).unwrap_or(0)
+}
+
+fn safe_shr_u64(value: u64, shift: u32) -> u64 {
+    value.checked_shr(shift).unwrap_or(0)
+}
+
 /// Unique identifier for a varnode across all blocks
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct VarnodeId {
@@ -259,7 +267,7 @@ impl DefUseTracker {
                 } else {
                     return mask; // Unknown shift
                 };
-                (self.get_nz_mask(&op.inputs[0]) << shift_amt) & mask
+                safe_shl_u64(self.get_nz_mask(&op.inputs[0]), shift_amt) & mask
             }
 
             PcodeOpcode::IntRight | PcodeOpcode::IntSRight => {
@@ -271,7 +279,7 @@ impl DefUseTracker {
                 } else {
                     return mask; // Unknown shift
                 };
-                self.get_nz_mask(&op.inputs[0]) >> shift_amt
+                safe_shr_u64(self.get_nz_mask(&op.inputs[0]), shift_amt)
             }
 
             PcodeOpcode::IntZExt => {
@@ -383,8 +391,10 @@ impl DefUseTracker {
                             if op.inputs.len() >= 2 {
                                 if op.inputs[1].is_constant {
                                     let shift_amt = op.inputs[1].constant_val as u32;
-                                    if self
-                                        .add_consume(&op.inputs[0], input_consume_req >> shift_amt)
+                                    if self.add_consume(
+                                        &op.inputs[0],
+                                        safe_shr_u64(input_consume_req, shift_amt),
+                                    )
                                     {
                                         changed = true;
                                     }
@@ -407,8 +417,10 @@ impl DefUseTracker {
                             if op.inputs.len() >= 2 {
                                 if op.inputs[1].is_constant {
                                     let shift_amt = op.inputs[1].constant_val as u32;
-                                    if self
-                                        .add_consume(&op.inputs[0], input_consume_req << shift_amt)
+                                    if self.add_consume(
+                                        &op.inputs[0],
+                                        safe_shl_u64(input_consume_req, shift_amt),
+                                    )
                                     {
                                         changed = true;
                                     }

@@ -60,37 +60,37 @@ pub(super) fn apply_profile(decomp: &mut DecompilerNative, profile: &str) {
     }
 }
 
-pub(super) fn detect_compiler_id(binary: &LoadedBinary) -> Option<&'static str> {
-    let detection = fission_loader::detect(binary);
-    let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
-    detection
-        .compiler()
-        .map(|d| match d.name.to_lowercase().as_str() {
-            "microsoft visual c++" | "msvc" => "windows",
+pub(super) fn detect_compiler_id(binary: &LoadedBinary) -> Option<String> {
+    binary.get_ghidra_compiler_id().or_else(|| {
+        let detection = fission_loader::detect(binary);
+        let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
+        detection.compiler().map(|d| match d.name.to_lowercase().as_str() {
+            "microsoft visual c++" | "msvc" => "windows".to_string(),
             "gcc" | "mingw" => {
                 if is_pe {
-                    "windows"
+                    "windows".to_string()
                 } else {
-                    "gcc"
+                    "gcc".to_string()
                 }
             }
-            "clang" => "clang",
-            _ => "default",
+            "clang" => "clang".to_string(),
+            _ => "default".to_string(),
         })
+    })
 }
 
 pub(super) fn resolve_compiler_id(
     binary: &LoadedBinary,
     user_override: Option<&str>,
-) -> (Option<&'static str>, Option<String>) {
+) -> (Option<String>, Option<String>) {
     if let Some(user_compiler) = user_override {
         let resolved = match user_compiler.to_ascii_lowercase().as_str() {
-            "windows" => Some("windows"),
-            "gcc" => Some("gcc"),
-            "clang" => Some("clang"),
-            "default" => Some("default"),
+            "windows" => Some("windows".to_string()),
+            "gcc" => Some("gcc".to_string()),
+            "clang" => Some("clang".to_string()),
+            "default" => Some("default".to_string()),
             "auto" => detect_compiler_id(binary),
-            _ => detect_compiler_id(binary).or(Some("default")),
+            _ => detect_compiler_id(binary).or(Some("default".to_string())),
         };
 
         let unknown = match user_compiler.to_ascii_lowercase().as_str() {

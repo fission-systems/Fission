@@ -15,6 +15,7 @@
 #include <mutex>
 #include <sstream>
 #include <cstdint>
+#include <set>
 
 // Forward declarations
 namespace ghidra {
@@ -46,6 +47,25 @@ struct MemoryBlockInfo {
     uint64_t file_size;        // Size in PE file
     bool is_executable;
     bool is_writable;
+};
+
+struct NativeDecompTiming {
+    double follow_flow_ms = 0.0;
+    double main_perform_ms = 0.0;
+    double analysis_passes_ms = 0.0;
+    double callee_preanalysis_ms = 0.0;
+    double callgraph_reanalysis_ms = 0.0;
+    double print_ms = 0.0;
+    double postprocess_ms = 0.0;
+    double smart_constant_replace_ms = 0.0;
+    double cfg_structurizer_ms = 0.0;
+    double loop_normalize_ms = 0.0;
+    double total_native_ms = 0.0;
+    uint64_t callee_preanalysis_count = 0;
+    uint64_t callgraph_reanalysis_count = 0;
+    uint64_t follow_flow_budget_bytes = 0;
+    double stage1_rerun_ms = 0.0;
+    double stage2_rerun_ms = 0.0;
 };
 
 /**
@@ -135,9 +155,22 @@ struct DecompContext {
     // subsequent function in the same binary (avoids O(n_funcs × section_size)).
     std::map<uint64_t, std::string> cached_string_table;
     bool string_table_built = false;
+
+    // Cached pointer-return inference for callee helper analysis.
+    // key: callee address, value: true if the helper analysis determined the
+    // callee returns allocator-backed memory and should expose a pointer return.
+    std::map<uint64_t, bool> pointer_return_cache;
     
     // Thread safety
     std::mutex mutex;
+
+    // Top-level active decomp requests. This separates true recursive entry
+    // from helper-analysis state left behind on Funcdata objects.
+    std::set<uint64_t> active_decomp_addrs;
+
+    // Most recent per-function native timing payload exposed through FFI.
+    NativeDecompTiming last_native_timing;
+    std::string last_timing_json;
     
     /**
      * Constructor

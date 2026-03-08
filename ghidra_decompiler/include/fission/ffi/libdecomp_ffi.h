@@ -279,6 +279,14 @@ DECOMP_API char* decomp_function_pcode(DecompContext* ctx, uint64_t addr);
  */
 DECOMP_API const char* decomp_get_last_error(DecompContext* ctx);
 
+/**
+ * Get the most recent native per-function timing JSON payload.
+ *
+ * @param ctx Decompiler context
+ * @return JSON string (do NOT free this, it's internal)
+ */
+DECOMP_API const char* decomp_get_last_timing_json(DecompContext* ctx);
+
 // ============================================================================
 // Memory Management
 // ============================================================================

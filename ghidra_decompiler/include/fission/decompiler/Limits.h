@@ -33,6 +33,9 @@ inline constexpr size_t k_string_scan_window = 0x120;
 /// tighter bound where that information is available.
 inline constexpr size_t k_follow_flow_limit = 0x10000;
 
+/// Minimum followFlow window after dynamic tightening.
+inline constexpr size_t k_min_follow_flow_limit = 0x200;
+
 /// callee relationship scan window inside a function body (bytes).
 inline constexpr size_t k_callee_scan_window = 0x100;
 
@@ -48,6 +51,21 @@ inline constexpr size_t k_max_prologue_candidates = 500'000;
 /// larger callee functions (factory methods, allocator wrappers) are fully
 /// analysed before their return types are used for type propagation.
 inline constexpr size_t k_callee_follow_limit = 0x4000;
+
+/// Complexity-aware reduced followFlow upper bound for helper analysis.
+inline constexpr size_t k_callee_follow_limit_large = 0x2000;
+
+/// Maximum helper callees to pre-analyze in a single giant function.
+inline constexpr size_t k_max_callee_preanalysis = 12;
+
+/// Maximum helper callees to pre-analyze in a very large dispatcher function.
+inline constexpr size_t k_max_callee_preanalysis_large = 6;
+
+/// Maximum pending callgraph helper functions reanalyzed per caller.
+inline constexpr size_t k_max_callgraph_reanalysis = 8;
+
+/// Maximum pending callgraph helper functions for giant callers.
+inline constexpr size_t k_max_callgraph_reanalysis_large = 4;
 
 } // namespace decompiler
 } // namespace fission

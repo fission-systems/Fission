@@ -7,9 +7,109 @@
 #include <map>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
 
 namespace fission {
 namespace decompiler {
+
+namespace {
+
+size_t count_occurrences_limited(
+    const std::string& text,
+    const std::string& needle,
+    size_t limit
+) {
+    if (text.empty() || needle.empty() || limit == 0) {
+        return 0;
+    }
+
+    size_t count = 0;
+    size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string::npos) {
+        ++count;
+        if (count >= limit) {
+            break;
+        }
+        pos += needle.size();
+    }
+    return count;
+}
+
+struct PostProcessorPolicy {
+    bool is_large_function = false;
+    bool is_huge_function = false;
+    bool is_giant_dispatcher = false;
+    bool is_extreme_dispatcher = false;
+    bool use_fast_mode = false;
+    bool skip_integer_constant_cleanup = false;
+    bool skip_cfg_structurizer = false;
+    bool skip_pointer_array_cleanup = false;
+    bool skip_loop_struct_cleanup = false;
+    bool skip_condition_simplify = false;
+    bool skip_array_fold = false;
+    bool skip_cast_cleanup = false;
+    bool skip_dead_store_cleanup = false;
+    bool skip_variable_rename = false;
+};
+
+PostProcessorPolicy build_policy(const std::string& code) {
+    PostProcessorPolicy policy;
+    policy.is_large_function = code.size() > 65536;
+    policy.is_huge_function = code.size() > 131072;
+
+    const size_t goto_count = count_occurrences_limited(code, "goto ", 256);
+    const size_t label_count = count_occurrences_limited(code, "LAB_", 256);
+    const size_t while_count = count_occurrences_limited(code, "while", 64);
+    const size_t if_count = count_occurrences_limited(code, "if", 256);
+    const size_t param_count = count_occurrences_limited(code, "param_", 128);
+    const size_t hex_count = count_occurrences_limited(code, "0x", 512);
+    const size_t line_count = count_occurrences_limited(code, "\n", 8192);
+
+    policy.is_giant_dispatcher =
+        (code.size() > 98304 && goto_count > 32) ||
+        (code.size() > 131072 && label_count > 64) ||
+        (line_count > 2500 && goto_count > 24);
+    policy.is_extreme_dispatcher =
+        code.size() > 196608 ||
+        (code.size() > 131072 && goto_count > 96) ||
+        (label_count > 160 && goto_count > 48) ||
+        (line_count > 4000 && goto_count > 32);
+    policy.use_fast_mode = policy.is_giant_dispatcher || policy.is_extreme_dispatcher;
+    policy.skip_integer_constant_cleanup =
+        policy.is_extreme_dispatcher ||
+        (policy.is_giant_dispatcher && hex_count > 192);
+    policy.skip_cfg_structurizer =
+        policy.is_extreme_dispatcher && goto_count > 96;
+    policy.skip_pointer_array_cleanup =
+        policy.is_extreme_dispatcher ||
+        (policy.is_giant_dispatcher && line_count > 3000);
+
+    policy.skip_loop_struct_cleanup =
+        policy.use_fast_mode ||
+        policy.is_huge_function ||
+        (policy.is_large_function && (goto_count > 24 || while_count > 16));
+    policy.skip_condition_simplify =
+        policy.use_fast_mode ||
+        policy.is_huge_function ||
+        (policy.is_large_function && if_count > 96);
+    policy.skip_array_fold = policy.is_large_function || policy.use_fast_mode;
+    policy.skip_cast_cleanup =
+        policy.is_huge_function ||
+        policy.is_extreme_dispatcher ||
+        (policy.is_large_function && goto_count > 24);
+    policy.skip_dead_store_cleanup =
+        policy.is_huge_function ||
+        policy.use_fast_mode ||
+        (policy.is_large_function && if_count > 128);
+    policy.skip_variable_rename =
+        policy.use_fast_mode ||
+        policy.is_large_function ||
+        param_count > 48;
+
+    return policy;
+}
+
+}  // namespace
 
 std::string PostProcessor::convert_integer_constants(std::string c_code) {
     // Manual scan for hex patterns: 0x[0-9a-fA-F]+
@@ -703,39 +803,99 @@ std::string PostProcessor::convert_while_to_for_struct(std::string c_code) {
     return out;
 }
 
-std::string PostProcessor::process(const std::string& c_code) {
+std::string PostProcessor::process(
+    const std::string& c_code,
+    bool fast_mode,
+    PostProcessorTrace* trace
+) {
     std::string result = c_code;
+    const PostProcessorPolicy policy = build_policy(result);
+    const bool effective_fast_mode = fast_mode || policy.use_fast_mode;
     
     // Apply all optimization passes in order
     // 1. Extract string literals from integer constants
-    result = convert_integer_constants(result);
+    if (!policy.skip_integer_constant_cleanup &&
+        result.find("0x") != std::string::npos) {
+        result = convert_integer_constants(result);
+    }
     
     // 2. Structurize control flow (eliminate gotos, normalize loops)
-    result = structurize_control_flow(result);
+    if (!policy.skip_cfg_structurizer &&
+        (result.find("goto ") != std::string::npos || result.size() <= 32768)) {
+        auto structurize_start = std::chrono::steady_clock::now();
+        result = structurize_control_flow(result);
+        if (trace != nullptr) {
+            trace->cfg_structurizer_ms += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - structurize_start
+            ).count();
+        }
+    }
+
+    if (effective_fast_mode) {
+        if (!policy.skip_pointer_array_cleanup &&
+            result.find("*(") != std::string::npos &&
+            result.find('+') != std::string::npos) {
+            result = rewrite_pointer_arithmetic_to_array(result);
+        }
+        if (!policy.skip_cast_cleanup && result.find('(') != std::string::npos) {
+            result = eliminate_redundant_casts(result);
+        }
+        return result;
+    }
 
     // 3. Convert to compound operators (i++ etc) — must run before while→for struct pass
-    result = convert_while_to_for(result);
+    if (result.find(" = ") != std::string::npos) {
+        result = convert_while_to_for(result);
+    }
 
     // 4. Convert while+init+increment → for loops (sees already-normalised ++ / -- etc.)
-    result = convert_while_to_for_struct(result);
+    if (!policy.skip_loop_struct_cleanup && result.find("while") != std::string::npos) {
+        auto loop_struct_start = std::chrono::steady_clock::now();
+        result = convert_while_to_for_struct(result);
+        if (trace != nullptr) {
+            trace->loop_normalize_ms += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - loop_struct_start
+            ).count();
+        }
+    }
 
     // 5. Simplify conditions
-    result = simplify_nested_if(result);
+    if (!policy.skip_condition_simplify &&
+        (result.find("if") != std::string::npos || result.find("while") != std::string::npos)) {
+        result = simplify_nested_if(result);
+    }
     
     // 6. Detect array initializations
-    result = fold_array_init(result);
+    if (!policy.skip_array_fold &&
+        result.find('[') != std::string::npos &&
+        result.find("] = ") != std::string::npos) {
+        result = fold_array_init(result);
+    }
 
     // 7. Pointer arithmetic → array subscript ( *(T*)(ptr+i*sz) → ptr[i] )
-    result = rewrite_pointer_arithmetic_to_array(result);
+    if (!policy.skip_pointer_array_cleanup &&
+        result.find("*(") != std::string::npos &&
+        result.find('+') != std::string::npos) {
+        result = rewrite_pointer_arithmetic_to_array(result);
+    }
 
     // 8. Remove redundant / widening casts and replace (void*)0 with NULL
-    result = eliminate_redundant_casts(result);
+    if (!policy.skip_cast_cleanup && result.find('(') != std::string::npos) {
+        result = eliminate_redundant_casts(result);
+    }
 
     // 9. Drop self-assignment lines (x = x;)
-    result = eliminate_dead_stores(result);
+    if (!policy.skip_dead_store_cleanup && result.find(" = ") != std::string::npos) {
+        result = eliminate_dead_stores(result);
+    }
 
     // 10. Improve variable names
-    result = improve_variable_names(result);
+    if (!policy.skip_variable_rename &&
+        (result.find("local_") != std::string::npos ||
+        result.find("param_") != std::string::npos ||
+        result.find("Var") != std::string::npos)) {
+        result = improve_variable_names(result);
+    }
     
     return result;
 }

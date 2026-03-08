@@ -8,6 +8,8 @@ use fission_loader::loader::{FunctionInfo, LoadedBinary};
 #[cfg(feature = "native_decomp")]
 use std::collections::BTreeMap;
 #[cfg(feature = "native_decomp")]
+use std::collections::HashSet;
+#[cfg(feature = "native_decomp")]
 use std::time::Instant;
 
 #[cfg(feature = "native_decomp")]
@@ -35,6 +37,58 @@ pub struct PrepareOptions<'a> {
     pub timeout_ms: Option<u64>,
     /// When set, per-step timings are written here (e.g. for `--benchmark` JSON).
     pub timings: Option<&'a mut PrepareTimings>,
+}
+
+#[cfg(feature = "native_decomp")]
+fn sanitize_registered_function_name(name: &str) -> String {
+    let mut sanitized = name.trim().to_string();
+    for suffix in [" [import]", " [export]"] {
+        if let Some(stripped) = sanitized.strip_suffix(suffix) {
+            sanitized = stripped.trim_end().to_string();
+        }
+    }
+
+    if sanitized.starts_with('{') {
+        return sanitized;
+    }
+
+    if let Some(paren) = sanitized.find('(') {
+        let prefix = sanitized[..paren].trim_end();
+        if !prefix.is_empty() {
+            sanitized = prefix
+                .split_whitespace()
+                .last()
+                .unwrap_or(prefix)
+                .to_string();
+        }
+    }
+
+    sanitized
+}
+
+#[cfg(feature = "native_decomp")]
+fn extract_struct_type_name(type_name: &str) -> Option<String> {
+    let mut cleaned = type_name.trim();
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    while let Some(stripped) = cleaned.strip_suffix('*') {
+        cleaned = stripped.trim_end();
+    }
+    while let Some(stripped) = cleaned.strip_suffix('&') {
+        cleaned = stripped.trim_end();
+    }
+
+    let tokens: Vec<&str> = cleaned
+        .split_whitespace()
+        .filter(|token| !matches!(*token, "const" | "volatile" | "struct" | "class" | "enum"))
+        .collect();
+    if tokens.is_empty() {
+        return None;
+    }
+
+    Some(tokens.join(" "))
 }
 
 #[cfg(feature = "native_decomp")]
@@ -108,9 +162,10 @@ fn register_known_functions(
     }
 
     for func in by_addr.values() {
+        let registered_name = sanitize_registered_function_name(&func.name);
         if func.address != 0
-            && !func.name.is_empty()
-            && let Err(e) = decomp.add_function(func.address, Some(&func.name))
+            && !registered_name.is_empty()
+            && let Err(e) = decomp.add_function(func.address, Some(&registered_name))
         {
             if verbose {
                 eprintln!(
@@ -123,13 +178,64 @@ fn register_known_functions(
 }
 
 #[cfg(feature = "native_decomp")]
-fn load_fid_databases(
+fn register_inferred_types_and_params(
     decomp: &mut DecompilerNative,
     binary: &LoadedBinary,
     verbose: bool,
+) {
+    if !binary.inferred_types.is_empty()
+        && let Err(e) = decomp.register_inferred_types(&binary.inferred_types)
+        && verbose
+    {
+        eprintln!("[!] Warning: Failed to register inferred types: {}", e);
+    }
+
+    let known_structs: HashSet<String> = binary
+        .inferred_types
+        .iter()
+        .map(|ty| ty.name.clone())
+        .collect();
+
+    for (func_addr, func) in &binary.dwarf_functions {
+        for (param_index, param) in func.params.iter().enumerate() {
+            let Some(struct_name) = extract_struct_type_name(&param.type_name) else {
+                continue;
+            };
+            if !known_structs.contains(&struct_name) {
+                continue;
+            }
+            if let Err(e) = decomp.apply_struct_to_param(*func_addr, param_index as i32, &struct_name)
+                && verbose
+            {
+                eprintln!(
+                    "[!] Warning: Failed to apply struct {} to 0x{:x} param {}: {}",
+                    struct_name, func_addr, param_index, e
+                );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "native_decomp")]
+fn load_fid_databases(
+    decomp: &mut DecompilerNative,
+    binary: &LoadedBinary,
+    compiler_id: Option<&str>,
+    verbose: bool,
 ) -> Result<()> {
     let mut fid_loaded_count = 0;
-    let fid_paths = PATHS.get_all_fid_paths(binary.is_64bit);
+    let fid_paths = PATHS.get_preferred_fid_paths(
+        binary.is_64bit,
+        Some(&binary.format),
+        compiler_id,
+    );
+    if verbose {
+        eprintln!(
+            "[*] Selected {} FID database(s) for compiler_id={}",
+            fid_paths.len(),
+            compiler_id.unwrap_or("default")
+        );
+    }
     for fid_full in &fid_paths {
         if verbose {
             eprintln!("[*] Loading FID database: {}", fid_full.display());
@@ -215,7 +321,7 @@ pub fn prepare_native_decompiler_for_binary<'a>(
 
     // Load FID databases (best-effort)
     let t0 = Instant::now();
-    load_fid_databases(decomp, binary, options.verbose)?;
+    load_fid_databases(decomp, binary, options.compiler_id, options.verbose)?;
     if let Some(t) = options.timings.as_deref_mut() {
         t.fid_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
@@ -234,6 +340,8 @@ pub fn prepare_native_decompiler_for_binary<'a>(
     if let Some(t) = options.timings.as_deref_mut() {
         t.gdt_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
+
+    register_inferred_types_and_params(decomp, binary, options.verbose);
 
     // timeout_ms is in options for future use when the native decompiler exposes it
 

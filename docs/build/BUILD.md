@@ -793,7 +793,7 @@ dumpbin /dependents target\release\fission_cli.exe
 
 ## Decompiler logging
 
-디컴파일러 준비(바이너리 로드·섹션·심볼·FID 등)는 fission-analysis의 `prepare_native_decompiler_for_binary` 한 경로만 사용하며, CLI와 GUI가 동일한 진입점을 호출한다. 구조는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)의 "Per-binary decompiler preparation" 참고. 초기화 비용은 `--benchmark` 시 JSON `_meta.prepare_timings`로 단계별 확인 가능하다.
+디컴파일러 준비(바이너리 로드·섹션·심볼·FID 등)는 fission-analysis의 `prepare_native_decompiler_for_binary` 한 경로만 사용하며, CLI와 GUI가 동일한 진입점을 호출한다. 구조는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)의 "Per-binary decompiler preparation" 참고. 초기화 비용은 `--benchmark` 시 JSON `_meta.prepare_timings`로 단계별 확인 가능하다. 성능 최적화 우선순위는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)의 "Decompiler performance optimization priorities" 참고.
 
 디컴파일러(C++) 진단 로그는 다음으로만 제어합니다.
 

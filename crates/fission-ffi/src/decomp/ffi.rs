@@ -53,6 +53,7 @@ unsafe extern "C" {
     pub(super) fn decomp_function_pcode(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
     pub(super) fn decomp_free_string(s: *mut c_char);
     pub(super) fn decomp_get_last_error(ctx: *mut DecompContext) -> *const c_char;
+    pub(super) fn decomp_get_last_timing_json(ctx: *mut DecompContext) -> *const c_char;
     pub(super) fn decomp_set_gdt(ctx: *mut DecompContext, gdt_path: *const c_char) -> DecompError;
     pub(super) fn decomp_set_feature(
         ctx: *mut DecompContext,

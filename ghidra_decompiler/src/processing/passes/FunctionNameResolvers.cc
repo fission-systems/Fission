@@ -9,6 +9,10 @@ namespace fission {
 namespace processing {
 
 std::string improve_internal_function_names(const std::string& code) {
+    if (code.find("func_0x") == std::string::npos) {
+        return code;
+    }
+
     std::string result = code;
     
     // Replace func_0x pattern with sub_ (standard disassembler convention)
@@ -36,7 +40,7 @@ std::string improve_internal_function_names(const std::string& code) {
 }
 
 std::string apply_fid_names(const std::string& code, const std::map<uint64_t, std::string>& fid_names) {
-    if (fid_names.empty()) return code;
+    if (fid_names.empty() || code.find("sub_") == std::string::npos) return code;
     
     std::string result = code;
     

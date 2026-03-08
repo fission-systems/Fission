@@ -50,6 +50,13 @@ struct AnalysisArtifacts {
     // GAP-4: addresses discovered from resolved jump/switch tables.
     // These should be enqueued for decompilation on the Rust side.
     std::vector<uint64_t> jump_table_targets;
+    double analysis_passes_ms = 0.0;
+    double callee_preanalysis_ms = 0.0;
+    double callgraph_reanalysis_ms = 0.0;
+    uint64_t callee_preanalysis_count = 0;
+    uint64_t callgraph_reanalysis_count = 0;
+    double stage1_rerun_ms = 0.0;
+    double stage2_rerun_ms = 0.0;
 };
 
 // ===========================================================================
@@ -80,6 +87,9 @@ public:
     /// Return true if `addr` falls inside an executable section.
     virtual bool is_address_executable(uint64_t addr) = 0;
 
+    /// True when a top-level decompilation for `addr` is currently active.
+    virtual bool is_top_level_active(uint64_t /*addr*/) const { return false; }
+
     /// Whether pointer-return prototype inference is available (FFI only).
     virtual bool has_pointer_return_inference() const = 0;
 
@@ -87,7 +97,12 @@ public:
     /// Returns true if any prototypes were updated (triggers Stage-1 rerun).
     /// Default: no-op (batch path).
     virtual bool try_infer_pointer_returns(
-        ghidra::Funcdata* /*fd*/, ghidra::Action* /*action*/) { return false; }
+        ghidra::Funcdata* /*fd*/, ghidra::Action* /*action*/, uint64_t* helper_count) {
+        if (helper_count != nullptr) {
+            *helper_count = 0;
+        }
+        return false;
+    }
 
     /// Register the function's signature in the type registry for call-graph
     /// propagation.

@@ -53,6 +53,22 @@ All work that must be done before decompiling a given binary (load binary image,
 
 **Prepare initialization cost** is measured per step when using `--benchmark`; the CLI adds `_meta.prepare_timings` (load_binary_ms, symbols_ms, symbol_provider_ms, sections_ms, known_functions_ms, fid_ms, gdt_ms) to the JSON output. Use this breakdown to drive optimization (e.g. skip empty work, limit FID count).
 
+#### Decompiler performance optimization priorities
+
+Priorities are ordered by impact, measurement data (`prepare_timings`), and implementation cost. Update this section when the order or items change.
+
+- **Required safeguard (not a fundamental performance fix)**: **Timeout** — Prevents unbounded wait or excessive time per decompilation; config `timeout_ms` should be applied in the native/FFI path so that one slow function does not block the process or UI. This does not make decompilation faster; it bounds the damage when something is slow or stuck.
+
+- **Performance priority 1**: **Reduce prepare init cost (e.g. FID)** — `prepare_timings` often shows FID loading as dominant. Options: skip empty work, limit FID paths/count, avoid retry on failure. This directly shortens init time.
+
+- **Performance priority 2**: **GUI prefetch** — Connect `enable_prefetch` / `prefetch_count` to decompilation: prefetch nearby functions into cache so that scrolling or selection feels faster.
+
+- **Performance priority 3**: **Batch/benchmark stability** — Use timeout and init metrics so that batch scripts and large binaries (e.g. putty) have predictable behavior; adjust per-step limits if needed.
+
+- **Performance priority 4**: **C++ engine options** — Expose or document quality-vs-speed knobs in the native pipeline; upstream constraints may limit changes.
+
+Error message refinement is a usability/debugging concern rather than performance; handle it separately (e.g. in the same prepare path for consistency).
+
 ### 3) Dynamic Analysis Layer
 
 Two distinct domains exist in `fission-analysis`:

@@ -24,6 +24,18 @@ PrototypeEnforcer::PrototypeEnforcer() {}
 PrototypeEnforcer::~PrototypeEnforcer() {}
 
 static std::string canonicalize_name(const std::string& name) {
+    auto trim_inline = [](std::string value) {
+        size_t start = 0;
+        while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start]))) {
+            start++;
+        }
+        size_t end = value.size();
+        while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
+            end--;
+        }
+        return value.substr(start, end - start);
+    };
+
     std::string result = name;
     size_t bang_pos = result.rfind('!');
     if (bang_pos != std::string::npos && bang_pos + 1 < result.size()) {
@@ -42,6 +54,17 @@ static std::string canonicalize_name(const std::string& name) {
     size_t at_pos = result.find('@');
     if (at_pos != std::string::npos) {
         result = result.substr(0, at_pos);
+    }
+
+    size_t paren_pos = result.find('(');
+    if (paren_pos != std::string::npos) {
+        result = result.substr(0, paren_pos);
+    }
+
+    result = trim_inline(result);
+    size_t space_pos = result.rfind(' ');
+    if (space_pos != std::string::npos) {
+        result = trim_inline(result.substr(space_pos + 1));
     }
 
     return result;
@@ -316,6 +339,7 @@ static bool build_win_api_prototype(
     const std::string& func_name,
     PrototypePieces& out_pieces
 ) {
+    const std::string display_name = canonicalize_name(func_name);
     if (!arch) {
         return false;
     }
@@ -368,7 +392,7 @@ static bool build_win_api_prototype(
     }
 
     out_pieces.model = model;
-    out_pieces.name = func_name;
+    out_pieces.name = display_name.empty() ? func_name : display_name;
     out_pieces.outtype = return_type;
     out_pieces.intypes = param_types;
     out_pieces.innames = param_names;
@@ -382,6 +406,7 @@ static bool build_varargs_prototype(
     const std::string& canonical,
     PrototypePieces& out_pieces
 ) {
+    const std::string display_name = canonicalize_name(func_name);
     if (!arch || canonical.empty()) {
         return false;
     }
@@ -417,7 +442,7 @@ static bool build_varargs_prototype(
                           const std::vector<std::string>& names,
                           int4 first_vararg) {
         out_pieces.model = model;
-        out_pieces.name = func_name;
+        out_pieces.name = display_name.empty() ? func_name : display_name;
         out_pieces.outtype = int_type;
         out_pieces.intypes = types;
         out_pieces.innames = names;
@@ -500,7 +525,10 @@ bool PrototypeEnforcer::build_prototype_pieces(
     proto->getPieces(out_pieces);
     
     // Override the name with the actual function name
-    out_pieces.name = func_name;
+    {
+        const std::string display_name = canonicalize_name(func_name);
+        out_pieces.name = display_name.empty() ? func_name : display_name;
+    }
 
     return true;
 }
@@ -521,13 +549,14 @@ bool PrototypeEnforcer::build_builtin_prototype(
 
     std::string canonical = to_lower_copy(canonicalize_name(func_name));
     std::string lower_name = to_lower_copy(func_name);
+    const std::string display_name = canonicalize_name(func_name);
     if (lower_name == "__main") {
         ProtoModel* model = arch->getModel("__cdecl");
         if (!model) {
             model = arch->getModel("__fastcall");
         }
         out_pieces.model = model;
-        out_pieces.name = func_name;
+        out_pieces.name = display_name.empty() ? func_name : display_name;
         out_pieces.outtype = factory->getTypeVoid();
         out_pieces.intypes.clear();
         out_pieces.innames.clear();
@@ -560,21 +589,21 @@ bool PrototypeEnforcer::build_builtin_prototype(
     auto set_simple = [&](Datatype* out,
                           const std::vector<Datatype*>& types,
                           const std::vector<std::string>& names) {
-        ProtoModel* model = nullptr;
-        if (ptr_size >= 8) {
+        ProtoModel* model = arch->defaultfp;
+        if (!model && ptr_size >= 8) {
             model = arch->getModel("__fastcall");
             if (!model) {
                 model = arch->getModel("windows");
+            }
+            if (!model) {
+                model = arch->getModel("__stdcall");
             }
         }
         if (!model) {
             model = arch->getModel("__cdecl");
         }
-        if (!model) {
-            model = arch->getModel("default");
-        }
         out_pieces.model = model;
-        out_pieces.name = func_name;
+        out_pieces.name = display_name.empty() ? func_name : display_name;
         out_pieces.outtype = out;
         out_pieces.intypes = types;
         out_pieces.innames = names;
@@ -749,7 +778,7 @@ bool PrototypeEnforcer::build_builtin_prototype(
     }
 
     out_pieces.model = model;
-    out_pieces.name = func_name;
+    out_pieces.name = display_name.empty() ? func_name : display_name;
     out_pieces.outtype = int_type;
     out_pieces.intypes = { int_type, char_ptr_ptr, char_ptr_ptr };
     out_pieces.innames = { "_Argc", "_Argv", "_Env" };

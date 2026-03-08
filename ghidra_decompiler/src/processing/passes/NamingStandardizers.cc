@@ -7,6 +7,10 @@ namespace fission {
 namespace processing {
 
 std::string standardize_variable_names(const std::string& code) {
+    if (code.find("Stack") == std::string::npos && code.find("stack") == std::string::npos) {
+        return code;
+    }
+
     std::string result = code;
 
     std::regex stack_x_regex(R"(\b([a-z]+)?Stack([XY])_([0-9a-f]+)\b)", std::regex::icase);

@@ -5,6 +5,7 @@
 #include "fission/decompiler/DecompilationCore.h"
 #include "fission/core/ArchInit.h"
 #include "fission/types/PrototypeEnforcer.h"
+#include "fission/decompiler/Limits.h"
 #include "fission/decompiler/PostProcessPipeline.h"
 #include "fission/analysis/CallingConvDetector.h"
 #include "fission/analysis/TypePropagator.h"
@@ -17,6 +18,10 @@
 #include "override.hh"
 #include "varnode.hh"
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <set>
 #include "fission/utils/logger.h"
@@ -140,6 +145,204 @@ static std::string json_escape(const std::string& input) {
     return output;
 }
 
+static double elapsed_ms(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start
+    ).count();
+}
+
+static void tighten_follow_flow_bound(uint64_t addr, uint64_t candidate, uint64_t& bound) {
+    if (candidate > addr && candidate < bound) {
+        bound = candidate;
+    }
+}
+
+static bool is_executable_address(DecompContext* ctx, uint64_t addr) {
+    if (ctx == nullptr) {
+        return false;
+    }
+    for (const auto& block : ctx->memory_blocks) {
+        if (!block.is_executable) {
+            continue;
+        }
+        uint64_t size = block.va_size > 0 ? block.va_size : block.file_size;
+        if (size == 0) {
+            continue;
+        }
+        uint64_t block_start = block.va_addr;
+        uint64_t block_end = block_start + size;
+        if (addr >= block_start && addr < block_end) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool is_probable_function_symbol(const std::string& name) {
+    if (name.empty()) {
+        return false;
+    }
+
+    static const char* k_non_function_prefixes[] = {
+        "DAT_",
+        "LAB_",
+        "UNK_",
+        "PTR_",
+        "caseD_",
+        "switchD_",
+        "g_",
+        "gp_",
+    };
+    for (const char* prefix : k_non_function_prefixes) {
+        if (name.rfind(prefix, 0) == 0) {
+            return false;
+        }
+    }
+
+    if (name.rfind("FUN_", 0) == 0 || name.rfind("sub_", 0) == 0) {
+        return true;
+    }
+
+    return std::isalpha(static_cast<unsigned char>(name.front())) != 0;
+}
+
+static size_t compute_follow_flow_limit(DecompContext* ctx, uint64_t addr) {
+    uint64_t bound = addr + fission::decompiler::k_follow_flow_limit;
+
+    if (ctx != nullptr) {
+        for (const auto& kv : ctx->symbols) {
+            if (is_probable_function_symbol(kv.second) &&
+                is_executable_address(ctx, kv.first)) {
+                tighten_follow_flow_bound(addr, kv.first, bound);
+            }
+        }
+        for (const auto& kv : ctx->global_symbols) {
+            if (is_probable_function_symbol(kv.second) &&
+                is_executable_address(ctx, kv.first)) {
+                tighten_follow_flow_bound(addr, kv.first, bound);
+            }
+        }
+        for (const auto& block : ctx->memory_blocks) {
+            if (!block.is_executable) {
+                continue;
+            }
+            uint64_t size = block.va_size > 0 ? block.va_size : block.file_size;
+            if (size == 0) {
+                continue;
+            }
+            uint64_t block_start = block.va_addr;
+            uint64_t block_end = block_start + size;
+            if (addr >= block_start && addr < block_end) {
+                tighten_follow_flow_bound(addr, block_end, bound);
+                break;
+            }
+        }
+    }
+
+    size_t limit = static_cast<size_t>(bound - addr);
+    // Keep at least 32KB to avoid coverage regression (original FFI used 0x8000).
+    limit = std::max<size_t>(limit, 0x8000);
+    limit = std::min<size_t>(limit, fission::decompiler::k_follow_flow_limit);
+    return limit;
+}
+
+static std::string make_native_timing_json(
+    uint64_t addr,
+    const fission::ffi::NativeDecompTiming& timing
+) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(3);
+    ss << "{"
+       << "\"address\":\"0x" << std::hex << addr << std::dec << "\","
+       << "\"follow_flow_ms\":" << timing.follow_flow_ms << ","
+       << "\"follow_flow_budget_bytes\":" << timing.follow_flow_budget_bytes << ","
+       << "\"main_perform_ms\":" << timing.main_perform_ms << ","
+       << "\"analysis_passes_ms\":" << timing.analysis_passes_ms << ","
+       << "\"callee_preanalysis_ms\":" << timing.callee_preanalysis_ms << ","
+       << "\"callgraph_reanalysis_ms\":" << timing.callgraph_reanalysis_ms << ","
+       << "\"print_ms\":" << timing.print_ms << ","
+       << "\"postprocess_ms\":" << timing.postprocess_ms << ","
+       << "\"smart_constant_replace_ms\":" << timing.smart_constant_replace_ms << ","
+       << "\"cfg_structurizer_ms\":" << timing.cfg_structurizer_ms << ","
+       << "\"loop_normalize_ms\":" << timing.loop_normalize_ms << ","
+       << "\"total_native_ms\":" << timing.total_native_ms << ","
+       << "\"callee_preanalysis_count\":" << timing.callee_preanalysis_count << ","
+       << "\"callgraph_reanalysis_count\":" << timing.callgraph_reanalysis_count << ","
+       << "\"stage1_rerun_ms\":" << timing.stage1_rerun_ms << ","
+       << "\"stage2_rerun_ms\":" << timing.stage2_rerun_ms
+       << "}";
+    return ss.str();
+}
+
+class ActiveDecompGuard {
+public:
+    ActiveDecompGuard(DecompContext* ctx, uint64_t addr) : ctx_(ctx), addr_(addr) {
+        if (ctx_ != nullptr) {
+            inserted_ = ctx_->active_decomp_addrs.insert(addr_).second;
+        }
+    }
+
+    ~ActiveDecompGuard() {
+        if (inserted_ && ctx_ != nullptr) {
+            ctx_->active_decomp_addrs.erase(addr_);
+        }
+    }
+
+    bool inserted() const { return inserted_; }
+
+private:
+    DecompContext* ctx_ = nullptr;
+    uint64_t addr_ = 0;
+    bool inserted_ = false;
+};
+
+class FuncdataCleanupGuard {
+public:
+    FuncdataCleanupGuard(ghidra::Architecture* arch, ghidra::Funcdata* fd)
+        : arch_(arch), fd_(fd) {}
+
+    ~FuncdataCleanupGuard() {
+        if (fd_ == nullptr) {
+            return;
+        }
+        if (arch_ != nullptr) {
+            arch_->clearAnalysis(fd_);
+        } else {
+            fd_->clear();
+        }
+    }
+
+private:
+    ghidra::Architecture* arch_ = nullptr;
+    ghidra::Funcdata* fd_ = nullptr;
+};
+
+class NativeTimingRecorder {
+public:
+    NativeTimingRecorder(DecompContext* ctx, uint64_t addr)
+        : ctx_(ctx), addr_(addr), start_(std::chrono::steady_clock::now()) {
+        if (ctx_ != nullptr) {
+            ctx_->last_timing_json.clear();
+            ctx_->last_native_timing = fission::ffi::NativeDecompTiming{};
+        }
+    }
+
+    ~NativeTimingRecorder() {
+        timing.total_native_ms = elapsed_ms(start_);
+        if (ctx_ != nullptr) {
+            ctx_->last_native_timing = timing;
+            ctx_->last_timing_json = make_native_timing_json(addr_, timing);
+        }
+    }
+
+    fission::ffi::NativeDecompTiming timing;
+
+private:
+    DecompContext* ctx_ = nullptr;
+    uint64_t addr_ = 0;
+    std::chrono::steady_clock::time_point start_;
+};
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -162,6 +365,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     }
     
     ensure_architecture(ctx);
+    NativeTimingRecorder timing_recorder(ctx, addr);
     
     fission::utils::log_output() << "[DecompilerCore] Starting decompilation at 0x" << std::hex << addr << std::dec << std::endl;
     
@@ -187,6 +391,14 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Code space not initialized");
     }
     ghidra::Address start_addr(code_space, addr);
+
+    if (ctx->active_decomp_addrs.count(addr) > 0) {
+        throw std::runtime_error("Function is already being decompiled (recursive decompilation detected)");
+    }
+    ActiveDecompGuard active_guard(ctx, addr);
+    if (!active_guard.inserted()) {
+        throw std::runtime_error("Function is already being decompiled (recursive decompilation detected)");
+    }
     
     fission::utils::log_output() << "[DecompilerCore] Requesting decompilation for addr: 0x" << std::hex << addr << std::dec << std::endl;
     fission::utils::log_output() << "[DecompilerCore] Created Address object: " << start_addr.getShortcut() << std::endl;
@@ -225,6 +437,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     if (!fd) {
         throw std::runtime_error("Failed to get function data");
     }
+    FuncdataCleanupGuard cleanup_guard(ctx->arch.get(), fd);
     
     // By default we force standalone decompilation for inline-marked functions,
     // but this can be relaxed via feature: allow_inline / inline.
@@ -236,8 +449,12 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     
     // Check if function is already being decompiled (recursive call)
     if (fd->isProcStarted()) {
-        fission::utils::log_output() << "[DecompilerCore] WARNING: Function at 0x" << std::hex << addr << std::dec << " is already being processed" << std::endl;
-        throw std::runtime_error("Function is already being decompiled (recursive decompilation detected)");
+        fission::utils::log_output()
+            << "[DecompilerCore] WARNING: stale started state at 0x"
+            << std::hex << addr << std::dec
+            << ", clearing analysis instead of treating it as recursion"
+            << std::endl;
+        ctx->arch->clearAnalysis(fd);
     }
     
     // Clear only this function's data for fresh analysis
@@ -261,11 +478,13 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         })() + "\n// " + e.what() + "\n";
     }
     
-    // CRITICAL: Follow control flow to discover instructions
-    // Higher range (32KB) to handle large functions. 
-    // Ghidra's followFlow will stop at returns anyway.
-    ghidra::Address end_addr = start_addr + 0x8000;
+    // Align the FFI path with the batch path by tightening the followFlow
+    // window to the next known symbol or executable block end.
+    size_t follow_flow_limit = compute_follow_flow_limit(ctx, addr);
+    ghidra::Address end_addr = start_addr + follow_flow_limit;
     bool follow_flow_ok = false;
+    auto follow_flow_start = std::chrono::steady_clock::now();
+    timing_recorder.timing.follow_flow_budget_bytes = follow_flow_limit;
     try {
         fd->followFlow(start_addr, end_addr);
         fission::utils::log_output() << "[DecompilerCore] Control flow analysis complete" << std::endl;
@@ -275,6 +494,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     } catch (...) {
         fission::utils::log_output() << "[DecompilerCore] ERROR: Unknown exception in followFlow" << std::endl;
     }
+    timing_recorder.timing.follow_flow_ms = elapsed_ms(follow_flow_start);
 
     // If control flow analysis failed, do NOT proceed to decompilation
     // (action->perform on empty function data causes hangs)
@@ -377,8 +597,13 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     fission::utils::log_output() << "[DecompilerCore] Performing decompilation..." << std::endl;
     
     // Perform decompilation
-    try {
+    auto perform_action = [&]() {
+        auto perform_start = std::chrono::steady_clock::now();
         current_action->perform(*fd);
+        timing_recorder.timing.main_perform_ms += elapsed_ms(perform_start);
+    };
+    try {
+        perform_action();
     } catch (const ghidra::LowlevelError& e) {
         std::string msg = e.explain;
         if (msg.find("Function loaded for inlining") != std::string::npos && !ctx->allow_inline) {
@@ -391,7 +616,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
             }
             fd->getFuncProto().setInline(false);
             current_action->reset(*fd);
-            current_action->perform(*fd);
+            perform_action();
         } else {
             throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
         }
@@ -403,6 +628,13 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
 
     fission::decompiler::AnalysisArtifacts analysis =
         fission::decompiler::run_analysis_passes(ctx, fd, current_action, MAX_FUNCTION_SIZE);
+    timing_recorder.timing.analysis_passes_ms = analysis.analysis_passes_ms;
+    timing_recorder.timing.callee_preanalysis_ms = analysis.callee_preanalysis_ms;
+    timing_recorder.timing.callgraph_reanalysis_ms = analysis.callgraph_reanalysis_ms;
+    timing_recorder.timing.callee_preanalysis_count = analysis.callee_preanalysis_count;
+    timing_recorder.timing.callgraph_reanalysis_count = analysis.callgraph_reanalysis_count;
+    timing_recorder.timing.stage1_rerun_ms = analysis.stage1_rerun_ms;
+    timing_recorder.timing.stage2_rerun_ms = analysis.stage2_rerun_ms;
     
     fission::utils::log_output() << "[DecompilerCore] Generating output..." << std::endl;
     
@@ -414,7 +646,9 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     // Print decompiled output to string
     std::ostringstream ss;
     ctx->arch->print->setOutputStream(&ss);
+    auto print_start = std::chrono::steady_clock::now();
     ctx->arch->print->docFunction(fd);
+    timing_recorder.timing.print_ms = elapsed_ms(print_start);
     
     std::string result = ss.str();
     
@@ -425,7 +659,9 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     const PostProcessOptions& options = ctx->post_process_options;
 
     // Use the analysis artifacts gathered earlier for post-processing
-    result = run_post_processing(ctx, fd, result, analysis, options);
+    auto postprocess_start = std::chrono::steady_clock::now();
+    result = run_post_processing(ctx, fd, result, analysis, options, &timing_recorder.timing);
+    timing_recorder.timing.postprocess_ms = elapsed_ms(postprocess_start);
     
     fission::utils::log_output() << "[DecompilerCore] Decompilation complete, " << result.size() << " bytes after post-processing" << std::endl;
     

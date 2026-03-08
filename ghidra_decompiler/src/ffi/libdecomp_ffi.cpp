@@ -258,6 +258,11 @@ extern "C" DECOMP_API const char* decomp_get_last_error(DecompContext* ctx) {
     return ctx->last_error.c_str();
 }
 
+extern "C" DECOMP_API const char* decomp_get_last_timing_json(DecompContext* ctx) {
+    if (!ctx) return "{}";
+    return ctx->last_timing_json.empty() ? "{}" : ctx->last_timing_json.c_str();
+}
+
 extern "C" DECOMP_API void decomp_free_string(char* str) {
     if (str) {
         free(str);

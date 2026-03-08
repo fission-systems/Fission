@@ -105,26 +105,11 @@ std::string strip_shadow_only_params(const std::string& code) {
 
 std::string inline_strings(const std::string& code, const std::map<uint64_t, std::string>& string_table) {
     if (string_table.empty()) return code;
-    
-    std::string result = code;
-    
-    std::vector<std::pair<uint64_t, std::string>> sorted_strings(string_table.begin(), string_table.end());
-    std::sort(sorted_strings.begin(), sorted_strings.end(),
-              [](const auto& a, const auto& b) { return a.first > b.first; });
-    
-    for (const auto& [addr, str] : sorted_strings) {
-        char pattern[32];
-        snprintf(pattern, sizeof(pattern), "0x%llx", (unsigned long long)addr);
-        
-        std::vector<std::string> patterns = { pattern };
-        snprintf(pattern, sizeof(pattern), "0x%lx", (unsigned long)addr);
-        patterns.push_back(pattern);
-        
-        // StringScanner already provides quoted strings: "content"
-        // Clean up whitespace for better display
-        std::string content = str;
-        
-        // Replace actual newlines/tabs with escape sequences for readability
+    if (code.find("0x") == std::string::npos) return code;
+
+    auto format_inline_string = [](const std::string& raw) -> std::string {
+        std::string content = raw;
+
         size_t pos = 0;
         while ((pos = content.find('\n', pos)) != std::string::npos) {
             content.replace(pos, 1, "\\n");
@@ -140,40 +125,111 @@ std::string inline_strings(const std::string& code, const std::map<uint64_t, std
             content.replace(pos, 1, "\\t");
             pos += 2;
         }
-        
+
         if (content.length() > 60) {
-            // Truncate long strings but preserve quote marks
-            if (content.front() == '"' && content.back() == '"') {
+            if (!content.empty() && content.front() == '"' && content.back() == '"') {
                 content = "\"" + content.substr(1, 56) + "...\"";
             } else {
                 content = content.substr(0, 57) + "...";
             }
         }
-        
-        // Replace address with the literal for readability.
-        std::string replacement = content;
-        
-        for (const auto& pat : patterns) {
-            size_t pos = 0;
-            while ((pos = result.find(pat, pos)) != std::string::npos) {
-                size_t end = pos + pat.length();
-                // Check if not part of a larger hex number
-                if (end < result.length() && std::isxdigit(result[end])) {
-                    pos++;
-                    continue;
+
+        return content;
+    };
+
+    std::string result;
+    result.reserve(code.size());
+
+    bool in_line_comment = false;
+    bool in_block_comment = false;
+    bool in_string = false;
+    bool in_char = false;
+
+    size_t i = 0;
+    while (i < code.size()) {
+        char c = code[i];
+
+        if (in_line_comment) {
+            result.push_back(c);
+            if (c == '\n') in_line_comment = false;
+            ++i;
+            continue;
+        }
+        if (in_block_comment) {
+            result.push_back(c);
+            if (c == '*' && i + 1 < code.size() && code[i + 1] == '/') {
+                result.push_back('/');
+                i += 2;
+                in_block_comment = false;
+            } else {
+                ++i;
+            }
+            continue;
+        }
+        if (in_string) {
+            result.push_back(c);
+            if (c == '"' && (i == 0 || code[i - 1] != '\\')) in_string = false;
+            ++i;
+            continue;
+        }
+        if (in_char) {
+            result.push_back(c);
+            if (c == '\'' && (i == 0 || code[i - 1] != '\\')) in_char = false;
+            ++i;
+            continue;
+        }
+
+        if (c == '/' && i + 1 < code.size() && code[i + 1] == '/') {
+            result.append("//");
+            i += 2;
+            in_line_comment = true;
+            continue;
+        }
+        if (c == '/' && i + 1 < code.size() && code[i + 1] == '*') {
+            result.append("/*");
+            i += 2;
+            in_block_comment = true;
+            continue;
+        }
+        if (c == '"') {
+            result.push_back(c);
+            in_string = true;
+            ++i;
+            continue;
+        }
+        if (c == '\'') {
+            result.push_back(c);
+            in_char = true;
+            ++i;
+            continue;
+        }
+
+        if (c == '0' && i + 1 < code.size() && (code[i + 1] == 'x' || code[i + 1] == 'X')) {
+            size_t hex_start = i + 2;
+            size_t hex_end = hex_start;
+            while (hex_end < code.size() && std::isxdigit(static_cast<unsigned char>(code[hex_end]))) {
+                ++hex_end;
+            }
+
+            if (hex_end > hex_start) {
+                try {
+                    uint64_t addr = std::stoull(code.substr(i, hex_end - i), nullptr, 16);
+                    auto it = string_table.find(addr);
+                    if (it != string_table.end()) {
+                        result.append(format_inline_string(it->second));
+                        i = hex_end;
+                        continue;
+                    }
+                } catch (...) {
+                    // Ignore parse errors and fall through to raw copy.
                 }
-                // Check if already has a comment
-                size_t comment_check = result.find("/*", pos);
-                if (comment_check != std::string::npos && comment_check < pos + 50) {
-                    pos++;
-                    continue;
-                }
-                result.replace(pos, pat.length(), replacement);
-                pos += replacement.length();
             }
         }
+
+        result.push_back(c);
+        ++i;
     }
-    
+
     return result;
 }
 

@@ -63,13 +63,30 @@ fn strip_inferred_structs(code: &str) -> String {
     result
 }
 
+fn attach_native_timing(entry: &mut serde_json::Value, decomp: &DecompilerNative) {
+    let Ok(raw_timing) = decomp.get_last_timing_json() else {
+        return;
+    };
+    if raw_timing.trim().is_empty() || raw_timing.trim() == "{}" {
+        return;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw_timing) {
+        entry["native_timing"] = value;
+    }
+}
+
 fn collect_target_functions<'a>(
     binary: &'a LoadedBinary,
     address: Option<u64>,
     decomp_all: bool,
+    decomp_limit: Option<usize>,
 ) -> Vec<&'a FunctionInfo> {
     if decomp_all {
-        return binary.functions.iter().collect();
+        let collected: Vec<_> = binary.functions.iter().collect();
+        if let Some(n) = decomp_limit {
+            return collected.into_iter().take(n).collect();
+        }
+        return collected;
     }
 
     if let Some(addr) = address {
@@ -136,7 +153,7 @@ pub(super) fn run_decompilation(
         if cli.verbose {
             eprintln!(
                 "[*] Decompiler compiler_id = {}",
-                compiler_id.unwrap_or("default")
+                compiler_id.as_deref().unwrap_or("default")
             );
         }
         let config = fission_core::config::Config::default();
@@ -145,7 +162,7 @@ pub(super) fn run_decompilation(
             .and_then(|p| p.to_str().map(String::from));
         let mut options = PrepareOptions {
             verbose: cli.verbose,
-            compiler_id,
+            compiler_id: compiler_id.as_deref(),
             gdt_path: gdt_path_owned.as_deref(),
             timeout_ms: Some(config.decompiler.timeout_ms),
             timings: if cli.benchmark {
@@ -174,7 +191,12 @@ pub(super) fn run_decompilation(
     // Some loaders may expose multiple aliases for a single address
     // (e.g., sub_xxx + exported symbol), which can trigger duplicate
     // decompile attempts and noisy recursive-guard errors.
-    let functions = collect_target_functions(binary, cli.address, cli.decomp_all);
+    let functions = collect_target_functions(
+        binary,
+        cli.address,
+        cli.decomp_all,
+        cli.decomp_limit,
+    );
 
     if functions.is_empty() && cli.address.is_some() {
         // Use if-let for safer unwrapping
@@ -196,6 +218,8 @@ pub(super) fn run_decompilation(
     let mut all_output = String::new();
     let mut json_results: Vec<serde_json::Value> = Vec::new();
     let mut total_decomp_secs: f64 = 0.0;
+    let mut total_postprocess_secs: f64 = 0.0;
+    let postprocessor = PostProcessor::new().with_inferred_types(binary.inferred_types.clone());
 
     for func in &functions {
         if cli.verbose {
@@ -208,10 +232,10 @@ pub(super) fn run_decompilation(
             Ok(code) => {
                 let decomp_sec = func_start.elapsed().as_secs_f64();
                 total_decomp_secs += decomp_sec;
-                // Apply Rust-side post-processing (switch reconstruction, while→for, etc.)
-                let postprocessor =
-                    PostProcessor::new().with_inferred_types(binary.inferred_types.clone());
+                let postprocess_start = std::time::Instant::now();
                 let code = postprocessor.process(&code);
+                let postprocess_sec = postprocess_start.elapsed().as_secs_f64();
+                total_postprocess_secs += postprocess_sec;
                 // Apply output filters
                 let mut filtered = code.clone();
                 if effective_no_warnings {
@@ -230,6 +254,10 @@ pub(super) fn run_decompilation(
                     if cli.benchmark {
                         entry["decomp_sec"] =
                             serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
+                        entry["postprocess_sec"] = serde_json::json!(
+                            (postprocess_sec * 1_000_000.0).round() / 1_000_000.0
+                        );
+                        attach_native_timing(&mut entry, &decomp);
                     }
                     json_results.push(entry);
                 } else {
@@ -257,6 +285,7 @@ pub(super) fn run_decompilation(
                     if cli.benchmark {
                         entry["decomp_sec"] =
                             serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
+                        attach_native_timing(&mut entry, &decomp);
                     }
                     json_results.push(entry);
                 } else {
@@ -280,6 +309,7 @@ pub(super) fn run_decompilation(
                 "init_sec": (init_elapsed.as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
                 "prepare_timings": &prepare_timings,
                 "total_decomp_sec": (total_decomp_secs * 1_000_000.0).round() / 1_000_000.0,
+                "total_postprocess_sec": (total_postprocess_secs * 1_000_000.0).round() / 1_000_000.0,
                 "wall_clock_sec": (init_start.elapsed().as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
             },
             "functions": json_results

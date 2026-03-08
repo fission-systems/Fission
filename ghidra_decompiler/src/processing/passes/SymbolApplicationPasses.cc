@@ -14,6 +14,9 @@ namespace processing {
 
 std::string post_process_iat_calls(const std::string& code, const std::map<uint64_t, std::string>& iat_symbols) {
     if (iat_symbols.empty()) return code;
+    if (code.find("pcRam") == std::string::npos && code.find(".dll!") == std::string::npos) {
+        return code;
+    }
     
     std::string result = code;
     
@@ -71,6 +74,10 @@ std::string post_process_iat_calls(const std::string& code, const std::map<uint6
 }
 
 std::string apply_function_signatures(const std::string& code) {
+    if (code.find("param_") == std::string::npos) {
+        return code;
+    }
+
     std::string result = code;
     
     for (const auto& [func_name, sig] : API_SIGNATURES) {

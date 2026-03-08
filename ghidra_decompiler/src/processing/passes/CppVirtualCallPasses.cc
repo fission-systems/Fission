@@ -19,6 +19,11 @@ namespace processing {
 
 std::string demangle_cpp_names(const std::string& code) {
     if (code.empty()) return code;
+#ifdef _MSC_VER
+    if (code.find('?') == std::string::npos) return code;
+#else
+    if (code.find("_Z") == std::string::npos) return code;
+#endif
     
     std::string result = code;
     
