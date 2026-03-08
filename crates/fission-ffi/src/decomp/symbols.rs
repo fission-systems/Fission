@@ -320,6 +320,8 @@ fn find_range_entry(ranges: &[SymbolProviderRange], address: u64) -> Option<u64>
 // ============================================================================
 
 /// FFI callback for finding a symbol (data)
+///
+/// Wrapped in `catch_unwind` to prevent Rust panics from unwinding into C++ (UB).
 #[cfg(feature = "native_decomp")]
 pub(super) extern "C" fn symbol_provider_find_symbol(
     userdata: *mut std::ffi::c_void,
@@ -328,73 +330,81 @@ pub(super) extern "C" fn symbol_provider_find_symbol(
     require_start: c_int,
     out: *mut DecompSymbolInfo,
 ) -> c_int {
-    if userdata.is_null() || out.is_null() {
-        return 0;
-    }
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if userdata.is_null() || out.is_null() {
+            return 0;
+        }
 
-    let state = unsafe { &*(userdata as *const SymbolProviderState) };
-    let entry = match state.data.get(&address) {
-        Some(entry) => entry,
-        None => {
-            if require_start == 0 {
-                if let Some(start) = find_range_entry(&state.data_ranges, address) {
-                    match state.data.get(&start) {
-                        Some(entry) => entry,
-                        None => return 0,
+        let state = unsafe { &*(userdata as *const SymbolProviderState) };
+        let entry = match state.data.get(&address) {
+            Some(entry) => entry,
+            None => {
+                if require_start == 0 {
+                    if let Some(start) = find_range_entry(&state.data_ranges, address) {
+                        match state.data.get(&start) {
+                            Some(entry) => entry,
+                            None => return 0,
+                        }
+                    } else {
+                        return 0;
                     }
                 } else {
                     return 0;
                 }
-            } else {
-                return 0;
             }
+        };
+
+        unsafe {
+            (*out).address = address;
+            (*out).size = entry.size;
+            (*out).flags = entry.flags;
+            (*out).name = entry.name.as_ptr();
+            (*out).name_len = entry.name.as_bytes().len().min(u32::MAX as usize) as u32;
         }
-    };
 
-    unsafe {
-        (*out).address = address;
-        (*out).size = entry.size;
-        (*out).flags = entry.flags;
-        (*out).name = entry.name.as_ptr();
-        (*out).name_len = entry.name.as_bytes().len().min(u32::MAX as usize) as u32;
-    }
-
-    1
+        1
+    }))
+    .unwrap_or(0)
 }
 
 /// FFI callback for finding a function
+///
+/// Wrapped in `catch_unwind` to prevent Rust panics from unwinding into C++ (UB).
 #[cfg(feature = "native_decomp")]
 pub(super) extern "C" fn symbol_provider_find_function(
     userdata: *mut std::ffi::c_void,
     address: u64,
     out: *mut DecompSymbolInfo,
 ) -> c_int {
-    if userdata.is_null() || out.is_null() {
-        return 0;
-    }
-
-    let state = unsafe { &*(userdata as *const SymbolProviderState) };
-    let entry = match state.functions.get(&address) {
-        Some(entry) => entry,
-        None => {
-            if let Some(start) = find_range_entry(&state.function_ranges, address) {
-                match state.functions.get(&start) {
-                    Some(entry) => entry,
-                    None => return 0,
-                }
-            } else {
-                return 0;
-            }
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if userdata.is_null() || out.is_null() {
+            return 0;
         }
-    };
 
-    unsafe {
-        (*out).address = address;
-        (*out).size = entry.size;
-        (*out).flags = entry.flags;
-        (*out).name = entry.name.as_ptr();
-        (*out).name_len = entry.name.as_bytes().len().min(u32::MAX as usize) as u32;
-    }
+        let state = unsafe { &*(userdata as *const SymbolProviderState) };
+        let entry = match state.functions.get(&address) {
+            Some(entry) => entry,
+            None => {
+                if let Some(start) = find_range_entry(&state.function_ranges, address) {
+                    match state.functions.get(&start) {
+                        Some(entry) => entry,
+                        None => return 0,
+                    }
+                } else {
+                    return 0;
+                }
+            }
+        };
 
-    1
+        unsafe {
+            (*out).address = address;
+            (*out).size = entry.size;
+            (*out).flags = entry.flags;
+            (*out).name = entry.name.as_ptr();
+            (*out).name_len = entry.name.as_bytes().len().min(u32::MAX as usize) as u32;
+        }
+
+        1
+    }))
+    .unwrap_or(0)
 }

@@ -493,6 +493,14 @@ DECOMP_API void decomp_init_pcode_bridge(
     void  (*free_fn)(char*)
 );
 
+/**
+ * Register flat-format Pcode optimizer (zero-copy path).
+ * Call after decomp_init_pcode_bridge. Result is freed with fission_free_string.
+ */
+DECOMP_API void decomp_init_pcode_flat_bridge(
+    char* (*optimize_flat_fn)(const uint8_t*, size_t)
+);
+
 #ifdef __cplusplus
 }
 #endif

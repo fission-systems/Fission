@@ -102,6 +102,17 @@ fn build_libdecomp() {
         );
     }
 
+    // ASAN (AddressSanitizer) for SIGSEGV debugging
+    if std::env::var("FISSION_ASAN").map(|v| v == "1" || v == "true").unwrap_or(false) {
+        #[cfg(not(target_os = "windows"))]
+        {
+            let asan_flags = "-fsanitize=address -fno-omit-frame-pointer -g";
+            cmake_args.push(format!("-DCMAKE_CXX_FLAGS={}", asan_flags));
+            cmake_args.push(format!("-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address"));
+            println!("cargo:warning=Building libdecomp with AddressSanitizer (FISSION_ASAN=1)");
+        }
+    }
+
     // Run cmake configure
     let cmake_status = Command::new("cmake")
         .args(&cmake_args)
@@ -171,7 +182,8 @@ fn build_libdecomp() {
     #[cfg(target_os = "linux")]
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", build_dir.display());
 
-    // Rerun if any C++ files change
+    // Rerun if any C++ files or ASAN env change
+    println!("cargo:rerun-if-env-changed=FISSION_ASAN");
     println!(
         "cargo:rerun-if-changed={}",
         decomp_dir.join("CMakeLists.txt").display()

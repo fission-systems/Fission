@@ -16,8 +16,22 @@
 #include "variable.hh"
 #include "op.hh"
 #include "database.hh"
+// #include "fission/utils/ObjectPool.h"  // Phase D rollback
 
 namespace ghidra {
+
+// --- Phase D Object Pool (temporarily disabled for rollback verification) ---
+// thread_local fission::ThreadLocalObjectPool<HighVariable> highvar_pool;
+// void* HighVariable::operator new(size_t size) {
+//   if (size != sizeof(HighVariable)) return ::operator new(size);
+//   return highvar_pool.alloc();
+// }
+// void HighVariable::operator delete(void* ptr, size_t size) {
+//   if (!ptr) return;
+//   if (size != sizeof(HighVariable)) { ::operator delete(ptr); return; }
+//   highvar_pool.free(ptr);
+// }
+// --------------------------------------------------------------------------
 
 AttributeId ATTRIB_CLASS = AttributeId("class",66);
 AttributeId ATTRIB_REPREF = AttributeId("repref",67);

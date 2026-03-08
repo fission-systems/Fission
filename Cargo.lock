@@ -1365,6 +1365,7 @@ dependencies = [
  "fission-loader",
  "iced-x86",
  "libc",
+ "rayon",
  "serde",
  "serde_json",
  "tracing",

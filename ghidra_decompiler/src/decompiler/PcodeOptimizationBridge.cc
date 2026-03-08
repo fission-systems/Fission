@@ -12,6 +12,7 @@
 // Function pointer types for Rust FFI functions
 typedef char* (*FissionOptimizePcodeJson)(const char*, size_t);
 typedef void (*FissionFreeString)(char*);
+typedef char* (*FissionOptimizePcodeFlat)(const uint8_t*, size_t);
 
 namespace fission {
 namespace decompiler {
@@ -23,6 +24,9 @@ bool PcodeOptimizationBridge::optimization_enabled = true;
 static FissionOptimizePcodeJson rust_optimize_fn = nullptr;
 static FissionFreeString rust_free_fn = nullptr;
 static bool ffi_attempted = false;
+
+// Flat-format (set by register_rust_flat_fn_ptrs; result freed with fission_free_string)
+static FissionOptimizePcodeFlat rust_optimize_flat_fn = nullptr;
 
 // Try to load Rust FFI functions from the main executable
 static bool load_rust_ffi() {
@@ -108,11 +112,18 @@ void PcodeOptimizationBridge::register_rust_fn_ptrs(
 ) {
     rust_optimize_fn = reinterpret_cast<FissionOptimizePcodeJson>(optimize_fn);
     rust_free_fn     = reinterpret_cast<FissionFreeString>(free_fn);
-    // Mark as attempted+successful so load_rust_ffi() short-circuits immediately
-    // without trying dlsym, and won't reset our pointers on failure.
     ffi_attempted = (rust_optimize_fn != nullptr && rust_free_fn != nullptr);
     if (ffi_attempted) {
         fission::utils::log_stream() << "[PcodeOptimizationBridge] Rust FFI registered via push (no dlsym needed)" << std::endl;
+    }
+}
+
+void PcodeOptimizationBridge::register_rust_flat_fn_ptrs(
+    char* (*optimize_flat_fn)(const uint8_t*, size_t)
+) {
+    rust_optimize_flat_fn = optimize_flat_fn;
+    if (rust_optimize_flat_fn) {
+        fission::utils::log_stream() << "[PcodeOptimizationBridge] Flat FFI registered" << std::endl;
     }
 }
 
@@ -176,16 +187,29 @@ std::string PcodeOptimizationBridge::extract_and_optimize(ghidra::Funcdata* fd) 
     if (!fd) {
         return "";
     }
-    
-    // Extract Pcode
+
+    // Prefer flat path when available (saves pcode_to_json + Rust from_json)
+    if (rust_optimize_flat_fn && rust_free_fn) {
+        std::vector<uint8_t> flat;
+        if (PcodeExtractor::extract_pcode_flat(fd, flat) && !flat.empty()) {
+            char* result = rust_optimize_flat_fn(flat.data(), flat.size());
+            if (result) {
+                std::string optimized(result);
+                rust_free_fn(result);
+                fission::utils::log_stream()
+                    << "[PcodeOptimizationBridge] Flat optimize: " << flat.size() << " -> "
+                    << optimized.size() << " bytes" << std::endl;
+                return optimized;
+            }
+        }
+    }
+
+    // Fallback to JSON path
     std::string pcode_json = PcodeExtractor::extract_pcode_json(fd);
-    
     if (pcode_json.empty()) {
         fission::utils::log_stream() << "[PcodeOptimizationBridge] Failed to extract Pcode" << std::endl;
         return "";
     }
-    
-    // Optimize
     return optimize_pcode_via_rust(pcode_json);
 }
 

@@ -12,6 +12,11 @@ use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
+use std::sync::{Mutex, OnceLock};
+
+/// Serializes C++ DecompContext create/destroy across all threads.
+/// Ghidra's global state (Sleigh, TypeFactory) is not thread-safe during init or teardown.
+static DECOMP_FFI_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 #[cfg(debug_assertions)]
 use tracing::warn;
 
@@ -98,7 +103,11 @@ impl DecompilerNative {
             FissionError::decompiler("Invalid SLA directory path (contains null byte)")
         })?;
 
+        // Serialize create: Ghidra Sleigh/arch init touches global state.
+        let lock = DECOMP_FFI_LOCK.get_or_init(|| Mutex::new(()));
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let ctx = unsafe { decomp_create(sla_cstr.as_ptr()) };
+        drop(_guard);
         if ctx.is_null() {
             return Err(FissionError::decompiler(
                 "Failed to create decompiler context",
@@ -113,6 +122,7 @@ impl DecompilerNative {
                 Some(crate::pcode::fission_optimize_pcode_json),
                 Some(crate::pcode::fission_free_string),
             );
+            decomp_init_pcode_flat_bridge(Some(crate::pcode::fission_optimize_pcode_flat));
         }
 
         Ok(Self {
@@ -773,11 +783,15 @@ impl DecompilerNative {
 #[cfg(feature = "native_decomp")]
 impl Drop for DecompilerNative {
     fn drop(&mut self) {
-        // Invalidate context first to prevent use-after-free
         self.is_valid = false;
 
         if !self.ctx.is_null() {
-            unsafe { decomp_destroy(self.ctx) };
+            // Serialize teardown: Ghidra's Sleigh/TypeFactory cleanup is not thread-safe.
+            let lock = DECOMP_FFI_LOCK.get_or_init(|| Mutex::new(()));
+            let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+            unsafe {
+                decomp_destroy(self.ctx);
+            }
             self.ctx = ptr::null_mut();
         }
     }

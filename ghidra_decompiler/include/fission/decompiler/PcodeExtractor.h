@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <cstring>
 
 namespace fission {
 namespace decompiler {
@@ -23,8 +24,9 @@ struct VarnodeInfo {
 struct PcodeOpInfo {
     uint32_t seq_num;           // Sequential number in basic block
     std::string opcode;         // Opcode name (COPY, INT_ADD, etc.)
+    uint32_t opcode_raw;        // Ghidra OpCode enum value (for flat serialization)
     uint64_t address;           // Instruction address
-    
+
     VarnodeInfo output;         // Output varnode (empty if no output)
     std::vector<VarnodeInfo> inputs; // Input varnodes
 };
@@ -48,7 +50,14 @@ public:
     /// @param fd Ghidra function data
     /// @return Vector of basic blocks with their Pcode ops
     static std::vector<PcodeBasicBlock> extract_pcode(ghidra::Funcdata* fd);
-    
+
+    /// Extract Pcode to flat binary format (zero-copy FFI path)
+    /// Format matches fission-pcode flat layout (FPCD magic, blocks, ops, varnodes)
+    /// @param fd Ghidra function data
+    /// @param out Output buffer
+    /// @return true on success
+    static bool extract_pcode_flat(ghidra::Funcdata* fd, std::vector<uint8_t>& out);
+
     /// Inject optimized Pcode back into Ghidra (replaces existing Pcode)
     /// @param fd Ghidra function data to modify
     /// @param pcode_json JSON representation of optimized Pcode

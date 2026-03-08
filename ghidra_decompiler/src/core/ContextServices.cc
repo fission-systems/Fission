@@ -17,7 +17,7 @@ namespace core {
 
 using fission::ffi::DecompContext;
 using fission::loader::SectionAwareLoadImage;
-using fission::core::CallbackSymbolProvider;
+using fission::core::CachedCallbackSymbolProvider;
 using fission::core::MapSymbolProvider;
 
 void add_symbol(DecompContext* ctx, uint64_t addr, const char* name) {
@@ -127,7 +127,7 @@ void set_symbol_provider(DecompContext* ctx, const DecompSymbolProvider* provide
 
     ctx->symbol_provider_callbacks = *provider;
     ctx->symbol_provider_enabled = true;
-    ctx->symbol_provider = std::make_unique<CallbackSymbolProvider>(
+    ctx->symbol_provider = std::make_unique<CachedCallbackSymbolProvider>(
         &ctx->symbol_provider_callbacks
     );
 

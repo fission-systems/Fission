@@ -146,6 +146,7 @@ std::vector<PcodeBasicBlock> PcodeExtractor::extract_pcode(ghidra::Funcdata* fd)
             PcodeOpInfo op_info;
             op_info.seq_num = seq++;
             op_info.opcode = opcode_to_string(op->code());
+            op_info.opcode_raw = static_cast<uint32_t>(op->code());
             op_info.address = op->getAddr().getOffset();
             
             // Extract output varnode
@@ -223,9 +224,69 @@ std::string PcodeExtractor::pcode_to_json(const std::vector<PcodeBasicBlock>& bl
     return json.str();
 }
 
+namespace {
+void append_u32(std::vector<uint8_t>& out, uint32_t v) {
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
+    out.insert(out.end(), p, p + sizeof(uint32_t));
+}
+
+void append_u64(std::vector<uint8_t>& out, uint64_t v) {
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&v);
+    out.insert(out.end(), p, p + sizeof(uint64_t));
+}
+
+void append_varnode(std::vector<uint8_t>& out, const fission::decompiler::VarnodeInfo& vn) {
+    append_u64(out, vn.space_id);
+    append_u64(out, vn.offset);
+    append_u32(out, vn.size);
+    out.push_back(vn.is_constant ? 1 : 0);
+    out.insert(out.end(), 3, 0);  // padding
+    int64_t cv = vn.constant_val;
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&cv);
+    out.insert(out.end(), p, p + sizeof(int64_t));
+}
+}  // namespace
+
 std::string PcodeExtractor::extract_pcode_json(ghidra::Funcdata* fd) {
     std::vector<PcodeBasicBlock> blocks = extract_pcode(fd);
     return pcode_to_json(blocks);
+}
+
+bool PcodeExtractor::extract_pcode_flat(ghidra::Funcdata* fd, std::vector<uint8_t>& out) {
+    if (!fd) return false;
+
+    std::vector<PcodeBasicBlock> blocks = extract_pcode(fd);
+    if (blocks.empty()) return true;  // Empty is valid
+
+    out.clear();
+    out.reserve(4096);
+    const uint8_t magic[] = {'F', 'P', 'C', 'D'};
+    out.insert(out.end(), magic, magic + 4);
+    out.push_back(1);  // version
+    append_u32(out, static_cast<uint32_t>(blocks.size()));
+
+    for (const auto& block : blocks) {
+        append_u32(out, block.index);
+        append_u64(out, block.start_address);
+        append_u32(out, static_cast<uint32_t>(block.ops.size()));
+
+        for (const auto& op : block.ops) {
+            append_u32(out, op.seq_num);
+            append_u32(out, op.opcode_raw);
+            append_u64(out, op.address);
+
+            bool has_out = op.output.size > 0;
+            out.push_back(has_out ? 1 : 0);
+            if (has_out) {
+                append_varnode(out, op.output);
+            }
+            append_u32(out, static_cast<uint32_t>(op.inputs.size()));
+            for (const auto& vn : op.inputs) {
+                append_varnode(out, vn);
+            }
+        }
+    }
+    return true;
 }
 
 bool PcodeExtractor::inject_pcode(ghidra::Funcdata* fd, const std::string& pcode_json) {

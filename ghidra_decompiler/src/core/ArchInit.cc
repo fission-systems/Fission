@@ -81,7 +81,7 @@ static void ensure_symbol_provider(DecompContext* ctx) {
     }
 
     if (ctx->symbol_provider_enabled) {
-        ctx->symbol_provider = std::make_unique<fission::core::CallbackSymbolProvider>(
+        ctx->symbol_provider = std::make_unique<fission::core::CachedCallbackSymbolProvider>(
             &ctx->symbol_provider_callbacks
         );
     } else {

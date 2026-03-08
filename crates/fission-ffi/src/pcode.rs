@@ -114,6 +114,60 @@ pub unsafe extern "C" fn fission_free_string(ptr: *mut c_char) {
     }
 }
 
+/// Optimize Pcode from flat binary buffer (zero-copy path).
+/// Parses flat -> optimizes -> returns JSON (for inject compatibility).
+/// Saves C++ pcode_to_json and Rust from_json overhead.
+///
+/// # Safety
+/// - `in_buf` must be valid for `in_len` bytes
+/// - Caller must free the returned string with `fission_free_string`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fission_optimize_pcode_flat(
+    in_buf: *const u8,
+    in_len: usize,
+) -> *mut c_char {
+    if in_buf.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let slice = unsafe { std::slice::from_raw_parts(in_buf, in_len) };
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let mut pcode = match fission_pcode::PcodeFunction::from_flat_bytes(slice) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[fission_optimize_pcode_flat] Flat parse error: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+
+        let config = fission_pcode::PcodeOptimizerConfig::default();
+        let mut optimizer = fission_pcode::PcodeOptimizer::new(config);
+        let _num_passes = optimizer.optimize(&mut pcode);
+
+        let optimized_json = match serde_json::to_string(&pcode) {
+            Ok(json) => json,
+            Err(e) => {
+                eprintln!("[fission_optimize_pcode_flat] JSON serialize error: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+
+        match CString::new(optimized_json) {
+            Ok(c_str) => c_str.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }));
+
+    match result {
+        Ok(ptr) => ptr,
+        Err(_) => {
+            eprintln!("[fission_optimize_pcode_flat] Panic during optimization");
+            std::ptr::null_mut()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

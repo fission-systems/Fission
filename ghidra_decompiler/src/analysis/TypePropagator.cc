@@ -886,38 +886,16 @@ void TypePropagator::apply_inferred_types(Funcdata* fd) {
         Varnode* vn = *iter;
         if (!vn) continue;
 
-        Datatype* temp_type = vn->getTempType();
-        if (temp_type && temp_type->getMetatype() != TYPE_UNKNOWN &&
-            (temp_type->getSize() == 0 || temp_type->getSize() == vn->getSize())) {
-            if (vn->updateType(temp_type)) {
-                applied++;
-                continue;
-            }
-        }
+        // Skip temp_type: Varnode temp union can hold dangling Datatype* (UAF in getMetatype).
+        // LLDB/ASAN: crash at getMetatype right after write_back. Use inferred_types only.
 
         uint64_t vid = get_varnode_id(vn);
         auto it = inferred_types.find(vid);
         if (it != inferred_types.end() && it->second) {
             Datatype* inferred = it->second;
-            // typeOrder guard: skip if varnode already carries a more-specific pointer type
-            // (mirrors Ghidra's ActionInferTypes::propagateTypeEdge typeOrder check).
-            Datatype* existing = vn->getType();
-            bool existing_is_more_specific = false;
-            if (existing && existing->getMetatype() == TYPE_PTR &&
-                inferred->getMetatype() == TYPE_PTR) {
-                // TYPE_PTR guarantees TypePointer — safe to static_cast
-                TypePointer* ep = static_cast<TypePointer*>(existing);
-                TypePointer* ip = static_cast<TypePointer*>(inferred);
-                if (ep && ip && ep->getPtrTo() && ip->getPtrTo()) {
-                    type_metatype em = ep->getPtrTo()->getMetatype();
-                    type_metatype im = ip->getPtrTo()->getMetatype();
-                    // Existing is more specific when the inferred pointee is void/unknown
-                    // but the existing pointee is a concrete type.
-                    existing_is_more_specific = (im == TYPE_VOID || im == TYPE_UNKNOWN) &&
-                                                (em != TYPE_VOID && em != TYPE_UNKNOWN);
-                }
-            }
-            if (existing_is_more_specific) continue;
+            // Defensive: inferred is from TypeFactory (our map) — should be valid.
+            // existing from vn->getType() can be dangling; ep->getPtrTo() etc. can UAF.
+            // Skip typeOrder comparison to avoid getMetatype on potentially-dangling pointers.
             if (inferred->getMetatype() != TYPE_UNKNOWN &&
                 (inferred->getSize() == 0 || inferred->getSize() == vn->getSize())) {
                 if (vn->updateType(inferred)) {
@@ -1444,72 +1422,18 @@ bool TypePropagator::propagate_struct_types(Funcdata* fd) {
     AddrSpace* stack_space = arch->getStackSpace();
     if (!stack_space) return changed;
 
+    // NOTE: Do NOT use Datatype* (inferred, temp_type, base_type, getOutputType) -
+    // all can be dangling and cause SEGV in getMetatype (ASAN 0xbebebebe).
     auto value_is_pointer = [&](Varnode* vn, const PcodeOp* read_op, int depth, auto&& self_ref) -> bool {
         if (!vn || depth <= 0) return false;
-
-        auto type_label = [](Datatype* type) -> std::string {
-            return type ? type->getName() : "null";
-        };
-
-        Datatype* inferred = get_type(vn);
-        Datatype* temp_type = vn->getTempType();
-        Datatype* base_type = vn->getType();
-        Datatype* high_read = nullptr;
-        Datatype* high_def = nullptr;
-
-        // Safely access high variable types with exception handling
-        // getHigh() may return non-null but the high variable may not be fully initialized
-        try {
-            if (vn->getHigh()) {
-                if (read_op) {
-                    int slot = read_op->getSlot(vn);
-                    if (slot >= 0 && slot < read_op->numInput()) {
-                        high_read = vn->getHighTypeReadFacing(read_op);
-                    }
-                }
-                if (vn->isWritten()) {
-                    high_def = vn->getHighTypeDefFacing();
-                }
-            }
-        } catch (const LowlevelError&) {
-            // High variable not fully initialized, skip high type checks
-            high_read = nullptr;
-            high_def = nullptr;
-        } catch (...) {
-            high_read = nullptr;
-            high_def = nullptr;
-        }
-
-        if (read_op && read_op->code() == CPUI_STORE) {
-            fission::utils::log_stream() << "[TypePropagator] STORE value types: temp=" << type_label(temp_type)
-                      << " base=" << type_label(base_type)
-                      << " inferred=" << type_label(inferred)
-                      << " high_read=" << type_label(high_read)
-                      << " high_def=" << type_label(high_def)
-                      << " size=" << vn->getSize() << std::endl;
-        }
-
-        if (is_pointer_type(inferred) || is_pointer_type(temp_type) || is_pointer_type(base_type) ||
-            is_pointer_type(high_read) || is_pointer_type(high_def)) {
-            if (read_op && read_op->code() == CPUI_STORE) {
-                fission::utils::log_stream() << "[TypePropagator] STORE value pointer hit (direct)" << std::endl;
-            }
-            return true;
-        }
+        (void)read_op;
 
         if (!vn->isWritten()) return false;
         PcodeOp* def = vn->getDef();
         if (!def) return false;
 
         OpCode opc = def->code();
-        if (opc == CPUI_CALL || opc == CPUI_CALLIND) {
-            FuncCallSpecs* fc = fd->getCallSpecs(def);
-            Datatype* ret = fc ? fc->getOutputType() : nullptr;
-            bool is_ptr = is_pointer_type(ret);
-            fission::utils::log_stream() << "[TypePropagator] CALL value types: ret=" << type_label(ret)
-                      << " ptr=" << (is_ptr ? "yes" : "no") << std::endl;
-            return is_ptr;
-        }
+        if (opc == CPUI_CALL || opc == CPUI_CALLIND) return false;
 
         switch (opc) {
             case CPUI_COPY:
@@ -1565,53 +1489,10 @@ bool TypePropagator::propagate_struct_types(Funcdata* fd) {
 
     if (pointer_offsets.empty()) return changed;
 
-    StackFrameAnalyzer stack_analyzer(arch);
-    int detected = stack_analyzer.analyze(fd);
-    if (detected <= 0) return changed;
-
-    Datatype* void_type = tf->getTypeVoid();
-    Datatype* void_ptr = tf->getTypePointer(ptr_size, void_type, ptr_size);
-    if (!void_ptr) return changed;
-
-    for (const auto& cluster : stack_analyzer.get_clusters()) {
-        Datatype* existing = tf->findByName(cluster.inferred_name);
-        if (!existing || existing->getMetatype() != TYPE_STRUCT) {
-            continue;
-        }
-
-        TypeStruct* ts = static_cast<TypeStruct*>(existing);
-        int struct_size = ts->getSize();
-        bool struct_changed = false;
-        std::vector<TypeField> fields;
-
-        for (auto it = ts->beginField(); it != ts->endField(); ++it) {
-            Datatype* field_type = it->type;
-            int64_t abs_off = cluster.base_offset + it->offset;
-            bool should_pointer = pointer_offsets.count(abs_off) > 0;
-
-            if (should_pointer && (!field_type || !is_pointer_type(field_type))) {
-                int field_size = field_type ? field_type->getSize() : 0;
-                if (field_size == ptr_size) {
-                    field_type = void_ptr;
-                    struct_changed = true;
-                }
-            }
-
-            fields.push_back(TypeField(0, it->offset, it->name, field_type));
-        }
-
-        if (struct_changed) {
-            // Only try to set fields if the structure supports modification
-            // Ghidra's TypeFactory only allows setFields on incomplete structures
-            try {
-                tf->setFields(fields, ts, struct_size, 0, 0);
-                changed = true;
-            } catch (const LowlevelError&) {
-                // Structure is already complete, cannot modify fields - this is not fatal
-            }
-        }
-    }
-
+    // DISABLED: Stack struct field pointer updates. existing->getMetatype() and
+    // field_type (it->type) can be dangling, causing SEGV. Re-enable after fix.
+    // See: run_analysis_passes -> propagate_struct_types, ASAN 0xbebebebe.
+    (void)ptr_size;
     return changed;
 }
 

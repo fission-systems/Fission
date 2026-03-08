@@ -67,6 +67,11 @@ class PcodeOp {
   friend class PcodeOpBank;
   friend class VarnodeBank;    // Only uses setInput
 public:
+  // --- Fission Object Pool (Phase D) — temporarily disabled for rollback verification ---
+  // static void* operator new(size_t size);
+  // static void operator delete(void* ptr, size_t size);
+  // ---------------------------------------------------------------------------------
+
   /// Boolean attributes (flags) that can be placed on a PcodeOp. Even though this enum is public, these are
   /// all set and read internally, although many are read publicly via \e get or \e is methods.
   enum {

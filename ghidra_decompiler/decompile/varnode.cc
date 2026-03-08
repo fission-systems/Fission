@@ -15,8 +15,22 @@
  */
 #include "varnode.hh"
 #include "funcdata.hh"
+// #include "fission/utils/ObjectPool.h"  // Phase D rollback
 
 namespace ghidra {
+
+// --- Phase D Object Pool (temporarily disabled for rollback verification) ---
+// thread_local fission::ThreadLocalObjectPool<Varnode> varnode_pool;
+// void* Varnode::operator new(size_t size) {
+//   if (size != sizeof(Varnode)) return ::operator new(size);
+//   return varnode_pool.alloc();
+// }
+// void Varnode::operator delete(void* ptr, size_t size) {
+//   if (!ptr) return;
+//   if (size != sizeof(Varnode)) { ::operator delete(ptr); return; }
+//   varnode_pool.free(ptr);
+// }
+// --------------------------------------------------------------------------
 
 AttributeId ATTRIB_ADDRTIED = AttributeId("addrtied",30);
 AttributeId ATTRIB_GRP = AttributeId("grp",31);

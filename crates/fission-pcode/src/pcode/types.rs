@@ -94,7 +94,103 @@ pub enum PcodeOpcode {
     Unknown,
 }
 
+/// Ghidra OpCode (1-based) to PcodeOpcode. Indices 0..=73; CPUI_COPY=1..CPUI_MAX=74.
+/// Slot 45 unused in Ghidra; CPUI_LZCOUNT=73 maps to Unknown.
+#[rustfmt::skip]
+fn ghidra_opcode_to_rust(n: u32) -> PcodeOpcode {
+    match n {
+        1 => PcodeOpcode::Copy, 2 => PcodeOpcode::Load, 3 => PcodeOpcode::Store,
+        4 => PcodeOpcode::Branch, 5 => PcodeOpcode::CBranch, 6 => PcodeOpcode::BranchInd,
+        7 => PcodeOpcode::Call, 8 => PcodeOpcode::CallInd, 9 => PcodeOpcode::CallOther,
+        10 => PcodeOpcode::Return,
+        11 => PcodeOpcode::IntEqual, 12 => PcodeOpcode::IntNotEqual,
+        13 => PcodeOpcode::IntSLess, 14 => PcodeOpcode::IntSLessEqual,
+        15 => PcodeOpcode::IntLess, 16 => PcodeOpcode::IntLessEqual,
+        17 => PcodeOpcode::IntZExt, 18 => PcodeOpcode::IntSExt,
+        19 => PcodeOpcode::IntAdd, 20 => PcodeOpcode::IntSub,
+        21 => PcodeOpcode::IntCarry, 22 => PcodeOpcode::IntSCarry,
+        23 => PcodeOpcode::IntSBorrow, 24 => PcodeOpcode::Int2Comp,
+        25 => PcodeOpcode::IntNegate, 26 => PcodeOpcode::IntXor,
+        27 => PcodeOpcode::IntAnd, 28 => PcodeOpcode::IntOr,
+        29 => PcodeOpcode::IntLeft, 30 => PcodeOpcode::IntRight,
+        31 => PcodeOpcode::IntSRight, 32 => PcodeOpcode::IntMult,
+        33 => PcodeOpcode::IntDiv, 34 => PcodeOpcode::IntSDiv,
+        35 => PcodeOpcode::IntRem, 36 => PcodeOpcode::IntSRem,
+        37 => PcodeOpcode::BoolNegate, 38 => PcodeOpcode::BoolXor,
+        39 => PcodeOpcode::BoolAnd, 40 => PcodeOpcode::BoolOr,
+        41 => PcodeOpcode::FloatEqual, 42 => PcodeOpcode::FloatNotEqual,
+        43 => PcodeOpcode::FloatLess, 44 => PcodeOpcode::FloatLessEqual,
+        46 => PcodeOpcode::FloatNan,
+        47 => PcodeOpcode::FloatAdd, 48 => PcodeOpcode::FloatDiv,
+        49 => PcodeOpcode::FloatMult, 50 => PcodeOpcode::FloatSub,
+        51 => PcodeOpcode::FloatNeg, 52 => PcodeOpcode::FloatAbs,
+        53 => PcodeOpcode::FloatSqrt, 54 => PcodeOpcode::FloatInt2Float,
+        55 => PcodeOpcode::FloatFloat2Float, 56 => PcodeOpcode::FloatTrunc,
+        57 => PcodeOpcode::FloatCeil, 58 => PcodeOpcode::FloatFloor,
+        59 => PcodeOpcode::FloatRound,
+        60 => PcodeOpcode::MultiEqual, 61 => PcodeOpcode::Indirect,
+        62 => PcodeOpcode::Piece, 63 => PcodeOpcode::SubPiece,
+        64 => PcodeOpcode::Cast, 65 => PcodeOpcode::PtrAdd,
+        66 => PcodeOpcode::PtrSub, 67 => PcodeOpcode::SegmentOp,
+        68 => PcodeOpcode::CPoolRef, 69 => PcodeOpcode::New,
+        70 => PcodeOpcode::Insert, 71 => PcodeOpcode::Extract,
+        72 => PcodeOpcode::PopCount,
+        _ => PcodeOpcode::Unknown,
+    }
+}
+
+/// PcodeOpcode to Ghidra OpCode u32 for flat serialization
+#[rustfmt::skip]
+fn rust_opcode_to_ghidra(o: PcodeOpcode) -> u32 {
+    match o {
+        PcodeOpcode::Copy => 1, PcodeOpcode::Load => 2, PcodeOpcode::Store => 3,
+        PcodeOpcode::Branch => 4, PcodeOpcode::CBranch => 5, PcodeOpcode::BranchInd => 6,
+        PcodeOpcode::Call => 7, PcodeOpcode::CallInd => 8, PcodeOpcode::CallOther => 9,
+        PcodeOpcode::Return => 10,
+        PcodeOpcode::IntEqual => 11, PcodeOpcode::IntNotEqual => 12,
+        PcodeOpcode::IntSLess => 13, PcodeOpcode::IntSLessEqual => 14,
+        PcodeOpcode::IntLess => 15, PcodeOpcode::IntLessEqual => 16,
+        PcodeOpcode::IntZExt => 17, PcodeOpcode::IntSExt => 18,
+        PcodeOpcode::IntAdd => 19, PcodeOpcode::IntSub => 20,
+        PcodeOpcode::IntCarry => 21, PcodeOpcode::IntSCarry => 22,
+        PcodeOpcode::IntSBorrow => 23, PcodeOpcode::Int2Comp => 24,
+        PcodeOpcode::IntNegate => 25, PcodeOpcode::IntXor => 26,
+        PcodeOpcode::IntAnd => 27, PcodeOpcode::IntOr => 28,
+        PcodeOpcode::IntLeft => 29, PcodeOpcode::IntRight => 30,
+        PcodeOpcode::IntSRight => 31, PcodeOpcode::IntMult => 32,
+        PcodeOpcode::IntDiv => 33, PcodeOpcode::IntSDiv => 34,
+        PcodeOpcode::IntRem => 35, PcodeOpcode::IntSRem => 36,
+        PcodeOpcode::BoolNegate => 37, PcodeOpcode::BoolXor => 38,
+        PcodeOpcode::BoolAnd => 39, PcodeOpcode::BoolOr => 40,
+        PcodeOpcode::FloatEqual => 41, PcodeOpcode::FloatNotEqual => 42,
+        PcodeOpcode::FloatLess => 43, PcodeOpcode::FloatLessEqual => 44,
+        PcodeOpcode::FloatNan => 46,
+        PcodeOpcode::FloatAdd => 47, PcodeOpcode::FloatDiv => 48,
+        PcodeOpcode::FloatMult => 49, PcodeOpcode::FloatSub => 50,
+        PcodeOpcode::FloatNeg => 51, PcodeOpcode::FloatAbs => 52,
+        PcodeOpcode::FloatSqrt => 53, PcodeOpcode::FloatInt2Float => 54,
+        PcodeOpcode::FloatFloat2Float => 55, PcodeOpcode::FloatTrunc => 56,
+        PcodeOpcode::FloatCeil => 57, PcodeOpcode::FloatFloor => 58,
+        PcodeOpcode::FloatRound => 59,
+        PcodeOpcode::MultiEqual => 60, PcodeOpcode::Indirect => 61,
+        PcodeOpcode::Piece => 62, PcodeOpcode::SubPiece => 63,
+        PcodeOpcode::Cast => 64, PcodeOpcode::PtrAdd => 65,
+        PcodeOpcode::PtrSub => 66, PcodeOpcode::SegmentOp => 67,
+        PcodeOpcode::CPoolRef => 68, PcodeOpcode::New => 69,
+        PcodeOpcode::Insert => 70, PcodeOpcode::Extract => 71,
+        PcodeOpcode::PopCount => 72,
+        PcodeOpcode::Unknown => 0,
+    }
+}
+
 impl PcodeOpcode {
+    pub fn from_flat_u32(n: u32) -> Self {
+        ghidra_opcode_to_rust(n)
+    }
+
+    pub fn to_flat_u32(self) -> u32 {
+        rust_opcode_to_ghidra(self)
+    }
     /// Parse opcode from string (from JSON)
     pub fn parse(s: &str) -> Self {
         match s {
@@ -309,7 +405,7 @@ impl Varnode {
 }
 
 /// Pcode operation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PcodeOp {
     pub seq_num: u32, // Sequential number in basic block
     pub opcode: PcodeOpcode,
@@ -321,7 +417,7 @@ pub struct PcodeOp {
 }
 
 /// Basic block of Pcode operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PcodeBasicBlock {
     pub index: u32,
     pub start_address: u64,
@@ -329,7 +425,7 @@ pub struct PcodeBasicBlock {
 }
 
 /// Complete Pcode representation of a function
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PcodeFunction {
     pub blocks: Vec<PcodeBasicBlock>,
 }
@@ -422,6 +518,130 @@ impl PcodeFunction {
         Ok(PcodeFunction { blocks })
     }
 
+    /// Parse Pcode from flat binary format (zero-copy friendly).
+    /// Format: FPCD magic(4) version(1) num_blocks(4) [block...]
+    /// Block: index(4) start_addr(8) num_ops(4) [op...]
+    /// Op: seq(4) opcode(4) addr(8) has_out(1) out_vn(32 if has_out) num_in(4) in_vn(32 each)
+    /// Varnode: space_id(8) offset(8) size(4) is_const(1) _pad(3) const_val(8) = 32 bytes
+    pub fn from_flat_bytes(bytes: &[u8]) -> Result<Self, FlatFormatError> {
+        const MAGIC: &[u8; 4] = b"FPCD";
+        const VARNODE_SIZE: usize = 32;
+
+        if bytes.len() < 4 + 1 + 4 {
+            return Err(FlatFormatError::TooShort);
+        }
+        if &bytes[0..4] != MAGIC {
+            return Err(FlatFormatError::BadMagic);
+        }
+        let _version = bytes[4];
+        let num_blocks = u32::from_le_bytes(bytes[5..9].try_into().unwrap()) as usize;
+        let mut pos = 9;
+        let mut blocks = Vec::with_capacity(num_blocks);
+
+        for _ in 0..num_blocks {
+            if pos + 4 + 8 + 4 > bytes.len() {
+                return Err(FlatFormatError::Truncated);
+            }
+            let index = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+            pos += 4;
+            let start_address = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+            pos += 8;
+            let num_ops = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+
+            let mut ops = Vec::with_capacity(num_ops);
+            for _ in 0..num_ops {
+                if pos + 4 + 4 + 8 + 1 > bytes.len() {
+                    return Err(FlatFormatError::Truncated);
+                }
+                let seq_num = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+                pos += 4;
+                let opcode = PcodeOpcode::from_flat_u32(u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()));
+                pos += 4;
+                let address = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
+                pos += 8;
+                let has_output = bytes[pos] != 0;
+                pos += 1;
+
+                let output = if has_output {
+                    if pos + VARNODE_SIZE > bytes.len() {
+                        return Err(FlatFormatError::Truncated);
+                    }
+                    let vn = read_varnode(&bytes[pos..pos + VARNODE_SIZE]);
+                    pos += VARNODE_SIZE;
+                    Some(vn)
+                } else {
+                    None
+                };
+
+                if pos + 4 > bytes.len() {
+                    return Err(FlatFormatError::Truncated);
+                }
+                let num_inputs = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4;
+
+                let mut inputs = Vec::with_capacity(num_inputs);
+                for _ in 0..num_inputs {
+                    if pos + VARNODE_SIZE > bytes.len() {
+                        return Err(FlatFormatError::Truncated);
+                    }
+                    inputs.push(read_varnode(&bytes[pos..pos + VARNODE_SIZE]));
+                    pos += VARNODE_SIZE;
+                }
+
+                ops.push(PcodeOp {
+                    seq_num,
+                    opcode,
+                    address,
+                    output,
+                    inputs,
+                    asm_mnemonic: None,
+                });
+            }
+            blocks.push(PcodeBasicBlock {
+                index,
+                start_address,
+                ops,
+            });
+        }
+
+        Ok(PcodeFunction { blocks })
+    }
+
+    /// Serialize to flat binary format.
+    pub fn to_flat_bytes(&self) -> Vec<u8> {
+        const MAGIC: &[u8; 4] = b"FPCD";
+        const VN_SIZE: usize = 32;
+
+        let mut out = Vec::new();
+        out.extend_from_slice(MAGIC);
+        out.push(1u8); // version
+        out.extend_from_slice(&(self.blocks.len() as u32).to_le_bytes());
+
+        for block in &self.blocks {
+            out.extend_from_slice(&block.index.to_le_bytes());
+            out.extend_from_slice(&block.start_address.to_le_bytes());
+            out.extend_from_slice(&(block.ops.len() as u32).to_le_bytes());
+
+            for op in &block.ops {
+                out.extend_from_slice(&op.seq_num.to_le_bytes());
+                out.extend_from_slice(&op.opcode.to_flat_u32().to_le_bytes());
+                out.extend_from_slice(&op.address.to_le_bytes());
+                if let Some(ref vn) = op.output {
+                    out.push(1);
+                    write_varnode(&mut out, vn);
+                } else {
+                    out.push(0);
+                }
+                out.extend_from_slice(&(op.inputs.len() as u32).to_le_bytes());
+                for vn in &op.inputs {
+                    write_varnode(&mut out, vn);
+                }
+            }
+        }
+        out
+    }
+
     /// Get all operations across all blocks
     pub fn all_ops(&self) -> impl Iterator<Item = &PcodeOp> {
         self.blocks.iter().flat_map(|b| b.ops.iter())
@@ -436,6 +656,53 @@ impl PcodeFunction {
 fn parse_hex_addr(s: &str) -> u64 {
     let s = s.trim_start_matches("0x");
     u64::from_str_radix(s, 16).unwrap_or(0)
+}
+
+/// Error from flat format parsing
+#[derive(Debug, Clone, Copy)]
+pub enum FlatFormatError {
+    TooShort,
+    BadMagic,
+    Truncated,
+}
+
+impl std::fmt::Display for FlatFormatError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooShort => write!(f, "Flat buffer too short"),
+            Self::BadMagic => write!(f, "Invalid flat format magic"),
+            Self::Truncated => write!(f, "Truncated flat buffer"),
+        }
+    }
+}
+
+impl std::error::Error for FlatFormatError {}
+
+const VARNODE_FLAT_SIZE: usize = 32;
+
+fn read_varnode(bytes: &[u8]) -> Varnode {
+    debug_assert!(bytes.len() >= VARNODE_FLAT_SIZE);
+    let space_id = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+    let offset = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+    let size = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
+    let is_constant = bytes[20] != 0;
+    let constant_val = i64::from_le_bytes(bytes[24..32].try_into().unwrap());
+    Varnode {
+        space_id,
+        offset,
+        size,
+        is_constant,
+        constant_val,
+    }
+}
+
+fn write_varnode(out: &mut Vec<u8>, vn: &Varnode) {
+    out.extend_from_slice(&vn.space_id.to_le_bytes());
+    out.extend_from_slice(&vn.offset.to_le_bytes());
+    out.extend_from_slice(&vn.size.to_le_bytes());
+    out.push(if vn.is_constant { 1 } else { 0 });
+    out.extend_from_slice(&[0u8; 3]); // padding
+    out.extend_from_slice(&vn.constant_val.to_le_bytes());
 }
 
 #[cfg(test)]
@@ -465,5 +732,64 @@ mod tests {
         let one = Varnode::constant(1, 4);
         assert!(one.is_one());
         assert!(!one.is_zero());
+    }
+
+    /// Phase C regression: Flat format round-trip must produce identical PcodeFunction.
+    #[test]
+    fn test_flat_roundtrip_equivalence() {
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntXor,
+                    address: 0x1000,
+                    output: Some(Varnode {
+                        space_id: 1,
+                        offset: 0x100,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    }),
+                    inputs: vec![
+                        Varnode {
+                            space_id: 2,
+                            offset: 0x10,
+                            size: 4,
+                            is_constant: false,
+                            constant_val: 0,
+                        },
+                        Varnode::constant(0, 4),
+                    ],
+                    asm_mnemonic: None,
+                }],
+            }],
+        };
+        let flat = func.to_flat_bytes();
+        let restored = PcodeFunction::from_flat_bytes(&flat).expect("flat parse");
+        assert_eq!(func, restored, "Flat round-trip must preserve PcodeFunction");
+    }
+
+    /// Phase C regression: JSON and Flat paths must produce equivalent PcodeFunction.
+    #[test]
+    fn test_flat_vs_json_optimization_equivalence() {
+        let json = r#"{"blocks":[{"index":0,"start_addr":"0x1000","ops":[{"seq":0,"opcode":"INT_XOR","addr":"0x1000","output":{"space":1,"offset":"0x100","size":4},"inputs":[{"space":2,"offset":"0x10","size":4},{"space":0,"offset":"0x0","size":4,"const_val":0}]}]}]}"#;
+        let from_json = PcodeFunction::from_json(json).expect("json parse");
+        let flat = from_json.to_flat_bytes();
+        let from_flat = PcodeFunction::from_flat_bytes(&flat).expect("flat parse");
+        assert_eq!(from_json.blocks.len(), from_flat.blocks.len());
+        for (j, f) in from_json.blocks.iter().zip(from_flat.blocks.iter()) {
+            assert_eq!(j.index, f.index);
+            assert_eq!(j.start_address, f.start_address);
+            assert_eq!(j.ops.len(), f.ops.len());
+            for (jo, fo) in j.ops.iter().zip(f.ops.iter()) {
+                assert_eq!(jo.seq_num, fo.seq_num);
+                assert_eq!(jo.opcode, fo.opcode);
+                assert_eq!(jo.address, fo.address);
+                assert_eq!(jo.output, fo.output);
+                assert_eq!(jo.inputs, fo.inputs);
+            }
+        }
     }
 }

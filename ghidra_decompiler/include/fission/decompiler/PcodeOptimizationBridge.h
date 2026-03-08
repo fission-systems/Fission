@@ -1,6 +1,8 @@
 #ifndef FISSION_PCODE_OPTIMIZATION_BRIDGE_H
 #define FISSION_PCODE_OPTIMIZATION_BRIDGE_H
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 // Forward declarations
@@ -27,7 +29,11 @@ public:
     static void register_rust_fn_ptrs(
         char* (*optimize_fn)(const char*, size_t),
         void  (*free_fn)(char*));
-    
+
+    /// Register flat-format FFI (optional, for zero-copy path)
+    /// fission_optimize_pcode_flat returns JSON string, freed with fission_free_string
+    static void register_rust_flat_fn_ptrs(char* (*optimize_flat_fn)(const uint8_t*, size_t));
+
     /// Optimize Pcode JSON through Rust FFI
     /// @param pcode_json Input Pcode in JSON format
     /// @return Optimized Pcode in JSON format, or empty string on error

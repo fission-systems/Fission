@@ -118,5 +118,63 @@ bool CallbackSymbolProvider::find_function(uint64_t address, SymbolInfo& out) co
     return true;
 }
 
+// -----------------------------------------------------------------------------
+// CachedCallbackSymbolProvider
+// -----------------------------------------------------------------------------
+
+CachedCallbackSymbolProvider::CachedCallbackSymbolProvider(const DecompSymbolProvider* provider)
+    : inner_(provider) {}
+
+bool CachedCallbackSymbolProvider::find_symbol(
+    uint64_t address,
+    uint32_t size,
+    bool require_start,
+    SymbolInfo& out
+) const {
+    SymbolCacheKey key{address, size, static_cast<uint8_t>(require_start ? 1u : 0u)};
+
+    auto it = symbol_map_.find(key);
+    if (it != symbol_map_.end()) {
+        out = it->second->second;
+        symbol_lru_.splice(symbol_lru_.begin(), symbol_lru_, it->second);
+        return true;
+    }
+
+    if (!inner_.find_symbol(address, size, require_start, out)) {
+        return false;
+    }
+
+    if (symbol_map_.size() >= kSymbolCacheSize) {
+        auto& oldest = symbol_lru_.back();
+        symbol_map_.erase(oldest.first);
+        symbol_lru_.pop_back();
+    }
+    symbol_lru_.emplace_front(key, out);
+    symbol_map_[key] = symbol_lru_.begin();
+    return true;
+}
+
+bool CachedCallbackSymbolProvider::find_function(uint64_t address, SymbolInfo& out) const {
+    auto it = function_map_.find(address);
+    if (it != function_map_.end()) {
+        out = it->second->second;
+        function_lru_.splice(function_lru_.begin(), function_lru_, it->second);
+        return true;
+    }
+
+    if (!inner_.find_function(address, out)) {
+        return false;
+    }
+
+    if (function_map_.size() >= kFunctionCacheSize) {
+        auto& oldest = function_lru_.back();
+        function_map_.erase(oldest.first);
+        function_lru_.pop_back();
+    }
+    function_lru_.emplace_front(address, out);
+    function_map_[address] = function_lru_.begin();
+    return true;
+}
+
 } // namespace core
 } // namespace fission

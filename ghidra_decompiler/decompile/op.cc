@@ -15,8 +15,22 @@
  */
 #include "op.hh"
 #include "funcdata.hh"
+// #include "fission/utils/ObjectPool.h"  // Phase D rollback
 
 namespace ghidra {
+
+// --- Phase D Object Pool (temporarily disabled for rollback verification) ---
+// thread_local fission::ThreadLocalObjectPool<PcodeOp> pcodeop_pool;
+// void* PcodeOp::operator new(size_t size) {
+//   if (size != sizeof(PcodeOp)) return ::operator new(size);
+//   return pcodeop_pool.alloc();
+// }
+// void PcodeOp::operator delete(void* ptr, size_t size) {
+//   if (!ptr) return;
+//   if (size != sizeof(PcodeOp)) { ::operator delete(ptr); return; }
+//   pcodeop_pool.free(ptr);
+// }
+// --------------------------------------------------------------------------
 
 ElementId ELEM_IOP = ElementId("iop",113);
 ElementId ELEM_UNIMPL = ElementId("unimpl",114);

@@ -72,6 +72,11 @@ typedef set<Varnode *,VarnodeCompareDefLoc> VarnodeDefSet;
 /// with the same Address and size. 
 class Varnode {
 public:
+  // --- Fission Object Pool (Phase D) — temporarily disabled for rollback verification ---
+  // static void* operator new(size_t size);
+  // static void operator delete(void* ptr, size_t size);
+  // ---------------------------------------------------------------------------------
+
   /// There are a large number of boolean attributes that can be placed on a Varnode.
   /// Some are calculated and maintained by the friend classes Funcdata and VarnodeBank, 
   /// and others can be set and cleared publicly by separate subsystems.

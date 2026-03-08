@@ -76,6 +76,9 @@ unsafe extern "C" {
         optimize_fn: Option<unsafe extern "C" fn(*const c_char, usize) -> *mut c_char>,
         free_fn: Option<unsafe extern "C" fn(*mut c_char)>,
     );
+    pub(super) fn decomp_init_pcode_flat_bridge(
+        optimize_flat_fn: Option<unsafe extern "C" fn(*const u8, usize) -> *mut c_char>,
+    );
 
     // Batch symbol registration (reduced FFI overhead)
     pub(super) fn decomp_add_symbols_batch(

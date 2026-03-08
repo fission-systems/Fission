@@ -111,6 +111,11 @@ class HighIntersectTest;
 /// which is the union of the covers of its Varnodes.
 class HighVariable {
 public:
+  // --- Fission Object Pool (Phase D) — temporarily disabled for rollback verification ---
+  // static void* operator new(size_t size);
+  // static void operator delete(void* ptr, size_t size);
+  // ---------------------------------------------------------------------------------
+
   /// \brief Dirtiness flags for a HighVariable
   ///
   /// The HighVariable inherits its Cover, its data-type, and other boolean properties from its Varnodes.

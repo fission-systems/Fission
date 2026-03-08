@@ -77,7 +77,14 @@ extern "C" DECOMP_API DecompContext* decomp_create(const char* sla_dir) {
 }
 
 extern "C" DECOMP_API void decomp_destroy(DecompContext* ctx) {
-    destroy_context(ctx);
+    if (!ctx) return;
+    try {
+        destroy_context(ctx);
+    } catch (const std::exception& e) {
+        fission::utils::log_stream() << "[FFI] decomp_destroy exception: " << e.what() << std::endl;
+    } catch (...) {
+        fission::utils::log_stream() << "[FFI] decomp_destroy unknown exception" << std::endl;
+    }
 }
 
 extern "C" DECOMP_API void decomp_set_log_verbose(DecompContext* ctx, int verbose) {
@@ -116,11 +123,25 @@ extern "C" DECOMP_API void decomp_add_symbol(
     uint64_t addr,
     const char* name
 ) {
-    add_symbol(ctx, addr, name);
+    if (!ctx) return;
+    try {
+        add_symbol(ctx, addr, name);
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("add_symbol failed: ") + e.what();
+    } catch (...) {
+        ctx->last_error = "add_symbol failed (unknown)";
+    }
 }
 
 extern "C" DECOMP_API void decomp_clear_symbols(DecompContext* ctx) {
-    clear_symbols(ctx);
+    if (!ctx) return;
+    try {
+        clear_symbols(ctx);
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("clear_symbols failed: ") + e.what();
+    } catch (...) {
+        ctx->last_error = "clear_symbols failed (unknown)";
+    }
 }
 
 extern "C" DECOMP_API void decomp_add_global_symbol(
@@ -128,11 +149,25 @@ extern "C" DECOMP_API void decomp_add_global_symbol(
     uint64_t addr,
     const char* name
 ) {
-    add_global_symbol(ctx, addr, name);
+    if (!ctx) return;
+    try {
+        add_global_symbol(ctx, addr, name);
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("add_global_symbol failed: ") + e.what();
+    } catch (...) {
+        ctx->last_error = "add_global_symbol failed (unknown)";
+    }
 }
 
 extern "C" DECOMP_API void decomp_clear_global_symbols(DecompContext* ctx) {
-    clear_global_symbols(ctx);
+    if (!ctx) return;
+    try {
+        clear_global_symbols(ctx);
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("clear_global_symbols failed: ") + e.what();
+    } catch (...) {
+        ctx->last_error = "clear_global_symbols failed (unknown)";
+    }
 }
 
 // Batch symbol registration for reduced FFI overhead
@@ -145,7 +180,13 @@ extern "C" DECOMP_API void decomp_add_symbols_batch(
     if (!ctx || !addrs || !names) return;
     for (size_t i = 0; i < count; ++i) {
         if (names[i]) {
-            add_symbol(ctx, addrs[i], names[i]);
+            try {
+                add_symbol(ctx, addrs[i], names[i]);
+            } catch (const std::exception& e) {
+                ctx->last_error = std::string("add_symbols_batch failed at index ") + std::to_string(i) + ": " + e.what();
+            } catch (...) {
+                ctx->last_error = "add_symbols_batch failed (unknown)";
+            }
         }
     }
 }
@@ -159,7 +200,13 @@ extern "C" DECOMP_API void decomp_add_global_symbols_batch(
     if (!ctx || !addrs || !names) return;
     for (size_t i = 0; i < count; ++i) {
         if (names[i]) {
-            add_global_symbol(ctx, addrs[i], names[i]);
+            try {
+                add_global_symbol(ctx, addrs[i], names[i]);
+            } catch (const std::exception& e) {
+                ctx->last_error = std::string("add_global_symbols_batch failed at index ") + std::to_string(i) + ": " + e.what();
+            } catch (...) {
+                ctx->last_error = "add_global_symbols_batch failed (unknown)";
+            }
         }
     }
 }
@@ -168,11 +215,25 @@ extern "C" DECOMP_API void decomp_set_symbol_provider(
     DecompContext* ctx,
     const DecompSymbolProvider* provider
 ) {
-    set_symbol_provider(ctx, provider);
+    if (!ctx) return;
+    try {
+        set_symbol_provider(ctx, provider);
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("set_symbol_provider failed: ") + e.what();
+    } catch (...) {
+        ctx->last_error = "set_symbol_provider failed (unknown)";
+    }
 }
 
 extern "C" DECOMP_API void decomp_reset_symbol_provider(DecompContext* ctx) {
-    reset_symbol_provider(ctx);
+    if (!ctx) return;
+    try {
+        reset_symbol_provider(ctx);
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("reset_symbol_provider failed: ") + e.what();
+    } catch (...) {
+        ctx->last_error = "reset_symbol_provider failed (unknown)";
+    }
 }
 
 extern "C" DECOMP_API DecompError decomp_add_function(
@@ -275,9 +336,16 @@ extern "C" DECOMP_API void decomp_free_string(char* str) {
 
 extern "C" DECOMP_API DecompError decomp_set_gdt(DecompContext* ctx, const char* gdt_path) {
     if (!ctx) return DECOMP_ERR_INVALID_CONTEXT;
-    
-    set_gdt_path(ctx, gdt_path);
-    return DECOMP_OK;
+    try {
+        set_gdt_path(ctx, gdt_path);
+        return DECOMP_OK;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("set_gdt failed: ") + e.what();
+        return DECOMP_ERR_INIT;
+    } catch (...) {
+        ctx->last_error = "set_gdt failed (unknown)";
+        return DECOMP_ERR_INIT;
+    }
 }
 
 extern "C" DECOMP_API void decomp_set_feature(
@@ -285,7 +353,14 @@ extern "C" DECOMP_API void decomp_set_feature(
     const char* feature,
     int enabled
 ) {
-    set_feature(ctx, feature, enabled != 0);
+    if (!ctx || !feature) return;
+    try {
+        set_feature(ctx, feature, enabled != 0);
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("set_feature failed: ") + e.what();
+    } catch (...) {
+        ctx->last_error = "set_feature failed (unknown)";
+    }
 }
 
 extern "C" DECOMP_API DecompError decomp_set_function_inline(
@@ -434,11 +509,29 @@ extern "C" DECOMP_API DecompError decomp_set_protoeval_called(
 // ============================================================================
 
 extern "C" DECOMP_API DecompError decomp_load_fid_db(DecompContext* ctx, const char* db_path) {
-    return load_fid_database(ctx, db_path);
+    if (!ctx || !db_path) return DECOMP_ERR_INVALID_CONTEXT;
+    try {
+        return load_fid_database(ctx, db_path);
+    } catch (const std::exception& e) {
+        if (ctx) ctx->last_error = std::string("load_fid_db failed: ") + e.what();
+        return DECOMP_ERR_FID_LOAD;
+    } catch (...) {
+        if (ctx) ctx->last_error = "load_fid_db failed (unknown)";
+        return DECOMP_ERR_FID_LOAD;
+    }
 }
 
 extern "C" DECOMP_API char* decomp_get_fid_match(DecompContext* ctx, uint64_t addr, size_t len) {
-    return get_fid_match(ctx, addr, len);
+    if (!ctx) return nullptr;
+    try {
+        return get_fid_match(ctx, addr, len);
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("get_fid_match failed: ") + e.what();
+        return nullptr;
+    } catch (...) {
+        ctx->last_error = "get_fid_match failed (unknown)";
+        return nullptr;
+    }
 }
 
 // ============================================================================
@@ -582,4 +675,10 @@ void decomp_init_pcode_bridge(
     void  (*free_fn)(char*)
 ) {
     fission::decompiler::PcodeOptimizationBridge::register_rust_fn_ptrs(optimize_fn, free_fn);
+}
+
+void decomp_init_pcode_flat_bridge(
+    char* (*optimize_flat_fn)(const uint8_t*, size_t)
+) {
+    fission::decompiler::PcodeOptimizationBridge::register_rust_flat_fn_ptrs(optimize_flat_fn);
 }
