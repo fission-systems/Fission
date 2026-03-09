@@ -29,6 +29,66 @@
 
 **효과:** 1스레드 정상 동작(exit 0). 8스레드에서는 여전히 exit 139 — 추가 레이스/UAF 존재 가능.
 
+### 8스레드 크래시 (2026-03 LLDB)
+
+**크래시 위치:** `ghidra::Varnode::isWritten() const` (this=0x0, NULL 포인터 역참조)
+
+```
+* thread #2, stop reason = EXC_BAD_ACCESS (code=1, address=0x0)
+    frame #0: libdecomp.dylib`ghidra::Varnode::isWritten() const + 12
+```
+
+**해석:** 1스레드 UAF(Datatype*)와 **다른** 버그. 워커 스레드(#2)에서 `vn->isWritten()` 호출 시 `vn`이 NULL.
+- `op->getIn(slot)` 또는 `high->getInstance(i)` 등에서 null 반환 후 null 체크 없이 사용 가능
+- 또는 cross-thread: 한 스레드의 Funcdata/Varnode가 다른 스레드에서 접근되며 이미 해제된 상태
+
+**확인 사항:**
+- `CachedCallbackSymbolProvider`: 워커별 DecompContext → 워커별 인스턴스이므로 공유 아님
+- `SleighArchitecture::translators`, `description`: static 전역 — 다중 Architecture가 공유 가능
+
+**권장 다음 액션:**
+1. **전체 콜스택 확보:** `(lldb) thread backtrace all` 또는 `bt all`로 크래시 스레드의 frame #1..#10까지 확인 → NULL `vn`을 넘긴 caller 식별
+2. **NULL 체크 보강:** Fission `src/` 내 `isWritten()` 호출부에 `vn` null 검사 추가 (TypePropagator, StackFrameAnalyzer, StructureAnalyzer 등)
+3. **ASAN 8스레드 재현:** `FISSION_ASAN=1` 빌드 후 8스레드 실행 → ASAN이 정확한 caller 위치 보고
+
+### 수정 4: UserPcodeOp::getOp() NULL 체크 (2026-03)
+
+**LLDB 크래시 위치:** `ghidra::UserPcodeOp::getType() const` (this=0x0, address=0x28)
+
+**원인:** `UserOpManage::getOp(index)`가 미등록 CALLOTHER 인덱스 시 NULL 반환 → null 체크 없이 `->getType()` 호출 시 SIGSEGV.
+
+**조치:** 다음 호출부에 null 체크 추가:
+- `jumptable.cc`: tmpOp null 시 `return false`
+- `flow.cc`: CPUI_CALLOTHER 분기에서 userOp null 시 injectlist에 추가하지 않음
+- `typeop.cc`: getInputLocal/getOutputLocal — userOp null 시 TypeOp fallback 반환
+- `funcdata_block.cc`: userOp null 시 `return JumpTable::fail_callother`
+- `printc.cc`: opCallother null 시 함수호출 형태 fallback; pushAnnotation null 시 size=0 유지
+- `flow.cc`: injectUserOp null 시 early return
+
+**효과:** UserPcodeOp NULL 역참조 크래시 제거. 8스레드에서 **추가** 크래시 존재(아래).
+
+### 8스레드 크래시 2: Sleigh::resolve (2026-03 LLDB)
+
+**크래시 위치:** `ghidra::Sleigh::resolve(ParserContext&) const` (address=0xdcf413c463be12e4, corrupt pointer)
+
+```
+* thread #4, stop reason = EXC_BAD_ACCESS (code=1, address=0xdcf413c463be12e4)
+    frame #0: libdecomp.dylib`ghidra::Sleigh::resolve(ghidra::ParserContext&) const + 76
+```
+
+**해석:** `SleighArchitecture::translators` static 맵을 여러 Architecture가 공유. 8스레드 동시 P-Code 번역 시 Sleigh/ParserContext 상태가 꼬이거나 UAF로 corrupt pointer 역참조.
+
+**후속 검토:** Sleigh 사용 직렬화(mutex) 또는 per-Architecture Sleigh 복제 검토.
+
+### 수정 5: Sleigh::resolve / resolveHandles 직렬화 (2026-03)
+
+**조치:** `sleigh.cc`에 전역 `sleigh_resolve_mutex` 추가. `Sleigh::resolve` 및 `Sleigh::resolveHandles` 본문 전체를 `std::lock_guard`로 감쌈.
+
+**결과:** 8스레드 벤치마크에서 **크래시는 여전히 발생** (exit 139). 1스레드는 정상.
+- Sleigh 락만으로는 해결되지 않음 → 추가 크래시 지점 존재 가능
+- `Varnode::isWritten` NULL, `UserPcodeOp::getType` NULL 등 다양한 crash site가 보고됨
+- ASAN 빌드로 8스레드 재현 시 정확한 현재 crash site 식별 권장
+
 ### 수정 2: decomp_create/destroy 직렬화 (DECOMP_FFI_LOCK)
 
 **조치:** `DecompilerNative::new()` 및 `Drop`에서 전역 `DECOMP_FFI_LOCK` (Mutex)으로 `decomp_create`/`decomp_destroy` 호출 직렬화. (`wrapper.rs`)
@@ -62,12 +122,20 @@
 ### 2.1 C++ libdecomp ASAN 빌드
 
 ```bash
-# 환경 변수 설정 후 빌드 (macOS/Linux)
-export FISSION_ASAN=1
-cargo build -p fission-cli --features native_decomp --release
+# 1. libdecomp를 ASAN으로 수동 빌드 (fission-ffi가 build 디렉터리를 먼저 기대함)
+cd ghidra_decompiler/build
+cmake -S .. -B . --fresh \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address"
+cmake --build . --target decomp -j8
+
+# 2. RUSTFLAGS로 링크 경로 지정 후 Rust 빌드
+cd ../..
+RUSTFLAGS="-L $(pwd)/ghidra_decompiler/build" \
+  cargo build -p fission-cli --features native_decomp --release
 ```
 
-`FISSION_ASAN=1`이 설정되면 `libdecomp`가 `-fsanitize=address`로 빌드됩니다.
+`FISSION_ASAN=1`로 `cargo build` 시 fission-analysis가 libdecomp를 ASAN으로 빌드하려 하나, fission-ffi가 먼저 링크를 시도해 실패할 수 있음. 위 순서로 수동 빌드 권장.
 
 ### 2.2 벤치마크 실행 (SIGSEGV 유도)
 
@@ -79,6 +147,16 @@ RAYON_NUM_THREADS=8 ./target/release/fission_cli samples/windows/x64/putty.exe \
 ```
 
 ASAN이 켜져 있으면 크래시 시 **정확한 파일·줄 번호와 콜스택**이 출력됩니다.
+
+```bash
+# ASAN 옵션으로 크래시 시 스택 출력 보장
+export ASAN_OPTIONS="abort_on_error=1:halt_on_error=1:print_stacktrace=1"
+export DYLD_LIBRARY_PATH="$(pwd)/target/release"   # macOS
+RAYON_NUM_THREADS=8 ./target/release/fission_cli samples/windows/x64/putty.exe \
+  --decomp-all --benchmark --ghidra-compat --profile balanced --decomp-limit 100
+```
+
+**참고:** 8스레드 크래시는 간헐적. decomp-limit 50에서는 성공, 100에서는 레이스에 따라 139 발생.
 
 ### 2.3 수동 CMake ASAN 빌드 (환경 변수 미지원 시)
 

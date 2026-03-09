@@ -2100,6 +2100,8 @@ bool JumpAssisted::recoverModel(Funcdata *fd,PcodeOp *indop,uint4 matchsize,uint
   if (assistOp->numInput() < 3) return false;
   int4 index = assistOp->getIn(0)->getOffset();
   UserPcodeOp *tmpOp = fd->getArch()->userops.getOp(index);
+  if (tmpOp == (UserPcodeOp *)0)
+    return false;
   if (tmpOp->getType() != UserPcodeOp::jumpassist)
     return false;
   userop = (JumpAssistOp *)tmpOp;

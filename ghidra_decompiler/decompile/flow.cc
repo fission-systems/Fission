@@ -343,7 +343,8 @@ PcodeOp *FlowInfo::xrefControlFlow(list<PcodeOp *>::const_iterator oiter,bool &s
       break;
     case CPUI_CALLOTHER:
     {
-      if (glb->userops.getOp(op->getIn(0)->getOffset())->getType() == UserPcodeOp::injected)
+      UserPcodeOp *userOp = glb->userops.getOp(op->getIn(0)->getOffset());
+      if (userOp != (UserPcodeOp *)0 && userOp->getType() == UserPcodeOp::injected)
 	injectlist.push_back(op);
       break;
     }
@@ -1213,6 +1214,8 @@ void FlowInfo::injectUserOp(PcodeOp *op)
 
 {
   InjectedUserOp *userop = (InjectedUserOp *)glb->userops.getOp((int4)op->getIn(0)->getOffset());
+  if (userop == (InjectedUserOp *)0)
+    return;
   InjectPayload *payload = glb->pcodeinjectlib->getPayload(userop->getInjectId());
   InjectContext &icontext(glb->pcodeinjectlib->getCachedContext());
   icontext.clear();

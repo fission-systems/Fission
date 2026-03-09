@@ -856,6 +856,8 @@ Datatype *TypeOpCallother::getInputLocal(const PcodeOp *op,int4 slot) const
 
 {
   UserPcodeOp *userOp = tlst->getArch()->userops.getOp(op->getIn(0)->getOffset());
+  if (userOp == (UserPcodeOp *)0)
+    return TypeOp::getInputLocal(op,slot);
   Datatype *res = userOp->getInputLocal(op, slot);
   if (res != (Datatype *)0)
     return res;
@@ -866,6 +868,8 @@ Datatype *TypeOpCallother::getOutputLocal(const PcodeOp *op) const
 
 {
   UserPcodeOp *userOp = tlst->getArch()->userops.getOp(op->getIn(0)->getOffset());
+  if (userOp == (UserPcodeOp *)0)
+    return TypeOp::getOutputLocal(op);
   Datatype *res = userOp->getOutputLocal(op);
   if (res != (Datatype *)0)
     return res;

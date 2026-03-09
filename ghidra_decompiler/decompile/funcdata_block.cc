@@ -570,7 +570,10 @@ JumpTable::RecoveryMode Funcdata::earlyJumpTableFail(PcodeOp *op)
 	OpCode opc = op->code();
 	if (opc == CPUI_CALLOTHER) {
 	  int4 id = (int4)op->getIn(0)->getOffset();
-	  uint4 userOpType = glb->userops.getOp(id)->getType();
+	  UserPcodeOp *userOp = glb->userops.getOp(id);
+	  if (userOp == (UserPcodeOp *)0)
+	    return JumpTable::fail_callother;
+	  uint4 userOpType = userOp->getType();
 	  if (userOpType == UserPcodeOp::injected)
 	    return JumpTable::success;	// Don't try to back track through injection
 	  if (userOpType == UserPcodeOp::jumpassist)

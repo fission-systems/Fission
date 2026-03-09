@@ -674,6 +674,19 @@ void PrintC::opCallother(const PcodeOp *op)
 
 {
   UserPcodeOp *userop = glb->userops.getOp(op->getIn(0)->getOffset());
+  if (userop == (UserPcodeOp *)0) {
+    pushOp(&function_call,op);
+    pushAtom(Atom(op->getOpcode()->getOperatorName(op),optoken,EmitMarkup::funcname_color,op));
+    if (op->numInput() > 1) {
+      for(int4 i = 1;i < op->numInput() - 1;++i)
+	pushOp(&comma,op);
+      for (int4 i = op->numInput() - 1;i >= 1;--i)
+	pushVn(op->getIn(i),op,mods);
+    }
+    else
+      pushAtom(Atom(EMPTY_STRING,blanktoken,EmitMarkup::no_color));
+    return;
+  }
   uint4 display = userop->getDisplay();
   if (display == 0) {	// Emit using functional syntax
     string nm = op->getOpcode()->getOperatorName(op);
@@ -1894,7 +1907,9 @@ void PrintC::pushAnnotation(const Varnode *vn,const PcodeOp *op)
   int4 size = 0;
   if (op->code() == CPUI_CALLOTHER) {
     int4 userind = (int4)op->getIn(0)->getOffset();
-    size = glb->userops.getOp(userind)->extractAnnotationSize(vn, op);
+    UserPcodeOp *userop = glb->userops.getOp(userind);
+    if (userop != (UserPcodeOp *)0)
+      size = userop->extractAnnotationSize(vn, op);
   }
   SymbolEntry *entry;
   if (size != 0)

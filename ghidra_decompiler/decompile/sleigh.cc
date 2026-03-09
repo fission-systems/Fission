@@ -15,8 +15,14 @@
  */
 #include "sleigh.hh"
 #include "loadimage.hh"
+#include <mutex>
 
 namespace ghidra {
+
+/// FISSION: Global mutex to serialize Sleigh::resolve (and thus obtainContext
+/// resolution) for multithreaded safety. SleighArchitecture::translators is
+/// shared across Architectures; concurrent resolve causes data races.
+static std::mutex sleigh_resolve_mutex;
 
 PcodeCacher::PcodeCacher(void)
 
@@ -609,6 +615,7 @@ ParserContext *Sleigh::obtainContext(const Address &addr,int4 state) const
 void Sleigh::resolve(ParserContext &pos) const
 
 {
+  std::lock_guard<std::mutex> lock(sleigh_resolve_mutex);
   loader->loadFill(pos.getBuffer(),16,pos.getAddr());
   ParserWalkerChange walker(&pos);
   pos.deallocateState(walker);	// Clear the previous resolve and initialize the walker
@@ -664,6 +671,7 @@ void Sleigh::resolve(ParserContext &pos) const
 void Sleigh::resolveHandles(ParserContext &pos) const
 
 {
+  std::lock_guard<std::mutex> lock(sleigh_resolve_mutex);
   TripleSymbol *triple;
   Constructor *ct;
   int4 oper,numoper;
