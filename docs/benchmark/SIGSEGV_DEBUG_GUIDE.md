@@ -89,6 +89,71 @@
 - `Varnode::isWritten` NULL, `UserPcodeOp::getType` NULL 등 다양한 crash site가 보고됨
 - ASAN 빌드로 8스레드 재현 시 정확한 현재 crash site 식별 권장
 
+### 수정 6: isWritten() / getDef() NULL 역참조 방지 (2026-03)
+
+**목표:** `Varnode::isWritten()` 호출 시 `vn`이 NULL인 경우 크래시 방지.
+
+**수정 대상:**
+- `ghidra_decompiler/src/analysis/TypePropagator.cc`
+- `ghidra_decompiler/src/analysis/StackFrameAnalyzer.cc`
+- `ghidra_decompiler/src/types/StructureAnalyzer.cc`
+- `ghidra_decompiler/src/analysis/EmulationAnalyzer.cc`
+
+**조치:**
+- `propagate_one_type`, `propagate_backwards` 등: `vn->isWritten()`, `vn->getDef()`, `vn->getSize()` 호출 전에 `vn != nullptr` 검사
+- `def->getIn(i)` 반환값 null 체크 후 사용 (예: `propagate_backwards` 내 CPUI_CAST, CPUI_INT_ZEXT/SEXT)
+- `try_propagate_constant`: 진입 시 `if (!vn) return false`
+- `resolve_base_pointer`: `vn` null 시 early return; `vn->isWritten()` 전 null 검사는 상단에서 이미 처리됨
+- `get_signed_offset`: `if (!vn || !vn->isConstant())`로 방어
+
+**검색 팁:** `grep -rn "isWritten\|getDef\|getIn(" ghidra_decompiler/src/`로 모든 호출부를 찾아 null 체크 적용.
+
+### 수정 9: Sleigh ContextCache UAF + PcodeCacher container-overflow (2026-03 ASAN)
+
+**ASAN UAF 보고서 (log_path=/tmp/asan_report 사용):**
+```
+READ of size 8 ... thread T5
+  ContextCache::getContext globalcontext.cc:571
+  ParserContext::loadContext → Sleigh::resolve → oneInstruction → run_decompilation
+
+freed by thread T7:
+  Sleigh::clearForDelete sleigh.cc:533
+  Sleigh::reset sleigh.cc:551
+  SleighArchitecture::buildTranslator sleigh_arch.cc:181
+  ensure_architecture → run_decompilation
+```
+
+**원인:** `SleighArchitecture::translators` static map을 동일 languageindex 워커들이 공유. T7의 `reset()`이 `ContextCache`를 해제하는 동안 T5가 `resolve()->getContext()`로 접근 → UAF.
+
+**추가 ASAN:** PcodeCacher::emit container-overflow (sleigh.cc:151) — `oneInstruction`의 `pcode_cache`를 여러 스레드가 동시 접근.
+
+**조치:**
+- `Sleigh::reset()`: `sleigh_resolve_mutex`로 `clearForDelete`/할당 직렬화
+- `sleigh_resolve_mutex`를 `recursive_mutex`로 변경 (oneInstruction에서 obtainContext 호출 시 중첩 lock 허용)
+- `Sleigh::oneInstruction()`: 전체 본문을 mutex로 보호하여 pcode_cache clear/build/emit 직렬화
+
+**효과:** 8스레드 limit 150에서 10회 연속 성공 (이전 8회). 간헐적 139는 여전히 존재 가능.
+
+### 수정 8: Heritage::splitByRefinement container-overflow (2026-03 ASAN)
+
+**ASAN 크래시 위치:** `ghidra::Heritage::splitByRefinement` at heritage.cc:1748
+```
+SUMMARY: AddressSanitizer: container-overflow heritage.cc:1748 in ghidra::Heritage::splitByRefinement
+```
+
+**원인:** `spc->wrapOffset()` 반환값이 `refine.size()` 이상일 때 `refine[diff]` 접근 시 container-overflow.
+
+**조치:** heritage.cc `splitByRefinement` 내 `diff >= refine.size()` bounds check 추가. 초기 진입 시 early return, 루프 내 OOB 시 남은 바이트를 단일 piece로 push 후 break.
+
+**효과:** 8스레드 벤치마크에서 8회 연속 성공 (이전엔 거의 매번 139). 간헐적 크래시는 여전히 존재 — 추가 UAF (Address::operator= heap-use-after-free) 보고됨.
+
+### 수정 7: 워커별 DecompilerNative 인스턴스 구조 (2026-03 검토)
+
+**검토 결과:** `fission-cli`의 oneshot decompile 흐름에서 이미 **워커별 독립 인스턴스** 구조를 사용 중.
+- `rayon::spawn` 또는 병렬 이터레이터 내부에서 각 워커가 `init_decompiler(false)`로 자체 `DecompilerNative` 생성
+- 전역(Global) 또는 Mutex로 공유하지 않음
+- 추가 구조 변경 불필요. 남은 크래시는 Ghidra 내부 전역 상태(Sleigh, TypeFactory) 경합 가능성 큼.
+
 ### 수정 2: decomp_create/destroy 직렬화 (DECOMP_FFI_LOCK)
 
 **조치:** `DecompilerNative::new()` 및 `Drop`에서 전역 `DECOMP_FFI_LOCK` (Mutex)으로 `decomp_create`/`decomp_destroy` 호출 직렬화. (`wrapper.rs`)
@@ -228,13 +293,41 @@ gdb ./target/release/fission_cli core
 
 ---
 
-## 5. 재현 스크립트
+## 5. 재현 스크립트 및 ASAN 워크플로우
+
+### 5.1 수동 ASAN 빌드 (권장)
+
+`FISSION_ASAN=1` cargo 빌드 시 fission-ffi와 fission-analysis의 빌드 순서 이슈로 링크 실패할 수 있음. 수동 빌드 권장:
+
+```bash
+# 1. libdecomp ASAN 빌드
+cd ghidra_decompiler/build
+cmake -S .. -B . -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address"
+cmake --build . --target decomp -j8
+cd ../..
+
+# 2. Rust 빌드 (fission-analysis가 기존 build/ 사용)
+RUSTFLAGS="-L $(pwd)/ghidra_decompiler/build" \
+  cargo build -p fission-cli --features native_decomp --release
+
+# 3. ASAN libdecomp를 target/release에 복사 (fission-analysis가 non-ASAN으로 덮어썼을 수 있음)
+cp ghidra_decompiler/build/libdecomp.dylib target/release/libdecomp.dylib
+
+# 4. 벤치마크 실행
+export ASAN_OPTIONS="abort_on_error=1:halt_on_error=1:print_stacktrace=1"
+export DYLD_LIBRARY_PATH="$(pwd)/target/release:$DYLD_LIBRARY_PATH"
+RAYON_NUM_THREADS=8 ./target/release/fission_cli samples/windows/x64/putty.exe \
+  --decomp-all --benchmark --ghidra-compat --profile balanced --decomp-limit 100 -o /tmp/asan_out.json
+```
+
+### 5.2 asan_benchmark.sh
 
 ```bash
 ./scripts/test/asan_benchmark.sh samples/windows/x64/putty.exe 100
 ```
 
-위 스크립트는 `FISSION_ASAN=1`로 libdecomp를 빌드한 뒤 8스레드 벤치마크를 실행합니다. SIGSEGV 발생 시 ASAN이 크래시 위치를 출력합니다.
+위 스크립트는 `FISSION_ASAN=1`로 libdecomp를 빌드한 뒤 8스레드 벤치마크를 실행합니다. 빌드 순서 이슈 시 5.1 수동 절차 사용.
 
 ---
 

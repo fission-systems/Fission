@@ -1329,6 +1329,7 @@ dependencies = [
  "fission-ffi",
  "fission-loader",
  "fission-pcode",
+ "fission-signatures",
  "flate2",
  "hex",
  "iced-x86",

@@ -63,7 +63,9 @@ fn main() {
             .and_then(|p| p.parent()) // root
             .unwrap_or_else(|| panic!("Failed to find project root directory"));
 
-        let lib_path = root_dir.join("ghidra_decompiler").join("build");
+        let lib_path = std::env::var("DECOMP_BUILD_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| root_dir.join("ghidra_decompiler").join("build"));
 
         if lib_path.exists() {
             println!("cargo:rustc-link-search=native={}", lib_path.display());

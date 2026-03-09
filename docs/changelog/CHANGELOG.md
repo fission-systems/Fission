@@ -61,6 +61,19 @@ O(N·L) 수동 라인 스캐너로 전환.
 - **수정 위치**: `ghidra_decompiler/src/decompiler/DecompilationCore.cpp`
 - `ctx->analyzed_callees`에 순환 주소 즉시 등록하여 재시도 방지
 
+#### Fix: Duplicate VariablePiece 예외 처리 강화 (PrototypeEnforcer + Ghidra Merge 충돌)
+
+PrototypeEnforcer가 주입한 엄격한 API 시그니처와 Ghidra Merge가 충돌할 때 발생하는
+`LowlevelError: Duplicate VariablePiece`를 Upstream 코드 수정 없이 방어.
+
+- **FFI**: `ghidra::LowlevelError` 전용 catch 추가 — `std::exception` 미상속으로 누락되던 실제 에러 메시지 노출
+- **DecompilationCore**: DVP 발생 시 `seed_before_action` 없이 1회 재시도
+- **run_analysis_passes**: DVP 발생 시 빈 `AnalysisArtifacts`로 폴백하여 기본 디컴파일 유지
+
+자세한 원인/현재 한계는 `docs/analysis/KNOWN_ISSUES.md` 참조.
+
+- **수정 위치**: `DecompilationCore.cpp`, `libdecomp_ffi.cpp`
+
 #### Infra: 공정 배치 벤치마크 시스템 구축
 
 단일 프로세스 `--decomp-all --benchmark` 모드를 활용, 초기화 비용을 분리한

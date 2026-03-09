@@ -334,6 +334,54 @@ static Datatype* resolve_winapi_type(TypeFactory* factory, const std::string& ty
     return nullptr;
 }
 
+static bool build_injected_prototype(
+    Architecture* arch,
+    const std::string& func_name,
+    const InjectedApiSignature& sig,
+    PrototypePieces& out_pieces
+) {
+    if (!arch || sig.name.empty()) return false;
+
+    TypeFactory* factory = arch->types;
+    if (!factory) return false;
+
+    Datatype* return_type = resolve_winapi_type(factory, sig.return_type);
+    if (!return_type) return false;
+
+    std::vector<Datatype*> param_types;
+    std::vector<std::string> param_names;
+
+    for (const auto& param : sig.params) {
+        Datatype* dt = resolve_winapi_type(factory, param.type_name);
+        if (!dt) {
+            dt = factory->getBase(factory->getSizeOfInt(), TYPE_INT);
+        }
+        param_types.push_back(dt);
+        param_names.push_back(param.name.empty() ? "param" : param.name);
+    }
+
+    ProtoModel* model = nullptr;
+    int ptr_size = factory->getSizeOfPointer();
+    if (ptr_size >= 8) {
+        model = arch->getModel("__fastcall");
+    } else {
+        model = arch->getModel("__stdcall");
+    }
+    if (!model) {
+        model = arch->getModel("__cdecl");
+    }
+    if (!model) return false;
+
+    // Use func_name for symbol table lookup — must match the name used in addFunction
+    out_pieces.model = model;
+    out_pieces.name = func_name;
+    out_pieces.outtype = return_type;
+    out_pieces.intypes = param_types;
+    out_pieces.innames = param_names;
+    out_pieces.firstVarArgSlot = -1;
+    return true;
+}
+
 static bool build_win_api_prototype(
     Architecture* arch,
     const std::string& func_name,
@@ -392,7 +440,7 @@ static bool build_win_api_prototype(
     }
 
     out_pieces.model = model;
-    out_pieces.name = display_name.empty() ? func_name : display_name;
+    out_pieces.name = func_name;  // Must match symbol table registration
     out_pieces.outtype = return_type;
     out_pieces.intypes = param_types;
     out_pieces.innames = param_names;
@@ -442,7 +490,7 @@ static bool build_varargs_prototype(
                           const std::vector<std::string>& names,
                           int4 first_vararg) {
         out_pieces.model = model;
-        out_pieces.name = display_name.empty() ? func_name : display_name;
+        out_pieces.name = func_name;
         out_pieces.outtype = int_type;
         out_pieces.intypes = types;
         out_pieces.innames = names;
@@ -524,11 +572,8 @@ bool PrototypeEnforcer::build_prototype_pieces(
     // Use getPieces() to fill the PrototypePieces directly
     proto->getPieces(out_pieces);
     
-    // Override the name with the actual function name
-    {
-        const std::string display_name = canonicalize_name(func_name);
-        out_pieces.name = display_name.empty() ? func_name : display_name;
-    }
+    // Use func_name for symbol table lookup
+    out_pieces.name = func_name;
 
     return true;
 }
@@ -556,7 +601,7 @@ bool PrototypeEnforcer::build_builtin_prototype(
             model = arch->getModel("__fastcall");
         }
         out_pieces.model = model;
-        out_pieces.name = display_name.empty() ? func_name : display_name;
+        out_pieces.name = func_name;
         out_pieces.outtype = factory->getTypeVoid();
         out_pieces.intypes.clear();
         out_pieces.innames.clear();
@@ -603,7 +648,7 @@ bool PrototypeEnforcer::build_builtin_prototype(
             model = arch->getModel("__cdecl");
         }
         out_pieces.model = model;
-        out_pieces.name = display_name.empty() ? func_name : display_name;
+        out_pieces.name = func_name;
         out_pieces.outtype = out;
         out_pieces.intypes = types;
         out_pieces.innames = names;
@@ -778,7 +823,7 @@ bool PrototypeEnforcer::build_builtin_prototype(
     }
 
     out_pieces.model = model;
-    out_pieces.name = display_name.empty() ? func_name : display_name;
+    out_pieces.name = func_name;
     out_pieces.outtype = int_type;
     out_pieces.intypes = { int_type, char_ptr_ptr, char_ptr_ptr };
     out_pieces.innames = { "_Argc", "_Argv", "_Env" };
@@ -789,14 +834,35 @@ bool PrototypeEnforcer::build_builtin_prototype(
 bool PrototypeEnforcer::enforce_single_prototype(
     Architecture* arch,
     uint64_t address,
-    const std::string& func_name
+    const std::string& func_name,
+    const std::unordered_map<std::string, InjectedApiSignature>* injected
 ) {
     if (!arch || func_name.empty()) return false;
 
     TypeFactory* factory = arch->types;
     if (!factory) return false;
 
-    // Try to find the function type by name in the TypeFactory
+    // 1. Try injected signatures first (from fission-signatures via FFI)
+    if (injected && !injected->empty()) {
+        std::string key = to_lower_copy(canonicalize_name(func_name));
+        auto it = injected->find(key);
+        if (it != injected->end()) {
+            PrototypePieces pieces;
+            if (build_injected_prototype(arch, func_name, it->second, pieces)) {
+                try {
+                    arch->setPrototype(pieces);
+                    fission::utils::log_stream() << "[PrototypeEnforcer] Applied injected prototype for: "
+                              << func_name << std::endl;
+                    return true;
+                } catch (const LowlevelError& e) {
+                    fission::utils::log_stream() << "[PrototypeEnforcer] Error applying injected prototype for "
+                              << func_name << ": " << e.explain << std::endl;
+                }
+            }
+        }
+    }
+
+    // 2. Try to find the function type by name in the TypeFactory
     std::string lookup_name = canonicalize_name(func_name);
     Datatype* dt = factory->findByName(lookup_name);
     if (!dt) {
@@ -875,7 +941,8 @@ bool PrototypeEnforcer::enforce_single_prototype(
 
 int PrototypeEnforcer::enforce_iat_prototypes(
     Architecture* arch,
-    const std::map<uint64_t, std::string>& iat_symbols
+    const std::map<uint64_t, std::string>& iat_symbols,
+    const std::unordered_map<std::string, InjectedApiSignature>* injected
 ) {
     int count = 0;
 
@@ -883,13 +950,13 @@ int PrototypeEnforcer::enforce_iat_prototypes(
         uint64_t address = pair.first;
         const std::string& name = pair.second;
 
-        if (enforce_single_prototype(arch, address, name)) {
+        if (enforce_single_prototype(arch, address, name, injected)) {
             ++count;
         }
     }
 
     if (count > 0) {
-        fission::utils::log_stream() << "[PrototypeEnforcer] Enforced " << count << "/" << iat_symbols.size() 
+        fission::utils::log_stream() << "[PrototypeEnforcer] Enforced " << count << "/" << iat_symbols.size()
                   << " IAT prototypes" << std::endl;
     }
 

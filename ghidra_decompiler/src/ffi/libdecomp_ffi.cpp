@@ -12,8 +12,10 @@
 #include "fission/ffi/DecompilerCore.h"
 #include "fission/decompiler/PcodeOptimizationBridge.h"
 #include "fission/utils/logger.h"
+#include "fission/utils/json_utils.h"
 
 // Ghidra types for type registration
+#include "error.hh"
 #include "type.hh"
 #include "address.hh"
 #include "funcdata.hh"
@@ -211,6 +213,56 @@ extern "C" DECOMP_API void decomp_add_global_symbols_batch(
     }
 }
 
+static std::string to_lower_copy(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (unsigned char c : s) {
+        out += static_cast<char>(std::tolower(c));
+    }
+    return out;
+}
+
+extern "C" DECOMP_API int decomp_set_signatures_json(DecompContext* ctx, const char* json_signatures) {
+    if (!ctx || !json_signatures) return -1;
+
+    try {
+        ctx->injected_signatures.clear();
+        std::string json(json_signatures);
+        if (json.empty()) return 0;
+
+        auto sig_objects = fission::utils::extract_json_array(json);
+        for (const auto& obj : sig_objects) {
+            fission::types::InjectedApiSignature sig;
+            sig.name = fission::utils::extract_json_string(obj, "name");
+            sig.return_type = fission::utils::extract_json_string(obj, "return_type");
+            if (sig.name.empty()) continue;
+
+            auto param_objects = fission::utils::extract_json_array_for_key(obj, "params");
+            for (const auto& p_obj : param_objects) {
+                fission::types::InjectedParamInfo param;
+                param.name = fission::utils::extract_json_string(p_obj, "name");
+                param.type_name = fission::utils::extract_json_string(p_obj, "type_name");
+                if (!param.name.empty() || !param.type_name.empty()) {
+                    sig.params.push_back(std::move(param));
+                }
+            }
+
+            std::string key = to_lower_copy(sig.name);
+            ctx->injected_signatures[key] = std::move(sig);
+        }
+        fission::utils::log_stream() << "[FFI] Injected " << ctx->injected_signatures.size()
+            << " function signatures for type back-propagation" << std::endl;
+        return 0;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("decomp_set_signatures_json: ") + e.what();
+        fission::utils::log_stream() << "[FFI] decomp_set_signatures_json error: " << e.what() << std::endl;
+        return -1;
+    } catch (...) {
+        ctx->last_error = "decomp_set_signatures_json: unknown error";
+        return -1;
+    }
+}
+
 extern "C" DECOMP_API void decomp_set_symbol_provider(
     DecompContext* ctx,
     const DecompSymbolProvider* provider
@@ -283,6 +335,34 @@ extern "C" DECOMP_API char* decomp_function(DecompContext* ctx, uint64_t addr) {
             std::memcpy(output, result.c_str(), result.size() + 1);
         }
         return output;
+    } catch (const ghidra::LowlevelError& e) {
+        ctx->last_error = std::string("Error: Ghidra LowlevelError: ") + e.explain;
+        return nullptr;
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Error: ") + e.what();
+        return nullptr;
+    } catch (...) {
+        ctx->last_error = "Unknown decompilation error";
+        return nullptr;
+    }
+}
+
+extern "C" DECOMP_API char* decomp_function_with_metadata(DecompContext* ctx, uint64_t addr) {
+    if (!ctx) return nullptr;
+    
+    std::lock_guard<std::mutex> lock(ctx->mutex);
+    
+    try {
+        std::string result = run_decompilation_with_metadata(ctx, addr);
+        
+        char* output = static_cast<char*>(malloc(result.size() + 1));
+        if (output) {
+            std::memcpy(output, result.c_str(), result.size() + 1);
+        }
+        return output;
+    } catch (const ghidra::LowlevelError& e) {
+        ctx->last_error = std::string("Error: Ghidra LowlevelError: ") + e.explain;
+        return nullptr;
     } catch (const std::exception& e) {
         ctx->last_error = std::string("Error: ") + e.what();
         return nullptr;
@@ -305,6 +385,9 @@ extern "C" DECOMP_API char* decomp_function_pcode(DecompContext* ctx, uint64_t a
             std::memcpy(output, result.c_str(), result.size() + 1);
         }
         return output;
+    } catch (const ghidra::LowlevelError& e) {
+        ctx->last_error = std::string("Error: Ghidra LowlevelError: ") + e.explain;
+        return nullptr;
     } catch (const std::exception& e) {
         ctx->last_error = std::string("Error: ") + e.what();
         return nullptr;

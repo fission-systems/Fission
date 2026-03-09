@@ -50,6 +50,7 @@ unsafe extern "C" {
         is_writable: c_int,
     ) -> DecompError;
     pub(super) fn decomp_function(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
+    pub(super) fn decomp_function_with_metadata(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
     pub(super) fn decomp_function_pcode(ctx: *mut DecompContext, addr: u64) -> *mut c_char;
     pub(super) fn decomp_free_string(s: *mut c_char);
     pub(super) fn decomp_get_last_error(ctx: *mut DecompContext) -> *const c_char;
@@ -93,6 +94,13 @@ unsafe extern "C" {
         names: *const *const c_char,
         count: usize,
     );
+
+    /// Inject function signatures for type inference (type back-propagation).
+    /// Returns 0 on success, -1 on parse error.
+    pub(super) fn decomp_set_signatures_json(
+        ctx: *mut DecompContext,
+        json_str: *const c_char,
+    ) -> c_int;
 
     // Type registration for metadata-driven type recovery
     pub(super) fn decomp_register_struct_type(

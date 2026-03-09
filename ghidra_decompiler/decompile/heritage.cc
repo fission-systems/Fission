@@ -1737,6 +1737,7 @@ void Heritage::splitByRefinement(Varnode *vn,const Address &addr,const vector<in
   int4 sz = vn->getSize();
   AddrSpace *spc = curaddr.getSpace();
   uint4 diff = (uint4)spc->wrapOffset(curaddr.getOffset() - addr.getOffset());
+  if (diff >= (uint4)refine.size()) return;	// Fission: bounds check (ASAN container-overflow fix)
   int4 cutsz = refine[diff];
   if (sz <= cutsz) return;	// Already refined
   while(sz > 0) {
@@ -1745,6 +1746,10 @@ void Heritage::splitByRefinement(Varnode *vn,const Address &addr,const vector<in
     curaddr = curaddr + cutsz;
     sz -= cutsz;
     diff = (uint4)spc->wrapOffset(curaddr.getOffset() - addr.getOffset());
+    if (diff >= (uint4)refine.size()) {
+      split.push_back(fd->newVarnode(sz, curaddr));	// Fission: remaining as single piece
+      break;
+    }
     cutsz = refine[diff];
     if (cutsz > sz)
       cutsz = sz;		// Final piece

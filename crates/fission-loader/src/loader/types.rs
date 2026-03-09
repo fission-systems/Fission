@@ -261,6 +261,8 @@ pub struct LoadedBinaryInner {
     pub functions_sorted: bool,
     /// Inferred types from metadata analysis (Swift, Go, etc.)
     pub inferred_types: Vec<InferredTypeInfo>,
+    /// String literals from .rdata/.rodata (address → content) for decompiler inlining
+    pub string_map: std::collections::HashMap<u64, String>,
 }
 
 /// Parsed binary information with O(1) clone via Arc.

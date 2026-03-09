@@ -31,6 +31,8 @@ bool EmulationAnalyzer::try_propagate_constant(Varnode* vn, uintb& out_val, int 
     if (!vn) return false;
     if (depth > 4) return false;   // cap recursion
 
+    if (!vn) return false;
+
     // Already a constant — base case
     if (vn->isConstant()) {
         out_val = vn->getOffset();

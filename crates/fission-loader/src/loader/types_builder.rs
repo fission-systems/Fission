@@ -1,4 +1,7 @@
-use super::{FunctionInfo, LoadedBinary, LoadedBinaryBuilder, LoadedBinaryInner, SectionInfo};
+use super::{
+    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, LoadedBinaryInner, SectionInfo,
+};
+use crate::loader::strings::scan_ascii_strings_from_sections;
 use crate::prelude::*;
 use std::sync::Arc;
 
@@ -115,6 +118,8 @@ impl LoadedBinaryBuilder {
             global_symbols.insert(addr, demangled);
         }
 
+        let string_map = scan_ascii_strings_from_sections(self.data.as_slice(), &self.sections);
+
         let inner = LoadedBinaryInner {
             path: self.path,
             hash: self.hash,
@@ -132,6 +137,7 @@ impl LoadedBinaryBuilder {
             function_name_index,
             functions_sorted: true,
             inferred_types: Vec::new(),
+            string_map,
         };
 
         Ok(LoadedBinary::from_inner(inner))

@@ -4,7 +4,10 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#include "fission/types/InjectedSignature.h"
 
 // Forward declarations for Ghidra types
 namespace ghidra {
@@ -45,21 +48,25 @@ public:
     /// \brief Enforce prototypes for all IAT symbols
     /// \param arch The Architecture context
     /// \param iat_symbols Map of address -> symbol name
+    /// \param injected Optional map of injected signatures (from fission-signatures via FFI)
     /// \return Number of prototypes successfully applied
     int enforce_iat_prototypes(
         ghidra::Architecture* arch,
-        const std::map<uint64_t, std::string>& iat_symbols
+        const std::map<uint64_t, std::string>& iat_symbols,
+        const std::unordered_map<std::string, InjectedApiSignature>* injected = nullptr
     );
 
     /// \brief Enforce prototype for a single function
     /// \param arch The Architecture context
     /// \param address Function address
     /// \param func_name Function name to lookup in GDT
+    /// \param injected Optional map of injected signatures
     /// \return true if prototype was applied
     bool enforce_single_prototype(
         ghidra::Architecture* arch,
         uint64_t address,
-        const std::string& func_name
+        const std::string& func_name,
+        const std::unordered_map<std::string, InjectedApiSignature>* injected = nullptr
     );
 };
 

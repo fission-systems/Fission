@@ -132,6 +132,9 @@ pub struct PassContext {
     /// DWARF function info for variable/parameter name substitution
     pub dwarf_info: Option<fission_loader::loader::types::DwarfFunctionInfo>,
 
+    /// String literals from .rdata/.rodata (address → content) for inlining
+    pub string_map: Option<std::collections::HashMap<u64, String>>,
+
     /// Custom key-value data for pass-specific configuration
     pub metadata: HashMap<String, String>,
 }
@@ -157,6 +160,15 @@ impl PassContext {
         info: Option<fission_loader::loader::types::DwarfFunctionInfo>,
     ) -> Self {
         self.dwarf_info = info;
+        self
+    }
+
+    /// Set string map for pointer inlining
+    pub fn with_string_map(
+        mut self,
+        map: Option<std::collections::HashMap<u64, String>>,
+    ) -> Self {
+        self.string_map = map;
         self
     }
 

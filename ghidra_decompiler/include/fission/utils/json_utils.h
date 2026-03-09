@@ -68,12 +68,21 @@ std::map<uint64_t, std::string> parse_json_string_map(const std::string& json_co
  * Extract JSON array elements
  * Parses a JSON array and returns each object as a string.
  * e.g. [{"name":"a"},{"name":"b"}] -> ["{"name":"a"}", "{"name":"b"}"]
- * 
+ *
  * @param json_content The JSON array content (must start with [)
  * @return Vector of JSON object strings
  */
 std::vector<std::string> extract_json_array(const std::string& json_content);
 
+/**
+ * Extract JSON array value for a key in an object.
+ * e.g. For {"params": [{"name":"a","type_name":"T"}...]}, returns vector of param object strings.
+ *
+ * @param json The JSON object string
+ * @param key The key whose value is an array
+ * @return Vector of element strings, or empty if not found
+ */
+std::vector<std::string> extract_json_array_for_key(const std::string& json, const std::string& key);
 
 } // namespace utils
 } // namespace fission

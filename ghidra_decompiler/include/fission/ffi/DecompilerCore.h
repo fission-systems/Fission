@@ -32,6 +32,15 @@ void ensure_architecture(DecompContext* ctx);
 std::string run_decompilation(DecompContext* ctx, uint64_t addr);
 
 /**
+ * Run decompilation and return JSON with code and inferred type metadata.
+ * Format: {"code":"...","inferred_types":[{...}]}
+ * @param ctx Decompiler context
+ * @param addr Function address
+ * @return JSON string (caller must free via decomp_free_string)
+ */
+std::string run_decompilation_with_metadata(DecompContext* ctx, uint64_t addr);
+
+/**
  * Run decompilation and return Pcode as JSON
  * @param ctx Decompiler context
  * @param addr Function address

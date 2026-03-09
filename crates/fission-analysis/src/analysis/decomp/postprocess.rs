@@ -6,6 +6,7 @@
 //! readable by hiding language-specific overhead like safety checks and panics.
 
 use fission_loader::loader::types::{DwarfFunctionInfo, InferredTypeInfo};
+use std::borrow::Cow;
 
 mod arithmetic;
 mod cleanup;
@@ -15,6 +16,7 @@ mod naming;
 pub mod pass;
 pub mod passes;
 pub mod registry;
+mod strings;
 mod structure;
 mod switch_recon;
 #[cfg(test)]
@@ -44,6 +46,7 @@ pub struct RustPostProcessOptions {
     pub switch_reconstruction: bool,
     pub mul_to_shift: bool,
     pub dwarf_names: bool,
+    pub string_pointers: bool,
 }
 
 impl Default for RustPostProcessOptions {
@@ -67,6 +70,7 @@ impl Default for RustPostProcessOptions {
             switch_reconstruction: true,
             mul_to_shift: true,
             dwarf_names: true,
+            string_pointers: true,
         }
     }
 }
@@ -76,6 +80,7 @@ pub struct PostProcessor {
     options: RustPostProcessOptions,
     inferred_types: Vec<InferredTypeInfo>,
     dwarf_info: Option<DwarfFunctionInfo>,
+    string_map: Option<std::collections::HashMap<u64, String>>,
 }
 
 impl PostProcessor {
@@ -84,6 +89,7 @@ impl PostProcessor {
             options: RustPostProcessOptions::default(),
             inferred_types: Vec::new(),
             dwarf_info: None,
+            string_map: None,
         }
     }
 
@@ -102,6 +108,15 @@ impl PostProcessor {
     /// Set DWARF function info for variable/parameter name substitution
     pub fn with_dwarf_info(mut self, info: Option<DwarfFunctionInfo>) -> Self {
         self.dwarf_info = info;
+        self
+    }
+
+    /// Set string map for address-to-string replacement in decompiled output
+    pub fn with_string_map(
+        mut self,
+        map: Option<std::collections::HashMap<u64, String>>,
+    ) -> Self {
+        self.string_map = map;
         self
     }
 
@@ -188,6 +203,14 @@ impl PostProcessor {
         if !self.options.dwarf_names {
             pass_registry.disable("apply_dwarf_names");
         }
+        if !self.options.string_pointers {
+            pass_registry.disable("replace_string_pointers");
+        }
+
+        // Add string map to context when available
+        if let Some(ref map) = self.string_map {
+            context.string_map = Some(map.clone());
+        }
 
         // Execute all enabled passes with dependency resolution
         pass_registry
@@ -206,6 +229,21 @@ impl PostProcessor {
 
         if self.options.clean_rust {
             processed = self.remove_rust_boilerplate(&processed);
+        }
+
+        // Replace address literals with string content when string_map is available
+        if self.options.string_pointers {
+            if let Some(ref map) = self.string_map {
+                if !map.is_empty() {
+                    use pass::PostProcessPass;
+                    let pass = strings::ReplaceStringPointersPass;
+                    let mut ctx = pass::PassContext::new();
+                    ctx.string_map = Some(map.clone());
+                    if let Ok(Cow::Owned(s)) = pass.run(&processed, &ctx) {
+                        processed = s;
+                    }
+                }
+            }
         }
 
         if self.options.clean_go {

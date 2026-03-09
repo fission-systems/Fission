@@ -106,8 +106,6 @@ fn run_sequential_decompilation<'a>(
     let mut json_results = Vec::new();
     let mut total_decomp_secs = 0.0;
     let mut total_postprocess_secs = 0.0;
-    let postprocessor = PostProcessor::new().with_inferred_types(binary.inferred_types.clone());
-
     for func in functions {
         if cli.verbose {
             eprintln!("[*] Decompiling {} (0x{:x})...", func.name, func.address);
@@ -115,12 +113,20 @@ fn run_sequential_decompilation<'a>(
 
         let _silencer = OutputSilencer::new_if(!cli.verbose);
         let func_start = std::time::Instant::now();
-        match decomp.decompile(func.address) {
-            Ok(code) => {
+        match decomp.decompile_with_metadata(func.address) {
+            Ok(result) => {
                 let decomp_sec = func_start.elapsed().as_secs_f64();
                 total_decomp_secs += decomp_sec;
+                let merged_types: Vec<_> = result
+                    .inferred_types
+                    .into_iter()
+                    .chain(binary.inferred_types.iter().cloned())
+                    .collect();
+                let postprocessor = PostProcessor::new()
+                    .with_inferred_types(merged_types)
+                    .with_string_map(Some(binary.inner().string_map.clone()));
                 let postprocess_start = std::time::Instant::now();
-                let code = postprocessor.process(&code);
+                let code = postprocessor.process(&result.code);
                 let postprocess_sec = postprocess_start.elapsed().as_secs_f64();
                 total_postprocess_secs += postprocess_sec;
                 let mut filtered = code.clone();
@@ -213,6 +219,7 @@ fn run_parallel_decompilation<'a>(
         .get_gdt_path(binary.is_64bit)
         .and_then(|p| p.to_str().map(String::from));
     let inferred_types = binary.inferred_types.clone();
+    let string_map = binary.inner().string_map.clone();
 
     let num_workers = rayon::current_num_threads().max(1);
 
@@ -225,21 +232,27 @@ fn run_parallel_decompilation<'a>(
 
     // Bucket 0: use the already-prepared main_decomp on the main thread
     let first_bucket_entries = if !buckets[0].is_empty() {
-        let postprocessor =
-            PostProcessor::new().with_inferred_types(inferred_types.clone());
         let mut entries = Vec::with_capacity(buckets[0].len());
         for func in &buckets[0] {
             let start = std::time::Instant::now();
-            let code_result = main_decomp.decompile(func.address);
+            let code_result = main_decomp.decompile_with_metadata(func.address);
             let decomp_sec = start.elapsed().as_secs_f64();
-            let (code_result, postprocess_sec) = match &code_result {
-                Ok(code) => {
+            let (code_result, postprocess_sec) = match code_result {
+                Ok(result) => {
+                    let merged: Vec<_> = result
+                        .inferred_types
+                        .into_iter()
+                        .chain(inferred_types.iter().cloned())
+                        .collect();
+                    let pp = PostProcessor::new()
+                        .with_inferred_types(merged)
+                        .with_string_map(Some(string_map.clone()));
                     let pp_start = std::time::Instant::now();
-                    let processed = postprocessor.process(code);
+                    let processed = pp.process(&result.code);
                     let pp_sec = pp_start.elapsed().as_secs_f64();
                     (Ok(processed), pp_sec)
                 }
-                Err(_) => (code_result, 0.0),
+                Err(e) => (Err(e), 0.0),
             };
             let timing = main_decomp.get_last_timing_json().ok();
             entries.push(DecompEntry {
@@ -286,21 +299,27 @@ fn run_parallel_decompilation<'a>(
                     .collect();
             }
 
-            let postprocessor =
-                PostProcessor::new().with_inferred_types(inferred_types.clone());
             let mut entries = Vec::with_capacity(bucket.len());
             for func in bucket.iter().copied() {
                 let start = std::time::Instant::now();
-                let code_result = decomp.decompile(func.address);
+                let code_result = decomp.decompile_with_metadata(func.address);
                 let decomp_sec = start.elapsed().as_secs_f64();
-                let (code_result, postprocess_sec) = match &code_result {
-                    Ok(code) => {
+                let (code_result, postprocess_sec) = match code_result {
+                    Ok(result) => {
+                        let merged: Vec<_> = result
+                            .inferred_types
+                            .into_iter()
+                            .chain(inferred_types.iter().cloned())
+                            .collect();
+                        let pp = PostProcessor::new()
+                            .with_inferred_types(merged)
+                            .with_string_map(Some(string_map.clone()));
                         let pp_start = std::time::Instant::now();
-                        let processed = postprocessor.process(code);
+                        let processed = pp.process(&result.code);
                         let pp_sec = pp_start.elapsed().as_secs_f64();
                         (Ok(processed), pp_sec)
                     }
-                    Err(_) => (code_result, 0.0),
+                    Err(e) => (Err(e), 0.0),
                 };
                 let timing = decomp.get_last_timing_json().ok();
                 entries.push(DecompEntry {
@@ -539,7 +558,7 @@ pub(super) fn run_decompilation(
         if let Some(addr) = cli.address {
             eprintln!("Warning: No function found at address 0x{:x}", addr);
             // Try to decompile anyway
-            decompile_and_output(cli, &decomp, addr, &format!("sub_{:x}", addr))?;
+            decompile_and_output(cli, &decomp, binary, addr, &format!("sub_{:x}", addr))?;
         }
         return Ok(());
     }
@@ -637,6 +656,7 @@ pub(super) fn run_decompilation(
 pub(super) fn decompile_and_output(
     cli: &OneShotArgs,
     decomp: &DecompilerNative,
+    binary: &LoadedBinary,
     addr: u64,
     name: &str,
 ) -> io::Result<()> {
@@ -644,11 +664,13 @@ pub(super) fn decompile_and_output(
     let effective_no_warnings = cli.no_warnings || cli.ghidra_compat;
 
     let _silencer = OutputSilencer::new_if(!cli.verbose);
-    match decomp.decompile(addr) {
-        Ok(code) => {
-            // Apply Rust-side post-processing
-            let postprocessor = PostProcessor::new();
-            let code = postprocessor.process(&code);
+    match decomp.decompile_with_metadata(addr) {
+        Ok(result) => {
+            // Apply Rust-side post-processing with StructureAnalyzer inferred types
+            let postprocessor = PostProcessor::new()
+                .with_inferred_types(result.inferred_types)
+                .with_string_map(Some(binary.inner().string_map.clone()));
+            let code = postprocessor.process(&result.code);
             // Apply output filters
             let mut filtered = code.clone();
             if effective_no_warnings {

@@ -55,6 +55,7 @@ pub struct CachingDecompiler {
     dwarf_functions:
         std::collections::HashMap<u64, fission_loader::loader::types::DwarfFunctionInfo>,
     rust_postprocess_options: RustPostProcessOptions,
+    string_map: std::collections::HashMap<u64, String>,
 }
 
 #[cfg(feature = "native_decomp")]
@@ -75,12 +76,15 @@ impl CachingDecompiler {
         let inferred_types = binary.inferred_types.clone();
         let dwarf_functions = binary.dwarf_functions.clone();
 
+        let string_map = binary.inner().string_map.clone();
+
         Ok(Self {
             inner,
             cache,
             inferred_types,
             dwarf_functions,
             rust_postprocess_options: RustPostProcessOptions::default(),
+            string_map,
         })
     }
 
@@ -91,18 +95,27 @@ impl CachingDecompiler {
             return Ok(code);
         }
 
-        // 2. Decompile using native engine
-        let raw_code = self.inner.decompile(address)?;
+        // 2. Decompile using native engine (with metadata for StructureAnalyzer types)
+        let result = self.inner.decompile_with_metadata(address)?;
 
-        // 3. Post-process with inferred types and DWARF debug info
+        // 3. Merge inferred types: loader (DWARF/RTTI) + per-function (StructureAnalyzer)
+        // Decompiler types first so they take precedence for replace_field_offsets
+        let merged_types: Vec<_> = result
+            .inferred_types
+            .into_iter()
+            .chain(self.inferred_types.iter().cloned())
+            .collect();
+
+        // 4. Post-process with merged inferred types, DWARF debug info, and string map
         let dwarf_info = self.dwarf_functions.get(&address).cloned();
         let processor = self::postprocess::PostProcessor::new()
             .with_options(self.rust_postprocess_options.clone())
-            .with_inferred_types(self.inferred_types.clone())
-            .with_dwarf_info(dwarf_info);
-        let code = processor.process(&raw_code);
+            .with_inferred_types(merged_types)
+            .with_dwarf_info(dwarf_info)
+            .with_string_map(Some(self.string_map.clone()));
+        let code = processor.process(&result.code);
 
-        // 4. Store in cache
+        // 5. Store in cache
         self.cache.put(address, code.clone());
 
         Ok(code)

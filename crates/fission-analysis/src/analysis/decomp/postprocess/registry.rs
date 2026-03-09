@@ -24,6 +24,7 @@ pub fn create_default_registry() -> Result<PassRegistry, String> {
     // Type-Based Passes (early to enable better analysis)
     // ========================================================================
     registry.register(Box::new(FieldOffsetReplacementPass))?;
+    registry.register(Box::new(super::strings::ReplaceStringPointersPass))?;
     registry.register(Box::new(InsertMissingCastsPass))?;
 
     // ========================================================================

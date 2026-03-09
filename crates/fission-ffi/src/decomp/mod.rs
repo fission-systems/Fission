@@ -28,4 +28,4 @@ pub mod wrapper;
 pub use ffi::is_native_available;
 pub use types::{DecompContext, DecompError, DecompFieldInfo};
 #[cfg(feature = "native_decomp")]
-pub use wrapper::DecompilerNative;
+pub use wrapper::{DecompilationResult, DecompilerNative};

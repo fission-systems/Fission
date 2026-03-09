@@ -8,6 +8,7 @@ use std::path::Path;
 
 pub mod cpp;
 pub mod demangle;
+pub mod strings;
 pub mod dwarf;
 pub mod elf;
 pub mod golang;
@@ -136,11 +137,9 @@ impl LoadedBinary {
                         go_strings.len()
                     );
                     for (addr, content) in go_strings {
-                        binary
-                            .inner_mut()
-                            .global_symbols
-                            .entry(addr)
-                            .or_insert(content);
+                        let inner = binary.inner_mut();
+                        inner.global_symbols.entry(addr).or_insert(content.clone());
+                        inner.string_map.entry(addr).or_insert(content);
                     }
                 }
             }
@@ -372,6 +371,46 @@ mod tests {
     }
 
     #[test]
+    fn test_string_map_populated() {
+        // Build a minimal binary with .rdata containing strings
+        let mut data = vec![0x90u8; 256];
+        let rdata_start = 128;
+        data[rdata_start..rdata_start + 6].copy_from_slice(b"Hello\0");
+        data[rdata_start + 6..rdata_start + 17].copy_from_slice(b"World Test\0");
+
+        let binary = LoadedBinaryBuilder::new(
+            "test.bin".to_string(),
+            DataBuffer::Heap(data),
+        )
+        .add_section(SectionInfo {
+            name: ".rdata".to_string(),
+            virtual_address: 0x2000,
+            virtual_size: 128,
+            file_offset: 128,
+            file_size: 128,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 128,
+            file_offset: 0,
+            file_size: 128,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("build");
+
+        assert!(!binary.string_map.is_empty());
+        assert_eq!(binary.string_map.get(&0x2000), Some(&"Hello".to_string()));
+        assert_eq!(binary.string_map.get(&0x2006), Some(&"World Test".to_string()));
+    }
+
+    #[test]
     fn test_loaded_binary_builder() {
         let builder =
             LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(vec![0x90; 100]))
@@ -409,6 +448,7 @@ mod tests {
         assert_eq!(binary.functions.len(), 1);
         assert_eq!(binary.sections.len(), 1);
         assert!(binary.global_symbols.is_empty());
+        assert!(binary.string_map.is_empty());
 
         let Some(func) = binary.find_function("main") else {
             panic!("main function should exist")

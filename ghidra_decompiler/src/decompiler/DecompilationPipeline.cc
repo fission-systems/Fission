@@ -759,40 +759,49 @@ void DecompilationPipeline::run_signature_analysis(
 
             if (all_candidates.empty()) continue;
 
-            if (all_candidates.size() == 1) {
-                state.fid_function_names[addr] = all_candidates[0]->name;
+            // Unified path: single and multiple candidates both go through RelationValidator
+            if (!best_db) continue;
+
+            RelationValidator validator(
+                std::shared_ptr<FidDatabase>(best_db, [](FidDatabase*){}));
+
+            // Collect callee hashes from CALL rel32 instructions
+            std::vector<uint64_t> actual_callees;
+            const size_t off = addr - image_base;
+            size_t estimated_size = 0x100;  // assume large if no RET found
+
+            // Phase 5: Strings referenced near function (for heuristic bonus in FID disambiguation)
+            std::vector<std::string> actual_ref_strings = collect_referenced_strings_near(
+                bin_bytes, off, static_cast<uint64_t>(image_base),
+                state.enum_values, bin_info.arch);
+            for (size_t k = 0;
+                 k < 0x100 && (off + k + 5) < bin_bytes.size(); ++k)
+            {
+                if (bin_bytes[off + k] == 0xE8) {
+                    int32_t rel = 0;
+                    std::memcpy(&rel, &bin_bytes[off + k + 1], sizeof(rel));
+                    const uint64_t target =
+                        addr + k + 5 + static_cast<int64_t>(rel);
+                    const auto th = addr_to_hash.find(target);
+                    if (th != addr_to_hash.end())
+                        actual_callees.push_back(th->second);
+                }
+                if (bin_bytes[off + k] == 0xC3) {
+                    estimated_size = k + 1;
+                    break;
+                }
+            }
+
+            // Small functions (< 24 bytes) have higher hash collision risk: require higher threshold
+            const float min_threshold = (estimated_size < 24) ? 0.6f : 0.3f;
+
+            const auto result = validator.find_best_match(
+                all_candidates, actual_callees, actual_ref_strings, min_threshold);
+
+            // Only apply FID name when validation passed (rejects false positives)
+            if (result.validated && !result.name.empty()) {
+                state.fid_function_names[addr] = result.name;
                 ++matched_count;
-            } else if (best_db) {
-                RelationValidator validator(
-                    std::shared_ptr<FidDatabase>(best_db, [](FidDatabase*){}));
-
-                // Collect callee hashes from CALL rel32 instructions
-                std::vector<uint64_t> actual_callees;
-                const size_t off = addr - image_base;
-                for (size_t k = 0;
-                     k < 0x100 && (off + k + 5) < bin_bytes.size(); ++k)
-                {
-                    if (bin_bytes[off + k] == 0xE8) {
-                        int32_t rel = 0;
-                        std::memcpy(&rel, &bin_bytes[off + k + 1], sizeof(rel));
-                        const uint64_t target =
-                            addr + k + 5 + static_cast<int64_t>(rel);
-                        const auto th = addr_to_hash.find(target);
-                        if (th != addr_to_hash.end())
-                            actual_callees.push_back(th->second);
-                    }
-                    if (bin_bytes[off + k] == 0xC3) break;
-                }
-
-                const auto result =
-                    validator.find_best_match(all_candidates, actual_callees);
-                if (!result.name.empty()) {
-                    state.fid_function_names[addr] = result.name;
-                    ++matched_count;
-                } else {
-                    state.fid_function_names[addr] = all_candidates[0]->name;
-                    ++matched_count;
-                }
             }
         }
 

@@ -767,6 +767,7 @@ void TypePropagator::propagate_backwards(Varnode* vn, Datatype* type) {
             // Cast - propagate to input (may need adjustment)
             if (def->numInput() > 0) {
                 Varnode* input = def->getIn(0);
+                if (!input) break;
                 // For casts, try to infer input type based on output
                 if (input->getSize() == type->getSize()) {
                     propagate_backwards(input, type);
@@ -823,6 +824,7 @@ void TypePropagator::propagate_backwards(Varnode* vn, Datatype* type) {
             // Extension operations - propagate smaller type to input
             if (def->numInput() > 0) {
                 Varnode* input = def->getIn(0);
+                if (!input) break;
                 Datatype* input_type = arch->types->getBase(
                     input->getSize(),
                     (opc == CPUI_INT_SEXT) ? TYPE_INT : TYPE_UINT
@@ -921,7 +923,8 @@ void TypePropagator::propagate_one_type(Varnode* vn) {
     while (!work_queue.empty()) {
         Varnode* current = work_queue.back();
         work_queue.pop_back();
-        
+        if (!current) continue;
+
         // Propagate to all descendant operations
         list<PcodeOp*>::const_iterator iter;
         for (iter = current->beginDescend(); iter != current->endDescend(); ++iter) {
@@ -953,7 +956,7 @@ void TypePropagator::propagate_one_type(Varnode* vn) {
         }
         
         // Also check definition
-        if (current->isWritten()) {
+        if (current && current->isWritten()) {
             PcodeOp* def = current->getDef();
             if (def && !def->isDead()) {
                 for (int inslot = 0; inslot < def->numInput(); ++inslot) {

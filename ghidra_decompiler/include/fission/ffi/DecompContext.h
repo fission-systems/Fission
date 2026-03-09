@@ -16,6 +16,7 @@
 #include <sstream>
 #include <cstdint>
 #include <set>
+#include <unordered_map>
 
 // Forward declarations
 namespace ghidra {
@@ -31,6 +32,7 @@ namespace ghidra {
 #include "fission/analysis/FunctionMatcher.h"
 #include "fission/ffi/SymbolProviderFfi.h"
 #include "fission/types/GlobalTypeRegistry.h"
+#include "fission/types/InjectedSignature.h"
 #include "fission/decompiler/PostProcessPipeline.h"
 
 namespace fission {
@@ -92,7 +94,11 @@ struct DecompContext {
     // Symbol table
     std::map<uint64_t, std::string> symbols;
     std::map<uint64_t, std::string> global_symbols;
-    
+
+    /// Injected function signatures from Rust (fission-signatures). Used for type back-propagation.
+    /// Key: function name (case-insensitive lookup), Value: signature with param types.
+    std::unordered_map<std::string, fission::types::InjectedApiSignature> injected_signatures;
+
     // Memory blocks (sections)
     std::vector<MemoryBlockInfo> memory_blocks;
     

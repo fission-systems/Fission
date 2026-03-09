@@ -225,5 +225,54 @@ std::vector<std::string> extract_json_array(const std::string& json_content) {
     return elements;
 }
 
+std::vector<std::string> extract_json_array_for_key(const std::string& json, const std::string& key) {
+    std::vector<std::string> result;
+    std::string search = "\"" + key + "\"";
+    size_t pos = json.find(search);
+    if (pos == std::string::npos) return result;
+    pos += search.length();
+
+    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == '\r'))
+        pos++;
+    if (pos >= json.length() || json[pos] != ':') return result;
+    pos++;
+
+    while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == '\r'))
+        pos++;
+    if (pos >= json.length() || json[pos] != '[') return result;
+
+    // Extract substring from '[' to matching ']'
+    size_t start = pos;
+    int depth = 1;
+    bool in_string = false;
+    pos++;
+    while (pos < json.length() && depth > 0) {
+        char c = json[pos];
+        if (in_string) {
+            if (c == '\\' && pos + 1 < json.length()) {
+                pos += 2;
+                continue;
+            }
+            if (c == '"') in_string = false;
+        } else {
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '[') {
+                depth++;
+            } else if (c == ']') {
+                depth--;
+                if (depth == 0) {
+                    pos++;
+                    break;
+                }
+            }
+        }
+        pos++;
+    }
+    if (depth != 0) return result;
+    std::string array_str = json.substr(start, pos - start);
+    return extract_json_array(array_str);
+}
+
 } // namespace utils
 } // namespace fission

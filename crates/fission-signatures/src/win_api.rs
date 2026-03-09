@@ -3,7 +3,7 @@
 //! Contains type information for common Windows API functions
 //! to improve decompiler output quality.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 pub static WIN_API_DB: LazyLock<WinApiDatabase> = LazyLock::new(WinApiDatabase::new);
 
 /// Parameter type information with optional enum group for context-aware constant resolution
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ParamInfo {
     pub name: String,
     pub type_name: String,
@@ -22,7 +22,7 @@ pub struct ParamInfo {
 }
 
 /// Function signature with parameter and return types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ApiSignature {
     pub name: String,
     pub return_type: String,

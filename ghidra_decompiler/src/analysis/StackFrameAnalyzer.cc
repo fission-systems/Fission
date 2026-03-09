@@ -213,7 +213,9 @@ void StackFrameAnalyzer::collect_stack_accesses(Funcdata* fd) {
             continue;
         }
 
-        int size = (opc == CPUI_LOAD) ? op->getOut()->getSize() : op->getIn(2)->getSize();
+        Varnode* size_vn = (opc == CPUI_LOAD) ? op->getOut() : op->getIn(2);
+        if (!size_vn) continue;
+        int size = size_vn->getSize();
         
         // Track access
         auto& entry = stack_accesses[offset];

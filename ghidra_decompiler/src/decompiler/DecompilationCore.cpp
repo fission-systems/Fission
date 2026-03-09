@@ -10,7 +10,9 @@
 #include "fission/analysis/CallingConvDetector.h"
 #include "fission/analysis/TypePropagator.h"
 #include "fission/decompiler/AnalysisPipeline.h"
+#include "fission/utils/json_utils.h"
 #include "libdecomp.hh"
+#include "error.hh"
 #include "address.hh"
 #include "block.hh"
 #include "funcdata.hh"
@@ -359,7 +361,8 @@ void fission::decompiler::ensure_architecture(DecompContext* ctx) {
     fission::core::initialize_architecture(ctx);
 }
 
-std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t addr) {
+std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t addr,
+                                                   AnalysisArtifacts* out_artifacts) {
     if (!ctx->memory_image) {
         throw std::runtime_error("No binary loaded");
     }
@@ -543,13 +546,13 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("No current action group");
     }
 
-    // Enforce GDT-based and built-in prototypes before action reset.
+    // Enforce GDT-based, injected (fission-signatures), and built-in prototypes before action reset.
     {
         fission::types::PrototypeEnforcer proto_enforcer;
+        const auto* injected = ctx->injected_signatures.empty() ? nullptr : &ctx->injected_signatures;
         if (!ctx->symbols.empty()) {
-            proto_enforcer.enforce_iat_prototypes(ctx->arch.get(), ctx->symbols);
+            proto_enforcer.enforce_iat_prototypes(ctx->arch.get(), ctx->symbols, injected);
         }
-
         std::string func_name;
         auto it = ctx->symbols.find(addr);
         if (it != ctx->symbols.end()) {
@@ -560,15 +563,11 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
                 func_name = it_global->second;
             }
         }
-
-        // Fallback to the actual function symbol name when the address is not in
-        // import/global maps (common for internal/user functions like cpp_*).
         if (func_name.empty() && fd) {
             func_name = fd->getName();
         }
-
         if (!func_name.empty()) {
-            proto_enforcer.enforce_single_prototype(ctx->arch.get(), addr, func_name);
+            proto_enforcer.enforce_single_prototype(ctx->arch.get(), addr, func_name, injected);
         }
     }
 
@@ -586,27 +585,42 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     ctx->arch->clearAnalysis(fd);
     current_action->reset(*fd);
 
-    // P1-A: Seed Ghidra's type recommendation system BEFORE action->perform()
-    // so that ActionInferTypes picks up API-derived types in its own loop.
-    {
-        fission::analysis::TypePropagator seeder(ctx->arch.get(), &ctx->struct_registry);
-        seeder.set_compiler_id(ctx->compiler_id.empty() ? "windows" : ctx->compiler_id);
-        seeder.seed_before_action(fd);
-    }
-
     fission::utils::log_output() << "[DecompilerCore] Performing decompilation..." << std::endl;
-    
-    // Perform decompilation
+
+    // Perform decompilation. On Duplicate VariablePiece (our strict types + Ghidra
+    // Merge conflict), retry without seed_before_action to get a valid decompilation.
     auto perform_action = [&]() {
         auto perform_start = std::chrono::steady_clock::now();
         current_action->perform(*fd);
         timing_recorder.timing.main_perform_ms += elapsed_ms(perform_start);
     };
-    try {
+
+    auto do_seed_and_perform = [&](bool with_seed) {
+        if (with_seed) {
+            fission::analysis::TypePropagator seeder(ctx->arch.get(), &ctx->struct_registry);
+            seeder.set_compiler_id(ctx->compiler_id.empty() ? "windows" : ctx->compiler_id);
+            seeder.seed_before_action(fd);
+        }
         perform_action();
+    };
+
+    bool did_retry_dvp = false;
+    try {
+        do_seed_and_perform(true);
     } catch (const ghidra::LowlevelError& e) {
         std::string msg = e.explain;
-        if (msg.find("Function loaded for inlining") != std::string::npos && !ctx->allow_inline) {
+        if (msg.find("Duplicate VariablePiece") != std::string::npos && !did_retry_dvp) {
+            fission::utils::log_output() << "[DecompilerCore] Duplicate VariablePiece, retrying without type seed"
+                      << std::endl;
+            did_retry_dvp = true;
+            ctx->arch->clearAnalysis(fd);
+            current_action->reset(*fd);
+            try {
+                do_seed_and_perform(false);
+            } catch (const ghidra::LowlevelError& e2) {
+                throw std::runtime_error("Ghidra LowlevelError: " + e2.explain + " (retry without seed failed)");
+            }
+        } else if (msg.find("Function loaded for inlining") != std::string::npos && !ctx->allow_inline) {
             fission::utils::log_output() << "[DecompilerCore] WARNING: Inline-loaded function, clearing analysis and retrying"
                       << std::endl;
             if (ctx->arch) {
@@ -626,8 +640,21 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Unknown error during decompilation");
     }
 
-    fission::decompiler::AnalysisArtifacts analysis =
-        fission::decompiler::run_analysis_passes(ctx, fd, current_action, MAX_FUNCTION_SIZE);
+    fission::decompiler::AnalysisArtifacts analysis;
+    try {
+        analysis = fission::decompiler::run_analysis_passes(ctx, fd, current_action, MAX_FUNCTION_SIZE);
+    } catch (const ghidra::LowlevelError& e) {
+        if (std::string(e.explain).find("Duplicate VariablePiece") != std::string::npos) {
+            fission::utils::log_output() << "[DecompilerCore] Duplicate VariablePiece in analysis passes, using base result"
+                      << std::endl;
+            analysis = fission::decompiler::AnalysisArtifacts{};
+        } else {
+            throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+        }
+    }
+    if (out_artifacts) {
+        *out_artifacts = analysis;
+    }
     timing_recorder.timing.analysis_passes_ms = analysis.analysis_passes_ms;
     timing_recorder.timing.callee_preanalysis_ms = analysis.callee_preanalysis_ms;
     timing_recorder.timing.callgraph_reanalysis_ms = analysis.callgraph_reanalysis_ms;
@@ -666,6 +693,65 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     fission::utils::log_output() << "[DecompilerCore] Decompilation complete, " << result.size() << " bytes after post-processing" << std::endl;
     
     return result;
+}
+
+// Serialize StructureAnalyzer's captured_structs to InferredTypeInfo JSON
+// Format matches fission_loader::InferredTypeInfo for Rust serde
+static std::string serialize_inferred_types_to_json(const fission::decompiler::AnalysisArtifacts& analysis) {
+    if (analysis.captured_structs.empty()) {
+        return "[]";
+    }
+    std::ostringstream out;
+    out << "[";
+    bool first_type = true;
+    for (const auto& [base_key, st] : analysis.captured_structs) {
+        if (!st) continue;
+        if (!first_type) out << ",";
+        first_type = false;
+
+        std::string struct_name = st->getName();
+        if (struct_name.empty()) struct_name = "anon";
+
+        out << "{\"name\":\"" << fission::utils::json_escape(struct_name)
+            << "\",\"mangled_name\":\"\",\"kind\":\"struct\",\"fields\":[";
+
+        bool first_field = true;
+        int total_size = 0;
+        for (auto iter = st->beginField(); iter != st->endField(); ++iter) {
+            if (!first_field) out << ",";
+            first_field = false;
+
+            int foff = iter->offset;
+            std::string fname = iter->name;
+            if (fname.empty()) fname = "field_" + std::to_string(foff);
+
+            int fsize = 4;
+            if (iter->type && iter->type->getSize() > 0) {
+                fsize = iter->type->getSize();
+            }
+            std::string ftype = "unknown";
+            if (iter->type && !iter->type->getName().empty()) {
+                ftype = iter->type->getName();
+            }
+            total_size = std::max(total_size, foff + fsize);
+
+            out << "{\"name\":\"" << fission::utils::json_escape(fname)
+                << "\",\"type_name\":\"" << fission::utils::json_escape(ftype)
+                << "\",\"offset\":" << foff
+                << ",\"size\":" << fsize << "}";
+        }
+        out << "],\"size\":" << total_size << ",\"metadata_address\":0}";
+    }
+    out << "]";
+    return out.str();
+}
+
+std::string fission::decompiler::run_decompilation_with_metadata(DecompContext* ctx, uint64_t addr) {
+    fission::decompiler::AnalysisArtifacts artifacts;
+    std::string code = run_decompilation(ctx, addr, &artifacts);
+    std::string inferred_json = serialize_inferred_types_to_json(artifacts);
+    std::string escaped_code = fission::utils::json_escape(code);
+    return "{\"code\":\"" + escaped_code + "\",\"inferred_types\":" + inferred_json + "}";
 }
 
 // Simple AssemblyEmit implementation for capturing disassembly

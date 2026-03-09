@@ -14,6 +14,71 @@ use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
+/// JSON-parsable field info (matches C++ output)
+#[derive(Debug, Clone, serde::Deserialize)]
+struct DecompilationFieldInfo {
+    name: String,
+    #[serde(default)]
+    type_name: String,
+    offset: u32,
+    #[serde(default)]
+    size: u32,
+}
+
+/// JSON-parsable type info (matches C++ output)
+#[derive(Debug, Clone, serde::Deserialize)]
+struct DecompilationTypeInfo {
+    name: String,
+    #[serde(default)]
+    mangled_name: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    fields: Vec<DecompilationFieldInfo>,
+    #[serde(default)]
+    size: u32,
+    #[serde(default)]
+    metadata_address: u64,
+}
+
+impl From<DecompilationTypeInfo> for fission_loader::loader::types::InferredTypeInfo {
+    fn from(d: DecompilationTypeInfo) -> Self {
+        Self {
+            name: d.name,
+            mangled_name: d.mangled_name,
+            kind: d.kind,
+            fields: d
+                .fields
+                .into_iter()
+                .map(|f| fission_loader::loader::types::InferredFieldInfo {
+                    name: f.name,
+                    type_name: f.type_name,
+                    offset: f.offset,
+                    size: f.size,
+                })
+                .collect(),
+            size: d.size,
+            metadata_address: d.metadata_address,
+        }
+    }
+}
+
+/// Intermediate for JSON parsing (field name matches C++ "inferred_types")
+#[derive(Debug, serde::Deserialize)]
+struct DecompilationResultJson {
+    code: String,
+    #[serde(default)]
+    inferred_types: Vec<DecompilationTypeInfo>,
+}
+
+/// Result of decompilation with per-function inferred type metadata.
+/// Matches JSON from C++ `decomp_function_with_metadata`.
+#[derive(Debug, Clone)]
+pub struct DecompilationResult {
+    pub code: String,
+    pub inferred_types: Vec<fission_loader::loader::types::InferredTypeInfo>,
+}
+
 /// Serializes C++ DecompContext create/destroy across all threads.
 /// Ghidra's global state (Sleigh, TypeFactory) is not thread-safe during init or teardown.
 static DECOMP_FFI_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -155,6 +220,28 @@ impl DecompilerNative {
                     decomp_set_log_file(self.ctx, cpath.as_ptr());
                 }
             }
+        }
+    }
+
+    /// Inject function signatures for type inference (type back-propagation).
+    /// Expects JSON array matching fission-signatures win_api format.
+    /// Call before or after load_binary.
+    pub fn set_signatures_json(&mut self, json: &str) -> Result<()> {
+        self.check_valid()?;
+        let c_json = CString::new(json).map_err(|_| {
+            FissionError::decompiler("JSON string contains embedded null byte")
+        })?;
+        let ret = unsafe { decomp_set_signatures_json(self.ctx, c_json.as_ptr()) };
+        if ret == 0 {
+            Ok(())
+        } else {
+            let err = unsafe { decomp_get_last_error(self.ctx) };
+            let msg = if err.is_null() {
+                "Failed to parse signatures JSON".to_string()
+            } else {
+                unsafe { CStr::from_ptr(err).to_string_lossy().into_owned() }
+            };
+            Err(FissionError::decompiler(msg))
         }
     }
 
@@ -482,6 +569,42 @@ impl DecompilerNative {
         };
 
         Ok(result)
+    }
+
+    /// Decompile a function and return both code and inferred type metadata from StructureAnalyzer.
+    /// Use this when you need `replace_field_offsets` to work with per-function inferred structs
+    /// (e.g. stripped binaries where loader has no DWARF/RTTI).
+    pub fn decompile_with_metadata(&self, addr: u64) -> Result<DecompilationResult> {
+        use super::ffi::decomp_function_with_metadata;
+
+        self.check_valid()?;
+
+        let result_ptr = unsafe { decomp_function_with_metadata(self.ctx, addr) };
+
+        if result_ptr.is_null() {
+            return Err(FissionError::decompiler(self.get_last_error()));
+        }
+
+        let json_str = unsafe {
+            let cstr = CStr::from_ptr(result_ptr);
+            let s = cstr.to_string_lossy().into_owned();
+            decomp_free_string(result_ptr);
+            s
+        };
+
+        let parsed: DecompilationResultJson = serde_json::from_str(&json_str)
+            .map_err(|e| FissionError::decompiler(format!("Failed to parse decompilation JSON: {}", e)))?;
+
+        let inferred_types: Vec<_> = parsed
+            .inferred_types
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
+        Ok(DecompilationResult {
+            code: parsed.code,
+            inferred_types,
+        })
     }
 
     /// Get Pcode JSON for a function at the given address

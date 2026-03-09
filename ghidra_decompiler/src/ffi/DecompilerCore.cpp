@@ -20,6 +20,10 @@ std::string fission::ffi::run_decompilation(DecompContext* ctx, uint64_t addr) {
     return fission::decompiler::run_decompilation(ctx, addr);
 }
 
+std::string fission::ffi::run_decompilation_with_metadata(DecompContext* ctx, uint64_t addr) {
+    return fission::decompiler::run_decompilation_with_metadata(ctx, addr);
+}
+
 std::string fission::ffi::run_decompilation_pcode(DecompContext* ctx, uint64_t addr) {
     return fission::decompiler::run_decompilation_pcode(ctx, addr);
 }

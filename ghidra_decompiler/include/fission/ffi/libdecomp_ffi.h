@@ -187,6 +187,19 @@ DECOMP_API void decomp_add_global_symbols_batch(
 );
 
 /**
+ * Inject function signatures for type inference (type back-propagation).
+ * Call before or after load_binary; signatures apply to all subsequent decompilations.
+ * Overwrites any previously set signatures for the same function names.
+ * Expects JSON array matching fission-signatures win_api format:
+ * [{"name":"MessageBoxA","return_type":"int","params":[{"name":"hWnd","type_name":"HWND"},...]}, ...]
+ *
+ * @param ctx Decompiler context
+ * @param json_signatures JSON array of ApiSignature
+ * @return 0 on success, -1 on parse error (invalid JSON or empty)
+ */
+DECOMP_API int decomp_set_signatures_json(DecompContext* ctx, const char* json_signatures);
+
+/**
  * Set a symbol provider callback for on-demand symbol queries.
  *
  * @param ctx Decompiler context
@@ -260,6 +273,18 @@ DECOMP_API DecompError decomp_add_memory_block(
  *         Caller must free with decomp_free_string().
  */
 DECOMP_API char* decomp_function(DecompContext* ctx, uint64_t addr);
+
+/**
+ * Decompile a function and return JSON with code and inferred type metadata.
+ * Format: {"code":"...","inferred_types":[{name, fields:[{offset,name,size,...}],...}]}
+ * Enables Rust replace_field_offsets to use StructureAnalyzer results.
+ *
+ * @param ctx Decompiler context (must have binary loaded)
+ * @param addr Start address of the function
+ * @return Allocated C string with JSON, or NULL on error.
+ *         Caller must free with decomp_free_string().
+ */
+DECOMP_API char* decomp_function_with_metadata(DecompContext* ctx, uint64_t addr);
 
 /**
  * Generate Pcode JSON for a function at the given address.

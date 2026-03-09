@@ -4,6 +4,8 @@ use crate::analysis::decomp::DecompilerNative;
 use fission_core::{Result, PATHS};
 #[cfg(feature = "native_decomp")]
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+#[cfg(feature = "native_decomp")]
+use fission_signatures::WIN_API_DB;
 
 #[cfg(feature = "native_decomp")]
 use std::collections::BTreeMap;
@@ -278,6 +280,15 @@ pub fn prepare_native_decompiler_for_binary<'a>(
     binary_data: &[u8],
     options: &mut PrepareOptions<'a>,
 ) -> Result<()> {
+    // Inject Win API signatures for type back-propagation (before load_binary is fine)
+    if let Ok(json) = serde_json::to_string(&WIN_API_DB.iter().collect::<Vec<_>>()) {
+        if let Err(e) = decomp.set_signatures_json(&json) {
+            if options.verbose {
+                eprintln!("[!] Warning: Failed to inject Win API signatures: {}", e);
+            }
+        }
+    }
+
     // Load binary image
     let t0 = Instant::now();
     decomp.load_binary(
