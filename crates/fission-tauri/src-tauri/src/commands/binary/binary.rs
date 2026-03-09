@@ -52,6 +52,7 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
                     gdt_path: gdt_path_owned.as_deref(),
                     timeout_ms: Some(config.decompiler.timeout_ms),
                     timings: None,
+                    signatures_json: None,
                 };
 
                 if let Err(e) = prepare_native_decompiler_for_binary(

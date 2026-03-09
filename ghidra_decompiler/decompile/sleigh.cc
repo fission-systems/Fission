@@ -15,16 +15,12 @@
  */
 #include "sleigh.hh"
 #include "loadimage.hh"
-#include <mutex>
 
 namespace ghidra {
 
-/// FISSION: Global mutex to serialize Sleigh::resolve, reset, and oneInstruction
-/// for multithreaded safety. SleighArchitecture::translators is shared across
-/// Architectures; concurrent access causes UAF (ContextCache) and container-overflow
-/// (PcodeCacher). recursive_mutex allows oneInstruction to hold the lock while
-/// calling obtainContext->resolve.
-static std::recursive_mutex sleigh_resolve_mutex;
+/// FISSION: Removed sleigh_resolve_mutex. Lock caused severe contention (26s single-thread
+/// vs 900s+ timeout with 8 workers). Root fix: Sleigh cache bypass in sleigh_arch.cc so
+/// each DecompContext gets its own Sleigh instance—no sharing, no lock needed.
 
 PcodeCacher::PcodeCacher(void)
 
@@ -550,10 +546,6 @@ Sleigh::~Sleigh(void)
 void Sleigh::reset(LoadImage *ld,ContextDatabase *c_db)
 
 {
-  // Fission: serialize with resolve() to prevent UAF when multiple workers share
-  // the static translators map - one worker's reset must not free cache while
-  // another is in resolve()->getContext().
-  std::lock_guard<std::recursive_mutex> lock(sleigh_resolve_mutex);
   delete cache;
   cache = (ContextCache *)0;
   if (discache != (DisassemblyCache *)0) {
@@ -625,7 +617,6 @@ ParserContext *Sleigh::obtainContext(const Address &addr,int4 state) const
 void Sleigh::resolve(ParserContext &pos) const
 
 {
-  std::lock_guard<std::recursive_mutex> lock(sleigh_resolve_mutex);
   loader->loadFill(pos.getBuffer(),16,pos.getAddr());
   ParserWalkerChange walker(&pos);
   pos.deallocateState(walker);	// Clear the previous resolve and initialize the walker
@@ -681,7 +672,6 @@ void Sleigh::resolve(ParserContext &pos) const
 void Sleigh::resolveHandles(ParserContext &pos) const
 
 {
-  std::lock_guard<std::recursive_mutex> lock(sleigh_resolve_mutex);
   TripleSymbol *triple;
   Constructor *ct;
   int4 oper,numoper;
@@ -759,7 +749,6 @@ int4 Sleigh::printAssembly(AssemblyEmit &emit,const Address &baseaddr) const
 int4 Sleigh::oneInstruction(PcodeEmit &emit,const Address &baseaddr) const
 
 {
-  std::lock_guard<std::recursive_mutex> lock(sleigh_resolve_mutex);  // Fission: protect pcode_cache
   int4 fallOffset;
   if (alignment != 1) {
     if ((baseaddr.getOffset() % alignment)!=0) {

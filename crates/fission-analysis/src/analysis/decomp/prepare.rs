@@ -10,6 +10,8 @@ use fission_signatures::WIN_API_DB;
 #[cfg(feature = "native_decomp")]
 use std::collections::BTreeMap;
 #[cfg(feature = "native_decomp")]
+use std::sync::Arc;
+#[cfg(feature = "native_decomp")]
 use std::collections::HashSet;
 #[cfg(feature = "native_decomp")]
 use std::time::Instant;
@@ -39,6 +41,18 @@ pub struct PrepareOptions<'a> {
     pub timeout_ms: Option<u64>,
     /// When set, per-step timings are written here (e.g. for `--benchmark` JSON).
     pub timings: Option<&'a mut PrepareTimings>,
+    /// Pre-serialized Win API signatures JSON. When set, used directly for set_signatures_json
+    /// instead of serializing WIN_API_DB per-call (avoids redundant work in parallel workers).
+    pub signatures_json: Option<&'a str>,
+}
+
+#[cfg(feature = "native_decomp")]
+/// Serialize Win API signatures to JSON once. Use for parallel workers to avoid
+/// redundant serialization per worker.
+pub fn serialize_win_api_signatures_json() -> Option<Arc<str>> {
+    serde_json::to_string(&WIN_API_DB.iter().collect::<Vec<_>>())
+        .ok()
+        .map(Arc::from)
 }
 
 #[cfg(feature = "native_decomp")]
@@ -281,8 +295,16 @@ pub fn prepare_native_decompiler_for_binary<'a>(
     options: &mut PrepareOptions<'a>,
 ) -> Result<()> {
     // Inject Win API signatures for type back-propagation (before load_binary is fine)
-    if let Ok(json) = serde_json::to_string(&WIN_API_DB.iter().collect::<Vec<_>>()) {
-        if let Err(e) = decomp.set_signatures_json(&json) {
+    let json_owned: Option<String> = options
+        .signatures_json
+        .is_none()
+        .then(|| serde_json::to_string(&WIN_API_DB.iter().collect::<Vec<_>>()).ok())
+        .and_then(|o| o);
+    let json_ref: Option<&str> = options
+        .signatures_json
+        .or_else(|| json_owned.as_deref());
+    if let Some(json) = json_ref {
+        if let Err(e) = decomp.set_signatures_json(json) {
             if options.verbose {
                 eprintln!("[!] Warning: Failed to inject Win API signatures: {}", e);
             }

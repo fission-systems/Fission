@@ -173,17 +173,13 @@ bool SleighArchitecture::isTranslateReused(void)
 
 Translate *SleighArchitecture::buildTranslator(DocumentStorage &store)
 
-{				// Build a sleigh translator
-  map<int4,Sleigh>::iterator iter;
-
-  iter = translators.find(languageindex);
-  if (iter != translators.end()) {
-    iter->second.reset(loader, context);
-    return &iter->second;
-  }
-  pair<map<int4,Sleigh>::iterator,bool> res;
-  res = translators.emplace(piecewise_construct,forward_as_tuple(languageindex),forward_as_tuple(loader,context));
-  return &(*res.first).second;
+{
+  // FISSION: Bypass static translators cache. Each DecompContext/worker gets its own
+  // Sleigh instance. The cache caused all workers to share one Sleigh, requiring a
+  // global mutex (sleigh_resolve_mutex) that serialized oneInstruction—causing
+  // 900s+ timeout with 8 workers vs 26s single-thread. Extra .sla parse (~0.1–0.5s
+  // per worker) is acceptable for true parallelism. Architecture dtor will delete.
+  return new Sleigh(loader, context);
 }
 
 PcodeInjectLibrary *SleighArchitecture::buildPcodeInjectLibrary(void)

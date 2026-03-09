@@ -11,9 +11,16 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -213,6 +220,103 @@ def similarity_percent(left: str, right: str) -> float:
     return round(difflib.SequenceMatcher(None, left, right).ratio() * 100.0, 2)
 
 
+def _collect_process_resources(
+    pid: int,
+    interval_sec: float,
+    result_holder: dict[str, Any],
+) -> None:
+    """Background thread: sample process until it exits. Writes into result_holder."""
+    rss_list: list[float] = []
+    cpu_list: list[float] = []
+    try:
+        proc = psutil.Process(pid)
+        proc.cpu_percent()
+        while True:
+            try:
+                if not proc.is_running():
+                    break
+            except psutil.NoSuchProcess:
+                break
+            try:
+                rss_list.append(proc.memory_info().rss / (1024 * 1024))
+                cpu_list.append(proc.cpu_percent(interval=interval_sec))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                break
+    except psutil.NoSuchProcess:
+        pass
+    result_holder["max_rss_mb"] = round(max(rss_list), 2) if rss_list else 0.0
+    result_holder["avg_rss_mb"] = round(statistics.fmean(rss_list), 2) if rss_list else 0.0
+    result_holder["avg_cpu_pct"] = round(statistics.fmean(cpu_list), 2) if cpu_list else 0.0
+    result_holder["max_cpu_pct"] = round(max(cpu_list), 2) if cpu_list else 0.0
+    result_holder["sample_count"] = len(rss_list)
+
+
+def run_popen_with_resource_monitor(
+    popen: subprocess.Popen[Any],
+    timeout_sec: float,
+    interval_sec: float = 0.5,
+) -> tuple[subprocess.CompletedProcess[Any], dict[str, Any]]:
+    """Run popen, monitor resources in background, wait for exit. Returns (completed, resources)."""
+    result_holder: dict[str, Any] = {}
+    t = threading.Thread(
+        target=_collect_process_resources,
+        args=(popen.pid, interval_sec, result_holder),
+        daemon=True,
+    )
+    t.start()
+    try:
+        returncode = popen.wait(timeout=timeout_sec)
+        t.join(timeout=5.0)
+        stdout = popen.stdout.read() if popen.stdout else ""
+        stderr = popen.stderr.read() if popen.stderr else ""
+        completed = subprocess.CompletedProcess(
+            args=popen.args, returncode=returncode, stdout=stdout, stderr=stderr
+        )
+        return completed, result_holder
+    except subprocess.TimeoutExpired:
+        t.join(timeout=1.0)
+        popen.kill()
+        try:
+            stdout = popen.stdout.read() if popen.stdout else ""
+            stderr = popen.stderr.read() if popen.stderr else ""
+        except Exception:
+            stdout, stderr = "", ""
+        popen.wait(timeout=5)
+        raise subprocess.TimeoutExpired(popen.args, timeout_sec, stdout, stderr)
+
+
+def start_self_resource_monitor(
+    interval_sec: float = 0.5,
+) -> tuple[threading.Thread, dict[str, Any], threading.Event]:
+    """Start background thread sampling current process. Returns (thread, result_holder, stop_event)."""
+    result_holder: dict[str, Any] = {}
+    stop_event = threading.Event()
+
+    def collect() -> None:
+        rss_list: list[float] = []
+        cpu_list: list[float] = []
+        try:
+            proc = psutil.Process(os.getpid())
+            proc.cpu_percent()
+            while not stop_event.is_set():
+                try:
+                    rss_list.append(proc.memory_info().rss / (1024 * 1024))
+                    cpu_list.append(proc.cpu_percent(interval=interval_sec))
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    break
+        except Exception:
+            pass
+        result_holder["max_rss_mb"] = round(max(rss_list), 2) if rss_list else 0.0
+        result_holder["avg_rss_mb"] = round(statistics.fmean(rss_list), 2) if rss_list else 0.0
+        result_holder["avg_cpu_pct"] = round(statistics.fmean(cpu_list), 2) if cpu_list else 0.0
+        result_holder["max_cpu_pct"] = round(max(cpu_list), 2) if cpu_list else 0.0
+        result_holder["sample_count"] = len(rss_list)
+
+    t = threading.Thread(target=collect, daemon=True)
+    t.start()
+    return t, result_holder, stop_event
+
+
 NATIVE_TIMING_PHASE_KEYS = (
     "follow_flow_ms",
     "main_perform_ms",
@@ -308,8 +412,21 @@ def run_fission_full(
     add_library_search_path(env, "LD_LIBRARY_PATH", bin_dir)
 
     wall_start = time.perf_counter()
+    resources: dict[str, Any] = {}
     try:
-        try:
+        if HAS_PSUTIL:
+            popen = subprocess.Popen(
+                cmd,
+                cwd=ROOT_DIR,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            completed, resources = run_popen_with_resource_monitor(
+                popen, timeout_sec=timeout_sec, interval_sec=0.5
+            )
+        else:
             completed = subprocess.run(
                 cmd,
                 cwd=ROOT_DIR,
@@ -320,20 +437,9 @@ def run_fission_full(
                 timeout=timeout_sec,
                 check=False,
             )
-        except subprocess.TimeoutExpired as exc:
-            partial_stdout = exc.stdout or ""
-            partial_stderr = exc.stderr or ""
-            stdout_log_path.write_text(partial_stdout, encoding="utf-8")
-            stderr_log_path.write_text(partial_stderr, encoding="utf-8")
-            raise RuntimeError(
-                f"fission_cli timed out after {timeout_sec}s.\n"
-                f"stdout log: {stdout_log_path}\n"
-                f"stderr log: {stderr_log_path}"
-            ) from exc
         wall_clock_sec = time.perf_counter() - wall_start
         stdout_log_path.write_text(completed.stdout, encoding="utf-8")
         stderr_log_path.write_text(completed.stderr, encoding="utf-8")
-
         if completed.returncode != 0:
             raise RuntimeError(
                 f"fission_cli failed with exit code {completed.returncode}.\n"
@@ -344,10 +450,19 @@ def run_fission_full(
                 "tail stderr:\n"
                 f"stderr:\n{completed.stderr[-4000:]}"
             )
-
         shutil.copyfile(temp_output.name, raw_output_path)
         with raw_output_path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
+    except subprocess.TimeoutExpired as exc:
+        partial_stdout = getattr(exc, "stdout", None) or ""
+        partial_stderr = getattr(exc, "stderr", None) or ""
+        stdout_log_path.write_text(partial_stdout, encoding="utf-8")
+        stderr_log_path.write_text(partial_stderr, encoding="utf-8")
+        raise RuntimeError(
+            f"fission_cli timed out after {timeout_sec}s.\n"
+            f"stdout log: {stdout_log_path}\n"
+            f"stderr log: {stderr_log_path}"
+        ) from exc
     finally:
         try:
             os.unlink(temp_output.name)
@@ -381,6 +496,8 @@ def run_fission_full(
     meta = dict(payload.get("_meta", {}))
     meta["wall_clock_sec"] = round(wall_clock_sec, 6)
     meta["raw_output_path"] = str(raw_output_path)
+    if resources:
+        meta["resources"] = resources
 
     return {
         "meta": meta,
@@ -413,6 +530,12 @@ def run_ghidra_full(
     monitor = ConsoleTaskMonitor()
     raw_output_path = output_dir / "ghidra_full.json"
     wall_start = time.perf_counter()
+
+    res_thread = None
+    res_holder: dict[str, Any] = {}
+    res_stop: threading.Event | None = None
+    if HAS_PSUTIL:
+        res_thread, res_holder, res_stop = start_self_resource_monitor(interval_sec=0.5)
     init_start = time.perf_counter()
     total_decomp_sec = 0.0
     entries: dict[str, dict[str, Any]] = {}
@@ -491,18 +614,28 @@ def run_ghidra_full(
 
     wall_clock_sec = time.perf_counter() - wall_start
 
+    if HAS_PSUTIL and res_stop is not None and res_thread is not None:
+        res_stop.set()
+        res_thread.join(timeout=3.0)
+
+    ghidra_resources = res_holder if res_holder else {}
+
+    meta_dict: dict[str, Any] = {
+        "tool": "ghidra",
+        "backend": "pyghidra",
+        "ghidra_install_dir": str(ghidra_dir),
+        "function_count": len(entries),
+        "init_sec": round(init_sec, 6),
+        "total_decomp_sec": round(total_decomp_sec, 6),
+        "wall_clock_sec": round(wall_clock_sec, 6),
+        "per_function_timeout_sec": per_function_timeout_sec,
+        "skip_thunks": skip_thunks,
+    }
+    if ghidra_resources:
+        meta_dict["resources"] = ghidra_resources
+
     payload = {
-        "_meta": {
-            "tool": "ghidra",
-            "backend": "pyghidra",
-            "ghidra_install_dir": str(ghidra_dir),
-            "function_count": len(entries),
-            "init_sec": round(init_sec, 6),
-            "total_decomp_sec": round(total_decomp_sec, 6),
-            "wall_clock_sec": round(wall_clock_sec, 6),
-            "per_function_timeout_sec": per_function_timeout_sec,
-            "skip_thunks": skip_thunks,
-        },
+        "_meta": meta_dict,
         "functions": list(entries.values()),
     }
     with raw_output_path.open("w", encoding="utf-8") as handle:
@@ -653,6 +786,20 @@ def build_comparison(
             if raw_scores
             else 0.0,
         },
+        "resources": {
+            "fission_max_rss_mb": round(
+                float(fission["meta"].get("resources", {}).get("max_rss_mb", 0.0)), 2
+            ),
+            "fission_avg_cpu_pct": round(
+                float(fission["meta"].get("resources", {}).get("avg_cpu_pct", 0.0)), 2
+            ),
+            "ghidra_max_rss_mb": round(
+                float(ghidra["meta"].get("resources", {}).get("max_rss_mb", 0.0)), 2
+            ),
+            "ghidra_avg_cpu_pct": round(
+                float(ghidra["meta"].get("resources", {}).get("avg_cpu_pct", 0.0)), 2
+            ),
+        },
         "speed": {
             "fission_total_sec": round(float(fission["meta"].get("total_decomp_sec", 0.0)), 6),
             "fission_postprocess_sec": round(
@@ -713,26 +860,43 @@ def write_summary_files(
         f"- Ghidra wall clock: {summary['speed']['ghidra_wall_sec']:.3f}s",
         f"- Wall speedup vs Ghidra: {summary['speed']['wall_speedup_vs_ghidra']:.3f}x",
         "",
-        "## Coverage",
-        "",
-        f"- Fission functions: {summary['fission']['function_count']} (success {summary['fission']['success_count']})",
-        f"- Fission reported-success before cleanup: {summary['fission']['reported_success_count']}",
-        f"- Fission explicit errors: {summary['fission']['explicit_error_count']}",
-        f"- Fission synthetic failures: {summary['fission']['synthetic_failure_count']}",
-        f"- Ghidra functions: {summary['ghidra']['function_count']} (success {summary['ghidra']['success_count']})",
-        f"- Fission-only addresses: {summary['matching']['fission_only_count']}",
-        f"- Ghidra-only addresses: {summary['matching']['ghidra_only_count']}",
-        "",
-        "## Speed Breakdown",
-        "",
-        f"- Fission init: {summary['speed']['fission_init_sec']:.3f}s",
-        f"- Fission pure decomp: {summary['speed']['fission_total_sec']:.3f}s",
-        f"- Fission postprocess: {summary['speed']['fission_postprocess_sec']:.3f}s",
-        f"- Ghidra pure decomp: {summary['speed']['ghidra_total_sec']:.3f}s",
-        "",
-        "## Lowest Similarity Samples",
+        "## Resources (requires psutil)",
         "",
     ]
+    res = summary.get("resources", {})
+    if res.get("fission_max_rss_mb") or res.get("ghidra_max_rss_mb"):
+        lines.extend(
+            [
+                f"- Fission max RSS: {res.get('fission_max_rss_mb', 0):.2f} MB, avg CPU: {res.get('fission_avg_cpu_pct', 0):.2f}%",
+                f"- Ghidra max RSS: {res.get('ghidra_max_rss_mb', 0):.2f} MB, avg CPU: {res.get('ghidra_avg_cpu_pct', 0):.2f}%",
+            ]
+        )
+    else:
+        lines.append("- Install `pip install psutil` for resource usage metrics.")
+    lines.extend(
+        [
+            "",
+            "## Coverage",
+            "",
+            f"- Fission functions: {summary['fission']['function_count']} (success {summary['fission']['success_count']})",
+            f"- Fission reported-success before cleanup: {summary['fission']['reported_success_count']}",
+            f"- Fission explicit errors: {summary['fission']['explicit_error_count']}",
+            f"- Fission synthetic failures: {summary['fission']['synthetic_failure_count']}",
+            f"- Ghidra functions: {summary['ghidra']['function_count']} (success {summary['ghidra']['success_count']})",
+            f"- Fission-only addresses: {summary['matching']['fission_only_count']}",
+            f"- Ghidra-only addresses: {summary['matching']['ghidra_only_count']}",
+            "",
+            "## Speed Breakdown",
+            "",
+            f"- Fission init: {summary['speed']['fission_init_sec']:.3f}s",
+            f"- Fission pure decomp: {summary['speed']['fission_total_sec']:.3f}s",
+            f"- Fission postprocess: {summary['speed']['fission_postprocess_sec']:.3f}s",
+            f"- Ghidra pure decomp: {summary['speed']['ghidra_total_sec']:.3f}s",
+            "",
+            "## Lowest Similarity Samples",
+            "",
+        ],
+    )
 
     if low_rows:
         lines.append("| Address | Fission | Ghidra | Norm Similarity |")
@@ -814,6 +978,14 @@ def print_console_summary(summary: dict[str, Any], output_dir: Path) -> None:
     print(
         f"Wall speedup vs Ghidra: {summary['speed']['wall_speedup_vs_ghidra']:.3f}x"
     )
+    res = summary.get("resources", {})
+    if res.get("fission_max_rss_mb") or res.get("ghidra_max_rss_mb"):
+        print(
+            f"Resources: Fission max_rss={res.get('fission_max_rss_mb', 0):.2f}MB avg_cpu={res.get('fission_avg_cpu_pct', 0):.2f}% | "
+            f"Ghidra max_rss={res.get('ghidra_max_rss_mb', 0):.2f}MB avg_cpu={res.get('ghidra_avg_cpu_pct', 0):.2f}%"
+        )
+    elif not HAS_PSUTIL:
+        print("Resources: (install psutil for metrics)")
     hot_rows = summary["samples"].get("fission_hot_path_phases", [])
     if hot_rows:
         top = hot_rows[0]

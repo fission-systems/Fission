@@ -5,7 +5,8 @@ use crate::cli::oneshot::common::{
 use crate::cli::output::OutputSilencer;
 use fission_analysis::analysis::decomp::postprocess::PostProcessor;
 use fission_analysis::analysis::decomp::{
-    prepare_native_decompiler_for_binary, PrepareOptions, PrepareTimings,
+    prepare_native_decompiler_for_binary, serialize_win_api_signatures_json, PrepareOptions,
+    PrepareTimings,
 };
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -221,7 +222,11 @@ fn run_parallel_decompilation<'a>(
     let inferred_types = binary.inferred_types.clone();
     let string_map = binary.inner().string_map.clone();
 
-    let num_workers = rayon::current_num_threads().max(1);
+    // Dynamic worker scaling: avoid negative scaling when function count is low.
+    // Each worker incurs ~3–4s init (FID/GDT/.sla). With 20 functions, 8 workers → 62s vs 1 → 26s.
+    // Heuristic: aim for ≥50 functions per worker so init cost is amortized (Amdahl's Law).
+    let ideal_workers = (functions.len() / 50).max(1);
+    let num_workers = ideal_workers.min(rayon::current_num_threads().max(1));
 
     // Round-robin distribution: spread heavy functions (often at low addresses) across workers
     // instead of clustering them in the first chunk (address-ordered chunks).
@@ -269,7 +274,11 @@ fn run_parallel_decompilation<'a>(
         Vec::new()
     };
 
-    // Remaining buckets: each worker creates its own decompiler
+    // Pre-serialize Win API signatures once (avoid per-worker JSON serialization).
+    let signatures_json = serialize_win_api_signatures_json();
+
+    // Each worker creates its own decompiler (init per bucket). num_workers is capped above
+    // so that small batches (e.g. limit 20) use 1 worker → 26s; large batches use all cores.
     let rest_buckets: Vec<_> = buckets.into_iter().skip(1).collect();
     let rest_results: Vec<Vec<DecompEntry>> = rest_buckets
         .par_iter()
@@ -282,6 +291,7 @@ fn run_parallel_decompilation<'a>(
                 gdt_path: gdt_path_owned.as_deref(),
                 timeout_ms: Some(config.decompiler.timeout_ms),
                 timings: None,
+                signatures_json: signatures_json.as_deref(),
             };
             if prepare_native_decompiler_for_binary(&mut decomp, binary, binary_data, &mut opts)
                 .is_err()
@@ -515,6 +525,7 @@ pub(super) fn run_decompilation(
         let gdt_path_owned = fission_core::PATHS
             .get_gdt_path(binary.is_64bit)
             .and_then(|p| p.to_str().map(String::from));
+        let signatures_json = serialize_win_api_signatures_json();
         let mut options = PrepareOptions {
             verbose: cli.verbose,
             compiler_id: compiler_id.as_deref(),
@@ -525,6 +536,7 @@ pub(super) fn run_decompilation(
             } else {
                 None
             },
+            signatures_json: signatures_json.as_deref(),
         };
         if let Err(e) =
             prepare_native_decompiler_for_binary(&mut decomp, binary, binary_data, &mut options)

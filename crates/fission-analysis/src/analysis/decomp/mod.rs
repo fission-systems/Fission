@@ -36,7 +36,10 @@ pub mod prepare;
 
 pub use postprocess::RustPostProcessOptions;
 #[cfg(feature = "native_decomp")]
-pub use prepare::{prepare_native_decompiler_for_binary, PrepareOptions, PrepareTimings};
+pub use prepare::{
+    prepare_native_decompiler_for_binary, serialize_win_api_signatures_json, PrepareOptions,
+    PrepareTimings,
+};
 
 #[cfg(feature = "native_decomp")]
 use self::cache::DecompilerCache;

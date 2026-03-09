@@ -48,6 +48,17 @@ python3 scripts/test/batch_benchmark/full_decomp_benchmark.py \
 - `total_postprocess_sec`: Rust 후처리 시간 합
 - `wall_clock_sec`: 전체 실행 시간
 
+## 타임아웃 원인 규명
+
+`--limit 20` 실행 시 900초 타임아웃이 발생한다면:
+
+```bash
+# 범인 함수 식별 (각 함수를 120초 제한으로 개별 테스트)
+python scripts/test/batch_benchmark/find_timeout_culprit.py samples/windows/x64/putty.exe --limit 20 --timeout 120 --verbose
+```
+
+상세 절차: `docs/debug/TIMEOUT_DEBUG_GUIDE.md` 참고.
+
 ## 현재 검증 결과
 
 - `test_control_flow_x64_O0.exe --limit 30`
