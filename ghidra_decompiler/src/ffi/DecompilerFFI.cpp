@@ -11,6 +11,8 @@
 #include "fission/analysis/FunctionMatcher.h"
 #include "fission/utils/logger.h"
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
 
 namespace fission {
 namespace ffi {
@@ -80,34 +82,56 @@ DecompError add_function(DecompContext* ctx, uint64_t addr, const char* name) {
 }
 
 // ===========================================================================
-// FID (Function ID) Management Implementation
+// FID (Function ID) Management Implementation - Global Cache
 // ===========================================================================
+//
+// FID databases are 100% read-only after load. Workers sharing the same path
+// get shared_ptr from cache instead of re-parsing 15MB+ .fidbf. Eliminates
+// I/O contention when multiple DecompContexts load the same database.
+
+namespace {
+std::mutex g_fid_cache_mutex;
+std::unordered_map<std::string, std::shared_ptr<FidDatabase>> g_fid_cache;
+
+std::shared_ptr<FidDatabase> get_or_load_fid(const std::string& path) {
+    std::lock_guard<std::mutex> lock(g_fid_cache_mutex);
+    auto it = g_fid_cache.find(path);
+    if (it != g_fid_cache.end()) {
+        return it->second;
+    }
+    auto db = std::make_shared<FidDatabase>();
+    if (!db->load(path)) {
+        return nullptr;
+    }
+    g_fid_cache[path] = db;
+    return db;
+}
+}  // namespace
 
 DecompError load_fid_database(DecompContext* ctx, const char* db_path) {
     if (!ctx || !db_path) return DECOMP_ERR_INVALID_CONTEXT;
-    
-    std::lock_guard<std::mutex> lock(ctx->mutex);
-    
+
     try {
-        auto new_db = std::make_unique<FidDatabase>();
-        if (!new_db->load(db_path)) {
+        std::shared_ptr<FidDatabase> db = get_or_load_fid(db_path);
+        if (!db) {
+            std::lock_guard<std::mutex> lock(ctx->mutex);
             ctx->last_error = "Failed to load FID database: ";
             ctx->last_error += db_path;
             return DECOMP_ERR_FID_LOAD;
         }
-        
+
+        std::lock_guard<std::mutex> lock(ctx->mutex);
         if (ctx->fid_databases.empty()) {
-            fission::utils::log_stream() << "[DecompilerFFI] Loaded FID database: " << db_path 
-                      << " (" << new_db->get_function_count() << " functions)" << std::endl;
+            fission::utils::log_stream() << "[DecompilerFFI] Loaded FID database: " << db_path
+                      << " (" << db->get_function_count() << " functions)" << std::endl;
         }
-        
-        ctx->fid_databases.push_back(std::move(new_db));
-        
-        // Register the newly-loaded database with the matcher for multi-DB search
+
+        ctx->fid_databases.push_back(db);
         ctx->matcher->add_fid_database(ctx->fid_databases.back().get());
-        
+
         return DECOMP_OK;
     } catch (const std::exception& e) {
+        std::lock_guard<std::mutex> lock(ctx->mutex);
         ctx->last_error = e.what();
         return DECOMP_ERR_FID_LOAD;
     }

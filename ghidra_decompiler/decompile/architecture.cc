@@ -172,6 +172,7 @@ Architecture::Architecture(void)
   printlist.push_back(print);
   options = new OptionDatabase(this);
   loadersymbols_parsed = false;
+  analysis_timeout_sec = 0.0;	// FISSION: Default to no timeout
 #ifdef CPUI_STATISTICS
   stats = new Statistics();
 #endif

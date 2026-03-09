@@ -116,6 +116,7 @@ struct DecompContext {
     bool analyze_loops = true;
     bool readonly_propagate = true;
     bool record_jumploads = true;
+    uint32_t timeout_ms = 0;   ///< Analysis timeout in ms (0 = no timeout)
     bool disable_toomanyinstructions_error = true;
     bool allow_inline = false;
 
@@ -128,8 +129,9 @@ struct DecompContext {
     // Post-processing options (configurable via set_feature with "pp_" prefix)
     fission::decompiler::PostProcessOptions post_process_options;
     
-    // FID Support - Multiple databases for better matching
-    std::vector<std::unique_ptr<fission::analysis::FidDatabase>> fid_databases;
+    // FID Support - Multiple databases for better matching.
+    // shared_ptr allows global cache (get_or_load_fid) to share read-only instances.
+    std::vector<std::shared_ptr<fission::analysis::FidDatabase>> fid_databases;
     std::unique_ptr<fission::analysis::FunctionMatcher> matcher;
 
     // VTable virtual call display names

@@ -1,0 +1,3 @@
+dyld[74415]: Library not loaded: @rpath/libdecomp.dylib
+  Referenced from: <D0BD3100-1F52-3648-A90E-E958F88DDEEE> /Users/sjkim1127/Fission/target/release/fission_cli
+  Reason: no LC_RPATH's found

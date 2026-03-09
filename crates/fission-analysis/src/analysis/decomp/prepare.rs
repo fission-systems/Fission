@@ -311,6 +311,10 @@ pub fn prepare_native_decompiler_for_binary<'a>(
         }
     }
 
+    if let Some(ms) = options.timeout_ms {
+        decomp.set_timeout_ms(ms as u32);
+    }
+
     // Load binary image
     let t0 = Instant::now();
     decomp.load_binary(
@@ -375,8 +379,6 @@ pub fn prepare_native_decompiler_for_binary<'a>(
     }
 
     register_inferred_types_and_params(decomp, binary, options.verbose);
-
-    // timeout_ms is in options for future use when the native decompiler exposes it
 
     Ok(())
 }

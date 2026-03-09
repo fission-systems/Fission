@@ -639,6 +639,15 @@ impl DecompilerNative {
         Ok(unsafe { CStr::from_ptr(timing_ptr).to_string_lossy().into_owned() })
     }
 
+    /// Set analysis timeout in milliseconds.
+    pub fn set_timeout_ms(&mut self, timeout_ms: u32) {
+        if self.check_valid().is_ok() {
+            unsafe {
+                decomp_set_timeout_ms(self.ctx, timeout_ms);
+            }
+        }
+    }
+
     /// Set GDT (Ghidra Data Type) file for type information
     pub fn set_gdt(&mut self, gdt_path: &str) -> Result<()> {
         self.check_valid()?;

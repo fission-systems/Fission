@@ -18,8 +18,12 @@
 
 #include <algorithm>
 #include <iostream>
+#include <mutex>
+#include <unordered_map>
+#include <memory>
 #include "fission/utils/logger.h"
 #include "fission/config/PathConfig.h"
+#include "fission/core/CliArchitecture.h"
 
 using namespace fission::config;
 
@@ -30,6 +34,10 @@ using fission::ffi::DecompContext;
 using fission::types::GdtBinaryParser;
 using fission::types::TypeManager;
 using fission::utils::file_exists;
+
+// Global GDT cache to avoid redundant parsing across workers.
+static std::mutex g_gdt_cache_mutex;
+static std::unordered_map<std::string, std::shared_ptr<GdtBinaryParser>> g_gdt_cache;
 
 static std::string select_sleigh_id(const DecompContext* ctx) {
     if (!ctx->sleigh_id.empty()) {
@@ -52,10 +60,26 @@ static bool try_load_gdt(ghidra::Architecture* arch, const std::string& path) {
         return false;
     }
 
-    fission::utils::log_stream() << "[DecompilerCore] Loading GDT from: " << path << std::endl;
-    GdtBinaryParser gdt;
-    if (gdt.load(path)) {
-        TypeManager::load_types_from_gdt(arch->types, &gdt, ArchPolicy::getPointerSize(arch));
+    std::shared_ptr<GdtBinaryParser> gdt_ptr;
+    {
+        std::lock_guard<std::mutex> lock(g_gdt_cache_mutex);
+        auto it = g_gdt_cache.find(path);
+        if (it != g_gdt_cache.end()) {
+            gdt_ptr = it->second;
+        } else {
+            fission::utils::log_stream() << "[DecompilerCore] First-time loading GDT: " << path << std::endl;
+            gdt_ptr = std::make_shared<GdtBinaryParser>();
+            if (gdt_ptr->load(path)) {
+                g_gdt_cache[path] = gdt_ptr;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    if (gdt_ptr && gdt_ptr->is_loaded()) {
+        fission::utils::log_stream() << "[DecompilerCore] Applying cached GDT: " << path << std::endl;
+        TypeManager::load_types_from_gdt(arch->types, gdt_ptr.get(), ArchPolicy::getPointerSize(arch));
         return true;
     }
 
@@ -92,164 +116,99 @@ static void ensure_symbol_provider(DecompContext* ctx) {
     }
 }
 
-static bool apply_default_space(DecompContext* ctx) {
+static bool apply_default_space(DecompContext* ctx, ghidra::Architecture* arch) {
     if (!ctx->memory_image) {
         return false;
     }
 
-    ghidra::AddrSpace* data_space = ctx->arch->getDefaultDataSpace();
+    ghidra::AddrSpace* data_space = arch->getDefaultDataSpace();
     if (!data_space) {
         return false;
     }
 
     ctx->memory_image->setDefaultSpace(data_space);
-    ctx->arch->refreshReadOnly();
+    if (auto* cli_arch = dynamic_cast<CliArchitecture*>(arch)) {
+        cli_arch->refreshReadOnly();
+    }
     return true;
 }
 
-static void apply_feature_flags(DecompContext* ctx) {
-    if (!ctx->arch) {
-        return;
-    }
-
-    ctx->arch->infer_pointers = ctx->infer_pointers;
-    ctx->arch->analyze_for_loops = ctx->analyze_loops;
-    ctx->arch->readonlypropagate = ctx->readonly_propagate;
+static void apply_feature_flags(DecompContext* ctx, ghidra::Architecture* arch) {
+    arch->infer_pointers = ctx->infer_pointers;
+    arch->analyze_for_loops = ctx->analyze_loops;
+    arch->readonlypropagate = ctx->readonly_propagate;
+    arch->analysis_timeout_sec = static_cast<double>(ctx->timeout_ms) / 1000.0;
 
     if (ctx->record_jumploads) {
-        ctx->arch->flowoptions |= ghidra::FlowInfo::record_jumploads;
+        arch->flowoptions |= ghidra::FlowInfo::record_jumploads;
     } else {
-        ctx->arch->flowoptions &= ~ghidra::FlowInfo::record_jumploads;
+        arch->flowoptions &= ~ghidra::FlowInfo::record_jumploads;
     }
 
     if (ctx->disable_toomanyinstructions_error) {
-        ctx->arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
+        arch->flowoptions &= ~ghidra::FlowInfo::error_toomanyinstructions;
     } else {
-        ctx->arch->flowoptions |= ghidra::FlowInfo::error_toomanyinstructions;
+        arch->flowoptions |= ghidra::FlowInfo::error_toomanyinstructions;
     }
 
-    // Keep OptionDatabase in sync with flags (mirrors original options.cc toggles)
-    if (ctx->arch->options != nullptr) {
+    if (arch->options != nullptr) {
         try {
-            ctx->arch->options->set(ghidra::ELEM_INFERCONSTPTR.getId(), ctx->infer_pointers ? "on" : "off", "", "");
-            ctx->arch->options->set(ghidra::ELEM_ANALYZEFORLOOPS.getId(), ctx->analyze_loops ? "on" : "off", "", "");
-            ctx->arch->options->set(ghidra::ELEM_READONLY.getId(), ctx->readonly_propagate ? "on" : "off", "", "");
-            ctx->arch->options->set(ghidra::ELEM_JUMPLOAD.getId(), ctx->record_jumploads ? "on" : "off", "", "");
-            ctx->arch->options->set(ghidra::ELEM_ERRORTOOMANYINSTRUCTIONS.getId(), ctx->disable_toomanyinstructions_error ? "off" : "on", "", "");
-            ctx->arch->options->set(ghidra::ELEM_INLINE.getId(), ctx->allow_inline ? "on" : "off", "", "");
-            // Phase 1: output quality options
-            ctx->arch->options->set(ghidra::ELEM_NULLPRINTING.getId(),       ctx->null_printing       ? "on" : "off", "", "");
-            ctx->arch->options->set(ghidra::ELEM_INPLACEOPS.getId(),         ctx->inplace_ops         ? "on" : "off", "", "");
-            ctx->arch->options->set(ghidra::ELEM_NOCASTPRINTING.getId(),     ctx->no_cast_printing    ? "on" : "off", "", "");
-            ctx->arch->options->set(ghidra::ELEM_CONVENTIONPRINTING.getId(), ctx->convention_printing ? "on" : "off", "", "");
-        } catch (const std::exception& e) {
-            fission::utils::log_stream() << "[DecompilerCore] apply_feature_flags: option sync failed: "
-                      << e.what() << std::endl;
-        } catch (...) {
-            fission::utils::log_stream() << "[DecompilerCore] apply_feature_flags: option sync failed (unknown)" << std::endl;
-        }
+            arch->options->set(ghidra::ELEM_INFERCONSTPTR.getId(), ctx->infer_pointers ? "on" : "off", "", "");
+            arch->options->set(ghidra::ELEM_ANALYZEFORLOOPS.getId(), ctx->analyze_loops ? "on" : "off", "", "");
+            arch->options->set(ghidra::ELEM_READONLY.getId(), ctx->readonly_propagate ? "on" : "off", "", "");
+            arch->options->set(ghidra::ELEM_JUMPLOAD.getId(), ctx->record_jumploads ? "on" : "off", "", "");
+            arch->options->set(ghidra::ELEM_ERRORTOOMANYINSTRUCTIONS.getId(), ctx->disable_toomanyinstructions_error ? "off" : "on", "", "");
+            arch->options->set(ghidra::ELEM_INLINE.getId(), ctx->allow_inline ? "on" : "off", "", "");
+            arch->options->set(ghidra::ELEM_NULLPRINTING.getId(),       ctx->null_printing       ? "on" : "off", "", "");
+            arch->options->set(ghidra::ELEM_INPLACEOPS.getId(),         ctx->inplace_ops         ? "on" : "off", "", "");
+            arch->options->set(ghidra::ELEM_NOCASTPRINTING.getId(),     ctx->no_cast_printing    ? "on" : "off", "", "");
+            arch->options->set(ghidra::ELEM_CONVENTIONPRINTING.getId(), ctx->convention_printing ? "on" : "off", "", "");
+        } catch (...) {}
     }
 }
 
-static void register_functions_from_symbols(DecompContext* ctx) {
-    if (ctx->symbols.empty()) {
-        return;
+static void register_functions_from_symbols(DecompContext* ctx, ghidra::Architecture* arch) {
+    if (ctx->symbols.empty() || !arch) return;
+
+    if (auto* cli_arch = dynamic_cast<CliArchitecture*>(arch)) {
+        cli_arch->injectIatSymbols(ctx->symbols);
     }
 
-    fission::utils::log_stream() << "[DecompilerCore] Injecting " << ctx->symbols.size() << " symbols" << std::endl;
-    ctx->arch->injectIatSymbols(ctx->symbols);
+    ghidra::Scope* global_scope = arch->symboltab->getGlobalScope();
+    if (!global_scope) return;
 
-    ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
-    if (!global_scope) {
-        return;
-    }
-
-    fission::utils::log_stream() << "[DecompilerCore] Using code space for registration: "
-              << ctx->arch->getDefaultCodeSpace()->getName() << std::endl;
-
-    int func_count = 0;
-    int existing_count = 0;
-    int failed_count = 0;
     for (const auto& [addr, name] : ctx->symbols) {
         try {
-            ghidra::Address func_addr(ctx->arch->getDefaultCodeSpace(), addr);
-            const ghidra::Funcdata* existing = global_scope->findFunction(func_addr);
-            if (!existing) {
-                const ghidra::FunctionSymbol* sym = global_scope->addFunction(func_addr, name);
-                if (sym) {
-                    func_count++;
-                } else {
-                    failed_count++;
-                    fission::utils::log_stream() << "[DecompilerCore] Failed to add function at 0x" << std::hex << addr << std::dec
-                              << ": " << name << std::endl;
-                }
-            } else {
-                existing_count++;
+            ghidra::Address func_addr(arch->getDefaultCodeSpace(), addr);
+            if (!global_scope->findFunction(func_addr)) {
+                global_scope->addFunction(func_addr, name);
             }
-        } catch (const std::exception& e) {
-            failed_count++;
-            fission::utils::log_stream() << "[DecompilerCore] Exception adding function at 0x" << std::hex << addr << std::dec
-                      << ": " << e.what() << std::endl;
-        } catch (...) {
-            failed_count++;
-        }
+        } catch (...) {}
     }
-
-    fission::utils::log_stream() << "[DecompilerCore] Function registration: " << func_count << " added, "
-              << existing_count << " already exist, " << failed_count << " failed" << std::endl;
-    fission::utils::log_stream() << "[DecompilerCore] Global scope: "
-              << static_cast<const void*>(global_scope) << std::endl;
 }
 
-static void apply_memory_block_readonly(DecompContext* ctx) {
-    if (ctx->memory_blocks.empty() || !ctx->arch->symboltab) {
-        return;
-    }
+static void apply_memory_block_readonly(DecompContext* ctx, ghidra::Architecture* arch) {
+    if (ctx->memory_blocks.empty() || !arch || !arch->symboltab) return;
 
-    ghidra::AddrSpace* data_space = ctx->arch->getDefaultDataSpace();
-    if (!data_space) {
-        return;
-    }
+    ghidra::AddrSpace* data_space = arch->getDefaultDataSpace();
+    if (!data_space) return;
 
     for (const auto& block : ctx->memory_blocks) {
         uint64_t size = block.va_size > 0 ? block.va_size : block.file_size;
-        if (size == 0) {
-            continue;
-        }
+        if (size == 0) continue;
 
         ghidra::uintb start = block.va_addr;
         ghidra::uintb last = start + static_cast<ghidra::uintb>(size - 1);
-        if (last < start) {
-            last = start;
-        }
+        if (last < start) last = start;
 
-        ghidra::uint4 flags = 0;
         if (!block.is_writable) {
-            flags |= ghidra::Varnode::readonly;
-        }
-
-        if (flags != 0) {
-            ctx->arch->symboltab->setPropertyRange(
-                flags,
-                ghidra::Range(data_space, start, last)
-            );
+            arch->symboltab->setPropertyRange(ghidra::Varnode::readonly, ghidra::Range(data_space, start, last));
         }
     }
 }
 
 static void log_memory_blocks(const DecompContext* ctx) {
-    if (ctx->memory_blocks.empty()) {
-        return;
-    }
-
     fission::utils::log_stream() << "[DecompilerCore] Registering " << ctx->memory_blocks.size() << " memory blocks" << std::endl;
-    for (const auto& block : ctx->memory_blocks) {
-        fission::utils::log_stream() << "  - " << block.name
-                  << ": VA 0x" << std::hex << block.va_addr << "-0x" << (block.va_addr + block.va_size)
-                  << std::dec << " (vsize: " << block.va_size << " bytes, "
-                  << "file_off: 0x" << std::hex << block.file_offset << std::dec << ", "
-                  << (block.is_executable ? "CODE" : "DATA") << ")" << std::endl;
-    }
 }
 
 static std::mutex arch_init_mutex;
@@ -260,87 +219,59 @@ void initialize_architecture(DecompContext* ctx) {
 }
 
 void initialize_architecture(DecompContext* ctx, const ArchInitOptions& options) {
-    if (!ctx || ctx->arch) {
-        return;
+    if (!ctx || ctx->arch) return;
+
+    std::string sleigh_id = select_sleigh_id(ctx);
+    std::unique_ptr<CliArchitecture> new_arch;
+
+    {
+        std::lock_guard<std::mutex> lock(arch_init_mutex);
+        new_arch = std::make_unique<CliArchitecture>(sleigh_id, ctx->memory_image.get(), &ctx->err_stream);
+        ensure_symbol_provider(ctx);
+        new_arch->setSymbolProvider(ctx->symbol_provider.get());
+        ghidra::DocumentStorage store;
+        new_arch->init(store);
     }
 
-    std::lock_guard<std::mutex> lock(arch_init_mutex);
-    
-    std::string sleigh_id = select_sleigh_id(ctx);
-
-    ctx->arch = std::make_unique<fission::core::CliArchitecture>(
-        sleigh_id,
-        ctx->memory_image.get(),
-        &ctx->err_stream
-    );
-
     try {
-        ensure_symbol_provider(ctx);
-        ctx->arch->setSymbolProvider(ctx->symbol_provider.get());
-
-        ghidra::DocumentStorage store;
-        ctx->arch->init(store);
-
-        bool readonly_props_set = apply_default_space(ctx);
-
-        configure_arch(ctx->arch.get());
+        bool readonly_props_set = apply_default_space(ctx, new_arch.get());
+        configure_arch(new_arch.get());
 
         if (options.read_loader_symbols) {
-            try {
-                ctx->arch->readLoaderSymbols("::");
-            } catch (const std::exception& e) {
-                fission::utils::log_stream() << "[DecompilerCore] WARNING: readLoaderSymbols failed: "
-                          << e.what() << std::endl;
-            } catch (...) {
-                fission::utils::log_stream() << "[DecompilerCore] WARNING: readLoaderSymbols failed (unknown)"
-                          << std::endl;
-            }
+            try { new_arch->readLoaderSymbols("::"); } catch (...) {}
         }
 
         if (options.apply_feature_flags) {
-            apply_feature_flags(ctx);
+            apply_feature_flags(ctx, new_arch.get());
         }
 
         if (options.register_windows_types) {
-            TypeManager::register_windows_types(ctx->arch->types, ArchPolicy::getPointerSize(ctx->arch.get()));
+            TypeManager::register_windows_types(new_arch->types, ArchPolicy::getPointerSize(new_arch.get()));
         }
 
         if (options.load_gdt) {
-            load_gdt_for_arch(ctx->arch.get(), ctx->is_64bit, ctx->gdt_path);
+            load_gdt_for_arch(new_arch.get(), ctx->is_64bit, ctx->gdt_path);
         }
 
-        if (options.inject_symbols && options.register_functions) {
-            register_functions_from_symbols(ctx);
-        } else if (options.inject_symbols) {
-            fission::utils::log_stream() << "[DecompilerCore] Injecting " << ctx->symbols.size() << " symbols" << std::endl;
-            ctx->arch->injectIatSymbols(ctx->symbols);
+        if (options.inject_symbols) {
+            if (options.register_functions) register_functions_from_symbols(ctx, new_arch.get());
+            else new_arch->injectIatSymbols(ctx->symbols);
         }
 
         if (options.apply_memory_blocks) {
-            if (!readonly_props_set) {
-                apply_memory_block_readonly(ctx);
-            }
+            if (!readonly_props_set) apply_memory_block_readonly(ctx, new_arch.get());
             log_memory_blocks(ctx);
         }
 
-        // FISSION IMPROVEMENT: Register data section symbols
         if (options.register_data_symbols && !ctx->binary_data.empty()) {
-            registerDataSectionSymbols(ctx);
+            registerDataSectionSymbols(ctx, new_arch.get());
         }
 
+        ctx->arch = std::move(new_arch);
         fission::utils::log_stream() << "[DecompilerCore] Architecture initialized: " << sleigh_id << std::endl;
 
-    } catch (const ghidra::LowlevelError& e) {
-        fission::utils::log_stream() << "[DecompilerCore] ERROR: Ghidra LowlevelError during architecture initialization: " << e.explain << std::endl;
-        ctx->arch.release(); // WORKAROUND: Leak instead of crash on failed init
-        throw;
-    } catch (const std::exception& e) {
-        fission::utils::log_stream() << "[DecompilerCore] ERROR: Architecture initialization failed: " << e.what() << std::endl;
-        ctx->arch.release(); // WORKAROUND: Leak instead of crash on failed init
-        throw;
     } catch (...) {
-        fission::utils::log_stream() << "[DecompilerCore] ERROR: Unknown error during architecture initialization" << std::endl;
-        ctx->arch.release(); // WORKAROUND: Leak instead of crash on failed init
+        fission::utils::log_stream() << "[DecompilerCore] ERROR: Architecture initialization failed" << std::endl;
         throw;
     }
 }

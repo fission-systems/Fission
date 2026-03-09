@@ -225,8 +225,7 @@ fn run_parallel_decompilation<'a>(
     // Dynamic worker scaling: avoid negative scaling when function count is low.
     // Each worker incurs ~3–4s init (FID/GDT/.sla). With 20 functions, 8 workers → 62s vs 1 → 26s.
     // Heuristic: aim for ≥50 functions per worker so init cost is amortized (Amdahl's Law).
-    let ideal_workers = (functions.len() / 50).max(1);
-    let num_workers = ideal_workers.min(rayon::current_num_threads().max(1));
+    let num_workers = 8;
 
     // Round-robin distribution: spread heavy functions (often at low addresses) across workers
     // instead of clustering them in the first chunk (address-ordered chunks).
@@ -289,7 +288,7 @@ fn run_parallel_decompilation<'a>(
                 verbose: false,
                 compiler_id: compiler_id.as_deref(),
                 gdt_path: gdt_path_owned.as_deref(),
-                timeout_ms: Some(config.decompiler.timeout_ms),
+                timeout_ms: Some(cli.timeout_ms.unwrap_or(config.decompiler.timeout_ms)),
                 timings: None,
                 signatures_json: signatures_json.as_deref(),
             };
@@ -530,7 +529,7 @@ pub(super) fn run_decompilation(
             verbose: cli.verbose,
             compiler_id: compiler_id.as_deref(),
             gdt_path: gdt_path_owned.as_deref(),
-            timeout_ms: Some(config.decompiler.timeout_ms),
+            timeout_ms: Some(cli.timeout_ms.unwrap_or(config.decompiler.timeout_ms)),
             timings: if cli.benchmark {
                 Some(&mut prepare_timings)
             } else {

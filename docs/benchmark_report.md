@@ -99,6 +99,27 @@ let num_workers = ideal_workers.min(rayon::current_num_threads().max(1));
 - limit 20 → 1 워커 → 26초
 - limit 100+ → 다중 워커 → 병렬 이득
 
+## 5.1 FID 전역 캐시 (Read-Only Shared Memory, 1단계)
+
+15MB+ `.fidbf` 파싱을 워커마다 반복하지 않고, 경로별로 `std::shared_ptr<FidDatabase>`를 전역 캐시하여 공유.
+
+**구현**: `DecompilerFFI.cpp`의 `g_fid_cache` + `get_or_load_fid()`. 첫 로드 시 파싱, 이후 캐시 히트 시 `shared_ptr`만 복사하여 반환.
+
+**검증 결과 (putty limit 100, 2 워커)**:
+
+| 지표 | 값 |
+|------|-----|
+| wall_clock_sec | **63.46초** |
+| total_decomp_sec | 62.94초 |
+| init_sec | 0.28초 |
+| prepare_timings.fid_ms | 164.57 (메인 스레드 1회만) |
+
+- 메인 스레드 prepare 시 FID 1회 로드(~165ms) → 캐시에 저장
+- 워커(버킷 1) prepare 시 `get_or_load_fid` 캐시 히트 → 디스크 I/O 없음
+- 기존 96.8초 대비 **~34% 단축** (동적 워커 + FID 캐시 + 시그니처 pre-serialization 등 누적 효과)
+
+**2단계 (Sleigh XML/DOM 캐싱)**: `.sla` 파싱 및 `DocumentStorage` 전역 캐싱은 `Sleigh` 내부의 가변 상태(`ContextCache`) 이슈로 난이도 높음. 추후 검토.
+
 ## 6. 권장 다음 단계
 
 1. **성능**

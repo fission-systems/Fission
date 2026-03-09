@@ -56,7 +56,7 @@ int scanAndRegisterDataSymbols(
 );
 
 /// Scan data sections from FFI context and register discovered symbols.
-void registerDataSectionSymbols(fission::ffi::DecompContext* ctx);
+void registerDataSectionSymbols(fission::ffi::DecompContext* ctx, ghidra::Architecture* arch);
 
 } // namespace core
 } // namespace fission

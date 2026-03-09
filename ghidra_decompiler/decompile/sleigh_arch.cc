@@ -16,6 +16,29 @@
 #include "sleigh_arch.hh"
 #include "inject_sleigh.hh"
 
+#include <mutex>
+#include <unordered_map>
+#include <sstream>
+#include <fstream>
+
+static std::mutex g_spec_mutex;
+static std::unordered_map<std::string, std::string> g_spec_cache;
+
+// Read file into string (return cached if exists)
+std::string get_cached_file_content(const std::string& filepath) {
+    std::lock_guard<std::mutex> lock(g_spec_mutex);
+    auto it = g_spec_cache.find(filepath);
+    if (it != g_spec_cache.end()) {
+        return it->second;
+    }
+    
+    std::ifstream s(filepath, std::ios_base::binary);
+    std::stringstream buffer;
+    buffer << s.rdbuf();
+    g_spec_cache[filepath] = buffer.str();
+    return g_spec_cache[filepath];
+}
+
 namespace ghidra {
 
 AttributeId ATTRIB_DEPRECATED = AttributeId("deprecated",136);
@@ -368,7 +391,9 @@ void SleighArchitecture::buildSpecFile(DocumentStorage &store)
   }
   
   try {
-    Document *doc = store.openDocument(processorfile);
+    std::string pspec_content = get_cached_file_content(processorfile);
+    std::istringstream pspec_iss(pspec_content);
+    Document *doc = store.parseDocument(pspec_iss);
     store.registerTag(doc->getRoot());
   }
   catch(DecoderError &err) {
@@ -385,7 +410,9 @@ void SleighArchitecture::buildSpecFile(DocumentStorage &store)
   }
   
   try {
-    Document *doc = store.openDocument(compilerfile);
+    std::string cspec_content = get_cached_file_content(compilerfile);
+    std::istringstream cspec_iss(cspec_content);
+    Document *doc = store.parseDocument(cspec_iss);
     store.registerTag(doc->getRoot());
   }
   catch(DecoderError &err) {

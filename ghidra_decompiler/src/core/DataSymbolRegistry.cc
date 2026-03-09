@@ -7,6 +7,10 @@
 #include <cstring>
 #include <iostream>
 #include <unordered_set>
+#include <mutex>
+#include <unordered_map>
+#include <memory>
+#include <sstream>
 #include "fission/utils/logger.h"
 
 namespace fission {
@@ -14,6 +18,20 @@ namespace core {
 
 using namespace ghidra;
 using namespace fission::loaders;
+
+// Global cache for scanned data symbols to avoid redundant O(section_size) scanning across workers.
+static std::mutex g_data_symbol_cache_mutex;
+static std::unordered_map<std::string, std::shared_ptr<std::vector<DataSymbol>>> g_data_symbol_cache;
+
+// Generate a unique signature for the binary based on its memory block layout.
+static std::string get_binary_signature(const fission::ffi::DecompContext* ctx) {
+    std::stringstream ss;
+    ss << ctx->is_64bit << ":" << ctx->base_addr << ";";
+    for (const auto& block : ctx->memory_blocks) {
+        ss << block.name << ":" << block.va_addr << ":" << block.file_size << ";";
+    }
+    return ss.str();
+}
 
 /// \brief Register data section symbols in global scope
 ///
@@ -221,30 +239,37 @@ int scanAndRegisterDataSymbols(
 // FFI path — uses pre-parsed memory_blocks from Rust loader
 // ---------------------------------------------------------------------------
 
-void registerDataSectionSymbols(fission::ffi::DecompContext* ctx) {
+void registerDataSectionSymbols(fission::ffi::DecompContext* ctx, ghidra::Architecture* arch) {
     fission::utils::log_stream() << "[DataSymbolRegistry] **CALLED** registerDataSectionSymbols" << std::endl;
     
-    if (ctx == nullptr || !ctx->arch) {
-        fission::utils::log_stream() << "[DataSymbolRegistry] ERROR: ctx or ctx->arch is null" << std::endl;
+    if (ctx == nullptr || !arch) {
+        fission::utils::log_stream() << "[DataSymbolRegistry] ERROR: ctx or arch is null" << std::endl;
         return;
     }
     
-    fission::utils::log_stream() << "[DataSymbolRegistry] binary_data.size() = " << ctx->binary_data.size() << std::endl;
-    fission::utils::log_stream() << "[DataSymbolRegistry] memory_blocks.size() = " << ctx->memory_blocks.size() << std::endl;
-    
-    Architecture* arch = ctx->arch.get();
-    if (arch == nullptr) {
-        fission::utils::log_stream() << "[DataSymbolRegistry] Missing required components" << std::endl;
+
+    std::string binary_sig = get_binary_signature(ctx);
+    std::shared_ptr<std::vector<DataSymbol>> cached_symbols;
+
+    {
+        std::lock_guard<std::mutex> lock(g_data_symbol_cache_mutex);
+        auto it = g_data_symbol_cache.find(binary_sig);
+        if (it != g_data_symbol_cache.end()) {
+            cached_symbols = it->second;
+        }
+    }
+
+    if (cached_symbols) {
+        fission::utils::log_stream() << "[DataSymbolRegistry] Applying cached data section symbols" << std::endl;
+        registerDataSymbolsInGlobalScope(arch, *cached_symbols);
         return;
     }
     
-    fission::utils::log_stream() << "[DataSymbolRegistry] Scanning data sections..." << std::endl;
+    fission::utils::log_stream() << "[DataSymbolRegistry] Scanning data sections (first-time)..." << std::endl;
     
-    int totalSymbols = 0;
+    auto symbols_ptr = std::make_shared<std::vector<DataSymbol>>();
     DataSectionScanner scanner;
     
-    // Scan each memory block that looks like data
-    // D-1: Extended from ".rdata" / ".data" (PE) to include ELF and Mach-O read-only sections.
     static const std::unordered_set<std::string> data_sections = {
         ".rdata",        // PE read-only data
         ".data",         // PE writable data
@@ -254,16 +279,8 @@ void registerDataSectionSymbols(fission::ffi::DecompContext* ctx) {
     };
 
     for (const auto& block : ctx->memory_blocks) {
-        // Only scan read-only data sections
-        if (data_sections.count(block.name) == 0) {
-            continue;
-        }
+        if (data_sections.count(block.name) == 0) continue;
         
-        fission::utils::log_stream() << "[DataSymbolRegistry] Scanning section: " << block.name 
-                  << " at 0x" << std::hex << block.va_addr 
-                  << " size=" << std::dec << block.file_size << std::endl;
-        
-        // Check if we have the data
         size_t start_idx = block.file_offset;
         size_t end_idx = start_idx + block.file_size;
         
@@ -272,19 +289,22 @@ void registerDataSectionSymbols(fission::ffi::DecompContext* ctx) {
             continue;
         }
         
-        // Get pointer to section data
         const uint8_t* section_data = ctx->binary_data.data() + start_idx;
-        
-        // Scan for symbols
         std::vector<DataSymbol> symbols = scanner.scanDataSection(
             section_data,
             block.va_addr,
             block.file_size
         );
         
-        totalSymbols += registerDataSymbolsInGlobalScope(arch, symbols);
+        symbols_ptr->insert(symbols_ptr->end(), symbols.begin(), symbols.end());
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_data_symbol_cache_mutex);
+        g_data_symbol_cache[binary_sig] = symbols_ptr;
     }
     
+    int totalSymbols = registerDataSymbolsInGlobalScope(arch, *symbols_ptr);
     fission::utils::log_stream() << "[DataSymbolRegistry] Registered " << totalSymbols 
               << " data section symbols" << std::endl;
 }

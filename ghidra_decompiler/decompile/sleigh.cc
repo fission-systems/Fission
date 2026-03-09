@@ -16,6 +16,8 @@
 #include "sleigh.hh"
 #include "loadimage.hh"
 
+std::string get_cached_file_content(const std::string& filepath);
+
 namespace ghidra {
 
 /// FISSION: Removed sleigh_resolve_mutex. Lock caused severe contention (26s single-thread
@@ -558,6 +560,10 @@ void Sleigh::reset(LoadImage *ld,ContextDatabase *c_db)
   cache = new ContextCache(c_db);
 }
 
+#include <sstream>
+
+
+
 /// The .sla file from the document store is loaded and cache objects are prepared
 /// \param store is the document store containing the main \<sleigh> tag.
 void Sleigh::initialize(DocumentStorage &store)
@@ -568,11 +574,12 @@ void Sleigh::initialize(DocumentStorage &store)
     if (el == (const Element *)0)
       throw LowlevelError("Could not find sleigh tag");
     sla::FormatDecode decoder(this);
-    ifstream s(el->getContent(), std::ios_base::binary);
-    if (!s)
-      throw LowlevelError("Could not open .sla file: " + el->getContent());
+    std::string filename = el->getContent();
+    std::string sla_content = get_cached_file_content(filename);
+    if (sla_content.empty())
+      throw LowlevelError("Could not open or cache .sla file: " + filename);
+    std::istringstream s(sla_content, std::ios_base::binary);
     decoder.ingestStream(s);
-    s.close();
     decode(decoder);
   }
   else

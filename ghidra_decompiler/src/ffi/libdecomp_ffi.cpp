@@ -431,6 +431,15 @@ extern "C" DECOMP_API DecompError decomp_set_gdt(DecompContext* ctx, const char*
     }
 }
 
+extern "C" DECOMP_API void decomp_set_timeout_ms(DecompContext* ctx, uint32_t timeout_ms) {
+    if (ctx) {
+        ctx->timeout_ms = timeout_ms;
+        if (ctx->arch) {
+            ctx->arch->analysis_timeout_sec = static_cast<double>(timeout_ms) / 1000.0;
+        }
+    }
+}
+
 extern "C" DECOMP_API void decomp_set_feature(
     DecompContext* ctx,
     const char* feature,

@@ -17,6 +17,8 @@
 #include "funcdata.hh"
 
 #include "coreaction.hh"
+#include <chrono>
+#include <sstream>
 
 namespace ghidra {
 
@@ -299,6 +301,14 @@ int4 Action::perform(Funcdata &data)
 
 {
   int4 res;
+  Architecture *glb = data.getArch();
+  if (glb->analysis_timeout_sec > 0.0) {
+    auto current_time = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed = current_time - glb->analysis_start;
+    if (elapsed.count() > glb->analysis_timeout_sec) {
+      throw LowlevelError("Analysis timeout exceeded (Monster function detected!)");
+    }
+  }
 
   do {
     switch(status) {
@@ -510,7 +520,16 @@ int4 ActionGroup::apply(Funcdata &data)
 
   if (status != status_mid)
     state = list.begin();	// Initialize the derived action
+  Architecture *glb = data.getArch();
+  int4 act_check_count = 0;
   for(;state!=list.end();++state) {
+    if ((++act_check_count & 0x1f) == 0 && glb->analysis_timeout_sec > 0.0) {
+      auto current_time = std::chrono::steady_clock::now();
+      std::chrono::duration<double> elapsed = current_time - glb->analysis_start;
+      if (elapsed.count() > glb->analysis_timeout_sec) {
+        throw LowlevelError("Analysis timeout exceeded in ActionGroup (Monster function detected!)");
+      }
+    }
     res = (*state)->perform(data);
     if (res>0) {		// A change was made
       count  += res;
@@ -881,8 +900,20 @@ int4 ActionPool::apply(Funcdata &data)
     op_state = data.beginOpAll();	// Initialize the derived action
     rule_index = 0;
   }
-  for(;op_state!=data.endOpAll();)
-	  if (0!=processOp((*op_state).second,data)) return -1;
+  Architecture *glb = data.getArch();
+  int4 op_check_count = 0;
+  for(;op_state!=data.endOpAll();) {
+    if ((++op_check_count & 0x7f) == 0 && glb->analysis_timeout_sec > 0.0) {
+      auto current_time = std::chrono::steady_clock::now();
+      std::chrono::duration<double> elapsed = current_time - glb->analysis_start;
+      if (elapsed.count() > glb->analysis_timeout_sec) {
+        std::ostringstream msg;
+        msg << "Analysis timeout exceeded in ActionPool: " << elapsed.count() << "s > " << glb->analysis_timeout_sec << "s";
+        throw LowlevelError(msg.str());
+      }
+    }
+    if (0!=processOp((*op_state).second,data)) return -1;
+  }
 
   return 0;			// Indicate successful completion
 }

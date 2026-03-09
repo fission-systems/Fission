@@ -1,0 +1,25 @@
+   Compiling fission-ffi v0.1.0 (/Users/sjkim1127/Fission/crates/fission-ffi)
+warning: constant `VN_SIZE` is never used
+   --> crates/fission-pcode/src/pcode/types.rs:614:15
+    |
+614 |         const VN_SIZE: usize = 32;
+    |               ^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling fission-analysis v0.1.0 (/Users/sjkim1127/Fission/crates/fission-analysis)
+warning: `fission-pcode` (lib) generated 1 warning
+warning: fission-ffi@0.1.0: Native library path not found: /Users/sjkim1127/Fission/ghidra_decompiler/build
+warning: fission-ffi@0.1.0: Build native target first: cmake --build ghidra_decompiler/build --config Release --target decomp
+error: linking with `cc` failed: exit status: 1
+  |
+  = note:  "cc" "-Wl,-exported_symbols_list" "-Wl,/var/folders/65/l9m02xg91b11jdfch2cycz9m0000gn/T/rustcFLfReI/list" "/var/folders/65/l9m02xg91b11jdfch2cycz9m0000gn/T/rustcFLfReI/symbols.o" "<2 object files omitted>" "-ldecomp" "/Users/sjkim1127/Fission/target/release/deps/{libfission_loader-ef2deb30feb74ad6,libmemmap2-036356012e0464a5,libblake3-3d2e4cd452242426,libconstant_time_eq-ea2f0583567af3dc,libarrayvec-da6d9f74132e2971,libarrayref-72f49beee8c6c445,libbinrw-653229a08707cdfa,libbytemuck-ba13c9134cf9f3bf,libarray_init-c8df06a25a397e7c,libgimli-389270a15da679f2,libfallible_iterator-6e125b4ee1b38567,libstable_deref_trait-f685290db77369f1,libcpp_demangle-d97615a6a79f5f0e,librustc_demangle-68193316638c304e,libmsvc_demangler-cd7306560ff8fee3,libbitflags-68f9ecfbc131ffbe,libfission_pcode-cae116050e9d9dcc,libfission_core-29787921b2630a32,libtracing_subscriber-4d46f4be54633815,libsmallvec-ca98d35e55d2018f,libsharded_slab-729aa8aededdebae,libmatchers-4acf4cc2ed5f5987,libregex_automata-10097744ba16f757,libaho_corasick-86fb4a372a4b2e4b,libregex_syntax-232a3ee8c8d51327,libnu_ansi_term-dcca4055315be4d4,libthread_local-1584076cf75aa93c,libtracing_log-cd3ca34caafa4900,liblog-8d354693017f0408,libserde_json-bb7c608bcb8e2912,libmemchr-b4350d5dc4cc9984,libitoa-86382837daf035fe,libzmij-ba905e466cd01489,libtoml-cd784b7c36f056e8,libtoml_edit-40cd63e60f298262,libserde_spanned-dec4008cc2e88a87,libindexmap-d32b8057a31c5b62,libhashbrown-3201f9686595c79c,libequivalent-199348b87301ac6f,liballocator_api2-543d7a3357871cd5,libfoldhash-7af9f7567b2efd83,libwinnow-33ab31b1d1604607,libtoml_datetime-392bb3d11d4f73a6,libdirs-7b0a27f496f295e1,libdirs_sys-ce05dbf4ada336fc,liboption_ext-504b10bc98fd74ed,libanyhow-a7e704116545607b,libtracing-2cbd18f9023f569f,libpin_project_lite-c75e47cf5a40b726,libtracing_core-92bfba738ae238ed,librkyv-89782e84b26db3cf,librend-1d35c36a30f9e329,libhashbrown-33fc39e999924321,libahash-629cfe4eab09a2fe,libgetrandom-d8bde5d03fab9a16,liblibc-3559f8fb75deb226,libcfg_if-e16524bbb6733dc5,libonce_cell-d60a4aa3ee4f5272,libseahash-97a9282bd3b2743e,libbytecheck-a01d699c47569143,libsimdutf8-8b5f535665b8188f,libptr_meta-7c2544b66b63ab54,libfission_disasm-fa797ba3a9192b31,libthiserror-9f9e793be5cca1af,libserde-4a325a90e24a10be,libserde_core-67c91a467c386096,libiced_x86-187c4bd747d622b9,liblazy_static-cad0fd72a733039a}.rlib" "<sysroot>/lib/rustlib/aarch64-apple-darwin/lib/{libstd-*,libpanic_unwind-*,libobject-*,libmemchr-*,libaddr2line-*,libgimli-*,libcfg_if-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libminiz_oxide-*,libadler2-*,libunwind-*,liblibc-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "-liconv" "-lSystem" "-lc" "-lm" "-arch" "arm64" "-mmacosx-version-min=11.0.0" "-L" "/Users/sjkim1127/Fission/target/release/build/blake3-fc74bd07825f1fba/out" "-o" "/Users/sjkim1127/Fission/target/release/deps/libfission_ffi.dylib" "-Wl,-dead_strip" "-dynamiclib" "-nodefaultlibs"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: ld: library 'decomp' not found
+          clang: error: linker command failed with exit code 1 (use -v to see invocation)
+          
+
+warning: fission-ffi@0.1.0: Native library path not found: /Users/sjkim1127/Fission/ghidra_decompiler/build
+warning: fission-ffi@0.1.0: Build native target first: cmake --build ghidra_decompiler/build --config Release --target decomp
+error: could not compile `fission-ffi` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

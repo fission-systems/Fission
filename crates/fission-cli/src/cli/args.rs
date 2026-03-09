@@ -109,6 +109,10 @@ pub struct OneShotArgs {
     #[arg(long, value_name = "N")]
     pub decomp_limit: Option<usize>,
 
+    /// Decompilation timeout per function in milliseconds (0 = no timeout)
+    #[arg(long, value_name = "MS")]
+    pub timeout_ms: Option<u64>,
+
     /// Override binary format detection (auto|pe|elf|macho)
     /// Affects sleigh ID selection for architecture-specific analysis
     #[arg(long, value_name = "FORMAT")]

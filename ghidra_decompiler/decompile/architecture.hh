@@ -33,6 +33,7 @@
 #include "options.hh"
 #include "transform.hh"
 #include "prefersplit.hh"
+#include <chrono>
 
 namespace ghidra {
 
@@ -211,6 +212,8 @@ public:
   vector<LanedRegister> lanerecords;	///< Vector registers that have preferred lane sizes
   ActionDatabase allacts;	///< Actions that can be applied in this architecture
   bool loadersymbols_parsed;	///< True if loader symbols have been read
+  std::chrono::steady_clock::time_point analysis_start; ///< FISSION: Start time of current function analysis
+  double analysis_timeout_sec; ///< FISSION: Analysis timeout in seconds (<= 0 for no timeout)
 #ifdef CPUI_STATISTICS
   Statistics *stats;		///< Statistics collector
 #endif

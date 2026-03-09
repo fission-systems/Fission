@@ -591,6 +591,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     // Merge conflict), retry without seed_before_action to get a valid decompilation.
     auto perform_action = [&]() {
         auto perform_start = std::chrono::steady_clock::now();
+        ctx->arch->analysis_start = perform_start; // FISSION: record for timeout check in action.cc
         current_action->perform(*fd);
         timing_recorder.timing.main_perform_ms += elapsed_ms(perform_start);
     };
