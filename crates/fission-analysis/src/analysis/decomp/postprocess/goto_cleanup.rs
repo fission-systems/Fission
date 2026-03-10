@@ -49,6 +49,14 @@ fn is_simple_statement(line: &str) -> bool {
         && !trimmed.contains('}')
 }
 
+fn is_terminal_statement(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("return ")
+        || trimmed == "return;"
+        || trimmed == "break;"
+        || trimmed == "continue;"
+}
+
 fn indent_of(line: &str) -> &str {
     let trimmed = line.trim_start();
     &line[..line.len() - trimmed.len()]
@@ -338,6 +346,110 @@ fn inline_single_use_labels(lines: &[String]) -> Vec<String> {
     result
 }
 
+fn collect_terminal_inline_body(
+    label: &str,
+    lines: &[String],
+    labels: &HashMap<String, usize>,
+    cache: &mut HashMap<String, Option<Vec<String>>>,
+    visiting: &mut HashSet<String>,
+) -> Option<Vec<String>> {
+    if let Some(cached) = cache.get(label) {
+        return cached.clone();
+    }
+    if !visiting.insert(label.to_string()) {
+        return None;
+    }
+
+    const MAX_INLINE_LINES: usize = 4;
+
+    let result = (|| {
+        let &label_pos = labels.get(label)?;
+        let mut idx = label_pos + 1;
+        let mut collected = Vec::new();
+
+        while idx < lines.len() {
+            let trimmed = lines[idx].trim();
+            if trimmed.is_empty() {
+                idx += 1;
+                continue;
+            }
+            if trimmed == "}" {
+                break;
+            }
+            if let Some(next_label) = parse_label(trimmed) {
+                if collected.is_empty() || collected.len() >= MAX_INLINE_LINES {
+                    return None;
+                }
+                let mut tail =
+                    collect_terminal_inline_body(next_label, lines, labels, cache, visiting)?;
+                if collected.len() + tail.len() > MAX_INLINE_LINES {
+                    return None;
+                }
+                collected.append(&mut tail);
+                return Some(collected);
+            }
+            if !is_simple_statement(trimmed) {
+                return None;
+            }
+            collected.push(trimmed.to_string());
+            if collected.len() > MAX_INLINE_LINES {
+                return None;
+            }
+            if is_terminal_statement(trimmed) {
+                return Some(collected);
+            }
+            idx += 1;
+        }
+
+        None
+    })();
+
+    visiting.remove(label);
+    cache.insert(label.to_string(), result.clone());
+    result
+}
+
+fn inline_terminal_label_blocks(lines: &[String]) -> Vec<String> {
+    let labels = label_positions(lines);
+    let mut cache: HashMap<String, Option<Vec<String>>> = HashMap::new();
+    let mut result = Vec::new();
+
+    for line in lines {
+        if let Some(target) = parse_goto(line)
+            && let Some(body) = collect_terminal_inline_body(
+                target,
+                lines,
+                &labels,
+                &mut cache,
+                &mut HashSet::new(),
+            )
+        {
+            let indent = indent_of(line).to_string();
+            result.extend(body.into_iter().map(|stmt| format!("{indent}{stmt}")));
+            continue;
+        }
+
+        if let Some((indent, cond, target)) = parse_if_goto(line)
+            && let Some(body) = collect_terminal_inline_body(
+                target,
+                lines,
+                &labels,
+                &mut cache,
+                &mut HashSet::new(),
+            )
+        {
+            result.push(format!("{indent}if ({cond}) {{"));
+            result.extend(body.into_iter().map(|stmt| format!("{indent}  {stmt}")));
+            result.push(format!("{indent}}}"));
+            continue;
+        }
+
+        result.push(line.clone());
+    }
+
+    result
+}
+
 fn remove_dead_labels(lines: &[String]) -> Vec<String> {
     let refs = count_label_references(lines);
     lines.iter()
@@ -360,9 +472,11 @@ impl PostProcessor {
 
         for _ in 0..3 {
             let lines: Vec<String> = current.lines().map(str::to_string).collect();
-            let next = remove_dead_labels(&inline_single_use_labels(&fold_guarded_if_gotos(
-                &fold_if_else_gotos(&thread_chained_gotos(&remove_self_fallthrough_gotos(&lines))),
-            )))
+            let next = remove_dead_labels(&inline_single_use_labels(
+                &inline_terminal_label_blocks(&fold_guarded_if_gotos(&fold_if_else_gotos(
+                    &thread_chained_gotos(&remove_self_fallthrough_gotos(&lines)),
+                ))),
+            ))
             .join("\n");
             if next == current {
                 break;

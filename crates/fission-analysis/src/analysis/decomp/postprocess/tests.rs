@@ -198,6 +198,44 @@ label_2:
 }
 
 #[test]
+fn test_goto_cleanup_inlines_multi_use_terminal_label() {
+    let input = r#"int test(int x)
+{
+  if (x == 0) goto label_ret;
+  if (x == 1) goto label_ret;
+  return 2;
+label_ret:
+  return 1;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(!output.contains("goto label_ret;"), "must inline terminal label references: {}", output);
+    assert!(!output.contains("label_ret:"), "must remove dead terminal label: {}", output);
+    assert!(output.matches("return 1;").count() >= 2, "must duplicate terminal body at call sites: {}", output);
+}
+
+#[test]
+fn test_goto_cleanup_inlines_fallthrough_terminal_chain() {
+    let input = r#"int test(int x)
+{
+  int y;
+  y = 2;
+  if (x == 0) goto label_zero;
+  return y;
+label_zero:
+  y = 0;
+label_ret:
+  return y;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(!output.contains("goto label_zero;"), "must inline fallthrough chain entry: {}", output);
+    assert!(!output.contains("label_zero:"), "must remove dead prefix label: {}", output);
+    assert!(output.contains("y = 0;"), "must preserve setup statement before terminal tail: {}", output);
+    assert!(output.contains("return y;"), "must preserve terminal tail after inline: {}", output);
+}
+
+#[test]
 fn test_goto_loop_to_do_while() {
     let input = r#"int test(int n)
 {
