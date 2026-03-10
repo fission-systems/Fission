@@ -666,3 +666,42 @@ fn test_var_sweep_keeps_temp_when_use_is_not_immediate() {
     );
     assert!(output.contains("return iVar18;"), "must preserve original use when not inlined: {}", output);
 }
+
+#[test]
+fn test_stack_normalization_renames_exposed_stack_locals() {
+    let input = r#"int test(void)
+{
+  uint uStack_48;
+  uint _axStack_938;
+  uint local_48;
+  uStack_48 = 1;
+  _axStack_938 = 2;
+  local_48 = uStack_48;
+  return local_48 + _axStack_938;
+}"#;
+
+    let output = PostProcessor::normalize_stack_artifacts(input);
+    assert!(!output.contains("uStack_48"), "must rename exposed stack variable: {}", output);
+    assert!(!output.contains("_axStack_938"), "must rename underscore-prefixed stack variable: {}", output);
+    assert!(output.contains("local_48_2"), "must avoid colliding with pre-existing local_48: {}", output);
+    assert!(output.contains("local_938"), "must normalize underscore-prefixed stack name: {}", output);
+}
+
+#[test]
+fn test_stack_normalization_rewrites_piece_access() {
+    let input = r#"int test(void)
+{
+  if ((int)axStack_848._12_4_ < 10) {
+    return 1;
+  }
+  return 0;
+}"#;
+
+    let output = PostProcessor::normalize_stack_artifacts(input);
+    assert!(
+        output.contains("*(uint32_t *)((uint8_t *)&local_848 + 12)"),
+        "must rewrite stack piece access into explicit pointer arithmetic: {}",
+        output
+    );
+    assert!(!output.contains("axStack_848._12_4_"), "must remove raw sub-variable syntax: {}", output);
+}

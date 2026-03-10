@@ -622,6 +622,28 @@ impl PostProcessPass for InlineSingleUseTempsPass {
     }
 }
 
+/// Stack-exposed local normalization pass
+pub struct NormalizeStackArtifactsPass;
+
+impl PostProcessPass for NormalizeStackArtifactsPass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "normalize_stack_artifacts",
+            name: "Normalize Stack Artifacts",
+            description: "Renames exposed Stack_ locals and rewrites piece access into explicit pointer casts",
+            category: PassCategory::Naming,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::normalize_stack_artifacts_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["inline_single_use_temps"]
+    }
+}
+
 /// Early goto and label cleanup pass
 pub struct GotoCleanupPass;
 

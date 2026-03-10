@@ -18,6 +18,7 @@ mod naming;
 pub mod pass;
 pub mod passes;
 pub mod registry;
+mod stack_normalization;
 mod strings;
 mod structure;
 mod switch_recon;
@@ -39,6 +40,7 @@ pub struct RustPostProcessOptions {
     pub insert_casts: bool,
     pub arithmetic_idioms: bool,
     pub temp_var_inlining: bool,
+    pub stack_var_normalization: bool,
     pub deref_to_array: bool,
     pub bitop_to_logicop: bool,
     pub remove_dead_branches: bool,
@@ -64,6 +66,7 @@ impl Default for RustPostProcessOptions {
             insert_casts: true,
             arithmetic_idioms: true,
             temp_var_inlining: true,
+            stack_var_normalization: true,
             deref_to_array: true,
             bitop_to_logicop: true,
             remove_dead_branches: true,
@@ -171,6 +174,9 @@ impl PostProcessor {
         if !self.options.temp_var_inlining {
             pass_registry.disable("inline_single_use_temps");
         }
+        if !self.options.stack_var_normalization {
+            pass_registry.disable("normalize_stack_artifacts");
+        }
         if !self.options.deref_to_array {
             pass_registry.disable("deref_to_array_index");
         }
@@ -273,6 +279,9 @@ impl PostProcessor {
         processed = Self::clean_ghidra_artifacts(&processed);
         if self.options.temp_var_inlining {
             processed = Self::inline_single_use_temps(&processed);
+        }
+        if self.options.stack_var_normalization {
+            processed = Self::normalize_stack_artifacts(&processed);
         }
 
         // Insert missing casts for assignment type mismatches
