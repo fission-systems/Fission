@@ -521,3 +521,21 @@ impl PostProcessPass for ApplyDwarfNamesPass {
         context.dwarf_info.is_some()
     }
 }
+
+/// API-driven RECT pointer promotion pass
+pub struct PromoteRectParamsPass;
+
+impl PostProcessPass for PromoteRectParamsPass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "promote_rect_params",
+            name: "Promote RECT Params",
+            description: "Promotes uint8_t[16] pointer params passed to GetClientRect into LPRECT",
+            category: PassCategory::TypeBased,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::promote_rect_params_cow(code))
+    }
+}

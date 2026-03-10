@@ -19,6 +19,7 @@ pub mod registry;
 mod strings;
 mod structure;
 mod switch_recon;
+mod type_promotion;
 #[cfg(test)]
 mod tests;
 
@@ -259,6 +260,8 @@ impl PostProcessor {
         if self.options.field_offsets && !self.inferred_types.is_empty() {
             processed = self.replace_field_offsets(&processed);
         }
+
+        processed = Self::promote_rect_params(&processed);
 
         // Insert missing casts for assignment type mismatches
         if self.options.insert_casts {

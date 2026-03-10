@@ -25,6 +25,7 @@ pub fn create_default_registry() -> Result<PassRegistry, String> {
     // ========================================================================
     registry.register(Box::new(FieldOffsetReplacementPass))?;
     registry.register(Box::new(super::strings::ReplaceStringPointersPass))?;
+    registry.register(Box::new(PromoteRectParamsPass))?;
     registry.register(Box::new(InsertMissingCastsPass))?;
 
     // ========================================================================

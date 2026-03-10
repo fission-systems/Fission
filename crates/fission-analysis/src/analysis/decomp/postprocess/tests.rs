@@ -100,3 +100,33 @@ y = c * 8 + d;"#;
         output
     );
 }
+
+#[test]
+fn test_promote_rect_param_for_get_client_rect() {
+    let input = r#"ulonglong FUN_0x140006260(longlong param_1,uint8_t (*param_2) [16])
+{
+  if (flag) {
+    iVar1 = GetClientRect(xVar2,param_2);
+  }
+  else {
+    *param_2 = CONCAT016(0,local_3c);
+  }
+}"#;
+
+    let output = PostProcessor::promote_rect_params(input);
+    assert!(
+        output.contains("LPRECT param_2"),
+        "must promote param declaration: {}",
+        output
+    );
+    assert!(
+        output.contains("GetClientRect(xVar2,param_2)"),
+        "must preserve API call: {}",
+        output
+    );
+    assert!(
+        output.contains("*(uint8_t (*)[16])param_2 = CONCAT016(0,local_3c);"),
+        "must preserve whole-object write via cast: {}",
+        output
+    );
+}
