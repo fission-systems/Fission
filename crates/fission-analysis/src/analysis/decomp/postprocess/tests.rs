@@ -878,6 +878,49 @@ fn test_aggregate_sweep_rewrites_pointer_destination_whole_object_copy() {
 }
 
 #[test]
+fn test_aggregate_sweep_rewrites_zero_initialized_whole_object_copy() {
+    let input = r#"void test(void)
+{
+  uint8_t local_678 [16];
+  local_678 = CONCAT016(0,ZEXT816(0));
+}"#;
+
+    let output = PostProcessor::normalize_aggregate_copies(input);
+    assert!(
+        output.contains("*(fission_agg16 *)&local_678 = (fission_agg16){0};"),
+        "must rewrite zero-initialized whole-object CONCAT into aggregate literal: {}",
+        output
+    );
+    assert!(
+        !output.contains("CONCAT016(0,ZEXT816(0))"),
+        "must eliminate zero aggregate CONCAT residue: {}",
+        output
+    );
+}
+
+#[test]
+fn test_aggregate_sweep_removes_noop_self_copy() {
+    let input = r#"void test(void)
+{
+  typedef struct { uint8_t bytes[16]; } fission_agg16;
+  *(fission_agg16 *)&local_ef8 = *(fission_agg16 *)&local_ef8;
+  return;
+}"#;
+
+    let output = PostProcessor::normalize_aggregate_copies(input);
+    assert!(
+        !output.contains("*(fission_agg16 *)&local_ef8 = *(fission_agg16 *)&local_ef8;"),
+        "must remove no-op aggregate self-copy residue: {}",
+        output
+    );
+    assert!(
+        output.contains("return;"),
+        "must preserve surrounding code: {}",
+        output
+    );
+}
+
+#[test]
 fn test_var_sweep_inlines_single_use_temp_into_call() {
     let input = r#"void test(void)
 {
@@ -936,6 +979,33 @@ fn test_var_sweep_inlines_named_result_into_return() {
     assert!(
         output.contains("return (ulonglong)(iVar1 != 0);"),
         "must inline named result temporary into return: {}",
+        output
+    );
+}
+
+#[test]
+fn test_var_sweep_inlines_two_step_temp_chain_into_return() {
+    let input = r#"ulonglong test(int iVar1)
+{
+  uVar3 = (ulonglong)(iVar1 != 0);
+  result = uVar3;
+  return result;
+}"#;
+
+    let output = PostProcessor::inline_single_use_temps(input);
+    assert!(
+        !output.contains("uVar3 ="),
+        "must eliminate first temp in forwarding chain: {}",
+        output
+    );
+    assert!(
+        !output.contains("result ="),
+        "must eliminate second temp in forwarding chain: {}",
+        output
+    );
+    assert!(
+        output.contains("return (ulonglong)(iVar1 != 0);"),
+        "must inline forwarding chain into final return: {}",
         output
     );
 }
@@ -1034,8 +1104,8 @@ fn test_stack_normalization_rewrites_piece_access() {
     let output =
         PostProcessor::normalize_piece_accesses(&PostProcessor::normalize_stack_artifacts(input));
     assert!(
-        output.contains("*(uint32_t *)((uint8_t *)&local_848 + 12)"),
-        "must rewrite stack piece access into explicit pointer arithmetic: {}",
+        output.contains("((uint32_t *)&local_848)[3]"),
+        "must rewrite stack piece access into typed local index form: {}",
         output
     );
     assert!(
@@ -1115,6 +1185,32 @@ fn test_piece_sweep_uses_short_zero_offset_wide_cast() {
     assert!(
         !output.contains("*(uint8_t (*)[12])(uint8_t *)&local_838"),
         "must avoid redundant byte-pointer cast at offset zero: {}",
+        output
+    );
+}
+
+#[test]
+fn test_piece_sweep_rewrites_explicit_byte_pointer_access_to_typed_index() {
+    let input = r#"void test(void)
+{
+  *(uint64_t *)((uint8_t *)&local_ed0 + 8) = value;
+  x = *(uint16_t *)((uint8_t *)&local_b18 + 8);
+}"#;
+
+    let output = PostProcessor::normalize_piece_accesses(input);
+    assert!(
+        output.contains("((uint64_t *)&local_ed0)[1] = value;"),
+        "must rewrite local byte-pointer store into typed index form: {}",
+        output
+    );
+    assert!(
+        output.contains("x = ((uint16_t *)&local_b18)[4];"),
+        "must rewrite local byte-pointer load into typed index form: {}",
+        output
+    );
+    assert!(
+        !output.contains("((uint8_t *)&local_ed0 + 8)"),
+        "must remove redundant byte-pointer arithmetic for typed local access: {}",
         output
     );
 }

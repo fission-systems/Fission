@@ -23,6 +23,18 @@ static CAST_ARRAY_EXPR: Lazy<Regex> = Lazy::new(|| {
         .unwrap_or_else(|e| panic!("invalid CAST_ARRAY_EXPR regex: {e}"))
 });
 
+static ZERO_AGG_EXPR: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(?:ZEXT\d+\s*\(\s*0\s*\)|CONCAT0?\d+\s*\(\s*0\s*,\s*0\s*\))$")
+        .unwrap_or_else(|e| panic!("invalid ZERO_AGG_EXPR regex: {e}"))
+});
+
+static NOOP_AGG_ASSIGN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"^(?P<indent>\s*)\*\((?P<lhs_agg>fission_agg\d+)\s*\*\)(?P<lhs>[^=;]+?)\s*=\s*(?P<rhs_expr>\*\([^;]+)\s*;\s*$",
+    )
+    .unwrap_or_else(|e| panic!("invalid NOOP_AGG_ASSIGN regex: {e}"))
+});
+
 static SIMPLE_DEREF_EXPR: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^\*(?P<base>[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]+\])?)$")
         .unwrap_or_else(|e| panic!("invalid SIMPLE_DEREF_EXPR regex: {e}"))
@@ -35,54 +47,63 @@ static SIMPLE_IDENT_EXPR: Lazy<Regex> = Lazy::new(|| {
 
 impl PostProcessor {
     pub(super) fn normalize_aggregate_copies_cow<'a>(code: &'a str) -> Cow<'a, str> {
-        if !code.contains("CONCAT0") || !code.contains("uint8_t") {
+        if (!code.contains("CONCAT0") || !code.contains("uint8_t")) && !code.contains("fission_agg")
+        {
             return Cow::Borrowed(code);
         }
 
         let local_sizes = collect_local_aggregate_sizes(code);
         let mut used_sizes = BTreeSet::new();
         let mut changed = false;
+        let mut rewritten_lines = Vec::new();
 
-        let rewritten = code
-            .lines()
-            .map(|line| {
-                let Some(caps) = WHOLE_OBJECT_COPY.captures(line) else {
-                    return line.to_string();
-                };
-                let Some(lhs) = caps.name("lhs").map(|m| m.as_str().trim()) else {
-                    return line.to_string();
-                };
-                let Some(rhs) = caps.name("rhs").map(|m| m.as_str().trim()) else {
-                    return line.to_string();
-                };
+        for line in code.lines() {
+            let Some(caps) = WHOLE_OBJECT_COPY.captures(line) else {
+                rewritten_lines.push(line.to_string());
+                continue;
+            };
+            let Some(lhs) = caps.name("lhs").map(|m| m.as_str().trim()) else {
+                rewritten_lines.push(line.to_string());
+                continue;
+            };
+            let Some(rhs) = caps.name("rhs").map(|m| m.as_str().trim()) else {
+                rewritten_lines.push(line.to_string());
+                continue;
+            };
 
-                let Some(size) = infer_aggregate_size(lhs, rhs, &local_sizes) else {
-                    return line.to_string();
-                };
-                let Some(lhs_expr) = rewrite_aggregate_lvalue(lhs, size, &local_sizes) else {
-                    return line.to_string();
-                };
-                let Some(rhs_expr) = rewrite_aggregate_rvalue(rhs, size, &local_sizes) else {
-                    return line.to_string();
-                };
+            let Some(size) = infer_aggregate_size(lhs, rhs, &local_sizes) else {
+                rewritten_lines.push(line.to_string());
+                continue;
+            };
+            let Some(lhs_expr) = rewrite_aggregate_lvalue(lhs, size, &local_sizes) else {
+                rewritten_lines.push(line.to_string());
+                continue;
+            };
+            let Some(rhs_expr) = rewrite_aggregate_rvalue(rhs, size, &local_sizes) else {
+                rewritten_lines.push(line.to_string());
+                continue;
+            };
 
-                used_sizes.insert(size);
-                changed = true;
-                format!(
+            used_sizes.insert(size);
+            changed = true;
+            if normalize_expr(&lhs_expr) != normalize_expr(&rhs_expr) {
+                rewritten_lines.push(format!(
                     "{}{} = {};",
                     caps.name("indent").map_or("", |m| m.as_str()),
                     lhs_expr,
                     rhs_expr
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+                ));
+            }
+        }
 
-        if !changed {
+        let rewritten = rewritten_lines.join("\n");
+
+        let cleaned = remove_noop_aggregate_assigns(&rewritten);
+        if !changed && cleaned == code {
             return Cow::Borrowed(code);
         }
 
-        Cow::Owned(insert_aggregate_typedefs(&rewritten, &used_sizes))
+        Cow::Owned(insert_aggregate_typedefs(&cleaned, &used_sizes))
     }
 
     pub(super) fn normalize_aggregate_copies(code: &str) -> String {
@@ -179,6 +200,10 @@ fn rewrite_aggregate_rvalue(
         }
     }
 
+    if ZERO_AGG_EXPR.is_match(expr) {
+        return Some(format!("(fission_agg{size}){{0}}"));
+    }
+
     if let Some(caps) = SIMPLE_DEREF_EXPR.captures(expr) {
         let base = caps.name("base")?.as_str().trim();
         return Some(format!("*(fission_agg{size} *){base}"));
@@ -192,6 +217,38 @@ fn rewrite_aggregate_rvalue(
     }
 
     None
+}
+
+fn normalize_expr(expr: &str) -> String {
+    expr.split_whitespace().collect::<String>()
+}
+
+fn remove_noop_aggregate_assigns(code: &str) -> String {
+    code.lines()
+        .filter(|line| {
+            let Some(caps) = NOOP_AGG_ASSIGN.captures(line) else {
+                return true;
+            };
+            let lhs_agg = caps
+                .name("lhs_agg")
+                .map(|m| m.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let rhs_expr = caps
+                .name("rhs_expr")
+                .map(|m| m.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let rhs_prefix = format!("*({lhs_agg} *)");
+            let Some(rhs) = rhs_expr.strip_prefix(&rhs_prefix) else {
+                return true;
+            };
+            let lhs = caps.name("lhs").map(|m| m.as_str()).unwrap_or_default();
+            normalize_expr(lhs) != normalize_expr(rhs)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn insert_aggregate_typedefs(code: &str, sizes: &BTreeSet<usize>) -> String {

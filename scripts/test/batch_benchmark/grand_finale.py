@@ -17,6 +17,16 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_RESULTS_DIR = ROOT_DIR / "artifacts" / "grand_finale"
 DEFAULT_GHIDRA_DIR = ROOT_DIR / "vendor" / "ghidra" / "ghidra_11.4.2_PUBLIC"
 BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
+MANDATORY_SAMPLE_ADDRESSES: dict[str, list[str]] = {
+    "cmkr": [
+        "0x140001000",
+        "0x140003270",
+        "0x1400034a0",
+        "0x1400036e0",
+        "0x140003920",
+        "0x140004010",
+    ]
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,10 +124,33 @@ def list_functions_with_fission(binary_path: Path, fission_bin: Path) -> list[tu
     return functions
 
 
-def sample_functions(functions: list[tuple[str, str]], limit: int) -> list[tuple[str, str]]:
+def sample_functions(
+    binary_name: str,
+    functions: list[tuple[str, str]],
+    limit: int,
+) -> list[tuple[str, str]]:
     if limit <= 0 or len(functions) <= limit:
         return functions
-    return functions[:limit]
+    selected: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    mandatory = {normalize_address(addr) for addr in MANDATORY_SAMPLE_ADDRESSES.get(binary_name, [])}
+
+    for address, name in functions:
+        normalized = normalize_address(address)
+        if normalized in mandatory and normalized not in seen:
+            selected.append((address, name))
+            seen.add(normalized)
+
+    for address, name in functions:
+        normalized = normalize_address(address)
+        if normalized in seen:
+            continue
+        selected.append((address, name))
+        seen.add(normalized)
+        if len(selected) >= limit:
+            break
+
+    return selected[:limit]
 
 
 def load_struct_pointer_aliases() -> dict[str, str]:
@@ -141,6 +174,9 @@ def detect_embedded_failure(code: str) -> tuple[str, str] | None:
         return classify_failure_kind(first), first
     if stripped.startswith("// Error:"):
         first = stripped.splitlines()[0].replace("// Error:", "").strip()
+        return classify_failure_kind(first), first
+    if stripped.startswith("// Assembly fallback:"):
+        first = stripped.splitlines()[0].replace("// Assembly fallback:", "").strip()
         return classify_failure_kind(first), first
     return None
 
@@ -331,6 +367,8 @@ def run_fission_function(
         entry["success"] = False
         entry["failure_kind"] = failure[0]
         entry["failure_detail"] = failure[1]
+        if code.lstrip().startswith("// Assembly fallback:"):
+            entry["fallback_counts"] = {"assembly_fallback": 1}
         return entry
     entry["metrics"] = collect_code_metrics(code, struct_ptr_aliases)
     return entry
@@ -453,9 +491,10 @@ def summarize_binary(
     def aggregate_fallbacks(entries: dict[str, dict[str, Any]]) -> Counter[str]:
         total: Counter[str] = Counter()
         for entry in entries.values():
-            if not entry.get("success"):
-                continue
-            total.update(entry["metrics"].get("fallback_counts", {}))
+            if entry.get("success"):
+                total.update(entry.get("metrics", {}).get("fallback_counts", {}))
+            else:
+                total.update(entry.get("fallback_counts", {}))
         return total
 
     fission_successes = sum(1 for entry in fission_entries.values() if entry.get("success"))
@@ -747,7 +786,11 @@ def main() -> int:
         binary_name = binary_path.stem
         print(f"[*] Benchmarking {binary_name} ...", flush=True)
 
-        functions = sample_functions(list_functions_with_fission(binary_path, args.fission_bin), args.limit)
+        functions = sample_functions(
+            binary_name,
+            list_functions_with_fission(binary_path, args.fission_bin),
+            args.limit,
+        )
         fission_entries: dict[str, dict[str, Any]] = {}
         for address, name in functions:
             print(f"    [Fission] {address} {name}", flush=True)

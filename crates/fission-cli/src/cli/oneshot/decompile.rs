@@ -75,6 +75,17 @@ fn should_use_assembly_fallback(error: &str) -> bool {
         || lower.contains("followflow")
 }
 
+fn classify_fallback_kind(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("duplicate variablepiece") {
+        "type"
+    } else if lower.contains("control flow analysis error") || lower.contains("followflow") {
+        "control_flow"
+    } else {
+        "other"
+    }
+}
+
 fn make_assembly_fallback(
     binary: &LoadedBinary,
     binary_data: &[u8],
@@ -84,10 +95,11 @@ fn make_assembly_fallback(
     if !should_use_assembly_fallback(error) {
         return None;
     }
+    let error_class = classify_fallback_kind(error);
     let asm = render_function_disassembly_text(binary, binary_data, func.address).ok()?;
     Some(format!(
-        "// Assembly fallback: {}\n// Function: {} @ 0x{:x}\n\n{}",
-        error, func.name, func.address, asm
+        "// Assembly fallback: {}\n// Function: {} @ 0x{:x}\n// Error class: {}\n\n{}",
+        error, func.name, func.address, error_class, asm
     ))
 }
 
@@ -194,12 +206,14 @@ fn run_sequential_decompilation<'a>(
                     make_assembly_fallback(binary, binary_data, func, &error_text)
                 {
                     if effective_json {
+                        let fallback_class = classify_fallback_kind(&error_text);
                         let mut entry = serde_json::json!({
                             "address": format!("0x{:x}", func.address),
                             "name": func.name,
                             "code": fallback,
                             "fallback": "assembly",
-                            "fallback_reason": error_text
+                            "fallback_reason": error_text,
+                            "fallback_class": fallback_class
                         });
                         if cli.benchmark {
                             entry["decomp_sec"] =

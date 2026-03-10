@@ -8,13 +8,20 @@ static PIECE_ACCESS: Lazy<Regex> = Lazy::new(|| {
         .unwrap_or_else(|e| panic!("invalid PIECE_ACCESS regex: {e}"))
 });
 
+static EXPLICIT_BYTE_POINTER_ACCESS: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"\*\((?P<ty>uint(?:8|16|32|64)_t)\s*\*\)\(\((?:uint8_t|byte|uint1)\s*\*\)&(?P<base>[A-Za-z_][A-Za-z0-9_]*)\s*\+\s*(?P<offset>\d+)\)",
+    )
+    .unwrap_or_else(|e| panic!("invalid EXPLICIT_BYTE_POINTER_ACCESS regex: {e}"))
+});
+
 impl PostProcessor {
     pub(super) fn normalize_piece_accesses_cow<'a>(code: &'a str) -> Cow<'a, str> {
-        if !code.contains("._") {
+        if !code.contains("._") && !code.contains("((uint8_t *)&") && !code.contains("((byte *)&") {
             return Cow::Borrowed(code);
         }
 
-        let rewritten = PIECE_ACCESS
+        let rewritten_pieces = PIECE_ACCESS
             .replace_all(code, |caps: &regex::Captures| {
                 let var = caps.name("var").map(|m| m.as_str()).unwrap_or_default();
                 let offset = caps
@@ -27,6 +34,20 @@ impl PostProcessor {
                     .unwrap_or(0);
 
                 rewrite_piece_access(var, offset, size).unwrap_or_else(|| caps[0].to_string())
+            })
+            .to_string();
+
+        let rewritten = EXPLICIT_BYTE_POINTER_ACCESS
+            .replace_all(&rewritten_pieces, |caps: &regex::Captures| {
+                let ty = caps.name("ty").map(|m| m.as_str()).unwrap_or_default();
+                let base = caps.name("base").map(|m| m.as_str()).unwrap_or_default();
+                let offset = caps
+                    .name("offset")
+                    .and_then(|m| m.as_str().parse::<u32>().ok())
+                    .unwrap_or(0);
+
+                rewrite_explicit_byte_pointer_access(ty, base, offset)
+                    .unwrap_or_else(|| caps[0].to_string())
             })
             .to_string();
 
@@ -71,5 +92,26 @@ fn scalar_piece_type(size: u32) -> Option<&'static str> {
         4 => Some("uint32_t"),
         8 => Some("uint64_t"),
         _ => None,
+    }
+}
+
+fn rewrite_explicit_byte_pointer_access(ty: &str, base: &str, offset: u32) -> Option<String> {
+    let width = match ty {
+        "uint8_t" => 1,
+        "uint16_t" => 2,
+        "uint32_t" => 4,
+        "uint64_t" => 8,
+        _ => return None,
+    };
+
+    if offset % width != 0 {
+        return None;
+    }
+
+    let index = offset / width;
+    if index == 0 {
+        Some(format!("*({ty} *)&{base}"))
+    } else {
+        Some(format!("(({ty} *)&{base})[{index}]"))
     }
 }
