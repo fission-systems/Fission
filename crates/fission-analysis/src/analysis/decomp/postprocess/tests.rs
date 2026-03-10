@@ -179,6 +179,25 @@ label_end:
 }
 
 #[test]
+fn test_goto_cleanup_threads_chained_goto_labels() {
+    let input = r#"int test(int x)
+{
+  if (x == 0) goto label_1;
+  return 2;
+label_1:
+  goto label_2;
+label_2:
+  return 1;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(!output.contains("goto label_1;"), "must retarget chained goto entry: {}", output);
+    assert!(!output.contains("goto label_2;"), "must remove intermediate goto-only label: {}", output);
+    assert!(!output.contains("label_1:"), "must remove dead intermediate label: {}", output);
+    assert!(output.contains("return 1;"), "must preserve final destination body: {}", output);
+}
+
+#[test]
 fn test_goto_loop_to_do_while() {
     let input = r#"int test(int n)
 {

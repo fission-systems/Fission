@@ -109,6 +109,63 @@ fn remove_self_fallthrough_gotos(lines: &[String]) -> Vec<String> {
     result
 }
 
+fn thread_chained_gotos(lines: &[String]) -> Vec<String> {
+    let labels = label_positions(lines);
+    let mut redirects: HashMap<String, String> = HashMap::new();
+
+    for (label, &label_pos) in &labels {
+        let boundary = next_block_boundary_index(lines, label_pos + 1);
+        let body: Vec<&str> = lines[label_pos + 1..boundary]
+            .iter()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .collect();
+        if body.len() == 1
+            && let Some(target) = parse_goto(body[0])
+            && target != label
+        {
+            redirects.insert(label.clone(), target.to_string());
+        }
+    }
+
+    if redirects.is_empty() {
+        return lines.to_vec();
+    }
+
+    fn resolve_target<'a>(
+        target: &'a str,
+        redirects: &'a HashMap<String, String>,
+    ) -> Option<&'a str> {
+        let mut current = target;
+        let mut seen = HashSet::new();
+        while let Some(next) = redirects.get(current) {
+            if !seen.insert(current) {
+                return None;
+            }
+            current = next;
+        }
+        Some(current)
+    }
+
+    lines.iter()
+        .map(|line| {
+            if let Some(target) = parse_goto(line)
+                && let Some(final_target) = resolve_target(target, &redirects)
+                && final_target != target
+            {
+                return line.replacen(target, final_target, 1);
+            }
+            if let Some((_, _, target)) = parse_if_goto(line)
+                && let Some(final_target) = resolve_target(target, &redirects)
+                && final_target != target
+            {
+                return line.replacen(target, final_target, 1);
+            }
+            line.clone()
+        })
+        .collect()
+}
+
 fn fold_if_else_gotos(lines: &[String]) -> Vec<String> {
     let labels = label_positions(lines);
     let mut result = Vec::new();
@@ -304,7 +361,7 @@ impl PostProcessor {
         for _ in 0..3 {
             let lines: Vec<String> = current.lines().map(str::to_string).collect();
             let next = remove_dead_labels(&inline_single_use_labels(&fold_guarded_if_gotos(
-                &fold_if_else_gotos(&remove_self_fallthrough_gotos(&lines)),
+                &fold_if_else_gotos(&thread_chained_gotos(&remove_self_fallthrough_gotos(&lines))),
             )))
             .join("\n");
             if next == current {
