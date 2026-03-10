@@ -12,6 +12,7 @@ mod arithmetic;
 mod clean_slate;
 mod cleanup;
 mod condition;
+mod goto_cleanup;
 mod loops;
 mod naming;
 pub mod pass;
@@ -295,6 +296,8 @@ impl PostProcessor {
         if self.options.remove_dead_branches {
             processed = Self::remove_constant_conditions(&processed);
         }
+
+        processed = Self::cleanup_gotos(&processed);
 
         // A-4: Empty else removal + If-return early exit
         if self.options.simplify_if {

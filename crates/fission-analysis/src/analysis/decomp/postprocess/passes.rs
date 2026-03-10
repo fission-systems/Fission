@@ -79,6 +79,10 @@ impl PostProcessPass for WhileTrueToCondPass {
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         Ok(PostProcessor::while_true_to_while_cond_cow(code))
     }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["goto_cleanup"]
+    }
 }
 
 /// While-true to for-loop pass
@@ -119,6 +123,10 @@ impl PostProcessPass for WhileCondToForPass {
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         Ok(PostProcessor::while_cond_to_for_cow(code))
     }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["goto_cleanup"]
+    }
 }
 
 /// Do-while to for-loop pass
@@ -136,6 +144,10 @@ impl PostProcessPass for DoWhileToForPass {
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         Ok(PostProcessor::do_while_to_for_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["goto_cleanup"]
     }
 }
 
@@ -176,6 +188,10 @@ impl PostProcessPass for SimplifyIfStructurePass {
 
     fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
         Ok(PostProcessor::simplify_if_structure_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["goto_cleanup"]
     }
 }
 
@@ -559,5 +575,27 @@ impl PostProcessPass for CleanSlatePass {
 
     fn dependencies(&self) -> &[&'static str] {
         &["promote_rect_params"]
+    }
+}
+
+/// Early goto and label cleanup pass
+pub struct GotoCleanupPass;
+
+impl PostProcessPass for GotoCleanupPass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "goto_cleanup",
+            name: "Goto Cleanup",
+            description: "Removes trivial gotos, inlines pass-through labels, and folds canonical goto-based if/else patterns",
+            category: PassCategory::ControlFlow,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::cleanup_gotos_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["remove_dead_branches"]
     }
 }

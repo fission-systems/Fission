@@ -102,6 +102,65 @@ y = c * 8 + d;"#;
 }
 
 #[test]
+fn test_goto_cleanup_removes_self_fallthrough_goto() {
+    let input = r#"int test(void)
+{
+  goto label_1;
+label_1:
+  return 1;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(!output.contains("goto label_1;"), "must remove no-op goto: {}", output);
+    assert!(!output.contains("label_1:"), "must remove dead label after cleanup: {}", output);
+    assert!(output.contains("return 1;"), "must preserve return body: {}", output);
+}
+
+#[test]
+fn test_goto_cleanup_inlines_single_use_label_block() {
+    let input = r#"int test(int x)
+{
+  if (x == 0) {
+    goto label_1;
+  }
+  return 2;
+label_1:
+  return 1;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(!output.contains("goto label_1;"), "must inline single-use label body: {}", output);
+    assert!(!output.contains("label_1:"), "must remove inlined label: {}", output);
+    assert!(output.contains("return 1;"), "must preserve inlined return: {}", output);
+}
+
+#[test]
+fn test_goto_cleanup_folds_canonical_if_else() {
+    let input = r#"int test(int x)
+{
+  int y;
+  if (x == 0) goto label_true;
+  goto label_false;
+label_true:
+  y = 1;
+  goto label_end;
+label_false:
+  y = 2;
+label_end:
+  return y;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(output.contains("if (x == 0) {"), "must reconstruct if block: {}", output);
+    assert!(output.contains("} else {"), "must reconstruct else block: {}", output);
+    assert!(!output.contains("goto label_true;"), "must eliminate then goto: {}", output);
+    assert!(!output.contains("goto label_false;"), "must eliminate else goto: {}", output);
+    assert!(!output.contains("label_true:"), "must eliminate then label: {}", output);
+    assert!(!output.contains("label_false:"), "must eliminate else label: {}", output);
+    assert!(!output.contains("label_end:"), "must eliminate join label: {}", output);
+}
+
+#[test]
 fn test_promote_rect_param_for_get_client_rect() {
     let input = r#"ulonglong FUN_0x140006260(longlong param_1,uint8_t (*param_2) [16])
 {
