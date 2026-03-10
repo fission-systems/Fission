@@ -28,7 +28,13 @@ const TYPES = new Set([
     "bool", "BOOL", "BYTE", "WORD", "DWORD", "QWORD",
     "HANDLE", "HMODULE", "FARPROC", "LPSTR", "LPCSTR", "LPWSTR", "LPCWSTR",
     "PVOID", "LPVOID", "HRESULT", "NTSTATUS", "ULONG", "UCHAR",
+    "RECT", "LPRECT", "POINT", "LPPOINT", "MSG", "LPMSG", "WSADATA", "LPWSADATA",
+    "HWND", "HDC", "HMENU", "WPARAM", "LPARAM", "LRESULT", "ULONG_PTR", "DWORD_PTR",
 ]);
+
+function isLikelyTypeToken(word: string): boolean {
+    return TYPES.has(word) || /^(?:LP|P)?[A-Z][A-Z0-9_]{2,}$/.test(word);
+}
 
 function tokenize(line: string): Token[] {
     const tokens: Token[] = [];
@@ -101,7 +107,7 @@ function tokenize(line: string): Token[] {
             const word = line.slice(i, j);
             if (KEYWORDS.has(word)) {
                 tokens.push({ type: "keyword", value: word });
-            } else if (TYPES.has(word)) {
+            } else if (isLikelyTypeToken(word)) {
                 tokens.push({ type: "type", value: word });
             } else {
                 tokens.push({ type: "symbol", value: word });
@@ -137,6 +143,7 @@ export default function DecompileView({
     onRename,
 }: DecompileViewProps) {
     const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
+    const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
     const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -159,6 +166,7 @@ export default function DecompileView({
 
     const handleSymbolClick = useCallback(
         (symbol: string) => {
+            setSelectedSymbol((prev) => (prev === symbol ? null : symbol));
             onSymbolClick?.(symbol);
         },
         [onSymbolClick],
@@ -200,11 +208,12 @@ export default function DecompileView({
                         <span className="decomp-line__content">
                             {line.tokens.map((token, ti) => {
                                 if (token.type === "symbol") {
-                                    const isHovered = hoveredSymbol === token.value;
+                                    const isHighlighted =
+                                        hoveredSymbol === token.value || selectedSymbol === token.value;
                                     return (
                                         <span
                                             key={ti}
-                                            className={`decomp-token decomp-token--symbol ${isHovered ? "decomp-token--highlight" : ""}`}
+                                            className={`decomp-token decomp-token--symbol ${isHighlighted ? "decomp-token--highlight" : ""}`}
                                             onMouseEnter={() => setHoveredSymbol(token.value)}
                                             onMouseLeave={() => setHoveredSymbol(null)}
                                             onClick={() => handleSymbolClick(token.value)}

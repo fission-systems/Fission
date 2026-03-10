@@ -206,6 +206,9 @@ export interface RustPostProcessOptions {
     field_offsets: boolean;
     insert_casts: boolean;
     arithmetic_idioms: boolean;
+    temp_var_inlining: boolean;
+    stack_var_normalization: boolean;
+    piece_access_normalization: boolean;
     deref_to_array: boolean;
     bitop_to_logicop: boolean;
     remove_dead_branches: boolean;
@@ -218,6 +221,7 @@ export interface RustPostProcessOptions {
     switch_reconstruction: boolean;
     mul_to_shift: boolean;
     dwarf_names: boolean;
+    string_pointers: boolean;
 }
 
 /** Display/formatting options for decompiler output. */
@@ -274,6 +278,9 @@ export function defaultDecompilerOptions(): DecompilerOptions {
             field_offsets: true,
             insert_casts: true,
             arithmetic_idioms: true,
+            temp_var_inlining: true,
+            stack_var_normalization: true,
+            piece_access_normalization: true,
             deref_to_array: true,
             bitop_to_logicop: true,
             remove_dead_branches: true,
@@ -286,6 +293,7 @@ export function defaultDecompilerOptions(): DecompilerOptions {
             switch_reconstruction: true,
             mul_to_shift: true,
             dwarf_names: true,
+            string_pointers: true,
         },
         display: {
             max_line_width: 100,

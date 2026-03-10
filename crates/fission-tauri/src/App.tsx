@@ -573,8 +573,11 @@ function App() {
                                         const matchByName = functions.find(
                                             (f) => f.name.toLowerCase() === sym.toLowerCase()
                                         );
-                                        const targetAddr = matchByName?.address ?? activeTab.address;
-                                        openRename(targetAddr, sym);
+                                        if (matchByName) {
+                                            openRename(matchByName.address, sym);
+                                            return;
+                                        }
+                                        log(`Local symbol rename not yet supported from decompile view: ${sym}`);
                                     }}
                                 />
                             ) : activeTab.type === "assembly" ? (

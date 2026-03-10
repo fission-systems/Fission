@@ -99,6 +99,9 @@ pub async fn apply_decompiler_options(
                 field_offsets: options.rust_postprocess.field_offsets,
                 insert_casts: options.rust_postprocess.insert_casts,
                 arithmetic_idioms: options.rust_postprocess.arithmetic_idioms,
+                temp_var_inlining: options.rust_postprocess.temp_var_inlining,
+                stack_var_normalization: options.rust_postprocess.stack_var_normalization,
+                piece_access_normalization: options.rust_postprocess.piece_access_normalization,
                 deref_to_array: options.rust_postprocess.deref_to_array,
                 bitop_to_logicop: options.rust_postprocess.bitop_to_logicop,
                 remove_dead_branches: options.rust_postprocess.remove_dead_branches,
@@ -111,6 +114,7 @@ pub async fn apply_decompiler_options(
                 switch_reconstruction: options.rust_postprocess.switch_reconstruction,
                 mul_to_shift: options.rust_postprocess.mul_to_shift,
                 dwarf_names: options.rust_postprocess.dwarf_names,
+                string_pointers: options.rust_postprocess.string_pointers,
             };
             decomp.set_rust_postprocess_options(rust_opts);
 

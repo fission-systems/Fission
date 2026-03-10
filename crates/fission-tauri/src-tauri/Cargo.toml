@@ -24,7 +24,7 @@ iced-x86 = { version = "1.21", features = ["std"] }
 # Fission crates
 fission-core = { path = "../../fission-core" }
 fission-loader = { path = "../../fission-loader" }
-fission-analysis = { path = "../../fission-analysis" }  # always needed for plugin system
+fission-analysis = { path = "../../fission-analysis", features = ["interactive_runtime"] }  # needed for plugin/debug/runtime UI
 fission-signatures = { path = "../../fission-signatures" }
 fission-ffi = { path = "../../fission-ffi", optional = true }
 tracing = "0.1"

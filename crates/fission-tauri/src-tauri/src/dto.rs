@@ -277,6 +277,9 @@ pub struct RustPostProcessOptions {
     pub field_offsets: bool,
     pub insert_casts: bool,
     pub arithmetic_idioms: bool,
+    pub temp_var_inlining: bool,
+    pub stack_var_normalization: bool,
+    pub piece_access_normalization: bool,
     pub deref_to_array: bool,
     pub bitop_to_logicop: bool,
     pub remove_dead_branches: bool,
@@ -289,6 +292,7 @@ pub struct RustPostProcessOptions {
     pub switch_reconstruction: bool,
     pub mul_to_shift: bool,
     pub dwarf_names: bool,
+    pub string_pointers: bool,
 }
 
 impl Default for RustPostProcessOptions {
@@ -300,6 +304,9 @@ impl Default for RustPostProcessOptions {
             field_offsets: true,
             insert_casts: true,
             arithmetic_idioms: true,
+            temp_var_inlining: true,
+            stack_var_normalization: true,
+            piece_access_normalization: true,
             deref_to_array: true,
             bitop_to_logicop: true,
             remove_dead_branches: true,
@@ -312,6 +319,7 @@ impl Default for RustPostProcessOptions {
             switch_reconstruction: true,
             mul_to_shift: true,
             dwarf_names: true,
+            string_pointers: true,
         }
     }
 }
