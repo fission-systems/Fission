@@ -10,26 +10,17 @@ static STACK_VAR: Lazy<Regex> = Lazy::new(|| {
         .unwrap_or_else(|e| panic!("invalid STACK_VAR regex: {e}"))
 });
 
-static STACK_PIECE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"\b(?P<var>(?:local_[0-9A-Za-z_]+|_?[A-Za-z]+Stack_[0-9A-Fa-f]+))\._(?P<offset>\d+)_(?P<size>\d+)_",
-    )
-    .unwrap_or_else(|e| panic!("invalid STACK_PIECE regex: {e}"))
-});
-
 impl PostProcessor {
     pub(super) fn normalize_stack_artifacts_cow<'a>(code: &'a str) -> Cow<'a, str> {
-        if !code.contains("Stack_") && !code.contains("._") {
+        if !code.contains("Stack_") {
             return Cow::Borrowed(code);
         }
 
         let renamed = rename_stack_locals(code);
-        let rewritten = rewrite_stack_piece_accesses(&renamed);
-
-        if rewritten == code {
+        if renamed == code {
             Cow::Borrowed(code)
         } else {
-            Cow::Owned(rewritten)
+            Cow::Owned(renamed)
         }
     }
 
@@ -83,44 +74,4 @@ fn rename_stack_locals(code: &str) -> String {
         }
     }
     result
-}
-
-fn rewrite_stack_piece_accesses(code: &str) -> String {
-    if !code.contains("._") {
-        return code.to_string();
-    }
-
-    STACK_PIECE
-        .replace_all(code, |caps: &regex::Captures| {
-            let var = caps.name("var").map(|m| m.as_str()).unwrap_or_default();
-            let offset = caps
-                .name("offset")
-                .and_then(|m| m.as_str().parse::<u32>().ok())
-                .unwrap_or(0);
-            let size = caps
-                .name("size")
-                .and_then(|m| m.as_str().parse::<u32>().ok())
-                .unwrap_or(0);
-
-            let Some(ty) = stack_piece_type(size) else {
-                return caps[0].to_string();
-            };
-
-            if offset == 0 {
-                format!("*({ty} *)&{var}")
-            } else {
-                format!("*({ty} *)((uint8_t *)&{var} + {offset})")
-            }
-        })
-        .to_string()
-}
-
-fn stack_piece_type(size: u32) -> Option<&'static str> {
-    match size {
-        1 => Some("uint8_t"),
-        2 => Some("uint16_t"),
-        4 => Some("uint32_t"),
-        8 => Some("uint64_t"),
-        _ => None,
-    }
 }

@@ -644,6 +644,28 @@ impl PostProcessPass for NormalizeStackArtifactsPass {
     }
 }
 
+/// Generic piece-access normalization pass
+pub struct NormalizePieceAccessesPass;
+
+impl PostProcessPass for NormalizePieceAccessesPass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "normalize_piece_accesses",
+            name: "Normalize Piece Accesses",
+            description: "Rewrites generic Ghidra _offset_size_ piece syntax into explicit pointer casts, including globals and wide aggregates",
+            category: PassCategory::Cleanup,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::normalize_piece_accesses_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["normalize_stack_artifacts"]
+    }
+}
+
 /// Early goto and label cleanup pass
 pub struct GotoCleanupPass;
 

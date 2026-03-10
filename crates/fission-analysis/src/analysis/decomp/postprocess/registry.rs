@@ -29,6 +29,7 @@ pub fn create_default_registry() -> Result<PassRegistry, String> {
     registry.register(Box::new(CleanSlatePass))?;
     registry.register(Box::new(InlineSingleUseTempsPass))?;
     registry.register(Box::new(NormalizeStackArtifactsPass))?;
+    registry.register(Box::new(NormalizePieceAccessesPass))?;
     registry.register(Box::new(InsertMissingCastsPass))?;
 
     // ========================================================================

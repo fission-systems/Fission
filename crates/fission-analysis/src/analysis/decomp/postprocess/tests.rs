@@ -697,11 +697,53 @@ fn test_stack_normalization_rewrites_piece_access() {
   return 0;
 }"#;
 
-    let output = PostProcessor::normalize_stack_artifacts(input);
+    let output = PostProcessor::normalize_piece_accesses(&PostProcessor::normalize_stack_artifacts(input));
     assert!(
         output.contains("*(uint32_t *)((uint8_t *)&local_848 + 12)"),
         "must rewrite stack piece access into explicit pointer arithmetic: {}",
         output
     );
     assert!(!output.contains("axStack_848._12_4_"), "must remove raw sub-variable syntax: {}", output);
+}
+
+#[test]
+fn test_piece_sweep_rewrites_global_scalar_piece_access() {
+    let input = r#"int test(void)
+{
+  if (DAT_140132020._0_1_ == 0) {
+    DAT_140132020._0_1_ = 1;
+  }
+  return DAT_140132020._0_1_;
+}"#;
+
+    let output = PostProcessor::normalize_piece_accesses(input);
+    assert!(
+        output.contains("*(uint8_t *)&DAT_140132020"),
+        "must rewrite global 1-byte piece access into explicit pointer cast: {}",
+        output
+    );
+    assert!(!output.contains("DAT_140132020._0_1_"), "must remove raw global piece syntax: {}", output);
+}
+
+#[test]
+fn test_piece_sweep_rewrites_wide_local_piece_access() {
+    let input = r#"void test(void)
+{
+  axVar10 = local_848._1_15_;
+  local_838._0_12_ = ZEXT812(0);
+}"#;
+
+    let output = PostProcessor::normalize_piece_accesses(input);
+    assert!(
+        output.contains("*(uint8_t (*)[15])((uint8_t *)&local_848 + 1)"),
+        "must rewrite 15-byte piece access using array-pointer cast: {}",
+        output
+    );
+    assert!(
+        output.contains("*(uint8_t (*)[12])(uint8_t *)&local_838"),
+        "must rewrite 12-byte whole-piece access using array-pointer cast: {}",
+        output
+    );
+    assert!(!output.contains("local_848._1_15_"), "must remove raw wide piece syntax: {}", output);
+    assert!(!output.contains("local_838._0_12_"), "must remove raw whole-piece syntax: {}", output);
 }

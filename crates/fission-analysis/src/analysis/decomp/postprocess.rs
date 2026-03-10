@@ -17,6 +17,7 @@ mod loops;
 mod naming;
 pub mod pass;
 pub mod passes;
+mod piece_sweep;
 pub mod registry;
 mod stack_normalization;
 mod strings;
@@ -41,6 +42,7 @@ pub struct RustPostProcessOptions {
     pub arithmetic_idioms: bool,
     pub temp_var_inlining: bool,
     pub stack_var_normalization: bool,
+    pub piece_access_normalization: bool,
     pub deref_to_array: bool,
     pub bitop_to_logicop: bool,
     pub remove_dead_branches: bool,
@@ -67,6 +69,7 @@ impl Default for RustPostProcessOptions {
             arithmetic_idioms: true,
             temp_var_inlining: true,
             stack_var_normalization: true,
+            piece_access_normalization: true,
             deref_to_array: true,
             bitop_to_logicop: true,
             remove_dead_branches: true,
@@ -177,6 +180,9 @@ impl PostProcessor {
         if !self.options.stack_var_normalization {
             pass_registry.disable("normalize_stack_artifacts");
         }
+        if !self.options.piece_access_normalization {
+            pass_registry.disable("normalize_piece_accesses");
+        }
         if !self.options.deref_to_array {
             pass_registry.disable("deref_to_array_index");
         }
@@ -282,6 +288,9 @@ impl PostProcessor {
         }
         if self.options.stack_var_normalization {
             processed = Self::normalize_stack_artifacts(&processed);
+        }
+        if self.options.piece_access_normalization {
+            processed = Self::normalize_piece_accesses(&processed);
         }
 
         // Insert missing casts for assignment type mismatches
