@@ -9,6 +9,7 @@ use fission_loader::loader::types::{DwarfFunctionInfo, InferredTypeInfo};
 use std::borrow::Cow;
 
 mod arithmetic;
+mod clean_slate;
 mod cleanup;
 mod condition;
 mod loops;
@@ -262,6 +263,7 @@ impl PostProcessor {
         }
 
         processed = Self::promote_rect_params(&processed);
+        processed = Self::clean_ghidra_artifacts(&processed);
 
         // Insert missing casts for assignment type mismatches
         if self.options.insert_casts {

@@ -130,3 +130,97 @@ fn test_promote_rect_param_for_get_client_rect() {
         output
     );
 }
+
+#[test]
+fn test_clean_slate_rect_whole_object_write() {
+    let input = r#"ulonglong FUN_0x140006260(longlong param_1,LPRECT param_2)
+{
+  uint8_t local_3c [16];
+  if (flag) {
+    iVar1 = GetClientRect(xVar2,param_2);
+    uVar3 = CONCAT71(Var4,iVar1 != 0);
+  }
+  else {
+    *(uint8_t (*)[16])param_2 = CONCAT016(0,local_3c);
+    uVar3 = CONCAT71(Var4,1);
+  }
+  return (uVar3 % 4294967296);
+}"#;
+
+    let output = PostProcessor::clean_ghidra_artifacts(input);
+    assert!(
+        output.contains("RECT local_3c;"),
+        "must promote 16-byte temp to RECT: {}",
+        output
+    );
+    assert!(
+        output.contains("*param_2 = local_3c;"),
+        "must collapse whole-object write to struct assignment: {}",
+        output
+    );
+    assert!(
+        output.contains("uVar3 = (ulonglong)(iVar1 != 0);"),
+        "must simplify CONCAT71 scalar assignment: {}",
+        output
+    );
+    assert!(
+        output.contains("uVar3 = (ulonglong)(1);"),
+        "must simplify branch constant assignment: {}",
+        output
+    );
+    assert!(
+        output.contains("return uVar3;"),
+        "must remove redundant 32-bit truncation on promoted scalar: {}",
+        output
+    );
+}
+
+#[test]
+fn test_clean_slate_real_world_rect_output() {
+    let input = r#"ulonglong FUN_0x140006260(longlong param_1,LPRECT param_2)
+{
+  int iVar1;
+  uint64_t xVar2;
+  uint64_t unaff_RBX;
+  undefined7 Var4;
+  ulonglong uVar3;
+  uint8_t local_68 [40];
+  uint32_t local_40;
+  RECT local_3c;
+  ulonglong local_18;
+  
+  local_18 = _DAT_140132040 ^ (ulonglong)local_68;
+  Var4 = (undefined7)((ulonglong)unaff_RBX >> 8);
+  if ((DAT_140132f78 == (code *)0x0) || (DAT_140132f70 == (code *)0x0)) {
+    xVar2 = GetDesktopWindow();
+    iVar1 = GetClientRect(xVar2,param_2);
+    uVar3 = CONCAT71(Var4,iVar1 != 0);
+  }
+  else {
+    xVar2 = (*DAT_140132f70)(param_1->field_28,2);
+    local_40 = 0x28;
+    (*DAT_140132f78)(xVar2,&local_40);
+    *param_2 = local_3c;
+    uVar3 = CONCAT71(Var4,1);
+  }
+  FUN_0x1400bdff0(local_18 ^ (ulonglong)local_68);
+  return (uVar3 % 4294967296);
+}"#;
+
+    let output = PostProcessor::clean_ghidra_artifacts(input);
+    assert!(
+        !output.contains("CONCAT71"),
+        "must eliminate CONCAT71 in real-world shape: {}",
+        output
+    );
+    assert!(
+        output.contains("uVar3 = (ulonglong)(iVar1 != 0);"),
+        "must simplify conditional branch assignment: {}",
+        output
+    );
+    assert!(
+        output.contains("return uVar3;"),
+        "must remove redundant masked return after CONCAT cleanup: {}",
+        output
+    );
+}

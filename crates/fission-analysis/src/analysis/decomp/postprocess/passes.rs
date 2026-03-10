@@ -539,3 +539,25 @@ impl PostProcessPass for PromoteRectParamsPass {
         Ok(PostProcessor::promote_rect_params_cow(code))
     }
 }
+
+/// Ghidra artifact cleanup pass for promoted WinAPI structures
+pub struct CleanSlatePass;
+
+impl PostProcessPass for CleanSlatePass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "clean_slate",
+            name: "Clean Ghidra Artifacts",
+            description: "Rewrites promoted structure writes and collapses trivial CONCAT scalar artifacts",
+            category: PassCategory::Cleanup,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::clean_ghidra_artifacts_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["promote_rect_params"]
+    }
+}
