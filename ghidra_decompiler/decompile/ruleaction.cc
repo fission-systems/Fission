@@ -7528,7 +7528,6 @@ bool RulePieceStructure::separateSymbol(Varnode *root,Varnode *leaf)
   if (op->isMarker()) return true;	// Leaf is not defined locally
   if (op->code() != CPUI_PIECE) return false;
   if (leaf->getType()->isPieceStructured()) return true;	// Would be a separate root
-
   return false;
 }
 
@@ -7599,6 +7598,13 @@ int4 RulePieceStructure::applyOp(PcodeOp *op,Funcdata &data)
       }
     }
     if (node.isLeaf()) {
+      // Avoid materializing a duplicate whole-piece into the same non-addrtied storage as the root.
+      if (!outvn->isAddrTied() &&
+          node.getTypeOffset() == 0 &&
+          addr == outvn->getAddr() &&
+          vn->getSize() == outvn->getSize()) {
+        continue;
+      }
       PcodeOp *copyOp = data.newOp(1,node.getOp()->getAddr());
       Varnode *newVn = data.newVarnodeOut(vn->getSize(), addr, copyOp);
       anyAddrTied = anyAddrTied || newVn->isAddrTied();	// Its possible newVn is addrtied, even if vn isn't

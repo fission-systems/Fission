@@ -130,6 +130,14 @@
     "params": []
   },
   {
+    "name": "GetClientRect",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "lpRect", "type_name": "LPRECT" }
+    ]
+  },
+  {
     "name": "PostMessageA",
     "return_type": "BOOL",
     "params": [

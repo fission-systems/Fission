@@ -126,6 +126,13 @@
     "is_signed": false
   },
   {
+    "name": "LPRECT",
+    "size_32": 4,
+    "size_64": 8,
+    "is_pointer": true,
+    "is_signed": false
+  },
+  {
     "name": "SIZE_T",
     "size_32": 4,
     "size_64": 8,

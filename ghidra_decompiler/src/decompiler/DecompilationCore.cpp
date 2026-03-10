@@ -550,7 +550,6 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
 
     // Enforce GDT-based, injected (fission-signatures), and built-in prototypes before action reset.
     {
-        /*
         fission::types::PrototypeEnforcer proto_enforcer;
         const auto* injected = ctx->injected_signatures.empty() ? nullptr : &ctx->injected_signatures;
         if (!ctx->symbols.empty()) {
@@ -572,7 +571,6 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         if (!func_name.empty()) {
             proto_enforcer.enforce_single_prototype(ctx->arch.get(), addr, func_name, injected);
         }
-        */
     }
 
     // ========================================================================
