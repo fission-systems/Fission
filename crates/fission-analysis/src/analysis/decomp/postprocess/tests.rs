@@ -253,6 +253,50 @@ label_bad:
 }
 
 #[test]
+fn test_goto_cleanup_sinks_nonterminal_label_prefix_for_goto() {
+    let input = r#"int test(int x)
+{
+  goto label_prefix;
+label_prefix:
+  y = 1;
+label_body:
+  if (x > 0) {
+    return y;
+  }
+  return 0;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(!output.contains("goto label_prefix;"), "must retarget prefix goto: {}", output);
+    assert!(!output.contains("label_prefix:"), "must remove dead prefix label: {}", output);
+    assert!(output.contains("y = 1;"), "must preserve sunk prefix statement: {}", output);
+    assert!(output.contains("return y;"), "must preserve original body semantics after sinking: {}", output);
+}
+
+#[test]
+fn test_goto_cleanup_sinks_nonterminal_label_prefix_for_if_goto() {
+    let input = r#"int test(int x)
+{
+  if (x == 0) goto label_prefix;
+  return 0;
+label_prefix:
+  y = 1;
+label_body:
+  if (x > 0) {
+    return y;
+  }
+  return 2;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(!output.contains("goto label_prefix;"), "must eliminate old prefix target: {}", output);
+    assert!(!output.contains("label_prefix:"), "must remove dead prefix label: {}", output);
+    assert!(output.contains("y = 1;"), "must preserve prefix statement inside guard: {}", output);
+    assert!(output.contains("return y;"), "must preserve body reached through sunk prefix: {}", output);
+    assert!(output.contains("return 2;"), "must preserve non-prefix path: {}", output);
+}
+
+#[test]
 fn test_goto_loop_to_do_while() {
     let input = r#"int test(int n)
 {

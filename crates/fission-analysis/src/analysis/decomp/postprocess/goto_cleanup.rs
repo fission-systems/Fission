@@ -341,6 +341,63 @@ fn merge_adjacent_if_goto_chains(lines: &[String]) -> Vec<String> {
     result
 }
 
+fn sink_label_prefixes(lines: &[String]) -> Vec<String> {
+    let labels = label_positions(lines);
+    let mut prefixes: HashMap<String, (Vec<String>, String)> = HashMap::new();
+
+    for (label, &label_pos) in &labels {
+        let block_end = next_block_boundary_index(lines, label_pos + 1);
+        if block_end <= label_pos + 1 || block_end >= lines.len() {
+            continue;
+        }
+        let Some(next_label) = parse_label(&lines[block_end]) else {
+            continue;
+        };
+        let body: Vec<String> = lines[label_pos + 1..block_end]
+            .iter()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+        if body.is_empty()
+            || body.len() > 2
+            || !body.iter().all(|line| is_simple_statement(line) && !is_terminal_statement(line))
+        {
+            continue;
+        }
+        prefixes.insert(label.clone(), (body, next_label.to_string()));
+    }
+
+    if prefixes.is_empty() {
+        return lines.to_vec();
+    }
+
+    let mut result = Vec::new();
+    for line in lines {
+        if let Some(target) = parse_goto(line)
+            && let Some((body, next_label)) = prefixes.get(target)
+        {
+            let indent = indent_of(line).to_string();
+            result.extend(body.iter().map(|stmt| format!("{indent}{stmt}")));
+            result.push(format!("{indent}goto {next_label};"));
+            continue;
+        }
+
+        if let Some((indent, cond, target)) = parse_if_goto(line)
+            && let Some((body, next_label)) = prefixes.get(target)
+        {
+            result.push(format!("{indent}if ({cond}) {{"));
+            result.extend(body.iter().map(|stmt| format!("{indent}  {stmt}")));
+            result.push(format!("{indent}  goto {next_label};"));
+            result.push(format!("{indent}}}"));
+            continue;
+        }
+
+        result.push(line.clone());
+    }
+
+    result
+}
+
 fn inline_single_use_labels(lines: &[String]) -> Vec<String> {
     let refs = count_label_references(lines);
     let labels = label_positions(lines);
@@ -513,8 +570,8 @@ impl PostProcessor {
         for _ in 0..3 {
             let lines: Vec<String> = current.lines().map(str::to_string).collect();
             let next = remove_dead_labels(&inline_single_use_labels(&inline_terminal_label_blocks(
-                &merge_adjacent_if_goto_chains(&fold_guarded_if_gotos(&fold_if_else_gotos(
-                    &thread_chained_gotos(&remove_self_fallthrough_gotos(&lines)),
+                &sink_label_prefixes(&merge_adjacent_if_goto_chains(&fold_guarded_if_gotos(
+                    &fold_if_else_gotos(&thread_chained_gotos(&remove_self_fallthrough_gotos(&lines))),
                 ))),
             )))
             .join("\n");
