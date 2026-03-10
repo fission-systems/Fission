@@ -237,6 +237,28 @@ impl PostProcessPass for SwitchFromIfElseAssignPass {
     }
 }
 
+/// Switch case clustering pass
+pub struct SwitchCaseClusteringPass;
+
+impl PostProcessPass for SwitchCaseClusteringPass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "switch_case_clustering",
+            name: "Switch Case Clustering",
+            description: "Clusters adjacent switch cases with common bodies or linear assignments",
+            category: PassCategory::ControlFlow,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::cluster_switch_case_runs_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["switch_from_if_else"]
+    }
+}
+
 // ============================================================================
 // Cleanup Passes
 // ============================================================================

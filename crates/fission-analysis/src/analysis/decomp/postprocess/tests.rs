@@ -31,6 +31,83 @@ fn test_switch_from_if_else_assign_multiline() {
 }
 
 #[test]
+fn test_cluster_switch_case_runs_with_identical_bodies() {
+    let input = r#"switch (x) {
+case 1:
+  goto label_out;
+case 2:
+  goto label_out;
+case 3:
+  goto label_out;
+default:
+  break;
+}"#;
+
+    let output = PostProcessor::cluster_switch_case_runs(input);
+    assert_eq!(output.matches("goto label_out;").count(), 1, "must keep only one shared goto: {}", output);
+    assert!(output.contains("case 1:"), "must preserve case labels: {}", output);
+    assert!(output.contains("case 2:"), "must preserve clustered case labels: {}", output);
+    assert!(output.contains("case 3:"), "must preserve clustered case labels: {}", output);
+}
+
+#[test]
+fn test_cluster_switch_case_runs_with_linear_assignment() {
+    let input = r#"switch (x) {
+case 0x61:
+  y = 0x31;
+  z = 1;
+  goto label_out;
+case 0x62:
+  y = 0x32;
+  z = 1;
+  goto label_out;
+case 0x63:
+  y = 0x33;
+  z = 1;
+  goto label_out;
+default:
+  break;
+}"#;
+
+    let output = PostProcessor::cluster_switch_case_runs(input);
+    assert_eq!(output.matches("goto label_out;").count(), 1, "must share tail goto once: {}", output);
+    assert_eq!(output.matches("z = 1;").count(), 1, "must keep common suffix once: {}", output);
+    assert!(
+        output.contains("y = (ulonglong)(x) - 0x30;"),
+        "must synthesize linear assignment from switch variable: {}",
+        output
+    );
+}
+
+#[test]
+fn test_cluster_switch_case_runs_with_linear_assignment_and_final_fallthrough() {
+    let input = r#"switch (x) {
+case 0x61:
+  y = 0x31;
+  z = 1;
+  goto label_out;
+case 0x62:
+  y = 0x32;
+  z = 1;
+  goto label_out;
+case 0x63:
+  y = 0x33;
+  z = 1;
+label_out:
+  return y;
+}"#;
+
+    let output = PostProcessor::cluster_switch_case_runs(input);
+    assert_eq!(output.matches("goto label_out;").count(), 0, "must use shared fallthrough tail: {}", output);
+    assert_eq!(output.matches("z = 1;").count(), 1, "must keep shared prefix once: {}", output);
+    assert!(
+        output.contains("y = (ulonglong)(x) - 0x30;"),
+        "must synthesize linear assignment for clustered fallthrough cases: {}",
+        output
+    );
+}
+
+#[test]
 fn test_negate_condition_basic_cases() {
     assert_eq!(negate_condition("x >= 10"), "x < 10");
     assert_eq!(negate_condition("!done"), "done");

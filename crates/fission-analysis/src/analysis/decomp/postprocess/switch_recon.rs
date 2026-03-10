@@ -504,4 +504,316 @@ impl PostProcessor {
             Cow::Owned(output)
         }
     }
+
+    pub(super) fn cluster_switch_case_runs_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !code.contains("switch") || !code.contains("case ") {
+            return Cow::Borrowed(code);
+        }
+
+        let output = Self::cluster_switch_case_runs(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
+    }
+
+    pub(super) fn cluster_switch_case_runs(code: &str) -> String {
+        #[derive(Clone)]
+        struct CaseBlock {
+            case_lines: Vec<String>,
+            body: Vec<String>,
+            end_idx: usize,
+        }
+
+        fn brace_delta(line: &str) -> i32 {
+            line.chars()
+                .map(|c| match c {
+                    '{' => 1,
+                    '}' => -1,
+                    _ => 0,
+                })
+                .sum()
+        }
+
+        fn parse_numeric_token(text: &str) -> Option<i64> {
+            let token = Regex::new(r"(0x[0-9a-fA-F]+|\d+)")
+                .unwrap_or_else(|e| panic!("numeric token regex should compile: {e}"))
+                .find_iter(text)
+                .last()?
+                .as_str()
+                .to_string();
+            if let Some(hex) = token.strip_prefix("0x") {
+                i64::from_str_radix(hex, 16).ok()
+            } else {
+                token.parse::<i64>().ok()
+            }
+        }
+
+        fn format_offset(delta: i64) -> String {
+            let abs = delta.unsigned_abs();
+            if abs >= 10 {
+                format!("0x{abs:x}")
+            } else {
+                abs.to_string()
+            }
+        }
+
+        fn build_formula(switch_expr: &str, delta: i64) -> String {
+            let base = format!("(ulonglong)({})", switch_expr.trim());
+            if delta == 0 {
+                base
+            } else if delta > 0 {
+                format!("{base} + {}", format_offset(delta))
+            } else {
+                format!("{base} - {}", format_offset(delta))
+            }
+        }
+
+        fn indent_of(line: &str) -> &str {
+            let trimmed = line.trim_start();
+            &line[..line.len() - trimmed.len()]
+        }
+
+        fn parse_assignment(line: &str) -> Option<(String, String, String)> {
+            let assign = Regex::new(r"^(\s*)([^=]+?)\s*=\s*(.+);\s*$")
+                .unwrap_or_else(|e| panic!("assignment regex should compile: {e}"));
+            let caps = assign.captures(line)?;
+            Some((
+                caps.get(1)?.as_str().to_string(),
+                caps.get(2)?.as_str().trim().to_string(),
+                caps.get(3)?.as_str().trim().to_string(),
+            ))
+        }
+
+        fn collect_case_block(
+            lines: &[&str],
+            start: usize,
+            switch_end: usize,
+            case_re: &Regex,
+            default_re: &Regex,
+        ) -> Option<CaseBlock> {
+            let label_re = Regex::new(r"^\s*[A-Za-z_]\w*:\s*$")
+                .unwrap_or_else(|e| panic!("label regex should compile: {e}"));
+            if !case_re.is_match(lines[start]) {
+                return None;
+            }
+
+            let mut case_lines = vec![lines[start].to_string()];
+            let mut idx = start + 1;
+            while idx < switch_end && case_re.is_match(lines[idx]) {
+                case_lines.push(lines[idx].to_string());
+                idx += 1;
+            }
+
+            let mut body = Vec::new();
+            let mut depth = 1i32;
+            while idx < switch_end {
+                if depth == 1
+                    && (case_re.is_match(lines[idx])
+                        || default_re.is_match(lines[idx])
+                        || label_re.is_match(lines[idx])
+                        || lines[idx].trim() == "}")
+                {
+                    break;
+                }
+                body.push(lines[idx].to_string());
+                depth += brace_delta(lines[idx]);
+                idx += 1;
+            }
+
+            Some(CaseBlock {
+                case_lines,
+                body,
+                end_idx: idx,
+            })
+        }
+
+        fn try_cluster_run(blocks: &[CaseBlock], switch_expr: &str) -> Option<(Vec<String>, usize)> {
+            if blocks.len() < 3 {
+                return None;
+            }
+
+            fn nonempty_lines(body: &[String]) -> Vec<&str> {
+                body.iter()
+                    .map(|line| line.trim())
+                    .filter(|line| !line.is_empty())
+                    .collect()
+            }
+
+            fn nonempty_raw(body: &[String]) -> Vec<&String> {
+                body.iter().filter(|line| !line.trim().is_empty()).collect()
+            }
+
+            fn trailing_goto_target<'a>(lines: &'a [&'a str]) -> Option<&'a str> {
+                let last = *lines.last()?;
+                Regex::new(r"^goto\s+([A-Za-z_]\w*)\s*;\s*$")
+                    .unwrap_or_else(|e| panic!("goto tail regex should compile: {e}"))
+                    .captures(last)
+                    .and_then(|caps| caps.get(1))
+                    .map(|m| m.as_str())
+            }
+
+            if blocks.iter().all(|block| block.body == blocks[0].body) {
+                let mut out = Vec::new();
+                for block in blocks {
+                    out.extend(block.case_lines.clone());
+                }
+                out.extend(blocks[0].body.clone());
+                return Some((out, blocks.len()));
+            }
+
+            let first_body_nonempty_raw = nonempty_raw(&blocks[0].body);
+            let first_body_nonempty: Vec<&str> =
+                first_body_nonempty_raw.iter().map(|line| line.trim()).collect();
+            let first_assign = parse_assignment(first_body_nonempty.first()?)?;
+            let last_body_nonempty_raw = nonempty_raw(&blocks.last()?.body);
+            let last_body_nonempty: Vec<&str> =
+                last_body_nonempty_raw.iter().map(|line| line.trim()).collect();
+            let last_suffix: Vec<&str> = last_body_nonempty.iter().skip(1).copied().collect();
+            let mut common_tail_target: Option<String> = None;
+
+            let mut delta: Option<i64> = None;
+            for block in blocks {
+                let body_nonempty = nonempty_lines(&block.body);
+                let head = parse_assignment(body_nonempty.first()?)?;
+                if head.0 != first_assign.0 || head.1 != first_assign.1 {
+                    return None;
+                }
+
+                let suffix_b: Vec<&str> = body_nonempty.iter().skip(1).copied().collect();
+                if suffix_b != last_suffix {
+                    if suffix_b.len() == last_suffix.len() + 1
+                        && suffix_b[..last_suffix.len()] == last_suffix[..]
+                    {
+                        let Some(target) = trailing_goto_target(&suffix_b) else {
+                            return None;
+                        };
+                        if let Some(prev) = &common_tail_target {
+                            if prev != target {
+                                return None;
+                            }
+                        } else {
+                            common_tail_target = Some(target.to_string());
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+
+                let case_value = parse_numeric_token(block.case_lines.last()?.trim())?;
+                let rhs_value = parse_numeric_token(&head.2)?;
+                let cur_delta = rhs_value - case_value;
+                if let Some(prev) = delta {
+                    if prev != cur_delta {
+                        return None;
+                    }
+                } else {
+                    delta = Some(cur_delta);
+                }
+            }
+
+            let (_, lhs, _) = first_assign;
+            let assign_indent = indent_of(first_body_nonempty_raw.first()?.as_str()).to_string();
+            let suffix: Vec<String> = last_body_nonempty_raw
+                .iter()
+                .skip(1)
+                .map(|line| (*line).clone())
+                .collect();
+
+            let mut out = Vec::new();
+            for block in blocks {
+                out.extend(block.case_lines.clone());
+            }
+            out.push(format!(
+                "{assign_indent}{lhs} = {};",
+                build_formula(switch_expr, delta.unwrap_or(0))
+            ));
+            out.extend(suffix);
+            Some((out, blocks.len()))
+        }
+
+        let switch_open = Regex::new(r"^\s*switch\s*\((.+)\)\s*\{\s*$")
+            .unwrap_or_else(|e| panic!("switch open regex should compile: {e}"));
+        let case_re = Regex::new(r"^\s*case\s+.+:\s*$")
+            .unwrap_or_else(|e| panic!("case regex should compile: {e}"));
+        let default_re = Regex::new(r"^\s*default:\s*$")
+            .unwrap_or_else(|e| panic!("default regex should compile: {e}"));
+
+        let lines: Vec<&str> = code.lines().collect();
+        if lines.is_empty() {
+            return code.to_string();
+        }
+
+        let mut result = Vec::new();
+        let mut i = 0;
+        let mut changed = false;
+
+        while i < lines.len() {
+            let Some(caps) = switch_open.captures(lines[i]) else {
+                result.push(lines[i].to_string());
+                i += 1;
+                continue;
+            };
+            let switch_expr = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let switch_start = i;
+            let mut switch_end = i + 1;
+            let mut depth = 1i32;
+            while switch_end < lines.len() {
+                depth += brace_delta(lines[switch_end]);
+                if depth == 0 {
+                    break;
+                }
+                switch_end += 1;
+            }
+            if switch_end >= lines.len() {
+                result.push(lines[i].to_string());
+                i += 1;
+                continue;
+            }
+
+            result.push(lines[switch_start].to_string());
+            let mut j = switch_start + 1;
+            while j < switch_end {
+                if !case_re.is_match(lines[j]) {
+                    result.push(lines[j].to_string());
+                    j += 1;
+                    continue;
+                }
+
+                let mut run = Vec::new();
+                let mut k = j;
+                while k < switch_end {
+                    let Some(block) = collect_case_block(&lines, k, switch_end, &case_re, &default_re) else {
+                        break;
+                    };
+                    k = block.end_idx;
+                    run.push(block);
+                    if k >= switch_end || !case_re.is_match(lines[k]) {
+                        break;
+                    }
+                }
+
+                if let Some((clustered, consumed)) = try_cluster_run(&run, &switch_expr) {
+                    result.extend(clustered);
+                    changed = true;
+                    j = run[consumed - 1].end_idx;
+                    continue;
+                }
+
+                let block = &run[0];
+                result.extend(block.case_lines.clone());
+                result.extend(block.body.clone());
+                j = block.end_idx;
+            }
+            result.push(lines[switch_end].to_string());
+            i = switch_end + 1;
+        }
+
+        if changed {
+            result.join("\n")
+        } else {
+            code.to_string()
+        }
+    }
 }

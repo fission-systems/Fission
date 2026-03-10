@@ -63,6 +63,7 @@ pub fn create_default_registry() -> Result<PassRegistry, String> {
     // ========================================================================
     registry.register(Box::new(SwitchReconstructionPass))?;
     registry.register(Box::new(SwitchFromIfElseAssignPass))?;
+    registry.register(Box::new(SwitchCaseClusteringPass))?;
 
     // ========================================================================
     // Naming Passes (after structure is clear)

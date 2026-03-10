@@ -349,6 +349,7 @@ impl PostProcessor {
         // e.g.: if (!x) { r = A; } else if (x == 1) { r = B; } ... return r;
         if self.options.switch_reconstruction {
             processed = Self::reconstruct_switch_from_if_else_assign(&processed);
+            processed = Self::cluster_switch_case_runs(&processed);
         }
 
         // B-7: General while(cond) → for conversion when init+increment detected
