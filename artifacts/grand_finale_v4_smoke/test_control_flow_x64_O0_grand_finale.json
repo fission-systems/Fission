@@ -1,0 +1,1575 @@
+{
+  "binary": "/Users/sjkim1127/Fission/samples/windows/x64/test_control_flow_x64_O0.exe",
+  "summary": {
+    "binary": "test_control_flow_x64_O0",
+    "function_count": 20,
+    "shared_success_count": 20,
+    "fission_success_count": 20,
+    "ghidra_success_count": 20,
+    "fission_failure_count": 0,
+    "ghidra_failure_count": 0,
+    "control_flow": {
+      "ghidra_gotos": 3,
+      "fission_gotos": 3,
+      "goto_reduction_pct": 0.0,
+      "ghidra_switches": 0,
+      "fission_switches": 2,
+      "ghidra_for_loops": 6,
+      "fission_for_loops": 7,
+      "ghidra_do_while": 1,
+      "fission_do_while": 1
+    },
+    "type_promotion": {
+      "fission_hits": {},
+      "ghidra_hits": {}
+    },
+    "type_preservation_counts": {
+      "fission": {},
+      "ghidra": {}
+    },
+    "fallback_counts": {
+      "fission": {
+        "raw_pointer_fallback": 0,
+        "assembly_fallback": 0
+      },
+      "ghidra": {
+        "raw_pointer_fallback": 0,
+        "assembly_fallback": 0
+      }
+    },
+    "cast_chain_counts": {
+      "fission": 0,
+      "ghidra": 0
+    },
+    "residue_rankings": {
+      "single_assign_temps": {
+        "bVar16": 3,
+        "xVar8": 1,
+        "iVar6": 1
+      },
+      "residue_names": {
+        "bVar16": 7,
+        "iVar6": 3,
+        "xVar8": 3
+      },
+      "residue_families": {
+        "bVar": 7,
+        "iVar": 3,
+        "xVar": 3,
+        "uVar": 0,
+        "uStack": 0,
+        "xStack": 0,
+        "axStack": 0,
+        "raw_pointer_fallback": 0,
+        "assembly_fallback": 0,
+        "redundant_return_temp": 0
+      }
+    },
+    "top_residue_offenders": [
+      {
+        "address": "0x140001010",
+        "name": "__tmainCRTStartup",
+        "residue_score": 18,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 5,
+        "top_residue_names": {
+          "bVar16": 7,
+          "iVar6": 3,
+          "xVar8": 3
+        }
+      }
+    ],
+    "failure_class_counts": {
+      "fission": {},
+      "ghidra": {}
+    },
+    "timings": {
+      "fission_total_decomp_sec": 48.560668,
+      "fission_total_postprocess_sec": 3.90733,
+      "ghidra_total_decomp_sec": 0.158317
+    },
+    "ghidra_init_sec": 1.310028
+  },
+  "functions": {
+    "fission": {
+      "140001000": {
+        "success": true,
+        "address": "0x140001000",
+        "name": "__mingw_invalidParameterHandler",
+        "decomp_sec": 2.321822,
+        "postprocess_sec": 0.177519,
+        "wall_sec": 2.998162,
+        "code": "\nvoid __mingw_invalidParameterHandler(void)\n\n{\n  return;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001010": {
+        "success": true,
+        "address": "0x140001010",
+        "name": "__tmainCRTStartup",
+        "decomp_sec": 3.461967,
+        "postprocess_sec": 0.26303,
+        "wall_sec": 4.236693,
+        "code": "\n\nint __tmainCRTStartup(void)\n\n{\n  longlong *plVar1;\n  int *piVar2;\n  char **ppcVar3;\n  code *pcVar4;\n  int result;\n  int iVar6;\n  uint64_t *pxVar7;\n  uint64_t xVar8;\n  int *piVar9;\n  uint32_t *pxVar10;\n  char **ppcVar11;\n  ulonglong len;\n  void *dest;\n  char **ppcVar13;\n  longlong lVar14;\n  longlong lVar15;\n  longlong unaff_GS_OFFSET;\n  bool bVar16;\n  uint32_t local_4c [3];\n  \n  pcVar4 = _KERNEL32.dll!Sleep;\n  plVar1 = _refptr___mingw_oldexcpt_handler.field_8/* @8 */;\n  lVar15 = *(longlong *)(unaff_GS_OFFSET->field_30/* @0x30 */ + 8);\n  for (;;) {\n    LOCK();\n    lVar14 = *plVar1;\n    bVar16 = lVar14 == NULL;\n    if (bVar16) {\n      *plVar1 = lVar15;\n      lVar14 = NULL;\n    }\n    piVar2 = _refptr___native_startup_lock.field_8/* @8 */;\n    UNLOCK();\n    if (bVar16) {\n      bVar16 = false;\n      goto code_r0x00014000105c;\n    }\n    if (lVar15 == lVar14) break;\n    (*pcVar4)(1000);\n  }\n  bVar16 = true;\ncode_r0x00014000105c:\n  if (*_refptr___native_startup_lock.field_8/* @8 */ == 1) {\n    result = _amsg_exit(0x1f);\n    goto code_r0x0001400013d2;\n  }\n  if (*_refptr___native_startup_lock.field_8/* @8 */ == 0) {\n    *_refptr___native_startup_lock.field_8/* @8 */ = 1;\n    _pei386_runtime_relocator();\n    xVar8 = SetUnhandledExceptionFilter(_gnu_exception_handler);\n    *_refptr___mingw_initltssuo_force.field_8/* @8 */ = xVar8;\n    _set_invalid_parameter_handler();\n    _fpreset();\n    uRam000000014000d008 = 0;\n    *_refptr___mingw_app_type.field_8/* @8 */ = 1;\n    *_refptr___mingw_initltsdrot_force.field_8/* @8 */ = 1;\n    *_refptr___mingw_initltsdyn_force.field_8/* @8 */ = 1;\n    if ((*_refptr___CTOR_LIST__.field_8/* @8 */ == 0x5a4d) &&\n       (piVar9 = (void *)((longlong)_refptr___CTOR_LIST__.field_8/* @8 */ +\n                         (longlong)*(int *)(_refptr___CTOR_LIST__.field_8/* @8 */ + 0x1e)), *piVar9 == 0x4550)) {\n      if ((short)piVar9[6] == 0x10b) {\n        if (0xe < (uint)piVar9[0x1d]) {\n          uRam000000014000d008 = (uint)(piVar9[0x3a] != 0);\n        }\n      }\n      else if (((short)piVar9[6] == 0x20b) && (0xe < (uint)piVar9[0x21])) {\n        uRam000000014000d008 = (uint)(piVar9[0x3e] != 0);\n      }\n    }\n    if (*_refptr___imp___initenv.field_8/* @8 */ == 0) {\n      __set_app_type(1);\n    }\n    else {\n      __set_app_type(2);\n    }\n    pxVar10 = (void *)__p__fmode();\n    *pxVar10 = *_refptr__dowildcard.field_8/* @8 */;\n    pxVar10 = (void *)__p__commode();\n    *pxVar10 = *_refptr___xi_z.field_8/* @8 */;\n    result = _setargv();\n    if (-1 < result) {\n      if (*_refptr__CRT_MT.field_8/* @8 */ == 1) {\n        __mingw_setusermatherr(_matherr);\n      }\n      if (*_refptr___dyn_tls_init_callback.field_8/* @8 */ == -1) {\n        _configthreadlocale(0xffffffff);\n      }\n      result = _initterm_e(_refptr___xc_z.field_8/* @8 */,_refptr___xi_a.field_8/* @8 */);\n      if (result) {\n        return 0xff;\n      }\n      local_4c[0] = *_refptr__matherr.field_8/* @8 */;\n      iVar6 = __getmainargs(&iRam000000014000d020,&ppcRam000000014000d018,&ppcRam000000014000d010,\n                            *_refptr__commode.field_8/* @8 */,local_4c);\n      result = iRam000000014000d020;\n      if (-1 < iVar6) {\n        lVar15 = SEXT48(iRam000000014000d020);\n        ppcVar11 = (void *)malloc((longlong)(iRam000000014000d020 + 1) << 3);\n        ppcVar3 = ppcRam000000014000d018;\n        if (ppcVar11 != (char **)0x0) {\n          ppcVar13 = ppcVar11;\n          if (result < 1) {\nfor (;;) {\n            *ppcVar13 = (char *)0x0;\n            ppcRam000000014000d018 = ppcVar11;\n            _initterm(_refptr___tens_D2A.field_8/* @8 */,_refptr___xc_a.field_8/* @8 */);\n            __main();\n            *piVar2 = 2;\n            goto code_r0x000140001084;\n          }\n          lVar14 = 1;\n          for (;;) {\n            len = strlen(*(uint64_t *)((longlong)ppcVar3 + lVar14 * 8 + -8));\n            dest = (void *)malloc(len + 1);\n            *(uint64_t *)((longlong)ppcVar11 + lVar14 * 8 + -8) = dest;\n            if (dest == NULL) break;\n            memcpy(dest,*(uint64_t *)((longlong)ppcVar3 + lVar14 * 8 + -8),len + 1);\n            if (lVar15 == lVar14) {\n              ppcVar13 = (char **)((longlong)ppcVar11 + lVar15 * 8);\n}\n\n            }\n            lVar14++;\n          }\n        }\n      }\n    }\n    result = _amsg_exit(8);\n  }\n  else {\n    iRam000000014000d004 = 1;\ncode_r0x000140001084:\n    if (!bVar16) {\n      LOCK();\n      *plVar1 = 0;\n      UNLOCK();\n    }\n    if ((code *)*_refptr___RUNTIME_PSEUDO_RELOC_LIST__.field_8/* @8 */ != (code *)0x0) {\n      (*(code *)*_refptr___RUNTIME_PSEUDO_RELOC_LIST__.field_8/* @8 */)(0,2,0);\n    }\n    pxVar7 = (void *)__p___initenv();\n    result = iRam000000014000d020;\n    ppcVar3 = ppcRam000000014000d010;\n    *pxVar7 = ppcRam000000014000d010;\n    result = main(result,ppcRam000000014000d018,ppcVar3);\n    if (!uRam000000014000d008) {\ncode_r0x0001400013d2:\n      exit(result);\n    }\n    if (iRam000000014000d004) {\n      return result;\n    }\n  }\n  _cexit();\n  return result;\n}\n",
+        "metrics": {
+          "goto_count": 3,
+          "switch_count": 0,
+          "for_count": 3,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 3,
+            "xVar": 3,
+            "bVar": 7,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {
+            "bVar16": 7,
+            "iVar6": 3,
+            "xVar8": 3
+          },
+          "single_assign_temps": {
+            "bVar16": 3,
+            "xVar8": 1,
+            "iVar6": 1
+          }
+        }
+      },
+      "1400013e0": {
+        "success": true,
+        "address": "0x1400013e0",
+        "name": "WinMainCRTStartup",
+        "decomp_sec": 2.343544,
+        "postprocess_sec": 0.184302,
+        "wall_sec": 3.037343,
+        "code": "\nvoid WinMainCRTStartup(void)\n\n{\n  *((uint64_t *)&_refptr___imp___initenv)[1] = 1;\n  __tmainCRTStartup();\n  return;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001400": {
+        "success": true,
+        "address": "0x140001400",
+        "name": "mainCRTStartup",
+        "decomp_sec": 2.33322,
+        "postprocess_sec": 0.18272,
+        "wall_sec": 3.025293,
+        "code": "\nvoid mainCRTStartup(void)\n\n{\n  *((uint64_t *)&_refptr___imp___initenv)[1] = 0;\n  __tmainCRTStartup();\n  return;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001420": {
+        "success": true,
+        "address": "0x140001420",
+        "name": "atexit",
+        "decomp_sec": 2.32644,
+        "postprocess_sec": 0.178742,
+        "wall_sec": 3.0209,
+        "code": "\n\nvoid atexit(void)\n\n{\n  _crt_atexit();\n  return;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001430": {
+        "success": true,
+        "address": "0x140001430",
+        "name": "__gcc_register_frame",
+        "decomp_sec": 2.332638,
+        "postprocess_sec": 0.180772,
+        "wall_sec": 3.025028,
+        "code": "\n\nvoid __gcc_register_frame(void)\n\n{\n  _crt_atexit(__gcc_deregister_frame);\n  return;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001440": {
+        "success": true,
+        "address": "0x140001440",
+        "name": "__gcc_deregister_frame",
+        "decomp_sec": 2.327919,
+        "postprocess_sec": 0.177743,
+        "wall_sec": 3.00717,
+        "code": "\nvoid __gcc_deregister_frame(void)\n\n{\n  return;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001450": {
+        "success": true,
+        "address": "0x140001450",
+        "name": "day_name(int)",
+        "decomp_sec": 2.366608,
+        "postprocess_sec": 0.228868,
+        "wall_sec": 3.098839,
+        "code": "\nchar * day_name(int4 param_1)\n\n{\n  switch (param_1) {\n  case 6:\n      return \"Saturday\";\n  case 5:\n      return \"Friday\";\n  case 4:\n      return \"Thursday\";\n  case 3:\n      return \"Wednesday\";\n  case 2:\n      return \"Tuesday\";\n  case 0:\n      return \"Sunday\";\n  case 1:\n      return \"Monday\";\n  default:\n      return \"Unknown\";\n  }\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 1,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "1400014e9": {
+        "success": true,
+        "address": "0x1400014e9",
+        "name": "sparse_switch(int)",
+        "decomp_sec": 2.367349,
+        "postprocess_sec": 0.232999,
+        "wall_sec": 3.104197,
+        "code": "\nuint64_t sparse_switch(int param_1)\n\n{\n  switch (param_1) {\n  case 1000:\n      return 10000;\n  case 500:\n      return 5000;\n  case 100:\n      return 1000;\n  case 0x32:\n      return 500;\n  case 10:\n      return 100;\n  case 1:\n      return 10;\n  case 5:\n      return 0x32;\n  default:\n      return 0xffffffff;\n  }\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 1,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "14000157e": {
+        "success": true,
+        "address": "0x14000157e",
+        "name": "classify_temperature(int)",
+        "decomp_sec": 2.503035,
+        "postprocess_sec": 0.189053,
+        "wall_sec": 3.197465,
+        "code": "\nuint64_t classify_temperature(int param_1)\n\n{\n  uint64_t result;\n  \n  if (param_1 < -0x14) {\n    result = 0;\n  }\n  else if (param_1 < 0) {\n    result = 1;\n  }\n  else if (param_1 < 10) {\n    result = 2;\n  }\n  else if (param_1 < 0x14) {\n    result = 3;\n  }\n  else if (param_1 < 0x1e) {\n    result = 4;\n  }\n  else if (param_1 < 0x28) {\n    result = 5;\n  }\n  else {\n    result = 6;\n  }\n  return result;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "1400015da": {
+        "success": true,
+        "address": "0x1400015da",
+        "name": "sum_range(int, int)",
+        "decomp_sec": 2.346229,
+        "postprocess_sec": 0.188634,
+        "wall_sec": 3.037153,
+        "code": "\nint sum_range(int param_1, int param_2)\n\n{\n  uint32_t i;\n  uint32_t result;\n  \n  result = 0;\n  for (i = param_1; i < param_2; i++) {\n    result += i;\n  }\n  return result;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 1,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001612": {
+        "success": true,
+        "address": "0x140001612",
+        "name": "count_digits(int)",
+        "decomp_sec": 2.51664,
+        "postprocess_sec": 0.201688,
+        "wall_sec": 3.22029,
+        "code": "\nint count_digits(int param_1)\n\n{\n  uint32_t local_8;\n  uint32_t result;\n  \n  result = 0;\n  local_8 = param_1;\n  if (param_1 < 0) {\n    local_8 = -param_1;\n  }\n  while (0 < local_8) {\n    local_8 = local_8 / 10;\n    result++;\n  }\n  if (!result) {\n    result = 1;\n  }\n  return result;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 1,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "14000166d": {
+        "success": true,
+        "address": "0x14000166d",
+        "name": "find_first_set(unsigned int)",
+        "decomp_sec": 2.510447,
+        "postprocess_sec": 0.198646,
+        "wall_sec": 3.212,
+        "code": "\nint4 find_first_set(uint4 param_1)\n\n{\n  uint4 local_8;\n  int4 result;\n  \n  if (param_1) {\n    result = 0;\n    local_8 = param_1;\n    do {\n      if ((local_8 & 1) != 0) {\n        return result;\n      }\n      local_8 = local_8 >> 1;\n      result++;\n    } while (local_8 != 0);\n  }\n  return -1;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 1,
+          "while_count": 1,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "1400016b3": {
+        "success": true,
+        "address": "0x1400016b3",
+        "name": "matrix_multiply(int const (*) [4], int const (*) [4], int (*) [4])",
+        "decomp_sec": 2.403526,
+        "postprocess_sec": 0.184223,
+        "wall_sec": 3.092412,
+        "code": "\nvoid matrix_multiply(longlong param_1, longlong param_2, longlong param_3)\n\n{\n  uint32_t k;\n  uint32_t j;\n  uint32_t i;\n  \n  for (i = 0; i < 4; i++) {\n    for (j = 0; j < 4; j++) {\n      *(uint32_t *)((longlong)i * 0x10 + param_3 + (longlong)j * 4) = 0;\n      for (k = 0; k < 4; k++) {\n        *(int *)(param_3 + (longlong)i * 0x10 + (longlong)j * 4) =\n             *(int *)((longlong)i * 0x10 + param_3 + (longlong)j * 4) +\n             *(int *)((longlong)k * 0x10 + param_2 + (longlong)j * 4) *\n             *(int *)((longlong)i * 0x10 + param_1 + (longlong)k * 4);\n      }\n    }\n  }\n  return;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 3,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "1400017a8": {
+        "success": true,
+        "address": "0x1400017a8",
+        "name": "read_until_sentinel(int const*, int)",
+        "decomp_sec": 2.365081,
+        "postprocess_sec": 0.194433,
+        "wall_sec": 3.061542,
+        "code": "\nint read_until_sentinel(longlong param_1, int param_2)\n\n{\n  uint32_t local_10;\n  uint32_t result;\n  \n  result = 0;\n  local_10 = 0;\n  while (param_2 != *(int *)(param_1 + (longlong)local_10 * 4)) {\n    result += *(int *)(param_1 + (longlong)local_10 * 4);\n    local_10++;\n  }\n  return result;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 1,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001809": {
+        "success": true,
+        "address": "0x140001809",
+        "name": "count_set_bits_loop(unsigned int)",
+        "decomp_sec": 2.356927,
+        "postprocess_sec": 0.200827,
+        "wall_sec": 3.060904,
+        "code": "\nint count_set_bits_loop(uint param_1)\n\n{\n  uint32_t local_10;\n  uint32_t result;\n  \n  result = 0;\n  local_10 = 1;\n  while (local_10 != 0) {\n    if ((param_1 & local_10) != 0) {\n      result++;\n    }\n    local_10 = local_10 * 2;\n  }\n  return result;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 1,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001845": {
+        "success": true,
+        "address": "0x140001845",
+        "name": "safe_divide(int, int)",
+        "decomp_sec": 2.343165,
+        "postprocess_sec": 0.195036,
+        "wall_sec": 3.043468,
+        "code": "\nulonglong safe_divide(int4 param_1, int4 param_2)\n\n{\n  ulonglong result;\n  \n  if (!param_2) {\n    result = 0xffffffff;\n  }\n  else {\n    result = (longlong)param_1 / (longlong)(param_2 % 4294967296);\n  }\n  return result;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001865": {
+        "success": true,
+        "address": "0x140001865",
+        "name": "clamp(int, int, int)",
+        "decomp_sec": 2.343378,
+        "postprocess_sec": 0.182723,
+        "wall_sec": 3.030161,
+        "code": "\nint4 clamp(int4 param_1, int4 param_2, int4 param_3)\n\n{\n  if ((param_2 <= param_1) && (param_2 = param_1, param_3 < param_1)) {\n    param_2 = param_3;\n  }\n  return param_2;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "140001892": {
+        "success": true,
+        "address": "0x140001892",
+        "name": "fatal_error(char const*)",
+        "decomp_sec": 2.35068,
+        "postprocess_sec": 0.184006,
+        "wall_sec": 3.037579,
+        "code": "\n\nvoid fatal_error(uint64_t param_1)\n\n{\n  void *stream;\n  \n  stream = (void *)__acrt_iob_func(2);\n  __mingw_fprintf(stream,\"FATAL: %s\\n\",param_1);\n  abort();\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      },
+      "1400018cb": {
+        "success": true,
+        "address": "0x1400018cb",
+        "name": "process_command(int)",
+        "decomp_sec": 2.340053,
+        "postprocess_sec": 0.181366,
+        "wall_sec": 3.027036,
+        "code": "\nint4 process_command(int4 param_1)\n\n{\n  if (param_1 < 0) {\n    fatal_error(\"negative command\");\n  }\n  if (100 < param_1) {\n    fatal_error(\"command overflow\");\n  }\n  return param_1 * 2 + 1;\n}\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        }
+      }
+    },
+    "ghidra": {
+      "140001000": {
+        "address": "0x000140001000",
+        "name": "__mingw_invalidParameterHandler",
+        "success": true,
+        "code": "\n/* WARNING: Unknown calling convention */\n\nvoid __mingw_invalidParameterHandler\n               (wchar_t *expression,wchar_t *function,wchar_t *file,uint line,uintptr_t pReserved)\n\n{\n  return;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.029621
+      },
+      "140001010": {
+        "address": "0x000140001010",
+        "name": "__tmainCRTStartup",
+        "success": true,
+        "code": "\n/* WARNING: Unknown calling convention */\n\nint __tmainCRTStartup(void)\n\n{\n  undefined *puVar1;\n  undefined *puVar2;\n  _TCHAR **pp_Var3;\n  int iVar4;\n  int iVar5;\n  char ***pppcVar6;\n  LPTOP_LEVEL_EXCEPTION_FILTER pPVar7;\n  int *piVar8;\n  undefined4 *puVar9;\n  _TCHAR **pp_Var10;\n  size_t sVar11;\n  _TCHAR *_Dst;\n  _TCHAR **pp_Var12;\n  longlong lVar13;\n  longlong lVar14;\n  longlong unaff_GS_OFFSET;\n  bool bVar15;\n  _startupinfo startinfo;\n  \n  puVar1 = _refptr___native_startup_lock;\n  lVar14 = *(longlong *)(*(longlong *)(unaff_GS_OFFSET + 0x30) + 8);\n  while( true ) {\n    LOCK();\n    lVar13 = *(longlong *)puVar1;\n    bVar15 = lVar13 == 0;\n    if (bVar15) {\n      *(longlong *)puVar1 = lVar14;\n      lVar13 = 0;\n    }\n    puVar2 = _refptr___native_startup_state;\n    UNLOCK();\n    if (bVar15) {\n      bVar15 = false;\n      goto LAB_14000105c;\n    }\n    if (lVar14 == lVar13) break;\n    Sleep(1000);\n  }\n  bVar15 = true;\nLAB_14000105c:\n  if (*(int *)_refptr___native_startup_state == 1) {\n                    /* WARNING: Subroutine does not return */\n    _amsg_exit(0x1f);\n  }\n  if (*(int *)_refptr___native_startup_state != 0) {\n    has_cctor = 1;\nLAB_140001084:\n    if (!bVar15) {\n      LOCK();\n      *(undefined8 *)puVar1 = 0;\n      UNLOCK();\n    }\n    if (*(code **)_refptr___dyn_tls_init_callback != (code *)0x0) {\n      (**(code **)_refptr___dyn_tls_init_callback)(0,2,0);\n    }\n    pppcVar6 = __p___initenv();\n    iVar4 = argc;\n    pp_Var3 = envp;\n    *pppcVar6 = envp;\n    iVar4 = main(iVar4,argv,pp_Var3);\n    if (managedapp != 0) {\n      if (has_cctor == 0) {\n        _cexit();\n      }\n      return iVar4;\n    }\n                    /* WARNING: Subroutine does not return */\n    exit(iVar4);\n  }\n  *(undefined4 *)_refptr___native_startup_state = 1;\n  _pei386_runtime_relocator();\n  pPVar7 = SetUnhandledExceptionFilter(_gnu_exception_handler);\n  *(LPTOP_LEVEL_EXCEPTION_FILTER *)_refptr___mingw_oldexcpt_handler = pPVar7;\n  _set_invalid_parameter_handler(__mingw_invalidParameterHandler);\n  _fpreset();\n  managedapp = 0;\n  *(undefined4 *)_refptr___mingw_initltsdrot_force = 1;\n  *(undefined4 *)_refptr___mingw_initltsdyn_force = 1;\n  *(undefined4 *)_refptr___mingw_initltssuo_force = 1;\n  if ((*(short *)_refptr___ImageBase == 0x5a4d) &&\n     (piVar8 = (int *)(_refptr___ImageBase + *(int *)(_refptr___ImageBase + 0x3c)),\n     *piVar8 == 0x4550)) {\n    if ((short)piVar8[6] == 0x10b) {\n      if (0xe < (uint)piVar8[0x1d]) {\n        managedapp = (int)(piVar8[0x3a] != 0);\n      }\n    }\n    else if (((short)piVar8[6] == 0x20b) && (0xe < (uint)piVar8[0x21])) {\n      managedapp = (int)(piVar8[0x3e] != 0);\n    }\n  }\n  if (*(int *)_refptr___mingw_app_type == 0) {\n    __set_app_type(1);\n  }\n  else {\n    __set_app_type(2);\n  }\n  puVar9 = (undefined4 *)__p__fmode();\n  *puVar9 = *(undefined4 *)_refptr__fmode;\n  puVar9 = (undefined4 *)__p__commode();\n  *puVar9 = *(undefined4 *)_refptr__commode;\n  iVar4 = _setargv();\n  if (-1 < iVar4) {\n    if (*(int *)_refptr__MINGW_INSTALL_DEBUG_MATHERR == 1) {\n      __mingw_setusermatherr(_matherr);\n    }\n    if (*(int *)_refptr___globallocalestatus == -1) {\n      _configthreadlocale(-1);\n    }\n    iVar4 = _initterm_e(_refptr___xi_a,_refptr___xi_z);\n    if (iVar4 != 0) {\n      return 0xff;\n    }\n    startinfo.newmode = *(int *)_refptr__newmode;\n    iVar5 = __getmainargs(&argc,&argv,&envp,*(int *)_refptr__dowildcard,&startinfo);\n    iVar4 = argc;\n    if (-1 < iVar5) {\n      lVar14 = (longlong)argc;\n      pp_Var10 = (_TCHAR **)malloc((longlong)(argc + 1) << 3);\n      pp_Var3 = argv;\n      if (pp_Var10 != (_TCHAR **)0x0) {\n        pp_Var12 = pp_Var10;\n        if (iVar4 < 1) {\nLAB_14000134c:\n          *pp_Var12 = (_TCHAR *)0x0;\n          argv = pp_Var10;\n          _initterm(_refptr___xc_a,_refptr___xc_z);\n          __main();\n          *(undefined4 *)puVar2 = 2;\n          goto LAB_140001084;\n        }\n        lVar13 = 1;\n        while( true ) {\n          sVar11 = strlen(pp_Var3[lVar13 + -1]);\n          _Dst = (_TCHAR *)malloc(sVar11 + 1);\n          pp_Var10[lVar13 + -1] = _Dst;\n          if (_Dst == (_TCHAR *)0x0) break;\n          memcpy(_Dst,pp_Var3[lVar13 + -1],sVar11 + 1);\n          if (lVar14 == lVar13) {\n            pp_Var12 = pp_Var10 + lVar14;\n            goto LAB_14000134c;\n          }\n          lVar13 = lVar13 + 1;\n        }\n      }\n    }\n  }\n                    /* WARNING: Subroutine does not return */\n  _amsg_exit(8);\n}\n\n",
+        "metrics": {
+          "goto_count": 3,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 2,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 15,
+            "xVar": 0,
+            "bVar": 7,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {
+            "iVar4": 12,
+            "bVar15": 7,
+            "iVar5": 3
+          },
+          "single_assign_temps": {
+            "iVar4": 5,
+            "bVar15": 3,
+            "iVar5": 1
+          }
+        },
+        "decomp_sec": 0.074167
+      },
+      "1400013e0": {
+        "address": "0x0001400013e0",
+        "name": "WinMainCRTStartup",
+        "success": true,
+        "code": "\n/* WARNING: Unknown calling convention */\n\nint WinMainCRTStartup(void)\n\n{\n  int iVar1;\n  \n  *(undefined4 *)_refptr___mingw_app_type = 1;\n  iVar1 = __tmainCRTStartup();\n  return iVar1;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 3,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 1
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {
+            "iVar1": 3
+          },
+          "single_assign_temps": {
+            "iVar1": 1
+          }
+        },
+        "decomp_sec": 0.002733
+      },
+      "140001400": {
+        "address": "0x000140001400",
+        "name": "mainCRTStartup",
+        "success": true,
+        "code": "\n/* WARNING: Unknown calling convention */\n\nint mainCRTStartup(void)\n\n{\n  int iVar1;\n  \n  *(undefined4 *)_refptr___mingw_app_type = 0;\n  iVar1 = __tmainCRTStartup();\n  return iVar1;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 3,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 1
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {
+            "iVar1": 3
+          },
+          "single_assign_temps": {
+            "iVar1": 1
+          }
+        },
+        "decomp_sec": 0.002496
+      },
+      "140001420": {
+        "address": "0x000140001420",
+        "name": "atexit",
+        "success": true,
+        "code": "\nint __cdecl atexit(_func_5014 *param_1)\n\n{\n  int iVar1;\n  \n                    /* WARNING: Could not recover jumptable at 0x000140008900. Too many branches */\n                    /* WARNING: Treating indirect jump as call */\n  iVar1 = _crt_atexit();\n  return iVar1;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 3,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 1
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {
+            "iVar1": 3
+          },
+          "single_assign_temps": {
+            "iVar1": 1
+          }
+        },
+        "decomp_sec": 0.002062
+      },
+      "140001430": {
+        "address": "0x000140001430",
+        "name": "__gcc_register_frame",
+        "success": true,
+        "code": "\nvoid __gcc_register_frame(void)\n\n{\n  atexit(__gcc_deregister_frame);\n  return;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.00118
+      },
+      "140001440": {
+        "address": "0x000140001440",
+        "name": "__gcc_deregister_frame",
+        "success": true,
+        "code": "\nvoid __gcc_deregister_frame(void)\n\n{\n  return;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.000561
+      },
+      "140001450": {
+        "address": "0x000140001450",
+        "name": "day_name(int)",
+        "success": true,
+        "code": "\n/* day_name(int) */\n\nchar * day_name(int param_1)\n\n{\n  if (param_1 == 6) {\n    return \"Saturday\";\n  }\n  if (param_1 < 7) {\n    if (param_1 == 5) {\n      return \"Friday\";\n    }\n    if (param_1 < 6) {\n      if (param_1 == 4) {\n        return \"Thursday\";\n      }\n      if (param_1 < 5) {\n        if (param_1 == 3) {\n          return \"Wednesday\";\n        }\n        if (param_1 < 4) {\n          if (param_1 == 2) {\n            return \"Tuesday\";\n          }\n          if (param_1 < 3) {\n            if (param_1 == 0) {\n              return \"Sunday\";\n            }\n            if (param_1 == 1) {\n              return \"Monday\";\n            }\n          }\n        }\n      }\n    }\n  }\n  return \"Unknown\";\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.007018
+      },
+      "1400014e9": {
+        "address": "0x0001400014e9",
+        "name": "sparse_switch(int)",
+        "success": true,
+        "code": "\n/* sparse_switch(int) */\n\nundefined8 sparse_switch(int param_1)\n\n{\n  if (param_1 == 1000) {\n    return 10000;\n  }\n  if (param_1 < 0x3e9) {\n    if (param_1 == 500) {\n      return 5000;\n    }\n    if (param_1 < 0x1f5) {\n      if (param_1 == 100) {\n        return 1000;\n      }\n      if (param_1 < 0x65) {\n        if (param_1 == 0x32) {\n          return 500;\n        }\n        if (param_1 < 0x33) {\n          if (param_1 == 10) {\n            return 100;\n          }\n          if (param_1 < 0xb) {\n            if (param_1 == 1) {\n              return 10;\n            }\n            if (param_1 == 5) {\n              return 0x32;\n            }\n          }\n        }\n      }\n    }\n  }\n  return 0xffffffff;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.004277
+      },
+      "14000157e": {
+        "address": "0x00014000157e",
+        "name": "classify_temperature(int)",
+        "success": true,
+        "code": "\n/* classify_temperature(int) */\n\nundefined8 classify_temperature(int param_1)\n\n{\n  undefined8 uVar1;\n  \n  if (param_1 < -0x14) {\n    uVar1 = 0;\n  }\n  else if (param_1 < 0) {\n    uVar1 = 1;\n  }\n  else if (param_1 < 10) {\n    uVar1 = 2;\n  }\n  else if (param_1 < 0x14) {\n    uVar1 = 3;\n  }\n  else if (param_1 < 0x1e) {\n    uVar1 = 4;\n  }\n  else if (param_1 < 0x28) {\n    uVar1 = 5;\n  }\n  else {\n    uVar1 = 6;\n  }\n  return uVar1;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 9,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {
+            "uVar1": 9
+          },
+          "single_assign_temps": {
+            "uVar1": 7
+          }
+        },
+        "decomp_sec": 0.002667
+      },
+      "1400015da": {
+        "address": "0x0001400015da",
+        "name": "int)",
+        "success": true,
+        "code": "\n/* sum_range(int, int) */\n\nint sum_range(int param_1,int param_2)\n\n{\n  undefined4 local_10;\n  undefined4 local_c;\n  \n  local_c = 0;\n  for (local_10 = param_1; local_10 < param_2; local_10 = local_10 + 1) {\n    local_c = local_c + local_10;\n  }\n  return local_c;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 1,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.002377
+      },
+      "140001612": {
+        "address": "0x000140001612",
+        "name": "count_digits(int)",
+        "success": true,
+        "code": "\n/* count_digits(int) */\n\nint count_digits(int param_1)\n\n{\n  undefined4 local_res8;\n  undefined4 local_c;\n  \n  local_c = 0;\n  local_res8 = param_1;\n  if (param_1 < 0) {\n    local_res8 = -param_1;\n  }\n  for (; 0 < local_res8; local_res8 = local_res8 / 10) {\n    local_c = local_c + 1;\n  }\n  if (local_c == 0) {\n    local_c = 1;\n  }\n  return local_c;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 1,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.003687
+      },
+      "14000166d": {
+        "address": "0x00014000166d",
+        "name": "int)",
+        "success": true,
+        "code": "\n/* find_first_set(unsigned int) */\n\nint find_first_set(uint param_1)\n\n{\n  uint local_res8;\n  int local_c;\n  \n  if (param_1 != 0) {\n    local_c = 0;\n    local_res8 = param_1;\n    do {\n      if ((local_res8 & 1) != 0) {\n        return local_c;\n      }\n      local_res8 = local_res8 >> 1;\n      local_c = local_c + 1;\n    } while (local_res8 != 0);\n  }\n  return -1;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 1,
+          "while_count": 1,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.002909
+      },
+      "1400016b3": {
+        "address": "0x0001400016b3",
+        "name": "[4])",
+        "success": true,
+        "code": "\n/* matrix_multiply(int const (*) [4], int const (*) [4], int (*) [4]) */\n\nvoid matrix_multiply(longlong param_1,longlong param_2,longlong param_3)\n\n{\n  undefined4 local_14;\n  undefined4 local_10;\n  undefined4 local_c;\n  \n  for (local_c = 0; local_c < 4; local_c = local_c + 1) {\n    for (local_10 = 0; local_10 < 4; local_10 = local_10 + 1) {\n      *(undefined4 *)((longlong)local_c * 0x10 + param_3 + (longlong)local_10 * 4) = 0;\n      for (local_14 = 0; local_14 < 4; local_14 = local_14 + 1) {\n        *(int *)(param_3 + (longlong)local_c * 0x10 + (longlong)local_10 * 4) =\n             *(int *)((longlong)local_c * 0x10 + param_3 + (longlong)local_10 * 4) +\n             *(int *)((longlong)local_14 * 0x10 + param_2 + (longlong)local_10 * 4) *\n             *(int *)((longlong)local_c * 0x10 + param_1 + (longlong)local_14 * 4);\n      }\n    }\n  }\n  return;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 3,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.007099
+      },
+      "1400017a8": {
+        "address": "0x0001400017a8",
+        "name": "int)",
+        "success": true,
+        "code": "\n/* read_until_sentinel(int const*, int) */\n\nint read_until_sentinel(longlong param_1,int param_2)\n\n{\n  undefined4 local_10;\n  undefined4 local_c;\n  \n  local_c = 0;\n  local_10 = 0;\n  while (param_2 != *(int *)(param_1 + (longlong)local_10 * 4)) {\n    local_c = local_c + *(int *)(param_1 + (longlong)local_10 * 4);\n    local_10 = local_10 + 1;\n  }\n  return local_c;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 1,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.002926
+      },
+      "140001809": {
+        "address": "0x000140001809",
+        "name": "int)",
+        "success": true,
+        "code": "\n/* count_set_bits_loop(unsigned int) */\n\nint count_set_bits_loop(uint param_1)\n\n{\n  undefined4 local_10;\n  undefined4 local_c;\n  \n  local_c = 0;\n  for (local_10 = 1; local_10 != 0; local_10 = local_10 << 1) {\n    if ((param_1 & local_10) != 0) {\n      local_c = local_c + 1;\n    }\n  }\n  return local_c;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 1,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.002597
+      },
+      "140001845": {
+        "address": "0x000140001845",
+        "name": "int)",
+        "success": true,
+        "code": "\n/* safe_divide(int, int) */\n\nulonglong safe_divide(int param_1,int param_2)\n\n{\n  ulonglong uVar1;\n  \n  if (param_2 == 0) {\n    uVar1 = 0xffffffff;\n  }\n  else {\n    uVar1 = (longlong)param_1 / (longlong)param_2 & 0xffffffff;\n  }\n  return uVar1;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 4,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {
+            "uVar1": 4
+          },
+          "single_assign_temps": {
+            "uVar1": 2
+          }
+        },
+        "decomp_sec": 0.001812
+      },
+      "140001865": {
+        "address": "0x000140001865",
+        "name": "int)",
+        "success": true,
+        "code": "\n/* clamp(int, int, int) */\n\nint clamp(int param_1,int param_2,int param_3)\n\n{\n  if ((param_2 <= param_1) && (param_2 = param_1, param_3 < param_1)) {\n    param_2 = param_3;\n  }\n  return param_2;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.001884
+      },
+      "140001892": {
+        "address": "0x000140001892",
+        "name": "const*)",
+        "success": true,
+        "code": "\n/* fatal_error(char const*) */\n\nvoid fatal_error(undefined8 param_1)\n\n{\n  FILE *stream;\n  \n  stream = (FILE *)__acrt_iob_func(2);\n  __mingw_fprintf(stream,\"FATAL: %s\\n\",param_1);\n                    /* WARNING: Subroutine does not return */\n  abort();\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.003275
+      },
+      "1400018cb": {
+        "address": "0x0001400018cb",
+        "name": "process_command(int)",
+        "success": true,
+        "code": "\n/* process_command(int) */\n\nint process_command(int param_1)\n\n{\n  if (param_1 < 0) {\n    fatal_error(\"negative command\");\n  }\n  if (100 < param_1) {\n    fatal_error(\"command overflow\");\n  }\n  return param_1 * 2 + 1;\n}\n\n",
+        "metrics": {
+          "goto_count": 0,
+          "switch_count": 0,
+          "for_count": 0,
+          "do_while_count": 0,
+          "while_count": 0,
+          "type_hits": {},
+          "type_preservation_hits": {},
+          "residue_families": {
+            "uVar": 0,
+            "iVar": 0,
+            "xVar": 0,
+            "bVar": 0,
+            "uStack": 0,
+            "xStack": 0,
+            "axStack": 0,
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0,
+            "redundant_return_temp": 0
+          },
+          "fallback_counts": {
+            "raw_pointer_fallback": 0,
+            "assembly_fallback": 0
+          },
+          "cast_chain_count": 0,
+          "residue_names": {},
+          "single_assign_temps": {}
+        },
+        "decomp_sec": 0.002969
+      }
+    }
+  }
+}
