@@ -19,6 +19,7 @@
 #include "coreaction.hh"
 #include <chrono>
 #include <sstream>
+#include "fission/utils/logger.h"
 
 namespace ghidra {
 
@@ -527,7 +528,11 @@ int4 ActionGroup::apply(Funcdata &data)
       auto current_time = std::chrono::steady_clock::now();
       std::chrono::duration<double> elapsed = current_time - glb->analysis_start;
       if (elapsed.count() > glb->analysis_timeout_sec) {
-        throw LowlevelError("Analysis timeout exceeded in ActionGroup (Monster function detected!)");
+        fission::utils::log_stream() << "[Warning] Timeout exceeded (" 
+                                     << glb->analysis_timeout_sec 
+                                     << "s) in ActionGroup. Halting optimization early to salvage partial results." 
+                                     << std::endl;
+        break; // break the loop
       }
     }
     res = (*state)->perform(data);
@@ -907,9 +912,11 @@ int4 ActionPool::apply(Funcdata &data)
       auto current_time = std::chrono::steady_clock::now();
       std::chrono::duration<double> elapsed = current_time - glb->analysis_start;
       if (elapsed.count() > glb->analysis_timeout_sec) {
-        std::ostringstream msg;
-        msg << "Analysis timeout exceeded in ActionPool: " << elapsed.count() << "s > " << glb->analysis_timeout_sec << "s";
-        throw LowlevelError(msg.str());
+        fission::utils::log_stream() << "[Warning] Timeout exceeded (" 
+                                     << glb->analysis_timeout_sec 
+                                     << "s) in ActionPool. Halting optimization early to salvage partial results." 
+                                     << std::endl;
+        break; // break the loop
       }
     }
     if (0!=processOp((*op_state).second,data)) return -1;

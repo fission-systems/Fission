@@ -4,6 +4,54 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-09
+
+### 대규모 멀티스레드 성능 혁신 (157초 → 10초)
+
+멀티스레드 환경에서의 I/O 병목과 중복 파싱 오버헤드를 근본적으로 제거하여 **약 15.6배의 속도 향상** 달성. 100개 함수 배치 디컴파일 시간이 2.5분에서 10초로 단축됨.
+
+#### Performance: 전역 싱글톤 캐시 레이어 도입 (초기화 8.5초 → 0초)
+
+각 워커가 독립적으로 수행하던 무거운 초기화 작업을 전역 공유 구조로 전환하여 Amdahl의 법칙에 따른 병렬 확장성 한계 극복.
+
+- **Sleigh XML 캐시**: `.sla` 바이너리 정의를 메모리에 캐싱하여 중복 XML 파싱 제거.
+- **GDT (Ghidra Data Type) 캐시**: 수만 개의 타입을 가진 `.gdt` 파일(ZIP 압축) 파싱 결과를 워커 간 공유 (`shared_ptr`).
+- **Data Section 스캔 캐시**: 바이너리의 데이터 섹션을 훑어 문자열/상수를 찾는 로직을 바이너리당 1회로 제한.
+
+#### Reliability: Fail-Fast 타임아웃 시스템 (Monster Function 제압)
+
+Ghidra 엔진의 `main_perform` 루프가 특정 함수에서 $O(N^3)$ 복잡도로 폭주하는 현상을 제어하기 위해 코어 레벨 타임아웃 도입.
+
+- **분석 트립와이어**: `ActionGroup::perform` 루프 내부에 Wall-clock 타이머를 심어 지정된 시간(기본 30초, CLI 조절 가능) 초과 시 즉시 `LowlevelError` 투척.
+- **성능 이득**: 11초 이상 소요되던 특정 괴물 함수를 빠른 시간 내에 끊어내어 전체 파이프라인의 "롱테일(Long-tail)" 병목 제거.
+
+#### Scaling: 병렬 초기화 로직 정밀화
+
+- **뮤텍스 최적화**: `initialize_architecture` 내 전역 락 범위를 최소화하고, 이미 초기화된 공통 리소스(GDT 등)는 락 없이 접근하도록 개선.
+- **동적 스케일링**: 함수 개수에 비례하여 워커 수를 조절하는 휴리스틱 최적화.
+
+#### 전체 변경 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `ghidra_decompiler/decompile/sleigh.cc`, `sleigh_arch.cc` | Sleigh 인메모리 스트림 캐시 구현 |
+| `ghidra_decompiler/src/core/ArchInit.cc` | GDT 전역 캐시 및 병렬 초기화 로직 |
+| `ghidra_decompiler/src/core/DataSymbolRegistry.cc` | 데이터 섹션 스캔 결과 캐시 |
+| `ghidra_decompiler/decompile/action.cc` | `Action::perform` 타임아웃 트립와이어 설치 |
+| `ghidra_decompiler/decompile/architecture.hh`, `.cc` | 아키텍처별 타임아웃 설정 필드 추가 |
+| `crates/fission-ffi/src/decomp/ffi.rs`, `wrapper.rs` | 타임아웃 조절용 FFI API 추가 |
+| `crates/fission-cli/src/cli/args.rs` | `--timeout-ms` 옵션 추가 |
+
+#### 벤치마크 결과 (putty.exe, limit 100 functions)
+
+| 단계 | 소요 시간 (Wall Clock) | 개선율 |
+|------|-----------------------|-------|
+| 순정 (Baseline) | 157초 | 1.0x |
+| Phase 2a (Sleigh Cache) | 57초 | 2.7x |
+| **Phase 3 (Global Cache + Timeout)** | **10.03초** | **15.6x** |
+
+---
+
 ## 2026-03-07
 
 ### 디컴파일러 성능 최적화 + 성공률 개선

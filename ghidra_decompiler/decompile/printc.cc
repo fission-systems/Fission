@@ -2688,8 +2688,11 @@ void PrintC::docFunction(const Funcdata *fd)
   uint4 modsave = mods;
   if (!fd->isProcStarted())
     throw RecovError("Function not decompiled");
-  if ((!isSet(flat))&&(fd->hasNoStructBlocks()))
-    throw RecovError("Function not fully decompiled. No structure present.");
+  if ((!isSet(flat))&&(fd->hasNoStructBlocks())) {
+    // FISSION: Graceful degradation for timeout partial results.
+    // Fall back to flat output instead of failing.
+    mods |= flat;
+  }
   try {
     commsorter.setupFunctionList(instr_comment_type|head_comment_type,fd,*fd->getArch()->commentdb,option_unplaced);
     int4 id1 = emit->beginFunction(fd);
