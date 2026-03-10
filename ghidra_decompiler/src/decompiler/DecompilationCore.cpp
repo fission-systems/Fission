@@ -518,6 +518,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     // Calling Convention Detection + Application
     // ========================================================================
     try {
+        /*
         fission::analysis::CallingConvDetector detector(ctx->arch.get());
         // Provide binary format hint so the detector can adjust heuristics
         // and choose the correct fallback when detection is ambiguous.
@@ -536,6 +537,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
             }
         }
         detector.apply(fd, conv);
+        */
     } catch (const std::exception& e) {
         fission::utils::log_output() << "[DecompilerCore] ERROR applying calling convention: " << e.what() << std::endl;
     }
@@ -548,6 +550,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
 
     // Enforce GDT-based, injected (fission-signatures), and built-in prototypes before action reset.
     {
+        /*
         fission::types::PrototypeEnforcer proto_enforcer;
         const auto* injected = ctx->injected_signatures.empty() ? nullptr : &ctx->injected_signatures;
         if (!ctx->symbols.empty()) {
@@ -569,6 +572,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         if (!func_name.empty()) {
             proto_enforcer.enforce_single_prototype(ctx->arch.get(), addr, func_name, injected);
         }
+        */
     }
 
     // ========================================================================
@@ -576,8 +580,8 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     // clearAnalysis/reset so that FlowInfo sees the flags during perform().
     // ========================================================================
     {
-        mark_noreturn_functions(ctx, ctx->symbols);
-        mark_noreturn_functions(ctx, ctx->global_symbols);
+        // mark_noreturn_functions(ctx, ctx->symbols);
+        // mark_noreturn_functions(ctx, ctx->global_symbols);
     }
 
     // CRITICAL: Reset action state for this function AFTER prototypes are applied
