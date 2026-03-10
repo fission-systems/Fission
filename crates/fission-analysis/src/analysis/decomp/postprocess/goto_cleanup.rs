@@ -301,6 +301,46 @@ fn fold_guarded_if_gotos(lines: &[String]) -> Vec<String> {
     result
 }
 
+fn merge_adjacent_if_goto_chains(lines: &[String]) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut idx = 0;
+
+    while idx < lines.len() {
+        let Some((indent, cond, target)) = parse_if_goto(&lines[idx]) else {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        };
+
+        let mut merged_cond = cond.to_string();
+        let mut next_idx = idx + 1;
+        let mut merged = false;
+
+        while next_idx < lines.len() {
+            let Some((next_indent, next_cond, next_target)) = parse_if_goto(&lines[next_idx]) else {
+                break;
+            };
+            if next_indent != indent || next_target != target {
+                break;
+            }
+            merged_cond = format!("({merged_cond}) || ({next_cond})");
+            merged = true;
+            next_idx += 1;
+        }
+
+        if merged {
+            result.push(format!("{indent}if ({merged_cond}) goto {target};"));
+            idx = next_idx;
+            continue;
+        }
+
+        result.push(lines[idx].clone());
+        idx += 1;
+    }
+
+    result
+}
+
 fn inline_single_use_labels(lines: &[String]) -> Vec<String> {
     let refs = count_label_references(lines);
     let labels = label_positions(lines);
@@ -472,11 +512,11 @@ impl PostProcessor {
 
         for _ in 0..3 {
             let lines: Vec<String> = current.lines().map(str::to_string).collect();
-            let next = remove_dead_labels(&inline_single_use_labels(
-                &inline_terminal_label_blocks(&fold_guarded_if_gotos(&fold_if_else_gotos(
+            let next = remove_dead_labels(&inline_single_use_labels(&inline_terminal_label_blocks(
+                &merge_adjacent_if_goto_chains(&fold_guarded_if_gotos(&fold_if_else_gotos(
                     &thread_chained_gotos(&remove_self_fallthrough_gotos(&lines)),
                 ))),
-            ))
+            )))
             .join("\n");
             if next == current {
                 break;

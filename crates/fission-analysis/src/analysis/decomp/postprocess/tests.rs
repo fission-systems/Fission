@@ -236,6 +236,23 @@ label_ret:
 }
 
 #[test]
+fn test_goto_cleanup_merges_adjacent_if_gotos_to_same_target() {
+    let input = r#"int test(int a, int b)
+{
+  if (a < 0) goto label_bad;
+  if (b < 0) goto label_bad;
+  return 0;
+label_bad:
+  return 1;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(output.contains("if (((a < 0) || (b < 0)))") || output.contains("if ((a < 0) || (b < 0))"),
+        "must merge adjacent guards with same target: {}", output);
+    assert!(!output.contains("if (b < 0) goto label_bad;"), "must collapse second guard: {}", output);
+}
+
+#[test]
 fn test_goto_loop_to_do_while() {
     let input = r#"int test(int n)
 {
