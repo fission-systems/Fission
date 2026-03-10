@@ -22,6 +22,7 @@ mod strings;
 mod structure;
 mod switch_recon;
 mod type_promotion;
+mod var_sweep;
 #[cfg(test)]
 mod tests;
 
@@ -37,6 +38,7 @@ pub struct RustPostProcessOptions {
     pub field_offsets: bool,
     pub insert_casts: bool,
     pub arithmetic_idioms: bool,
+    pub temp_var_inlining: bool,
     pub deref_to_array: bool,
     pub bitop_to_logicop: bool,
     pub remove_dead_branches: bool,
@@ -61,6 +63,7 @@ impl Default for RustPostProcessOptions {
             field_offsets: true,
             insert_casts: true,
             arithmetic_idioms: true,
+            temp_var_inlining: true,
             deref_to_array: true,
             bitop_to_logicop: true,
             remove_dead_branches: true,
@@ -165,6 +168,9 @@ impl PostProcessor {
         if !self.options.arithmetic_idioms {
             pass_registry.disable("arithmetic_idioms");
         }
+        if !self.options.temp_var_inlining {
+            pass_registry.disable("inline_single_use_temps");
+        }
         if !self.options.deref_to_array {
             pass_registry.disable("deref_to_array_index");
         }
@@ -265,6 +271,9 @@ impl PostProcessor {
 
         processed = Self::promote_rect_params(&processed);
         processed = Self::clean_ghidra_artifacts(&processed);
+        if self.options.temp_var_inlining {
+            processed = Self::inline_single_use_temps(&processed);
+        }
 
         // Insert missing casts for assignment type mismatches
         if self.options.insert_casts {

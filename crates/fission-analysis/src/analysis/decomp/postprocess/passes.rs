@@ -600,6 +600,28 @@ impl PostProcessPass for CleanSlatePass {
     }
 }
 
+/// Conservative single-use temp variable inlining pass
+pub struct InlineSingleUseTempsPass;
+
+impl PostProcessPass for InlineSingleUseTempsPass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "inline_single_use_temps",
+            name: "Inline Single-Use Temps",
+            description: "Inlines trivial single-assignment temporary variables into their immediate use sites",
+            category: PassCategory::Cleanup,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::inline_single_use_temps_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["clean_slate"]
+    }
+}
+
 /// Early goto and label cleanup pass
 pub struct GotoCleanupPass;
 

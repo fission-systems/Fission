@@ -618,3 +618,51 @@ fn test_clean_slate_real_world_rect_output() {
         output
     );
 }
+
+#[test]
+fn test_var_sweep_inlines_single_use_temp_into_call() {
+    let input = r#"void test(void)
+{
+  uVar55 = uVar14;
+  foo(uVar55);
+}"#;
+
+    let output = PostProcessor::inline_single_use_temps(input);
+    assert!(!output.contains("uVar55 = uVar14;"), "must remove trivial temp assignment: {}", output);
+    assert!(output.contains("foo(uVar14);"), "must inline temp into immediate call site: {}", output);
+}
+
+#[test]
+fn test_var_sweep_inlines_single_use_temp_into_return() {
+    let input = r#"ulonglong test(int iVar1)
+{
+  uVar3 = (ulonglong)(iVar1 != 0);
+  return uVar3;
+}"#;
+
+    let output = PostProcessor::inline_single_use_temps(input);
+    assert!(!output.contains("uVar3 ="), "must remove single-use temp before return: {}", output);
+    assert!(
+        output.contains("return (ulonglong)(iVar1 != 0);"),
+        "must inline cast expression into return: {}",
+        output
+    );
+}
+
+#[test]
+fn test_var_sweep_keeps_temp_when_use_is_not_immediate() {
+    let input = r#"int test(int x)
+{
+  iVar18 = x + 1;
+  side_effect();
+  return iVar18;
+}"#;
+
+    let output = PostProcessor::inline_single_use_temps(input);
+    assert!(
+        output.contains("iVar18 = x + 1;"),
+        "must keep temp when an intervening side-effect blocks safe inlining: {}",
+        output
+    );
+    assert!(output.contains("return iVar18;"), "must preserve original use when not inlined: {}", output);
+}

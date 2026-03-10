@@ -27,6 +27,7 @@ pub fn create_default_registry() -> Result<PassRegistry, String> {
     registry.register(Box::new(super::strings::ReplaceStringPointersPass))?;
     registry.register(Box::new(PromoteRectParamsPass))?;
     registry.register(Box::new(CleanSlatePass))?;
+    registry.register(Box::new(InlineSingleUseTempsPass))?;
     registry.register(Box::new(InsertMissingCastsPass))?;
 
     // ========================================================================
