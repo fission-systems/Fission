@@ -1,4 +1,5 @@
 use super::PostProcessor;
+use super::condition::negate_condition;
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -189,6 +190,52 @@ fn fold_if_else_gotos(lines: &[String]) -> Vec<String> {
     result
 }
 
+fn fold_guarded_if_gotos(lines: &[String]) -> Vec<String> {
+    let refs = count_label_references(lines);
+    let labels = label_positions(lines);
+    let mut result = Vec::new();
+    let mut idx = 0;
+
+    while idx < lines.len() {
+        let Some((indent, cond, end_label)) = parse_if_goto(&lines[idx]) else {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        };
+        if refs.get(end_label).copied().unwrap_or(0) != 1 {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        }
+        let Some(&label_pos) = labels.get(end_label) else {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        };
+        if label_pos <= idx + 1 {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        }
+
+        let body = &lines[idx + 1..label_pos];
+        if body.is_empty() || body.iter().any(|line| parse_label(line).is_some()) {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        }
+
+        result.push(format!("{}if ({}) {{", indent, negate_condition(cond)));
+        for line in body {
+            result.push(format!("{}  {}", indent, line.trim()));
+        }
+        result.push(format!("{}}}", indent));
+        idx = label_pos + 1;
+    }
+
+    result
+}
+
 fn inline_single_use_labels(lines: &[String]) -> Vec<String> {
     let refs = count_label_references(lines);
     let labels = label_positions(lines);
@@ -256,8 +303,8 @@ impl PostProcessor {
 
         for _ in 0..3 {
             let lines: Vec<String> = current.lines().map(str::to_string).collect();
-            let next = remove_dead_labels(&inline_single_use_labels(&fold_if_else_gotos(
-                &remove_self_fallthrough_gotos(&lines),
+            let next = remove_dead_labels(&inline_single_use_labels(&fold_guarded_if_gotos(
+                &fold_if_else_gotos(&remove_self_fallthrough_gotos(&lines)),
             )))
             .join("\n");
             if next == current {

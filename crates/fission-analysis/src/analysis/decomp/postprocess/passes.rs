@@ -147,7 +147,7 @@ impl PostProcessPass for DoWhileToForPass {
     }
 
     fn dependencies(&self) -> &[&'static str] {
-        &["goto_cleanup"]
+        &["goto_loop_to_do_while"]
     }
 }
 
@@ -597,5 +597,27 @@ impl PostProcessPass for GotoCleanupPass {
 
     fn dependencies(&self) -> &[&'static str] {
         &["remove_dead_branches"]
+    }
+}
+
+/// Convert goto back-edge loops into do-while loops
+pub struct GotoLoopToDoWhilePass;
+
+impl PostProcessPass for GotoLoopToDoWhilePass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "goto_loop_to_do_while",
+            name: "Goto Loop to Do-While",
+            description: "Converts single-label back-edge goto loops into do-while form",
+            category: PassCategory::ControlFlow,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::goto_loop_to_do_while_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["goto_cleanup"]
     }
 }

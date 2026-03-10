@@ -4,8 +4,150 @@ use crate::utils::patterns::*;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 impl PostProcessor {
+    pub(super) fn goto_loop_to_do_while_cow<'a>(code: &'a str) -> Cow<'a, str> {
+        if !code.contains("goto ") {
+            return Cow::Borrowed(code);
+        }
+
+        let output = Self::goto_loop_to_do_while(code);
+        if output == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(output)
+        }
+    }
+
+    pub(super) fn goto_loop_to_do_while(code: &str) -> String {
+        static LABEL_RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"^\s*([A-Za-z_]\w*)\s*:\s*$")
+                .unwrap_or_else(|e| panic!("LABEL_RE regex should compile: {}", e))
+        });
+        static IF_GOTO_RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"^(\s*)if\s*\((.+)\)\s*goto\s+([A-Za-z_]\w*)\s*;\s*$")
+                .unwrap_or_else(|e| panic!("IF_GOTO_RE regex should compile: {}", e))
+        });
+        static GOTO_RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"^\s*goto\s+([A-Za-z_]\w*)\s*;\s*$")
+                .unwrap_or_else(|e| panic!("GOTO_RE regex should compile: {}", e))
+        });
+
+        fn parse_label<'a>(line: &'a str, re: &Regex) -> Option<&'a str> {
+            re.captures(line).and_then(|caps| caps.get(1)).map(|m| m.as_str())
+        }
+
+        fn parse_if_goto<'a>(line: &'a str, re: &Regex) -> Option<(&'a str, &'a str, &'a str)> {
+            re.captures(line).and_then(|caps| {
+                Some((
+                    caps.get(1)?.as_str(),
+                    caps.get(2)?.as_str().trim(),
+                    caps.get(3)?.as_str(),
+                ))
+            })
+        }
+
+        fn count_refs(lines: &[&str], if_re: &Regex, goto_re: &Regex) -> HashMap<String, usize> {
+            let mut refs = HashMap::new();
+            for line in lines {
+                if let Some(caps) = if_re.captures(line)
+                    && let Some(label) = caps.get(3).map(|m| m.as_str())
+                {
+                    *refs.entry(label.to_string()).or_insert(0) += 1;
+                }
+                if let Some(caps) = goto_re.captures(line)
+                    && let Some(label) = caps.get(1).map(|m| m.as_str())
+                {
+                    *refs.entry(label.to_string()).or_insert(0) += 1;
+                }
+            }
+            refs
+        }
+
+        let lines: Vec<&str> = code.lines().collect();
+        let refs = count_refs(&lines, &IF_GOTO_RE, &GOTO_RE);
+        let mut result = Vec::with_capacity(lines.len());
+        let mut idx = 0;
+        let mut changed = false;
+
+        while idx < lines.len() {
+            let Some(loop_label) = parse_label(lines[idx], &LABEL_RE) else {
+                result.push(lines[idx].to_string());
+                idx += 1;
+                continue;
+            };
+
+            if refs.get(loop_label).copied().unwrap_or(0) != 1 {
+                result.push(lines[idx].to_string());
+                idx += 1;
+                continue;
+            }
+
+            let mut next_label = lines.len();
+            for (scan_idx, line) in lines.iter().enumerate().skip(idx + 1) {
+                if parse_label(line, &LABEL_RE).is_some() {
+                    next_label = scan_idx;
+                    break;
+                }
+            }
+
+            if next_label <= idx + 1 {
+                result.push(lines[idx].to_string());
+                idx += 1;
+                continue;
+            }
+
+            let mut backedge_idx = None;
+            let mut backedge = None;
+            for (scan_idx, line) in lines.iter().enumerate().take(next_label).skip(idx + 1) {
+                if let Some(parsed) = parse_if_goto(line, &IF_GOTO_RE)
+                    && parsed.2 == loop_label
+                {
+                    backedge_idx = Some(scan_idx);
+                    backedge = Some(parsed);
+                    break;
+                }
+            }
+
+            let Some(tail_idx) = backedge_idx else {
+                result.push(lines[idx].to_string());
+                idx += 1;
+                continue;
+            };
+            let Some((indent, cond, target)) = backedge else {
+                result.push(lines[idx].to_string());
+                idx += 1;
+                continue;
+            };
+            debug_assert_eq!(target, loop_label);
+
+            let body = &lines[idx + 1..tail_idx];
+            if body.is_empty() {
+                result.push(lines[idx].to_string());
+                idx += 1;
+                continue;
+            }
+
+            result.push(format!("{}do {{", indent));
+            for line in body {
+                result.push((*line).to_string());
+            }
+            result.push(format!("{}}} while ({});", indent, cond));
+            for line in lines.iter().take(next_label).skip(tail_idx + 1) {
+                result.push((*line).to_string());
+            }
+            idx = next_label;
+            changed = true;
+        }
+
+        if !changed {
+            return code.to_string();
+        }
+
+        result.join("\n")
+    }
+
     pub(super) fn while_true_to_for_loop_cow<'a>(code: &'a str) -> Cow<'a, str> {
         if !code.contains("while") {
             return Cow::Borrowed(code);

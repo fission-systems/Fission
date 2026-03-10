@@ -50,6 +50,7 @@ pub fn create_default_registry() -> Result<PassRegistry, String> {
     // Control Flow Restructuring
     // ========================================================================
     registry.register(Box::new(GotoCleanupPass))?;
+    registry.register(Box::new(GotoLoopToDoWhilePass))?;
     registry.register(Box::new(SimplifyIfStructurePass))?;
     registry.register(Box::new(WhileTrueToCondPass))?;
     registry.register(Box::new(WhileTrueToForPass))?;

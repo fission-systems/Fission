@@ -298,6 +298,7 @@ impl PostProcessor {
         }
 
         processed = Self::cleanup_gotos(&processed);
+        processed = Self::goto_loop_to_do_while(&processed);
 
         // A-4: Empty else removal + If-return early exit
         if self.options.simplify_if {

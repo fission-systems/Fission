@@ -161,6 +161,66 @@ label_end:
 }
 
 #[test]
+fn test_goto_cleanup_folds_guarded_if_goto() {
+    let input = r#"int test(int x)
+{
+  if (x == 0) goto label_end;
+  x = x + 1;
+  return x;
+label_end:
+  return 0;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(output.contains("if (x != 0) {"), "must negate guarded goto into if-body: {}", output);
+    assert!(output.contains("x = x + 1;"), "must keep guarded body: {}", output);
+    assert!(output.contains("return x;"), "must keep guarded return: {}", output);
+    assert!(!output.contains("goto label_end;"), "must remove guarded goto: {}", output);
+}
+
+#[test]
+fn test_goto_loop_to_do_while() {
+    let input = r#"int test(int n)
+{
+  int i;
+  i = 0;
+loop_1:
+  sum = sum + i;
+  i++;
+  if (i < n) goto loop_1;
+  return sum;
+}"#;
+
+    let output = PostProcessor::goto_loop_to_do_while(input);
+    assert!(output.contains("do {"), "must form do-while body: {}", output);
+    assert!(output.contains("} while (i < n);"), "must form do-while tail condition: {}", output);
+    assert!(!output.contains("loop_1:"), "must remove loop label: {}", output);
+    assert!(!output.contains("goto loop_1;"), "must remove back-edge goto: {}", output);
+}
+
+#[test]
+fn test_goto_loop_then_do_while_to_for() {
+    let input = r#"int test(int n)
+{
+  int i;
+  i = 0;
+loop_1:
+  sum = sum + i;
+  i++;
+  if (i < n) goto loop_1;
+  return sum;
+}"#;
+
+    let output = PostProcessor::do_while_to_for(&PostProcessor::goto_loop_to_do_while(input));
+    assert!(
+        output.contains("for (i = 0; i < n; i++) {"),
+        "must promote goto loop through do-while into for-loop: {}",
+        output
+    );
+    assert!(output.contains("sum = sum + i;"), "must preserve loop body: {}", output);
+}
+
+#[test]
 fn test_promote_rect_param_for_get_client_rect() {
     let input = r#"ulonglong FUN_0x140006260(longlong param_1,uint8_t (*param_2) [16])
 {
