@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 static TEMP_ASSIGN_LINE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"^(?P<indent>\s*)(?:(?:const\s+)?[A-Za-z_][A-Za-z0-9_\s\*\[\]]*?\s+)?(?P<name>(?:temp_[A-Za-z0-9_]+|_tmp[A-Za-z0-9_]*|tmp[A-Za-z0-9_]*|uVar[A-Za-z0-9_]*|iVar[A-Za-z0-9_]*|xVar[A-Za-z0-9_]*|bVar[A-Za-z0-9_]*))\s*=\s*(?P<expr>[^;]+);\s*$",
+        r"^(?P<indent>\s*)(?:(?:const\s+)?[A-Za-z_][A-Za-z0-9_\s\*\[\]]*?\s+)?(?P<name>(?:temp_[A-Za-z0-9_]+|_tmp[A-Za-z0-9_]*|tmp[A-Za-z0-9_]*|uVar[A-Za-z0-9_]*|iVar[A-Za-z0-9_]*|xVar[A-Za-z0-9_]*|bVar[A-Za-z0-9_]*|result|retval))\s*=\s*(?P<expr>[^;]+);\s*$",
     )
     .unwrap_or_else(|e| panic!("invalid TEMP_ASSIGN_LINE regex: {e}"))
 });
@@ -23,6 +23,11 @@ static CALL_LIKE_EXPR: Lazy<Regex> = Lazy::new(|| {
 static SIMPLE_INLINE_EXPR: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^(?:[A-Za-z_][A-Za-z0-9_]*|0x[0-9A-Fa-f]+|\d+|true|false|null)$")
         .unwrap_or_else(|e| panic!("invalid SIMPLE_INLINE_EXPR regex: {e}"))
+});
+
+static DECLARATION_LINE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^\s*(?:const\s+)?[A-Za-z_][A-Za-z0-9_\s\*\[\]]+\s+[A-Za-z_][A-Za-z0-9_]*\s*(?:=\s*[^;]+)?;\s*$")
+        .unwrap_or_else(|e| panic!("invalid DECLARATION_LINE regex: {e}"))
 });
 
 impl PostProcessor {
@@ -64,24 +69,26 @@ fn inline_single_use_temps_once(lines: &[String]) -> (Vec<String>, bool) {
         let line = &lines[i];
         if let Some(caps) = TEMP_ASSIGN_LINE.captures(line) {
             let name = caps.name("name").map(|m| m.as_str()).unwrap_or_default();
-            let expr = caps.name("expr").map(|m| m.as_str()).unwrap_or_default().trim();
+            let expr = caps
+                .name("expr")
+                .map(|m| m.as_str())
+                .unwrap_or_default()
+                .trim();
 
-            if is_safe_inline_expr(expr)
-                && count_identifier_occurrences(&lines[i + 1..], name) == 1
-                && let Some(j) = first_non_empty_line_after(lines, i + 1)
-                && count_identifier_occurrences(std::slice::from_ref(&lines[j]), name) == 1
-                && can_inline_into_line(&lines[j], name)
+            if is_safe_inline_expr(expr) && count_identifier_occurrences(&lines[i + 1..], name) == 1
             {
-                let replacement = format_inline_expr(expr);
-                let rewritten = replace_identifier_once(&lines[j], name, &replacement);
-                if rewritten != lines[j] {
-                    for line in lines.iter().take(j).skip(i + 1) {
-                        result.push(line.clone());
+                if let Some(j) = find_inline_target(lines, i + 1, name) {
+                    let replacement = format_inline_expr(expr);
+                    let rewritten = replace_identifier_once(&lines[j], name, &replacement);
+                    if rewritten != lines[j] {
+                        for line in lines.iter().take(j).skip(i + 1) {
+                            result.push(line.clone());
+                        }
+                        result.push(rewritten);
+                        i = j + 1;
+                        changed = true;
+                        continue;
                     }
-                    result.push(rewritten);
-                    i = j + 1;
-                    changed = true;
-                    continue;
                 }
             }
         }
@@ -93,12 +100,61 @@ fn inline_single_use_temps_once(lines: &[String]) -> (Vec<String>, bool) {
     (result, changed)
 }
 
-fn first_non_empty_line_after(lines: &[String], start: usize) -> Option<usize> {
-    lines
-        .iter()
-        .enumerate()
-        .skip(start)
-        .find_map(|(idx, line)| (!line.trim().is_empty()).then_some(idx))
+fn find_inline_target(lines: &[String], start: usize, name: &str) -> Option<usize> {
+    let mut non_empty_seen = 0usize;
+    for (idx, line) in lines.iter().enumerate().skip(start) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        non_empty_seen += 1;
+        if count_identifier_occurrences(std::slice::from_ref(line), name) == 1
+            && can_inline_into_line(line, name)
+        {
+            return Some(idx);
+        }
+        if non_empty_seen >= 4 || !can_skip_between_inline(line, name) {
+            return None;
+        }
+    }
+    None
+}
+
+fn can_skip_between_inline(line: &str, name: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    if LABEL_LINE.is_match(trimmed)
+        || trimmed.starts_with("case ")
+        || trimmed == "default:"
+        || trimmed.starts_with("if ")
+        || trimmed.starts_with("if (")
+        || trimmed.starts_with("else")
+        || trimmed.starts_with("for ")
+        || trimmed.starts_with("for (")
+        || trimmed.starts_with("while ")
+        || trimmed.starts_with("while (")
+        || trimmed.starts_with("switch ")
+        || trimmed.starts_with("switch (")
+        || trimmed.starts_with("do")
+        || trimmed.starts_with("goto ")
+        || trimmed.starts_with("break;")
+        || trimmed.starts_with("continue;")
+        || trimmed.starts_with("return ")
+        || trimmed == "return;"
+        || trimmed.contains(name)
+        || trimmed.contains("++")
+        || trimmed.contains("--")
+        || trimmed.contains('?')
+        || trimmed.contains('{')
+        || trimmed.contains('}')
+        || CALL_LIKE_EXPR.is_match(trimmed)
+    {
+        return false;
+    }
+
+    DECLARATION_LINE.is_match(trimmed) || trimmed.starts_with("//") || trimmed.starts_with("/*")
 }
 
 fn can_inline_into_line(line: &str, name: &str) -> bool {
@@ -164,7 +220,8 @@ fn format_inline_expr(expr: &str) -> String {
 }
 
 fn count_identifier_occurrences(lines: &[String], name: &str) -> usize {
-    lines.iter()
+    lines
+        .iter()
         .map(|line| count_identifier_occurrences_in_str(line, name))
         .sum()
 }

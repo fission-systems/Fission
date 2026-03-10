@@ -6,7 +6,7 @@
 use fission_pcode::{PcodeFunction, PcodeOptimizer, PcodeOptimizerConfig};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Optimize Pcode JSON (called from C++)
 ///

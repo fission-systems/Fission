@@ -204,7 +204,9 @@ fn main() {
                 "cargo:warning=Native library path not found: {}",
                 lib_path.display()
             );
-            println!("cargo:warning=Build native target first: cmake --build ghidra_decompiler/build --config Release --target decomp");
+            println!(
+                "cargo:warning=Build native target first: cmake --build ghidra_decompiler/build --config Release --target decomp"
+            );
         }
     }
     println!("cargo:rerun-if-changed=build.rs");

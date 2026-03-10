@@ -629,7 +629,10 @@ impl PostProcessor {
             })
         }
 
-        fn try_cluster_run(blocks: &[CaseBlock], switch_expr: &str) -> Option<(Vec<String>, usize)> {
+        fn try_cluster_run(
+            blocks: &[CaseBlock],
+            switch_expr: &str,
+        ) -> Option<(Vec<String>, usize)> {
             if blocks.len() < 3 {
                 return None;
             }
@@ -664,12 +667,16 @@ impl PostProcessor {
             }
 
             let first_body_nonempty_raw = nonempty_raw(&blocks[0].body);
-            let first_body_nonempty: Vec<&str> =
-                first_body_nonempty_raw.iter().map(|line| line.trim()).collect();
+            let first_body_nonempty: Vec<&str> = first_body_nonempty_raw
+                .iter()
+                .map(|line| line.trim())
+                .collect();
             let first_assign = parse_assignment(first_body_nonempty.first()?)?;
             let last_body_nonempty_raw = nonempty_raw(&blocks.last()?.body);
-            let last_body_nonempty: Vec<&str> =
-                last_body_nonempty_raw.iter().map(|line| line.trim()).collect();
+            let last_body_nonempty: Vec<&str> = last_body_nonempty_raw
+                .iter()
+                .map(|line| line.trim())
+                .collect();
             let last_suffix: Vec<&str> = last_body_nonempty.iter().skip(1).copied().collect();
             let mut common_tail_target: Option<String> = None;
 
@@ -755,7 +762,10 @@ impl PostProcessor {
                 i += 1;
                 continue;
             };
-            let switch_expr = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let switch_expr = caps
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
             let switch_start = i;
             let mut switch_end = i + 1;
             let mut depth = 1i32;
@@ -784,7 +794,9 @@ impl PostProcessor {
                 let mut run = Vec::new();
                 let mut k = j;
                 while k < switch_end {
-                    let Some(block) = collect_case_block(&lines, k, switch_end, &case_re, &default_re) else {
+                    let Some(block) =
+                        collect_case_block(&lines, k, switch_end, &case_re, &default_re)
+                    else {
                         break;
                     };
                     k = block.end_idx;

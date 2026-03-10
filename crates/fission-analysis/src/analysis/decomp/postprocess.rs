@@ -8,6 +8,7 @@
 use fission_loader::loader::types::{DwarfFunctionInfo, InferredTypeInfo};
 use std::borrow::Cow;
 
+mod aggregate_sweep;
 mod arithmetic;
 mod clean_slate;
 mod cleanup;
@@ -23,10 +24,10 @@ mod stack_normalization;
 mod strings;
 mod structure;
 mod switch_recon;
-mod type_promotion;
-mod var_sweep;
 #[cfg(test)]
 mod tests;
+mod type_promotion;
+mod var_sweep;
 
 /// Configurable options for the Rust-side post-processing passes.
 ///
@@ -124,10 +125,7 @@ impl PostProcessor {
     }
 
     /// Set string map for address-to-string replacement in decompiled output
-    pub fn with_string_map(
-        mut self,
-        map: Option<std::collections::HashMap<u64, String>>,
-    ) -> Self {
+    pub fn with_string_map(mut self, map: Option<std::collections::HashMap<u64, String>>) -> Self {
         self.string_map = map;
         self
     }
@@ -181,6 +179,7 @@ impl PostProcessor {
             pass_registry.disable("normalize_stack_artifacts");
         }
         if !self.options.piece_access_normalization {
+            pass_registry.disable("aggregate_copy_cleanup");
             pass_registry.disable("normalize_piece_accesses");
         }
         if !self.options.deref_to_array {
@@ -283,6 +282,9 @@ impl PostProcessor {
 
         processed = Self::promote_rect_params(&processed);
         processed = Self::clean_ghidra_artifacts(&processed);
+        if self.options.piece_access_normalization {
+            processed = Self::normalize_aggregate_copies(&processed);
+        }
         if self.options.temp_var_inlining {
             processed = Self::inline_single_use_temps(&processed);
         }

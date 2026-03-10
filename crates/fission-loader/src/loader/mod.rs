@@ -8,13 +8,13 @@ use std::path::Path;
 
 pub mod cpp;
 pub mod demangle;
-pub mod strings;
 pub mod dwarf;
 pub mod elf;
 pub mod golang;
 pub mod macho;
 pub mod pe;
 pub mod rust;
+pub mod strings;
 pub mod types;
 pub use types::*;
 
@@ -378,36 +378,36 @@ mod tests {
         data[rdata_start..rdata_start + 6].copy_from_slice(b"Hello\0");
         data[rdata_start + 6..rdata_start + 17].copy_from_slice(b"World Test\0");
 
-        let binary = LoadedBinaryBuilder::new(
-            "test.bin".to_string(),
-            DataBuffer::Heap(data),
-        )
-        .add_section(SectionInfo {
-            name: ".rdata".to_string(),
-            virtual_address: 0x2000,
-            virtual_size: 128,
-            file_offset: 128,
-            file_size: 128,
-            is_executable: false,
-            is_readable: true,
-            is_writable: false,
-        })
-        .add_section(SectionInfo {
-            name: ".text".to_string(),
-            virtual_address: 0x1000,
-            virtual_size: 128,
-            file_offset: 0,
-            file_size: 128,
-            is_executable: true,
-            is_readable: true,
-            is_writable: false,
-        })
-        .build()
-        .expect("build");
+        let binary = LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(data))
+            .add_section(SectionInfo {
+                name: ".rdata".to_string(),
+                virtual_address: 0x2000,
+                virtual_size: 128,
+                file_offset: 128,
+                file_size: 128,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 128,
+                file_offset: 0,
+                file_size: 128,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("build");
 
         assert!(!binary.string_map.is_empty());
         assert_eq!(binary.string_map.get(&0x2000), Some(&"Hello".to_string()));
-        assert_eq!(binary.string_map.get(&0x2006), Some(&"World Test".to_string()));
+        assert_eq!(
+            binary.string_map.get(&0x2006),
+            Some(&"World Test".to_string())
+        );
     }
 
     #[test]

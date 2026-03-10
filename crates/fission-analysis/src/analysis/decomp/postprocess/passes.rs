@@ -600,6 +600,28 @@ impl PostProcessPass for CleanSlatePass {
     }
 }
 
+/// Whole-object aggregate copy cleanup pass
+pub struct AggregateSweepPass;
+
+impl PostProcessPass for AggregateSweepPass {
+    fn metadata(&self) -> PassMetadata {
+        PassMetadata {
+            id: "aggregate_copy_cleanup",
+            name: "Aggregate Copy Cleanup",
+            description: "Normalizes whole-object CONCAT and byte-array copy residue into aggregate-typed assignments",
+            category: PassCategory::Cleanup,
+        }
+    }
+
+    fn run<'a>(&self, code: &'a str, _context: &PassContext) -> PassResult<'a> {
+        Ok(PostProcessor::normalize_aggregate_copies_cow(code))
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["clean_slate"]
+    }
+}
+
 /// Conservative single-use temp variable inlining pass
 pub struct InlineSingleUseTempsPass;
 
@@ -618,7 +640,7 @@ impl PostProcessPass for InlineSingleUseTempsPass {
     }
 
     fn dependencies(&self) -> &[&'static str] {
-        &["clean_slate"]
+        &["aggregate_copy_cleanup"]
     }
 }
 

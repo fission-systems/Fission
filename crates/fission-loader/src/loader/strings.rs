@@ -11,12 +11,12 @@ use crate::loader::types::SectionInfo;
 /// Section names that typically contain string literals (read-only data).
 /// Matches DataSectionScanner / DecompilationPipeline conventions.
 const DATA_SECTION_NAMES: &[&str] = &[
-    ".rdata",        // PE read-only data
-    ".rodata",       // ELF read-only data
-    ".data",         // PE/ELF writable data (may contain string literals)
-    "__const",       // Mach-O read-only constants
-    "__DATA_CONST",  // Mach-O data const
-    ".data.rel.ro",  // ELF RELRO (read-only after relocation)
+    ".rdata",       // PE read-only data
+    ".rodata",      // ELF read-only data
+    ".data",        // PE/ELF writable data (may contain string literals)
+    "__const",      // Mach-O read-only constants
+    "__DATA_CONST", // Mach-O data const
+    ".data.rel.ro", // ELF RELRO (read-only after relocation)
 ];
 
 /// Minimum string length to consider (avoids noise from shorts like "AA", "x").

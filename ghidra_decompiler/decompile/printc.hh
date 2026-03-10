@@ -218,6 +218,8 @@ protected:
   virtual void push_integer(uintb val,int4 sz,bool sign,tagtype tag,
 			    const Varnode *vn,
 			    const PcodeOp *op);
+  void pushPtrsubFallback(const PcodeOp *op,const Varnode *base,const TypePointer *ptype,
+			  int8 suboff,bool valueon,uint4 m);
   virtual void push_float(uintb val,int4 sz,tagtype tag,const Varnode *vn,
 			  const PcodeOp *op);
   virtual void printUnicode(ostream &s,int4 onechar) const;

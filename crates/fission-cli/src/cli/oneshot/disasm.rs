@@ -2,6 +2,132 @@ use fission_core::{DISASM_READ_WINDOW, PAGE_SIZE};
 use fission_loader::loader::LoadedBinary;
 use std::io::{self, Write};
 
+fn collect_function_instructions(
+    binary: &LoadedBinary,
+    data: &[u8],
+    addr: u64,
+) -> io::Result<(String, u64, bool, Vec<(u64, String, String)>)> {
+    use iced_x86::{Decoder, DecoderOptions, Formatter, IntelFormatter, Mnemonic};
+
+    let func = binary.function_at(addr).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("No function found at address 0x{addr:x}"),
+        )
+    })?;
+    let func_start = func.address;
+    let mut func_size = func.size;
+    let needs_boundary_detection = func_size == 0;
+
+    if needs_boundary_detection {
+        let all_functions: Vec<_> = binary
+            .functions
+            .iter()
+            .filter(|f| f.address > func_start)
+            .collect();
+
+        if let Some(next_func) = all_functions.iter().min_by_key(|f| f.address) {
+            func_size = next_func.address - func_start;
+        } else {
+            func_size = PAGE_SIZE as u64;
+        }
+    }
+
+    let section = binary.sections.iter().find(|s| {
+        func_start >= s.virtual_address && func_start < s.virtual_address + s.virtual_size
+    });
+
+    let (bytes, base) = if let Some(sec) = section {
+        let offset = (func_start - sec.virtual_address) as usize;
+        let file_offset = sec.file_offset as usize + offset;
+        let remaining = (sec.virtual_size as usize).saturating_sub(offset);
+        let len = remaining
+            .min(func_size as usize)
+            .min(data.len().saturating_sub(file_offset));
+
+        if file_offset + len <= data.len() {
+            (&data[file_offset..file_offset + len], func_start)
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!("Function at 0x{func_start:x} is outside file bounds"),
+            ));
+        }
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Function at 0x{func_start:x} not in any section"),
+        ));
+    };
+
+    let decoder_options = if binary.is_64bit { 64 } else { 32 };
+    let mut decoder = Decoder::with_ip(decoder_options, bytes, base, DecoderOptions::NONE);
+    let mut formatter = IntelFormatter::new();
+    let mut output = String::with_capacity(64);
+    let mut instructions = Vec::new();
+    let func_end = func_start + func_size;
+
+    while decoder.can_decode() {
+        let instr = decoder.decode();
+        if instr.ip() >= func_end {
+            break;
+        }
+
+        output.clear();
+        formatter.format(&instr, &mut output);
+
+        let bytes_str: String = bytes[instr.ip() as usize - base as usize
+            ..instr.ip() as usize - base as usize + instr.len()]
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        instructions.push((instr.ip(), bytes_str, output.clone()));
+
+        if needs_boundary_detection && instr.mnemonic() == Mnemonic::Ret {
+            break;
+        }
+    }
+
+    Ok((
+        func.name.clone(),
+        func_start,
+        needs_boundary_detection,
+        instructions,
+    ))
+}
+
+pub(super) fn render_function_disassembly_text(
+    binary: &LoadedBinary,
+    data: &[u8],
+    addr: u64,
+) -> io::Result<String> {
+    let (name, func_start, needs_boundary_detection, instructions) =
+        collect_function_instructions(binary, data, addr)?;
+
+    let mut out = String::new();
+    if needs_boundary_detection {
+        out.push_str(&format!(
+            "Function: {} at 0x{:x} (size: auto-detected)\n",
+            name, func_start
+        ));
+    } else {
+        let size = binary.function_at(addr).map(|f| f.size).unwrap_or_default();
+        out.push_str(&format!(
+            "Function: {} at 0x{:x} (size: {} bytes)\n",
+            name, func_start, size
+        ));
+    }
+    out.push_str(&format!("{:>18}  {:24}  Instruction\n", "Address", "Bytes"));
+    out.push_str(&format!("{:─<70}\n", ""));
+    for (ip, bytes, mnemonic) in &instructions {
+        out.push_str(&format!("  0x{:012x}  {:24}  {}\n", ip, bytes, mnemonic));
+    }
+    out.push_str(&format!("\nTotal instructions: {}\n", instructions.len()));
+    Ok(out)
+}
+
 pub(super) fn disassemble(
     binary: &LoadedBinary,
     data: &[u8],
@@ -101,113 +227,20 @@ pub(super) fn disassemble_function(
     addr: u64,
     json: bool,
 ) -> io::Result<()> {
-    use iced_x86::{Decoder, DecoderOptions, Formatter, IntelFormatter, Mnemonic};
     let mut stdout = io::stdout().lock();
 
-    // Find the function at this address
-    let func = match binary.function_at(addr) {
-        Some(f) => f,
-        None => {
-            eprintln!("Error: No function found at address 0x{:x}", addr);
-            std::process::exit(1);
-        }
-    };
-    let func_start = func.address;
-    let mut func_size = func.size;
-
-    // If function size is 0, we need to find the boundary by looking for RET
-    // or by finding the next function
-    let needs_boundary_detection = func_size == 0;
-
-    if needs_boundary_detection {
-        // Try to find next function to estimate max size
-        let all_functions: Vec<_> = binary
-            .functions
-            .iter()
-            .filter(|f| f.address > func_start)
-            .collect();
-
-        if let Some(next_func) = all_functions.iter().min_by_key(|f| f.address) {
-            func_size = next_func.address - func_start;
-        } else {
-            // No next function, use a reasonable limit
-            func_size = PAGE_SIZE as u64;
-        }
-    }
-
-    // Find the section containing this address
-    let section = binary.sections.iter().find(|s| {
-        func_start >= s.virtual_address && func_start < s.virtual_address + s.virtual_size
-    });
-
-    let (bytes, base) = if let Some(sec) = section {
-        // Calculate offset within section
-        let offset = (func_start - sec.virtual_address) as usize;
-        let file_offset = sec.file_offset as usize + offset;
-        let remaining = (sec.virtual_size as usize).saturating_sub(offset);
-        let len = remaining
-            .min(func_size as usize)
-            .min(data.len().saturating_sub(file_offset));
-
-        if file_offset + len <= data.len() {
-            (&data[file_offset..file_offset + len], func_start)
-        } else {
-            eprintln!(
-                "Error: Function at 0x{:x} is outside file bounds",
-                func_start
-            );
-            std::process::exit(1);
-        }
-    } else {
-        eprintln!("Error: Function at 0x{:x} not in any section", func_start);
-        std::process::exit(1);
-    };
-
-    let decoder_options = if binary.is_64bit { 64 } else { 32 };
-
-    let mut decoder = Decoder::with_ip(decoder_options, bytes, base, DecoderOptions::NONE);
-    let mut formatter = IntelFormatter::new();
-    let mut output = String::with_capacity(64);
-    let mut instructions = Vec::new();
-
-    // Disassemble until we reach the end of the function
-    let func_end = func_start + func_size;
-
-    while decoder.can_decode() {
-        let instr = decoder.decode();
-
-        // Stop if we've gone past the function end
-        if instr.ip() >= func_end {
-            break;
-        }
-
-        output.clear();
-        formatter.format(&instr, &mut output);
-
-        let bytes_str: String = bytes[instr.ip() as usize - base as usize
-            ..instr.ip() as usize - base as usize + instr.len()]
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        instructions.push((instr.ip(), bytes_str, output.clone()));
-
-        // If we're detecting boundaries, stop at RET instruction
-        if needs_boundary_detection && instr.mnemonic() == Mnemonic::Ret {
-            break;
-        }
-    }
+    let (name, func_start, needs_boundary_detection, instructions) =
+        collect_function_instructions(binary, data, addr)?;
 
     if json {
         let result = serde_json::json!({
             "function": {
-                "name": &func.name,
+                "name": &name,
                 "address": format!("0x{:x}", func_start),
                 "size": if needs_boundary_detection {
                     "unknown (stopped at RET)".to_string()
                 } else {
-                    func_size.to_string()
+                    binary.function_at(addr).map(|f| f.size).unwrap_or_default().to_string()
                 },
             },
             "instructions": instructions
@@ -229,25 +262,11 @@ pub(super) fn disassemble_function(
         })?;
         writeln!(stdout, "{}", json_output)?;
     } else {
-        if needs_boundary_detection {
-            writeln!(
-                stdout,
-                "Function: {} at 0x{:x} (size: auto-detected)",
-                func.name, func_start
-            )?;
-        } else {
-            writeln!(
-                stdout,
-                "Function: {} at 0x{:x} (size: {} bytes)",
-                func.name, func_start, func_size
-            )?;
-        }
-        writeln!(stdout, "{:>18}  {:24}  Instruction", "Address", "Bytes")?;
-        writeln!(stdout, "{:─<70}", "")?;
-        for (ip, bytes, mnemonic) in &instructions {
-            writeln!(stdout, "  0x{:012x}  {:24}  {}", ip, bytes, mnemonic)?;
-        }
-        writeln!(stdout, "\nTotal instructions: {}", instructions.len())?;
+        write!(
+            stdout,
+            "{}",
+            render_function_disassembly_text(binary, data, addr)?
+        )?;
     }
     Ok(())
 }

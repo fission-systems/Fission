@@ -39,7 +39,6 @@ pub struct InnerState {
     pub bookmarks: Vec<BookmarkDto>,
 }
 
-
 /// Thread-safe application state wrapper.
 ///
 /// The decompiler has its own separate Mutex so that a slow/hanging

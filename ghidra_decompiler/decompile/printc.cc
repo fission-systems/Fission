@@ -923,6 +923,31 @@ static bool isValueFlexible(const Varnode *vn)
   return false;
 }
 
+void PrintC::pushPtrsubFallback(const PcodeOp *op,const Varnode *base,const TypePointer *ptype,
+				int8 suboff,bool valueon,uint4 m)
+
+{
+  Datatype *outtype = (op->getOut() != (Varnode *)0) ? op->getOut()->getHighTypeDefFacing() : (Datatype *)0;
+  Datatype *byteType = glb->types->getBase(1,TYPE_UINT);
+  Datatype *bytePtrType = glb->types->getTypePointer(ptype->getSize(),byteType,1);
+
+  if (valueon)
+    pushOp(&dereference,op);
+  if (!option_nocasts && outtype != (Datatype *)0) {
+    pushOp(&typecast,op);
+    pushType(outtype);
+  }
+  if (suboff != 0) {
+    pushOp(&binary_plus,op);
+    push_integer(suboff,ptype->getSize(),suboff < 0,syntax,(Varnode *)0,op);
+  }
+  if (!option_nocasts && bytePtrType != (Datatype *)0) {
+    pushOp(&typecast,op);
+    pushType(bytePtrType);
+  }
+  pushVn(base,op,m);
+}
+
 /// We need to distinguish between the following cases:
 ///  - ptr->        struct spacebase or array
 ///  - valueoption  on/off   (from below)
@@ -991,11 +1016,17 @@ void PrintC::opPtrsub(const PcodeOp *op)
     int8 newoff;
     if (ct->getMetatype() == TYPE_UNION) {
       if (suboff != 0)
-	throw LowlevelError("PTRSUB accesses union with non-zero offset");
+      {
+	pushPtrsubFallback(op,in0,ptype,suboff,valueon,m);
+	return;
+      }
       const Funcdata *fd = op->getParent()->getFuncdata();
       const ResolvedUnion *resUnion = fd->getUnionField(ptype, op, -1);
       if (resUnion == (const ResolvedUnion *)0 || resUnion->getFieldNum() < 0)
-	throw LowlevelError("PTRSUB for union that does not resolve to a field");
+      {
+	pushPtrsubFallback(op,in0,ptype,suboff,valueon,m);
+	return;
+      }
       const TypeField *fld = ((TypeUnion *)ct)->getField(resUnion->getFieldNum());
       fieldid = fld->ident;
       fieldname = fld->name;
@@ -1005,8 +1036,8 @@ void PrintC::opPtrsub(const PcodeOp *op)
       const TypeField *fld = ct->findTruncation(suboff,0,op,0,newoff);
       if (fld == (const TypeField*)0) {
 	if (ct->getSize() <= suboff || suboff < 0) {
-	  clear();
-	  throw LowlevelError("PTRSUB out of bounds into struct");
+	  pushPtrsubFallback(op,in0,ptype,suboff,valueon,m);
+	  return;
 	}
 	// Try to match the Ghidra's default field name from DataTypeComponent.getDefaultFieldName
 	ostringstream s;

@@ -44,10 +44,27 @@ default:
 }"#;
 
     let output = PostProcessor::cluster_switch_case_runs(input);
-    assert_eq!(output.matches("goto label_out;").count(), 1, "must keep only one shared goto: {}", output);
-    assert!(output.contains("case 1:"), "must preserve case labels: {}", output);
-    assert!(output.contains("case 2:"), "must preserve clustered case labels: {}", output);
-    assert!(output.contains("case 3:"), "must preserve clustered case labels: {}", output);
+    assert_eq!(
+        output.matches("goto label_out;").count(),
+        1,
+        "must keep only one shared goto: {}",
+        output
+    );
+    assert!(
+        output.contains("case 1:"),
+        "must preserve case labels: {}",
+        output
+    );
+    assert!(
+        output.contains("case 2:"),
+        "must preserve clustered case labels: {}",
+        output
+    );
+    assert!(
+        output.contains("case 3:"),
+        "must preserve clustered case labels: {}",
+        output
+    );
 }
 
 #[test]
@@ -70,8 +87,18 @@ default:
 }"#;
 
     let output = PostProcessor::cluster_switch_case_runs(input);
-    assert_eq!(output.matches("goto label_out;").count(), 1, "must share tail goto once: {}", output);
-    assert_eq!(output.matches("z = 1;").count(), 1, "must keep common suffix once: {}", output);
+    assert_eq!(
+        output.matches("goto label_out;").count(),
+        1,
+        "must share tail goto once: {}",
+        output
+    );
+    assert_eq!(
+        output.matches("z = 1;").count(),
+        1,
+        "must keep common suffix once: {}",
+        output
+    );
     assert!(
         output.contains("y = (ulonglong)(x) - 0x30;"),
         "must synthesize linear assignment from switch variable: {}",
@@ -98,8 +125,18 @@ label_out:
 }"#;
 
     let output = PostProcessor::cluster_switch_case_runs(input);
-    assert_eq!(output.matches("goto label_out;").count(), 0, "must use shared fallthrough tail: {}", output);
-    assert_eq!(output.matches("z = 1;").count(), 1, "must keep shared prefix once: {}", output);
+    assert_eq!(
+        output.matches("goto label_out;").count(),
+        0,
+        "must use shared fallthrough tail: {}",
+        output
+    );
+    assert_eq!(
+        output.matches("z = 1;").count(),
+        1,
+        "must keep shared prefix once: {}",
+        output
+    );
     assert!(
         output.contains("y = (ulonglong)(x) - 0x30;"),
         "must synthesize linear assignment for clustered fallthrough cases: {}",
@@ -188,9 +225,21 @@ label_1:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(!output.contains("goto label_1;"), "must remove no-op goto: {}", output);
-    assert!(!output.contains("label_1:"), "must remove dead label after cleanup: {}", output);
-    assert!(output.contains("return 1;"), "must preserve return body: {}", output);
+    assert!(
+        !output.contains("goto label_1;"),
+        "must remove no-op goto: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_1:"),
+        "must remove dead label after cleanup: {}",
+        output
+    );
+    assert!(
+        output.contains("return 1;"),
+        "must preserve return body: {}",
+        output
+    );
 }
 
 #[test]
@@ -206,9 +255,21 @@ label_1:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(!output.contains("goto label_1;"), "must inline single-use label body: {}", output);
-    assert!(!output.contains("label_1:"), "must remove inlined label: {}", output);
-    assert!(output.contains("return 1;"), "must preserve inlined return: {}", output);
+    assert!(
+        !output.contains("goto label_1;"),
+        "must inline single-use label body: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_1:"),
+        "must remove inlined label: {}",
+        output
+    );
+    assert!(
+        output.contains("return 1;"),
+        "must preserve inlined return: {}",
+        output
+    );
 }
 
 #[test]
@@ -228,13 +289,41 @@ label_end:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(output.contains("if (x == 0) {"), "must reconstruct if block: {}", output);
-    assert!(output.contains("} else {"), "must reconstruct else block: {}", output);
-    assert!(!output.contains("goto label_true;"), "must eliminate then goto: {}", output);
-    assert!(!output.contains("goto label_false;"), "must eliminate else goto: {}", output);
-    assert!(!output.contains("label_true:"), "must eliminate then label: {}", output);
-    assert!(!output.contains("label_false:"), "must eliminate else label: {}", output);
-    assert!(!output.contains("label_end:"), "must eliminate join label: {}", output);
+    assert!(
+        output.contains("if (x == 0) {"),
+        "must reconstruct if block: {}",
+        output
+    );
+    assert!(
+        output.contains("} else {"),
+        "must reconstruct else block: {}",
+        output
+    );
+    assert!(
+        !output.contains("goto label_true;"),
+        "must eliminate then goto: {}",
+        output
+    );
+    assert!(
+        !output.contains("goto label_false;"),
+        "must eliminate else goto: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_true:"),
+        "must eliminate then label: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_false:"),
+        "must eliminate else label: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_end:"),
+        "must eliminate join label: {}",
+        output
+    );
 }
 
 #[test]
@@ -249,10 +338,26 @@ label_end:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(output.contains("if (x != 0) {"), "must negate guarded goto into if-body: {}", output);
-    assert!(output.contains("x = x + 1;"), "must keep guarded body: {}", output);
-    assert!(output.contains("return x;"), "must keep guarded return: {}", output);
-    assert!(!output.contains("goto label_end;"), "must remove guarded goto: {}", output);
+    assert!(
+        output.contains("if (x != 0) {"),
+        "must negate guarded goto into if-body: {}",
+        output
+    );
+    assert!(
+        output.contains("x = x + 1;"),
+        "must keep guarded body: {}",
+        output
+    );
+    assert!(
+        output.contains("return x;"),
+        "must keep guarded return: {}",
+        output
+    );
+    assert!(
+        !output.contains("goto label_end;"),
+        "must remove guarded goto: {}",
+        output
+    );
 }
 
 #[test]
@@ -268,10 +373,26 @@ label_2:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(!output.contains("goto label_1;"), "must retarget chained goto entry: {}", output);
-    assert!(!output.contains("goto label_2;"), "must remove intermediate goto-only label: {}", output);
-    assert!(!output.contains("label_1:"), "must remove dead intermediate label: {}", output);
-    assert!(output.contains("return 1;"), "must preserve final destination body: {}", output);
+    assert!(
+        !output.contains("goto label_1;"),
+        "must retarget chained goto entry: {}",
+        output
+    );
+    assert!(
+        !output.contains("goto label_2;"),
+        "must remove intermediate goto-only label: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_1:"),
+        "must remove dead intermediate label: {}",
+        output
+    );
+    assert!(
+        output.contains("return 1;"),
+        "must preserve final destination body: {}",
+        output
+    );
 }
 
 #[test]
@@ -286,9 +407,21 @@ label_ret:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(!output.contains("goto label_ret;"), "must inline terminal label references: {}", output);
-    assert!(!output.contains("label_ret:"), "must remove dead terminal label: {}", output);
-    assert!(output.matches("return 1;").count() >= 2, "must duplicate terminal body at call sites: {}", output);
+    assert!(
+        !output.contains("goto label_ret;"),
+        "must inline terminal label references: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_ret:"),
+        "must remove dead terminal label: {}",
+        output
+    );
+    assert!(
+        output.matches("return 1;").count() >= 2,
+        "must duplicate terminal body at call sites: {}",
+        output
+    );
 }
 
 #[test]
@@ -306,10 +439,26 @@ label_ret:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(!output.contains("goto label_zero;"), "must inline fallthrough chain entry: {}", output);
-    assert!(!output.contains("label_zero:"), "must remove dead prefix label: {}", output);
-    assert!(output.contains("y = 0;"), "must preserve setup statement before terminal tail: {}", output);
-    assert!(output.contains("return y;"), "must preserve terminal tail after inline: {}", output);
+    assert!(
+        !output.contains("goto label_zero;"),
+        "must inline fallthrough chain entry: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_zero:"),
+        "must remove dead prefix label: {}",
+        output
+    );
+    assert!(
+        output.contains("y = 0;"),
+        "must preserve setup statement before terminal tail: {}",
+        output
+    );
+    assert!(
+        output.contains("return y;"),
+        "must preserve terminal tail after inline: {}",
+        output
+    );
 }
 
 #[test]
@@ -324,9 +473,16 @@ label_bad:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(output.contains("if (((a < 0) || (b < 0)))") || output.contains("if ((a < 0) || (b < 0))"),
-        "must merge adjacent guards with same target: {}", output);
-    assert!(!output.contains("if (b < 0) goto label_bad;"), "must collapse second guard: {}", output);
+    assert!(
+        output.contains("if (((a < 0) || (b < 0)))") || output.contains("if ((a < 0) || (b < 0))"),
+        "must merge adjacent guards with same target: {}",
+        output
+    );
+    assert!(
+        !output.contains("if (b < 0) goto label_bad;"),
+        "must collapse second guard: {}",
+        output
+    );
 }
 
 #[test]
@@ -344,10 +500,26 @@ label_body:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(!output.contains("goto label_prefix;"), "must retarget prefix goto: {}", output);
-    assert!(!output.contains("label_prefix:"), "must remove dead prefix label: {}", output);
-    assert!(output.contains("y = 1;"), "must preserve sunk prefix statement: {}", output);
-    assert!(output.contains("return y;"), "must preserve original body semantics after sinking: {}", output);
+    assert!(
+        !output.contains("goto label_prefix;"),
+        "must retarget prefix goto: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_prefix:"),
+        "must remove dead prefix label: {}",
+        output
+    );
+    assert!(
+        output.contains("y = 1;"),
+        "must preserve sunk prefix statement: {}",
+        output
+    );
+    assert!(
+        output.contains("return y;"),
+        "must preserve original body semantics after sinking: {}",
+        output
+    );
 }
 
 #[test]
@@ -366,11 +538,31 @@ label_body:
 }"#;
 
     let output = PostProcessor::cleanup_gotos(input);
-    assert!(!output.contains("goto label_prefix;"), "must eliminate old prefix target: {}", output);
-    assert!(!output.contains("label_prefix:"), "must remove dead prefix label: {}", output);
-    assert!(output.contains("y = 1;"), "must preserve prefix statement inside guard: {}", output);
-    assert!(output.contains("return y;"), "must preserve body reached through sunk prefix: {}", output);
-    assert!(output.contains("return 2;"), "must preserve non-prefix path: {}", output);
+    assert!(
+        !output.contains("goto label_prefix;"),
+        "must eliminate old prefix target: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_prefix:"),
+        "must remove dead prefix label: {}",
+        output
+    );
+    assert!(
+        output.contains("y = 1;"),
+        "must preserve prefix statement inside guard: {}",
+        output
+    );
+    assert!(
+        output.contains("return y;"),
+        "must preserve body reached through sunk prefix: {}",
+        output
+    );
+    assert!(
+        output.contains("return 2;"),
+        "must preserve non-prefix path: {}",
+        output
+    );
 }
 
 #[test]
@@ -387,10 +579,26 @@ loop_1:
 }"#;
 
     let output = PostProcessor::goto_loop_to_do_while(input);
-    assert!(output.contains("do {"), "must form do-while body: {}", output);
-    assert!(output.contains("} while (i < n);"), "must form do-while tail condition: {}", output);
-    assert!(!output.contains("loop_1:"), "must remove loop label: {}", output);
-    assert!(!output.contains("goto loop_1;"), "must remove back-edge goto: {}", output);
+    assert!(
+        output.contains("do {"),
+        "must form do-while body: {}",
+        output
+    );
+    assert!(
+        output.contains("} while (i < n);"),
+        "must form do-while tail condition: {}",
+        output
+    );
+    assert!(
+        !output.contains("loop_1:"),
+        "must remove loop label: {}",
+        output
+    );
+    assert!(
+        !output.contains("goto loop_1;"),
+        "must remove back-edge goto: {}",
+        output
+    );
 }
 
 #[test]
@@ -412,7 +620,11 @@ loop_1:
         "must promote goto loop through do-while into for-loop: {}",
         output
     );
-    assert!(output.contains("sum = sum + i;"), "must preserve loop body: {}", output);
+    assert!(
+        output.contains("sum = sum + i;"),
+        "must preserve loop body: {}",
+        output
+    );
 }
 
 #[test]
@@ -620,6 +832,52 @@ fn test_clean_slate_real_world_rect_output() {
 }
 
 #[test]
+fn test_aggregate_sweep_rewrites_local_whole_object_concat_copy() {
+    let input = r#"void test(uint64_t *param_2)
+{
+  uint8_t local_80 [16];
+  local_80 = CONCAT016(0,*(uint8_t (*) [16])(param_2 + 4));
+}"#;
+
+    let output = PostProcessor::normalize_aggregate_copies(input);
+    assert!(
+        output.contains("typedef struct { uint8_t bytes[16]; } fission_agg16;"),
+        "must inject aggregate typedef once when rewriting wide copy: {}",
+        output
+    );
+    assert!(
+        output.contains("*(fission_agg16 *)&local_80 = *(fission_agg16 *)(param_2 + 4);"),
+        "must rewrite CONCAT whole-object copy into aggregate assignment: {}",
+        output
+    );
+    assert!(
+        !output.contains("local_80 = CONCAT016"),
+        "must remove raw CONCAT whole-object residue: {}",
+        output
+    );
+}
+
+#[test]
+fn test_aggregate_sweep_rewrites_pointer_destination_whole_object_copy() {
+    let input = r#"void test(uint8_t *param_1,uint8_t (*param_2) [16])
+{
+  *(uint8_t (*) [16])(param_1 + 8) = CONCAT016(0,*param_2);
+}"#;
+
+    let output = PostProcessor::normalize_aggregate_copies(input);
+    assert!(
+        output.contains("*(fission_agg16 *)(param_1 + 8) = *(fission_agg16 *)param_2;"),
+        "must rewrite pointer-destination whole-object copy into aggregate-typed assignment: {}",
+        output
+    );
+    assert!(
+        !output.contains("CONCAT016(0,*param_2)"),
+        "must eliminate source CONCAT residue: {}",
+        output
+    );
+}
+
+#[test]
 fn test_var_sweep_inlines_single_use_temp_into_call() {
     let input = r#"void test(void)
 {
@@ -628,8 +886,16 @@ fn test_var_sweep_inlines_single_use_temp_into_call() {
 }"#;
 
     let output = PostProcessor::inline_single_use_temps(input);
-    assert!(!output.contains("uVar55 = uVar14;"), "must remove trivial temp assignment: {}", output);
-    assert!(output.contains("foo(uVar14);"), "must inline temp into immediate call site: {}", output);
+    assert!(
+        !output.contains("uVar55 = uVar14;"),
+        "must remove trivial temp assignment: {}",
+        output
+    );
+    assert!(
+        output.contains("foo(uVar14);"),
+        "must inline temp into immediate call site: {}",
+        output
+    );
 }
 
 #[test]
@@ -641,10 +907,35 @@ fn test_var_sweep_inlines_single_use_temp_into_return() {
 }"#;
 
     let output = PostProcessor::inline_single_use_temps(input);
-    assert!(!output.contains("uVar3 ="), "must remove single-use temp before return: {}", output);
+    assert!(
+        !output.contains("uVar3 ="),
+        "must remove single-use temp before return: {}",
+        output
+    );
     assert!(
         output.contains("return (ulonglong)(iVar1 != 0);"),
         "must inline cast expression into return: {}",
+        output
+    );
+}
+
+#[test]
+fn test_var_sweep_inlines_named_result_into_return() {
+    let input = r#"ulonglong test(int iVar1)
+{
+  result = (ulonglong)(iVar1 != 0);
+  return result;
+}"#;
+
+    let output = PostProcessor::inline_single_use_temps(input);
+    assert!(
+        !output.contains("result ="),
+        "must remove redundant named result temporary before return: {}",
+        output
+    );
+    assert!(
+        output.contains("return (ulonglong)(iVar1 != 0);"),
+        "must inline named result temporary into return: {}",
         output
     );
 }
@@ -664,7 +955,34 @@ fn test_var_sweep_keeps_temp_when_use_is_not_immediate() {
         "must keep temp when an intervening side-effect blocks safe inlining: {}",
         output
     );
-    assert!(output.contains("return iVar18;"), "must preserve original use when not inlined: {}", output);
+    assert!(
+        output.contains("return iVar18;"),
+        "must preserve original use when not inlined: {}",
+        output
+    );
+}
+
+#[test]
+fn test_var_sweep_inlines_temp_across_declaration_gap() {
+    let input = r#"int test(int x)
+{
+  iVar18 = x + 1;
+  int local_4;
+  local_4 = iVar18;
+  return local_4;
+}"#;
+
+    let output = PostProcessor::inline_single_use_temps(input);
+    assert!(
+        !output.contains("iVar18 = x + 1;"),
+        "must inline temp across declaration-only gap: {}",
+        output
+    );
+    assert!(
+        output.contains("local_4 = (x + 1);") || output.contains("local_4 = x + 1;"),
+        "must preserve expression at final use site: {}",
+        output
+    );
 }
 
 #[test]
@@ -681,10 +999,26 @@ fn test_stack_normalization_renames_exposed_stack_locals() {
 }"#;
 
     let output = PostProcessor::normalize_stack_artifacts(input);
-    assert!(!output.contains("uStack_48"), "must rename exposed stack variable: {}", output);
-    assert!(!output.contains("_axStack_938"), "must rename underscore-prefixed stack variable: {}", output);
-    assert!(output.contains("local_48_2"), "must avoid colliding with pre-existing local_48: {}", output);
-    assert!(output.contains("local_938"), "must normalize underscore-prefixed stack name: {}", output);
+    assert!(
+        !output.contains("uStack_48"),
+        "must rename exposed stack variable: {}",
+        output
+    );
+    assert!(
+        !output.contains("_axStack_938"),
+        "must rename underscore-prefixed stack variable: {}",
+        output
+    );
+    assert!(
+        output.contains("local_48_2"),
+        "must avoid colliding with pre-existing local_48: {}",
+        output
+    );
+    assert!(
+        output.contains("local_938"),
+        "must normalize underscore-prefixed stack name: {}",
+        output
+    );
 }
 
 #[test]
@@ -697,13 +1031,18 @@ fn test_stack_normalization_rewrites_piece_access() {
   return 0;
 }"#;
 
-    let output = PostProcessor::normalize_piece_accesses(&PostProcessor::normalize_stack_artifacts(input));
+    let output =
+        PostProcessor::normalize_piece_accesses(&PostProcessor::normalize_stack_artifacts(input));
     assert!(
         output.contains("*(uint32_t *)((uint8_t *)&local_848 + 12)"),
         "must rewrite stack piece access into explicit pointer arithmetic: {}",
         output
     );
-    assert!(!output.contains("axStack_848._12_4_"), "must remove raw sub-variable syntax: {}", output);
+    assert!(
+        !output.contains("axStack_848._12_4_"),
+        "must remove raw sub-variable syntax: {}",
+        output
+    );
 }
 
 #[test]
@@ -722,7 +1061,11 @@ fn test_piece_sweep_rewrites_global_scalar_piece_access() {
         "must rewrite global 1-byte piece access into explicit pointer cast: {}",
         output
     );
-    assert!(!output.contains("DAT_140132020._0_1_"), "must remove raw global piece syntax: {}", output);
+    assert!(
+        !output.contains("DAT_140132020._0_1_"),
+        "must remove raw global piece syntax: {}",
+        output
+    );
 }
 
 #[test]
@@ -740,10 +1083,38 @@ fn test_piece_sweep_rewrites_wide_local_piece_access() {
         output
     );
     assert!(
-        output.contains("*(uint8_t (*)[12])(uint8_t *)&local_838"),
+        output.contains("*(uint8_t (*)[12])&local_838"),
         "must rewrite 12-byte whole-piece access using array-pointer cast: {}",
         output
     );
-    assert!(!output.contains("local_848._1_15_"), "must remove raw wide piece syntax: {}", output);
-    assert!(!output.contains("local_838._0_12_"), "must remove raw whole-piece syntax: {}", output);
+    assert!(
+        !output.contains("local_848._1_15_"),
+        "must remove raw wide piece syntax: {}",
+        output
+    );
+    assert!(
+        !output.contains("local_838._0_12_"),
+        "must remove raw whole-piece syntax: {}",
+        output
+    );
+}
+
+#[test]
+fn test_piece_sweep_uses_short_zero_offset_wide_cast() {
+    let input = r#"void test(void)
+{
+  local_838._0_12_ = other;
+}"#;
+
+    let output = PostProcessor::normalize_piece_accesses(input);
+    assert!(
+        output.contains("*(uint8_t (*)[12])&local_838"),
+        "must shorten zero-offset wide cast to direct address-of form: {}",
+        output
+    );
+    assert!(
+        !output.contains("*(uint8_t (*)[12])(uint8_t *)&local_838"),
+        "must avoid redundant byte-pointer cast at offset zero: {}",
+        output
+    );
 }

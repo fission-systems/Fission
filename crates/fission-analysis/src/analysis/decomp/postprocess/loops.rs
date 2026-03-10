@@ -35,7 +35,9 @@ impl PostProcessor {
         });
 
         fn parse_label<'a>(line: &'a str, re: &Regex) -> Option<&'a str> {
-            re.captures(line).and_then(|caps| caps.get(1)).map(|m| m.as_str())
+            re.captures(line)
+                .and_then(|caps| caps.get(1))
+                .map(|m| m.as_str())
         }
 
         fn parse_if_goto<'a>(line: &'a str, re: &Regex) -> Option<(&'a str, &'a str, &'a str)> {

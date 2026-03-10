@@ -486,29 +486,46 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     size_t follow_flow_limit = compute_follow_flow_limit(ctx, addr);
     ghidra::Address end_addr = start_addr + follow_flow_limit;
     bool follow_flow_ok = false;
+    std::string follow_flow_error;
     auto follow_flow_start = std::chrono::steady_clock::now();
     timing_recorder.timing.follow_flow_budget_bytes = follow_flow_limit;
     try {
         fd->followFlow(start_addr, end_addr);
         fission::utils::log_output() << "[DecompilerCore] Control flow analysis complete" << std::endl;
         follow_flow_ok = true;
+    } catch (const ghidra::LowlevelError& e) {
+        follow_flow_error = e.explain;
+        fission::utils::log_output() << "[DecompilerCore] followFlow LowlevelError: "
+                  << e.explain << std::endl;
     } catch (const std::exception& e) {
+        follow_flow_error = e.what();
         fission::utils::log_output() << "[DecompilerCore] ERROR in followFlow: " << e.what() << std::endl;
     } catch (...) {
+        follow_flow_error = "unknown followFlow error";
         fission::utils::log_output() << "[DecompilerCore] ERROR: Unknown exception in followFlow" << std::endl;
     }
     timing_recorder.timing.follow_flow_ms = elapsed_ms(follow_flow_start);
 
-    // If control flow analysis failed, do NOT proceed to decompilation
-    // (action->perform on empty function data causes hangs)
     if (!follow_flow_ok) {
-        std::ostringstream err;
-        err << "// Decompilation failed: control flow analysis error\n"
-            << "// Function: " << fd->getName() << "\n"
-            << "// Address: 0x" << std::hex << addr << "\n"
-            << "// The function at this address could not be analyzed.\n"
-            << "// Possible causes: unmapped memory, invalid entry point, or corrupted code.\n";
-        return err.str();
+        const bool has_partial_flow =
+            fd->beginOpAll() != fd->endOpAll() || fd->getBasicBlocks().getSize() > 0;
+        if (has_partial_flow) {
+            fission::utils::log_output()
+                << "[DecompilerCore] Continuing with partial control-flow graph after followFlow failure"
+                << std::endl;
+            follow_flow_ok = true;
+        } else {
+            std::ostringstream err;
+            err << "// Decompilation failed: control flow analysis error\n"
+                << "// Function: " << fd->getName() << "\n"
+                << "// Address: 0x" << std::hex << addr << "\n"
+                << "// The function at this address could not be analyzed.\n"
+                << "// Possible causes: unmapped memory, invalid entry point, or corrupted code.\n";
+            if (!follow_flow_error.empty()) {
+                err << "// followFlow error: " << follow_flow_error << "\n";
+            }
+            return err.str();
+        }
     }
 
     // TAIL-CALL OVERRIDE REMOVED: It was causing recursive stubs for correctly followed functions.

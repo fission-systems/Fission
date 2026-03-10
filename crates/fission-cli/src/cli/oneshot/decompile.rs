@@ -2,11 +2,12 @@ use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::common::{
     apply_profile, init_decompiler, resolve_compiler_id, resolve_profile,
 };
+use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
 use fission_analysis::analysis::decomp::postprocess::PostProcessor;
 use fission_analysis::analysis::decomp::{
-    prepare_native_decompiler_for_binary, serialize_win_api_signatures_json, PrepareOptions,
-    PrepareTimings,
+    PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
+    serialize_win_api_signatures_json,
 };
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
@@ -67,6 +68,29 @@ fn strip_inferred_structs(code: &str) -> String {
     result
 }
 
+fn should_use_assembly_fallback(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("duplicate variablepiece")
+        || lower.contains("control flow analysis error")
+        || lower.contains("followflow")
+}
+
+fn make_assembly_fallback(
+    binary: &LoadedBinary,
+    binary_data: &[u8],
+    func: &FunctionInfo,
+    error: &str,
+) -> Option<String> {
+    if !should_use_assembly_fallback(error) {
+        return None;
+    }
+    let asm = render_function_disassembly_text(binary, binary_data, func.address).ok()?;
+    Some(format!(
+        "// Assembly fallback: {}\n// Function: {} @ 0x{:x}\n\n{}",
+        error, func.name, func.address, asm
+    ))
+}
+
 fn attach_native_timing(entry: &mut serde_json::Value, decomp: &DecompilerNative) {
     let Ok(raw_timing) = decomp.get_last_timing_json() else {
         return;
@@ -93,16 +117,12 @@ fn run_sequential_decompilation<'a>(
     cli: &OneShotArgs,
     decomp: &mut DecompilerNative,
     binary: &LoadedBinary,
+    binary_data: &[u8],
     functions: &[&'a FunctionInfo],
     effective_no_header: bool,
     effective_no_warnings: bool,
     effective_json: bool,
-) -> (
-    String,
-    Vec<serde_json::Value>,
-    f64,
-    f64,
-) {
+) -> (String, Vec<serde_json::Value>, f64, f64) {
     let mut all_output = String::new();
     let mut json_results = Vec::new();
     let mut total_decomp_secs = 0.0;
@@ -169,11 +189,45 @@ fn run_sequential_decompilation<'a>(
             Err(e) => {
                 let decomp_sec = func_start.elapsed().as_secs_f64();
                 total_decomp_secs += decomp_sec;
+                let error_text = e.to_string();
+                if let Some(fallback) =
+                    make_assembly_fallback(binary, binary_data, func, &error_text)
+                {
+                    if effective_json {
+                        let mut entry = serde_json::json!({
+                            "address": format!("0x{:x}", func.address),
+                            "name": func.name,
+                            "code": fallback,
+                            "fallback": "assembly",
+                            "fallback_reason": error_text
+                        });
+                        if cli.benchmark {
+                            entry["decomp_sec"] =
+                                serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
+                            attach_native_timing(&mut entry, decomp);
+                        }
+                        json_results.push(entry);
+                    } else {
+                        if !effective_no_header {
+                            all_output
+                                .push_str("// ============================================\n");
+                            all_output.push_str(&format!(
+                                "// Function: {} @ 0x{:x}\n",
+                                func.name, func.address
+                            ));
+                            all_output
+                                .push_str("// ============================================\n\n");
+                        }
+                        all_output.push_str(&fallback);
+                        all_output.push_str("\n\n");
+                    }
+                    continue;
+                }
                 if effective_json {
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
-                        "error": e.to_string()
+                        "error": error_text
                     });
                     if cli.benchmark {
                         entry["decomp_sec"] =
@@ -184,14 +238,19 @@ fn run_sequential_decompilation<'a>(
                 } else {
                     all_output.push_str(&format!(
                         "// Error decompiling {} (0x{:x}): {}\n\n",
-                        func.name, func.address, e
+                        func.name, func.address, error_text
                     ));
                 }
             }
         }
     }
 
-    (all_output, json_results, total_decomp_secs, total_postprocess_secs)
+    (
+        all_output,
+        json_results,
+        total_decomp_secs,
+        total_postprocess_secs,
+    )
 }
 
 #[cfg(feature = "native_decomp")]
@@ -208,12 +267,7 @@ fn run_parallel_decompilation<'a>(
     effective_no_header: bool,
     effective_no_warnings: bool,
     effective_json: bool,
-) -> (
-    String,
-    Vec<serde_json::Value>,
-    f64,
-    f64,
-) {
+) -> (String, Vec<serde_json::Value>, f64, f64) {
     let (compiler_id, _) = resolve_compiler_id(binary, cli.compiler_id.as_deref());
     let config = fission_core::config::Config::default();
     let gdt_path_owned = fission_core::PATHS
@@ -256,7 +310,16 @@ fn run_parallel_decompilation<'a>(
                     let pp_sec = pp_start.elapsed().as_secs_f64();
                     (Ok(processed), pp_sec)
                 }
-                Err(e) => (Err(e), 0.0),
+                Err(e) => {
+                    let error_text = e.to_string();
+                    if let Some(fallback) =
+                        make_assembly_fallback(binary, binary_data, func, &error_text)
+                    {
+                        (Ok(fallback), 0.0)
+                    } else {
+                        (Err(e), 0.0)
+                    }
+                }
             };
             let timing = main_decomp.get_last_timing_json().ok();
             entries.push(DecompEntry {
@@ -328,7 +391,16 @@ fn run_parallel_decompilation<'a>(
                         let pp_sec = pp_start.elapsed().as_secs_f64();
                         (Ok(processed), pp_sec)
                     }
-                    Err(e) => (Err(e), 0.0),
+                    Err(e) => {
+                        let error_text = e.to_string();
+                        if let Some(fallback) =
+                            make_assembly_fallback(binary, binary_data, func, &error_text)
+                        {
+                            (Ok(fallback), 0.0)
+                        } else {
+                            (Err(e), 0.0)
+                        }
+                    }
                 };
                 let timing = decomp.get_last_timing_json().ok();
                 entries.push(DecompEntry {
@@ -379,8 +451,9 @@ fn run_parallel_decompilation<'a>(
                         "code": filtered
                     });
                     if cli.benchmark {
-                        json_entry["decomp_sec"] =
-                            serde_json::json!((entry.decomp_sec * 1_000_000.0).round() / 1_000_000.0);
+                        json_entry["decomp_sec"] = serde_json::json!(
+                            (entry.decomp_sec * 1_000_000.0).round() / 1_000_000.0
+                        );
                         json_entry["postprocess_sec"] = serde_json::json!(
                             (entry.postprocess_sec * 1_000_000.0).round() / 1_000_000.0
                         );
@@ -436,7 +509,12 @@ fn run_parallel_decompilation<'a>(
         }
     }
 
-    (all_output, json_results, total_decomp_secs, total_postprocess_secs)
+    (
+        all_output,
+        json_results,
+        total_decomp_secs,
+        total_postprocess_secs,
+    )
 }
 
 fn collect_target_functions<'a>(
@@ -557,12 +635,7 @@ pub(super) fn run_decompilation(
     // Some loaders may expose multiple aliases for a single address
     // (e.g., sub_xxx + exported symbol), which can trigger duplicate
     // decompile attempts and noisy recursive-guard errors.
-    let functions = collect_target_functions(
-        binary,
-        cli.address,
-        cli.decomp_all,
-        cli.decomp_limit,
-    );
+    let functions = collect_target_functions(binary, cli.address, cli.decomp_all, cli.decomp_limit);
 
     if functions.is_empty() && cli.address.is_some() {
         // Use if-let for safer unwrapping
@@ -602,6 +675,7 @@ pub(super) fn run_decompilation(
             cli,
             &mut decomp,
             binary,
+            binary_data,
             &functions,
             effective_no_header,
             effective_no_warnings,

@@ -1,7 +1,7 @@
 #[cfg(feature = "native_decomp")]
 use crate::analysis::decomp::DecompilerNative;
 #[cfg(feature = "native_decomp")]
-use fission_core::{Result, PATHS};
+use fission_core::{PATHS, Result};
 #[cfg(feature = "native_decomp")]
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 #[cfg(feature = "native_decomp")]
@@ -10,9 +10,9 @@ use fission_signatures::WIN_API_DB;
 #[cfg(feature = "native_decomp")]
 use std::collections::BTreeMap;
 #[cfg(feature = "native_decomp")]
-use std::sync::Arc;
-#[cfg(feature = "native_decomp")]
 use std::collections::HashSet;
+#[cfg(feature = "native_decomp")]
+use std::sync::Arc;
 #[cfg(feature = "native_decomp")]
 use std::time::Instant;
 
@@ -118,11 +118,7 @@ fn prefer_function_name(candidate: &str, current: &str) -> bool {
 }
 
 #[cfg(feature = "native_decomp")]
-fn register_memory_sections(
-    decomp: &mut DecompilerNative,
-    binary: &LoadedBinary,
-    verbose: bool,
-) {
+fn register_memory_sections(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
     if verbose {
         eprintln!(
             "[*] Registering {} memory sections...",
@@ -148,11 +144,7 @@ fn register_memory_sections(
 }
 
 #[cfg(feature = "native_decomp")]
-fn register_known_functions(
-    decomp: &mut DecompilerNative,
-    binary: &LoadedBinary,
-    verbose: bool,
-) {
+fn register_known_functions(decomp: &mut DecompilerNative, binary: &LoadedBinary, verbose: bool) {
     if verbose {
         eprintln!(
             "[*] Registering {} known functions...",
@@ -220,7 +212,8 @@ fn register_inferred_types_and_params(
             if !known_structs.contains(&struct_name) {
                 continue;
             }
-            if let Err(e) = decomp.apply_struct_to_param(*func_addr, param_index as i32, &struct_name)
+            if let Err(e) =
+                decomp.apply_struct_to_param(*func_addr, param_index as i32, &struct_name)
                 && verbose
             {
                 eprintln!(
@@ -240,11 +233,8 @@ fn load_fid_databases(
     verbose: bool,
 ) -> Result<()> {
     let mut fid_loaded_count = 0;
-    let fid_paths = PATHS.get_preferred_fid_paths(
-        binary.is_64bit,
-        Some(&binary.format),
-        compiler_id,
-    );
+    let fid_paths =
+        PATHS.get_preferred_fid_paths(binary.is_64bit, Some(&binary.format), compiler_id);
     if verbose {
         eprintln!(
             "[*] Selected {} FID database(s) for compiler_id={}",
@@ -300,9 +290,7 @@ pub fn prepare_native_decompiler_for_binary<'a>(
         .is_none()
         .then(|| serde_json::to_string(&WIN_API_DB.iter().collect::<Vec<_>>()).ok())
         .and_then(|o| o);
-    let json_ref: Option<&str> = options
-        .signatures_json
-        .or_else(|| json_owned.as_deref());
+    let json_ref: Option<&str> = options.signatures_json.or_else(|| json_owned.as_deref());
     if let Some(json) = json_ref {
         if let Err(e) = decomp.set_signatures_json(json) {
             if options.verbose {
@@ -382,4 +370,3 @@ pub fn prepare_native_decompiler_for_binary<'a>(
 
     Ok(())
 }
-

@@ -103,7 +103,10 @@ fn build_libdecomp() {
     }
 
     // ASAN (AddressSanitizer) for SIGSEGV debugging
-    if std::env::var("FISSION_ASAN").map(|v| v == "1" || v == "true").unwrap_or(false) {
+    if std::env::var("FISSION_ASAN")
+        .map(|v| v == "1" || v == "true")
+        .unwrap_or(false)
+    {
         #[cfg(not(target_os = "windows"))]
         {
             let asan_flags = "-fsanitize=address -fno-omit-frame-pointer -g";

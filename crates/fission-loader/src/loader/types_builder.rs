@@ -1,6 +1,4 @@
-use super::{
-    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, LoadedBinaryInner, SectionInfo,
-};
+use super::{FunctionInfo, LoadedBinary, LoadedBinaryBuilder, LoadedBinaryInner, SectionInfo};
 use crate::loader::strings::scan_ascii_strings_from_sections;
 use crate::prelude::*;
 use std::sync::Arc;

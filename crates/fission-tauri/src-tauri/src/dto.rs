@@ -191,8 +191,7 @@ impl Default for AppSettings {
 /// Comprehensive decompiler options mirroring Ghidra's DecompileOptions.
 ///
 /// Divided into four categories: Analysis, Post-Processing, Display, Performance.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DecompilerOptions {
     pub analysis: AnalysisOptions,
     pub cpp_postprocess: CppPostProcessOptions,
@@ -200,7 +199,6 @@ pub struct DecompilerOptions {
     pub display: DisplayOptions,
     pub performance: PerformanceOptions,
 }
-
 
 /// Ghidra engine analysis options (controlled via FFI set_feature).
 #[derive(Debug, Clone, Serialize, Deserialize)]

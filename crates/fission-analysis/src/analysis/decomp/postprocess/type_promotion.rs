@@ -1,6 +1,6 @@
 use super::PostProcessor;
-use fission_signatures::win_types::WindowsStructures;
 use fission_signatures::WIN_API_DB;
+use fission_signatures::win_types::WindowsStructures;
 use regex::{Captures, Regex};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -323,9 +323,10 @@ pub(super) fn lookup_promoted_struct_param(
             continue;
         }
         let decl_re = promoted_param_decl_re(pointer_type);
-        if !decl_re.captures_iter(code).any(|caps| {
-            caps.get(1).map(|m| m.as_str()) == Some(param_name)
-        }) {
+        if !decl_re
+            .captures_iter(code)
+            .any(|caps| caps.get(1).map(|m| m.as_str()) == Some(param_name))
+        {
             continue;
         }
         return Some(PromotedStructParam {

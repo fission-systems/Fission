@@ -556,7 +556,9 @@ impl PcodeFunction {
                 }
                 let seq_num = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
                 pos += 4;
-                let opcode = PcodeOpcode::from_flat_u32(u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()));
+                let opcode = PcodeOpcode::from_flat_u32(u32::from_le_bytes(
+                    bytes[pos..pos + 4].try_into().unwrap(),
+                ));
                 pos += 4;
                 let address = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
                 pos += 8;
@@ -577,7 +579,8 @@ impl PcodeFunction {
                 if pos + 4 > bytes.len() {
                     return Err(FlatFormatError::Truncated);
                 }
-                let num_inputs = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                let num_inputs =
+                    u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
                 pos += 4;
 
                 let mut inputs = Vec::with_capacity(num_inputs);
@@ -768,7 +771,10 @@ mod tests {
         };
         let flat = func.to_flat_bytes();
         let restored = PcodeFunction::from_flat_bytes(&flat).expect("flat parse");
-        assert_eq!(func, restored, "Flat round-trip must preserve PcodeFunction");
+        assert_eq!(
+            func, restored,
+            "Flat round-trip must preserve PcodeFunction"
+        );
     }
 
     /// Phase C regression: JSON and Flat paths must produce equivalent PcodeFunction.

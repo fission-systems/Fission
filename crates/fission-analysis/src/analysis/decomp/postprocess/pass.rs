@@ -164,10 +164,7 @@ impl PassContext {
     }
 
     /// Set string map for pointer inlining
-    pub fn with_string_map(
-        mut self,
-        map: Option<std::collections::HashMap<u64, String>>,
-    ) -> Self {
+    pub fn with_string_map(mut self, map: Option<std::collections::HashMap<u64, String>>) -> Self {
         self.string_map = map;
         self
     }

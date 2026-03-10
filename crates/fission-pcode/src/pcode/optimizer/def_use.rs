@@ -394,8 +394,7 @@ impl DefUseTracker {
                                     if self.add_consume(
                                         &op.inputs[0],
                                         safe_shr_u64(input_consume_req, shift_amt),
-                                    )
-                                    {
+                                    ) {
                                         changed = true;
                                     }
                                 } else {
@@ -420,8 +419,7 @@ impl DefUseTracker {
                                     if self.add_consume(
                                         &op.inputs[0],
                                         safe_shl_u64(input_consume_req, shift_amt),
-                                    )
-                                    {
+                                    ) {
                                         changed = true;
                                     }
                                 } else {

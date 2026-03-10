@@ -64,18 +64,20 @@ pub(super) fn detect_compiler_id(binary: &LoadedBinary) -> Option<String> {
     binary.get_ghidra_compiler_id().or_else(|| {
         let detection = fission_loader::detect(binary);
         let is_pe = binary.format.to_ascii_uppercase().starts_with("PE");
-        detection.compiler().map(|d| match d.name.to_lowercase().as_str() {
-            "microsoft visual c++" | "msvc" => "windows".to_string(),
-            "gcc" | "mingw" => {
-                if is_pe {
-                    "windows".to_string()
-                } else {
-                    "gcc".to_string()
+        detection
+            .compiler()
+            .map(|d| match d.name.to_lowercase().as_str() {
+                "microsoft visual c++" | "msvc" => "windows".to_string(),
+                "gcc" | "mingw" => {
+                    if is_pe {
+                        "windows".to_string()
+                    } else {
+                        "gcc".to_string()
+                    }
                 }
-            }
-            "clang" => "clang".to_string(),
-            _ => "default".to_string(),
-        })
+                "clang" => "clang".to_string(),
+                _ => "default".to_string(),
+            })
     })
 }
 

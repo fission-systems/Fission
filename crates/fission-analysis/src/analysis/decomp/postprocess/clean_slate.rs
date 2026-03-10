@@ -30,8 +30,7 @@ fn local_decl_re(local_name: &str, size: usize) -> Regex {
 }
 
 fn local_index_re(local_name: &str) -> Regex {
-    Regex::new(&format!(r"\b{}\s*\[", regex::escape(local_name)))
-        .expect("valid local index regex")
+    Regex::new(&format!(r"\b{}\s*\[", regex::escape(local_name))).expect("valid local index regex")
 }
 
 impl PostProcessor {
@@ -59,7 +58,10 @@ impl PostProcessor {
             }
 
             rewritten = local_decl_re(local_name, size)
-                .replace_all(&rewritten, format!("{} {};", promoted.struct_name, local_name))
+                .replace_all(
+                    &rewritten,
+                    format!("{} {};", promoted.struct_name, local_name),
+                )
                 .into_owned();
 
             rewritten = rewritten.replace(

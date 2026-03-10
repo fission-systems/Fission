@@ -57,7 +57,7 @@ fn rewrite_piece_access(var: &str, offset: u32, size: u32) -> Option<String> {
     }
 
     let ptr = if offset == 0 {
-        format!("(uint8_t *)&{var}")
+        format!("&{var}")
     } else {
         format!("((uint8_t *)&{var} + {offset})")
     };

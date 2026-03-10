@@ -115,10 +115,7 @@ impl PostProcessPass for ReplaceStringPointersPass {
     }
 
     fn should_run(&self, context: &super::pass::PassContext) -> bool {
-        context
-            .string_map
-            .as_ref()
-            .map_or(false, |m| !m.is_empty())
+        context.string_map.as_ref().map_or(false, |m| !m.is_empty())
     }
 }
 

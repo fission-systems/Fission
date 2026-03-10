@@ -5,21 +5,21 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
-static GOTO_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*goto\s+([A-Za-z_]\w*)\s*;\s*$").expect("valid goto regex")
-});
+static GOTO_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*goto\s+([A-Za-z_]\w*)\s*;\s*$").expect("valid goto regex"));
 
 static IF_GOTO_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(\s*)if\s*\((.+)\)\s*goto\s+([A-Za-z_]\w*)\s*;\s*$")
-        .expect("valid if-goto regex")
+    Regex::new(r"^(\s*)if\s*\((.+)\)\s*goto\s+([A-Za-z_]\w*)\s*;\s*$").expect("valid if-goto regex")
 });
 
-static LABEL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*([A-Za-z_]\w*)\s*:\s*$").expect("valid label regex")
-});
+static LABEL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*([A-Za-z_]\w*)\s*:\s*$").expect("valid label regex"));
 
 fn parse_goto(line: &str) -> Option<&str> {
-    GOTO_RE.captures(line).and_then(|caps| caps.get(1)).map(|m| m.as_str())
+    GOTO_RE
+        .captures(line)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str())
 }
 
 fn parse_if_goto(line: &str) -> Option<(&str, &str, &str)> {
@@ -76,7 +76,8 @@ fn count_label_references(lines: &[String]) -> HashMap<String, usize> {
 }
 
 fn label_positions(lines: &[String]) -> HashMap<String, usize> {
-    lines.iter()
+    lines
+        .iter()
         .enumerate()
         .filter_map(|(idx, line)| parse_label(line).map(|label| (label.to_string(), idx)))
         .collect()
@@ -155,7 +156,8 @@ fn thread_chained_gotos(lines: &[String]) -> Vec<String> {
         Some(current)
     }
 
-    lines.iter()
+    lines
+        .iter()
         .map(|line| {
             if let Some(target) = parse_goto(line)
                 && let Some(final_target) = resolve_target(target, &redirects)
@@ -317,7 +319,8 @@ fn merge_adjacent_if_goto_chains(lines: &[String]) -> Vec<String> {
         let mut merged = false;
 
         while next_idx < lines.len() {
-            let Some((next_indent, next_cond, next_target)) = parse_if_goto(&lines[next_idx]) else {
+            let Some((next_indent, next_cond, next_target)) = parse_if_goto(&lines[next_idx])
+            else {
                 break;
             };
             if next_indent != indent || next_target != target {
@@ -360,7 +363,9 @@ fn sink_label_prefixes(lines: &[String]) -> Vec<String> {
             .collect();
         if body.is_empty()
             || body.len() > 2
-            || !body.iter().all(|line| is_simple_statement(line) && !is_terminal_statement(line))
+            || !body
+                .iter()
+                .all(|line| is_simple_statement(line) && !is_terminal_statement(line))
         {
             continue;
         }
@@ -549,7 +554,8 @@ fn inline_terminal_label_blocks(lines: &[String]) -> Vec<String> {
 
 fn remove_dead_labels(lines: &[String]) -> Vec<String> {
     let refs = count_label_references(lines);
-    lines.iter()
+    lines
+        .iter()
         .filter(|line| {
             parse_label(line)
                 .map(|label| refs.get(label).copied().unwrap_or(0) > 0)
@@ -569,11 +575,13 @@ impl PostProcessor {
 
         for _ in 0..3 {
             let lines: Vec<String> = current.lines().map(str::to_string).collect();
-            let next = remove_dead_labels(&inline_single_use_labels(&inline_terminal_label_blocks(
-                &sink_label_prefixes(&merge_adjacent_if_goto_chains(&fold_guarded_if_gotos(
-                    &fold_if_else_gotos(&thread_chained_gotos(&remove_self_fallthrough_gotos(&lines))),
-                ))),
-            )))
+            let next = remove_dead_labels(&inline_single_use_labels(
+                &inline_terminal_label_blocks(&sink_label_prefixes(
+                    &merge_adjacent_if_goto_chains(&fold_guarded_if_gotos(&fold_if_else_gotos(
+                        &thread_chained_gotos(&remove_self_fallthrough_gotos(&lines)),
+                    ))),
+                )),
+            ))
             .join("\n");
             if next == current {
                 break;

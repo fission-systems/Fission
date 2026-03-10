@@ -34,7 +34,9 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     // Initialize decompiler if native_decomp feature is enabled
     #[cfg(feature = "native_decomp")]
     {
-        use fission_analysis::analysis::decomp::{prepare_native_decompiler_for_binary, PrepareOptions};
+        use fission_analysis::analysis::decomp::{
+            prepare_native_decompiler_for_binary, PrepareOptions,
+        };
 
         let sla_dir = find_sla_dir();
         match fission_analysis::analysis::decomp::CachingDecompiler::new(&binary_arc, &sla_dir, 200)

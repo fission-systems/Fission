@@ -120,13 +120,13 @@ def sample_functions(functions: list[tuple[str, str]], limit: int) -> list[tuple
     return functions[:limit]
 
 
-def load_struct_pointer_aliases() -> set[str]:
+def load_struct_pointer_aliases() -> dict[str, str]:
     items = json.loads(BASE_TYPES_JSON.read_text())
-    aliases = set()
+    aliases: dict[str, str] = {}
     for item in items:
         name = item.get("name", "")
         if item.get("is_pointer") and name.startswith("LP") and len(name) > 2:
-            aliases.add(name)
+            aliases[name] = name[2:]
     return aliases
 
 
@@ -134,7 +134,55 @@ def count_regex(pattern: str, text: str) -> int:
     return len(re.findall(pattern, text, flags=re.MULTILINE))
 
 
-def collect_code_metrics(code: str, struct_ptr_aliases: set[str]) -> dict[str, Any]:
+def detect_embedded_failure(code: str) -> tuple[str, str] | None:
+    stripped = code.lstrip()
+    if stripped.startswith("// Decompilation failed:"):
+        first = stripped.splitlines()[0].replace("// Decompilation failed:", "").strip()
+        return classify_failure_kind(first), first
+    if stripped.startswith("// Error:"):
+        first = stripped.splitlines()[0].replace("// Error:", "").strip()
+        return classify_failure_kind(first), first
+    return None
+
+
+def classify_failure_kind(message: str | None) -> str:
+    if not message:
+        return "other"
+    lower = message.lower()
+    if "timeout" in lower:
+        return "timeout"
+    if "out of memory" in lower or "oom" in lower:
+        return "oom"
+    if "control flow" in lower or "followflow" in lower:
+        return "control_flow"
+    if "ptrsub" in lower or "printer" in lower or "print" in lower:
+        return "printer"
+    if (
+        "duplicate variablepiece" in lower
+        or "high-level" in lower
+        or "structure" in lower
+        or "type" in lower
+        or "union" in lower
+    ):
+        return "type"
+    return "other"
+
+
+def collect_type_preservation_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[str, int]:
+    hits: Counter[str] = Counter()
+    signature = code.split("{", 1)[0]
+    for alias, struct_name in struct_ptr_aliases.items():
+        patterns = [
+            rf"\b{re.escape(alias)}\b",
+            rf"\b{re.escape(struct_name)}\s*\*",
+            rf"\bstruct\s+{re.escape(struct_name)}\s*\*",
+        ]
+        if any(re.search(pattern, signature) for pattern in patterns):
+            hits[alias] = 1
+    return dict(hits)
+
+
+def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[str, Any]:
     metrics = {
         "goto_count": count_regex(r"\bgoto\s+[A-Za-z_]\w*\s*;", code),
         "switch_count": count_regex(r"\bswitch\s*\(", code),
@@ -149,6 +197,7 @@ def collect_code_metrics(code: str, struct_ptr_aliases: set[str]) -> dict[str, A
         if count:
             type_hits[alias] = count
     metrics["type_hits"] = dict(type_hits)
+    metrics["type_preservation_hits"] = collect_type_preservation_metrics(code, struct_ptr_aliases)
 
     residue_patterns = {
         "uVar": r"\buVar\d+\b",
@@ -158,10 +207,23 @@ def collect_code_metrics(code: str, struct_ptr_aliases: set[str]) -> dict[str, A
         "uStack": r"\buStack_[0-9a-fA-F]+\b",
         "xStack": r"\bxStack_[0-9a-fA-F]+\b",
         "axStack": r"\baxStack_[0-9a-fA-F]+\b",
+        "raw_pointer_fallback": r"\(\((?:uint8_t|byte|uint1)\s*\*\)[^)]+\+\s*[^)]+\)",
+        "assembly_fallback": r"^// Assembly fallback:",
+        "redundant_return_temp": r"^\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*[^;]+;\s*\n\s*return\s+[A-Za-z_][A-Za-z0-9_]*;\s*$",
     }
     metrics["residue_families"] = {
         family: count_regex(pattern, code) for family, pattern in residue_patterns.items()
     }
+
+    metrics["fallback_counts"] = {
+        "raw_pointer_fallback": metrics["residue_families"]["raw_pointer_fallback"],
+        "assembly_fallback": metrics["residue_families"]["assembly_fallback"],
+    }
+
+    metrics["cast_chain_count"] = count_regex(
+        r"\([A-Za-z_][A-Za-z0-9_\s\*]+\)\s*\([A-Za-z_][A-Za-z0-9_\s\*]+\)",
+        code,
+    )
 
     residue_names = re.findall(
         r"\b(?:[uibax]Var\d+|(?:u|x|ax)Stack_[0-9a-fA-F]+)\b",
@@ -178,12 +240,61 @@ def collect_code_metrics(code: str, struct_ptr_aliases: set[str]) -> dict[str, A
     return metrics
 
 
+def compute_residue_score(entry: dict[str, Any]) -> int:
+    metrics = entry.get("metrics", {})
+    families = metrics.get("residue_families", {})
+    score = 0
+    for key in ("uVar", "iVar", "xVar", "bVar", "uStack", "xStack", "axStack"):
+        score += int(families.get(key, 0))
+    score += int(families.get("raw_pointer_fallback", 0)) * 2
+    score += int(families.get("redundant_return_temp", 0)) * 2
+    score += sum(int(v) for v in metrics.get("single_assign_temps", {}).values())
+    return score
+
+
+def collect_top_residue_offenders(
+    entries: dict[str, dict[str, Any]],
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    offenders: list[dict[str, Any]] = []
+    for entry in entries.values():
+        if not entry.get("success"):
+            continue
+        metrics = entry.get("metrics", {})
+        residue_names = metrics.get("residue_names", {})
+        single_assign = metrics.get("single_assign_temps", {})
+        raw_pointer_fallback = int(metrics.get("fallback_counts", {}).get("raw_pointer_fallback", 0))
+        residue_score = compute_residue_score(entry)
+        if residue_score <= 0 and raw_pointer_fallback <= 0:
+            continue
+        offenders.append(
+            {
+                "address": entry.get("address", ""),
+                "name": entry.get("name", ""),
+                "residue_score": residue_score,
+                "raw_pointer_fallback": raw_pointer_fallback,
+                "single_assign_temp_total": sum(int(v) for v in single_assign.values()),
+                "top_residue_names": dict(Counter(residue_names).most_common(5)),
+            }
+        )
+
+    offenders.sort(
+        key=lambda item: (
+            -int(item["residue_score"]),
+            -int(item["raw_pointer_fallback"]),
+            -int(item["single_assign_temp_total"]),
+            item["address"],
+        )
+    )
+    return offenders[:limit]
+
+
 def run_fission_function(
     binary_path: Path,
     address: str,
     fission_bin: Path,
     timeout_sec: int,
-    struct_ptr_aliases: set[str],
+    struct_ptr_aliases: dict[str, str],
 ) -> dict[str, Any]:
     cmd = [
         str(fission_bin),
@@ -200,7 +311,8 @@ def run_fission_function(
     if payload is None:
         return {
             "success": False,
-            "failure_kind": error,
+            "failure_kind": classify_failure_kind(error),
+            "failure_detail": error,
             "wall_sec": round(wall_sec, 6),
         }
 
@@ -215,6 +327,11 @@ def run_fission_function(
         "wall_sec": round(wall_sec, 6),
         "code": code,
     }
+    if failure := detect_embedded_failure(code):
+        entry["success"] = False
+        entry["failure_kind"] = failure[0]
+        entry["failure_detail"] = failure[1]
+        return entry
     entry["metrics"] = collect_code_metrics(code, struct_ptr_aliases)
     return entry
 
@@ -224,7 +341,7 @@ def run_ghidra_binary(
     functions: list[tuple[str, str]],
     ghidra_dir: Path,
     timeout_sec: int,
-    struct_ptr_aliases: set[str],
+    struct_ptr_aliases: dict[str, str],
 ) -> tuple[float, dict[str, dict[str, Any]]]:
     os.environ["GHIDRA_INSTALL_DIR"] = str(ghidra_dir)
     import pyghidra
@@ -275,9 +392,10 @@ def run_ghidra_binary(
                         entry["code"] = code
                         entry["metrics"] = collect_code_metrics(code, struct_ptr_aliases)
                     else:
-                        entry["failure_kind"] = "decompile_incomplete"
+                        entry["failure_kind"] = "other"
+                        entry["failure_detail"] = "decompile_incomplete"
             except Exception as exc:  # noqa: BLE001
-                entry["failure_kind"] = exc.__class__.__name__
+                entry["failure_kind"] = classify_failure_kind(str(exc))
                 entry["error"] = str(exc)
             entry["decomp_sec"] = round(time.perf_counter() - start, 6)
             results[normalize_address(addr_str)] = entry
@@ -316,6 +434,14 @@ def summarize_binary(
             total.update(entry["metrics"].get("type_hits", {}))
         return total
 
+    def aggregate_type_preservation(entries: dict[str, dict[str, Any]]) -> Counter[str]:
+        total: Counter[str] = Counter()
+        for entry in entries.values():
+            if not entry.get("success"):
+                continue
+            total.update(entry["metrics"].get("type_preservation_hits", {}))
+        return total
+
     def aggregate_residues(entries: dict[str, dict[str, Any]], key: str) -> Counter[str]:
         total: Counter[str] = Counter()
         for entry in entries.values():
@@ -324,8 +450,17 @@ def summarize_binary(
             total.update(entry["metrics"].get(key, {}))
         return total
 
+    def aggregate_fallbacks(entries: dict[str, dict[str, Any]]) -> Counter[str]:
+        total: Counter[str] = Counter()
+        for entry in entries.values():
+            if not entry.get("success"):
+                continue
+            total.update(entry["metrics"].get("fallback_counts", {}))
+        return total
+
     fission_successes = sum(1 for entry in fission_entries.values() if entry.get("success"))
     ghidra_successes = sum(1 for entry in ghidra_entries.values() if entry.get("success"))
+    top_residue_offenders = collect_top_residue_offenders(fission_entries)
 
     return {
         "binary": binary_name,
@@ -350,6 +485,26 @@ def summarize_binary(
             "fission_hits": dict(aggregate_type_hits(fission_entries).most_common()),
             "ghidra_hits": dict(aggregate_type_hits(ghidra_entries).most_common()),
         },
+        "type_preservation_counts": {
+            "fission": dict(aggregate_type_preservation(fission_entries).most_common()),
+            "ghidra": dict(aggregate_type_preservation(ghidra_entries).most_common()),
+        },
+        "fallback_counts": {
+            "fission": dict(aggregate_fallbacks(fission_entries).most_common()),
+            "ghidra": dict(aggregate_fallbacks(ghidra_entries).most_common()),
+        },
+        "cast_chain_counts": {
+            "fission": sum(
+                int(entry.get("metrics", {}).get("cast_chain_count", 0))
+                for entry in fission_entries.values()
+                if entry.get("success")
+            ),
+            "ghidra": sum(
+                int(entry.get("metrics", {}).get("cast_chain_count", 0))
+                for entry in ghidra_entries.values()
+                if entry.get("success")
+            ),
+        },
         "residue_rankings": {
             "single_assign_temps": dict(
                 aggregate_residues(fission_entries, "single_assign_temps").most_common(20)
@@ -361,17 +516,18 @@ def summarize_binary(
                 aggregate_residues(fission_entries, "residue_families").most_common()
             ),
         },
-        "failures": {
+        "top_residue_offenders": top_residue_offenders,
+        "failure_class_counts": {
             "fission": dict(
                 Counter(
-                    entry.get("failure_kind", "success")
+                    classify_failure_kind(entry.get("failure_kind") or entry.get("failure_detail"))
                     for entry in fission_entries.values()
                     if not entry.get("success")
                 )
             ),
             "ghidra": dict(
                 Counter(
-                    entry.get("failure_kind", "success")
+                    classify_failure_kind(entry.get("failure_kind") or entry.get("error"))
                     for entry in ghidra_entries.values()
                     if not entry.get("success")
                 )
@@ -408,6 +564,11 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Fission switches / Ghidra switches: {report['global']['control_flow']['fission_switches']} / {report['global']['control_flow']['ghidra_switches']}",
         f"- Fission for-loops / Ghidra for-loops: {report['global']['control_flow']['fission_for_loops']} / {report['global']['control_flow']['ghidra_for_loops']}",
         f"- Fission do-while / Ghidra do-while: {report['global']['control_flow']['fission_do_while']} / {report['global']['control_flow']['ghidra_do_while']}",
+        f"- Failure classes (Fission): {report['global']['failure_class_counts']['fission']}",
+        f"- Failure classes (Ghidra): {report['global']['failure_class_counts']['ghidra']}",
+        f"- Type preservation hits (Fission): {report['global']['type_preservation_counts']['fission']}",
+        f"- Raw pointer / assembly fallbacks (Fission): {report['global']['fallback_counts']['fission']}",
+        f"- Cast chains (Fission/Ghidra): {report['global']['cast_chain_counts']['fission']} / {report['global']['cast_chain_counts']['ghidra']}",
         "",
         "## Residue Intel",
         "",
@@ -426,6 +587,19 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 lines.append(f"- `{name}`: {count}")
         lines.append("")
 
+    lines.append("### Top Offenders")
+    if not report["global"]["top_residue_offenders"]:
+        lines.append("- none")
+    else:
+        for offender in report["global"]["top_residue_offenders"]:
+            lines.append(
+                f"- `{offender['binary']}` `{offender['address']}` `{offender['name']}`: "
+                f"score={offender['residue_score']}, raw_pointer_fallback={offender['raw_pointer_fallback']}, "
+                f"single_assign_temps={offender['single_assign_temp_total']}, "
+                f"top_names={offender['top_residue_names']}"
+            )
+    lines.append("")
+
     lines.append("## Per-Binary Summary")
     lines.append("")
     for binary in report["binaries"]:
@@ -441,6 +615,27 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
             f"- Struct pointer hits: Fission {sum(binary['type_promotion']['fission_hits'].values())}, "
             f"Ghidra {sum(binary['type_promotion']['ghidra_hits'].values())}"
         )
+        lines.append(
+            f"- Type preservation: Fission {binary['type_preservation_counts']['fission']}, "
+            f"Ghidra {binary['type_preservation_counts']['ghidra']}"
+        )
+        lines.append(
+            f"- Failure classes: Fission {binary['failure_class_counts']['fission']} | "
+            f"Ghidra {binary['failure_class_counts']['ghidra']}"
+        )
+        lines.append(
+            f"- Cast chains: Fission {binary['cast_chain_counts']['fission']} | "
+            f"Ghidra {binary['cast_chain_counts']['ghidra']}"
+        )
+        if binary["top_residue_offenders"]:
+            lines.append("- Top residue offenders:")
+            for offender in binary["top_residue_offenders"]:
+                lines.append(
+                    f"  - `{offender['address']}` `{offender['name']}`: "
+                    f"score={offender['residue_score']}, raw_pointer_fallback={offender['raw_pointer_fallback']}, "
+                    f"single_assign_temps={offender['single_assign_temp_total']}, "
+                    f"top_names={offender['top_residue_names']}"
+                )
         lines.append("")
 
     output_path.write_text("\n".join(lines))
@@ -452,11 +647,28 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         "fission_success_count": 0,
         "ghidra_success_count": 0,
         "control_flow": Counter(),
+        "failure_class_counts": {
+            "fission": Counter(),
+            "ghidra": Counter(),
+        },
+        "type_preservation_counts": {
+            "fission": Counter(),
+            "ghidra": Counter(),
+        },
+        "fallback_counts": {
+            "fission": Counter(),
+            "ghidra": Counter(),
+        },
+        "cast_chain_counts": {
+            "fission": 0,
+            "ghidra": 0,
+        },
         "residue_rankings": {
             "single_assign_temps": Counter(),
             "residue_names": Counter(),
             "residue_families": Counter(),
         },
+        "top_residue_offenders": [],
     }
 
     for report in binary_reports:
@@ -464,8 +676,23 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         global_report["fission_success_count"] += report["fission_success_count"]
         global_report["ghidra_success_count"] += report["ghidra_success_count"]
         global_report["control_flow"].update(report["control_flow"])
+        global_report["failure_class_counts"]["fission"].update(report["failure_class_counts"]["fission"])
+        global_report["failure_class_counts"]["ghidra"].update(report["failure_class_counts"]["ghidra"])
+        global_report["type_preservation_counts"]["fission"].update(report["type_preservation_counts"]["fission"])
+        global_report["type_preservation_counts"]["ghidra"].update(report["type_preservation_counts"]["ghidra"])
+        global_report["fallback_counts"]["fission"].update(report["fallback_counts"]["fission"])
+        global_report["fallback_counts"]["ghidra"].update(report["fallback_counts"]["ghidra"])
+        global_report["cast_chain_counts"]["fission"] += report["cast_chain_counts"]["fission"]
+        global_report["cast_chain_counts"]["ghidra"] += report["cast_chain_counts"]["ghidra"]
         for key in global_report["residue_rankings"]:
             global_report["residue_rankings"][key].update(report["residue_rankings"][key])
+        for offender in report.get("top_residue_offenders", []):
+            global_report["top_residue_offenders"].append(
+                {
+                    "binary": report["binary"],
+                    **offender,
+                }
+            )
 
     ghidra_gotos = global_report["control_flow"]["ghidra_gotos"]
     fission_gotos = global_report["control_flow"]["fission_gotos"]
@@ -476,6 +703,28 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         global_report["residue_rankings"][key] = dict(
             global_report["residue_rankings"][key].most_common(20)
         )
+    global_report["top_residue_offenders"] = sorted(
+        global_report["top_residue_offenders"],
+        key=lambda item: (
+            -int(item["residue_score"]),
+            -int(item["raw_pointer_fallback"]),
+            -int(item["single_assign_temp_total"]),
+            item["binary"],
+            item["address"],
+        ),
+    )[:10]
+    global_report["failure_class_counts"] = {
+        side: dict(counter)
+        for side, counter in global_report["failure_class_counts"].items()
+    }
+    global_report["type_preservation_counts"] = {
+        side: dict(counter)
+        for side, counter in global_report["type_preservation_counts"].items()
+    }
+    global_report["fallback_counts"] = {
+        side: dict(counter)
+        for side, counter in global_report["fallback_counts"].items()
+    }
     global_report["control_flow"] = dict(global_report["control_flow"])
     return global_report
 

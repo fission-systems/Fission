@@ -228,9 +228,8 @@ impl DecompilerNative {
     /// Call before or after load_binary.
     pub fn set_signatures_json(&mut self, json: &str) -> Result<()> {
         self.check_valid()?;
-        let c_json = CString::new(json).map_err(|_| {
-            FissionError::decompiler("JSON string contains embedded null byte")
-        })?;
+        let c_json = CString::new(json)
+            .map_err(|_| FissionError::decompiler("JSON string contains embedded null byte"))?;
         let ret = unsafe { decomp_set_signatures_json(self.ctx, c_json.as_ptr()) };
         if ret == 0 {
             Ok(())
@@ -592,14 +591,11 @@ impl DecompilerNative {
             s
         };
 
-        let parsed: DecompilationResultJson = serde_json::from_str(&json_str)
-            .map_err(|e| FissionError::decompiler(format!("Failed to parse decompilation JSON: {}", e)))?;
+        let parsed: DecompilationResultJson = serde_json::from_str(&json_str).map_err(|e| {
+            FissionError::decompiler(format!("Failed to parse decompilation JSON: {}", e))
+        })?;
 
-        let inferred_types: Vec<_> = parsed
-            .inferred_types
-            .into_iter()
-            .map(Into::into)
-            .collect();
+        let inferred_types: Vec<_> = parsed.inferred_types.into_iter().map(Into::into).collect();
 
         Ok(DecompilationResult {
             code: parsed.code,
