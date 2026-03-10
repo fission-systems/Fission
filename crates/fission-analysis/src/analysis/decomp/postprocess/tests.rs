@@ -132,6 +132,64 @@ fn test_promote_rect_param_for_get_client_rect() {
 }
 
 #[test]
+fn test_promote_struct_param_for_wsa_startup() {
+    let input = r#"int FUN_0x180001000(uint8_t (*param_1) [408])
+{
+  if (flag) {
+    return WSAStartup(0x202,param_1);
+  }
+  *param_1 = CONCAT0408(0,local_198);
+  return 0;
+}"#;
+
+    let output = PostProcessor::promote_rect_params(input);
+    assert!(
+        output.contains("LPWSADATA param_1"),
+        "must promote param declaration from signature DB: {}",
+        output
+    );
+    assert!(
+        output.contains("WSAStartup(0x202,param_1)"),
+        "must preserve dynamic API trigger: {}",
+        output
+    );
+    assert!(
+        output.contains("*(uint8_t (*)[408])param_1 = CONCAT0408(0,local_198);"),
+        "must preserve whole-object write via sized cast: {}",
+        output
+    );
+}
+
+#[test]
+fn test_promote_struct_param_for_get_message_w() {
+    let input = r#"BOOL FUN_0x180001100(uint8_t (*param_1) [48])
+{
+  if (flag) {
+    return GetMessageW(param_1,(HWND)0x0,0,0);
+  }
+  *param_1 = CONCAT048(0,local_30);
+  return 0;
+}"#;
+
+    let output = PostProcessor::promote_rect_params(input);
+    assert!(
+        output.contains("LPMSG param_1"),
+        "must promote MSG pointer params from user32 signature DB: {}",
+        output
+    );
+    assert!(
+        output.contains("GetMessageW(param_1,(HWND)0x0,0,0)"),
+        "must preserve GetMessageW trigger: {}",
+        output
+    );
+    assert!(
+        output.contains("*(uint8_t (*)[48])param_1 = CONCAT048(0,local_30);"),
+        "must preserve sized cast for MSG writes: {}",
+        output
+    );
+}
+
+#[test]
 fn test_clean_slate_rect_whole_object_write() {
     let input = r#"ulonglong FUN_0x140006260(longlong param_1,LPRECT param_2)
 {
@@ -171,6 +229,28 @@ fn test_clean_slate_rect_whole_object_write() {
     assert!(
         output.contains("return uVar3;"),
         "must remove redundant 32-bit truncation on promoted scalar: {}",
+        output
+    );
+}
+
+#[test]
+fn test_clean_slate_wsadata_whole_object_write() {
+    let input = r#"int FUN_0x180001000(LPWSADATA param_1)
+{
+  uint8_t local_198 [408];
+  *(uint8_t (*)[408])param_1 = CONCAT0408(0,local_198);
+  return 0;
+}"#;
+
+    let output = PostProcessor::clean_ghidra_artifacts(input);
+    assert!(
+        output.contains("WSADATA local_198;"),
+        "must promote sized temp to target struct: {}",
+        output
+    );
+    assert!(
+        output.contains("*param_1 = local_198;"),
+        "must collapse whole-object write for non-RECT structs too: {}",
         output
     );
 }

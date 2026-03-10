@@ -522,15 +522,15 @@ impl PostProcessPass for ApplyDwarfNamesPass {
     }
 }
 
-/// API-driven RECT pointer promotion pass
+/// API-driven WinAPI structure pointer promotion pass
 pub struct PromoteRectParamsPass;
 
 impl PostProcessPass for PromoteRectParamsPass {
     fn metadata(&self) -> PassMetadata {
         PassMetadata {
             id: "promote_rect_params",
-            name: "Promote RECT Params",
-            description: "Promotes uint8_t[16] pointer params passed to GetClientRect into LPRECT",
+            name: "Promote WinAPI Struct Params",
+            description: "Promotes downgraded uint8_t array-pointer params into WinAPI structure pointers via signature DB",
             category: PassCategory::TypeBased,
         }
     }

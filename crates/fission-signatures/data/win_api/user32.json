@@ -138,6 +138,41 @@
     ]
   },
   {
+    "name": "GetWindowRect",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "lpRect", "type_name": "LPRECT" }
+    ]
+  },
+  {
+    "name": "GetCursorPos",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "lpPoint", "type_name": "LPPOINT" }
+    ]
+  },
+  {
+    "name": "GetMessageA",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "lpMsg", "type_name": "LPMSG" },
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "wMsgFilterMin", "type_name": "UINT" },
+      { "name": "wMsgFilterMax", "type_name": "UINT" }
+    ]
+  },
+  {
+    "name": "GetMessageW",
+    "return_type": "BOOL",
+    "params": [
+      { "name": "lpMsg", "type_name": "LPMSG" },
+      { "name": "hWnd", "type_name": "HWND" },
+      { "name": "wMsgFilterMin", "type_name": "UINT" },
+      { "name": "wMsgFilterMax", "type_name": "UINT" }
+    ]
+  },
+  {
     "name": "PostMessageA",
     "return_type": "BOOL",
     "params": [

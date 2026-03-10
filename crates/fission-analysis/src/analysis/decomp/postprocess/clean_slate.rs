@@ -1,22 +1,14 @@
 use super::PostProcessor;
+use super::type_promotion::lookup_promoted_struct_param;
 use regex::Regex;
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
-static LPRECT_PARAM_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\bLPRECT\s+(param_\d+)\b").expect("valid LPRECT param regex")
-});
-
-static RECT_WHOLE_ASSIGN_RE: LazyLock<Regex> = LazyLock::new(|| {
+static WHOLE_ASSIGN_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"\*\(uint8_t\s*\(\*\)\[16\]\)\s*(param_\d+)\s*=\s*CONCAT016\s*\(\s*0\s*,\s*(local_[A-Za-z0-9_]+)\s*\);",
+        r"\*\(uint8_t\s*\(\*\)\[(\d+)\]\)\s*(param_\d+)\s*=\s*CONCAT0?\d+\s*\(\s*0\s*,\s*(local_[A-Za-z0-9_]+)\s*\);",
     )
-    .expect("valid RECT whole-assign regex")
-});
-
-static LOCAL16_DECL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\buint8_t\s+(local_[A-Za-z0-9_]+)\s*\[\s*16\s*\]\s*;")
-        .expect("valid local 16-byte decl regex")
+    .expect("valid whole-assign regex")
 });
 
 static RETURN_MOD_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -28,10 +20,11 @@ static RETURN_MASK_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid return mask regex")
 });
 
-fn local_decl_re(local_name: &str) -> Regex {
+fn local_decl_re(local_name: &str, size: usize) -> Regex {
     Regex::new(&format!(
-        r"\buint8_t\s+{}\s*\[\s*16\s*\]\s*;",
-        regex::escape(local_name)
+        r"\buint8_t\s+{}\s*\[\s*{}\s*\]\s*;",
+        regex::escape(local_name),
+        size
     ))
     .expect("valid local decl regex")
 }
@@ -45,35 +38,33 @@ impl PostProcessor {
     pub(super) fn clean_ghidra_artifacts_cow<'a>(code: &'a str) -> Cow<'a, str> {
         let mut rewritten = code.to_string();
 
-        let lprect_params: Vec<String> = LPRECT_PARAM_RE
-            .captures_iter(code)
-            .filter_map(|caps| caps.get(1).map(|m| m.as_str().to_string()))
-            .collect();
-
-        for caps in RECT_WHOLE_ASSIGN_RE.captures_iter(code) {
-            let Some(param_name) = caps.get(1).map(|m| m.as_str()) else {
+        for caps in WHOLE_ASSIGN_RE.captures_iter(code) {
+            let Some(size) = caps.get(1).and_then(|m| m.as_str().parse::<usize>().ok()) else {
                 continue;
             };
-            let Some(local_name) = caps.get(2).map(|m| m.as_str()) else {
+            let Some(param_name) = caps.get(2).map(|m| m.as_str()) else {
                 continue;
             };
-            if !lprect_params.iter().any(|p| p == param_name) {
+            let Some(local_name) = caps.get(3).map(|m| m.as_str()) else {
                 continue;
-            }
-            if !LOCAL16_DECL_RE.is_match(&rewritten) {
+            };
+            let Some(promoted) = lookup_promoted_struct_param(&rewritten, param_name, size) else {
+                continue;
+            };
+            if !local_decl_re(local_name, size).is_match(&rewritten) {
                 continue;
             }
             if local_index_re(local_name).find_iter(&rewritten).count() > 1 {
                 continue;
             }
 
-            rewritten = local_decl_re(local_name)
-                .replace_all(&rewritten, format!("RECT {};", local_name))
+            rewritten = local_decl_re(local_name, size)
+                .replace_all(&rewritten, format!("{} {};", promoted.struct_name, local_name))
                 .into_owned();
 
             rewritten = rewritten.replace(
                 caps.get(0).map_or("", |m| m.as_str()),
-                &format!("*{} = {};", param_name, local_name),
+                &format!("*{} = {};", promoted.param_name, local_name),
             );
         }
 

@@ -20,7 +20,7 @@ interactive_runtime = [
     "dep:windows",
     "dep:nix",
 ]
-native_decomp = ["dep:fission-ffi", "dep:fission-signatures", "fission-ffi/native_decomp"]
+native_decomp = ["dep:fission-ffi", "fission-ffi/native_decomp"]
 unpacker_runtime = ["dep:windows"]
 
 [dependencies]
@@ -28,7 +28,7 @@ fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 fission-pcode = { path = "../fission-pcode" }
 fission-ffi = { path = "../fission-ffi", optional = true }
-fission-signatures = { path = "../fission-signatures", optional = true }
+fission-signatures = { path = "../fission-signatures" }
 object = "0.32"
 iced-x86 = { version = "1.21", features = ["std"] }
 bytes = "1.11"
