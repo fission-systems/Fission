@@ -4,6 +4,78 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-11
+
+### Experimental Fission MLIL/NIR 경로를 제품 경로에 통합
+
+Ghidra C 출력 후처리만으로는 IDA Pro / Binary Ninja 급의 일관된 가독성을 만들기 어렵다는 판단 아래,
+Ghidra를 `lift + CFG + baseline type recovery + hard-fail containment` 계층으로 축소하고
+그 위에 Fission 고유의 preview decompilation 경로를 올리는 작업을 시작했다.
+
+이번 변경으로 `mlil-preview`는 더 이상 CLI 전용 실험 코드가 아니라,
+CLI/Tauri 양쪽에서 선택 가능한 실제 엔진 모드가 되었다.
+
+#### Added
+
+- `legacy | mlil-preview | auto` decompilation engine mode 추가
+  - CLI: `--engine <legacy|mlil-preview|auto>`
+  - Tauri: decompiler options dialog에서 engine selector 제공
+- preview 결과 메타데이터 추가
+  - `engine_used`
+  - `fell_back`
+  - `fallback_reason`
+- decompile view 상단에 engine badge / fallback badge 추가
+
+#### Added: Fission-owned preview pipeline
+
+- `crates/fission-pcode/src/nir/` 기반 preview NIR/HIR + Rust printer 경로 추가
+- 현재 지원 범위
+  - PE x64 only
+  - stack-slot recovery
+  - straight-line lowering
+  - simple multi-block `if`, `if/else`, `while`, `do-while`
+  - 구조화 실패 시 label/goto pseudocode fallback
+  - basic `div/mod by power-of-two` idiom recognition
+
+#### Changed: preview coverage 확대를 위한 p-code extraction 경량화
+
+- `ghidra_decompiler/src/decompiler/DecompilationCore.cpp`
+  - `run_decompilation_pcode()`가 full action-group `perform()` 전에
+    `followFlow()` 기반 lightweight p-code serialization을 우선 사용
+  - preview path가 Ghidra 분석 timeout / type 예외를 p-code 추출 단계에서 먼저 밟는 문제 완화
+- `crates/fission-pcode/src/pcode/types.rs`
+  - wrapped negative constant (`u64` 형태의 sign-extended constant)를
+    `i64`로 복구하도록 JSON parser 보강
+  - preview path가 `18446744073709551612` 같은 상수 때문에 즉시 parse 실패하던 문제 수정
+- `crates/fission-pcode/src/nir/mod.rs`
+  - multi-block canonical `if/if-else` lowering 보강
+  - `PIECE`, `SUBPIECE`, conservative `MULTIEQUAL` lowering 보강
+  - PE format gating을 `PE32+`까지 허용하도록 수정
+
+#### Benchmark / Status
+
+- v12 smoke benchmark 기준 `mlil-preview` 경로는 4개 바이너리 / 48개 샘플 함수에서
+  직접 preview 출력을 생성
+- legacy path는 회귀 없이 유지
+  - `putty.exe 0x140006260`의 `LPRECT` / `RECT` 경로 유지
+  - `putty.exe 0x140011060`, `cmkr.exe 0x140002cc0`의 fallback 안정성 유지
+- 현재 한계:
+  - preview coverage는 크게 늘었지만, real-world multi-block 함수의 pseudocode 품질은 아직 legacy보다 낮음
+  - `switch` 복원, phi/loop-header normalization, large-function structuring은 다음 단계 과제
+
+#### 핵심 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `crates/fission-pcode/src/nir/mod.rs` | preview NIR/HIR builder, Rust printer, multi-block lowering |
+| `crates/fission-pcode/src/pcode/types.rs` | wrapped negative constant JSON parsing 보강 |
+| `ghidra_decompiler/src/decompiler/DecompilationCore.cpp` | lightweight p-code extraction 우선 경로 추가 |
+| `crates/fission-cli/src/cli/args.rs` | `--engine` 옵션 추가 |
+| `crates/fission-cli/src/cli/oneshot/decompile.rs` | engine 선택 / preview fallback plumbing |
+| `crates/fission-tauri/src/panels/dialogs/DecompilerOptionsDialog.tsx` | Tauri engine selector 추가 |
+| `crates/fission-tauri/src/panels/editor/DecompileView.tsx` | engine/fallback badge 표시 |
+| `scripts/test/batch_benchmark/grand_finale.py` | preview comparison artifact 수집 강화 |
+
 ## 2026-03-09
 
 ### 대규모 멀티스레드 성능 혁신 (157초 → 10초)

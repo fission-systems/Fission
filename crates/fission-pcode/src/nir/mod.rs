@@ -199,7 +199,7 @@ impl MlilPreviewOptions {
     }
 
     fn is_pe_x64(&self) -> bool {
-        self.is_64bit && self.format.eq_ignore_ascii_case("PE")
+        self.is_64bit && self.format.to_ascii_uppercase().starts_with("PE")
     }
 
     fn is_mapped_global(&self, address: u64) -> bool {
@@ -392,6 +392,16 @@ impl<'a> PreviewBuilder<'a> {
                 idx = skip_to;
                 continue;
             }
+            if let Some((stmt, skip_to)) = self.try_lower_if_else(idx)? {
+                body.push(stmt);
+                idx = skip_to;
+                continue;
+            }
+            if let Some((stmt, skip_to)) = self.try_lower_if(idx)? {
+                body.push(stmt);
+                idx = skip_to;
+                continue;
+            }
 
             let block = &self.pcode.blocks[idx];
             if idx == 0 || targeted.contains(&block.start_address) {
@@ -436,6 +446,111 @@ impl<'a> PreviewBuilder<'a> {
             idx += 1;
         }
         Ok(body)
+    }
+
+    fn try_lower_if(
+        &mut self,
+        idx: usize,
+    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        if idx + 1 >= self.pcode.blocks.len() {
+            return Ok(None);
+        }
+        let LoweredTerminator::Cond {
+            cond,
+            true_target,
+            false_target,
+        } = self.lower_block_terminator(idx)?
+        else {
+            return Ok(None);
+        };
+
+        let next_block = &self.pcode.blocks[idx + 1];
+        let next_addr = next_block.start_address;
+
+        let (cond, body_idx, join_addr) = if true_target == next_addr {
+            (cond, idx + 1, false_target)
+        } else if false_target == Some(next_addr) {
+            (negate_expr(cond), idx + 1, Some(true_target))
+        } else {
+            return Ok(None);
+        };
+
+        let body = match self.lower_block_as_body(body_idx, join_addr)? {
+            Some(body) => body,
+            None => return Ok(None),
+        };
+        let skip_to = if let Some(join_addr) = join_addr {
+            self.find_block_index_by_address(join_addr).unwrap_or(body_idx + 1)
+        } else {
+            body_idx + 1
+        };
+        Ok(Some((
+            HirStmt::If {
+                cond,
+                then_body: body,
+                else_body: Vec::new(),
+            },
+            skip_to,
+        )))
+    }
+
+    fn try_lower_if_else(
+        &mut self,
+        idx: usize,
+    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        if idx + 2 >= self.pcode.blocks.len() {
+            return Ok(None);
+        }
+        let LoweredTerminator::Cond {
+            cond,
+            true_target,
+            false_target: Some(false_target),
+        } = self.lower_block_terminator(idx)?
+        else {
+            return Ok(None);
+        };
+
+        let next_idx = idx + 1;
+        let next_addr = self.pcode.blocks[next_idx].start_address;
+
+        let (cond, then_idx, else_idx) = if true_target == next_addr {
+            let Some(else_idx) = self.find_block_index_by_address(false_target) else {
+                return Ok(None);
+            };
+            (cond, next_idx, else_idx)
+        } else if false_target == next_addr {
+            let Some(then_idx) = self.find_block_index_by_address(true_target) else {
+                return Ok(None);
+            };
+            (negate_expr(cond), next_idx, then_idx)
+        } else {
+            return Ok(None);
+        };
+
+        if else_idx != then_idx + 1 {
+            return Ok(None);
+        }
+
+        let Some(join_addr) = self.shared_join_address(then_idx, else_idx)? else {
+            return Ok(None);
+        };
+        let then_body = match self.lower_block_as_body(then_idx, Some(join_addr))? {
+            Some(body) => body,
+            None => return Ok(None),
+        };
+        let else_body = match self.lower_block_as_body(else_idx, Some(join_addr))? {
+            Some(body) => body,
+            None => return Ok(None),
+        };
+        let skip_to = self.find_block_index_by_address(join_addr).unwrap_or(else_idx + 1);
+        Ok(Some((
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            },
+            skip_to,
+        )))
     }
 
     fn try_lower_dowhile(
@@ -495,6 +610,65 @@ impl<'a> PreviewBuilder<'a> {
         }
         let body = self.lower_block_stmts(body_block)?;
         Ok(Some((HirStmt::While { cond, body }, idx + 2)))
+    }
+
+    fn lower_block_as_body(
+        &mut self,
+        idx: usize,
+        join_addr: Option<u64>,
+    ) -> Result<Option<Vec<HirStmt>>, MlilPreviewError> {
+        let block = &self.pcode.blocks[idx];
+        let mut body = self.lower_block_stmts(block)?;
+        match self.lower_block_terminator(idx)? {
+            LoweredTerminator::Fallthrough(target) => {
+                if target == join_addr {
+                    Ok(Some(body))
+                } else {
+                    Ok(None)
+                }
+            }
+            LoweredTerminator::Goto(target) => {
+                if Some(target) == join_addr {
+                    Ok(Some(body))
+                } else {
+                    Ok(None)
+                }
+            }
+            LoweredTerminator::Return(expr) => {
+                body.push(HirStmt::Return(expr));
+                Ok(Some(body))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn shared_join_address(&mut self, lhs_idx: usize, rhs_idx: usize) -> Result<Option<u64>, MlilPreviewError> {
+        let lhs = self.lower_block_terminator(lhs_idx)?;
+        let rhs = self.lower_block_terminator(rhs_idx)?;
+        let lhs_join = match lhs {
+            LoweredTerminator::Fallthrough(target) => target,
+            LoweredTerminator::Goto(target) => Some(target),
+            LoweredTerminator::Return(_) => None,
+            _ => return Ok(None),
+        };
+        let rhs_join = match rhs {
+            LoweredTerminator::Fallthrough(target) => target,
+            LoweredTerminator::Goto(target) => Some(target),
+            LoweredTerminator::Return(_) => None,
+            _ => return Ok(None),
+        };
+        if lhs_join.is_some() && lhs_join == rhs_join {
+            Ok(lhs_join)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn find_block_index_by_address(&self, address: u64) -> Option<usize> {
+        self.pcode
+            .blocks
+            .iter()
+            .position(|block| block.start_address == address)
     }
 
     fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {
@@ -768,12 +942,109 @@ impl<'a> PreviewBuilder<'a> {
             PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
                 self.lower_call(op, visiting)
             }
-            PcodeOpcode::Piece | PcodeOpcode::SubPiece => {
-                Err(MlilPreviewError::UnsupportedPattern("piece operations"))
+            PcodeOpcode::Piece => self.lower_piece_op(op, visiting),
+            PcodeOpcode::SubPiece => self.lower_subpiece_op(op, visiting),
+            PcodeOpcode::MultiEqual => self.lower_multiequal(op, visiting),
+            PcodeOpcode::Indirect => {
+                if let Some(input) = op.inputs.first() {
+                    self.lower_varnode(input, visiting)
+                } else {
+                    Err(MlilPreviewError::LoweringFailed)
+                }
             }
-            PcodeOpcode::MultiEqual => Err(MlilPreviewError::UnsupportedControlFlow),
             _ => Err(MlilPreviewError::UnsupportedPattern("opcode")),
         }
+    }
+
+    fn lower_multiequal(
+        &mut self,
+        op: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        let mut lowered = Vec::new();
+        for input in &op.inputs {
+            lowered.push(self.lower_varnode(input, visiting)?);
+        }
+        if let Some(first) = lowered.first() {
+            let canonical = strip_casts(first);
+            if lowered.iter().all(|expr| strip_casts(expr) == canonical) {
+                return Ok(first.clone());
+            }
+        }
+        Err(MlilPreviewError::UnsupportedControlFlow)
+    }
+
+    fn lower_piece_op(
+        &mut self,
+        op: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        if op.inputs.len() < 2 {
+            return Err(MlilPreviewError::LoweringFailed);
+        }
+        let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+        let output_ty = type_from_size(output.size, false);
+        let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
+        let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
+        let shift_bits = i64::from(op.inputs[1].size) * 8;
+        let shifted = HirExpr::Binary {
+            op: HirBinaryOp::Shl,
+            lhs: Box::new(HirExpr::Cast {
+                ty: output_ty.clone(),
+                expr: Box::new(lhs),
+            }),
+            rhs: Box::new(HirExpr::Const(
+                shift_bits,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            ty: output_ty.clone(),
+        };
+        Ok(HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs: Box::new(shifted),
+            rhs: Box::new(HirExpr::Cast {
+                ty: output_ty.clone(),
+                expr: Box::new(rhs),
+            }),
+            ty: output_ty,
+        })
+    }
+
+    fn lower_subpiece_op(
+        &mut self,
+        op: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        if op.inputs.len() < 2 {
+            return Err(MlilPreviewError::LoweringFailed);
+        }
+        let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+        let output_ty = type_from_size(output.size, false);
+        let base = self.lower_varnode(&op.inputs[0], visiting)?;
+        let byte_offset = const_offset(&op.inputs[1]).ok_or(MlilPreviewError::LoweringFailed)?;
+        let shifted = if byte_offset == 0 {
+            base
+        } else {
+            HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: Box::new(base),
+                rhs: Box::new(HirExpr::Const(
+                    byte_offset * 8,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: type_from_size(op.inputs[0].size, false),
+            }
+        };
+        Ok(HirExpr::Cast {
+            ty: output_ty,
+            expr: Box::new(shifted),
+        })
     }
 
     fn lower_ptr_op(
@@ -969,6 +1240,28 @@ fn branch_target_address(vn: &Varnode) -> Option<u64> {
 
 fn block_label(address: u64) -> String {
     format!("block_{:x}", address)
+}
+
+fn negate_expr(expr: HirExpr) -> HirExpr {
+    match expr {
+        HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr,
+            ..
+        } => *expr,
+        other => HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: Box::new(other),
+            ty: NirType::Bool,
+        },
+    }
+}
+
+fn strip_casts(expr: &HirExpr) -> HirExpr {
+    match expr {
+        HirExpr::Cast { expr, .. } => strip_casts(expr),
+        other => other.clone(),
+    }
 }
 
 fn is_comparison(opcode: PcodeOpcode) -> bool {
@@ -1800,10 +2093,202 @@ mod tests {
 
         let code = render_mlil_preview(&func, "branchy", 0x3000, &preview_options())
             .expect("preview render");
-        assert!(code.contains("if (param_1) {"));
-        assert!(code.contains("goto block_3020;"));
-        assert!(code.contains("block_3010:"));
+        assert!(code.contains("if (!(param_1)) {"));
+        assert!(code.contains("return 0;"));
         assert!(code.contains("block_3020:"));
+        assert!(code.contains("return 1;"));
+    }
+
+    #[test]
+    fn multi_block_preview_lowers_canonical_if_else() {
+        let cond = uniq(0x350, 1);
+        let ptr = uniq(0x360, 8);
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x3500,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::Copy,
+                            address: 0x3500,
+                            output: Some(cond.clone()),
+                            inputs: vec![reg(0x08, 1)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::CBranch,
+                            address: 0x3501,
+                            output: None,
+                            inputs: vec![cst(0x3520, 8), cond],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x3510,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::IntAdd,
+                            address: 0x3510,
+                            output: Some(ptr.clone()),
+                            inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Store,
+                            address: 0x3511,
+                            output: None,
+                            inputs: vec![cst(0, 4), ptr.clone(), cst(1, 4)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 2,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x3512,
+                            output: None,
+                            inputs: vec![cst(0x3530, 8)],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x3520,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::IntAdd,
+                            address: 0x3520,
+                            output: Some(ptr.clone()),
+                            inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Store,
+                            address: 0x3521,
+                            output: None,
+                            inputs: vec![cst(0, 4), ptr, cst(2, 4)],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 3,
+                    start_address: 0x3530,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x3530,
+                        output: None,
+                        inputs: vec![cst(0, 8), cst(0, 4)],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        };
+
+        let code = render_mlil_preview(&func, "if_else_fn", 0x3500, &preview_options())
+            .expect("preview render");
+        assert!(code.contains("if (!(param_1)) {") || code.contains("if (param_1) {"));
+        assert!(code.contains("local_10 = 1;"));
+        assert!(code.contains("} else {"));
+        assert!(code.contains("local_10 = 2;"));
+        assert!(!code.contains("goto block_3510;"));
+        assert!(!code.contains("goto block_3520;"));
+    }
+
+    #[test]
+    fn multiequal_with_identical_inputs_does_not_fail_preview() {
+        let phi = uniq(0x500, 8);
+        let copy = uniq(0x508, 8);
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x5000,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::MultiEqual,
+                            address: 0x5000,
+                            output: Some(phi.clone()),
+                            inputs: vec![reg(0x08, 8), reg(0x08, 8)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Copy,
+                            address: 0x5001,
+                            output: Some(copy.clone()),
+                            inputs: vec![phi],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 2,
+                            opcode: PcodeOpcode::Return,
+                            address: 0x5002,
+                            output: None,
+                            inputs: vec![cst(0, 8), copy],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        let code = render_mlil_preview(&func, "phi_fn", 0x5000, &preview_options())
+            .expect("preview render");
+        assert!(code.contains("return param_1;"));
+    }
+
+    #[test]
+    fn piece_and_subpiece_lower_without_preview_failure() {
+        let piece = uniq(0x600, 8);
+        let sub = uniq(0x608, 4);
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x6000,
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Piece,
+                        address: 0x6000,
+                        output: Some(piece.clone()),
+                        inputs: vec![reg(0x08, 4), reg(0x10, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::SubPiece,
+                        address: 0x6001,
+                        output: Some(sub.clone()),
+                        inputs: vec![piece, cst(4, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x6002,
+                        output: None,
+                        inputs: vec![cst(0, 8), sub],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        };
+
+        let code = render_mlil_preview(&func, "piece_fn", 0x6000, &preview_options())
+            .expect("preview render");
+        assert!(code.contains("return"));
+        assert!(!code.contains("goto"));
     }
 
     #[test]

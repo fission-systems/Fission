@@ -461,7 +461,7 @@ impl PcodeFunction {
             space: u64,
             offset: String,
             size: u32,
-            const_val: Option<i64>,
+            const_val: Option<serde_json::Value>,
         }
 
         let root: JsonRoot = serde_json::from_str(json)?;
@@ -482,7 +482,7 @@ impl PcodeFunction {
                             offset: parse_hex_addr(&jv.offset),
                             size: jv.size,
                             is_constant: jv.const_val.is_some(),
-                            constant_val: jv.const_val.unwrap_or(0),
+                            constant_val: parse_json_const_val(jv.const_val.as_ref()).unwrap_or(0),
                         });
                         let inputs = jo
                             .inputs
@@ -492,7 +492,8 @@ impl PcodeFunction {
                                 offset: parse_hex_addr(&jv.offset),
                                 size: jv.size,
                                 is_constant: jv.const_val.is_some(),
-                                constant_val: jv.const_val.unwrap_or(0),
+                                constant_val: parse_json_const_val(jv.const_val.as_ref())
+                                    .unwrap_or(0),
                             })
                             .collect();
 
@@ -661,6 +662,19 @@ fn parse_hex_addr(s: &str) -> u64 {
     u64::from_str_radix(s, 16).unwrap_or(0)
 }
 
+fn parse_json_const_val(value: Option<&serde_json::Value>) -> Option<i64> {
+    match value? {
+        serde_json::Value::Number(num) => {
+            if let Some(v) = num.as_i64() {
+                Some(v)
+            } else {
+                num.as_u64().map(|v| v as i64)
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Error from flat format parsing
 #[derive(Debug, Clone, Copy)]
 pub enum FlatFormatError {
@@ -797,5 +811,12 @@ mod tests {
                 assert_eq!(jo.inputs, fo.inputs);
             }
         }
+    }
+
+    #[test]
+    fn test_json_parses_wrapped_negative_const_values() {
+        let json = r#"{"blocks":[{"index":0,"start_addr":"0x1000","ops":[{"seq":0,"opcode":"INT_ADD","addr":"0x1000","output":{"space":1,"offset":"0x100","size":8},"inputs":[{"space":2,"offset":"0x20","size":8},{"space":0,"offset":"0xfffffffffffffffc","size":8,"const_val":18446744073709551612}]}]}]}"#;
+        let parsed = PcodeFunction::from_json(json).expect("json parse");
+        assert_eq!(parsed.blocks[0].ops[0].inputs[1].constant_val, -4);
     }
 }

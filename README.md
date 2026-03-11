@@ -13,7 +13,12 @@ The repository currently ships a CLI entrypoint (`fission_cli`), a modular analy
 
 ## Current Snapshot
 
-As of March 10, 2026, the mainline tree includes these recent decompiler-quality changes:
+As of March 11, 2026, the mainline tree has two decompilation paths:
+
+- the mature `legacy` path: Ghidra-native decompilation plus Fission post-processing
+- the experimental `mlil-preview` path: Ghidra p-code lifting plus Fission-owned NIR/HIR and a Rust printer
+
+Recent stable quality work in the `legacy` path includes:
 
 - WinAPI signature-driven type promotion
 - expression cleanup for Ghidra-style `CONCAT`/piece residue
@@ -21,9 +26,19 @@ As of March 10, 2026, the mainline tree includes these recent decompiler-quality
 - temporary-variable inlining
 - stack-name normalization and generic piece-access normalization
 
-The latest benchmark summary is preserved in [`docs/benchmark/grand_finale_summary.md`](/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md).
+Recent experimental engine work now in-tree:
 
-Headline numbers from that run:
+- `legacy | mlil-preview | auto` engine selection in the CLI
+- Tauri decompile-engine selection plus engine/fallback badges in the UI
+- a PE x64 `mlil-preview` pipeline with:
+  - stack-slot recovery
+  - NIR/HIR lowering for straight-line code, simple multi-block `if`, `if/else`, `while`, `do-while`
+  - label/goto pseudocode fallback when structure reconstruction is incomplete
+  - Rust-side idiom recognition for basic `div/mod by power-of-two`
+
+The checked-in legacy benchmark summary is preserved in [`docs/benchmark/grand_finale_summary.md`](/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md).
+
+Headline numbers from that checked-in run:
 
 - 3 binaries, 60 shared successfully decompiled functions
 - Fission success count: 60/60
@@ -32,6 +47,12 @@ Headline numbers from that run:
 - `for` loops: 16 vs 11
 - `do-while` loops: 16 vs 22
 - sampled run reported no timeout, OOM, or crash
+
+Current practical status:
+
+- `legacy` is still the default-quality path
+- `mlil-preview` is integrated into the product path, but it is still an experimental subset engine
+- preview coverage is increasing, but output quality on real multi-block functions still trails the legacy path
 
 ## Workspace Layout
 
@@ -133,10 +154,21 @@ The one-shot CLI entrypoint lives in [`crates/fission-cli`](/Users/sjkim1127/Fis
 Useful decompilation flags from the current CLI:
 
 - `--profile balanced|quality|speed`
+- `--engine legacy|mlil-preview|auto`
 - `--compiler-id auto|windows|gcc|clang|default`
 - `--timeout-ms <ms>`
 - `--ghidra-compat`
 - `--benchmark`
+
+Examples for the experimental engine path:
+
+```bash
+# Force the Fission-owned preview engine
+./target/release/fission_cli <binary> --decomp 0x140001160 --engine mlil-preview
+
+# Try preview first for low-risk PE x64 functions, then fall back automatically
+./target/release/fission_cli <binary> --decomp 0x140001160 --engine auto
+```
 
 ## Desktop GUI
 
@@ -149,6 +181,8 @@ What is concretely present in-tree today:
 - decompiler options dialog
 - comments, bookmarks, and function rename plumbing
 - search, strings, imports/exports, CFG and debug-related panels
+- decompile engine selector (`legacy`, `mlil-preview`, `auto`)
+- engine-used / fallback badges in the decompile view
 
 What is still moving:
 
@@ -179,4 +213,9 @@ Relevant files:
 
 ## Status
 
-Fission is under active development. The CLI and analysis backend are the most mature parts of the repository. The Tauri frontend is real and buildable, but its interaction model is still evolving alongside the backend decompiler output.
+Fission is under active development.
+
+- The CLI and analysis backend are the most mature parts of the repository.
+- The Tauri frontend is real, buildable, and now exposes decompile engine selection, but its interaction model is still evolving.
+- The `legacy` engine is currently the only path that should be treated as the stable default for serious analysis.
+- The `mlil-preview` engine is now wired through CLI and GUI, but should still be treated as an experimental architecture path rather than a drop-in replacement for the legacy decompiler.

@@ -812,13 +812,122 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
     
     if (!fd) throw std::runtime_error("Failed to get function data");
     
+    auto serialize_current_pcode = [&]() -> std::string {
+        std::ostringstream json;
+        json << "{";
+        json << "\"blocks\": [";
+
+        const ghidra::BlockGraph& basic_blocks = fd->getBasicBlocks();
+        bool first_block = true;
+        size_t op_count = 0;
+        for (int i = 0; i < basic_blocks.getSize(); ++i) {
+            ghidra::FlowBlock* block = basic_blocks.getBlock(i);
+            ghidra::BlockBasic* bb = static_cast<ghidra::BlockBasic*>(block);
+
+            std::ostringstream block_json;
+            block_json << "{";
+            block_json << "\"index\": " << block->getIndex() << ",";
+            block_json << "\"start_addr\": \"0x" << std::hex << block->getStart().getOffset()
+                       << "\",";
+            block_json << "\"ops\": [";
+
+            bool first_op = true;
+            auto iter = bb->beginOp();
+            auto end_iter = bb->endOp();
+            for (; iter != end_iter; ++iter) {
+                ghidra::PcodeOp* op = *iter;
+                if (!op) continue;
+                ++op_count;
+
+                if (!first_op) block_json << ",";
+                first_op = false;
+
+                block_json << "{";
+                block_json << "\"seq\": " << std::dec << op->getSeqNum().getTime() << ",";
+                block_json << "\"opcode\": \"" << json_escape(op->getOpcode()->getName()) << "\",";
+                block_json << "\"addr\": \"0x" << std::hex << op->getAddr().getOffset() << std::dec
+                           << "\",";
+
+                try {
+                    ghidra::Address asm_addr = op->getAddr();
+                    SimpleAssemblyEmit asm_emit;
+                    ctx->arch->translate->printAssembly(asm_emit, asm_addr);
+                    std::string mnemonic = asm_emit.getMnemonic();
+                    std::string body = asm_emit.getBody();
+                    if (!mnemonic.empty()) {
+                        if (!body.empty()) {
+                            block_json << "\"asm\": \"" << json_escape(mnemonic) << " "
+                                       << json_escape(body) << "\",";
+                        } else {
+                            block_json << "\"asm\": \"" << json_escape(mnemonic) << "\",";
+                        }
+                    } else {
+                        block_json << "\"asm\": null,";
+                    }
+                } catch (...) {
+                    block_json << "\"asm\": null,";
+                }
+
+                ghidra::Varnode* out = op->getOut();
+                if (out) {
+                    block_json << "\"output\": {";
+                    block_json << "\"offset\": \"0x" << std::hex << out->getOffset() << "\",";
+                    block_json << "\"size\": " << std::dec << out->getSize() << ",";
+                    block_json << "\"space\": " << out->getSpace()->getType() << ",";
+                    block_json << "\"const_val\": "
+                               << (out->isConstant() ? std::to_string(out->getOffset()) : "null");
+                    block_json << "},";
+                } else {
+                    block_json << "\"output\": null,";
+                }
+
+                block_json << "\"inputs\": [";
+                for (int j = 0; j < op->numInput(); ++j) {
+                    ghidra::Varnode* in = op->getIn(j);
+                    if (j > 0) block_json << ",";
+                    block_json << "{";
+                    block_json << "\"offset\": \"0x" << std::hex << in->getOffset() << "\",";
+                    block_json << "\"size\": " << std::dec << in->getSize() << ",";
+                    block_json << "\"space\": " << in->getSpace()->getType() << ",";
+                    block_json << "\"const_val\": "
+                               << (in->isConstant() ? std::to_string(in->getOffset()) : "null");
+                    block_json << "}";
+                }
+                block_json << "]";
+                block_json << "}";
+            }
+            block_json << "]";
+            block_json << "}";
+
+            if (!first_op) {
+                if (!first_block) json << ",";
+                first_block = false;
+                json << block_json.str();
+            }
+        }
+
+        json << "]";
+        json << "}";
+        if (op_count == 0) {
+            return std::string();
+        }
+        return json.str();
+    };
+
     fd->clear();
-    
+
     ghidra::Address end_addr = start_addr + 0x10000;
     try {
         fd->followFlow(start_addr, end_addr);
     } catch (...) {}
-    
+
+    // Preview extraction only needs recovered p-code. Avoid full action-group execution
+    // unless the lightweight followFlow path failed to populate any ops.
+    std::string lightweight_json = serialize_current_pcode();
+    if (!lightweight_json.empty()) {
+        return lightweight_json;
+    }
+
     ghidra::Action* current_action = ctx->arch->allacts.getCurrent();
     if (!current_action) throw std::runtime_error("No current action group");
     
@@ -834,92 +943,11 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
         current_action->reset(*fd);
         current_action->perform(*fd);
         
-        std::ostringstream json;
-        json << "{";
-        json << "\"blocks\": [";
-        
-        const ghidra::BlockGraph& basic_blocks = fd->getBasicBlocks();
-        for (int i = 0; i < basic_blocks.getSize(); ++i) {
-            ghidra::FlowBlock* block = basic_blocks.getBlock(i);
-            ghidra::BlockBasic* bb = static_cast<ghidra::BlockBasic*>(block);
-            
-            if (i > 0) json << ",";
-            
-            json << "{";
-            json << "\"index\": " << block->getIndex() << ",";
-            json << "\"start_addr\": \"0x" << std::hex << block->getStart().getOffset() << "\",";
-            json << "\"ops\": [";
-            
-            bool first_op = true;
-            auto iter = bb->beginOp();
-            auto end_iter = bb->endOp();
-            
-            for (; iter != end_iter; ++iter) {
-                ghidra::PcodeOp* op = *iter;
-                if (!op) continue;
-                
-                if (!first_op) json << ",";
-                first_op = false;
-                
-                json << "{";
-                json << "\"seq\": " << std::dec << op->getSeqNum().getTime() << ",";
-                json << "\"opcode\": \"" << json_escape(op->getOpcode()->getName()) << "\",";
-                json << "\"addr\": \"0x" << std::hex << op->getAddr().getOffset() << std::dec << "\",";
-                
-                // Try to get assembly mnemonic
-                try {
-                    ghidra::Address asm_addr = op->getAddr();
-                    SimpleAssemblyEmit asm_emit;
-                    ctx->arch->translate->printAssembly(asm_emit, asm_addr);
-                    std::string mnemonic = asm_emit.getMnemonic();
-                    std::string body = asm_emit.getBody();
-                    if (!mnemonic.empty()) {
-                        if (!body.empty()) {
-                            json << "\"asm\": \"" << json_escape(mnemonic) << " " << json_escape(body) << "\",";
-                        } else {
-                            json << "\"asm\": \"" << json_escape(mnemonic) << "\",";
-                        }
-                    } else {
-                        json << "\"asm\": null,";
-                    }
-                } catch (...) {
-                    json << "\"asm\": null,";
-                }
-                
-                ghidra::Varnode* out = op->getOut();
-                if (out) {
-                    json << "\"output\": {";
-                    json << "\"offset\": \"0x" << std::hex << out->getOffset() << "\",";
-                    json << "\"size\": " << std::dec << out->getSize() << ",";
-                    json << "\"space\": " << out->getSpace()->getType() << ","; // Use type ID for space
-                    json << "\"const_val\": " << (out->isConstant() ? std::to_string(out->getOffset()) : "null");
-                    json << "},";
-                } else {
-                    json << "\"output\": null,";
-                }
-                
-                json << "\"inputs\": [";
-                for (int j = 0; j < op->numInput(); ++j) {
-                    ghidra::Varnode* in = op->getIn(j);
-                    if (j > 0) json << ",";
-                    json << "{";
-                    json << "\"offset\": \"0x" << std::hex << in->getOffset() << "\",";
-                    json << "\"size\": " << std::dec << in->getSize() << ",";
-                    json << "\"space\": " << in->getSpace()->getType() << ",";
-                    json << "\"const_val\": " << (in->isConstant() ? std::to_string(in->getOffset()) : "null");
-                    json << "}";
-                }
-                json << "]";
-                json << "}";
-            }
-            json << "]";
-            json << "}";
+        std::string analyzed_json = serialize_current_pcode();
+        if (!analyzed_json.empty()) {
+            return analyzed_json;
         }
-        
-        json << "]";
-        json << "}";
-        
-        return json.str();
+        throw std::runtime_error("Pcode extraction produced no ops");
     } catch (const ghidra::LowlevelError& e) {
         throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
     } catch (const std::exception& e) {
