@@ -983,3 +983,327 @@ fn test_indirect_collapse() {
     assert!(ops[1].inputs[1].is_constant);
     assert_eq!(ops[1].inputs[1].constant_val, 30);
 }
+
+#[test]
+fn test_copy_propagation_single_use_same_block() {
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_dead_code_elimination: true,
+        enable_cse: false,
+        ..PcodeOptimizerConfig::default()
+    });
+
+    let src = Varnode {
+        space_id: 2,
+        offset: 0x10,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp = Varnode {
+        space_id: 1,
+        offset: 0x100,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let out = Varnode {
+        space_id: 1,
+        offset: 0x104,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(tmp.clone()),
+                    inputs: vec![src.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1001,
+                    output: Some(out.clone()),
+                    inputs: vec![tmp.clone(), Varnode::constant(1, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1002,
+                    output: None,
+                    inputs: vec![out.clone()],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    optimizer.optimize(&mut func);
+
+    let ops = &func.blocks[0].ops;
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[0].opcode, PcodeOpcode::IntAdd);
+    assert_eq!(ops[0].inputs[0], src);
+    assert_eq!(ops[1].opcode, PcodeOpcode::Return);
+}
+
+#[test]
+fn test_cast_copy_chain_propagation_same_size() {
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_dead_code_elimination: true,
+        enable_cse: false,
+        ..PcodeOptimizerConfig::default()
+    });
+
+    let src = Varnode {
+        space_id: 2,
+        offset: 0x20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let cast_tmp = Varnode {
+        space_id: 1,
+        offset: 0x200,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let copy_tmp = Varnode {
+        space_id: 1,
+        offset: 0x204,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let out = Varnode {
+        space_id: 1,
+        offset: 0x208,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Cast,
+                    address: 0x1000,
+                    output: Some(cast_tmp.clone()),
+                    inputs: vec![src.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1001,
+                    output: Some(copy_tmp.clone()),
+                    inputs: vec![cast_tmp.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntXor,
+                    address: 0x1002,
+                    output: Some(out.clone()),
+                    inputs: vec![copy_tmp, Varnode::constant(2, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1003,
+                    output: None,
+                    inputs: vec![out.clone()],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    optimizer.optimize(&mut func);
+
+    let ops = &func.blocks[0].ops;
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[0].opcode, PcodeOpcode::IntXor);
+    assert_eq!(ops[0].inputs[0], src);
+    assert_eq!(ops[1].opcode, PcodeOpcode::Return);
+}
+
+#[test]
+fn test_copy_propagation_does_not_cross_store_boundary() {
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_dead_code_elimination: false,
+        enable_cse: false,
+        ..PcodeOptimizerConfig::default()
+    });
+
+    let src = Varnode {
+        space_id: 2,
+        offset: 0x10,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp = Varnode {
+        space_id: 1,
+        offset: 0x100,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let out = Varnode {
+        space_id: 1,
+        offset: 0x104,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(tmp.clone()),
+                    inputs: vec![src.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x1001,
+                    output: None,
+                    inputs: vec![Varnode::constant(0x2000, 8), Varnode::constant(0x55, 1)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1002,
+                    output: Some(out),
+                    inputs: vec![tmp.clone(), Varnode::constant(1, 4)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    optimizer.optimize(&mut func);
+
+    let ops = &func.blocks[0].ops;
+    assert_eq!(ops.len(), 3);
+    assert_eq!(ops[2].inputs[0], tmp);
+}
+
+#[test]
+fn test_loop_header_temp_coalescing_preserves_multiequal() {
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_dead_code_elimination: true,
+        enable_cse: false,
+        ..PcodeOptimizerConfig::default()
+    });
+
+    let in_a = Varnode {
+        space_id: 2,
+        offset: 0x10,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let in_b = Varnode {
+        space_id: 2,
+        offset: 0x14,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let phi = Varnode {
+        space_id: 1,
+        offset: 0x100,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let tmp = Varnode {
+        space_id: 1,
+        offset: 0x104,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let out = Varnode {
+        space_id: 1,
+        offset: 0x108,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x2000,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::MultiEqual,
+                    address: 0x2000,
+                    output: Some(phi.clone()),
+                    inputs: vec![in_a, in_b],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x2001,
+                    output: Some(tmp.clone()),
+                    inputs: vec![phi.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x2002,
+                    output: Some(out.clone()),
+                    inputs: vec![tmp, Varnode::constant(4, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x2003,
+                    output: None,
+                    inputs: vec![out.clone()],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    optimizer.optimize(&mut func);
+
+    let ops = &func.blocks[0].ops;
+    assert_eq!(ops.len(), 3);
+    assert_eq!(ops[0].opcode, PcodeOpcode::MultiEqual);
+    assert_eq!(ops[1].opcode, PcodeOpcode::IntAdd);
+    assert_eq!(ops[1].inputs[0], phi);
+    assert_eq!(ops[2].opcode, PcodeOpcode::Return);
+}

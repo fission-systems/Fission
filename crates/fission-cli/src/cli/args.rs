@@ -66,9 +66,13 @@ pub struct OneShotArgs {
     #[arg(long, value_name = "ID")]
     pub compiler_id: Option<String>,
 
-    /// Decompilation profile (balanced|quality|speed)
+    /// Decompilation profile (balanced|quality|speed|mlil-preview)
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
+
+    /// Decompilation engine (legacy|mlil-preview|auto)
+    #[arg(long, value_name = "ENGINE")]
+    pub engine: Option<String>,
 
     /// Output to file instead of stdout
     #[arg(short, long)]

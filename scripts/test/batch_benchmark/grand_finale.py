@@ -25,7 +25,14 @@ MANDATORY_SAMPLE_ADDRESSES: dict[str, list[str]] = {
         "0x1400036e0",
         "0x140003920",
         "0x140004010",
-    ]
+    ],
+    "everything": [
+        "0x1401120c0",
+        "0x14011d840",
+        "0x140123c80",
+        "0x14014df40",
+        "0x140183590",
+    ],
 }
 
 
@@ -68,6 +75,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-ghidra",
         action="store_true",
         help="Collect only Fission metrics",
+    )
+    parser.add_argument(
+        "--skip-preview-compare",
+        action="store_true",
+        help="Do not run the extra mlil-preview comparison pass",
     )
     return parser.parse_args()
 
@@ -331,12 +343,15 @@ def run_fission_function(
     fission_bin: Path,
     timeout_sec: int,
     struct_ptr_aliases: dict[str, str],
+    engine: str = "auto",
 ) -> dict[str, Any]:
     cmd = [
         str(fission_bin),
         str(binary_path),
         "--decomp",
         address,
+        "--engine",
+        engine,
         "--json",
         "--benchmark",
         "--ghidra-compat",
@@ -362,6 +377,9 @@ def run_fission_function(
         "postprocess_sec": round(float(func.get("postprocess_sec", 0.0)), 6),
         "wall_sec": round(wall_sec, 6),
         "code": code,
+        "engine_used": func.get("engine_used", engine),
+        "fell_back": bool(func.get("fell_back", False)),
+        "fallback_reason": func.get("fallback_reason"),
     }
     if failure := detect_embedded_failure(code):
         entry["success"] = False
@@ -445,7 +463,9 @@ def summarize_binary(
     functions: list[tuple[str, str]],
     fission_entries: dict[str, dict[str, Any]],
     ghidra_entries: dict[str, dict[str, Any]],
+    preview_entries: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    preview_entries = preview_entries or {}
     shared_success = [
         normalize_address(addr)
         for addr, _ in functions
@@ -500,6 +520,17 @@ def summarize_binary(
     fission_successes = sum(1 for entry in fission_entries.values() if entry.get("success"))
     ghidra_successes = sum(1 for entry in ghidra_entries.values() if entry.get("success"))
     top_residue_offenders = collect_top_residue_offenders(fission_entries)
+    preview_successes = sum(1 for entry in preview_entries.values() if entry.get("success"))
+    preview_cast_density = sum(
+        int(entry.get("metrics", {}).get("cast_chain_count", 0))
+        for entry in preview_entries.values()
+        if entry.get("success")
+    )
+    preview_residue_total = sum(
+        compute_residue_score(entry)
+        for entry in preview_entries.values()
+        if entry.get("success")
+    )
 
     return {
         "binary": binary_name,
@@ -544,6 +575,9 @@ def summarize_binary(
                 if entry.get("success")
             ),
         },
+        "mlil_preview_success": preview_successes,
+        "mlil_preview_residue": preview_residue_total,
+        "mlil_preview_cast_density": preview_cast_density,
         "residue_rankings": {
             "single_assign_temps": dict(
                 aggregate_residues(fission_entries, "single_assign_temps").most_common(20)
@@ -556,6 +590,7 @@ def summarize_binary(
             ),
         },
         "top_residue_offenders": top_residue_offenders,
+        "mlil_preview_top_residue_offenders": collect_top_residue_offenders(preview_entries),
         "failure_class_counts": {
             "fission": dict(
                 Counter(
@@ -608,6 +643,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Type preservation hits (Fission): {report['global']['type_preservation_counts']['fission']}",
         f"- Raw pointer / assembly fallbacks (Fission): {report['global']['fallback_counts']['fission']}",
         f"- Cast chains (Fission/Ghidra): {report['global']['cast_chain_counts']['fission']} / {report['global']['cast_chain_counts']['ghidra']}",
+        f"- MLIL preview success / residue / cast density: {report['global']['mlil_preview_success']} / {report['global']['mlil_preview_residue']} / {report['global']['mlil_preview_cast_density']}",
         "",
         "## Residue Intel",
         "",
@@ -666,6 +702,12 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
             f"- Cast chains: Fission {binary['cast_chain_counts']['fission']} | "
             f"Ghidra {binary['cast_chain_counts']['ghidra']}"
         )
+        lines.append(
+            f"- MLIL preview success / residue / cast density: "
+            f"{binary.get('mlil_preview_success', 0)} / "
+            f"{binary.get('mlil_preview_residue', 0)} / "
+            f"{binary.get('mlil_preview_cast_density', 0)}"
+        )
         if binary["top_residue_offenders"]:
             lines.append("- Top residue offenders:")
             for offender in binary["top_residue_offenders"]:
@@ -702,12 +744,16 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
             "fission": 0,
             "ghidra": 0,
         },
+        "mlil_preview_success": 0,
+        "mlil_preview_residue": 0,
+        "mlil_preview_cast_density": 0,
         "residue_rankings": {
             "single_assign_temps": Counter(),
             "residue_names": Counter(),
             "residue_families": Counter(),
         },
         "top_residue_offenders": [],
+        "mlil_preview_top_residue_offenders": [],
     }
 
     for report in binary_reports:
@@ -723,10 +769,20 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         global_report["fallback_counts"]["ghidra"].update(report["fallback_counts"]["ghidra"])
         global_report["cast_chain_counts"]["fission"] += report["cast_chain_counts"]["fission"]
         global_report["cast_chain_counts"]["ghidra"] += report["cast_chain_counts"]["ghidra"]
+        global_report["mlil_preview_success"] += report.get("mlil_preview_success", 0)
+        global_report["mlil_preview_residue"] += report.get("mlil_preview_residue", 0)
+        global_report["mlil_preview_cast_density"] += report.get("mlil_preview_cast_density", 0)
         for key in global_report["residue_rankings"]:
             global_report["residue_rankings"][key].update(report["residue_rankings"][key])
         for offender in report.get("top_residue_offenders", []):
             global_report["top_residue_offenders"].append(
+                {
+                    "binary": report["binary"],
+                    **offender,
+                }
+            )
+        for offender in report.get("mlil_preview_top_residue_offenders", []):
+            global_report["mlil_preview_top_residue_offenders"].append(
                 {
                     "binary": report["binary"],
                     **offender,
@@ -744,6 +800,16 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         )
     global_report["top_residue_offenders"] = sorted(
         global_report["top_residue_offenders"],
+        key=lambda item: (
+            -int(item["residue_score"]),
+            -int(item["raw_pointer_fallback"]),
+            -int(item["single_assign_temp_total"]),
+            item["binary"],
+            item["address"],
+        ),
+    )[:10]
+    global_report["mlil_preview_top_residue_offenders"] = sorted(
+        global_report["mlil_preview_top_residue_offenders"],
         key=lambda item: (
             -int(item["residue_score"]),
             -int(item["raw_pointer_fallback"]),
@@ -792,6 +858,7 @@ def main() -> int:
             args.limit,
         )
         fission_entries: dict[str, dict[str, Any]] = {}
+        preview_entries: dict[str, dict[str, Any]] = {}
         for address, name in functions:
             print(f"    [Fission] {address} {name}", flush=True)
             entry = run_fission_function(
@@ -800,10 +867,24 @@ def main() -> int:
                 args.fission_bin,
                 args.per_func_timeout,
                 struct_ptr_aliases,
+                engine="auto",
             )
             entry.setdefault("address", address)
             entry.setdefault("name", name)
             fission_entries[normalize_address(address)] = entry
+            if not args.skip_preview_compare:
+                print(f"    [Preview] {address} {name}", flush=True)
+                preview = run_fission_function(
+                    binary_path,
+                    address,
+                    args.fission_bin,
+                    args.per_func_timeout,
+                    struct_ptr_aliases,
+                    engine="mlil-preview",
+                )
+                preview.setdefault("address", address)
+                preview.setdefault("name", name)
+                preview_entries[normalize_address(address)] = preview
 
         ghidra_entries: dict[str, dict[str, Any]] = {}
         ghidra_init_sec = 0.0
@@ -825,7 +906,7 @@ def main() -> int:
                     "decomp_sec": 0.0,
                 }
 
-        report = summarize_binary(binary_name, functions, fission_entries, ghidra_entries)
+        report = summarize_binary(binary_name, functions, fission_entries, ghidra_entries, preview_entries)
         report["ghidra_init_sec"] = round(ghidra_init_sec, 6)
         binary_reports.append(report)
 
@@ -834,6 +915,7 @@ def main() -> int:
             "summary": report,
             "functions": {
                 "fission": fission_entries,
+                "mlil_preview": preview_entries,
                 "ghidra": ghidra_entries,
             },
         }

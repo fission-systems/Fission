@@ -6,6 +6,7 @@ import { ASM_PAGE, DECOMPILE_TIMEOUT_MS, HEX_PREVIEW_SIZE } from "../utils/const
 import type {
     BinaryInfo,
     FunctionDto,
+    DecompileResult,
     AsmInstructionDto,
     StringDto,
     ImportDto,
@@ -39,7 +40,8 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
     const [lastFidResult, setLastFidResult] = useState<FidResultDto | null>(null);
 
     // Caches
-    const [decompileCache, setDecompileCache] = useState<Record<string, string>>({});
+    const [decompileCache, setDecompileCache] = useState<Record<string, DecompileResult>>({});
+    const [decompileStatus, setDecompileStatus] = useState<Record<string, "idle" | "loading" | "ready" | "error">>({});
     const [asmCache, setAsmCache] = useState<Record<string, AsmInstructionDto[]>>({});
     const [asmHasMore, setAsmHasMore] = useState<Record<string, boolean>>({});
     const [asmLoadingMore, setAsmLoadingMore] = useState<Record<string, boolean>>({});
@@ -105,6 +107,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
             log(`Loading: ${path}`);
             onResetTabs();
             setDecompileCache({});
+            setDecompileStatus({});
             setAsmCache({});
             await _loadBinaryState(path);
         } catch (err) {
@@ -122,6 +125,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
             try {
                 onResetTabs();
                 setDecompileCache({});
+                setDecompileStatus({});
                 setAsmCache({});
                 setProgress({ value: 0.5, message: "Loading functions..." });
                 await _loadBinaryState(path);
@@ -156,6 +160,40 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
         }
     }, [log]);
 
+    const fetchDecompileResult = useCallback(
+        async (address: number, tabId: string, functionName: string, addressText: string) => {
+            setDecompileStatus((prev) => ({ ...prev, [tabId]: "loading" }));
+            try {
+                log(`Decompiling ${functionName}...`);
+                const timeout = new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error("Decompile timeout (30s)")), DECOMPILE_TIMEOUT_MS),
+                );
+                const result = await Promise.race([
+                    invoke<DecompileResult>("decompile_function", { address }),
+                    timeout,
+                ]);
+                setDecompileCache((prev) => ({ ...prev, [tabId]: result }));
+                setDecompileStatus((prev) => ({ ...prev, [tabId]: "ready" }));
+                log(`Decompiled ${functionName} ✓`);
+                return result;
+            } catch (err) {
+                const fallback: DecompileResult = {
+                    code: `// Error decompiling ${functionName}: ${err}`,
+                    function_name: functionName,
+                    address: addressText,
+                    engine_used: "legacy",
+                    fell_back: false,
+                    fallback_reason: String(err),
+                };
+                setDecompileCache((prev) => ({ ...prev, [tabId]: fallback }));
+                setDecompileStatus((prev) => ({ ...prev, [tabId]: "error" }));
+                log(`Decompile error: ${err}`);
+                return fallback;
+            }
+        },
+        [log],
+    );
+
     // --- Function Click (opens tabs + loads decompile/asm/hex/xrefs) ---
     const handleFunctionClick = useCallback(
         async (func: FunctionDto) => {
@@ -166,23 +204,10 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
             const addr = parseAddress(func.address);
 
             const decompPromise = (async () => {
-                if (decompileCache[decompTabId]) return;
-                try {
-                    log(`Decompiling ${func.name}...`);
-                    const timeout = new Promise<never>((_, reject) =>
-                        setTimeout(() => reject(new Error("Decompile timeout (30s)")), DECOMPILE_TIMEOUT_MS),
-                    );
-                    const result = await Promise.race([
-                        invoke<{ code: string }>("decompile_function", { address: addr }),
-                        timeout,
-                    ]);
-                    setDecompileCache((prev) => ({ ...prev, [decompTabId]: result.code }));
-                    log(`Decompiled ${func.name} ✓`);
-                } catch (err) {
-                    const errMsg = `// Error decompiling ${func.name}: ${err}`;
-                    setDecompileCache((prev) => ({ ...prev, [decompTabId]: errMsg }));
-                    log(`Decompile error: ${err}`);
+                if (decompileCache[decompTabId] || decompileStatus[decompTabId] === "loading") {
+                    return;
                 }
+                await fetchDecompileResult(addr, decompTabId, func.name, func.address);
             })();
 
             const asmPromise = (async () => {
@@ -215,7 +240,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
 
             await Promise.allSettled([decompPromise, asmPromise, hexPromise, xrefPromise]);
         },
-        [binaryInfo, decompileCache, asmCache, log, onOpenTabs],
+        [binaryInfo, decompileCache, decompileStatus, asmCache, onOpenTabs, fetchDecompileResult],
     );
 
     // --- Load More Assembly ---
@@ -279,6 +304,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
     // --- Clear Cache ---
     const handleClearCache = useCallback(async () => {
         setDecompileCache({});
+        setDecompileStatus({});
         setAsmCache({});
         await invoke("clear_decompiler_cache").catch(() => {});
         log("Decompile & assembly cache cleared.");
@@ -304,6 +330,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
         fidRunning,
         lastFidResult,
         decompileCache,
+        decompileStatus,
         asmCache,
         asmHasMore,
         asmLoadingMore,
@@ -311,6 +338,7 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
         handleLoadBinary,
         handleRunFid,
         handleFunctionClick,
+        fetchDecompileResult,
         handleAsmLoadMore,
         handleToggleBookmark,
         handleRecordPatch,

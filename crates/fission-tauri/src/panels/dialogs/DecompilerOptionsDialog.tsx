@@ -16,6 +16,7 @@ interface DecompilerOptionsDialogProps {
 }
 
 type TabId = "analysis" | "postprocess" | "display" | "performance";
+type DecompilerOptionsCategory = Exclude<keyof DecompilerOptions, "engine_mode">;
 
 interface ToggleRowProps {
     label: string;
@@ -131,7 +132,7 @@ export default function DecompilerOptionsDialog({
     }, [open, onLog]);
 
     const update = useCallback(
-        <K extends keyof DecompilerOptions>(
+        <K extends DecompilerOptionsCategory>(
             category: K,
             field: string,
             value: boolean | number | string,
@@ -196,6 +197,23 @@ export default function DecompilerOptionsDialog({
                     {activeTab === "analysis" && (
                         <div className="decomp-opts__section">
                             <div className="decomp-opts__section-title">Ghidra Engine Analysis</div>
+                            <SelectRow
+                                label="Decompiler Engine"
+                                description="Choose legacy Ghidra output, MLIL preview, or auto preview-first mode"
+                                value={options.engine_mode}
+                                options={[
+                                    { value: "auto", label: "Auto (Preview when safe)" },
+                                    { value: "legacy", label: "Legacy" },
+                                    { value: "mlil_preview", label: "MLIL Preview" },
+                                ]}
+                                onChange={(v) => {
+                                    setOptions((prev) => ({
+                                        ...prev,
+                                        engine_mode: v as DecompilerOptions["engine_mode"],
+                                    }));
+                                    setDirty(true);
+                                }}
+                            />
                             <ToggleRow
                                 label="Infer Constant Pointers"
                                 description="Treat constants as pointers when plausible"

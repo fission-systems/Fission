@@ -158,6 +158,7 @@ fn print_help() {
     println!("  -v, --verbose              Show detailed progress");
     println!("      --compiler-id <ID>     Override compiler ABI hint");
     println!("      --profile <P>          Decomp profile: balanced|quality|speed");
+    println!("      --engine <E>           Decomp engine: legacy|mlil-preview|auto");
     println!("      --no-header            Suppress function header comments");
     println!("      --ghidra-compat        Suppress headers/warnings + strip inferred structs");
     println!("      --no-warnings          Suppress WARNING/NOTICE lines");

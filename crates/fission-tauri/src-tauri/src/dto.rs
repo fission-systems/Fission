@@ -35,6 +35,9 @@ pub struct DecompileResult {
     pub code: String,
     pub function_name: String,
     pub address: String,
+    pub engine_used: DecompilerEngineMode,
+    pub fell_back: bool,
+    pub fallback_reason: Option<String>,
 }
 
 /// Single assembly instruction.
@@ -193,11 +196,22 @@ impl Default for AppSettings {
 /// Divided into four categories: Analysis, Post-Processing, Display, Performance.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DecompilerOptions {
+    #[serde(default)]
+    pub engine_mode: DecompilerEngineMode,
     pub analysis: AnalysisOptions,
     pub cpp_postprocess: CppPostProcessOptions,
     pub rust_postprocess: RustPostProcessOptions,
     pub display: DisplayOptions,
     pub performance: PerformanceOptions,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DecompilerEngineMode {
+    Legacy,
+    MlilPreview,
+    #[default]
+    Auto,
 }
 
 /// Ghidra engine analysis options (controlled via FFI set_feature).

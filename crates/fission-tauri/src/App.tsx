@@ -70,9 +70,9 @@ function App() {
         patches, hexData, xrefs,
         loading, progress, fidRunning,
         lastFidResult,
-        decompileCache, asmCache, asmHasMore, asmLoadingMore,
+        decompileCache, decompileStatus, asmCache, asmHasMore, asmLoadingMore,
         handleOpenFile, handleLoadBinary, handleRunFid,
-        handleFunctionClick, handleAsmLoadMore,
+        handleFunctionClick, fetchDecompileResult, handleAsmLoadMore,
         handleToggleBookmark: handleToggleBookmarkAt,
         handleRecordPatch, handleRevertPatch,
         handleClearCache: handleClearDecompileCache,
@@ -550,8 +550,8 @@ function App() {
                         {activeTab ? (
                             activeTab.type === "decompile" ? (
                                 <DecompileView
-                                    code={decompileCache[activeTab.id] ?? null}
-                                    functionName={activeTab.functionName}
+                                    result={decompileCache[activeTab.id] ?? null}
+                                    status={decompileStatus[activeTab.id] ?? "idle"}
                                     onSymbolClick={(sym) => {
                                         // Try to navigate to matching function by name
                                         const matchByName = functions.find(
@@ -713,14 +713,22 @@ function App() {
                 open={decompilerOptionsOpen}
                 onClose={() => setDecompilerOptionsOpen(false)}
                 onApplied={() => {
-                    // Re-decompile the current function if one is open
-                    const tab = tabs.find((t) => t.id === activeTabId);
-                    if (tab) {
+                    void (async () => {
+                        await handleClearDecompileCache();
+                        const tab = tabs.find((t) => t.id === activeTabId);
+                        if (tab?.type !== "decompile") {
+                            return;
+                        }
                         const addr = parseAddress(tab.address);
                         if (addr !== null) {
-                            invoke("decompile_function", { address: addr }).catch(() => {});
+                            await fetchDecompileResult(
+                                addr,
+                                tab.id,
+                                tab.functionName,
+                                tab.address,
+                            );
                         }
-                    }
+                    })();
                 }}
                 onLog={log}
             />

@@ -1,6 +1,7 @@
 use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::common::{
-    apply_profile, init_decompiler, resolve_compiler_id, resolve_profile,
+    EngineMode, apply_profile, init_decompiler, resolve_compiler_id, resolve_engine_mode,
+    resolve_profile,
 };
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
@@ -9,8 +10,12 @@ use fission_analysis::analysis::decomp::{
     PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
     serialize_win_api_signatures_json,
 };
+use fission_core::FissionError;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use fission_pcode::{
+    MlilPreviewOptions, PcodeFunction, PcodeOptimizer, PcodeOptimizerConfig, render_mlil_preview,
+};
 use std::fs;
 use std::io::{self, Write};
 use tracing::warn;
@@ -119,10 +124,169 @@ fn attach_native_timing(entry: &mut serde_json::Value, decomp: &DecompilerNative
 struct DecompEntry {
     address: u64,
     name: String,
-    code: Result<String, fission_core::FissionError>,
+    code: Result<RenderedCode, fission_core::FissionError>,
     decomp_sec: f64,
     postprocess_sec: f64,
     last_timing_json: Option<String>,
+}
+
+struct RenderedCode {
+    code: String,
+    postprocess_sec: f64,
+    engine_used: &'static str,
+    fell_back: bool,
+    fallback_reason: Option<String>,
+}
+
+fn render_legacy_code(
+    binary: &LoadedBinary,
+    result: fission_ffi::DecompilationResult,
+) -> (String, f64) {
+    let postprocessor = PostProcessor::new()
+        .with_inferred_types(
+            result
+                .inferred_types
+                .into_iter()
+                .chain(binary.inferred_types.iter().cloned())
+                .collect(),
+        )
+        .with_string_map(Some(binary.inner().string_map.clone()));
+    let postprocess_start = std::time::Instant::now();
+    let code = postprocessor.process(&result.code);
+    let postprocess_sec = postprocess_start.elapsed().as_secs_f64();
+    (code, postprocess_sec)
+}
+
+fn legacy_rendered_code(
+    binary: &LoadedBinary,
+    result: fission_ffi::DecompilationResult,
+) -> RenderedCode {
+    let (code, postprocess_sec) = render_legacy_code(binary, result);
+    RenderedCode {
+        code,
+        postprocess_sec,
+        engine_used: "legacy",
+        fell_back: false,
+        fallback_reason: None,
+    }
+}
+
+fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
+    pcode.blocks.iter().map(|block| block.ops.len()).sum()
+}
+
+fn max_multiequal_fanin(pcode: &PcodeFunction) -> usize {
+    pcode
+        .blocks
+        .iter()
+        .flat_map(|block| block.ops.iter())
+        .filter(|op| op.opcode == fission_pcode::PcodeOpcode::MultiEqual)
+        .map(|op| op.inputs.len())
+        .max()
+        .unwrap_or(0)
+}
+
+fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
+    pcode.blocks.iter().flat_map(|block| block.ops.iter()).any(|op| {
+        matches!(
+            op.opcode,
+            fission_pcode::PcodeOpcode::CallInd | fission_pcode::PcodeOpcode::BranchInd
+        )
+    })
+}
+
+fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
+    binary.is_64bit
+        && binary.format.eq_ignore_ascii_case("PE")
+        && pcode.blocks.len() <= 8
+        && pcode_total_ops(pcode) <= 400
+        && !contains_indirect_control_flow(pcode)
+        && max_multiequal_fanin(pcode) <= 4
+}
+
+fn try_mlil_preview_code(
+    decomp: &DecompilerNative,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+) -> Result<String, FissionError> {
+    let pcode_json = decomp.get_pcode(address)?;
+    let mut pcode = PcodeFunction::from_json(&pcode_json)
+        .map_err(|e| FissionError::decompiler(format!("mlil-preview pcode parse failed: {}", e)))?;
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
+    let _ = optimizer.optimize(&mut pcode);
+    let options = MlilPreviewOptions::from_loaded_binary(binary);
+    render_mlil_preview(&pcode, name, address, &options)
+        .map_err(|e| FissionError::decompiler(format!("mlil-preview unavailable: {}", e)))
+}
+
+fn try_mlil_preview_with_mode(
+    engine_mode: EngineMode,
+    decomp: &DecompilerNative,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+) -> Result<Option<String>, FissionError> {
+    match engine_mode {
+        EngineMode::Legacy => Ok(None),
+        EngineMode::MlilPreview => try_mlil_preview_code(decomp, binary, address, name).map(Some),
+        EngineMode::Auto => {
+            let pcode_json = decomp.get_pcode(address)?;
+            let mut pcode = PcodeFunction::from_json(&pcode_json).map_err(|e| {
+                FissionError::decompiler(format!("mlil-preview pcode parse failed: {}", e))
+            })?;
+            if !auto_mlil_eligible(binary, &pcode) {
+                return Ok(None);
+            }
+            let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
+            let _ = optimizer.optimize(&mut pcode);
+            let options = MlilPreviewOptions::from_loaded_binary(binary);
+            render_mlil_preview(&pcode, name, address, &options)
+                .map(Some)
+                .map_err(|e| FissionError::decompiler(format!("mlil-preview unavailable: {}", e)))
+        }
+    }
+}
+
+fn decompile_code_with_profile(
+    _profile: &str,
+    engine_mode: EngineMode,
+    decomp: &DecompilerNative,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    verbose: bool,
+) -> Result<RenderedCode, FissionError> {
+    if let Some(code) = match try_mlil_preview_with_mode(engine_mode, decomp, binary, address, name)
+    {
+        Ok(code) => code,
+        Err(err) => {
+            if verbose && engine_mode != EngineMode::Legacy {
+                eprintln!(
+                    "[mlil-preview] Falling back to legacy decompiler for {} @ 0x{:x}: {}",
+                    name, address, err
+                );
+            }
+            None
+        }
+    } {
+        return Ok(RenderedCode {
+            code,
+            postprocess_sec: 0.0,
+            engine_used: "mlil_preview",
+            fell_back: false,
+            fallback_reason: None,
+        });
+    }
+
+    let result = decomp.decompile_with_metadata(address)?;
+    let mut rendered = legacy_rendered_code(binary, result);
+    if engine_mode != EngineMode::Legacy {
+        rendered.fell_back = true;
+        rendered.fallback_reason =
+            Some("mlil-preview unavailable or ineligible; fell back to legacy".to_string());
+    }
+    Ok(rendered)
 }
 
 fn run_sequential_decompilation<'a>(
@@ -131,6 +295,8 @@ fn run_sequential_decompilation<'a>(
     binary: &LoadedBinary,
     binary_data: &[u8],
     functions: &[&'a FunctionInfo],
+    selected_profile: &str,
+    engine_mode: EngineMode,
     effective_no_header: bool,
     effective_no_warnings: bool,
     effective_json: bool,
@@ -146,23 +312,21 @@ fn run_sequential_decompilation<'a>(
 
         let _silencer = OutputSilencer::new_if(!cli.verbose);
         let func_start = std::time::Instant::now();
-        match decomp.decompile_with_metadata(func.address) {
-            Ok(result) => {
+        match decompile_code_with_profile(
+            selected_profile,
+            engine_mode,
+            decomp,
+            binary,
+            func.address,
+            &func.name,
+            cli.verbose,
+        ) {
+            Ok(rendered) => {
+                let postprocess_sec = rendered.postprocess_sec;
                 let decomp_sec = func_start.elapsed().as_secs_f64();
                 total_decomp_secs += decomp_sec;
-                let merged_types: Vec<_> = result
-                    .inferred_types
-                    .into_iter()
-                    .chain(binary.inferred_types.iter().cloned())
-                    .collect();
-                let postprocessor = PostProcessor::new()
-                    .with_inferred_types(merged_types)
-                    .with_string_map(Some(binary.inner().string_map.clone()));
-                let postprocess_start = std::time::Instant::now();
-                let code = postprocessor.process(&result.code);
-                let postprocess_sec = postprocess_start.elapsed().as_secs_f64();
                 total_postprocess_secs += postprocess_sec;
-                let mut filtered = code.clone();
+                let mut filtered = rendered.code.clone();
                 if effective_no_warnings {
                     filtered = strip_warnings(&filtered);
                 }
@@ -174,7 +338,10 @@ fn run_sequential_decompilation<'a>(
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
-                        "code": filtered
+                        "code": filtered,
+                        "engine_used": rendered.engine_used,
+                        "fell_back": rendered.fell_back,
+                        "fallback_reason": rendered.fallback_reason,
                     });
                     if cli.benchmark {
                         entry["decomp_sec"] =
@@ -211,6 +378,8 @@ fn run_sequential_decompilation<'a>(
                             "address": format!("0x{:x}", func.address),
                             "name": func.name,
                             "code": fallback,
+                            "engine_used": "legacy",
+                            "fell_back": true,
                             "fallback": "assembly",
                             "fallback_reason": error_text,
                             "fallback_class": fallback_class
@@ -241,6 +410,8 @@ fn run_sequential_decompilation<'a>(
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
+                        "engine_used": "legacy",
+                        "fell_back": false,
                         "error": error_text
                     });
                     if cli.benchmark {
@@ -276,6 +447,7 @@ fn run_parallel_decompilation<'a>(
     functions: &[&'a FunctionInfo],
     _prepare_timings: &PrepareTimings,
     selected_profile: &str,
+    engine_mode: EngineMode,
     _init_elapsed_sec: f64,
     _init_start: std::time::Instant,
     effective_no_header: bool,
@@ -287,9 +459,6 @@ fn run_parallel_decompilation<'a>(
     let gdt_path_owned = fission_core::PATHS
         .get_gdt_path(binary.is_64bit)
         .and_then(|p| p.to_str().map(String::from));
-    let inferred_types = binary.inferred_types.clone();
-    let string_map = binary.inner().string_map.clone();
-
     // Dynamic worker scaling: avoid negative scaling when function count is low.
     // Each worker incurs ~3–4s init (FID/GDT/.sla). With 20 functions, 8 workers → 62s vs 1 → 26s.
     // Heuristic: aim for ≥50 functions per worker so init cost is amortized (Amdahl's Law).
@@ -307,34 +476,41 @@ fn run_parallel_decompilation<'a>(
         let mut entries = Vec::with_capacity(buckets[0].len());
         for func in &buckets[0] {
             let start = std::time::Instant::now();
-            let code_result = main_decomp.decompile_with_metadata(func.address);
+            let code_result = decompile_code_with_profile(
+                selected_profile,
+                engine_mode,
+                main_decomp,
+                binary,
+                func.address,
+                &func.name,
+                false,
+            );
             let decomp_sec = start.elapsed().as_secs_f64();
-            let (code_result, postprocess_sec) = match code_result {
-                Ok(result) => {
-                    let merged: Vec<_> = result
-                        .inferred_types
-                        .into_iter()
-                        .chain(inferred_types.iter().cloned())
-                        .collect();
-                    let pp = PostProcessor::new()
-                        .with_inferred_types(merged)
-                        .with_string_map(Some(string_map.clone()));
-                    let pp_start = std::time::Instant::now();
-                    let processed = pp.process(&result.code);
-                    let pp_sec = pp_start.elapsed().as_secs_f64();
-                    (Ok(processed), pp_sec)
-                }
-                Err(e) => {
-                    let error_text = e.to_string();
-                    if let Some(fallback) =
-                        make_assembly_fallback(binary, binary_data, func, &error_text)
-                    {
-                        (Ok(fallback), 0.0)
-                    } else {
-                        (Err(e), 0.0)
-                    }
-                }
-            };
+                    let (code_result, postprocess_sec) = match code_result {
+                        Ok(rendered) => {
+                            let postprocess_sec = rendered.postprocess_sec;
+                            (Ok(rendered), postprocess_sec)
+                        }
+                        Err(e) => {
+                            let error_text = e.to_string();
+                            if let Some(fallback) =
+                                make_assembly_fallback(binary, binary_data, func, &error_text)
+                            {
+                                (
+                                    Ok(RenderedCode {
+                                        code: fallback,
+                                        postprocess_sec: 0.0,
+                                        engine_used: "legacy",
+                                        fell_back: true,
+                                        fallback_reason: Some(error_text),
+                                    }),
+                                    0.0,
+                                )
+                            } else {
+                                (Err(e), 0.0)
+                            }
+                        }
+                    };
             let timing = main_decomp.get_last_timing_json().ok();
             entries.push(DecompEntry {
                 address: func.address,
@@ -388,29 +564,36 @@ fn run_parallel_decompilation<'a>(
             let mut entries = Vec::with_capacity(bucket.len());
             for func in bucket.iter().copied() {
                 let start = std::time::Instant::now();
-                let code_result = decomp.decompile_with_metadata(func.address);
+                let code_result = decompile_code_with_profile(
+                    selected_profile,
+                    engine_mode,
+                    &decomp,
+                    binary,
+                    func.address,
+                    &func.name,
+                    false,
+                );
                 let decomp_sec = start.elapsed().as_secs_f64();
                 let (code_result, postprocess_sec) = match code_result {
-                    Ok(result) => {
-                        let merged: Vec<_> = result
-                            .inferred_types
-                            .into_iter()
-                            .chain(inferred_types.iter().cloned())
-                            .collect();
-                        let pp = PostProcessor::new()
-                            .with_inferred_types(merged)
-                            .with_string_map(Some(string_map.clone()));
-                        let pp_start = std::time::Instant::now();
-                        let processed = pp.process(&result.code);
-                        let pp_sec = pp_start.elapsed().as_secs_f64();
-                        (Ok(processed), pp_sec)
+                    Ok(rendered) => {
+                        let postprocess_sec = rendered.postprocess_sec;
+                        (Ok(rendered), postprocess_sec)
                     }
                     Err(e) => {
                         let error_text = e.to_string();
                         if let Some(fallback) =
                             make_assembly_fallback(binary, binary_data, func, &error_text)
                         {
-                            (Ok(fallback), 0.0)
+                            (
+                                Ok(RenderedCode {
+                                    code: fallback,
+                                    postprocess_sec: 0.0,
+                                    engine_used: "legacy",
+                                    fell_back: true,
+                                    fallback_reason: Some(error_text),
+                                }),
+                                0.0,
+                            )
                         } else {
                             (Err(e), 0.0)
                         }
@@ -449,8 +632,8 @@ fn run_parallel_decompilation<'a>(
         total_postprocess_secs += entry.postprocess_sec;
 
         match &entry.code {
-            Ok(code) => {
-                let mut filtered = code.clone();
+            Ok(rendered) => {
+                let mut filtered = rendered.code.clone();
                 if effective_no_warnings {
                     filtered = strip_warnings(&filtered);
                 }
@@ -462,7 +645,10 @@ fn run_parallel_decompilation<'a>(
                     let mut json_entry = serde_json::json!({
                         "address": format!("0x{:x}", entry.address),
                         "name": entry.name,
-                        "code": filtered
+                        "code": filtered,
+                        "engine_used": rendered.engine_used,
+                        "fell_back": rendered.fell_back,
+                        "fallback_reason": rendered.fallback_reason,
                     });
                     if cli.benchmark {
                         json_entry["decomp_sec"] = serde_json::json!(
@@ -498,6 +684,8 @@ fn run_parallel_decompilation<'a>(
                     let mut json_entry = serde_json::json!({
                         "address": format!("0x{:x}", entry.address),
                         "name": entry.name,
+                        "engine_used": "legacy",
+                        "fell_back": false,
                         "error": e.to_string()
                     });
                     if cli.benchmark {
@@ -576,9 +764,11 @@ pub(super) fn run_decompilation(
 
     // Apply one-shot profile before binary load/decompilation.
     let (selected_profile, unknown_profile) = resolve_profile(cli.profile.as_deref());
+    let (engine_mode, unknown_engine, deprecated_preview_alias) =
+        resolve_engine_mode(cli.engine.as_deref(), cli.profile.as_deref());
     if let Some(other) = unknown_profile {
         eprintln!(
-            "[!] Unknown --profile '{}', using balanced (quality|speed|balanced)",
+            "[!] Unknown --profile '{}', using balanced (quality|speed|balanced|mlil-preview)",
             other
         );
         warn!(
@@ -586,10 +776,23 @@ pub(super) fn run_decompilation(
             "unknown decompilation profile, using balanced"
         );
     }
+    if let Some(other) = unknown_engine {
+        eprintln!(
+            "[!] Unknown --engine '{}', using auto (legacy|mlil-preview|auto)",
+            other
+        );
+        warn!(engine = other, "unknown decompilation engine, using auto");
+    }
+    if deprecated_preview_alias && cli.verbose {
+        eprintln!(
+            "[*] '--profile mlil-preview' is deprecated; use '--engine mlil-preview --profile quality'"
+        );
+    }
     apply_profile(&mut decomp, selected_profile);
 
     if cli.verbose {
         eprintln!("[*] Decompilation profile = {}", selected_profile);
+        eprintln!("[*] Decompilation engine = {:?}", engine_mode);
     }
 
     let mut prepare_timings = PrepareTimings::default();
@@ -656,7 +859,16 @@ pub(super) fn run_decompilation(
         if let Some(addr) = cli.address {
             eprintln!("Warning: No function found at address 0x{:x}", addr);
             // Try to decompile anyway
-            decompile_and_output(cli, &decomp, binary, addr, &format!("sub_{:x}", addr))?;
+            decompile_and_output(
+                cli,
+                &decomp,
+                binary,
+                binary_data,
+                selected_profile,
+                engine_mode,
+                addr,
+                &format!("sub_{:x}", addr),
+            )?;
         }
         return Ok(());
     }
@@ -678,6 +890,7 @@ pub(super) fn run_decompilation(
             &functions,
             &prepare_timings,
             selected_profile,
+            engine_mode,
             init_elapsed.as_secs_f64(),
             init_start,
             effective_no_header,
@@ -691,6 +904,8 @@ pub(super) fn run_decompilation(
             binary,
             binary_data,
             &functions,
+            selected_profile,
+            engine_mode,
             effective_no_header,
             effective_no_warnings,
             effective_json,
@@ -704,6 +919,7 @@ pub(super) fn run_decompilation(
                 "tool": "fission",
                 "version": env!("CARGO_PKG_VERSION"),
                 "profile": cli.profile.as_deref().unwrap_or("balanced"),
+                "engine": cli.engine.as_deref().unwrap_or("auto"),
                 "function_count": functions.len(),
                 "init_sec": (init_elapsed.as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
                 "prepare_timings": &prepare_timings,
@@ -756,6 +972,9 @@ pub(super) fn decompile_and_output(
     cli: &OneShotArgs,
     decomp: &DecompilerNative,
     binary: &LoadedBinary,
+    binary_data: &[u8],
+    selected_profile: &str,
+    engine_mode: EngineMode,
     addr: u64,
     name: &str,
 ) -> io::Result<()> {
@@ -763,15 +982,18 @@ pub(super) fn decompile_and_output(
     let effective_no_warnings = cli.no_warnings || cli.ghidra_compat;
 
     let _silencer = OutputSilencer::new_if(!cli.verbose);
-    match decomp.decompile_with_metadata(addr) {
-        Ok(result) => {
-            // Apply Rust-side post-processing with StructureAnalyzer inferred types
-            let postprocessor = PostProcessor::new()
-                .with_inferred_types(result.inferred_types)
-                .with_string_map(Some(binary.inner().string_map.clone()));
-            let code = postprocessor.process(&result.code);
+    match decompile_code_with_profile(
+        selected_profile,
+        engine_mode,
+        decomp,
+        binary,
+        addr,
+        name,
+        cli.verbose,
+    ) {
+        Ok(rendered) => {
             // Apply output filters
-            let mut filtered = code.clone();
+            let mut filtered = rendered.code.clone();
             if effective_no_warnings {
                 filtered = strip_warnings(&filtered);
             }
@@ -783,7 +1005,10 @@ pub(super) fn decompile_and_output(
                 let json_output = serde_json::to_string_pretty(&serde_json::json!({
                     "address": format!("0x{:x}", addr),
                     "name": name,
-                    "code": filtered
+                    "code": filtered,
+                    "engine_used": rendered.engine_used,
+                    "fell_back": rendered.fell_back,
+                    "fallback_reason": rendered.fallback_reason,
                 }))
                 .map_err(|e| {
                     io::Error::new(
@@ -820,7 +1045,16 @@ pub(super) fn decompile_and_output(
             }
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            let error_text = e.to_string();
+            if let Some(func) = binary.function_at_exact(addr)
+                && let Some(fallback) =
+                    make_assembly_fallback(binary, binary_data, func, &error_text)
+            {
+                let mut stdout = io::stdout().lock();
+                writeln!(stdout, "{}", fallback)?;
+                return Ok(());
+            }
+            eprintln!("Error: {}", error_text);
             std::process::exit(1);
         }
     }

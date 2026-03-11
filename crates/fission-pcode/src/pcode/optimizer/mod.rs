@@ -6,9 +6,11 @@
 //! 3. Can optimize before high-level C constructs are generated
 //! 4. Matches Ghidra's own optimization framework
 
+mod copy_propagation;
 mod cse;
 mod dead_code;
 mod def_use;
+mod loop_header;
 mod rules;
 
 #[cfg(test)]
@@ -18,9 +20,11 @@ mod tests_dead_bit;
 
 use crate::pcode::{PcodeFunction, PcodeOpcode};
 
+pub use copy_propagation::CopyPropagator;
 pub use cse::CommonSubexpressionEliminator;
 pub use dead_code::DeadCodeEliminator;
 pub use def_use::DefUseTracker;
+pub use loop_header::LoopHeaderTempCoalescer;
 pub use rules::OptimizationRules;
 
 /// Configuration for Pcode optimization
@@ -31,6 +35,8 @@ pub struct PcodeOptimizerConfig {
     pub enable_algebraic_simplification: bool,
     pub enable_dead_code_elimination: bool,
     pub enable_cse: bool,
+    pub enable_copy_propagation: bool,
+    pub enable_loop_header_temp_coalescing: bool,
 }
 
 impl Default for PcodeOptimizerConfig {
@@ -41,6 +47,8 @@ impl Default for PcodeOptimizerConfig {
             enable_algebraic_simplification: true,
             enable_dead_code_elimination: true,
             enable_cse: true,
+            enable_copy_propagation: true,
+            enable_loop_header_temp_coalescing: true,
         }
     }
 }
@@ -53,6 +61,8 @@ pub struct PcodeOptimizer {
     dead_code_eliminator: DeadCodeEliminator,
     def_use_tracker: DefUseTracker,
     cse: CommonSubexpressionEliminator,
+    copy_propagator: CopyPropagator,
+    loop_header_temp_coalescer: LoopHeaderTempCoalescer,
 }
 
 impl PcodeOptimizer {
@@ -64,6 +74,8 @@ impl PcodeOptimizer {
             def_use_tracker: DefUseTracker::new(),
             dead_code_eliminator: DeadCodeEliminator::new(),
             cse: CommonSubexpressionEliminator::new(),
+            copy_propagator: CopyPropagator::new(),
+            loop_header_temp_coalescer: LoopHeaderTempCoalescer::new(),
         }
     }
 
@@ -83,19 +95,38 @@ impl PcodeOptimizer {
                 self.optimize_arithmetic(func);
             }
 
-            // Pass 2: Common Subexpression Elimination (CSE)
+            // Pass 2: Single-use COPY/CAST propagation
+            self.def_use_tracker.build(func);
+            if self.config.enable_copy_propagation {
+                if self.copy_propagator.eliminate(func, &self.def_use_tracker) {
+                    self.modified = true;
+                }
+            }
+
+            // Pass 3: Loop-header temp coalescing for MULTIEQUAL forwarding
+            self.def_use_tracker.build(func);
+            if self.config.enable_loop_header_temp_coalescing {
+                if self
+                    .loop_header_temp_coalescer
+                    .eliminate(func, &self.def_use_tracker)
+                {
+                    self.modified = true;
+                }
+            }
+
+            // Pass 4: Common Subexpression Elimination (CSE)
             if self.config.enable_cse {
                 if self.cse.eliminate(func) {
                     self.modified = true;
                 }
             }
 
-            // Pass 3: Identity operation removal
+            // Pass 5: Identity operation removal
             if self.config.enable_identity_removal {
                 self.remove_identity_ops(func);
             }
 
-            // Pass 4: Dead code elimination
+            // Pass 6: Dead code elimination
             if self.config.enable_dead_code_elimination {
                 self.dead_code_eliminator
                     .eliminate(func, &mut self.modified);

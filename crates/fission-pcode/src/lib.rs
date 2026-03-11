@@ -15,6 +15,7 @@
 
 // Re-export fission-disasm directly (no wrapper needed)
 pub use fission_disasm as disasm;
+pub mod nir;
 mod pcode;
 pub mod prelude;
 
@@ -22,4 +23,8 @@ pub mod prelude;
 pub use pcode::*;
 
 // Re-export optimizer
+pub use nir::{
+    HirExpr, HirFunction, HirStmt, MlilPreviewError, MlilPreviewOptions, NirBlock, NirFunction,
+    NirTerminator, NirType, NirValueId, StackSlotId, render_mlil_preview,
+};
 pub use pcode::optimizer::{PcodeOptimizer, PcodeOptimizerConfig};

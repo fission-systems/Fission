@@ -4,6 +4,13 @@ use fission_core::find_sla_dir;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::LoadedBinary;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EngineMode {
+    Legacy,
+    MlilPreview,
+    Auto,
+}
+
 pub(super) fn init_decompiler(verbose: bool) -> DecompilerNative {
     let sla_dir = find_sla_dir();
 
@@ -36,13 +43,40 @@ pub(super) fn resolve_profile(profile: Option<&str>) -> (&'static str, Option<St
         "quality" => ("quality", None),
         "speed" => ("speed", None),
         "balanced" => ("balanced", None),
+        "mlil-preview" => ("quality", None),
         _ => ("balanced", Some(selected)),
     }
 }
 
+pub(super) fn resolve_engine_mode(
+    engine: Option<&str>,
+    profile: Option<&str>,
+) -> (EngineMode, Option<String>, bool) {
+    if let Some(engine) = engine {
+        let normalized = engine.to_ascii_lowercase();
+        let mode = match normalized.as_str() {
+            "legacy" => EngineMode::Legacy,
+            "mlil-preview" | "mlil_preview" => EngineMode::MlilPreview,
+            "auto" => EngineMode::Auto,
+            _ => EngineMode::Auto,
+        };
+        let unknown = match normalized.as_str() {
+            "legacy" | "mlil-preview" | "mlil_preview" | "auto" => None,
+            _ => Some(engine.to_string()),
+        };
+        return (mode, unknown, false);
+    }
+
+    if matches!(profile, Some(profile) if profile.eq_ignore_ascii_case("mlil-preview")) {
+        return (EngineMode::MlilPreview, None, true);
+    }
+
+    (EngineMode::Auto, None, false)
+}
+
 pub(super) fn apply_profile(decomp: &mut DecompilerNative, profile: &str) {
     match profile {
-        "quality" => {
+        "quality" | "mlil-preview" => {
             decomp.set_feature("infer_pointers", true);
             decomp.set_feature("analyze_loops", true);
             decomp.set_feature("readonly_propagate", true);

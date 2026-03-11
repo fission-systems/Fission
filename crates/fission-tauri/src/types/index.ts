@@ -23,6 +23,9 @@ export interface DecompileResult {
     code: string;
     function_name: string;
     address: string;
+    engine_used: DecompilerEngineMode;
+    fell_back: boolean;
+    fallback_reason?: string | null;
 }
 
 export interface AsmInstructionDto {
@@ -162,12 +165,15 @@ export interface AppSettings {
 // ============================================================================
 
 export interface DecompilerOptions {
+    engine_mode: DecompilerEngineMode;
     analysis: AnalysisOptions;
     cpp_postprocess: CppPostProcessOptions;
     rust_postprocess: RustPostProcessOptions;
     display: DisplayOptions;
     performance: PerformanceOptions;
 }
+
+export type DecompilerEngineMode = "legacy" | "mlil_preview" | "auto";
 
 /** Ghidra engine analysis options (controlled via FFI set_feature). */
 export interface AnalysisOptions {
@@ -246,6 +252,7 @@ export interface PerformanceOptions {
 /** Creates default DecompilerOptions matching Rust defaults. */
 export function defaultDecompilerOptions(): DecompilerOptions {
     return {
+        engine_mode: "auto",
         analysis: {
             infer_pointers: true,
             analyze_loops: true,

@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback, useRef } from "react";
+import type { DecompileResult } from "../../types";
 
 interface DecompileViewProps {
-    code: string | null;
-    functionName?: string;
+    result: DecompileResult | null;
+    status?: "idle" | "loading" | "ready" | "error";
     onSymbolClick?: (symbol: string) => void;
     onRename?: (symbol: string) => void;
 }
@@ -137,11 +138,12 @@ function tokenize(line: string): Token[] {
 }
 
 export default function DecompileView({
-    code,
-    functionName,
+    result,
+    status = "idle",
     onSymbolClick,
     onRename,
 }: DecompileViewProps) {
+    const code = result?.code ?? null;
     const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
     const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
@@ -179,6 +181,14 @@ export default function DecompileView({
         [onRename],
     );
 
+    if (!code && status === "loading") {
+        return (
+            <div className="decomp-view decomp-view--empty">
+                <div className="decomp-view__placeholder">Decompiling function...</div>
+            </div>
+        );
+    }
+
     if (!code) {
         return (
             <div className="decomp-view decomp-view--empty">
@@ -189,9 +199,19 @@ export default function DecompileView({
 
     return (
         <div className="decomp-view">
-            {functionName && (
+            {result && (
                 <div className="decomp-view__header">
-                    <span className="decomp-view__func-name">{functionName}</span>
+                    <div className="decomp-view__header-left">
+                        <span className="decomp-view__func-name">{result.function_name}</span>
+                        <span className="decomp-view__func-name">{result.address}</span>
+                        <span className="decomp-view__func-name">
+                            {result.fell_back
+                                ? "MLIL Preview -> Legacy fallback"
+                                : result.engine_used === "mlil_preview"
+                                  ? "MLIL Preview"
+                                  : "Legacy"}
+                        </span>
+                    </div>
                     <button
                         className="decomp-view__copy-btn"
                         onClick={handleCopy}

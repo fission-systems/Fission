@@ -1,0 +1,909 @@
+{
+  "binaries": [
+    {
+      "binary": "test_control_flow_x64_O0",
+      "function_count": 30,
+      "shared_success_count": 30,
+      "fission_success_count": 30,
+      "ghidra_success_count": 30,
+      "fission_failure_count": 0,
+      "ghidra_failure_count": 0,
+      "control_flow": {
+        "ghidra_gotos": 3,
+        "fission_gotos": 3,
+        "goto_reduction_pct": 0.0,
+        "ghidra_switches": 0,
+        "fission_switches": 2,
+        "ghidra_for_loops": 8,
+        "fission_for_loops": 10,
+        "ghidra_do_while": 3,
+        "fission_do_while": 3
+      },
+      "type_promotion": {
+        "fission_hits": {},
+        "ghidra_hits": {
+          "LPVOID": 2
+        }
+      },
+      "type_preservation_counts": {
+        "fission": {},
+        "ghidra": {
+          "LPVOID": 2
+        }
+      },
+      "fallback_counts": {
+        "fission": {
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0
+        },
+        "ghidra": {
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0
+        }
+      },
+      "cast_chain_counts": {
+        "fission": 0,
+        "ghidra": 1
+      },
+      "residue_rankings": {
+        "single_assign_temps": {
+          "uVar1": 11,
+          "uVar2": 4,
+          "bVar16": 3,
+          "uVar3": 2,
+          "xVar8": 1,
+          "iVar6": 1,
+          "iVar1": 1,
+          "xVar2": 1
+        },
+        "residue_names": {
+          "uVar1": 23,
+          "uVar2": 18,
+          "bVar16": 7,
+          "uVar3": 6,
+          "iVar6": 3,
+          "xVar8": 3,
+          "iVar1": 3,
+          "xVar2": 3
+        },
+        "residue_families": {
+          "uVar": 47,
+          "bVar": 7,
+          "iVar": 6,
+          "xVar": 6,
+          "uStack": 0,
+          "xStack": 0,
+          "axStack": 0,
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0,
+          "redundant_return_temp": 0
+        }
+      },
+      "top_residue_offenders": [
+        {
+          "address": "0x140001a00",
+          "name": "main",
+          "residue_score": 38,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 12,
+          "top_residue_names": {
+            "uVar1": 23,
+            "xVar2": 3
+          }
+        },
+        {
+          "address": "0x140001010",
+          "name": "__tmainCRTStartup",
+          "residue_score": 18,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 5,
+          "top_residue_names": {
+            "bVar16": 7,
+            "iVar6": 3,
+            "xVar8": 3
+          }
+        },
+        {
+          "address": "0x140001c80",
+          "name": "__do_global_ctors",
+          "residue_score": 15,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 3,
+          "top_residue_names": {
+            "uVar2": 9,
+            "uVar3": 3
+          }
+        },
+        {
+          "address": "0x140001d00",
+          "name": "__main",
+          "residue_score": 15,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 3,
+          "top_residue_names": {
+            "uVar2": 9,
+            "uVar3": 3
+          }
+        },
+        {
+          "address": "0x1400019b3",
+          "name": "fibonacci(int)",
+          "residue_score": 4,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 1,
+          "top_residue_names": {
+            "iVar1": 3
+          }
+        }
+      ],
+      "failure_class_counts": {
+        "fission": {},
+        "ghidra": {}
+      },
+      "timings": {
+        "fission_total_decomp_sec": 71.083375,
+        "fission_total_postprocess_sec": 0.55112,
+        "ghidra_total_decomp_sec": 0.193843
+      },
+      "ghidra_init_sec": 1.335126
+    },
+    {
+      "binary": "test_structs_classes_x64_O0",
+      "function_count": 30,
+      "shared_success_count": 30,
+      "fission_success_count": 30,
+      "ghidra_success_count": 30,
+      "fission_failure_count": 0,
+      "ghidra_failure_count": 0,
+      "control_flow": {
+        "ghidra_gotos": 17,
+        "fission_gotos": 15,
+        "goto_reduction_pct": 11.76,
+        "ghidra_switches": 2,
+        "fission_switches": 2,
+        "ghidra_for_loops": 5,
+        "fission_for_loops": 9,
+        "ghidra_do_while": 5,
+        "fission_do_while": 5
+      },
+      "type_promotion": {
+        "fission_hits": {},
+        "ghidra_hits": {}
+      },
+      "type_preservation_counts": {
+        "fission": {},
+        "ghidra": {}
+      },
+      "fallback_counts": {
+        "fission": {
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0
+        },
+        "ghidra": {
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0
+        }
+      },
+      "cast_chain_counts": {
+        "fission": 2,
+        "ghidra": 2
+      },
+      "residue_rankings": {
+        "single_assign_temps": {
+          "uVar2": 8,
+          "xVar5": 4,
+          "bVar16": 3,
+          "uVar3": 3,
+          "iVar4": 3,
+          "uVar1": 3,
+          "iVar1": 2,
+          "bVar4": 2,
+          "uVar5": 2,
+          "iVar2": 2,
+          "xVar8": 1,
+          "iVar6": 1
+        },
+        "residue_names": {
+          "uVar2": 28,
+          "uVar1": 22,
+          "uVar3": 13,
+          "uVar5": 12,
+          "xVar5": 11,
+          "iVar1": 10,
+          "iVar4": 8,
+          "bVar16": 7,
+          "iVar2": 6,
+          "bVar4": 4,
+          "iVar6": 3,
+          "xVar8": 3
+        },
+        "residue_families": {
+          "uVar": 75,
+          "iVar": 27,
+          "xVar": 14,
+          "bVar": 11,
+          "uStack": 0,
+          "xStack": 0,
+          "axStack": 0,
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0,
+          "redundant_return_temp": 0
+        }
+      },
+      "top_residue_offenders": [
+        {
+          "address": "0x140001e40",
+          "name": "d_ref_qualifier",
+          "residue_score": 35,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 7,
+          "top_residue_names": {
+            "uVar5": 12,
+            "uVar2": 8,
+            "iVar4": 8
+          }
+        },
+        {
+          "address": "0x1400016e7",
+          "name": "main",
+          "residue_score": 32,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 9,
+          "top_residue_names": {
+            "xVar5": 11,
+            "uVar2": 7,
+            "uVar3": 5
+          }
+        },
+        {
+          "address": "0x140001f10",
+          "name": "d_count_templates_scopes",
+          "residue_score": 24,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 3,
+          "top_residue_names": {
+            "uVar1": 13,
+            "uVar2": 8
+          }
+        },
+        {
+          "address": "0x140001010",
+          "name": "__tmainCRTStartup",
+          "residue_score": 18,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 5,
+          "top_residue_names": {
+            "bVar16": 7,
+            "iVar6": 3,
+            "xVar8": 3
+          }
+        },
+        {
+          "address": "0x1400020e0",
+          "name": "d_growable_string_callback_adapter",
+          "residue_score": 15,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 2,
+          "top_residue_names": {
+            "uVar3": 8,
+            "uVar1": 5
+          }
+        }
+      ],
+      "failure_class_counts": {
+        "fission": {},
+        "ghidra": {}
+      },
+      "timings": {
+        "fission_total_decomp_sec": 83.542635,
+        "fission_total_postprocess_sec": 0.651072,
+        "ghidra_total_decomp_sec": 0.171918
+      },
+      "ghidra_init_sec": 2.599957
+    },
+    {
+      "binary": "cmkr",
+      "function_count": 30,
+      "shared_success_count": 29,
+      "fission_success_count": 29,
+      "ghidra_success_count": 30,
+      "fission_failure_count": 1,
+      "ghidra_failure_count": 0,
+      "control_flow": {
+        "ghidra_gotos": 1,
+        "fission_gotos": 0,
+        "goto_reduction_pct": 100.0,
+        "ghidra_switches": 1,
+        "fission_switches": 1,
+        "ghidra_for_loops": 0,
+        "fission_for_loops": 1,
+        "ghidra_do_while": 8,
+        "fission_do_while": 7
+      },
+      "type_promotion": {
+        "fission_hits": {},
+        "ghidra_hits": {}
+      },
+      "type_preservation_counts": {
+        "fission": {},
+        "ghidra": {}
+      },
+      "fallback_counts": {
+        "fission": {
+          "raw_pointer_fallback": 13,
+          "assembly_fallback": 1
+        },
+        "ghidra": {
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0
+        }
+      },
+      "cast_chain_counts": {
+        "fission": 0,
+        "ghidra": 7
+      },
+      "residue_rankings": {
+        "single_assign_temps": {
+          "iVar3": 19,
+          "uVar9": 12,
+          "uVar2": 6,
+          "uVar10": 4,
+          "uVar5": 4,
+          "uVar8": 4,
+          "uVar22": 3,
+          "xVar4": 3,
+          "xVar6": 3,
+          "xVar17": 1,
+          "xVar16": 1,
+          "iVar4": 1,
+          "xVar2": 1,
+          "xVar1": 1,
+          "xVar5": 1,
+          "uVar1": 1
+        },
+        "residue_names": {
+          "iVar3": 49,
+          "uVar9": 48,
+          "xVar16": 20,
+          "xVar17": 20,
+          "uVar10": 18,
+          "uVar5": 15,
+          "uVar2": 15,
+          "uVar22": 13,
+          "xVar4": 9,
+          "uVar8": 9,
+          "xVar18": 8,
+          "xVar6": 7,
+          "uVar1": 6,
+          "iVar4": 3,
+          "xVar2": 3,
+          "xVar1": 3,
+          "xVar5": 3
+        },
+        "residue_families": {
+          "uVar": 124,
+          "xVar": 73,
+          "iVar": 52,
+          "raw_pointer_fallback": 13,
+          "redundant_return_temp": 2,
+          "bVar": 0,
+          "uStack": 0,
+          "xStack": 0,
+          "axStack": 0,
+          "assembly_fallback": 0
+        }
+      },
+      "top_residue_offenders": [
+        {
+          "address": "0x140001000",
+          "name": "FUN_0x140001000",
+          "residue_score": 92,
+          "raw_pointer_fallback": 13,
+          "single_assign_temp_total": 5,
+          "top_residue_names": {
+            "xVar16": 20,
+            "xVar17": 20,
+            "uVar22": 13,
+            "xVar18": 8
+          }
+        },
+        {
+          "address": "0x1400048b0",
+          "name": "FUN_0x1400048b0",
+          "residue_score": 56,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 17,
+          "top_residue_names": {
+            "uVar2": 9,
+            "uVar8": 9,
+            "iVar3": 7,
+            "xVar6": 7,
+            "uVar9": 7
+          }
+        },
+        {
+          "address": "0x140004010",
+          "name": "FUN_0x140004010",
+          "residue_score": 22,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 5,
+          "top_residue_names": {
+            "uVar10": 9,
+            "iVar3": 5,
+            "xVar4": 3
+          }
+        },
+        {
+          "address": "0x140004240",
+          "name": "FUN_0x140004240",
+          "residue_score": 22,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 5,
+          "top_residue_names": {
+            "uVar10": 9,
+            "iVar3": 5,
+            "xVar4": 3
+          }
+        },
+        {
+          "address": "0x140003270",
+          "name": "FUN_0x140003270",
+          "residue_score": 18,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 4,
+          "top_residue_names": {
+            "uVar9": 9,
+            "iVar3": 5
+          }
+        }
+      ],
+      "failure_class_counts": {
+        "fission": {
+          "type": 1
+        },
+        "ghidra": {}
+      },
+      "timings": {
+        "fission_total_decomp_sec": 121.760622,
+        "fission_total_postprocess_sec": 0.660954,
+        "ghidra_total_decomp_sec": 1.025512
+      },
+      "ghidra_init_sec": 0.327148
+    },
+    {
+      "binary": "everything",
+      "function_count": 30,
+      "shared_success_count": 30,
+      "fission_success_count": 30,
+      "ghidra_success_count": 30,
+      "fission_failure_count": 0,
+      "ghidra_failure_count": 0,
+      "control_flow": {
+        "ghidra_gotos": 83,
+        "fission_gotos": 50,
+        "goto_reduction_pct": 39.76,
+        "ghidra_switches": 3,
+        "fission_switches": 6,
+        "ghidra_for_loops": 7,
+        "fission_for_loops": 30,
+        "ghidra_do_while": 75,
+        "fission_do_while": 52
+      },
+      "type_promotion": {
+        "fission_hits": {},
+        "ghidra_hits": {
+          "LPSTR": 7,
+          "LPCSTR": 7,
+          "LPCWSTR": 5
+        }
+      },
+      "type_preservation_counts": {
+        "fission": {},
+        "ghidra": {
+          "LPSTR": 3,
+          "LPCWSTR": 2
+        }
+      },
+      "fallback_counts": {
+        "fission": {
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0
+        },
+        "ghidra": {
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0
+        }
+      },
+      "cast_chain_counts": {
+        "fission": 7,
+        "ghidra": 14
+      },
+      "residue_rankings": {
+        "single_assign_temps": {
+          "iVar7": 180,
+          "iVar72": 109,
+          "iVar6": 101,
+          "uVar11": 91,
+          "iVar4": 69,
+          "iVar69": 59,
+          "uVar4": 55,
+          "iVar2": 53,
+          "xVar7": 43,
+          "iVar5": 37,
+          "iVar8": 36,
+          "iVar78": 31,
+          "uVar9": 25,
+          "xVar11": 24,
+          "iVar3": 23,
+          "xVar5": 19,
+          "iVar20": 17,
+          "uVar8": 16,
+          "bVar1": 13,
+          "iVar9": 11
+        },
+        "residue_names": {
+          "iVar7": 436,
+          "iVar4": 320,
+          "uVar11": 254,
+          "iVar6": 250,
+          "iVar72": 222,
+          "xVar13": 214,
+          "uVar4": 165,
+          "iVar2": 149,
+          "iVar69": 137,
+          "iVar5": 97,
+          "iVar8": 82,
+          "iVar78": 81,
+          "iVar3": 80,
+          "xVar7": 78,
+          "uVar9": 73,
+          "iVar1": 68,
+          "iVar20": 53,
+          "iVar18": 50,
+          "xVar11": 50,
+          "xVar5": 39
+        },
+        "residue_families": {
+          "iVar": 2114,
+          "uVar": 930,
+          "xVar": 408,
+          "bVar": 40,
+          "uStack": 0,
+          "xStack": 0,
+          "axStack": 0,
+          "raw_pointer_fallback": 0,
+          "assembly_fallback": 0,
+          "redundant_return_temp": 0
+        }
+      },
+      "top_residue_offenders": [
+        {
+          "address": "0x140183590",
+          "name": "FUN_0x140183590",
+          "residue_score": 1574,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 382,
+          "top_residue_names": {
+            "iVar72": 222,
+            "uVar11": 174,
+            "uVar4": 156,
+            "iVar69": 137,
+            "iVar78": 81
+          }
+        },
+        {
+          "address": "0x14014df40",
+          "name": "FUN_0x14014df40",
+          "residue_score": 1135,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 303,
+          "top_residue_names": {
+            "iVar7": 353,
+            "xVar13": 214,
+            "iVar6": 65,
+            "xVar11": 45,
+            "iVar8": 30
+          }
+        },
+        {
+          "address": "0x140123c80",
+          "name": "FUN_0x140123c80",
+          "residue_score": 637,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 159,
+          "top_residue_names": {
+            "iVar2": 142,
+            "iVar6": 82,
+            "iVar4": 58,
+            "iVar20": 53,
+            "iVar18": 50
+          }
+        },
+        {
+          "address": "0x14011d840",
+          "name": "FUN_0x14011d840",
+          "residue_score": 417,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 130,
+          "top_residue_names": {
+            "xVar7": 78,
+            "uVar11": 76,
+            "iVar4": 70,
+            "iVar3": 22,
+            "iVar9": 10
+          }
+        },
+        {
+          "address": "0x1401120c0",
+          "name": "FUN_0x1401120c0",
+          "residue_score": 245,
+          "raw_pointer_fallback": 0,
+          "single_assign_temp_total": 20,
+          "top_residue_names": {
+            "iVar4": 128,
+            "iVar1": 44,
+            "iVar6": 39,
+            "iVar3": 8,
+            "uVar2": 3
+          }
+        }
+      ],
+      "failure_class_counts": {
+        "fission": {},
+        "ghidra": {}
+      },
+      "timings": {
+        "fission_total_decomp_sec": 315.545295,
+        "fission_total_postprocess_sec": 0.679209,
+        "ghidra_total_decomp_sec": 4.298141
+      },
+      "ghidra_init_sec": 0.341963
+    }
+  ],
+  "global": {
+    "shared_success_count": 119,
+    "fission_success_count": 119,
+    "ghidra_success_count": 120,
+    "control_flow": {
+      "ghidra_gotos": 104,
+      "fission_gotos": 68,
+      "goto_reduction_pct": 34.62,
+      "ghidra_switches": 6,
+      "fission_switches": 11,
+      "ghidra_for_loops": 20,
+      "fission_for_loops": 50,
+      "ghidra_do_while": 91,
+      "fission_do_while": 67
+    },
+    "failure_class_counts": {
+      "fission": {
+        "type": 1
+      },
+      "ghidra": {}
+    },
+    "type_preservation_counts": {
+      "fission": {},
+      "ghidra": {
+        "LPVOID": 2,
+        "LPSTR": 3,
+        "LPCWSTR": 2
+      }
+    },
+    "fallback_counts": {
+      "fission": {
+        "raw_pointer_fallback": 13,
+        "assembly_fallback": 1
+      },
+      "ghidra": {
+        "raw_pointer_fallback": 0,
+        "assembly_fallback": 0
+      }
+    },
+    "cast_chain_counts": {
+      "fission": 9,
+      "ghidra": 24
+    },
+    "residue_rankings": {
+      "single_assign_temps": {
+        "iVar7": 180,
+        "iVar72": 109,
+        "iVar6": 103,
+        "uVar11": 91,
+        "iVar4": 73,
+        "iVar69": 59,
+        "iVar2": 55,
+        "uVar4": 55,
+        "xVar7": 43,
+        "iVar3": 42,
+        "uVar9": 37,
+        "iVar5": 37,
+        "iVar8": 36,
+        "iVar78": 31,
+        "xVar5": 24,
+        "xVar11": 24,
+        "uVar8": 20,
+        "uVar2": 18,
+        "iVar20": 17,
+        "uVar1": 15
+      },
+      "residue_names": {
+        "iVar7": 436,
+        "iVar4": 331,
+        "iVar6": 256,
+        "uVar11": 254,
+        "iVar72": 222,
+        "xVar13": 214,
+        "uVar4": 165,
+        "iVar2": 155,
+        "iVar69": 137,
+        "iVar3": 129,
+        "uVar9": 121,
+        "iVar5": 97,
+        "iVar8": 82,
+        "iVar1": 81,
+        "iVar78": 81,
+        "xVar7": 78,
+        "uVar2": 61,
+        "xVar5": 53,
+        "iVar20": 53,
+        "uVar1": 51
+      },
+      "residue_families": {
+        "iVar": 2199,
+        "uVar": 1176,
+        "xVar": 501,
+        "bVar": 58,
+        "raw_pointer_fallback": 13,
+        "redundant_return_temp": 2,
+        "uStack": 0,
+        "xStack": 0,
+        "axStack": 0,
+        "assembly_fallback": 0
+      }
+    },
+    "top_residue_offenders": [
+      {
+        "binary": "everything",
+        "address": "0x140183590",
+        "name": "FUN_0x140183590",
+        "residue_score": 1574,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 382,
+        "top_residue_names": {
+          "iVar72": 222,
+          "uVar11": 174,
+          "uVar4": 156,
+          "iVar69": 137,
+          "iVar78": 81
+        }
+      },
+      {
+        "binary": "everything",
+        "address": "0x14014df40",
+        "name": "FUN_0x14014df40",
+        "residue_score": 1135,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 303,
+        "top_residue_names": {
+          "iVar7": 353,
+          "xVar13": 214,
+          "iVar6": 65,
+          "xVar11": 45,
+          "iVar8": 30
+        }
+      },
+      {
+        "binary": "everything",
+        "address": "0x140123c80",
+        "name": "FUN_0x140123c80",
+        "residue_score": 637,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 159,
+        "top_residue_names": {
+          "iVar2": 142,
+          "iVar6": 82,
+          "iVar4": 58,
+          "iVar20": 53,
+          "iVar18": 50
+        }
+      },
+      {
+        "binary": "everything",
+        "address": "0x14011d840",
+        "name": "FUN_0x14011d840",
+        "residue_score": 417,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 130,
+        "top_residue_names": {
+          "xVar7": 78,
+          "uVar11": 76,
+          "iVar4": 70,
+          "iVar3": 22,
+          "iVar9": 10
+        }
+      },
+      {
+        "binary": "everything",
+        "address": "0x1401120c0",
+        "name": "FUN_0x1401120c0",
+        "residue_score": 245,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 20,
+        "top_residue_names": {
+          "iVar4": 128,
+          "iVar1": 44,
+          "iVar6": 39,
+          "iVar3": 8,
+          "uVar2": 3
+        }
+      },
+      {
+        "binary": "cmkr",
+        "address": "0x140001000",
+        "name": "FUN_0x140001000",
+        "residue_score": 92,
+        "raw_pointer_fallback": 13,
+        "single_assign_temp_total": 5,
+        "top_residue_names": {
+          "xVar16": 20,
+          "xVar17": 20,
+          "uVar22": 13,
+          "xVar18": 8
+        }
+      },
+      {
+        "binary": "cmkr",
+        "address": "0x1400048b0",
+        "name": "FUN_0x1400048b0",
+        "residue_score": 56,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 17,
+        "top_residue_names": {
+          "uVar2": 9,
+          "uVar8": 9,
+          "iVar3": 7,
+          "xVar6": 7,
+          "uVar9": 7
+        }
+      },
+      {
+        "binary": "test_control_flow_x64_O0",
+        "address": "0x140001a00",
+        "name": "main",
+        "residue_score": 38,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 12,
+        "top_residue_names": {
+          "uVar1": 23,
+          "xVar2": 3
+        }
+      },
+      {
+        "binary": "test_structs_classes_x64_O0",
+        "address": "0x140001e40",
+        "name": "d_ref_qualifier",
+        "residue_score": 35,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 7,
+        "top_residue_names": {
+          "uVar5": 12,
+          "uVar2": 8,
+          "iVar4": 8
+        }
+      },
+      {
+        "binary": "test_structs_classes_x64_O0",
+        "address": "0x1400016e7",
+        "name": "main",
+        "residue_score": 32,
+        "raw_pointer_fallback": 0,
+        "single_assign_temp_total": 9,
+        "top_residue_names": {
+          "xVar5": 11,
+          "uVar2": 7,
+          "uVar3": 5
+        }
+      }
+    ]
+  }
+}
