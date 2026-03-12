@@ -4,49 +4,14 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 #[cfg(feature = "native_decomp")]
+use fission_analysis::analysis::decomp::{PreviewEngineMode, PreviewSelection, select_preview_output};
+#[cfg(feature = "native_decomp")]
 use fission_loader::loader::LoadedBinary;
 use tauri::State;
 
 // ============================================================================
 // Commands
 // ============================================================================
-
-#[cfg(feature = "native_decomp")]
-fn pcode_total_ops(pcode: &fission_pcode::PcodeFunction) -> usize {
-    pcode.blocks.iter().map(|block| block.ops.len()).sum()
-}
-
-#[cfg(feature = "native_decomp")]
-fn max_multiequal_fanin(pcode: &fission_pcode::PcodeFunction) -> usize {
-    pcode
-        .blocks
-        .iter()
-        .flat_map(|block| block.ops.iter())
-        .filter(|op| op.opcode == fission_pcode::PcodeOpcode::MultiEqual)
-        .map(|op| op.inputs.len())
-        .max()
-        .unwrap_or(0)
-}
-
-#[cfg(feature = "native_decomp")]
-fn contains_indirect_control_flow(pcode: &fission_pcode::PcodeFunction) -> bool {
-    pcode.blocks.iter().flat_map(|block| block.ops.iter()).any(|op| {
-        matches!(
-            op.opcode,
-            fission_pcode::PcodeOpcode::CallInd | fission_pcode::PcodeOpcode::BranchInd
-        )
-    })
-}
-
-#[cfg(feature = "native_decomp")]
-fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &fission_pcode::PcodeFunction) -> bool {
-    binary.is_64bit
-        && binary.format.eq_ignore_ascii_case("PE")
-        && pcode.blocks.len() <= 8
-        && pcode_total_ops(pcode) <= 400
-        && !contains_indirect_control_flow(pcode)
-        && max_multiequal_fanin(pcode) <= 4
-}
 
 #[cfg(feature = "native_decomp")]
 struct DecompileOutcome {
@@ -57,32 +22,6 @@ struct DecompileOutcome {
 }
 
 #[cfg(feature = "native_decomp")]
-fn try_render_mlil_preview(
-    decomp: &mut fission_analysis::analysis::decomp::CachingDecompiler,
-    binary: &LoadedBinary,
-    address: u64,
-    name: &str,
-    enforce_auto_gate: bool,
-) -> Result<Option<String>, CmdError> {
-    let pcode_json = decomp
-        .inner_mut()
-        .get_pcode(address)
-        .map_err(|e| CmdError::other(format!("{e}")))?;
-    let mut pcode = fission_pcode::PcodeFunction::from_json(&pcode_json)
-        .map_err(|e| CmdError::other(format!("mlil-preview pcode parse failed: {e}")))?;
-    if enforce_auto_gate && !auto_mlil_eligible(binary, &pcode) {
-        return Ok(None);
-    }
-    let mut optimizer =
-        fission_pcode::PcodeOptimizer::new(fission_pcode::PcodeOptimizerConfig::default());
-    let _ = optimizer.optimize(&mut pcode);
-    let options = fission_pcode::MlilPreviewOptions::from_loaded_binary(binary);
-    let code = fission_pcode::render_mlil_preview(&pcode, name, address, &options)
-        .map_err(|e| CmdError::other(format!("mlil-preview unavailable: {e}")))?;
-    Ok(Some(code))
-}
-
-#[cfg(feature = "native_decomp")]
 fn decompile_with_engine(
     decomp: &mut fission_analysis::analysis::decomp::CachingDecompiler,
     binary: &LoadedBinary,
@@ -90,75 +29,39 @@ fn decompile_with_engine(
     name: &str,
     engine_mode: DecompilerEngineMode,
 ) -> Result<DecompileOutcome, CmdError> {
-    match engine_mode {
-        DecompilerEngineMode::Legacy => decomp
-            .decompile(address)
-            .map(|code| DecompileOutcome {
-                code,
-                engine_used: DecompilerEngineMode::Legacy,
-                fell_back: false,
-                fallback_reason: None,
-            })
-            .map_err(|e| CmdError::other(format!("{e}"))),
-        DecompilerEngineMode::MlilPreview => match try_render_mlil_preview(
-            decomp, binary, address, name, false,
-        ) {
-            Ok(Some(code)) => Ok(DecompileOutcome {
-                code,
-                engine_used: DecompilerEngineMode::MlilPreview,
-                fell_back: false,
-                fallback_reason: None,
-            }),
-            Ok(None) => decomp
-                .decompile(address)
-                .map(|code| DecompileOutcome {
-                    code,
-                    engine_used: DecompilerEngineMode::Legacy,
-                    fell_back: true,
-                    fallback_reason: Some(
-                        "mlil-preview skipped: function not supported by preview builder"
-                            .to_string(),
-                    ),
-                })
-                .map_err(|e| CmdError::other(format!("{e}"))),
-            Err(preview_err) => decomp
-                .decompile(address)
-                .map(|code| DecompileOutcome {
-                    code,
-                    engine_used: DecompilerEngineMode::Legacy,
-                    fell_back: true,
-                    fallback_reason: Some(preview_err.to_string()),
-                })
-                .map_err(|e| CmdError::other(format!("{e}"))),
-        },
-        DecompilerEngineMode::Auto => match try_render_mlil_preview(
-            decomp, binary, address, name, true,
-        ) {
-            Ok(Some(code)) => Ok(DecompileOutcome {
-                code,
-                engine_used: DecompilerEngineMode::MlilPreview,
-                fell_back: false,
-                fallback_reason: None,
-            }),
-            Ok(None) => decomp
-                .decompile(address)
-                .map(|code| DecompileOutcome {
-                    code,
-                    engine_used: DecompilerEngineMode::Legacy,
-                    fell_back: false,
-                    fallback_reason: None,
-                })
-                .map_err(|e| CmdError::other(format!("{e}"))),
-            Err(preview_err) => decomp
-                .decompile(address)
-                .map(|code| DecompileOutcome {
-                    code,
-                    engine_used: DecompilerEngineMode::Legacy,
-                    fell_back: true,
-                    fallback_reason: Some(preview_err.to_string()),
-                })
-                .map_err(|e| CmdError::other(format!("{e}"))),
-        },
+    let preview_mode = match engine_mode {
+        DecompilerEngineMode::Legacy => PreviewEngineMode::Legacy,
+        DecompilerEngineMode::MlilPreview => PreviewEngineMode::MlilPreview,
+        DecompilerEngineMode::Auto => PreviewEngineMode::Auto,
+    };
+    let preview = select_preview_output(decomp, binary, address, name, preview_mode)
+        .map_err(CmdError::other)?;
+    if let Some(code) = preview.preview_code {
+        return Ok(DecompileOutcome {
+            code,
+            engine_used: DecompilerEngineMode::MlilPreview,
+            fell_back: false,
+            fallback_reason: None,
+        });
+    }
+    decomp
+        .decompile(address)
+        .map(|code| outcome_from_preview_selection(code, preview))
+        .map_err(|e| CmdError::other(format!("{e}")))
+}
+
+#[cfg(feature = "native_decomp")]
+fn outcome_from_preview_selection(code: String, selection: PreviewSelection) -> DecompileOutcome {
+    let engine_used = match selection.engine_used {
+        PreviewEngineMode::Legacy => DecompilerEngineMode::Legacy,
+        PreviewEngineMode::MlilPreview => DecompilerEngineMode::MlilPreview,
+        PreviewEngineMode::Auto => DecompilerEngineMode::Auto,
+    };
+    DecompileOutcome {
+        code,
+        engine_used,
+        fell_back: selection.fell_back,
+        fallback_reason: selection.fallback_reason,
     }
 }
 

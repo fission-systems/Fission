@@ -203,6 +203,7 @@ Relevant files:
 
 ## Key Docs
 
+- [`docs/README.md`](/Users/sjkim1127/Fission/docs/README.md): documentation index / folder guide
 - [`docs/build/BUILD.md`](/Users/sjkim1127/Fission/docs/build/BUILD.md): build instructions
 - [`docs/architecture/ARCHITECTURE.md`](/Users/sjkim1127/Fission/docs/architecture/ARCHITECTURE.md): architecture notes
 - [`docs/changelog/CHANGELOG.md`](/Users/sjkim1127/Fission/docs/changelog/CHANGELOG.md): project changelog

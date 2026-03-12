@@ -1,196 +1,138 @@
-# Fission - Feature Documentation
+# Features
 
-> ℹ️ **Note:** 상위 수준 기능 개요와 최신 상태는 루트 `README.md`를 기준으로 합니다.  
-> 이 문서는 세부 기능/서브시스템(분석 모듈, GUI 세부 기능 등)을 좀 더 자세히 설명하는 **보조 문서**입니다.
+이 문서는 현재 Fission이 **실제로 제공하는 기능**을 최신 기준으로 요약한다.  
+상세 구조는 [`/Users/sjkim1127/Fission/docs/architecture/ARCHITECTURE.md`](/Users/sjkim1127/Fission/docs/architecture/ARCHITECTURE.md), 최신 변경 이력은 [`/Users/sjkim1127/Fission/docs/changelog/CHANGELOG.md`](/Users/sjkim1127/Fission/docs/changelog/CHANGELOG.md)를 기준으로 본다.
 
-## 🎯 Overview
+## Decompilation Engines
 
-Fission is a next-generation decompiler and reverse engineering platform.
+Fission에는 현재 두 개의 디컴파일 경로가 있다.
 
----
+### `legacy`
 
-## 📦 Crate Structure
+Ghidra native decompiler + Fission 후처리 파이프라인.
 
-| Crate | Description | LOC |
-|-------|-------------|-----|
-| `fission-core` | Configuration, errors, utilities | ~1.5K |
-| `fission-loader` | Binary parsing (PE/ELF/Mach-O) | ~6K |
-| `fission-analysis` | CFG, optimization, post-processing | ~8K |
-| `fission-ffi` | Ghidra native decompiler FFI | ~1K |
-| `fission-pcode` | P-code IR and optimizer | ~5K |
-| `fission-signatures` | Function signatures database | ~2K |
-| `fission-disasm` | Fast x86/x64 disassembler (iced-x86) | ~200 |
-| `fission-tauri` | Tauri 2.x + React 19 desktop GUI | ~8K |
-| `fission-cli` | Command-line interface | ~3K |
+현재 가장 안정적인 경로이며, serious analysis의 기본 품질 기준이다.
 
----
+주요 기능:
+- WinAPI 시그니처 기반 type promotion
+- `CONCAT` / piece residue 정리
+- `goto` 감소 및 CFG 구조화
+- switch clustering
+- temp inlining
+- stack / piece access 정규화
 
-## 🔬 Decompiler Features
+### `mlil-preview`
 
-### Binary Format Support
+Ghidra p-code를 받아 Fission NIR/HIR + Rust printer로 직접 pseudocode를 생성하는 차세대 경로.
 
-- ✅ PE (Windows EXE/DLL)
-- ✅ ELF (Linux/Unix executables)
-- ✅ Mach-O (macOS/iOS)
+현재 지원:
+- PE x64 only
+- stack-slot recovery
+- multi-block `if`
+- multi-block `if/else`
+- short-circuit `&&` / `||`
+- multi-block `while`
+- multi-block `do-while`
+- cast canonicalization
+- `PIECE` / `SUBPIECE` recombination
+- preview 전용 label/goto fallback
 
-### Architecture Support
+현재 한계:
+- 범용 품질은 아직 `legacy`보다 낮을 수 있음
+- 일부 large function / type-heavy 함수는 fallback 필요
+- field name 추측, semantic renaming은 아직 하지 않음
 
-- ✅ x86-32/x86-64 (Sleigh spec)
-- ✅ ARM64/AARCH64 (Sleigh spec + Apple Silicon variant)
-- ✅ ARM64 Big Endian
+## Binary / Architecture Support
 
-### Language-Specific Analysis
+지원 포맷:
+- PE
+- ELF
+- Mach-O
 
-| Language | Function Names | Type Recovery | Field Names |
-|----------|---------------|---------------|-------------|
-| Swift | ✅ Demangling | ✅ Metadata | ✅ __swift5_fieldmd |
-| Objective-C | ✅ Method names | ✅ ivar parsing | ✅ ObjC2 runtime |
-| Go | ✅ pclntab | ✅ .rodata types | ✅ Struct fields |
-| C/C++ | ✅ DWARF symbols | ✅ Debug info | ✅ DWARF parsing |
-| Rust | ✅ Demangling | ✅ VTable/Trait | ✅ Automatic |
+지원 아키텍처:
+- x86
+- x86-64
+- ARM64 / AArch64
 
-### Post-Processing
+단, `mlil-preview`의 현재 1차 범위는 **PE x64 only**다.
 
-- ✅ IAT symbol replacement
-- ✅ Smart constant replacement (Windows API: VirtualAlloc, CreateFile, etc.)
-- ✅ String inlining from .rdata
-- ✅ GUID substitution
-- ✅ Unicode string recovery
-- ✅ SEH boilerplate cleanup
-- ✅ C++ name demangling
-- ✅ FID (Function ID) matching
-- ✅ Structure offset annotation
-- ✅ Control flow structurization (goto elimination)
-- ✅ Compound operator conversion (i++ / +=)
-- ✅ Condition simplification
+## Analysis / Recovery Capabilities
 
-### Type System
+정적 분석 계층이 제공하는 핵심 기능:
+- function discovery
+- imports / exports / strings / sections
+- disassembly
+- xref / CFG 기반 분석
+- p-code optimization
+- signature / type DB 로딩
+- FID 기반 심볼 식별
 
-- ✅ GDT (Ghidra Data Type) loading (65K+ Windows functions)
-- ✅ Custom struct registration via FFI
-- ✅ Type propagation
-- ✅ Parameter type hints
+## Type / Signature Features
 
----
+현재 tree에 있는 타입/시그니처 기능:
+- Windows signature DB (`fission-signatures`)
+- WinAPI prototype injection
+- structure / pointer type promotion
+- GDT loading
+- baseline type propagation
 
-## 🖥️ GUI Features (Tauri + React)
+현재 강한 경로:
+- `LPRECT`, `RECT`, `LPMSG` 같은 WinAPI 구조체 포인터 승격
+- legacy path의 parameter / structure cleanup
 
-### Main Panels
+## CLI Features
 
-| Panel | Description | File |
-|-------|-------------|------|
-| Assembly View | Disassembly with syntax highlighting | `AssemblyView.tsx` |
-| Decompile View | C-like decompiled code | `DecompileView.tsx` |
-| Hex View | Raw hex editor | `HexView.tsx` |
-| Listing View | Linear listing | `ListingView.tsx` |
-| Functions List | Function browser with search | `FunctionsList.tsx` |
-| Search Panel | Global search | `SearchPanel.tsx` |
-| Settings | Application settings | `SettingsPanel.tsx` |
-| Plugins | Plugin manager | `PluginsPanel.tsx` |
+현재 CLI가 제공하는 주요 기능:
+- binary info
+- function list
+- strings
+- disassembly
+- single-function decompilation
+- batch decompilation
+- benchmark mode
+- engine selection
 
-### Bottom Tabs
+핵심 옵션:
+- `--profile balanced|quality|speed`
+- `--engine legacy|mlil-preview|auto`
+- `--timeout-ms`
+- `--benchmark`
+- `--ghidra-compat`
 
-- XRefs (`XrefsPanel.tsx`)
-- String XRefs (`StringXrefsPanel.tsx`)
-- CFG (`CfgPanel.tsx`)
-- Exports (`ExportsPanel.tsx`)
-- Patches (`PatchesPanel.tsx`)
-- Notes (`NotesPanel.tsx`)
-- Debug (`DebugTab.tsx`)
-- Timeline (`TimelinePanel.tsx`)
+## Desktop GUI Features
 
-### Keyboard Shortcuts
+현재 Tauri GUI에서 실제로 제공하는 기능:
+- function list / filtering
+- assembly tabs
+- decompile tabs
+- decompiler options dialog
+- engine selector (`legacy`, `mlil_preview`, `auto`)
+- engine used / fallback badge
+- strings / imports / exports / search / CFG 관련 패널
 
-| Key | Action |
-|-----|--------|
-| `G` | Go to Address |
-| `N` | Rename function/variable |
-| `;` | Add comment |
-| `F2` | Toggle bookmark |
-| `Ctrl+O` | Open file |
-| `Ctrl+S` | Save project |
-| `Ctrl+F` | Search |
+주의:
+- [`/Users/sjkim1127/Fission/docs/gui/GUI_GUIDE.md`](/Users/sjkim1127/Fission/docs/gui/GUI_GUIDE.md)는 현재 Tauri UI 기준 문서가 아니라, 오래된 egui 문서다.
 
-### Theme
+## Benchmark Snapshot
 
-- Catppuccin Mocha dark theme
-- Code syntax highlighting
-- JetBrains Mono font support
+체크인된 대표 benchmark summary:
+- [`/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md`](/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md)
 
----
+최근 품질 작업에서 확인된 방향:
+- `legacy`는 안정적인 기본 경로
+- `mlil-preview`는 coverage와 구조화 품질이 빠르게 올라가는 중
+- preview benchmark에서는 `goto`와 temp surface가 크게 줄어드는 방향이 확인됨
 
-## 🔧 CLI Features
+## Known Limits
 
-CLI 바이너리: `fission_cli` (`cargo build --release --bin fission_cli`)
+현재 문서 기준으로 중요한 제한:
+- `mlil-preview`는 아직 full replacement가 아님
+- 일부 `type` 계열 함수는 legacy에서도 hard case로 남아 있음
+- semantic renaming, advanced field naming, perfect high-level idiom recovery는 아직 진행 중
 
-```bash
-# Basic decompilation
-fission_cli --decomp <address> <binary>
+## Related Docs
 
-# Verbose output
-fission_cli --decomp <address> --verbose <binary>
-
-# Show binary info
-fission_cli --info <binary>
-
-# List functions
-fission_cli --funcs <binary>
-
-# Interactive REPL
-fission_cli <binary>
-```
-
----
-
-## 📁 Key Directories
-
-```
-/ghidra_decompiler/        # Native Ghidra C++ integration
-  /src/
-    /analysis/             # Type propagation, VTable, etc.
-    /decompiler/           # Core decompilation pipeline
-    /ffi/                  # FFI interface
-    /processing/           # String scanner, constants
-    /types/                # GDT parser, type resolver
-  /languages/              # Sleigh specs (x86, ARM64)
-  /decompile/              # Ghidra decompiler source
-
-/crates/                   # Rust crates
-  /fission-loader/         # Binary loading
-    /src/loader/
-      /macho/apple.rs      # Swift/ObjC analysis
-      /golang.rs           # Go analysis
-      /dwarf.rs            # DWARF debug info
-  /fission-analysis/       # Analysis passes
-  /fission-tauri/          # Tauri GUI (React frontend + Rust backend)
-```
-
----
-
-## 🔮 Known Limitations
-
-1. **Swift Accessors**: VTable-based property access not fully resolved
-2. **PDB**: No native PDB parsing (uses GDT instead)
-3. **WASM**: Not supported yet
-
----
-
-## 📊 Build & Test
-
-```bash
-# Build CLI
-cargo build --release --bin fission_cli
-
-# Run tests
-cargo test
-
-# Run CLI
-./target/release/fission_cli <binary>
-
-# Run GUI (Tauri)
-cd crates/fission-tauri && npm install && npm run tauri dev
-```
-
----
-
-*Last updated: 2026-03-07*
+- [`/Users/sjkim1127/Fission/docs/README.md`](/Users/sjkim1127/Fission/docs/README.md)
+- [`/Users/sjkim1127/Fission/docs/architecture/ARCHITECTURE.md`](/Users/sjkim1127/Fission/docs/architecture/ARCHITECTURE.md)
+- [`/Users/sjkim1127/Fission/docs/changelog/CHANGELOG.md`](/Users/sjkim1127/Fission/docs/changelog/CHANGELOG.md)
+- [`/Users/sjkim1127/Fission/docs/ROADMAP.md`](/Users/sjkim1127/Fission/docs/ROADMAP.md)

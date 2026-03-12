@@ -33,12 +33,18 @@ pub mod cache;
 pub mod postprocess;
 #[cfg(feature = "native_decomp")]
 pub mod prepare;
+#[cfg(feature = "native_decomp")]
+pub mod preview_engine;
 
 pub use postprocess::RustPostProcessOptions;
 #[cfg(feature = "native_decomp")]
 pub use prepare::{
     PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
     serialize_win_api_signatures_json,
+};
+#[cfg(feature = "native_decomp")]
+pub use preview_engine::{
+    PreviewEngineMode, PreviewSelection, PreviewSource, select_preview_output,
 };
 
 #[cfg(feature = "native_decomp")]

@@ -1,0 +1,160 @@
+use super::*;
+
+impl<'a> PreviewBuilder<'a> {
+    pub(super) fn lower_piece_op(
+        &mut self,
+        op: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        if op.inputs.len() < 2 {
+            return Err(MlilPreviewError::LoweringFailed);
+        }
+        let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+        let output_ty = type_from_size(output.size, false);
+        if let Some(expr) = self.try_recombine_piece(op, &output_ty, visiting)? {
+            return Ok(expr);
+        }
+        let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
+        let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
+        let shift_bits = i64::from(op.inputs[1].size) * 8;
+        let shifted = HirExpr::Binary {
+            op: HirBinaryOp::Shl,
+            lhs: Box::new(HirExpr::Cast {
+                ty: output_ty.clone(),
+                expr: Box::new(lhs),
+            }),
+            rhs: Box::new(HirExpr::Const(
+                shift_bits,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            ty: output_ty.clone(),
+        };
+        Ok(HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs: Box::new(shifted),
+            rhs: Box::new(HirExpr::Cast {
+                ty: output_ty.clone(),
+                expr: Box::new(rhs),
+            }),
+            ty: output_ty,
+        })
+    }
+
+    fn try_recombine_piece(
+        &mut self,
+        op: &PcodeOp,
+        _output_ty: &NirType,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<Option<HirExpr>, MlilPreviewError> {
+        if op.inputs.len() < 2 {
+            return Ok(None);
+        }
+        let Some(lhs_origin) = self.extract_subpiece_origin(&op.inputs[0]) else {
+            return Ok(None);
+        };
+        let Some(rhs_origin) = self.extract_subpiece_origin(&op.inputs[1]) else {
+            return Ok(None);
+        };
+        if lhs_origin.base != rhs_origin.base {
+            return Ok(None);
+        }
+        if rhs_origin.byte_offset != 0 {
+            return Ok(None);
+        }
+        if lhs_origin.byte_offset != i64::from(rhs_origin.piece_size) {
+            return Ok(None);
+        }
+        if lhs_origin.base_size != op.output.as_ref().map(|out| out.size).unwrap_or(0) {
+            return Ok(None);
+        }
+        let base_expr = self.lower_varnode(&lhs_origin.base_vn, visiting)?;
+        Ok(Some(base_expr))
+    }
+
+    pub(super) fn lower_subpiece_op(
+        &mut self,
+        op: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        if op.inputs.len() < 2 {
+            return Err(MlilPreviewError::LoweringFailed);
+        }
+        let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+        let output_ty = type_from_size(output.size, false);
+        let base = self.lower_varnode(&op.inputs[0], visiting)?;
+        let byte_offset = const_offset(&op.inputs[1]).ok_or(MlilPreviewError::LoweringFailed)?;
+        let shifted = if byte_offset == 0 {
+            base
+        } else {
+            HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: Box::new(base),
+                rhs: Box::new(HirExpr::Const(
+                    byte_offset * 8,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: type_from_size(op.inputs[0].size, false),
+            }
+        };
+        Ok(HirExpr::Cast {
+            ty: output_ty,
+            expr: Box::new(shifted),
+        })
+    }
+
+    fn extract_subpiece_origin(&self, vn: &Varnode) -> Option<SubpieceOrigin> {
+        self.extract_subpiece_origin_inner(vn, &mut HashSet::new())
+    }
+
+    fn extract_subpiece_origin_inner(
+        &self,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Option<SubpieceOrigin> {
+        let key = VarnodeKey::from(vn);
+        if !visiting.insert(key.clone()) {
+            return None;
+        }
+        let result = match self.defs.get(&key).copied() {
+            Some(op)
+                if matches!(
+                    op.opcode,
+                    PcodeOpcode::Copy
+                        | PcodeOpcode::Cast
+                        | PcodeOpcode::IntZExt
+                        | PcodeOpcode::IntSExt
+                ) && op.inputs.len() == 1
+                    && op.inputs[0].size == vn.size =>
+            {
+                self.extract_subpiece_origin_inner(&op.inputs[0], visiting)
+            }
+            Some(op) if op.opcode == PcodeOpcode::SubPiece && op.inputs.len() >= 2 => {
+                let base_vn = op.inputs[0].clone();
+                Some(SubpieceOrigin {
+                    base: VarnodeKey::from(&base_vn),
+                    base_vn,
+                    base_size: op.inputs[0].size,
+                    byte_offset: const_offset(&op.inputs[1])?,
+                    piece_size: vn.size,
+                })
+            }
+            None => Some(SubpieceOrigin {
+                base: VarnodeKey::from(vn),
+                base_vn: vn.clone(),
+                base_size: vn.size,
+                byte_offset: 0,
+                piece_size: vn.size,
+            }),
+            _ => None,
+        };
+        visiting.remove(&key);
+        result
+    }
+
+}

@@ -4,6 +4,86 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-12
+
+### v13 - MLIL Preview 구조화/가독성 고도화
+
+`mlil-preview`를 단순 실험 슬라이스에서 벗어나, 실제로 의미 있는 pseudocode를 직접 생성하는 차세대 경로로 끌어올리는 작업을 진행했다.
+이번 라운드의 핵심은 Ghidra C 출력 후처리가 아니라, Fission 고유의 NIR/HIR 경로에서 직접
+제어 흐름 구조화와 식(Expression) 정규화를 수행하는 데 있었다.
+
+#### Added
+
+- preview NIR/HIR 경로에 CFG helper 계층 추가
+  - predecessor / successor 기반 block relation 추적
+  - linear body / join 탐색 helper 추가
+- canonical short-circuit folding 추가
+  - `&&`
+  - `||`
+- multi-block loop lowering 추가
+  - `while`
+  - `do-while`
+- cast canonicalizer 추가
+  - 동일 타입 중첩 cast 제거
+  - redundant widen-before-narrow wrapper 제거
+  - no-op cast 제거
+- `PIECE` / `SUBPIECE` recombination 추가
+  - split-temp를 원본 식 기준으로 재조합
+  - call argument / return surface에서 파편화 변수 노출 억제
+- preview 전용 benchmark 지표 추가
+  - `preview_engine_used_count`
+  - `preview_fallback_count`
+  - `preview_goto_count`
+  - `preview_temp_surface_count`
+
+#### Changed
+
+- `mlil-preview`의 구조화 로직이 block index 기반의 취약한 패턴 매칭에서
+  CFG 관계 기반 구조화로 전환됨
+- unsupported multi-block CFG는 무리하게 잘못된 고수준 코드로 만들지 않고
+  Fission pseudocode / fallback 경로로 안전하게 남기도록 유지
+- legacy/Ghidra 경로는 기능 확장 대상이 아니라 regression guard path로 계속 유지
+
+#### Improved
+
+- preview path가 canonical multi-block `if`, `if/else`, `while`, `do-while`를 직접 출력할 수 있게 됨
+- preview path에서 short-circuit boolean chain이 `&&`, `||`로 구조화됨
+- split value (`PIECE/SUBPIECE`)가 별도 temp 변수로 노출되지 않고 source expression으로 재조합됨
+- cast density가 낮아지고, 불필요한 `(T)(T)x` / widen-wrapper 표현이 줄어듦
+
+#### Benchmark Highlights
+
+- Shared success: `87 / 90`
+- Fission success: `87 / 90`
+- Ghidra success: `90 / 90`
+- Goto reduction vs Ghidra: `47.01%`
+- Cast chains: `Fission 27 / Ghidra 37`
+- Preview success: `90`
+- Preview engine used: `87`
+- Preview fallback: `3`
+- Preview goto count: `0`
+- Preview temp surface count: `0`
+
+#### Regression Status
+
+- `putty.exe 0x140006260`의 `LPRECT` / `RECT` 경로 유지
+- 기존 fallback 동작은 안정적으로 유지
+
+#### Known Issues
+
+- 남은 실패는 `type` 계열 3건에 집중됨
+  - `putty 0x1400052b0`
+  - `putty 0x140006380`
+  - `cmkr 0x140002cc0`
+- 다음 라운드의 1차 타깃은 type recovery / propagation 안정화
+
+#### 핵심 파일
+
+| 파일 | 변경 내용 |
+|------|----------|
+| `crates/fission-pcode/src/nir/mod.rs` | CFG helper, short-circuit folding, multi-block loop lowering, cast canonicalization, `PIECE/SUBPIECE` recombination |
+| `scripts/test/batch_benchmark/grand_finale.py` | preview-only benchmark 지표 및 summary/report 강화 |
+
 ## 2026-03-11
 
 ### Experimental Fission MLIL/NIR 경로를 제품 경로에 통합

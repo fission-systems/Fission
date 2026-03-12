@@ -1,117 +1,212 @@
-# Fission Architecture Documentation
+# Architecture
 
-## Workspace Structure (`crates/*`)
+이 문서는 현재 Fission의 **실제 아키텍처 기준 문서**다.  
+특히 2026-03 기준으로는 `legacy`와 `mlil-preview` 두 개의 디컴파일 경로가 공존하므로, 역할 분리를 명확히 이해하는 것이 중요하다.
 
-Fission is a Cargo workspace with strict crate boundaries:
+## Top-Level Model
 
-- `fission-core`: shared configuration, error types, common models, plugin trait types
-- `fission-loader`: binary loading/parsing (PE/ELF/Mach-O), symbol/language metadata extraction
-- `fission-disasm`: disassembly abstraction (iced-x86 based)
-- `fission-pcode`: P-code IR and optimizer pipeline
-- `fission-signatures`: API/signature and relation databases
-- `fission-ffi`: unsafe boundary to native decompiler and pcode C ABI
-- `fission-analysis`: analysis logic (CFG/xref/decomp wrapping/debug/unpacker/plugin/script)
-- `fission-tauri`: Tauri 2.x + React 19 desktop GUI (backend commands + frontend). 소스는 `crates/fission-tauri/`이며 Rust 백엔드는 `src-tauri/` 하위에 있음.
-- `fission-cli`: entrypoints, one-shot/interactive CLI (`fission_cli` 바이너리), TUI binaries
+Fission은 크게 네 층으로 본다.
+
+1. **Binary / metadata layer**
+2. **Native lifting / decompilation layer**
+3. **Fission-owned analysis and IR layer**
+4. **Presentation layer**
+
+핵심 방향은 다음과 같다.
+
+- Ghidra는 점점 더 **lifting / CFG / baseline type recovery / fail containment** 역할로 축소
+- Fission은 그 위에서 **NIR/HIR + Rust printer**를 통해 더 읽기 좋은 pseudocode를 직접 생성
+
+## Workspace Structure
+
+주요 crate 역할:
+
+- `fission-core`
+  - 공통 에러, 설정, 모델
+- `fission-loader`
+  - PE / ELF / Mach-O 로딩
+  - 심볼 / 문자열 / 메타데이터 추출
+- `fission-disasm`
+  - 디스어셈블리 표면 계층
+- `fission-signatures`
+  - WinAPI / type / signature DB
+- `fission-ffi`
+  - Rust ↔ native decompiler 경계
+- `fission-analysis`
+  - legacy decompile wrapping
+  - postprocess
+  - CFG / xref / debug / unpacking
+- `fission-pcode`
+  - p-code 모델
+  - optimizer
+  - preview NIR/HIR
+  - Rust pseudocode printer
+- `fission-cli`
+  - CLI 엔트리포인트
+- `fission-tauri`
+  - Tauri frontend/backend
 
 ## Dependency Direction
 
-Primary dependency flow:
+기본 흐름:
 
-`fission-core` -> (`fission-loader`, `fission-signatures`, `fission-disasm`) -> `fission-pcode` -> `fission-analysis` -> (`fission-tauri`, `fission-cli`)
+`fission-core`
+→ `fission-loader` / `fission-signatures` / `fission-disasm`
+→ `fission-pcode`
+→ `fission-analysis`
+→ `fission-cli` / `fission-tauri`
 
-Native integration flow:
+native 경계:
 
-`ghidra_decompiler/src/*` <-> `fission-ffi` <-> `fission-analysis`
+`ghidra_decompiler/src/*`
+↔ `fission-ffi`
+↔ `fission-analysis`
 
-Notes:
+원칙:
+- `fission-ffi`가 unsafe/native boundary를 소유
+- UI/CLI는 orchestration만 담당
+- 핵심 품질 로직은 analysis / pcode 레이어에 둠
 
-- `fission-ffi` owns unsafe/native boundary.
-- `fission-analysis` consumes `fission-ffi` through feature gates (`native_decomp`).
-- UI/CLI should remain consumers (presentation/orchestration), not business-logic owners.
+## Decompilation Architecture
+
+### 1. Legacy Path
+
+현재 가장 안정적인 경로.
+
+흐름:
+- Ghidra native decompiler
+- Fission postprocess (`fission-analysis`)
+- 최종 C-like 출력
+
+역할:
+- 실전 기본 경로
+- regression guard
+- type promotion, cleanup, control-flow cleanup의 현재 기준선
+
+### 2. MLIL Preview Path
+
+차세대 경로.
+
+흐름:
+- Ghidra p-code lifting
+- `fission-pcode` optimizer
+- Fission NIR builder
+- Fission HIR lowering
+- Rust printer
+- unsupported case는 preview pseudocode fallback 또는 legacy fallback
+
+현재 목적:
+- Ghidra C 출력 후처리로는 도달하기 어려운 가독성 개선
+- 구조화와 정규화를 Fission이 직접 통제
+
+현재 지원 범위:
+- PE x64 only
+- stack-slot recovery
+- multi-block `if`
+- multi-block `if/else`
+- short-circuit `&&`, `||`
+- multi-block `while`
+- multi-block `do-while`
+- cast canonicalization
+- `PIECE` / `SUBPIECE` recombination
 
 ## Runtime Layers
 
-### 1) Static Analysis Layer
+### Binary / Static Analysis Layer
 
-- Loader: parse binary bytes and construct `LoadedBinary`
-- Disassembly: instruction decoding and textual rendering
-- P-code/CFG/XRef: IR-based analysis and graph modeling
-- Signatures: API/function identification and relation checks
+- binary parsing
+- section / import / export / string extraction
+- disassembly
+- signature lookup
+- xref / CFG support
 
-### 2) Decompilation Layer
+### Native Decompiler Layer
 
-- Native decompiler integration is feature-gated (`native_decomp`)
-- `fission-analysis::analysis::decomp` provides safe high-level wrapper/cache
-- `fission-ffi` provides ABI + safe wrappers for Rust callers
+native decompiler preparation의 단일 진입점은:
 
-#### Per-binary decompiler preparation (single entry point)
+- `fission_analysis::analysis::decomp::prepare_native_decompiler_for_binary`
 
-All work that must be done before decompiling a given binary (load binary image, register memory sections, IAT/global symbols, symbol provider, known functions, FID DB, GDT when configured, etc.) is performed in **one place only**. The single entry point is `fission_analysis::analysis::decomp::prepare_native_decompiler_for_binary`. Both the CLI (oneshot) and the GUI (Tauri) create a decompiler instance and then call this function only.
+이 경로에서 처리되는 것:
+- binary image load
+- memory block registration
+- symbols / sections
+- known functions
+- FID DB
+- GDT
+- timeout / logging setup
 
-**GDT, timeout, and errors** are controlled only from this entry point and from config. Callers pass `PrepareOptions` (e.g. `gdt_path` from `PATHS.get_gdt_path(binary.is_64bit)`, `timeout_ms` from `Config::default().decompiler.timeout_ms`). GDT is applied in prepare when a path is provided; timeout is reserved for when the native layer exposes it. Failure reporting stays as `last_error` → Rust `Result`; any step-specific error refinement should be done in this path so both CLI and GUI benefit.
+원칙:
+- CLI와 GUI는 이 단일 경로만 사용
+- step-specific 에러 정제도 이 경로에서 통합 관리
 
-**Prepare initialization cost** is measured per step when using `--benchmark`; the CLI adds `_meta.prepare_timings` (load_binary_ms, symbols_ms, symbol_provider_ms, sections_ms, known_functions_ms, fid_ms, gdt_ms) to the JSON output. Use this breakdown to drive optimization (e.g. skip empty work, limit FID count).
+### Fission IR / Quality Layer
 
-#### Decompiler performance optimization priorities
+현재 두 갈래가 공존한다.
 
-Priorities are ordered by impact, measurement data (`prepare_timings`), and implementation cost. Update this section when the order or items change.
+- `fission-analysis` postprocess
+  - legacy 전용 품질 계층
+- `fission-pcode` NIR/HIR
+  - preview 전용 품질 계층
 
-- **Required safeguard (not a fundamental performance fix)**: **Timeout** — Prevents unbounded wait or excessive time per decompilation; config `timeout_ms` should be applied in the native/FFI path so that one slow function does not block the process or UI. This does not make decompilation faster; it bounds the damage when something is slow or stuck.
+장기 방향:
+- 후처리 문자열 정리보다, IR 레벨 구조화와 normalization을 중심으로 이동
 
-- **Performance priority 1**: **Reduce prepare init cost (e.g. FID)** — `prepare_timings` often shows FID loading as dominant. Options: skip empty work, limit FID paths/count, avoid retry on failure. This directly shortens init time.
+### Presentation Layer
 
-- **Performance priority 2**: **GUI prefetch** — Connect `enable_prefetch` / `prefetch_count` to decompilation: prefetch nearby functions into cache so that scrolling or selection feels faster.
+- `fission-cli`
+  - one-shot decompilation
+  - benchmark
+  - engine selection
+- `fission-tauri`
+  - assembly / decompile view
+  - engine selector
+  - fallback badge / engine badge
 
-- **Performance priority 3**: **Batch/benchmark stability** — Use timeout and init metrics so that batch scripts and large binaries (e.g. putty) have predictable behavior; adjust per-step limits if needed.
+## Engine Modes
 
-- **Performance priority 4**: **C++ engine options** — Expose or document quality-vs-speed knobs in the native pipeline; upstream constraints may limit changes.
+현재 제품 노출 엔진:
 
-Error message refinement is a usability/debugging concern rather than performance; handle it separately (e.g. in the same prepare path for consistency).
+- `legacy`
+- `mlil_preview`
+- `auto`
 
-### 3) Dynamic Analysis Layer
+정책:
+- `legacy`: 안정성 우선
+- `mlil_preview`: Fission NIR/HIR 전용 경로
+- `auto`: low-risk subset에서는 preview 우선 시도, 실패 시 legacy fallback
 
-Two distinct domains exist in `fission-analysis`:
+## Error / Fallback Policy
 
-- `debug/`: interactive debugging (attach/step/register/memory/ttd scaffolding)
-- `unpacker/`: runtime memory extraction/reconstruction (IAT rebuild, dump/fix)
+원칙:
+- 틀린 고수준 코드를 억지로 만들지 않는다
+- 실패 시 label/goto pseudocode 또는 legacy fallback으로 안전하게 내려간다
+- `Duplicate VariablePiece` 같은 hard case는 완전 수정 전까지 fallback 안정성을 우선한다
 
-`unpacker` is not a general interactive debugger; it is purpose-built for extraction and reconstruction workflows.
+## Logging / Diagnostics
 
-### 4) Presentation Layer
+제어 surface:
+- `[decompiler].log_verbose`
+- `[decompiler].log_file`
+- CLI `--verbose`
 
-- `fission-tauri`: Tauri backend (`commands/`) + React 19 frontend (`src/panels/`, `src/components/`)
-- `fission-cli`: CLI arguments, one-shot analysis commands, interactive REPL/TUI
-
-## Feature Gates
-
-Important workspace-level features:
-
-- `native_decomp`: enables native decompiler path (`fission-ffi` + analysis integration)
-- `gui` / `cli` / `tui`: binary/runtime surface selection
-
-Use `#[cfg(feature = "native_decomp")]` for native decompiler dependent code paths.
-
-## Error Handling Policy
-
-- Prefer `fission_core::errors::FissionError` and `fission_core::Result<T>`
-- Core and analysis logic should propagate errors (`?`) rather than panic
-- CLI/UI handlers should report/log errors instead of crashing
-
-## Concurrency & Performance
-
-- Zero-copy and shared ownership patterns are used for large binary data (`DataBuffer`, `Arc`)
-- Caching used for decompilation and repeated analyses
-- `rayon` is available for CPU-bound analysis tasks
-
-## Decompiler Logging and Errors
-
-- **Control surface**: Decompiler diagnostic logging is controlled only by `[decompiler].log_verbose` and `[decompiler].log_file` in config (see [fission.toml](../../fission.toml)). CLI overrides with `--verbose` (effective log = config `log_verbose` OR CLI `--verbose`).
-- **Errors**: Failures are always reported via `last_error` on the C++ context and exposed as Rust `Result` / `FissionError::decompiler(...)`. This path is separate from the diagnostic log stream.
-- **C++ contract**: When `log_verbose` is false, the native decompiler uses `log_output()` (null stream); when true, it uses stderr (and optionally the file set by `log_file`). `DecompilerNative::set_log_verbose` / `set_log_file` apply this at context creation or before use.
-- **Clients**: CLI and GUI (Tauri) should both read `Config::default().decompiler.log_verbose` and `log_file`, and call `set_log_verbose` / `set_log_file` after creating the decompiler. CLI additionally uses `OutputSilencer` when not verbose so that any remaining stderr from the process is suppressed.
+에러 경로:
+- native `last_error`
+- Rust `FissionError`
+- benchmark failure classification
 
 ## Native Code Boundary Rule
 
-`ghidra_decompiler/decompile` is upstream source.  
-Modify wrappers/integration code under `ghidra_decompiler/src/*` and Rust crates, not upstream `decompile` internals.
+`ghidra_decompiler/decompile`는 upstream 성격이 강한 영역이다.  
+가능하면 `ghidra_decompiler/src/*`와 Rust 쪽에서 통합/안정화 작업을 하고, upstream `decompile` 내부는 꼭 필요할 때만 건드린다.
+
+## Current Architectural Direction
+
+현재 Fission의 핵심 방향은 이것이다.
+
+- Ghidra를 “최종 디컴파일러”로 쓰는 것이 아니라,
+- **좋은 lifting / CFG / type recovery backend**로 사용한다
+- 그 위에서 Fission이 자체 NIR/HIR와 printer를 만들어
+- 더 읽기 좋은 pseudocode를 생성한다
+
+즉, Fission은 더 이상 “Ghidra output post-processor”만이 아니라,
+**Ghidra를 하부 엔진으로 사용하는 독자 디컴파일러 아키텍처**로 이동 중이다.

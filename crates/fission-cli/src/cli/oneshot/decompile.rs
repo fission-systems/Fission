@@ -7,15 +7,12 @@ use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
 use fission_analysis::analysis::decomp::postprocess::PostProcessor;
 use fission_analysis::analysis::decomp::{
-    PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
-    serialize_win_api_signatures_json,
+    PreviewEngineMode, PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
+    select_preview_output, serialize_win_api_signatures_json,
 };
 use fission_core::FissionError;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_pcode::{
-    MlilPreviewOptions, PcodeFunction, PcodeOptimizer, PcodeOptimizerConfig, render_mlil_preview,
-};
 use std::fs;
 use std::io::{self, Write};
 use tracing::warn;
@@ -171,105 +168,24 @@ fn legacy_rendered_code(
     }
 }
 
-fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
-    pcode.blocks.iter().map(|block| block.ops.len()).sum()
-}
-
-fn max_multiequal_fanin(pcode: &PcodeFunction) -> usize {
-    pcode
-        .blocks
-        .iter()
-        .flat_map(|block| block.ops.iter())
-        .filter(|op| op.opcode == fission_pcode::PcodeOpcode::MultiEqual)
-        .map(|op| op.inputs.len())
-        .max()
-        .unwrap_or(0)
-}
-
-fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
-    pcode.blocks.iter().flat_map(|block| block.ops.iter()).any(|op| {
-        matches!(
-            op.opcode,
-            fission_pcode::PcodeOpcode::CallInd | fission_pcode::PcodeOpcode::BranchInd
-        )
-    })
-}
-
-fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
-    binary.is_64bit
-        && binary.format.eq_ignore_ascii_case("PE")
-        && pcode.blocks.len() <= 8
-        && pcode_total_ops(pcode) <= 400
-        && !contains_indirect_control_flow(pcode)
-        && max_multiequal_fanin(pcode) <= 4
-}
-
-fn try_mlil_preview_code(
-    decomp: &DecompilerNative,
-    binary: &LoadedBinary,
-    address: u64,
-    name: &str,
-) -> Result<String, FissionError> {
-    let pcode_json = decomp.get_pcode(address)?;
-    let mut pcode = PcodeFunction::from_json(&pcode_json)
-        .map_err(|e| FissionError::decompiler(format!("mlil-preview pcode parse failed: {}", e)))?;
-    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
-    let _ = optimizer.optimize(&mut pcode);
-    let options = MlilPreviewOptions::from_loaded_binary(binary);
-    render_mlil_preview(&pcode, name, address, &options)
-        .map_err(|e| FissionError::decompiler(format!("mlil-preview unavailable: {}", e)))
-}
-
-fn try_mlil_preview_with_mode(
-    engine_mode: EngineMode,
-    decomp: &DecompilerNative,
-    binary: &LoadedBinary,
-    address: u64,
-    name: &str,
-) -> Result<Option<String>, FissionError> {
-    match engine_mode {
-        EngineMode::Legacy => Ok(None),
-        EngineMode::MlilPreview => try_mlil_preview_code(decomp, binary, address, name).map(Some),
-        EngineMode::Auto => {
-            let pcode_json = decomp.get_pcode(address)?;
-            let mut pcode = PcodeFunction::from_json(&pcode_json).map_err(|e| {
-                FissionError::decompiler(format!("mlil-preview pcode parse failed: {}", e))
-            })?;
-            if !auto_mlil_eligible(binary, &pcode) {
-                return Ok(None);
-            }
-            let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
-            let _ = optimizer.optimize(&mut pcode);
-            let options = MlilPreviewOptions::from_loaded_binary(binary);
-            render_mlil_preview(&pcode, name, address, &options)
-                .map(Some)
-                .map_err(|e| FissionError::decompiler(format!("mlil-preview unavailable: {}", e)))
-        }
-    }
-}
-
 fn decompile_code_with_profile(
     _profile: &str,
     engine_mode: EngineMode,
-    decomp: &DecompilerNative,
+    decomp: &mut DecompilerNative,
     binary: &LoadedBinary,
     address: u64,
     name: &str,
-    verbose: bool,
+    _verbose: bool,
 ) -> Result<RenderedCode, FissionError> {
-    if let Some(code) = match try_mlil_preview_with_mode(engine_mode, decomp, binary, address, name)
-    {
-        Ok(code) => code,
-        Err(err) => {
-            if verbose && engine_mode != EngineMode::Legacy {
-                eprintln!(
-                    "[mlil-preview] Falling back to legacy decompiler for {} @ 0x{:x}: {}",
-                    name, address, err
-                );
-            }
-            None
-        }
-    } {
+    let preview_mode = match engine_mode {
+        EngineMode::Legacy => PreviewEngineMode::Legacy,
+        EngineMode::MlilPreview => PreviewEngineMode::MlilPreview,
+        EngineMode::Auto => PreviewEngineMode::Auto,
+    };
+    let preview = select_preview_output(decomp, binary, address, name, preview_mode)
+        .map_err(FissionError::decompiler)?;
+
+    if let Some(code) = preview.preview_code {
         return Ok(RenderedCode {
             code,
             postprocess_sec: 0.0,
@@ -281,11 +197,8 @@ fn decompile_code_with_profile(
 
     let result = decomp.decompile_with_metadata(address)?;
     let mut rendered = legacy_rendered_code(binary, result);
-    if engine_mode != EngineMode::Legacy {
-        rendered.fell_back = true;
-        rendered.fallback_reason =
-            Some("mlil-preview unavailable or ineligible; fell back to legacy".to_string());
-    }
+    rendered.fell_back = preview.fell_back;
+    rendered.fallback_reason = preview.fallback_reason;
     Ok(rendered)
 }
 
@@ -567,7 +480,7 @@ fn run_parallel_decompilation<'a>(
                 let code_result = decompile_code_with_profile(
                     selected_profile,
                     engine_mode,
-                    &decomp,
+                    &mut decomp,
                     binary,
                     func.address,
                     &func.name,
@@ -861,7 +774,7 @@ pub(super) fn run_decompilation(
             // Try to decompile anyway
             decompile_and_output(
                 cli,
-                &decomp,
+                &mut decomp,
                 binary,
                 binary_data,
                 selected_profile,
@@ -970,7 +883,7 @@ pub(super) fn run_decompilation(
 
 pub(super) fn decompile_and_output(
     cli: &OneShotArgs,
-    decomp: &DecompilerNative,
+    decomp: &mut DecompilerNative,
     binary: &LoadedBinary,
     binary_data: &[u8],
     selected_profile: &str,
