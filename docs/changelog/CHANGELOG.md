@@ -6,6 +6,52 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-12
 
+### v14 - Legacy `type` 실패 제거 및 90/90 복구
+
+v14의 목표는 `mlil-preview` rescue를 성공으로 간주하지 않고, legacy / Ghidra-backed C 경로 자체가 끝까지 살아남도록 만드는 것이었다.
+핵심은 `Duplicate VariablePiece` 기반 `type` 실패를 더 이른 단계에서 containment 하고, strict type-seeded path가 무너지더라도 printer 가능한 보수적 base result를 legacy 경로 안에서 끝까지 전달하는 것이었다.
+
+#### Fixed
+
+- legacy path에서 남아 있던 `type` failure 3건 해소
+  - `putty 0x1400052b0`
+  - `putty 0x140006380`
+  - `cmkr 0x140002cc0`
+- `Duplicate VariablePiece` 재시도 실패 후에도 printable legacy C result가 남아 있으면 assembly fallback 대신 그 결과를 우선 반환하도록 조정
+- explicit `--engine legacy` 호출에서는 preview rescue가 개입하지 않도록 정리
+
+#### Changed
+
+- `ghidra_decompiler/src/decompiler/DecompilationCore.cpp`
+  - `Duplicate VariablePiece` 재시도 실패 시 partial legacy C 결과를 우선 확보하는 경로 추가
+  - strict type-seeded path가 무너져도 legacy printer가 먹을 수 있는 보수적 결과를 전달하도록 containment 강화
+- `crates/fission-cli/src/cli/oneshot/decompile.rs`
+  - explicit legacy 경로에서는 preview rescue 비활성화
+- `crates/fission-tauri/src-tauri/src/commands/analysis/assembly.rs`
+  - explicit legacy 경로에서는 preview rescue 비활성화
+
+#### Benchmark Highlights
+
+- Shared success: `90 / 90`
+- Fission success: `90 / 90`
+- Ghidra success: `90 / 90`
+- Fission `type` failures: `0`
+- Preview engine used: `87`
+- Preview fallback: `0`
+- Preview goto count: `0`
+- Preview temp surface count: `0`
+
+#### Regression Status
+
+- `putty.exe 0x140006260`의 `LPRECT` / `RECT` 경로 유지
+- preview metrics 후퇴 없음
+- `Stack_` / `_offset_size_` 잔재 재발 없음
+
+#### Notes
+
+- 이번 라운드는 preview 품질 개선이 아니라 pure legacy C failure removal 라운드였다.
+- `mlil-preview`는 regression guard로만 유지했고, 정식 해결 판정에는 포함하지 않았다.
+
 ### v13 - MLIL Preview 구조화/가독성 고도화
 
 `mlil-preview`를 단순 실험 슬라이스에서 벗어나, 실제로 의미 있는 pseudocode를 직접 생성하는 차세대 경로로 끌어올리는 작업을 진행했다.

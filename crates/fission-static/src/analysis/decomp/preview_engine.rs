@@ -16,6 +16,14 @@ pub struct PreviewSelection {
     pub fallback_reason: Option<String>,
 }
 
+fn is_type_failure_for_preview_rescue(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("duplicate variablepiece")
+        || lower.contains("ptrsub")
+        || lower.contains("non structured pointer type")
+        || lower.contains("struct")
+}
+
 pub trait PreviewSource {
     fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String>;
 }
@@ -149,5 +157,31 @@ pub fn select_preview_output<S: PreviewSource>(
                 }),
             }
         }
+    }
+}
+
+pub fn rescue_preview_output<S: PreviewSource>(
+    source: &mut S,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    error: &str,
+) -> Result<Option<PreviewSelection>, String> {
+    if !is_type_failure_for_preview_rescue(error) {
+        return Ok(None);
+    }
+
+    let pcode_json = source
+        .get_pcode_json(address)
+        .map_err(|e| e.to_string())?;
+    match render_preview_from_json(&pcode_json, binary, address, name, false) {
+        Ok(Some(code)) => Ok(Some(PreviewSelection {
+            preview_code: Some(code),
+            engine_used: PreviewEngineMode::MlilPreview,
+            fell_back: true,
+            fallback_reason: Some(format!("legacy type failure rescued by mlil-preview: {error}")),
+        })),
+        Ok(None) => Ok(None),
+        Err(_) => Ok(None),
     }
 }

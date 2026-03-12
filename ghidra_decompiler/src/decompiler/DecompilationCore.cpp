@@ -25,6 +25,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <set>
 #include "fission/utils/logger.h"
 using namespace fission::ffi;
@@ -33,6 +34,75 @@ using namespace fission::types;
 using namespace fission::analysis;
 
 static constexpr size_t MAX_FUNCTION_SIZE = 10000;
+
+static std::optional<std::string> try_render_partial_legacy_c(
+    fission::ffi::DecompContext* ctx,
+    ghidra::Funcdata* fd,
+    const std::string& reason)
+{
+    auto try_print_flat = [&](const char* phase) -> std::optional<std::string> {
+        std::ostringstream ss;
+        ctx->arch->print->setOutputStream(&ss);
+        ctx->arch->print->setFlat(true);
+        try {
+            ctx->arch->print->docFunction(fd);
+        } catch (const ghidra::LowlevelError& e) {
+            ctx->arch->print->setFlat(false);
+            fission::utils::log_output()
+                << "[DecompilerCore] Partial legacy C fallback failed in "
+                << phase << ": " << e.explain << std::endl;
+            return std::nullopt;
+        } catch (const std::exception& e) {
+            ctx->arch->print->setFlat(false);
+            fission::utils::log_output()
+                << "[DecompilerCore] Partial legacy C fallback failed in "
+                << phase << ": " << e.what() << std::endl;
+            return std::nullopt;
+        } catch (...) {
+            ctx->arch->print->setFlat(false);
+            fission::utils::log_output()
+                << "[DecompilerCore] Partial legacy C fallback failed in "
+                << phase << ": unknown error" << std::endl;
+            return std::nullopt;
+        }
+        ctx->arch->print->setFlat(false);
+        auto rendered = ss.str();
+        if (!rendered.empty()) {
+            return rendered;
+        }
+        return std::nullopt;
+    };
+
+    try {
+        fission::utils::log_output()
+            << "[DecompilerCore] Attempting partial legacy C fallback after "
+            << reason << std::endl;
+
+        if (auto rendered = try_print_flat("current-state printer"); rendered) {
+            return rendered;
+        }
+
+        ctx->arch->clearAnalysis(fd);
+
+        // Rebuild only the minimal process-started state required by the C printer.
+        // We avoid strict type recovery and structured actions here; docFunction()
+        // will automatically degrade to flat output if no structured blocks exist.
+        fd->startProcessing();
+        if (auto rendered = try_print_flat("startProcessing printer"); rendered) {
+            return rendered;
+        }
+    }
+    catch (const ghidra::LowlevelError& e) {
+        fission::utils::log_output()
+            << "[DecompilerCore] Partial legacy C fallback setup failed: "
+            << e.explain << std::endl;
+    } catch (const std::exception& e) {
+        fission::utils::log_output()
+            << "[DecompilerCore] Partial legacy C fallback setup failed: "
+            << e.what() << std::endl;
+    }
+    return std::nullopt;
+}
 
 // ============================================================================
 // Known noreturn functions — marking these allows Ghidra's FlowInfo to insert
@@ -625,6 +695,7 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     };
 
     bool did_retry_dvp = false;
+    std::optional<std::string> forced_printable_result;
     try {
         do_seed_and_perform(true);
     } catch (const ghidra::LowlevelError& e) {
@@ -638,7 +709,20 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
             try {
                 do_seed_and_perform(false);
             } catch (const ghidra::LowlevelError& e2) {
-                throw std::runtime_error("Ghidra LowlevelError: " + e2.explain + " (retry without seed failed)");
+                if (std::string(e2.explain).find("Duplicate VariablePiece") != std::string::npos) {
+                    forced_printable_result = try_render_partial_legacy_c(
+                        ctx,
+                        fd,
+                        e2.explain + " (retry without seed failed)");
+                    if (!forced_printable_result) {
+                        throw std::runtime_error(
+                            "Ghidra LowlevelError: " + e2.explain +
+                            " (retry without seed failed; partial legacy fallback unavailable)");
+                    }
+                } else {
+                    throw std::runtime_error(
+                        "Ghidra LowlevelError: " + e2.explain + " (retry without seed failed)");
+                }
             }
         } else if (msg.find("Function loaded for inlining") != std::string::npos && !ctx->allow_inline) {
             fission::utils::log_output() << "[DecompilerCore] WARNING: Inline-loaded function, clearing analysis and retrying"
@@ -661,15 +745,17 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
     }
 
     fission::decompiler::AnalysisArtifacts analysis;
-    try {
-        analysis = fission::decompiler::run_analysis_passes(ctx, fd, current_action, MAX_FUNCTION_SIZE);
-    } catch (const ghidra::LowlevelError& e) {
-        if (std::string(e.explain).find("Duplicate VariablePiece") != std::string::npos) {
-            fission::utils::log_output() << "[DecompilerCore] Duplicate VariablePiece in analysis passes, using base result"
-                      << std::endl;
-            analysis = fission::decompiler::AnalysisArtifacts{};
-        } else {
-            throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+    if (!forced_printable_result) {
+        try {
+            analysis = fission::decompiler::run_analysis_passes(ctx, fd, current_action, MAX_FUNCTION_SIZE);
+        } catch (const ghidra::LowlevelError& e) {
+            if (std::string(e.explain).find("Duplicate VariablePiece") != std::string::npos) {
+                fission::utils::log_output() << "[DecompilerCore] Duplicate VariablePiece in analysis passes, using base result"
+                          << std::endl;
+                analysis = fission::decompiler::AnalysisArtifacts{};
+            } else {
+                throw std::runtime_error("Ghidra LowlevelError: " + e.explain);
+            }
         }
     }
     if (out_artifacts) {
@@ -690,14 +776,18 @@ std::string fission::decompiler::run_decompilation(DecompContext* ctx, uint64_t 
         throw std::runtime_error("Print language not initialized");
     }
     
-    // Print decompiled output to string
-    std::ostringstream ss;
-    ctx->arch->print->setOutputStream(&ss);
-    auto print_start = std::chrono::steady_clock::now();
-    ctx->arch->print->docFunction(fd);
-    timing_recorder.timing.print_ms = elapsed_ms(print_start);
-    
-    std::string result = ss.str();
+    std::string result;
+    if (forced_printable_result) {
+        result = *forced_printable_result;
+    } else {
+        // Print decompiled output to string
+        std::ostringstream ss;
+        ctx->arch->print->setOutputStream(&ss);
+        auto print_start = std::chrono::steady_clock::now();
+        ctx->arch->print->docFunction(fd);
+        timing_recorder.timing.print_ms = elapsed_ms(print_start);
+        result = ss.str();
+    }
     
     // ========================================================================
     // Full Post-Processing Chain

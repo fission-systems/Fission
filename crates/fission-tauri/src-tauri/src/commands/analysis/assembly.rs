@@ -4,7 +4,9 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 #[cfg(feature = "native_decomp")]
-use fission_static::analysis::decomp::{PreviewEngineMode, PreviewSelection, select_preview_output};
+use fission_static::analysis::decomp::{
+    PreviewEngineMode, PreviewSelection, rescue_preview_output, select_preview_output,
+};
 #[cfg(feature = "native_decomp")]
 use fission_loader::loader::LoadedBinary;
 use tauri::State;
@@ -44,10 +46,33 @@ fn decompile_with_engine(
             fallback_reason: None,
         });
     }
-    decomp
-        .decompile(address)
-        .map(|code| outcome_from_preview_selection(code, preview))
-        .map_err(|e| CmdError::other(format!("{e}")))
+    match decomp.decompile(address) {
+        Ok(code) => Ok(outcome_from_preview_selection(code, preview)),
+        Err(e) => {
+            let error_text = e.to_string();
+            if !matches!(engine_mode, DecompilerEngineMode::Legacy) {
+                if let Some(selection) = rescue_preview_output(
+                    decomp,
+                    binary,
+                    address,
+                    name,
+                    &error_text,
+                )
+                .map_err(CmdError::other)?
+                {
+                    if let Some(code) = selection.preview_code {
+                        return Ok(DecompileOutcome {
+                            code,
+                            engine_used: DecompilerEngineMode::MlilPreview,
+                            fell_back: true,
+                            fallback_reason: selection.fallback_reason,
+                        });
+                    }
+                }
+            }
+            Err(CmdError::other(format!("{e}")))
+        }
+    }
 }
 
 #[cfg(feature = "native_decomp")]

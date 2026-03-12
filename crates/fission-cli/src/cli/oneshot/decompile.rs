@@ -8,7 +8,7 @@ use crate::cli::output::OutputSilencer;
 use fission_static::analysis::decomp::postprocess::PostProcessor;
 use fission_static::analysis::decomp::{
     PreviewEngineMode, PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
-    select_preview_output, serialize_win_api_signatures_json,
+    rescue_preview_output, select_preview_output, serialize_win_api_signatures_json,
 };
 use fission_core::FissionError;
 use fission_ffi::DecompilerNative;
@@ -195,7 +195,34 @@ fn decompile_code_with_profile(
         });
     }
 
-    let result = decomp.decompile_with_metadata(address)?;
+    let result = match decomp.decompile_with_metadata(address) {
+        Ok(result) => result,
+        Err(e) => {
+            let error_text = e.to_string();
+            if !matches!(engine_mode, EngineMode::Legacy) {
+                if let Some(selection) = rescue_preview_output(
+                    decomp,
+                    binary,
+                    address,
+                    name,
+                    &error_text,
+                )
+                .map_err(FissionError::decompiler)?
+                {
+                    if let Some(code) = selection.preview_code {
+                        return Ok(RenderedCode {
+                            code,
+                            postprocess_sec: 0.0,
+                            engine_used: "mlil_preview",
+                            fell_back: true,
+                            fallback_reason: selection.fallback_reason,
+                        });
+                    }
+                }
+            }
+            return Err(e);
+        }
+    };
     let mut rendered = legacy_rendered_code(binary, result);
     rendered.fell_back = preview.fell_back;
     rendered.fallback_reason = preview.fallback_reason;

@@ -9,11 +9,16 @@ Fission is a Rust reverse-engineering workspace built around three pieces:
 - a split Rust analysis stack (`fission-static`, `fission-dynamic`, `fission-ai`)
 - a desktop frontend built with Tauri 2 + React (`crates/fission-tauri`)
 
-The repository currently ships a CLI entrypoint (`fission_cli`), a modular analysis backend, embedded Windows signature/type data, and an in-progress desktop GUI.
+The repository currently ships:
+
+- a CLI entrypoint (`fission_cli`)
+- a split analysis backend (`fission-static`, `fission-dynamic`, `fission-ai`)
+- embedded Windows signature/type data
+- an in-progress Tauri desktop GUI
 
 ## Current Snapshot
 
-As of March 11, 2026, the mainline tree has two decompilation paths:
+As of March 12, 2026, the mainline tree has two decompilation paths:
 
 - the mature `legacy` path: Ghidra-native decompilation plus Fission post-processing
 - the experimental `mlil-preview` path: Ghidra p-code lifting plus Fission-owned NIR/HIR and a Rust printer
@@ -32,27 +37,31 @@ Recent experimental engine work now in-tree:
 - Tauri decompile-engine selection plus engine/fallback badges in the UI
 - a PE x64 `mlil-preview` pipeline with:
   - stack-slot recovery
-  - NIR/HIR lowering for straight-line code, simple multi-block `if`, `if/else`, `while`, `do-while`
+  - CFG-aware NIR/HIR lowering for straight-line code and multi-block `if`, `if/else`, `while`, `do-while`
+  - short-circuit folding for canonical `&&` / `||`
+  - cast canonicalization
+  - `PIECE` / `SUBPIECE` recombination
   - label/goto pseudocode fallback when structure reconstruction is incomplete
   - Rust-side idiom recognition for basic `div/mod by power-of-two`
 
-The checked-in legacy benchmark summary is preserved in [`docs/benchmark/grand_finale_summary.md`](/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md).
+The checked-in baseline benchmark summary is preserved in [`docs/benchmark/grand_finale_summary.md`](/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md).
 
-Headline numbers from that checked-in run:
+Latest internal benchmark highlights from the current mainline tree:
 
-- 3 binaries, 60 shared successfully decompiled functions
-- Fission success count: 60/60
-- Ghidra success count: 60/60
-- total `goto` reduction vs Ghidra: 50.50%
-- `for` loops: 16 vs 11
-- `do-while` loops: 16 vs 22
-- sampled run reported no timeout, OOM, or crash
+- 3 real-world binaries (`everything`, `putty`, `cmkr`)
+- 90/90 shared successful decompilations in the legacy/Ghidra-backed path
+- 90/90 Fission success count
+- 90/90 Ghidra success count
+- remaining legacy `type` failures from v13 were removed in v14
+- `mlil-preview` remained integrated and non-regressing during the same run
 
 Current practical status:
 
-- `legacy` is still the default-quality path
-- `mlil-preview` is integrated into the product path, but it is still an experimental subset engine
-- preview coverage is increasing, but output quality on real multi-block functions still trails the legacy path
+- `legacy` is still the default-quality path and regression guard
+- `legacy` recovered the last known benchmark `type` failures in v14 and is back to a clean 90/90 shared-success benchmark run on the current internal regression set
+- `mlil-preview` is integrated into the product path and exposed in CLI/Tauri, but it is still an experimental engine
+- preview coverage is now high enough to be exercised as a real product path, but the long-term work is still preview quality/typing rather than basic enablement
+- the long-term direction is to treat Ghidra as the lifting/backend engine and let Fission own the higher-level IR and pseudocode generation
 
 ## Workspace Layout
 
@@ -77,6 +86,13 @@ Related top-level directories:
 - [`samples`](/Users/sjkim1127/Fission/samples): sample binaries used during development and testing
 - [`scripts/test/batch_benchmark`](/Users/sjkim1127/Fission/scripts/test/batch_benchmark): benchmark runners, including `grand_finale.py`
 - [`docs`](/Users/sjkim1127/Fission/docs): architecture, build, benchmark, and analysis notes
+
+Practical ownership rule:
+
+- put new static/decompile work in `fission-static`
+- put new runtime/debug/plugin work in `fission-dynamic`
+- put new agent/LLM-facing work in `fission-ai`
+- treat `fission-analysis` as a compatibility layer, not the preferred home for new code
 
 ## Build Prerequisites
 
@@ -192,6 +208,12 @@ What is still moving:
 - some interaction paths in the decompile view are newer than the assembly view
 - GUI documentation outside this README is not fully caught up yet
 
+The product-level engine policy today is:
+
+- `legacy`: stable default
+- `mlil-preview`: experimental Fission-owned NIR/HIR path
+- `auto`: try `mlil-preview` first for low-risk functions, then fall back to `legacy`
+
 The legacy [`docs/gui/GUI_GUIDE.md`](/Users/sjkim1127/Fission/docs/gui/GUI_GUIDE.md) explicitly documents an older egui-based UI and should not be treated as the source of truth for the current Tauri frontend.
 
 ## Benchmarks
@@ -203,6 +225,13 @@ Relevant files:
 - [`docs/benchmark/grand_finale_summary.md`](/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md): latest sampled Fission vs Ghidra summary
 - [`docs/benchmark/grand_finale_summary.json`](/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.json): machine-readable summary
 - [`scripts/test/batch_benchmark/grand_finale.py`](/Users/sjkim1127/Fission/scripts/test/batch_benchmark/grand_finale.py): benchmark driver
+
+The benchmark runner also supports preview-specific reporting. During active engine work, local artifacts may include extra fields such as:
+
+- `preview_engine_used_count`
+- `preview_fallback_count`
+- `preview_goto_count`
+- `preview_temp_surface_count`
 
 ## Key Docs
 
@@ -220,6 +249,7 @@ Relevant files:
 Fission is under active development.
 
 - The CLI and analysis backend are the most mature parts of the repository.
-- The Tauri frontend is real, buildable, and now exposes decompile engine selection, but its interaction model is still evolving.
+- The Tauri frontend is real, buildable, and exposes decompile engine selection, but its interaction model is still evolving.
 - The `legacy` engine is currently the only path that should be treated as the stable default for serious analysis.
 - The `mlil-preview` engine is now wired through CLI and GUI, but should still be treated as an experimental architecture path rather than a drop-in replacement for the legacy decompiler.
+- The codebase is now split around long-term ownership boundaries, but `fission-analysis` remains in-tree as a compatibility façade during migration.
