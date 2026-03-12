@@ -32,10 +32,17 @@ Fission은 크게 네 층으로 본다.
   - WinAPI / type / signature DB
 - `fission-ffi`
   - Rust ↔ native decompiler 경계
-- `fission-analysis`
+- `fission-static`
   - legacy decompile wrapping
   - postprocess
-  - CFG / xref / debug / unpacking
+  - preview engine / NIR-HIR orchestration
+  - CFG / xref / patch / strings / callgraph
+- `fission-dynamic`
+  - debug / runtime / plugin / unpacker
+- `fission-ai`
+  - agent-facing AI abstraction layer
+- `fission-analysis`
+  - compatibility façade for historical import paths
 - `fission-pcode`
   - p-code 모델
   - optimizer
@@ -53,19 +60,23 @@ Fission은 크게 네 층으로 본다.
 `fission-core`
 → `fission-loader` / `fission-signatures` / `fission-disasm`
 → `fission-pcode`
-→ `fission-analysis`
+→ `fission-static`
+→ `fission-dynamic`
+→ `fission-ai`
 → `fission-cli` / `fission-tauri`
 
 native 경계:
 
 `ghidra_decompiler/src/*`
 ↔ `fission-ffi`
-↔ `fission-analysis`
+↔ `fission-static`
 
 원칙:
 - `fission-ffi`가 unsafe/native boundary를 소유
+- `fission-static`은 `fission-dynamic`, `fission-ai`를 의존하지 않음
+- `fission-dynamic`은 `fission-static`을 의존 가능
 - UI/CLI는 orchestration만 담당
-- 핵심 품질 로직은 analysis / pcode 레이어에 둠
+- 핵심 품질 로직은 static / pcode 레이어에 둠
 
 ## Decompilation Architecture
 
@@ -75,7 +86,7 @@ native 경계:
 
 흐름:
 - Ghidra native decompiler
-- Fission postprocess (`fission-analysis`)
+- Fission postprocess (`fission-static`)
 - 최종 C-like 출력
 
 역할:
@@ -124,7 +135,7 @@ native 경계:
 
 native decompiler preparation의 단일 진입점은:
 
-- `fission_analysis::analysis::decomp::prepare_native_decompiler_for_binary`
+- `fission_static::analysis::decomp::prepare_native_decompiler_for_binary`
 
 이 경로에서 처리되는 것:
 - binary image load
@@ -143,7 +154,7 @@ native decompiler preparation의 단일 진입점은:
 
 현재 두 갈래가 공존한다.
 
-- `fission-analysis` postprocess
+- `fission-static` postprocess
   - legacy 전용 품질 계층
 - `fission-pcode` NIR/HIR
   - preview 전용 품질 계층
@@ -210,3 +221,13 @@ native decompiler preparation의 단일 진입점은:
 
 즉, Fission은 더 이상 “Ghidra output post-processor”만이 아니라,
 **Ghidra를 하부 엔진으로 사용하는 독자 디컴파일러 아키텍처**로 이동 중이다.
+
+## Compatibility Note
+
+`fission-analysis`는 즉시 제거되지 않는다.
+
+- 기존 import path 호환성 유지
+- 단계적 migration 보조
+- façade 역할만 유지
+
+새 구현과 신규 의존성은 원칙적으로 `fission-static`, `fission-dynamic`, `fission-ai`에 추가한다.

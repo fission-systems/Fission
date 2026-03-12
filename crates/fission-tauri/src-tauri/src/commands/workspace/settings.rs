@@ -92,7 +92,7 @@ pub async fn apply_decompiler_options(
             apply_cpp_postprocess_options(decomp.inner_mut(), &options.cpp_postprocess);
 
             // 3. Rust PostProcess options → CachingDecompiler
-            let rust_opts = fission_analysis::analysis::decomp::RustPostProcessOptions {
+            let rust_opts = fission_static::analysis::decomp::RustPostProcessOptions {
                 clean_rust: options.rust_postprocess.clean_rust,
                 clean_go: options.rust_postprocess.clean_go,
                 swift_demangle: options.rust_postprocess.swift_demangle,

@@ -4,7 +4,7 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 #[cfg(feature = "native_decomp")]
-use fission_analysis::analysis::decomp::{PreviewEngineMode, PreviewSelection, select_preview_output};
+use fission_static::analysis::decomp::{PreviewEngineMode, PreviewSelection, select_preview_output};
 #[cfg(feature = "native_decomp")]
 use fission_loader::loader::LoadedBinary;
 use tauri::State;
@@ -23,7 +23,7 @@ struct DecompileOutcome {
 
 #[cfg(feature = "native_decomp")]
 fn decompile_with_engine(
-    decomp: &mut fission_analysis::analysis::decomp::CachingDecompiler,
+    decomp: &mut fission_static::analysis::decomp::CachingDecompiler,
     binary: &LoadedBinary,
     address: u64,
     name: &str,

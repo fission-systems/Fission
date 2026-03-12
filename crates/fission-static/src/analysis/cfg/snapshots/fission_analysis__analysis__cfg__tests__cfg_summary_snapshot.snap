@@ -1,0 +1,37 @@
+---
+source: crates/fission-analysis/src/analysis/cfg/mod.rs
+expression: summary
+---
+function_address: "0x1000"
+block_count: 3
+edge_count: 2
+cyclomatic_complexity: 1
+max_nesting_depth: 0
+loops: []
+blocks:
+  - index: 0
+    address: "0x1000"
+    is_entry: true
+    is_exit: false
+    successors:
+      - 1
+    predecessors: []
+    instruction_count: 5
+  - index: 1
+    address: "0x1010"
+    is_entry: false
+    is_exit: false
+    successors:
+      - 2
+    predecessors:
+      - 0
+    instruction_count: 2
+  - index: 2
+    address: "0x1020"
+    is_entry: false
+    is_exit: true
+    successors: []
+    predecessors:
+      - 1
+    instruction_count: 1
+dot_content: "digraph { }"

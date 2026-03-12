@@ -1,0 +1,54 @@
+[package]
+name = "fission-static"
+version = "0.1.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Fission static analysis and decompilation engine"
+repository = "https://github.com/sjkim1127/Fission"
+readme = "../../README.md"
+keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]
+categories = ["development-tools::debugging"]
+build = "build.rs"
+
+[features]
+default = []
+native_decomp = ["dep:fission-ffi", "fission-ffi/native_decomp"]
+
+[dependencies]
+fission-core = { path = "../fission-core" }
+fission-loader = { path = "../fission-loader" }
+fission-pcode = { path = "../fission-pcode" }
+fission-ffi = { path = "../fission-ffi", optional = true }
+fission-signatures = { path = "../fission-signatures" }
+object = "0.32"
+iced-x86 = { version = "1.21", features = ["std"] }
+bytes = "1.11"
+anyhow = "1.0"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+crossbeam-channel = "0.5"
+rkyv = { version = "0.7", features = ["validation"] }
+bytecheck = "0.6"
+hex = "0.4"
+base64 = "0.22"
+colored = "2.1"
+regex = "1.10"
+lru = "0.16"
+toml = "0.8"
+dirs = "5.0"
+flate2 = "1.1.5"
+binrw = "0.15.0"
+once_cell = "1.19"
+
+[build-dependencies]
+cc = "1.0"
+
+[dev-dependencies]
+proptest = "1.4"
+insta = { version = "1.34", features = ["yaml"] }
+fission-pcode = { path = "../fission-pcode" }
+fission-loader = { path = "../fission-loader" }

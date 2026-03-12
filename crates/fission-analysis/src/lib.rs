@@ -1,7 +1,10 @@
-//! Fission - Next-Gen Dynamic Instrumentation Platform
+//! Fission compatibility facade.
 //!
-//! This library provides the core functionality for binary analysis,
-//! debugging, and decompilation.
+//! This crate preserves the historical `fission-analysis` public paths while
+//! the implementation is split into dedicated crates:
+//! - `fission-static`
+//! - `fission-dynamic`
+//! - `fission-ai`
 
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![allow(clippy::module_name_repetitions)]
@@ -10,45 +13,16 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::multiple_crate_versions)]
 
-#[allow(
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_wrap,
-    clippy::cast_precision_loss
-)]
-pub mod analysis;
-#[cfg(feature = "interactive_runtime")]
-#[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
-pub mod app;
-#[cfg(feature = "interactive_runtime")]
-#[allow(
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
-pub mod debug;
-#[cfg(feature = "interactive_runtime")]
-#[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
-pub mod plugin;
 pub mod prelude;
-#[allow(
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
-#[cfg(feature = "unpacker_runtime")]
-pub mod unpacker;
-
-pub mod utils;
 
 pub use fission_core as core;
 
-// Re-export core utilities at crate level for convenience
 pub use fission_core::{config, constants, errors, logging, prelude as core_prelude, settings};
+pub use fission_static::{analysis, utils};
 
-// NOTE: FFI functions are now exclusively exported through fission-ffi crate
-// to maintain clear separation of concerns. Do not re-export FFI here.
+#[cfg(feature = "interactive_runtime")]
+pub use fission_dynamic::{app, debug, plugin};
+#[cfg(feature = "unpacker_runtime")]
+pub use fission_dynamic::unpacker;
+
+pub use fission_ai as ai;

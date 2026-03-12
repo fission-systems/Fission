@@ -19,7 +19,7 @@ test = false
 [features]
 default = []
 native_decomp = [
-    "fission-analysis/native_decomp",
+    "fission-static/native_decomp",
     "dep:fission-ffi",
     "dep:rayon",
 ]
@@ -27,7 +27,7 @@ native_decomp = [
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
-fission-analysis = { path = "../fission-analysis" }
+fission-static = { path = "../fission-static" }
 fission-pcode = { path = "../fission-pcode" }
 fission-ffi = { path = "../fission-ffi", optional = true }
 rayon = { version = "1.10", optional = true }

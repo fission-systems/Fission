@@ -9,7 +9,7 @@ use tauri::State;
 // Private helpers
 // ============================================================================
 
-fn snapshot_to_dto(s: &fission_analysis::debug::ttd::ExecutionSnapshot) -> TtdSnapshotDto {
+fn snapshot_to_dto(s: &fission_dynamic::debug::ttd::ExecutionSnapshot) -> TtdSnapshotDto {
     TtdSnapshotDto {
         step: s.step_index,
         thread_id: s.thread_id,
@@ -26,7 +26,7 @@ fn snapshot_to_dto(s: &fission_analysis::debug::ttd::ExecutionSnapshot) -> TtdSn
     }
 }
 
-fn timeline_to_state_dto(tl: &fission_analysis::debug::ttd::Timeline) -> TtdStateDto {
+fn timeline_to_state_dto(tl: &fission_dynamic::debug::ttd::Timeline) -> TtdStateDto {
     let stats = tl.stats();
     let step_range = tl.step_range().map(|(a, b)| [a, b]);
     let current_step = tl.current_position();

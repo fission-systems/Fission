@@ -10,8 +10,8 @@ use tauri::State;
 // ============================================================================
 
 /// Convert fission-core PluginInfo → PluginInfoDto.
-fn plugin_info_to_dto(info: &fission_analysis::plugin::api::PluginInfo) -> PluginInfoDto {
-    use fission_analysis::plugin::api::PluginType;
+fn plugin_info_to_dto(info: &fission_dynamic::plugin::api::PluginInfo) -> PluginInfoDto {
+    use fission_dynamic::plugin::api::PluginType;
     PluginInfoDto {
         id: info.id.clone(),
         name: info.name.clone(),

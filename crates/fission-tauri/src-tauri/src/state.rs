@@ -3,20 +3,20 @@
 use crate::dto::BookmarkDto;
 use crate::dto::DebugStateDto;
 use crate::menu::MenuHandles;
-use fission_analysis::debug::ttd::Timeline;
-use fission_analysis::plugin::PluginManager;
+use fission_dynamic::debug::ttd::Timeline;
+use fission_dynamic::plugin::PluginManager;
 use fission_loader::loader::LoadedBinary;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[cfg(feature = "native_decomp")]
-use fission_analysis::analysis::decomp::CachingDecompiler;
+use fission_static::analysis::decomp::CachingDecompiler;
 
 #[cfg(target_os = "windows")]
 use crossbeam_channel::{Receiver, Sender};
 #[cfg(target_os = "windows")]
-use fission_analysis::debug::{types::DebugEvent, windows::WindowsDebugger};
+use fission_dynamic::debug::{types::DebugEvent, windows::WindowsDebugger};
 
 /// Inner mutable state behind a Mutex.
 /// Does NOT contain the decompiler — that lives in its own Mutex to

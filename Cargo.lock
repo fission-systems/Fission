@@ -1312,47 +1312,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
 
 [[package]]
+name = "fission-ai"
+version = "0.1.0"
+dependencies = [
+ "fission-core",
+ "fission-dynamic",
+ "fission-static",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "fission-analysis"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "base64 0.22.1",
- "binrw",
- "bytecheck",
- "bytes",
- "cc",
- "colored",
- "criterion",
- "crossbeam-channel",
- "dirs 5.0.1",
+ "fission-ai",
  "fission-core",
- "fission-ffi",
+ "fission-dynamic",
  "fission-loader",
- "fission-pcode",
- "fission-signatures",
- "flate2",
- "hex",
- "iced-x86",
- "insta",
- "libloading 0.8.9",
- "log",
- "lru",
- "nix",
- "object",
- "once_cell",
- "proptest",
- "rayon",
- "regex",
- "rkyv",
- "serde",
- "serde_json",
- "sysinfo",
- "thiserror 1.0.69",
- "tokio",
- "toml 0.8.2",
- "tracing",
- "tracing-subscriber",
- "windows 0.54.0",
+ "fission-static",
 ]
 
 [[package]]
@@ -1360,11 +1340,11 @@ name = "fission-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
- "fission-analysis",
  "fission-core",
  "fission-ffi",
  "fission-loader",
  "fission-pcode",
+ "fission-static",
  "iced-x86",
  "libc",
  "rayon",
@@ -1397,6 +1377,44 @@ dependencies = [
  "iced-x86",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "fission-dynamic"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "binrw",
+ "bytecheck",
+ "bytes",
+ "colored",
+ "crossbeam-channel",
+ "dirs 5.0.1",
+ "fission-core",
+ "fission-loader",
+ "fission-static",
+ "flate2",
+ "hex",
+ "iced-x86",
+ "libloading 0.8.9",
+ "log",
+ "lru",
+ "nix",
+ "object",
+ "once_cell",
+ "rayon",
+ "regex",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml 0.8.2",
+ "tracing",
+ "tracing-subscriber",
+ "windows 0.54.0",
 ]
 
 [[package]]
@@ -1479,16 +1497,54 @@ dependencies = [
 ]
 
 [[package]]
-name = "fission-tauri"
+name = "fission-static"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "binrw",
+ "bytecheck",
+ "bytes",
+ "cc",
+ "colored",
  "crossbeam-channel",
- "fission-analysis",
+ "dirs 5.0.1",
  "fission-core",
  "fission-ffi",
  "fission-loader",
  "fission-pcode",
  "fission-signatures",
+ "flate2",
+ "hex",
+ "iced-x86",
+ "insta",
+ "log",
+ "lru",
+ "object",
+ "once_cell",
+ "proptest",
+ "regex",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "toml 0.8.2",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "fission-tauri"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "fission-core",
+ "fission-dynamic",
+ "fission-ffi",
+ "fission-loader",
+ "fission-pcode",
+ "fission-signatures",
+ "fission-static",
  "iced-x86",
  "serde",
  "serde_json",

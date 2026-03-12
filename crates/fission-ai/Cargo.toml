@@ -1,0 +1,25 @@
+[package]
+name = "fission-ai"
+version = "0.1.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Fission AI agent platform abstractions"
+repository = "https://github.com/sjkim1127/Fission"
+readme = "../../README.md"
+keywords = ["fission", "ai", "agent", "llm"]
+categories = ["development-tools"]
+
+[features]
+default = []
+dynamic = ["dep:fission-dynamic"]
+openai = []
+local-model = []
+
+[dependencies]
+fission-core = { path = "../fission-core" }
+fission-static = { path = "../fission-static" }
+fission-dynamic = { path = "../fission-dynamic", optional = true, default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"

@@ -15,8 +15,8 @@ use tauri::State;
 /// both locks at the same time.
 #[cfg(target_os = "windows")]
 async fn drain_events_into_state(state: &AppState) {
-    use fission_analysis::debug::traits::Debugger;
-    use fission_analysis::debug::types::DebugEvent;
+    use fission_dynamic::debug::traits::Debugger;
+    use fission_dynamic::debug::types::DebugEvent;
 
     // Step 1: non-blocking drain into a local Vec (very short lock)
     let events: Vec<DebugEvent> = {
@@ -63,7 +63,7 @@ async fn drain_events_into_state(state: &AppState) {
             for evt in &events {
                 if let DebugEvent::SingleStep { thread_id } = evt {
                     if let Some(regs) = reg_cache.get(thread_id) {
-                        use fission_analysis::debug::types::RegisterState;
+                        use fission_dynamic::debug::types::RegisterState;
                         let rs = RegisterState {
                             rax: regs.rax,
                             rbx: regs.rbx,
@@ -177,7 +177,7 @@ pub async fn debug_get_state(state: State<'_, AppState>) -> CmdResult<DebugState
 pub async fn debug_attach(pid: u32, state: State<'_, AppState>) -> CmdResult<()> {
     #[cfg(target_os = "windows")]
     {
-        use fission_analysis::debug::{
+        use fission_dynamic::debug::{
             traits::Debugger,
             windows::{start_event_loop, WindowsDebugger},
         };
@@ -199,7 +199,7 @@ pub async fn debug_attach(pid: u32, state: State<'_, AppState>) -> CmdResult<()>
 
         // Wire up background event loop
         let (tx_events, rx_events) =
-            crossbeam_channel::unbounded::<fission_analysis::debug::types::DebugEvent>();
+            crossbeam_channel::unbounded::<fission_dynamic::debug::types::DebugEvent>();
         let (tx_stop, rx_stop) = crossbeam_channel::bounded::<()>(1);
         start_event_loop(pid, tx_events, rx_stop);
 
@@ -235,7 +235,7 @@ pub async fn debug_attach(pid: u32, state: State<'_, AppState>) -> CmdResult<()>
 pub async fn debug_detach(state: State<'_, AppState>) -> CmdResult<()> {
     #[cfg(target_os = "windows")]
     {
-        use fission_analysis::debug::traits::Debugger;
+        use fission_dynamic::debug::traits::Debugger;
 
         // Signal event loop to stop, then clear channel handles
         {
@@ -290,7 +290,7 @@ pub async fn debug_detach(state: State<'_, AppState>) -> CmdResult<()> {
 pub async fn debug_continue(state: State<'_, AppState>) -> CmdResult<()> {
     #[cfg(target_os = "windows")]
     {
-        use fission_analysis::debug::traits::Debugger;
+        use fission_dynamic::debug::traits::Debugger;
 
         let mut dbg = state.debugger.lock().await;
         let d = dbg
@@ -319,7 +319,7 @@ pub async fn debug_continue(state: State<'_, AppState>) -> CmdResult<()> {
 pub async fn debug_step(state: State<'_, AppState>) -> CmdResult<()> {
     #[cfg(target_os = "windows")]
     {
-        use fission_analysis::debug::traits::Debugger;
+        use fission_dynamic::debug::traits::Debugger;
 
         let mut dbg = state.debugger.lock().await;
         let d = dbg
@@ -348,7 +348,7 @@ pub async fn debug_step(state: State<'_, AppState>) -> CmdResult<()> {
 pub async fn debug_add_breakpoint(address: u64, state: State<'_, AppState>) -> CmdResult<()> {
     #[cfg(target_os = "windows")]
     {
-        use fission_analysis::debug::traits::Debugger;
+        use fission_dynamic::debug::traits::Debugger;
 
         let mut dbg = state.debugger.lock().await;
         let d = dbg
@@ -382,7 +382,7 @@ pub async fn debug_add_breakpoint(address: u64, state: State<'_, AppState>) -> C
 pub async fn debug_remove_breakpoint(address: u64, state: State<'_, AppState>) -> CmdResult<()> {
     #[cfg(target_os = "windows")]
     {
-        use fission_analysis::debug::traits::Debugger;
+        use fission_dynamic::debug::traits::Debugger;
 
         let mut dbg = state.debugger.lock().await;
         let d = dbg
@@ -430,7 +430,7 @@ pub async fn debug_read_memory(
 
     #[cfg(target_os = "windows")]
     {
-        use fission_analysis::debug::traits::Debugger;
+        use fission_dynamic::debug::traits::Debugger;
         let mut dbg = state.debugger.lock().await;
         let d = dbg
             .as_mut()

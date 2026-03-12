@@ -6,7 +6,7 @@
 Fission is a Rust reverse-engineering workspace built around three pieces:
 
 - a native Ghidra decompiler bridge (`ghidra_decompiler` + `fission-ffi`)
-- a Rust analysis and post-processing pipeline (`fission-analysis`)
+- a split Rust analysis stack (`fission-static`, `fission-dynamic`, `fission-ai`)
 - a desktop frontend built with Tauri 2 + React (`crates/fission-tauri`)
 
 The repository currently ships a CLI entrypoint (`fission_cli`), a modular analysis backend, embedded Windows signature/type data, and an in-progress desktop GUI.
@@ -63,7 +63,10 @@ The workspace members are declared in [`Cargo.toml`](/Users/sjkim1127/Fission/Ca
 - [`crates/fission-disasm`](/Users/sjkim1127/Fission/crates/fission-disasm): disassembly support
 - [`crates/fission-pcode`](/Users/sjkim1127/Fission/crates/fission-pcode): p-code data structures and transforms
 - [`crates/fission-signatures`](/Users/sjkim1127/Fission/crates/fission-signatures): embedded WinAPI/type/signature database
-- [`crates/fission-analysis`](/Users/sjkim1127/Fission/crates/fission-analysis): decompilation, post-processing, CFG analysis, debugger/runtime support
+- [`crates/fission-static`](/Users/sjkim1127/Fission/crates/fission-static): static analysis, decompilation orchestration, preview engine, post-processing
+- [`crates/fission-dynamic`](/Users/sjkim1127/Fission/crates/fission-dynamic): debugger/runtime, plugin runtime, unpacker
+- [`crates/fission-ai`](/Users/sjkim1127/Fission/crates/fission-ai): agent/platform abstraction layer for future AI workflows
+- [`crates/fission-analysis`](/Users/sjkim1127/Fission/crates/fission-analysis): compatibility façade that re-exports the split analysis crates
 - [`crates/fission-ffi`](/Users/sjkim1127/Fission/crates/fission-ffi): Rust/C++ bridge into the native decompiler
 - [`crates/fission-cli`](/Users/sjkim1127/Fission/crates/fission-cli): CLI entrypoint
 - [`crates/fission-tauri/src-tauri`](/Users/sjkim1127/Fission/crates/fission-tauri/src-tauri): Tauri backend for the desktop app

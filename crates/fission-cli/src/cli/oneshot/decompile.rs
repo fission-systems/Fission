@@ -5,8 +5,8 @@ use crate::cli::oneshot::common::{
 };
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
-use fission_analysis::analysis::decomp::postprocess::PostProcessor;
-use fission_analysis::analysis::decomp::{
+use fission_static::analysis::decomp::postprocess::PostProcessor;
+use fission_static::analysis::decomp::{
     PreviewEngineMode, PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
     select_preview_output, serialize_win_api_signatures_json,
 };

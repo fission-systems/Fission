@@ -30,6 +30,12 @@
 - 릴리즈 이력: [`/Users/sjkim1127/Fission/docs/changelog/CHANGELOG.md`](/Users/sjkim1127/Fission/docs/changelog/CHANGELOG.md)
 - 최신 벤치마크 기준: [`/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md`](/Users/sjkim1127/Fission/docs/benchmark/grand_finale_summary.md)
 
+현재 crate 경계 기준:
+- `fission-static`: source of truth for static analysis / decomp orchestration
+- `fission-dynamic`: source of truth for debugging/runtime/plugin/unpacker
+- `fission-ai`: source of truth for future agent/AI integration
+- `fission-analysis`: compatibility façade, not the preferred home for new code
+
 ## Folder Tree
 
 ### `/Users/sjkim1127/Fission/docs/architecture`
@@ -136,4 +142,3 @@
 
 1. [`/Users/sjkim1127/Fission/docs/ROADMAP.md`](/Users/sjkim1127/Fission/docs/ROADMAP.md)
 2. `/Users/sjkim1127/Fission/docs/idea/*`
-
