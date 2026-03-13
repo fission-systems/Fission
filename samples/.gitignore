@@ -1,9 +1,0 @@
-# Ignore actual binary files — they may be commercial/proprietary.
-# Commit suite YAML + README notes instead of the binaries themselves.
-*
-!.gitignore
-!.gitkeep
-!README.md
-!*.yaml
-!*.yml
-!*/

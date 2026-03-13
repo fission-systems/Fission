@@ -1,11 +1,28 @@
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{MlilPreviewOptions, PcodeFunction, PcodeOpcode, PcodeOptimizer, PcodeOptimizerConfig, render_mlil_preview};
+use fission_pcode::{
+    MlilPreviewOptions, PcodeFunction, PcodeOpcode, PcodeOptimizer, PcodeOptimizerConfig,
+    PreviewCallParamRule, PreviewTypeContext, render_mlil_preview_with_context,
+};
+use fission_signatures::WIN_API_DB;
+use fission_signatures::win_types::WindowsStructures;
+use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewEngineMode {
     Legacy,
     MlilPreview,
     Auto,
+}
+
+impl PreviewEngineMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PreviewEngineMode::Legacy => "legacy",
+            PreviewEngineMode::MlilPreview => "mlil_preview",
+            PreviewEngineMode::Auto => "auto",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,10 +81,80 @@ fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
 pub fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
     binary.is_64bit
         && binary.format.eq_ignore_ascii_case("PE")
-        && pcode.blocks.len() <= 8
-        && pcode_total_ops(pcode) <= 400
+        && pcode.blocks.len() <= 12
+        && pcode_total_ops(pcode) <= 600
         && !contains_indirect_control_flow(pcode)
         && max_multiequal_fanin(pcode) <= 4
+}
+
+fn sanitize_preview_symbol_name(name: &str) -> String {
+    let mut sanitized = name.trim().to_string();
+    for suffix in [" [import]", " [export]"] {
+        if let Some(stripped) = sanitized.strip_suffix(suffix) {
+            sanitized = stripped.trim_end().to_string();
+        }
+    }
+    sanitized
+}
+
+fn build_preview_type_context(binary: &LoadedBinary) -> PreviewTypeContext {
+    let structures = WindowsStructures::new();
+    let mut call_targets = HashMap::new();
+    for func in &binary.functions {
+        if func.address == 0 || func.name.is_empty() {
+            continue;
+        }
+        call_targets
+            .entry(func.address)
+            .or_insert_with(|| sanitize_preview_symbol_name(&func.name));
+    }
+
+    let mut call_param_rules = Vec::new();
+    for sig in WIN_API_DB.iter() {
+        for (arg_index, param) in sig.params.iter().enumerate() {
+            let Some(struct_name) = resolve_preview_struct_name(&param.type_name, &structures)
+            else {
+                continue;
+            };
+            let Some(struct_def) = structures.get(&struct_name) else {
+                continue;
+            };
+            if struct_def.size_64 == 0 {
+                continue;
+            }
+            call_param_rules.push(PreviewCallParamRule {
+                callee_name: sig.name.clone(),
+                arg_index,
+                pointer_alias: param.type_name.clone(),
+                pointee_alias: struct_name,
+                pointer_size: 8,
+                pointee_sizes: vec![struct_def.size_64 as u32],
+            });
+        }
+    }
+
+    PreviewTypeContext {
+        call_targets,
+        call_param_rules,
+    }
+}
+
+fn resolve_preview_struct_name(
+    type_name: &str,
+    structures: &WindowsStructures,
+) -> Option<String> {
+    if type_name.contains('*') {
+        return None;
+    }
+    for prefix in ["LP", "P"] {
+        let Some(candidate) = type_name.strip_prefix(prefix) else {
+            continue;
+        };
+        if structures.get(candidate).is_some() {
+            return Some(candidate.to_string());
+        }
+    }
+    None
 }
 
 fn render_preview_from_json(
@@ -77,15 +164,91 @@ fn render_preview_from_json(
     name: &str,
     enforce_auto_gate: bool,
 ) -> Result<Option<String>, String> {
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        let _ = std::fs::write(
+            format!("/tmp/fission_preview_{address:x}.json"),
+            pcode_json,
+        );
+    }
     let mut pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        let mut debug_dump = String::new();
+        debug_dump.push_str(&format!(
+            "[mlil-preview] function=0x{address:x} blocks={} ops={}\n",
+            pcode.blocks.len(),
+            pcode.blocks.iter().map(|b| b.ops.len()).sum::<usize>()
+        ));
+        eprintln!(
+            "[mlil-preview] function=0x{address:x} blocks={} ops={}",
+            pcode.blocks.len(),
+            pcode.blocks.iter().map(|b| b.ops.len()).sum::<usize>()
+        );
+        for block in &pcode.blocks {
+            let term = block
+                .ops
+                .last()
+                .map(|op| format!("{:?}@0x{:x}", op.opcode, op.address))
+                .unwrap_or_else(|| "<none>".to_string());
+            debug_dump.push_str(&format!(
+                "[mlil-preview] block 0x{:x} ops={} term={}\n",
+                block.start_address,
+                block.ops.len(),
+                term
+            ));
+            eprintln!(
+                "[mlil-preview] block 0x{:x} ops={} term={}",
+                block.start_address,
+                block.ops.len(),
+                term
+            );
+        }
+        let _ = std::fs::write(
+            format!("/tmp/fission_preview_{address:x}.log"),
+            debug_dump,
+        );
+    }
     if enforce_auto_gate && !auto_mlil_eligible(binary, &pcode) {
         return Ok(None);
     }
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(format!("/tmp/fission_preview_{address:x}.log"))
+            .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=before_optimize\n"));
+    }
     let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
-    let _ = optimizer.optimize(&mut pcode);
+    let optimize_result = catch_unwind(AssertUnwindSafe(|| optimizer.optimize(&mut pcode)));
+    if optimize_result.is_err() && std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(format!("/tmp/fission_preview_{address:x}.log"))
+            .and_then(|mut f| {
+                std::io::Write::write_all(
+                    &mut f,
+                    b"[mlil-preview] stage=optimize_panicked_using_raw_pcode\n",
+                )
+            });
+    }
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(format!("/tmp/fission_preview_{address:x}.log"))
+            .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=after_optimize\n"));
+    }
     let options = MlilPreviewOptions::from_loaded_binary(binary);
-    render_mlil_preview(&pcode, name, address, &options)
+    let type_context = build_preview_type_context(binary);
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(format!("/tmp/fission_preview_{address:x}.log"))
+            .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=before_render\n"));
+    }
+    render_mlil_preview_with_context(&pcode, name, address, &options, Some(&type_context))
         .map(Some)
         .map_err(|e| format!("mlil-preview unavailable: {e}"))
 }

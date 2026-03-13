@@ -265,6 +265,252 @@ fn reg(offset: u64, size: u32) -> Varnode {
     }
 
     #[test]
+    fn preview_type_hints_surface_known_pointer_alias_on_param() {
+        let mut func = HirFunction {
+            name: "FUN_0x140006260".to_string(),
+            params: vec![
+                NirBinding {
+                    name: "param_1".to_string(),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                    surface_type_name: None,
+                },
+                NirBinding {
+                    name: "param_2".to_string(),
+                    ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                    surface_type_name: None,
+                },
+            ],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "GetClientRect".to_string(),
+                args: vec![
+                    HirExpr::Var("param_1".to_string()),
+                    HirExpr::Var("param_2".to_string()),
+                ],
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            })],
+        };
+
+        let mut context = PreviewTypeContext::default();
+        context.call_param_rules.push(PreviewCallParamRule {
+            callee_name: "GetClientRect".to_string(),
+            arg_index: 1,
+            pointer_alias: "LPRECT".to_string(),
+            pointee_alias: "RECT".to_string(),
+            pointer_size: 8,
+            pointee_sizes: vec![16],
+        });
+
+        apply_preview_type_hints(&mut func, &context);
+        assert_eq!(
+            func.params[1].surface_type_name.as_deref(),
+            Some("LPRECT")
+        );
+        let rendered = print_hir_function(&func);
+        assert!(rendered.contains("undefined FUN_0x140006260(longlong param_1, LPRECT param_2)"));
+    }
+
+    #[test]
+    fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
+        let mut func = HirFunction {
+            name: "FUN_0x140006260".to_string(),
+            params: vec![
+                NirBinding {
+                    name: "param_1".to_string(),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                    surface_type_name: None,
+                },
+                NirBinding {
+                    name: "param_2".to_string(),
+                    ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                    surface_type_name: None,
+                },
+            ],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                target: "GetClientRect".to_string(),
+                args: vec![
+                    HirExpr::Var("param_1".to_string()),
+                    HirExpr::Cast {
+                        ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                        expr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("param_2".to_string())),
+                            offset: 0,
+                        }),
+                    },
+                ],
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            })],
+        };
+
+        let mut context = PreviewTypeContext::default();
+        context.call_param_rules.push(PreviewCallParamRule {
+            callee_name: "GetClientRect".to_string(),
+            arg_index: 1,
+            pointer_alias: "LPRECT".to_string(),
+            pointee_alias: "RECT".to_string(),
+            pointer_size: 8,
+            pointee_sizes: vec![16],
+        });
+
+        apply_preview_type_hints(&mut func, &context);
+        assert_eq!(
+            func.params[1].surface_type_name.as_deref(),
+            Some("LPRECT")
+        );
+    }
+
+    #[test]
+    fn preview_type_hints_surface_known_local_aggregate_alias() {
+        let mut func = HirFunction {
+            name: "FUN_0x140006260".to_string(),
+            params: vec![
+                NirBinding {
+                    name: "param_1".to_string(),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                    surface_type_name: None,
+                },
+                NirBinding {
+                    name: "param_2".to_string(),
+                    ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                    surface_type_name: None,
+                },
+            ],
+            locals: vec![NirBinding {
+                name: "local_3c".to_string(),
+                ty: NirType::Aggregate { size: 16 },
+                surface_type_name: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![
+                HirStmt::Expr(HirExpr::Call {
+                    target: "GetClientRect".to_string(),
+                    args: vec![
+                        HirExpr::Var("param_1".to_string()),
+                        HirExpr::Var("param_2".to_string()),
+                    ],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                }),
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("param_2".to_string())),
+                        ty: NirType::Aggregate { size: 16 },
+                    },
+                    rhs: HirExpr::Var("local_3c".to_string()),
+                },
+            ],
+        };
+
+        let mut context = PreviewTypeContext::default();
+        context.call_param_rules.push(PreviewCallParamRule {
+            callee_name: "GetClientRect".to_string(),
+            arg_index: 1,
+            pointer_alias: "LPRECT".to_string(),
+            pointee_alias: "RECT".to_string(),
+            pointer_size: 8,
+            pointee_sizes: vec![16],
+        });
+
+        let mut hints = std::collections::HashMap::new();
+        hints.insert("param_2".to_string(), context.call_param_rules[0].clone());
+        let mut local_hints = std::collections::HashMap::new();
+        collect_local_surface_hints(&func.body, &hints, &func, &mut local_hints);
+        assert_eq!(local_hints.get("local_3c").map(String::as_str), Some("RECT"));
+
+        apply_preview_type_hints(&mut func, &context);
+        assert_eq!(
+            func.params[1].surface_type_name.as_deref(),
+            Some("LPRECT")
+        );
+        assert_eq!(
+            func.locals[0].surface_type_name.as_deref(),
+            Some("RECT")
+        );
+        let rendered = print_hir_function(&func);
+        assert!(rendered.contains("RECT local_3c;"));
+    }
+
+    #[test]
+    fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
+        let func = HirFunction {
+            name: "FUN_0x140006260".to_string(),
+            params: vec![
+                NirBinding {
+                    name: "param_1".to_string(),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                    surface_type_name: None,
+                },
+                NirBinding {
+                    name: "param_2".to_string(),
+                    ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                    surface_type_name: Some("LPRECT".to_string()),
+                },
+            ],
+            locals: vec![NirBinding {
+                name: "local_3c".to_string(),
+                ty: NirType::Aggregate { size: 16 },
+                surface_type_name: None,
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Cast {
+                        ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                        expr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("param_2".to_string())),
+                            offset: 0,
+                        }),
+                    }),
+                    ty: NirType::Aggregate { size: 16 },
+                },
+                rhs: HirExpr::AggregateCopy {
+                    src: Box::new(HirExpr::Var("local_3c".to_string())),
+                    size: 16,
+                },
+            }],
+        };
+
+        let mut hints = std::collections::HashMap::new();
+        hints.insert(
+            "param_2".to_string(),
+            PreviewCallParamRule {
+                callee_name: "GetClientRect".to_string(),
+                arg_index: 1,
+                pointer_alias: "LPRECT".to_string(),
+                pointee_alias: "RECT".to_string(),
+                pointer_size: 8,
+                pointee_sizes: vec![16],
+            },
+        );
+        let mut local_hints = std::collections::HashMap::new();
+        collect_local_surface_hints(&func.body, &hints, &func, &mut local_hints);
+        assert_eq!(local_hints.get("local_3c").map(String::as_str), Some("RECT"));
+    }
+
+    #[test]
     fn multi_block_preview_lowers_simple_if_without_failing() {
         let cond = uniq(0x300, 1);
         let func = PcodeFunction {
@@ -319,6 +565,67 @@ fn reg(offset: u64, size: u32) -> Varnode {
         };
 
         let code = render_mlil_preview(&func, "branchy", 0x3000, &preview_options())
+            .expect("preview render");
+        assert!(code.contains("if (!(param_1)) {"));
+        assert!(code.contains("return 0;"));
+        assert!(code.contains("return 1;"));
+    }
+
+    #[test]
+    fn multi_block_preview_lowers_conditional_goto_style_if() {
+        let cond = uniq(0x340, 1);
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x3400,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::Copy,
+                            address: 0x3400,
+                            output: Some(cond.clone()),
+                            inputs: vec![reg(0x08, 1)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x3401,
+                            output: None,
+                            inputs: vec![cst(0x3420, 8), cond],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x3410,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x3410,
+                        output: None,
+                        inputs: vec![cst(0, 8), cst(0, 4)],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x3420,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x3420,
+                        output: None,
+                        inputs: vec![cst(0, 8), cst(1, 4)],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        };
+
+        let code = render_mlil_preview(&func, "cond_goto_if", 0x3400, &preview_options())
             .expect("preview render");
         assert!(code.contains("if (!(param_1)) {"));
         assert!(code.contains("return 0;"));
@@ -779,7 +1086,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
 
         let code = render_mlil_preview(&func, "short_or_fn", 0x3800, &preview_options())
             .expect("preview render");
-        assert!(code.contains("||"));
+        assert!(code.contains("||"), "{code}");
         assert!(code.contains("local_10 = 9;"));
         assert!(!code.contains("goto block_3830;"));
     }
@@ -1241,4 +1548,204 @@ fn reg(offset: u64, size: u32) -> Varnode {
         assert!(code.contains("local_10 = 5;"));
         assert!(code.contains("local_14 = 6;"));
         assert!(code.contains("} while (param_1);"));
-}
+    }
+
+    #[test]
+    fn normalize_bool_compare_to_zero() {
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::LogicalAnd,
+                lhs: Box::new(HirExpr::Var("flag_a".to_string())),
+                rhs: Box::new(HirExpr::Var("flag_b".to_string())),
+                ty: NirType::Bool,
+            }),
+            rhs: Box::new(HirExpr::Const(0, NirType::Int { bits: 32, signed: false })),
+            ty: NirType::Bool,
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return (flag_a && flag_b);");
+    }
+
+    #[test]
+    fn normalize_trivial_assign_return_chain() {
+        let mut body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("result".to_string()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("param_1".to_string())),
+                    rhs: Box::new(HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    )),
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                },
+            },
+            HirStmt::Return(Some(HirExpr::Var("result".to_string()))),
+        ];
+        normalize_function_body(&mut body);
+        assert_eq!(body.len(), 1);
+        assert_eq!(print_stmt(&body[0]), "return (param_1 + 1);");
+    }
+
+    #[test]
+    fn normalize_inlines_single_use_trivial_temp() {
+        let mut body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("uVar1".to_string()),
+                rhs: HirExpr::Const(
+                    7,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+            HirStmt::Return(Some(HirExpr::Var("uVar1".to_string()))),
+        ];
+        normalize_function_body(&mut body);
+        assert_eq!(body.len(), 1);
+        assert_eq!(print_stmt(&body[0]), "return 7;");
+    }
+
+    #[test]
+    fn normalize_inlines_non_adjacent_single_use_trivial_temp() {
+        let mut body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("uVar1".to_string()),
+                rhs: HirExpr::Const(
+                    7,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("local_10".to_string()),
+                rhs: HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                ),
+            },
+            HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("uVar1".to_string())),
+                rhs: Box::new(HirExpr::Var("local_10".to_string())),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            })),
+        ];
+        normalize_function_body(&mut body);
+        assert_eq!(body.len(), 2);
+        assert_eq!(print_stmt(&body[1]), "return (7 + local_10);");
+    }
+
+    #[test]
+    fn multi_block_preview_lowers_canonical_switch_chain() {
+        let cond0 = uniq(0x500, 1);
+        let cond1 = uniq(0x501, 1);
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x5000,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::IntEqual,
+                            address: 0x5000,
+                            output: Some(cond0.clone()),
+                            inputs: vec![reg(0x08, 4), cst(1, 4)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::CBranch,
+                            address: 0x5001,
+                            output: None,
+                            inputs: vec![cst(0x5030, 8), cond0],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x5010,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::IntEqual,
+                            address: 0x5010,
+                            output: Some(cond1.clone()),
+                            inputs: vec![reg(0x08, 4), cst(2, 4)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::CBranch,
+                            address: 0x5011,
+                            output: None,
+                            inputs: vec![cst(0x5040, 8), cond1],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x5020,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x5020,
+                        output: None,
+                        inputs: vec![cst(0, 8), cst(0, 4)],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 3,
+                    start_address: 0x5030,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x5030,
+                        output: None,
+                        inputs: vec![cst(0, 8), cst(1, 4)],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 4,
+                    start_address: 0x5040,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x5040,
+                        output: None,
+                        inputs: vec![cst(0, 8), cst(2, 4)],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        };
+
+        let code = render_mlil_preview(&func, "switchy", 0x5000, &preview_options())
+            .expect("preview render");
+        assert!(code.contains("switch (param_1) {"));
+        assert!(code.contains("case 1:"));
+        assert!(code.contains("case 2:"));
+        assert!(code.contains("default:"));
+    }

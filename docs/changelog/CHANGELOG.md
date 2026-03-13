@@ -6,6 +6,85 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-12
 
+### v16 - Preview 타입 표면 품질 및 `putty 0x140006260` 직접 출력 달성
+
+v16의 목표는 preview 경로가 단순히 구조화된 pseudocode를 내는 수준을 넘어서, known signature 기반 타입 표면을 더 자연스럽게 드러내도록 만드는 것이었다. 특히 `putty.exe 0x140006260`를 preview 경로에서도 직접 구조화하고, `LPRECT` / `RECT` / whole-object assignment 형태까지 surface 하는 것을 목표로 했다.
+
+#### Added
+
+- preview path에 known-signature 기반 type surface context 추가
+- preview binding surface type 힌트 추가
+- real p-code JSON opcode alias parsing 강화
+  - `goto`, `copy`, `load`, `store`, `==`, `+`, `SUB`, `ZEXT` 등
+- layout-based fallthrough 계산 추가로 preview CFG recovery 보강
+
+#### Changed
+
+- preview CFG/structuring이 block vector 순서가 아니라 실제 block layout과 successor 관계를 기준으로 동작하도록 수정
+- conditional `goto(target, cond)` 형태의 real p-code branch를 preview lowering이 직접 이해하도록 수정
+- preview optimizer panic은 즉시 전체 실패로 번지지 않고 raw p-code path로 containment 하도록 조정
+
+#### Improved
+
+- `putty.exe 0x140006260 --engine mlil-preview` 에서 직접:
+  - `LPRECT param_2`
+  - `RECT local_3c`
+  - `*param_2 = local_3c;`
+  를 surface 할 수 있게 됨
+- preview는 여전히:
+  - `preview_engine_used_count 113`
+  - `preview_fallback_count 0`
+  - `preview_goto_count 0`
+  - `preview_temp_surface_count 0`
+  를 유지
+
+#### Benchmark Highlights
+
+- Shared success: `120 / 120`
+- Preview engine used: `113`
+- Preview fallback: `0`
+- Preview goto count: `0`
+- Preview temp surface count: `0`
+- Cast chains: `Fission 9 / Ghidra 24`
+
+#### Notes
+
+- 이번 라운드는 legacy 경로나 Ghidra C++ core를 넓게 손대지 않고, preview 전용 타입 표면과 CFG 해석 품질을 높이는 데 집중했다.
+- `putty.exe 0x140006260`는 preview 타입 표면 품질의 대표 regression/acceptance guard로 유지된다.
+
+### v15 - Preview 품질 격상과 저위험 함수 기본 경로 승격
+
+v15의 목표는 legacy 성공률을 더 올리는 것이 아니라, `mlil-preview`를 낮은 리스크 함수에서는 더 읽기 좋은 기본 경로로 끌어올리는 것이었다. 이번 라운드에서 preview 경로는 canonical `switch` reconstruction, preview 전용 surface cleanup, `auto` 채택 범위 확대를 통해 실질적인 제품 경로로 한 단계 더 올라갔다.
+
+#### Added
+
+- preview 경로에 canonical `switch` reconstruction 추가
+- preview 전용 surface cleanup 계층 추가
+  - bool compare/test normalization
+  - trivial temp elision
+  - redundant return temp 제거
+  - repeated cast wrapper collapse
+- preview/legacy 공용 `engine_used` 문자열 source of truth를 `fission-static` helper로 집중
+
+#### Changed
+
+- `auto` preview eligibility 한도를 완화하여, 구조가 안정적인 multi-block 함수는 preview를 더 자주 직접 채택하도록 조정
+- preview printer는 구조화와 cast cleanup은 더 강해졌지만, field-name 추측이나 legacy postprocess 전체 재도입은 하지 않도록 정책을 유지
+
+#### Benchmark Highlights
+
+- Shared success: `120 / 120`
+- Preview engine used: `113`
+- Preview fallback: `0`
+- Preview goto count: `0`
+- Preview temp surface count: `0`
+- Cast chains: `Fission 9 / Ghidra 24`
+
+#### Notes
+
+- v15는 preview coverage와 구조화 품질을 올리는 데는 성공했지만, preview 타입 표면 품질은 아직 legacy보다 약하다.
+- 대표적인 known limitation은 `putty.exe 0x140006260`에서 preview가 아직 legacy 수준의 `LPRECT` / `RECT` 표면 타입을 직접 만들지 못한다는 점이다.
+
 ### v14 - Legacy `type` 실패 제거 및 90/90 복구
 
 v14의 목표는 `mlil-preview` rescue를 성공으로 간주하지 않고, legacy / Ghidra-backed C 경로 자체가 끝까지 살아남도록 만드는 것이었다.

@@ -7,11 +7,11 @@ pub(super) fn print_hir_function(func: &HirFunction) -> String {
         if idx > 0 {
             out.push_str(", ");
         }
-        out.push_str(&format!("{} {}", print_type(&param.ty), param.name));
+        out.push_str(&format!("{} {}", print_binding_type(param), param.name));
     }
     out.push_str(")\n{\n");
     for local in &func.locals {
-        out.push_str(&format!("    {} {};\n", print_type(&local.ty), local.name));
+        out.push_str(&format!("    {} {};\n", print_binding_type(local), local.name));
     }
     if !func.locals.is_empty() {
         out.push('\n');
@@ -23,6 +23,13 @@ pub(super) fn print_hir_function(func: &HirFunction) -> String {
     out
 }
 
+fn print_binding_type(binding: &NirBinding) -> String {
+    binding
+        .surface_type_name
+        .clone()
+        .unwrap_or_else(|| print_type(&binding.ty))
+}
+
 pub(super) fn print_stmt(stmt: &HirStmt) -> String {
     match stmt {
         HirStmt::Assign { lhs, rhs } => format!("{} = {};", print_lvalue(lhs), print_expr(rhs)),
@@ -30,6 +37,7 @@ pub(super) fn print_stmt(stmt: &HirStmt) -> String {
         HirStmt::Label(label) => format!("{}:", label),
         HirStmt::Goto(label) => format!("goto {};", label),
         HirStmt::Block(_) => "{ ... }".to_string(),
+        HirStmt::Switch { .. } => "switch (...) { ... }".to_string(),
         HirStmt::If { .. } => "if (...) { ... }".to_string(),
         HirStmt::While { .. } => "while (...) { ... }".to_string(),
         HirStmt::DoWhile { .. } => "do { ... } while (...);".to_string(),
@@ -62,6 +70,47 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
             out.push_str("{\n");
             for stmt in stmts {
                 print_stmt_with_indent(stmt, indent + 1, out);
+            }
+            out.push_str(&pad);
+            out.push_str("}\n");
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            out.push_str(&pad);
+            out.push_str(&format!("switch ({}) {{\n", print_expr(expr)));
+            for case in cases {
+                for value in &case.values {
+                    out.push_str(&pad);
+                    out.push_str("    ");
+                    out.push_str(&format!("case {}:\n", value));
+                }
+                for stmt in &case.body {
+                    print_stmt_with_indent(stmt, indent + 2, out);
+                }
+                if !matches!(
+                    case.body.last(),
+                    Some(HirStmt::Break | HirStmt::Return(_) | HirStmt::Goto(_))
+                ) {
+                    out.push_str(&pad);
+                    out.push_str("        break;\n");
+                }
+            }
+            if !default.is_empty() {
+                out.push_str(&pad);
+                out.push_str("    default:\n");
+                for stmt in default {
+                    print_stmt_with_indent(stmt, indent + 2, out);
+                }
+                if !matches!(
+                    default.last(),
+                    Some(HirStmt::Break | HirStmt::Return(_) | HirStmt::Goto(_))
+                ) {
+                    out.push_str(&pad);
+                    out.push_str("        break;\n");
+                }
             }
             out.push_str(&pad);
             out.push_str("}\n");

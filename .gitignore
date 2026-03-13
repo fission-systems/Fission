@@ -76,6 +76,9 @@ ghidra_decompiler/fission_decomp
 !examples/binaries/comparison_test_x64.exe
 !examples/binaries/comparison_test_x86.exe
 
+# Local sample corpora and scratch projects
+samples/
+
 # Script run outputs (result dirs, benchmarks, temp comparison runs)
 # Use ** (not trailing /) so specific files can be un-ignored below
 scripts/result/**
@@ -97,6 +100,9 @@ ghidra_decompiler/.cache/
 # Benchmark results (criterion output)
 benchmark_results/
 **/benchmark_results/
+
+# Local benchmark/decomp artifacts
+artifacts/
 
 # User-specific utility scripts and tools
 /utils/

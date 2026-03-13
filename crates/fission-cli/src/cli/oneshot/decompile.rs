@@ -162,7 +162,7 @@ fn legacy_rendered_code(
     RenderedCode {
         code,
         postprocess_sec,
-        engine_used: "legacy",
+        engine_used: PreviewEngineMode::Legacy.as_str(),
         fell_back: false,
         fallback_reason: None,
     }
@@ -189,7 +189,7 @@ fn decompile_code_with_profile(
         return Ok(RenderedCode {
             code,
             postprocess_sec: 0.0,
-            engine_used: "mlil_preview",
+            engine_used: PreviewEngineMode::MlilPreview.as_str(),
             fell_back: false,
             fallback_reason: None,
         });
@@ -213,7 +213,7 @@ fn decompile_code_with_profile(
                         return Ok(RenderedCode {
                             code,
                             postprocess_sec: 0.0,
-                            engine_used: "mlil_preview",
+                            engine_used: PreviewEngineMode::MlilPreview.as_str(),
                             fell_back: true,
                             fallback_reason: selection.fallback_reason,
                         });
@@ -318,7 +318,7 @@ fn run_sequential_decompilation<'a>(
                             "address": format!("0x{:x}", func.address),
                             "name": func.name,
                             "code": fallback,
-                            "engine_used": "legacy",
+                            "engine_used": PreviewEngineMode::Legacy.as_str(),
                             "fell_back": true,
                             "fallback": "assembly",
                             "fallback_reason": error_text,
@@ -350,7 +350,7 @@ fn run_sequential_decompilation<'a>(
                     let mut entry = serde_json::json!({
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
-                        "engine_used": "legacy",
+                        "engine_used": PreviewEngineMode::Legacy.as_str(),
                         "fell_back": false,
                         "error": error_text
                     });
@@ -440,7 +440,7 @@ fn run_parallel_decompilation<'a>(
                                     Ok(RenderedCode {
                                         code: fallback,
                                         postprocess_sec: 0.0,
-                                        engine_used: "legacy",
+                                        engine_used: PreviewEngineMode::Legacy.as_str(),
                                         fell_back: true,
                                         fallback_reason: Some(error_text),
                                     }),
@@ -528,7 +528,7 @@ fn run_parallel_decompilation<'a>(
                                 Ok(RenderedCode {
                                     code: fallback,
                                     postprocess_sec: 0.0,
-                                    engine_used: "legacy",
+                                    engine_used: PreviewEngineMode::Legacy.as_str(),
                                     fell_back: true,
                                     fallback_reason: Some(error_text),
                                 }),
@@ -624,7 +624,7 @@ fn run_parallel_decompilation<'a>(
                     let mut json_entry = serde_json::json!({
                         "address": format!("0x{:x}", entry.address),
                         "name": entry.name,
-                        "engine_used": "legacy",
+                        "engine_used": PreviewEngineMode::Legacy.as_str(),
                         "fell_back": false,
                         "error": e.to_string()
                     });

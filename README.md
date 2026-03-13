@@ -53,14 +53,30 @@ Latest internal benchmark highlights from the current mainline tree:
 - 90/90 Fission success count
 - 90/90 Ghidra success count
 - remaining legacy `type` failures from v13 were removed in v14
-- `mlil-preview` remained integrated and non-regressing during the same run
+- v15 widened preview adoption without regressing the legacy path:
+  - `shared success 120/120`
+  - `preview_engine_used_count 113`
+  - `preview_fallback_count 0`
+  - `preview_goto_count 0`
+  - `preview_temp_surface_count 0`
+- v16 kept the same benchmark envelope while improving preview type surfacing and coverage:
+  - `shared success 120/120`
+  - `preview_engine_used_count 113`
+  - `preview_fallback_count 0`
+  - `preview_goto_count 0`
+  - `preview_temp_surface_count 0`
+  - `putty.exe 0x140006260 --engine mlil-preview` now directly surfaces:
+    - `LPRECT param_2`
+    - `RECT local_3c`
+    - `*param_2 = local_3c;`
 
 Current practical status:
 
 - `legacy` is still the default-quality path and regression guard
 - `legacy` recovered the last known benchmark `type` failures in v14 and is back to a clean 90/90 shared-success benchmark run on the current internal regression set
 - `mlil-preview` is integrated into the product path and exposed in CLI/Tauri, but it is still an experimental engine
-- preview coverage is now high enough to be exercised as a real product path, but the long-term work is still preview quality/typing rather than basic enablement
+- preview coverage is now high enough to be exercised as a real product path, and v16 closed one of the most visible type-surface gaps by making `putty.exe 0x140006260` preview output match the expected `LPRECT` / `RECT` shape
+- preview still lags legacy in broader real-world type surfacing beyond the current WinAPI/aggregate hint set, so the next rounds remain preview type quality rather than basic enablement
 - the long-term direction is to treat Ghidra as the lifting/backend engine and let Fission own the higher-level IR and pseudocode generation
 
 ## Workspace Layout

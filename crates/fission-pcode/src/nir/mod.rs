@@ -54,13 +54,18 @@ impl From<&Varnode> for VarnodeKey {
 struct PreviewBuilder<'a> {
     pcode: &'a PcodeFunction,
     options: &'a MlilPreviewOptions,
+    type_context: Option<&'a PreviewTypeContext>,
     defs: HashMap<VarnodeKey, &'a PcodeOp>,
     address_to_index: HashMap<u64, usize>,
+    layout_fallthrough: Vec<Option<usize>>,
     successors: Vec<Vec<usize>>,
     predecessors: Vec<Vec<usize>>,
     params: BTreeMap<usize, NirBinding>,
     locals: BTreeMap<i64, StackSlot>,
     locals_next_id: StackSlotId,
+    temps: BTreeMap<String, NirBinding>,
+    temp_next_id: u32,
+    materialized_vns: HashMap<VarnodeKey, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,20 +103,47 @@ pub fn render_mlil_preview(
     address: u64,
     options: &MlilPreviewOptions,
 ) -> Result<String, MlilPreviewError> {
+    render_mlil_preview_with_context(pcode, name, address, options, None)
+}
+
+pub fn render_mlil_preview_with_context(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
+) -> Result<String, MlilPreviewError> {
     if options.pe_x64_only && !options.is_pe_x64() {
         return Err(MlilPreviewError::UnsupportedArchitecture);
     }
 
-    let mut builder = PreviewBuilder::new(pcode, options);
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        eprintln!("[mlil-preview] stage=build_hir start fn=0x{address:x}");
+    }
+    let mut builder = PreviewBuilder::new(pcode, options, type_context);
     let mut hir = builder.build_hir(name, address)?;
-    for stmt in &mut hir.body {
-        normalize_stmt(stmt);
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        eprintln!("[mlil-preview] stage=normalize start fn=0x{address:x}");
+    }
+    normalize_function_body(&mut hir.body);
+    if let Some(context) = type_context {
+        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+            eprintln!("[mlil-preview] stage=type_hints start fn=0x{address:x}");
+        }
+        apply_preview_type_hints(&mut hir, context);
+    }
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
     Ok(print_hir_function(&hir))
 }
 
 impl<'a> PreviewBuilder<'a> {
-    fn new(pcode: &'a PcodeFunction, options: &'a MlilPreviewOptions) -> Self {
+    fn new(
+        pcode: &'a PcodeFunction,
+        options: &'a MlilPreviewOptions,
+        type_context: Option<&'a PreviewTypeContext>,
+    ) -> Self {
         let mut defs = HashMap::new();
         for block in &pcode.blocks {
             for op in &block.ops {
@@ -126,18 +158,24 @@ impl<'a> PreviewBuilder<'a> {
             .enumerate()
             .map(|(idx, block)| (block.start_address, idx))
             .collect::<HashMap<_, _>>();
-        let successors = build_successor_index_map(pcode, &address_to_index);
+        let layout_fallthrough = build_layout_fallthrough_map(pcode);
+        let successors = build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
         let predecessors = build_predecessor_index_map(&successors);
         Self {
             pcode,
             options,
+            type_context,
             defs,
             address_to_index,
+            layout_fallthrough,
             successors,
             predecessors,
             params: BTreeMap::new(),
             locals: BTreeMap::new(),
             locals_next_id: 0,
+            temps: BTreeMap::new(),
+            temp_next_id: 0,
+            materialized_vns: HashMap::new(),
         }
     }
 
@@ -195,7 +233,9 @@ impl<'a> PreviewBuilder<'a> {
                 .map(|slot| NirBinding {
                     name: slot.name.clone(),
                     ty: slot.ty.clone(),
+                    surface_type_name: None,
                 })
+                .chain(self.temps.values().cloned())
                 .collect(),
             return_type,
             body,
@@ -235,12 +275,83 @@ impl<'a> PreviewBuilder<'a> {
                     if op.output.is_none() {
                         let expr = self.lower_call(op, &mut HashSet::new())?;
                         body.push(HirStmt::Expr(expr));
+                    } else if let Some(stmt) =
+                        self.maybe_materialize_output_stmt(block, op_idx, terminator_index, op)?
+                    {
+                        body.push(stmt);
                     }
                 }
-                _ => {}
+                _ => {
+                    if let Some(stmt) =
+                        self.maybe_materialize_output_stmt(block, op_idx, terminator_index, op)?
+                    {
+                        body.push(stmt);
+                    }
+                }
             }
         }
         Ok(body)
+    }
+
+    fn maybe_materialize_output_stmt(
+        &mut self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        op: &PcodeOp,
+    ) -> Result<Option<HirStmt>, MlilPreviewError> {
+        let Some(output) = &op.output else {
+            return Ok(None);
+        };
+        if self.output_used_only_by_block_terminator(block, op_idx, terminator_index, output) {
+            return Ok(None);
+        }
+        self.materialize_output_stmt(op)
+    }
+
+    fn materialize_output_stmt(
+        &mut self,
+        op: &PcodeOp,
+    ) -> Result<Option<HirStmt>, MlilPreviewError> {
+        let Some(output) = &op.output else {
+            return Ok(None);
+        };
+        if !is_materializable_output_opcode(op.opcode) {
+            return Ok(None);
+        }
+        let rhs = self.lower_def_op(op, &mut HashSet::new())?;
+        let lhs = HirLValue::Var(self.ensure_temp_binding_for_output(output).name);
+        Ok(Some(HirStmt::Assign { lhs, rhs }))
+    }
+
+    fn output_used_only_by_block_terminator(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        terminator_index: Option<usize>,
+        output: &Varnode,
+    ) -> bool {
+        let key = VarnodeKey::from(output);
+        let mut use_sites = block
+            .ops
+            .iter()
+            .enumerate()
+            .skip(op_idx + 1)
+            .filter(|(_, candidate)| {
+                candidate
+                    .inputs
+                    .iter()
+                    .any(|input| VarnodeKey::from(input) == key)
+            })
+            .map(|(idx, _)| idx);
+
+        let Some(first_use) = use_sites.next() else {
+            return false;
+        };
+        if use_sites.next().is_some() {
+            return false;
+        }
+        Some(first_use) == terminator_index
     }
 
     fn block_terminator_index(&self, block: &crate::pcode::PcodeBasicBlock) -> Option<usize> {
@@ -273,13 +384,13 @@ impl<'a> PreviewBuilder<'a> {
                     .transpose()?;
                 Ok(LoweredTerminator::Return(expr))
             }
-            PcodeOpcode::Branch => {
+            PcodeOpcode::Branch if op.inputs.len() == 1 => {
                 let Some(target) = op.inputs.first().and_then(branch_target_address) else {
                     return Err(MlilPreviewError::UnsupportedControlFlow);
                 };
                 Ok(LoweredTerminator::Goto(target))
             }
-            PcodeOpcode::CBranch => {
+            PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
                 if op.inputs.len() < 2 {
                     return Err(MlilPreviewError::LoweringFailed);
                 }
@@ -299,7 +410,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn next_block_address(&self, idx: usize) -> Option<u64> {
-        self.pcode.blocks.get(idx + 1).map(|block| block.start_address)
+        self.layout_fallthrough[idx].map(|next_idx| self.pcode.blocks[next_idx].start_address)
     }
 
     fn lower_call(
@@ -309,7 +420,10 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<HirExpr, MlilPreviewError> {
         let target = if let Some(target) = op.inputs.first() {
             match self.lower_varnode(target, visiting)? {
-                HirExpr::Const(val, _) => format!("sub_{:x}", val as u64),
+                HirExpr::Const(val, _) => self
+                    .type_context
+                    .and_then(|ctx| ctx.call_targets.get(&(val as u64)).cloned())
+                    .unwrap_or_else(|| format!("sub_{:x}", val as u64)),
                 HirExpr::Var(name) => name,
                 other => print_expr(&other),
             }
@@ -354,6 +468,9 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let key = VarnodeKey::from(vn);
+        if let Some(name) = self.materialized_vns.get(&key) {
+            return Ok(HirExpr::Var(name.clone()));
+        }
         if !visiting.insert(key.clone()) {
             return Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)));
         }
@@ -545,6 +662,7 @@ impl<'a> PreviewBuilder<'a> {
             self.params.entry(index).or_insert_with(|| NirBinding {
                 name: name.to_string(),
                 ty: type_from_size(vn.size, false),
+                surface_type_name: None,
             });
         }
         Some(name.to_string())
@@ -644,6 +762,228 @@ impl<'a> PreviewBuilder<'a> {
         visiting.remove(&key);
         resolved
     }
+
+    fn ensure_temp_binding_for_output(&mut self, output: &Varnode) -> NirBinding {
+        let key = VarnodeKey::from(output);
+        if let Some(name) = self.materialized_vns.get(&key)
+            && let Some(binding) = self.temps.get(name)
+        {
+            return binding.clone();
+        }
+
+        let ty = type_from_size(output.size, false);
+        let name = next_temp_name(&ty, &mut self.temp_next_id);
+        let binding = NirBinding {
+            name: name.clone(),
+            ty,
+            surface_type_name: None,
+        };
+        self.materialized_vns.insert(key, name.clone());
+        self.temps.insert(name, binding.clone());
+        binding
+    }
+}
+
+fn apply_preview_type_hints(func: &mut HirFunction, context: &PreviewTypeContext) {
+    let mut pointer_hints: HashMap<String, PreviewCallParamRule> = HashMap::new();
+    collect_call_type_hints(&func.body, context, &mut pointer_hints);
+
+    for (var_name, hint) in &pointer_hints {
+        if let Some(binding) = find_binding_mut(func, var_name)
+            && binding.surface_type_name.is_none()
+            && binding_byte_size(&binding.ty) == Some(hint.pointer_size)
+        {
+            binding.surface_type_name = Some(hint.pointer_alias.clone());
+        }
+    }
+
+    let mut local_hints: HashMap<String, String> = HashMap::new();
+    collect_local_surface_hints(&func.body, &pointer_hints, func, &mut local_hints);
+    for (var_name, surface_type_name) in local_hints {
+        if let Some(binding) = func.locals.iter_mut().find(|binding| binding.name == var_name)
+            && binding.surface_type_name.is_none()
+        {
+            binding.surface_type_name = Some(surface_type_name);
+        }
+    }
+}
+
+fn collect_call_type_hints(
+    body: &[HirStmt],
+    context: &PreviewTypeContext,
+    pointer_hints: &mut HashMap<String, PreviewCallParamRule>,
+) {
+    for stmt in body {
+        match stmt {
+            HirStmt::Assign { rhs, .. } | HirStmt::Expr(rhs) => {
+                collect_call_hints_from_expr(rhs, context, pointer_hints);
+            }
+            HirStmt::Block(stmts)
+            | HirStmt::While { body: stmts, .. }
+            | HirStmt::DoWhile { body: stmts, .. } => {
+                collect_call_type_hints(stmts, context, pointer_hints);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_call_type_hints(&case.body, context, pointer_hints);
+                }
+                collect_call_type_hints(default, context, pointer_hints);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_call_hints_from_expr(cond, context, pointer_hints);
+                collect_call_type_hints(then_body, context, pointer_hints);
+                collect_call_type_hints(else_body, context, pointer_hints);
+            }
+            HirStmt::Return(Some(expr)) => {
+                collect_call_hints_from_expr(expr, context, pointer_hints);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn collect_call_hints_from_expr(
+    expr: &HirExpr,
+    context: &PreviewTypeContext,
+    pointer_hints: &mut HashMap<String, PreviewCallParamRule>,
+) {
+    match expr {
+        HirExpr::Call { target, args, .. } => {
+            for rule in &context.call_param_rules {
+                if rule.callee_name != *target {
+                    continue;
+                }
+                let Some(var_name) = args
+                    .get(rule.arg_index)
+                    .and_then(peel_surface_var_name_from_expr)
+                else {
+                    continue;
+                };
+                pointer_hints
+                    .entry(var_name.to_string())
+                    .or_insert_with(|| rule.clone());
+            }
+            for arg in args {
+                collect_call_hints_from_expr(arg, context, pointer_hints);
+            }
+        }
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::PtrOffset { base: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
+            collect_call_hints_from_expr(expr, context, pointer_hints);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            collect_call_hints_from_expr(lhs, context, pointer_hints);
+            collect_call_hints_from_expr(rhs, context, pointer_hints);
+        }
+        HirExpr::Index { base, .. } => collect_call_hints_from_expr(base, context, pointer_hints),
+        HirExpr::Var(_) | HirExpr::Const(_, _) => {}
+    }
+}
+
+fn collect_local_surface_hints(
+    body: &[HirStmt],
+    pointer_hints: &HashMap<String, PreviewCallParamRule>,
+    func: &HirFunction,
+    local_hints: &mut HashMap<String, String>,
+) {
+    for stmt in body {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                if let HirLValue::Deref {
+                    ptr,
+                    ty: NirType::Aggregate { .. } | NirType::Unknown | NirType::Ptr(_),
+                } = lhs
+                    && let Some(param_name) = peel_surface_var_name_from_expr(ptr)
+                    && let Some(local_name) = peel_local_surface_name(rhs)
+                    && let Some(rule) = pointer_hints.get(param_name)
+                    && let Some(local_binding) =
+                        func.locals.iter().find(|binding| binding.name == local_name)
+                    && let Some(local_size) = binding_byte_size(&local_binding.ty)
+                    && rule.pointee_sizes.contains(&local_size)
+                {
+                    local_hints
+                        .entry(local_name.to_string())
+                        .or_insert_with(|| rule.pointee_alias.clone());
+                }
+            }
+            HirStmt::Block(stmts)
+            | HirStmt::While { body: stmts, .. }
+            | HirStmt::DoWhile { body: stmts, .. } => {
+                collect_local_surface_hints(stmts, pointer_hints, func, local_hints);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_local_surface_hints(&case.body, pointer_hints, func, local_hints);
+                }
+                collect_local_surface_hints(default, pointer_hints, func, local_hints);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_local_surface_hints(then_body, pointer_hints, func, local_hints);
+                collect_local_surface_hints(else_body, pointer_hints, func, local_hints);
+            }
+            HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn peel_surface_var_name_from_expr(expr: &HirExpr) -> Option<&str> {
+    match expr {
+        HirExpr::Var(name) => Some(name),
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => peel_surface_var_name_from_expr(expr),
+        HirExpr::PtrOffset { base, offset } if *offset == 0 => peel_surface_var_name_from_expr(base),
+        HirExpr::Index { base, index, .. } if *index == 0 => peel_surface_var_name_from_expr(base),
+        _ => None,
+    }
+}
+
+fn peel_local_surface_name(expr: &HirExpr) -> Option<&str> {
+    match expr {
+        HirExpr::Var(name) => Some(name),
+        HirExpr::Cast { expr, .. } | HirExpr::AggregateCopy { src: expr, .. } => {
+            peel_local_surface_name(expr)
+        }
+        _ => None,
+    }
+}
+
+fn find_binding_mut<'a>(func: &'a mut HirFunction, name: &str) -> Option<&'a mut NirBinding> {
+    if let Some(param) = func.params.iter_mut().find(|binding| binding.name == name) {
+        return Some(param);
+    }
+    func.locals.iter_mut().find(|binding| binding.name == name)
+}
+
+fn binding_byte_size(ty: &NirType) -> Option<u32> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } => Some(bits / 8),
+        NirType::Ptr(_) => Some(8),
+        NirType::Aggregate { size } => Some(*size),
+        NirType::Float { bits } => Some(bits / 8),
+        NirType::Unknown => None,
+    }
 }
 
 fn is_comparison(opcode: PcodeOpcode) -> bool {
@@ -692,6 +1032,63 @@ fn type_from_size(size: u32, signed: bool) -> NirType {
         16 | 24 | 32 => NirType::Aggregate { size },
         _ => NirType::Unknown,
     }
+}
+
+fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
+    matches!(
+        opcode,
+        PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::Load
+            | PcodeOpcode::PtrAdd
+            | PcodeOpcode::PtrSub
+            | PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub
+            | PcodeOpcode::IntMult
+            | PcodeOpcode::IntDiv
+            | PcodeOpcode::IntSDiv
+            | PcodeOpcode::IntRem
+            | PcodeOpcode::IntSRem
+            | PcodeOpcode::IntAnd
+            | PcodeOpcode::IntOr
+            | PcodeOpcode::IntXor
+            | PcodeOpcode::IntLeft
+            | PcodeOpcode::IntRight
+            | PcodeOpcode::IntSRight
+            | PcodeOpcode::IntEqual
+            | PcodeOpcode::IntNotEqual
+            | PcodeOpcode::IntLess
+            | PcodeOpcode::IntLessEqual
+            | PcodeOpcode::IntSLess
+            | PcodeOpcode::IntSLessEqual
+            | PcodeOpcode::BoolAnd
+            | PcodeOpcode::BoolOr
+            | PcodeOpcode::BoolXor
+            | PcodeOpcode::IntNegate
+            | PcodeOpcode::BoolNegate
+            | PcodeOpcode::Int2Comp
+            | PcodeOpcode::Call
+            | PcodeOpcode::CallInd
+            | PcodeOpcode::CallOther
+            | PcodeOpcode::Piece
+            | PcodeOpcode::SubPiece
+            | PcodeOpcode::MultiEqual
+            | PcodeOpcode::Indirect
+    )
+}
+
+fn next_temp_name(ty: &NirType, next_id: &mut u32) -> String {
+    let prefix = match ty {
+        NirType::Bool => "bVar",
+        NirType::Int { bits: 32, signed: true } => "iVar",
+        NirType::Int { bits: 32, signed: false } => "uVar",
+        _ => "xVar",
+    };
+    let name = format!("{prefix}{}", *next_id);
+    *next_id += 1;
+    name
 }
 
 fn register_name_with_param(offset: u64, _size: u32) -> Option<(&'static str, Option<usize>)> {

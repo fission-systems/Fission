@@ -194,33 +194,55 @@ impl PcodeOpcode {
     /// Parse opcode from string (from JSON)
     pub fn parse(s: &str) -> Self {
         match s {
+            "copy" => Self::Copy,
             "COPY" => Self::Copy,
+            "load" => Self::Load,
             "LOAD" => Self::Load,
+            "store" => Self::Store,
             "STORE" => Self::Store,
+            "goto" => Self::Branch,
             "BRANCH" => Self::Branch,
+            "if" => Self::CBranch,
             "CBRANCH" => Self::CBranch,
             "BRANCHIND" => Self::BranchInd,
+            "call" => Self::Call,
             "CALL" => Self::Call,
+            "callind" => Self::CallInd,
             "CALLIND" => Self::CallInd,
+            "callother" => Self::CallOther,
             "CALLOTHER" => Self::CallOther,
+            "return" => Self::Return,
             "RETURN" => Self::Return,
+            "==" => Self::IntEqual,
             "INT_EQUAL" => Self::IntEqual,
+            "!=" => Self::IntNotEqual,
             "INT_NOTEQUAL" => Self::IntNotEqual,
             "INT_SLESS" => Self::IntSLess,
             "INT_SLESSEQUAL" => Self::IntSLessEqual,
+            "<" => Self::IntLess,
             "INT_LESS" => Self::IntLess,
             "INT_LESSEQUAL" => Self::IntLessEqual,
+            "ZEXT" => Self::IntZExt,
             "INT_ZEXT" => Self::IntZExt,
+            "SEXT" => Self::IntSExt,
             "INT_SEXT" => Self::IntSExt,
+            "+" => Self::IntAdd,
             "INT_ADD" => Self::IntAdd,
+            "-" => Self::IntSub,
             "INT_SUB" => Self::IntSub,
+            "CARRY" => Self::IntCarry,
             "INT_CARRY" => Self::IntCarry,
+            "SCARRY" => Self::IntSCarry,
             "INT_SCARRY" => Self::IntSCarry,
+            "SBORROW" => Self::IntSBorrow,
             "INT_SBORROW" => Self::IntSBorrow,
             "INT_2COMP" => Self::Int2Comp,
             "INT_NEGATE" => Self::IntNegate,
+            "^" => Self::IntXor,
             "INT_XOR" => Self::IntXor,
+            "&" => Self::IntAnd,
             "INT_AND" => Self::IntAnd,
+            "|" => Self::IntOr,
             "INT_OR" => Self::IntOr,
             "INT_LEFT" => Self::IntLeft,
             "INT_RIGHT" => Self::IntRight,
@@ -230,6 +252,7 @@ impl PcodeOpcode {
             "INT_SDIV" => Self::IntSDiv,
             "INT_REM" => Self::IntRem,
             "INT_SREM" => Self::IntSRem,
+            "!" => Self::BoolNegate,
             "BOOL_NEGATE" => Self::BoolNegate,
             "BOOL_XOR" => Self::BoolXor,
             "BOOL_AND" => Self::BoolAnd,
@@ -255,6 +278,7 @@ impl PcodeOpcode {
             "MULTIEQUAL" => Self::MultiEqual,
             "INDIRECT" => Self::Indirect,
             "PIECE" => Self::Piece,
+            "SUB" => Self::SubPiece,
             "SUBPIECE" => Self::SubPiece,
             "CAST" => Self::Cast,
             "PTRADD" => Self::PtrAdd,
@@ -731,6 +755,14 @@ mod tests {
         assert_eq!(PcodeOpcode::parse("INT_ADD"), PcodeOpcode::IntAdd);
         assert_eq!(PcodeOpcode::parse("INT_XOR"), PcodeOpcode::IntXor);
         assert_eq!(PcodeOpcode::parse("COPY"), PcodeOpcode::Copy);
+        assert_eq!(PcodeOpcode::parse("goto"), PcodeOpcode::Branch);
+        assert_eq!(PcodeOpcode::parse("return"), PcodeOpcode::Return);
+        assert_eq!(PcodeOpcode::parse("callind"), PcodeOpcode::CallInd);
+        assert_eq!(PcodeOpcode::parse("=="), PcodeOpcode::IntEqual);
+        assert_eq!(PcodeOpcode::parse("&"), PcodeOpcode::IntAnd);
+        assert_eq!(PcodeOpcode::parse("!"), PcodeOpcode::BoolNegate);
+        assert_eq!(PcodeOpcode::parse("SUB"), PcodeOpcode::SubPiece);
+        assert_eq!(PcodeOpcode::parse("ZEXT"), PcodeOpcode::IntZExt);
     }
 
     #[test]

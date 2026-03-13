@@ -1,4 +1,5 @@
 use fission_loader::loader::LoadedBinary;
+use std::collections::HashMap;
 use thiserror::Error;
 
 pub type NirValueId = u32;
@@ -18,6 +19,7 @@ pub enum NirType {
 pub struct NirBinding {
     pub name: String,
     pub ty: NirType,
+    pub surface_type_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +67,11 @@ pub enum HirStmt {
     Assign { lhs: HirLValue, rhs: HirExpr },
     Expr(HirExpr),
     Block(Vec<HirStmt>),
+    Switch {
+        expr: HirExpr,
+        cases: Vec<HirSwitchCase>,
+        default: Vec<HirStmt>,
+    },
     If {
         cond: HirExpr,
         then_body: Vec<HirStmt>,
@@ -83,6 +90,12 @@ pub enum HirStmt {
     Return(Option<HirExpr>),
     Break,
     Continue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HirSwitchCase {
+    pub values: Vec<i64>,
+    pub body: Vec<HirStmt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +184,22 @@ pub struct MlilPreviewOptions {
     pub format: String,
     pub image_base: u64,
     pub sections: Vec<(u64, u64)>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PreviewTypeContext {
+    pub call_targets: HashMap<u64, String>,
+    pub call_param_rules: Vec<PreviewCallParamRule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewCallParamRule {
+    pub callee_name: String,
+    pub arg_index: usize,
+    pub pointer_alias: String,
+    pub pointee_alias: String,
+    pub pointer_size: u32,
+    pub pointee_sizes: Vec<u32>,
 }
 
 impl MlilPreviewOptions {
