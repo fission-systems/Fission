@@ -112,6 +112,7 @@ fn normalize_expr(expr: &mut HirExpr) {
         let next = canonicalize_integer_expr(&current)
             .or_else(|| recognize_mod_div_power_of_two(&current))
             .or_else(|| recognize_hi_lo_extract(&current))
+            .or_else(|| recognize_wide_integer_recombine(&current))
             .or_else(|| normalize_boolean_logic(&current))
             .or_else(|| cleanup_arithmetic_wrappers(&current))
             .or_else(|| collapse_zero_offset_cast(&current));
@@ -155,8 +156,190 @@ fn recognize_hi_lo_extract(expr: &HirExpr) -> Option<HirExpr> {
                 }
                 None
             }
+            HirExpr::Binary {
+                op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+                lhs,
+                rhs,
+                ..
+            } => {
+                let HirExpr::Const(shift, _) = rhs.as_ref() else {
+                    return None;
+                };
+                let inner_ty = expr_type(lhs);
+                let Some(target_bits) = int_type_bits(ty) else {
+                    return None;
+                };
+                let Some(source_bits) = int_type_bits(&inner_ty) else {
+                    return None;
+                };
+                if *shift == i64::from(source_bits.saturating_sub(target_bits)) {
+                    Some(HirExpr::Cast {
+                        ty: ty.clone(),
+                        expr: Box::new(HirExpr::Binary {
+                            op: HirBinaryOp::Shr,
+                            lhs: lhs.clone(),
+                            rhs: rhs.clone(),
+                            ty: inner_ty,
+                        }),
+                    })
+                } else {
+                    None
+                }
+            }
             _ => None,
         },
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs,
+            rhs,
+            ty,
+        } if is_integer_type(ty) => {
+            let HirExpr::Const(mask, _) = rhs.as_ref() else {
+                return None;
+            };
+            let mask_limit = full_mask_for_type(ty)?;
+            if *mask != mask_limit {
+                return None;
+            }
+            Some(HirExpr::Cast {
+                ty: ty.clone(),
+                expr: lhs.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn recognize_wide_integer_recombine(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Or,
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    let HirExpr::Binary {
+        op: HirBinaryOp::Shl,
+        lhs: hi_expr,
+        rhs: hi_shift,
+        ..
+    } = lhs.as_ref()
+    else {
+        return None;
+    };
+    let HirExpr::Const(shift_amount, _) = hi_shift.as_ref() else {
+        return None;
+    };
+    let Some(total_bits) = int_type_bits(ty) else {
+        return None;
+    };
+    let high = extract_high_part(hi_expr, *shift_amount, total_bits)?;
+    let low = extract_low_part(rhs, *shift_amount)?;
+    if high.source != low.source || high.width_bits != low.width_bits || high.shift_bits != low.shift_bits {
+        return None;
+    }
+    let source_ty = expr_type(&high.source);
+    if source_ty == *ty {
+        Some(high.source)
+    } else if matches!(source_ty, NirType::Unknown) {
+        Some(HirExpr::Cast {
+            ty: ty.clone(),
+            expr: Box::new(high.source),
+        })
+    } else {
+        None
+    }
+}
+
+#[derive(Clone)]
+struct WidePart {
+    source: HirExpr,
+    width_bits: u32,
+    shift_bits: i64,
+}
+
+fn extract_high_part(expr: &HirExpr, shift_amount: i64, total_bits: u32) -> Option<WidePart> {
+    let HirExpr::Cast { ty, expr: inner } = expr else {
+        return None;
+    };
+    let HirExpr::Binary {
+        op: HirBinaryOp::Shr | HirBinaryOp::Sar,
+        lhs,
+        rhs,
+        ..
+    } = inner.as_ref()
+    else {
+        return None;
+    };
+    let HirExpr::Const(inner_shift, _) = rhs.as_ref() else {
+        return None;
+    };
+    if *inner_shift != shift_amount {
+        return None;
+    }
+    let width_bits = int_type_bits(ty)?;
+    if shift_amount != i64::from(total_bits.saturating_sub(width_bits)) {
+        return None;
+    }
+    Some(WidePart {
+        source: (**lhs).clone(),
+        width_bits,
+        shift_bits: shift_amount,
+    })
+}
+
+fn extract_low_part(expr: &HirExpr, shift_amount: i64) -> Option<WidePart> {
+    match expr {
+        HirExpr::Cast { ty, expr: inner } => {
+            let width_bits = int_type_bits(ty)?;
+            Some(WidePart {
+                source: (**inner).clone(),
+                width_bits,
+                shift_bits: shift_amount,
+            })
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let HirExpr::Const(mask, _) = rhs.as_ref() else {
+                return None;
+            };
+            let width_bits = shift_amount as u32;
+            let expected_mask = full_mask_for_bits(width_bits)?;
+            if *mask != expected_mask {
+                return None;
+            }
+            Some(WidePart {
+                source: (**lhs).clone(),
+                width_bits,
+                shift_bits: shift_amount,
+            })
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Mod,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let HirExpr::Const(modulus, _) = rhs.as_ref() else {
+                return None;
+            };
+            let width_bits = shift_amount as u32;
+            let expected_modulus = 1i64.checked_shl(width_bits)?;
+            if *modulus != expected_modulus {
+                return None;
+            }
+            Some(WidePart {
+                source: (**lhs).clone(),
+                width_bits,
+                shift_bits: shift_amount,
+            })
+        }
         _ => None,
     }
 }
@@ -860,13 +1043,25 @@ fn is_integer_type(ty: &NirType) -> bool {
     matches!(ty, NirType::Bool | NirType::Int { .. })
 }
 
-fn full_mask_for_type(ty: &NirType) -> Option<i64> {
+fn int_type_bits(ty: &NirType) -> Option<u32> {
     match ty {
         NirType::Bool => Some(1),
-        NirType::Int { bits, .. } if *bits > 0 && *bits < 63 => Some((1_i64 << bits) - 1),
-        NirType::Int { bits, .. } if *bits == 63 => Some(i64::MAX),
+        NirType::Int { bits, .. } => Some(*bits),
         _ => None,
     }
+}
+
+fn full_mask_for_bits(bits: u32) -> Option<i64> {
+    match bits {
+        0 => None,
+        1..=62 => Some((1_i64 << bits) - 1),
+        63 => Some(i64::MAX),
+        _ => None,
+    }
+}
+
+fn full_mask_for_type(ty: &NirType) -> Option<i64> {
+    int_type_bits(ty).and_then(full_mask_for_bits)
 }
 
 fn is_full_mask_const(expr: &HirExpr, ty: &NirType) -> bool {
@@ -931,20 +1126,20 @@ fn find_single_use_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str)
     let mut scan_idx = def_idx + 1;
     while scan_idx < stmts.len() {
         let stmt = &stmts[scan_idx];
-        if !stmt_allows_forward_scan(stmt) {
-            return None;
-        }
         let uses = count_var_uses_in_stmt(stmt, name);
         let redefines = stmt_redefines_temp(stmt, name);
         if redefines {
             return None;
         }
+        if uses == 1 && stmt_allows_inline_target(stmt) {
+            return Some(scan_idx);
+        }
+        if !stmt_allows_forward_scan(stmt) {
+            return None;
+        }
         if uses == 0 {
             scan_idx += 1;
             continue;
-        }
-        if uses == 1 && stmt_allows_inline_target(stmt) {
-            return Some(scan_idx);
         }
         return None;
     }

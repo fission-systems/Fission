@@ -447,6 +447,25 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn lower_intrinsic_call(
+        &mut self,
+        op: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+        target: &str,
+        ty: NirType,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        let args = op
+            .inputs
+            .iter()
+            .map(|input| self.lower_varnode(input, visiting))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(HirExpr::Call {
+            target: target.to_string(),
+            args,
+            ty,
+        })
+    }
+
     fn lower_varnode(
         &mut self,
         vn: &Varnode,
@@ -558,6 +577,24 @@ impl<'a> PreviewBuilder<'a> {
                     expr: Box::new(expr),
                     ty,
                 })
+            }
+            PcodeOpcode::IntCarry => {
+                self.lower_intrinsic_call(op, visiting, "__carry", NirType::Bool)
+            }
+            PcodeOpcode::IntSCarry => {
+                self.lower_intrinsic_call(op, visiting, "__scarry", NirType::Bool)
+            }
+            PcodeOpcode::IntSBorrow => {
+                self.lower_intrinsic_call(op, visiting, "__sborrow", NirType::Bool)
+            }
+            PcodeOpcode::PopCount => {
+                let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+                self.lower_intrinsic_call(
+                    op,
+                    visiting,
+                    "__popcount",
+                    type_from_size(output.size, false),
+                )
             }
             PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
                 self.lower_call(op, visiting)
@@ -1069,6 +1106,10 @@ fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
             | PcodeOpcode::IntNegate
             | PcodeOpcode::BoolNegate
             | PcodeOpcode::Int2Comp
+            | PcodeOpcode::IntCarry
+            | PcodeOpcode::IntSCarry
+            | PcodeOpcode::IntSBorrow
+            | PcodeOpcode::PopCount
             | PcodeOpcode::Call
             | PcodeOpcode::CallInd
             | PcodeOpcode::CallOther

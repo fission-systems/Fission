@@ -302,6 +302,153 @@ fn reg(offset: u64, size: u32) -> Varnode {
     }
 
     #[test]
+    fn high_part_extract_canonicalizes_to_shift_and_cast() {
+        let mut stmt = HirStmt::Return(Some(HirExpr::Cast {
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            expr: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: Box::new(HirExpr::Var("wide".to_string())),
+                rhs: Box::new(HirExpr::Const(
+                    32,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return (uint)(wide >> 32);");
+    }
+
+    #[test]
+    fn wide_recombine_from_shifted_hi_and_cast_lo_collapses_to_source() {
+        let source = HirExpr::Var("wide".to_string());
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                lhs: Box::new(HirExpr::Cast {
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    expr: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Shr,
+                        lhs: Box::new(source.clone()),
+                        rhs: Box::new(HirExpr::Const(
+                            32,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        )),
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    }),
+                }),
+                rhs: Box::new(HirExpr::Const(
+                    32,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+            rhs: Box::new(HirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                expr: Box::new(source.clone()),
+            }),
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return (ulonglong)wide;");
+    }
+
+    #[test]
+    fn wide_recombine_from_shifted_hi_and_masked_lo_collapses_to_source() {
+        let source = HirExpr::Var("wide".to_string());
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                lhs: Box::new(HirExpr::Cast {
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                    expr: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Shr,
+                        lhs: Box::new(source.clone()),
+                        rhs: Box::new(HirExpr::Const(
+                            32,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        )),
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    }),
+                }),
+                rhs: Box::new(HirExpr::Const(
+                    32,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs: Box::new(source.clone()),
+                rhs: Box::new(HirExpr::Const(
+                    0xffff_ffff,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return (ulonglong)wide;");
+    }
+
+    #[test]
     fn cast_canonicalizer_removes_duplicate_same_type_cast() {
         let mut stmt = HirStmt::Return(Some(HirExpr::Cast {
             ty: NirType::Int {

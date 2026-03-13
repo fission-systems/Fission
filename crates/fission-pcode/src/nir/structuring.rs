@@ -719,10 +719,44 @@ impl<'a> PreviewBuilder<'a> {
         next_idx: usize,
         visited: &HashSet<usize>,
     ) -> bool {
-        next_idx > idx
-            && self.predecessors[next_idx]
-                .iter()
-                .all(|pred| *pred == idx || visited.contains(pred))
+        if next_idx <= idx {
+            return false;
+        }
+        if self.predecessors[next_idx]
+            .iter()
+            .all(|pred| *pred == idx || visited.contains(pred))
+        {
+            return true;
+        }
+        self.is_trivial_linear_tail(next_idx)
+    }
+
+    fn is_trivial_linear_tail(&self, idx: usize) -> bool {
+        let block = &self.pcode.blocks[idx];
+        if block.ops.len() > 4 {
+            return false;
+        }
+        block
+            .ops
+            .iter()
+            .all(|op| self.is_trivial_tail_op(op.opcode))
+    }
+
+    fn is_trivial_tail_op(&self, opcode: PcodeOpcode) -> bool {
+        matches!(
+            opcode,
+            PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntAdd
+                | PcodeOpcode::IntSub
+                | PcodeOpcode::IntAnd
+                | PcodeOpcode::IntOr
+                | PcodeOpcode::IntXor
+                | PcodeOpcode::SubPiece
+                | PcodeOpcode::Piece
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+        )
     }
 
     fn fallthrough_index(&self, idx: usize) -> Option<usize> {

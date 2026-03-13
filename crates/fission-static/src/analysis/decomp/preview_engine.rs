@@ -253,6 +253,29 @@ fn render_preview_from_json(
         .map_err(|e| format!("mlil-preview unavailable: {e}"))
 }
 
+fn classify_preview_failure(reason: &str) -> &'static str {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("unsupported control flow") {
+        "unsupported_cfg"
+    } else if lower.contains("loop") || lower.contains("dowhile") || lower.contains("while") {
+        "unsupported_loop_shape"
+    } else if lower.contains("switch") {
+        "unsupported_switch_shape"
+    } else if lower.contains("ptr") || lower.contains("load") || lower.contains("store") {
+        "unsupported_memory_pattern"
+    } else if lower.contains("multiequal") || lower.contains("phi") {
+        "unsupported_phi_merge"
+    } else if lower.contains("call") {
+        "unsupported_call_boundary"
+    } else {
+        "unsupported_expr"
+    }
+}
+
+fn classified_preview_error(reason: &str) -> String {
+    format!("{}: {}", classify_preview_failure(reason), reason)
+}
+
 pub fn select_preview_output<S: PreviewSource>(
     source: &mut S,
     binary: &LoadedBinary,
@@ -282,16 +305,15 @@ pub fn select_preview_output<S: PreviewSource>(
                     preview_code: None,
                     engine_used: PreviewEngineMode::Legacy,
                     fell_back: true,
-                    fallback_reason: Some(
-                        "mlil-preview skipped: function not supported by preview builder"
-                            .to_string(),
-                    ),
+                    fallback_reason: Some(classified_preview_error(
+                        "mlil-preview skipped: function not supported by preview builder",
+                    )),
                 }),
                 Err(err) => Ok(PreviewSelection {
                     preview_code: None,
                     engine_used: PreviewEngineMode::Legacy,
                     fell_back: true,
-                    fallback_reason: Some(err),
+                    fallback_reason: Some(classified_preview_error(&err)),
                 }),
             }
         }
@@ -316,7 +338,7 @@ pub fn select_preview_output<S: PreviewSource>(
                     preview_code: None,
                     engine_used: PreviewEngineMode::Legacy,
                     fell_back: true,
-                    fallback_reason: Some(err),
+                    fallback_reason: Some(classified_preview_error(&err)),
                 }),
             }
         }
