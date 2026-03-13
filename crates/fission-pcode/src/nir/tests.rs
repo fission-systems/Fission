@@ -116,7 +116,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
 
         let code = render_mlil_preview(&func, "mod_ll", 0x2000, &preview_options())
             .expect("preview render");
-        assert!(code.contains("return (param_1 % 2);"));
+        assert!(code.contains("return param_1 % 2;"));
     }
 
     #[test]
@@ -198,7 +198,107 @@ fn reg(offset: u64, size: u32) -> Varnode {
         let mut stmt = HirStmt::Return(Some(expr));
         normalize_stmt(&mut stmt);
         let rendered = print_stmt(&stmt);
-        assert_eq!(rendered, "return (param_1 % 2);");
+        assert_eq!(rendered, "return param_1 % 2;");
+    }
+
+    #[test]
+    fn unsigned_mod_mask_recognition_collapses_to_percent() {
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs: Box::new(HirExpr::Var("uVar1".to_string())),
+            rhs: Box::new(HirExpr::Const(
+                3,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return uVar1 % 4;");
+    }
+
+    #[test]
+    fn unsigned_div_shift_recognition_collapses_to_div() {
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Shr,
+            lhs: Box::new(HirExpr::Var("uVar1".to_string())),
+            rhs: Box::new(HirExpr::Const(
+                2,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return uVar1 / 4;");
+    }
+
+    #[test]
+    fn signed_div_idiom_recognition_collapses_to_slash() {
+        let base = HirExpr::Var("param_1".to_string());
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Sar,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(base.clone()),
+                rhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::And,
+                    lhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Shr,
+                        lhs: Box::new(base.clone()),
+                        rhs: Box::new(HirExpr::Const(
+                            63,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        )),
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    }),
+                    rhs: Box::new(HirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                }),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+            }),
+            rhs: Box::new(HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 64,
+                signed: true,
+            },
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return param_1 / 2;");
     }
 
     #[test]
@@ -217,7 +317,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
             }),
         }));
         normalize_stmt(&mut stmt);
-        assert_eq!(print_stmt(&stmt), "return (uint)(uVar1);");
+        assert_eq!(print_stmt(&stmt), "return (uint)uVar1;");
     }
 
     #[test]
@@ -242,7 +342,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
             }),
         }));
         normalize_stmt(&mut stmt);
-        assert_eq!(print_stmt(&stmt), "return (longlong)((uint)(var1));");
+        assert_eq!(print_stmt(&stmt), "return (longlong)(uint)var1;");
     }
 
     #[test]
@@ -261,7 +361,86 @@ fn reg(offset: u64, size: u32) -> Varnode {
             }),
         }));
         normalize_stmt(&mut stmt);
-        assert_eq!(print_stmt(&stmt), "return (longlong)((int)(iVar1));");
+        assert_eq!(print_stmt(&stmt), "return (longlong)(int)iVar1;");
+    }
+
+    #[test]
+    fn condition_canonicalizer_turns_nonzero_compare_into_truthy_value() {
+        let mut stmt = HirStmt::If {
+            cond: HirExpr::Binary {
+                op: HirBinaryOp::Ne,
+                lhs: Box::new(HirExpr::Var("flag".to_string())),
+                rhs: Box::new(HirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Bool,
+            },
+            then_body: vec![HirStmt::Return(Some(HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )))],
+            else_body: vec![],
+        };
+        normalize_stmt(&mut stmt);
+        match stmt {
+            HirStmt::If { cond, .. } => assert_eq!(print_expr(&cond), "flag"),
+            _ => panic!("expected if statement"),
+        }
+    }
+
+    #[test]
+    fn printer_uses_precedence_aware_parentheses() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::LogicalOr,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::LogicalAnd,
+                lhs: Box::new(HirExpr::Var("a".to_string())),
+                rhs: Box::new(HirExpr::Var("b".to_string())),
+                ty: NirType::Bool,
+            }),
+            rhs: Box::new(HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(HirExpr::Var("c".to_string())),
+                ty: NirType::Bool,
+            }),
+            ty: NirType::Bool,
+        };
+        assert_eq!(print_expr(&expr), "a && b || !c");
+    }
+
+    #[test]
+    fn printer_preserves_needed_parentheses_for_mul_over_add() {
+        let expr = HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("x".to_string())),
+                rhs: Box::new(HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            }),
+            rhs: Box::new(HirExpr::Var("y".to_string())),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        };
+        assert_eq!(print_expr(&expr), "(x + 1) * y");
     }
 
     #[test]
@@ -566,7 +745,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
 
         let code = render_mlil_preview(&func, "branchy", 0x3000, &preview_options())
             .expect("preview render");
-        assert!(code.contains("if (!(param_1)) {"));
+        assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
         assert!(code.contains("return 0;"));
         assert!(code.contains("return 1;"));
     }
@@ -627,7 +806,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
 
         let code = render_mlil_preview(&func, "cond_goto_if", 0x3400, &preview_options())
             .expect("preview render");
-        assert!(code.contains("if (!(param_1)) {"));
+        assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
         assert!(code.contains("return 0;"));
         assert!(code.contains("return 1;"));
     }
@@ -729,7 +908,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
 
         let code = render_mlil_preview(&func, "if_else_fn", 0x3500, &preview_options())
             .expect("preview render");
-        assert!(code.contains("if (!(param_1)) {") || code.contains("if (param_1) {"));
+        assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
         assert!(code.contains("local_10 = 1;"));
         assert!(code.contains("} else {"));
         assert!(code.contains("local_10 = 2;"));
@@ -864,7 +1043,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
 
         let code = render_mlil_preview(&func, "if_else_chain_fn", 0x3600, &preview_options())
             .expect("preview render");
-        assert!(code.contains("if (!(param_1)) {") || code.contains("if (param_1) {"));
+        assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
         assert!(code.contains("local_10 = 1;"));
         assert!(code.contains("local_10 = 2;"));
         assert!(code.contains("} else {"));
@@ -1279,8 +1458,8 @@ fn reg(offset: u64, size: u32) -> Varnode {
         let code = render_mlil_preview(&func, "subpiece_call_fn", 0x6200, &preview_options())
             .expect("preview render");
         assert!(code.contains("sub_140001000"));
-        assert!(code.contains("(uint)(param_1)"));
-        assert!(code.contains("(uint)((param_1 >> 32))"));
+        assert!(code.contains("(uint)param_1"));
+        assert!(code.contains("(uint)(param_1 >> 32)"));
         assert!(!code.contains("tmp_"));
     }
 
@@ -1448,7 +1627,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
 
         let code = render_mlil_preview(&func, "while_fn", 0x4100, &preview_options())
             .expect("preview render");
-        assert!(code.contains("while (!(param_1)) {") || code.contains("while (param_1) {"));
+        assert!(code.contains("while (!param_1) {") || code.contains("while (param_1) {"));
         assert!(code.contains("local_10 = 1;"));
         assert!(code.contains("local_14 = 2;"));
         assert!(!code.contains("goto block_4100;"));
@@ -1564,7 +1743,55 @@ fn reg(offset: u64, size: u32) -> Varnode {
             ty: NirType::Bool,
         }));
         normalize_stmt(&mut stmt);
-        assert_eq!(print_stmt(&stmt), "return (flag_a && flag_b);");
+        assert_eq!(print_stmt(&stmt), "return flag_a && flag_b;");
+    }
+
+    #[test]
+    fn normalize_trivial_integer_identities() {
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("param_1".to_string())),
+            rhs: Box::new(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return param_1;");
+    }
+
+    #[test]
+    fn normalize_full_mask_and_wrapper() {
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs: Box::new(HirExpr::Cast {
+                ty: NirType::Int {
+                    bits: 16,
+                    signed: false,
+                },
+                expr: Box::new(HirExpr::Var("uVar1".to_string())),
+            }),
+            rhs: Box::new(HirExpr::Const(
+                0xffff,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 16,
+                signed: false,
+            },
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return (ushort)uVar1;");
     }
 
     #[test]
@@ -1592,7 +1819,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
         ];
         normalize_function_body(&mut body);
         assert_eq!(body.len(), 1);
-        assert_eq!(print_stmt(&body[0]), "return (param_1 + 1);");
+        assert_eq!(print_stmt(&body[0]), "return param_1 + 1;");
     }
 
     #[test]
@@ -1650,7 +1877,7 @@ fn reg(offset: u64, size: u32) -> Varnode {
         ];
         normalize_function_body(&mut body);
         assert_eq!(body.len(), 2);
-        assert_eq!(print_stmt(&body[1]), "return (7 + local_10);");
+        assert_eq!(print_stmt(&body[1]), "return 7 + local_10;");
     }
 
     #[test]

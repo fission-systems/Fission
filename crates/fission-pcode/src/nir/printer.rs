@@ -167,57 +167,83 @@ fn print_lvalue(lhs: &HirLValue) -> String {
 }
 
 pub(super) fn print_expr(expr: &HirExpr) -> String {
-    match expr {
-        HirExpr::Var(name) => name.clone(),
-        HirExpr::Const(value, _) => value.to_string(),
-        HirExpr::Cast { ty, expr } => format!("({})({})", print_type(ty), print_expr(expr)),
+    print_expr_prec(expr, 0)
+}
+
+fn print_expr_prec(expr: &HirExpr, parent_prec: u8) -> String {
+    let (text, prec) = match expr {
+        HirExpr::Var(name) => (name.clone(), 100),
+        HirExpr::Const(value, _) => (value.to_string(), 100),
+        HirExpr::Cast { ty, expr } => {
+            let inner = print_expr_prec(expr, 90);
+            (format!("({}){}", print_type(ty), inner), 90)
+        }
         HirExpr::Unary { op, expr, .. } => {
             let symbol = match op {
                 HirUnaryOp::Neg => "-",
                 HirUnaryOp::Not => "!",
                 HirUnaryOp::BitNot => "~",
             };
-            format!("{}({})", symbol, print_expr(expr))
+            let inner = print_expr_prec(expr, 85);
+            (format!("{symbol}{inner}"), 85)
         }
         HirExpr::Binary { op, lhs, rhs, .. } => {
-            format!(
-                "({} {} {})",
-                print_expr(lhs),
-                print_binary_op(*op),
-                print_expr(rhs)
-            )
+            let prec = binary_precedence(*op);
+            let lhs = print_expr_prec(lhs, prec);
+            let rhs = print_expr_prec(rhs, prec + 1);
+            (format!("{lhs} {} {rhs}", print_binary_op(*op)), prec)
         }
         HirExpr::Call { target, args, .. } => {
             let args = args.iter().map(print_expr).collect::<Vec<_>>().join(", ");
-            format!("{target}({args})")
+            (format!("{target}({args})"), 100)
         }
-        HirExpr::Load { ptr, ty } => format!("*({} *)({})", print_type(ty), print_expr(ptr)),
+        HirExpr::Load { ptr, ty } => {
+            let inner = print_expr(ptr);
+            (format!("*({} *)({inner})", print_type(ty)), 95)
+        }
         HirExpr::PtrOffset { base, offset } => {
-            if *offset == 0 {
-                print_expr(base)
+            let inner = print_expr(base);
+            let text = if *offset == 0 {
+                inner
             } else if *offset > 0 {
-                format!("((uint8_t *)({}) + {})", print_expr(base), offset)
+                format!("(uint8_t *)({inner}) + {offset}")
             } else {
-                format!(
-                    "((uint8_t *)({}) - {})",
-                    print_expr(base),
-                    offset.unsigned_abs()
-                )
-            }
+                format!("(uint8_t *)({inner}) - {}", offset.unsigned_abs())
+            };
+            (text, 60)
         }
         HirExpr::Index {
             base,
             index,
             elem_ty,
-        } => format!(
-            "(({} *)({}))[{}]",
-            print_type(elem_ty),
-            print_expr(base),
-            index
-        ),
-        HirExpr::AggregateCopy { src, size } => {
-            format!("*(fission_agg{} *)({})", size, print_expr(src))
+        } => {
+            let inner = print_expr(base);
+            (format!("(({} *)({inner}))[{index}]", print_type(elem_ty)), 95)
         }
+        HirExpr::AggregateCopy { src, size } => {
+            let inner = print_expr(src);
+            (format!("*(fission_agg{} *)({inner})", size), 95)
+        }
+    };
+
+    if prec < parent_prec {
+        format!("({text})")
+    } else {
+        text
+    }
+}
+
+fn binary_precedence(op: HirBinaryOp) -> u8 {
+    match op {
+        HirBinaryOp::LogicalOr => 10,
+        HirBinaryOp::LogicalAnd => 20,
+        HirBinaryOp::Eq | HirBinaryOp::Ne | HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe => 30,
+        HirBinaryOp::Or => 40,
+        HirBinaryOp::Xor => 45,
+        HirBinaryOp::And => 50,
+        HirBinaryOp::Shl | HirBinaryOp::Shr | HirBinaryOp::Sar => 60,
+        HirBinaryOp::Add | HirBinaryOp::Sub => 70,
+        HirBinaryOp::Mul | HirBinaryOp::Div | HirBinaryOp::Mod => 80,
     }
 }
 

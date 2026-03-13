@@ -46,7 +46,7 @@ pub(super) fn normalize_stmt(stmt: &mut HirStmt) {
             then_body,
             else_body,
         } => {
-            normalize_expr(cond);
+            normalize_condition_expr(cond);
             for stmt in then_body {
                 normalize_stmt(stmt);
             }
@@ -55,7 +55,7 @@ pub(super) fn normalize_stmt(stmt: &mut HirStmt) {
             }
         }
         HirStmt::While { cond, body } => {
-            normalize_expr(cond);
+            normalize_condition_expr(cond);
             for stmt in body {
                 normalize_stmt(stmt);
             }
@@ -64,12 +64,28 @@ pub(super) fn normalize_stmt(stmt: &mut HirStmt) {
             for stmt in body {
                 normalize_stmt(stmt);
             }
-            normalize_expr(cond);
+            normalize_condition_expr(cond);
         }
         HirStmt::Label(_) | HirStmt::Goto(_) => {}
         HirStmt::Return(Some(expr)) => normalize_expr(expr),
         HirStmt::Return(None) | HirStmt::Break | HirStmt::Continue => {}
     }
+}
+
+fn normalize_condition_expr(expr: &mut HirExpr) {
+    normalize_expr(expr);
+    let mut current = expr.clone();
+    loop {
+        let next = canonicalize_condition_expr(&current);
+        match next {
+            Some(next_expr) if next_expr != current => {
+                current = next_expr;
+                normalize_expr(&mut current);
+            }
+            _ => break,
+        }
+    }
+    *expr = current;
 }
 
 fn normalize_expr(expr: &mut HirExpr) {
@@ -93,10 +109,11 @@ fn normalize_expr(expr: &mut HirExpr) {
 
     let mut current = expr.clone();
     loop {
-        let next = canonicalize_cast_expr(&current)
-            .or_else(|| normalize_signed_power_of_two_mod(&current))
-            .or_else(|| normalize_unsigned_power_of_two_mod(&current))
+        let next = canonicalize_integer_expr(&current)
+            .or_else(|| recognize_mod_div_power_of_two(&current))
+            .or_else(|| recognize_hi_lo_extract(&current))
             .or_else(|| normalize_boolean_logic(&current))
+            .or_else(|| cleanup_arithmetic_wrappers(&current))
             .or_else(|| collapse_zero_offset_cast(&current));
         match next {
             Some(next_expr) if next_expr != current => current = next_expr,
@@ -104,6 +121,44 @@ fn normalize_expr(expr: &mut HirExpr) {
         }
     }
     *expr = current;
+}
+
+fn canonicalize_integer_expr(expr: &HirExpr) -> Option<HirExpr> {
+    canonicalize_cast_expr(expr)
+}
+
+fn recognize_mod_div_power_of_two(expr: &HirExpr) -> Option<HirExpr> {
+    normalize_signed_power_of_two_mod(expr)
+        .or_else(|| normalize_unsigned_power_of_two_mod(expr))
+        .or_else(|| normalize_signed_power_of_two_div(expr))
+        .or_else(|| normalize_unsigned_power_of_two_div(expr))
+}
+
+fn recognize_hi_lo_extract(expr: &HirExpr) -> Option<HirExpr> {
+    match expr {
+        HirExpr::Cast { ty, expr: inner } if is_integer_type(ty) => match inner.as_ref() {
+            HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs,
+                rhs,
+                ..
+            } => {
+                let HirExpr::Const(mask, _) = rhs.as_ref() else {
+                    return None;
+                };
+                let mask_limit = full_mask_for_type(ty)?;
+                if *mask == mask_limit {
+                    return Some(HirExpr::Cast {
+                        ty: ty.clone(),
+                        expr: lhs.clone(),
+                    });
+                }
+                None
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn canonicalize_cast_expr(expr: &HirExpr) -> Option<HirExpr> {
@@ -254,6 +309,32 @@ fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
+fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) && is_truthy_condition_type(&expr_type(lhs)) => {
+            Some((**lhs).clone())
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) && is_truthy_condition_type(&expr_type(lhs)) => {
+            Some(negate_expr((**lhs).clone()))
+        }
+        _ => None,
+    }
+}
+
+fn is_truthy_condition_type(ty: &NirType) -> bool {
+    matches!(ty, NirType::Unknown | NirType::Bool | NirType::Int { .. } | NirType::Ptr(_))
+}
+
 fn normalize_unsigned_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
     let HirExpr::Binary {
         op: HirBinaryOp::And,
@@ -274,6 +355,9 @@ fn normalize_unsigned_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
     else {
         return None;
     };
+    if is_full_mask_const(rhs.as_ref(), &expr_type(lhs)) {
+        return None;
+    }
     let divisor = (*mask as i128) + 1;
     if divisor <= 1 || (divisor & (divisor - 1)) != 0 {
         return None;
@@ -295,6 +379,61 @@ fn normalize_unsigned_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
     })
 }
 
+fn normalize_unsigned_power_of_two_div(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Shr,
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    let HirExpr::Const(shift_amount, _) = rhs.as_ref() else {
+        return None;
+    };
+    let width = match ty {
+        NirType::Int {
+            bits,
+            signed: false,
+        } => *bits,
+        _ => return None,
+    };
+    match expr_type(lhs) {
+        NirType::Int {
+            bits,
+            signed: false,
+        } if bits == width => {}
+        NirType::Unknown => {}
+        _ => return None,
+    }
+    if *shift_amount < 0 || *shift_amount >= i64::from(width) {
+        return None;
+    }
+    if *shift_amount == i64::from(width.saturating_sub(1)) {
+        return None;
+    }
+    if (*shift_amount as u32) * 2 >= width && *shift_amount % 8 == 0 {
+        return None;
+    }
+    let divisor = 1_i64.checked_shl(*shift_amount as u32)?;
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::Div,
+        lhs: lhs.clone(),
+        rhs: Box::new(HirExpr::Const(
+            divisor,
+            NirType::Int {
+                bits: width,
+                signed: false,
+            },
+        )),
+        ty: NirType::Int {
+            bits: width,
+            signed: false,
+        },
+    })
+}
+
 fn normalize_signed_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
     let HirExpr::Binary {
         op: HirBinaryOp::Sub,
@@ -305,6 +444,54 @@ fn normalize_signed_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
     else {
         return None;
     };
+    if let HirExpr::Binary {
+        op: HirBinaryOp::Shl,
+        lhs: shl_inner,
+        rhs: shl_rhs,
+        ..
+    } = rhs.as_ref()
+    {
+        let HirExpr::Const(shift_amount, _) = shl_rhs.as_ref() else {
+            return None;
+        };
+        let HirExpr::Binary {
+            op: HirBinaryOp::Div,
+            lhs: div_lhs,
+            rhs: div_rhs,
+            ..
+        } = shl_inner.as_ref()
+        else {
+            return None;
+        };
+        let HirExpr::Const(divisor, _) = div_rhs.as_ref() else {
+            return None;
+        };
+        if div_lhs.as_ref() == lhs.as_ref()
+            && *divisor > 1
+            && (*divisor & (*divisor - 1)) == 0
+            && *divisor == (1_i64.checked_shl(*shift_amount as u32)?)
+        {
+            let width = match ty {
+                NirType::Int { bits, signed: true } => *bits,
+                _ => 64,
+            };
+            return Some(HirExpr::Binary {
+                op: HirBinaryOp::Mod,
+                lhs: lhs.clone(),
+                rhs: Box::new(HirExpr::Const(
+                    *divisor,
+                    NirType::Int {
+                        bits: width,
+                        signed: true,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: width,
+                    signed: true,
+                },
+            });
+        }
+    }
     let HirExpr::Binary {
         op: HirBinaryOp::Shl,
         lhs: shl_inner,
@@ -424,6 +611,110 @@ fn normalize_signed_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
     })
 }
 
+fn normalize_signed_power_of_two_div(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::Sar,
+        lhs,
+        rhs,
+        ty,
+    } = expr
+    else {
+        return None;
+    };
+    let HirExpr::Const(shift_amount, _) = rhs.as_ref() else {
+        return None;
+    };
+    let HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: add_lhs,
+        rhs: add_rhs,
+        ..
+    } = lhs.as_ref()
+    else {
+        return None;
+    };
+    let (sign_source, sign_shift, mask) = match add_rhs.as_ref() {
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs: and_lhs,
+            rhs: and_rhs,
+            ..
+        } => {
+            let HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: shr_lhs,
+                rhs: shr_rhs,
+                ..
+            } = and_lhs.as_ref()
+            else {
+                return None;
+            };
+            let HirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
+                return None;
+            };
+            let HirExpr::Const(mask, _) = and_rhs.as_ref() else {
+                return None;
+            };
+            (shr_lhs.as_ref(), *sign_shift, *mask)
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Mod,
+            lhs: mod_lhs,
+            rhs: mod_rhs,
+            ..
+        } => {
+            let HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: shr_lhs,
+                rhs: shr_rhs,
+                ..
+            } = mod_lhs.as_ref()
+            else {
+                return None;
+            };
+            let HirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
+                return None;
+            };
+            let HirExpr::Const(divisor, _) = mod_rhs.as_ref() else {
+                return None;
+            };
+            (shr_lhs.as_ref(), *sign_shift, *divisor - 1)
+        }
+        _ => return None,
+    };
+    if sign_source != add_lhs.as_ref() {
+        return None;
+    }
+
+    let width = match ty {
+        NirType::Int { bits, signed: true } => *bits,
+        _ => return None,
+    };
+    if *shift_amount < 0 || *shift_amount >= i64::from(width) {
+        return None;
+    }
+    let divisor = 1_i64.checked_shl(*shift_amount as u32)?;
+    if sign_shift != i64::from(width.saturating_sub(1)) || mask != divisor - 1 {
+        return None;
+    }
+
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::Div,
+        lhs: add_lhs.clone(),
+        rhs: Box::new(HirExpr::Const(
+            divisor,
+            NirType::Int {
+                bits: width,
+                signed: true,
+            },
+        )),
+        ty: NirType::Int {
+            bits: width,
+            signed: true,
+        },
+    })
+}
+
 fn collapse_zero_offset_cast(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Load { ptr, ty } => {
@@ -451,8 +742,138 @@ fn collapse_zero_offset_cast(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
+fn cleanup_arithmetic_wrappers(expr: &HirExpr) -> Option<HirExpr> {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(lhs.as_ref()) => Some((**rhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } if is_one_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } if is_one_const(lhs.as_ref()) => Some((**rhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Shl,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Shr,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Sar,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(lhs.as_ref()) => Some((**rhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Xor,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Xor,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(lhs.as_ref()) => Some((**rhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs,
+            rhs,
+            ..
+        } if is_full_mask_const(rhs.as_ref(), &expr_type(lhs)) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs,
+            rhs,
+            ..
+        } if is_full_mask_const(lhs.as_ref(), &expr_type(rhs)) => Some((**rhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ..
+        } if is_zero_const(rhs.as_ref()) => match lhs.as_ref() {
+            HirExpr::Binary {
+                op: HirBinaryOp::And,
+                lhs: and_lhs,
+                rhs: and_rhs,
+                ty: _,
+            } if is_one_const(and_rhs.as_ref()) && matches!(expr_type(and_lhs), NirType::Bool) => {
+                Some((**and_lhs).clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn is_zero_const(expr: &HirExpr) -> bool {
     matches!(expr, HirExpr::Const(0, _))
+}
+
+fn is_one_const(expr: &HirExpr) -> bool {
+    matches!(expr, HirExpr::Const(1, _))
+}
+
+fn is_integer_type(ty: &NirType) -> bool {
+    matches!(ty, NirType::Bool | NirType::Int { .. })
+}
+
+fn full_mask_for_type(ty: &NirType) -> Option<i64> {
+    match ty {
+        NirType::Bool => Some(1),
+        NirType::Int { bits, .. } if *bits > 0 && *bits < 63 => Some((1_i64 << bits) - 1),
+        NirType::Int { bits, .. } if *bits == 63 => Some(i64::MAX),
+        _ => None,
+    }
+}
+
+fn is_full_mask_const(expr: &HirExpr, ty: &NirType) -> bool {
+    let HirExpr::Const(value, _) = expr else {
+        return false;
+    };
+    full_mask_for_type(ty).is_some_and(|mask| mask == *value)
 }
 
 fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool {
