@@ -4,6 +4,99 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-14
+
+### v25 - NIR 모듈 트리 리팩토링 및 유지보수성 정리
+
+v25의 목표는 기능을 더 넣는 것이 아니라, 이미 커진 `nir` 코어를 이후 라운드에서 다루기 쉽게 정리하는 것이었다. 이번 라운드에서는 알고리즘 변경 없이, `builder / normalize / structuring / tests` 축으로 책임을 나누고 flat file split을 실제 directory tree로 승격했다.
+
+#### Changed
+
+- `crates/fission-pcode/src/nir/` 아래 구현을 폴더 트리 기준으로 재배치
+  - `builder/`
+  - `normalize/`
+  - `structuring/`
+  - `tests/`
+- `nir/mod.rs`는 외부 entrypoint 역할만 유지하고, 내부 lowering/normalization/structuring 세부 구현은 각 하위 모듈로 이동
+- `normalize` 계층을 다음 책임으로 분리
+  - arithmetic / boolean normalization
+  - cleanup
+  - slot/table surfacing
+  - bitstream helper matching
+- `structuring` 계층을 다음 책임으로 분리
+  - conditionals
+  - loops
+  - switch
+  - linear fallback
+- `nir` 테스트를 기능별 파일로 분리
+  - arithmetic normalization
+  - slot/table surfacing
+  - bitstream helpers
+  - structuring
+  - x86 bootstrap
+  - preview type hints
+
+#### Validation
+
+- `cargo test -p fission-pcode --lib nir::tests -- --nocapture`
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo check -p fission-tauri`
+
+#### Notes
+
+- 이번 라운드는 기계적 리팩토링만 수행했고, 알고리즘/출력 정책은 의도적으로 바꾸지 않았다.
+- 대표 preview smoke entrypoint는 계속 유지된다.
+  - `putty.exe 0x140006260`
+  - `everything.exe 0x140183590`
+  - `7zr.exe 0x401000`
+
+### v24 - Preview Coverage Recovery First, x64+x86 병행
+
+v24의 목표는 v22/v23에서 추가한 slot/table abstraction과 bitstream helper 계층이 실제 함수에 적용되도록, preview가 다시 직접 끝까지 살아남게 만드는 것이었다. 이번 라운드에서는 beautification을 거의 늘리지 않고, x64 large-function coverage 복구와 x86 bootstrap에 집중했다.
+
+#### Added
+
+- preview unsupported reason 세분화
+  - `unsupported_arch`
+  - `unsupported_cfg_branch_target`
+  - `unsupported_cfg_region_shape`
+  - `unsupported_cfg_phi_join`
+  - `unsupported_cfg_indirect_call_region`
+  - `unsupported_expr_multiequal`
+  - `unsupported_expr_varnode_lowering`
+- PE x86 preview bootstrap 경로 추가
+  - 32-bit pointer size / stack-base 규칙 반영
+  - x86 seed 함수 direct preview bootstrap 지원
+
+#### Changed
+
+- x64 large-function direct preview 복구를 위해 branch target recovery를 완화
+- trivial forwarding / cleanup / tail return region 흡수를 region builder 앞단에서 더 공격적으로 수행
+- `MULTIEQUAL`의 identical-input case는 region failure 대신 canonical value로 내리도록 조정
+- indirect call이 block body 내부에 있는 경우, control terminator가 아니면 preview region failure 사유로 취급하지 않도록 정리
+- v22/v23의 slot-family / bitstream helper / loop-body compaction 계층은 유지하되, 적용 순서는 coverage-first 기준으로 고정
+
+#### Improved
+
+- `putty.exe 0x140006260`는 다시 `engine_used = mlil_preview` direct output을 회복
+- `everything.exe 0x140183590`도 `engine_used = mlil_preview` direct output을 회복
+- `7zr.exe` fixed seed 중 최소 1개 함수가 direct preview로 내려가며, x86 preview bootstrap이 실함수 기준으로 처음 확인됨
+
+#### Validation
+
+- `cargo test -p fission-pcode --lib nir::tests -- --nocapture`
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo check -p fission-tauri`
+- compare reports
+  - `artifacts/compare_v24_putty/`
+  - `artifacts/compare_v24_everything/`
+  - `artifacts/compare_v24_7zr/`
+
+#### Notes
+
+- 이번 라운드는 “본문 beautification”보다 “preview direct output 복구”가 KPI였다.
+- 남은 병목은 `putty.exe 0x140001160`의 `value lowering failed`와 일부 x64 large-function residue에 집중된다.
+
 ## 2026-03-12
 
 ### v16 - Preview 타입 표면 품질 및 `putty 0x140006260` 직접 출력 달성
