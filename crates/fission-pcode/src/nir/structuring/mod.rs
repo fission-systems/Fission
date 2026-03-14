@@ -7,7 +7,7 @@ mod switch;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
-        if self.pcode.blocks.len() > 80 {
+        if self.should_force_linear_structuring() {
             return self.build_linear_multiblock_body();
         }
 
@@ -101,6 +101,30 @@ impl<'a> PreviewBuilder<'a> {
             idx += 1;
         }
         Ok(body)
+    }
+
+    fn should_force_linear_structuring(&self) -> bool {
+        if self.pcode.blocks.len() > 80 {
+            return true;
+        }
+
+        let edge_count: usize = self.successors.iter().map(Vec::len).sum();
+        let multi_pred_blocks = self
+            .predecessors
+            .iter()
+            .filter(|preds| preds.len() > 1)
+            .count();
+        let max_predecessors = self
+            .predecessors
+            .iter()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0);
+
+        self.pcode.blocks.len() > 32
+            && (edge_count > self.pcode.blocks.len().saturating_mul(2)
+                || multi_pred_blocks > 8
+                || max_predecessors >= 4)
     }
 
     fn ignore_unsupported<T>(

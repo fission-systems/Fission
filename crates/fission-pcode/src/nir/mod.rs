@@ -51,12 +51,29 @@ impl From<&Varnode> for VarnodeKey {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MaterializedVarnodeKey {
+    varnode: VarnodeKey,
+    def_addr: u64,
+    def_seq: u32,
+}
+
+impl MaterializedVarnodeKey {
+    fn new(vn: &Varnode, op: &PcodeOp) -> Self {
+        Self {
+            varnode: VarnodeKey::from(vn),
+            def_addr: op.address,
+            def_seq: op.seq_num,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct PreviewBuilder<'a> {
     pcode: &'a PcodeFunction,
     options: &'a MlilPreviewOptions,
     type_context: Option<&'a PreviewTypeContext>,
-    defs: HashMap<VarnodeKey, &'a PcodeOp>,
+    defs: HashMap<VarnodeKey, DefSite<'a>>,
     address_to_index: HashMap<u64, usize>,
     layout_fallthrough: Vec<Option<usize>>,
     successors: Vec<Vec<usize>>,
@@ -66,7 +83,25 @@ struct PreviewBuilder<'a> {
     locals_next_id: StackSlotId,
     temps: BTreeMap<String, NirBinding>,
     temp_next_id: u32,
-    materialized_vns: HashMap<VarnodeKey, String>,
+    materialized_vns: HashMap<MaterializedVarnodeKey, String>,
+    current_lowering_site: Option<LoweringSite>,
+    register_param_aliases: HashMap<u64, usize>,
+    stack_frame_size: i64,
+    linear_exit_cache: HashMap<usize, Option<LinearExit>>,
+    jump_targets_cache: Option<HashSet<u64>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DefSite<'a> {
+    block_idx: usize,
+    op_idx: usize,
+    op: &'a PcodeOp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct LoweringSite {
+    block_idx: usize,
+    op_idx: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +149,15 @@ pub fn render_mlil_preview_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
+    let debug_log = |stage: &str| {
+        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(format!("/tmp/fission_preview_{address:x}.log"))
+                .and_then(|mut f| std::io::Write::write_all(&mut f, format!("[mlil-preview] stage={stage}\n").as_bytes()));
+        }
+    };
     if options.pe_x64_only && !options.is_supported_pe() {
         return Err(MlilPreviewError::UnsupportedArchitectureDetailed);
     }
@@ -121,6 +165,7 @@ pub fn render_mlil_preview_with_context(
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=build_hir start fn=0x{address:x}");
     }
+    debug_log("build_hir_start");
     let mut builder = PreviewBuilder::new(pcode, options, type_context);
     let mut hir = builder.build_hir(name, address).map_err(|err| {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
@@ -128,25 +173,32 @@ pub fn render_mlil_preview_with_context(
                 "[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}"
             );
         }
+        debug_log("build_hir_error");
         err
     })?;
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=normalize start fn=0x{address:x}");
     }
+    debug_log("normalize_start");
     normalize_hir_function(&mut hir);
+    debug_log("normalize_done");
     if let Some(context) = type_context {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
             eprintln!("[mlil-preview] stage=type_hints start fn=0x{address:x}");
         }
+        debug_log("type_hints_start");
         apply_preview_type_hints(&mut hir, context);
+        debug_log("type_hints_done");
     }
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
+    debug_log("print_start");
     let rendered = print_hir_function(&hir);
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=print done fn=0x{address:x}");
     }
+    debug_log("print_done");
     Ok(rendered)
 }
 

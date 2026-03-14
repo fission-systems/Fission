@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_LINEAR_STRUCTURING_DEPTH: usize = 256;
+
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn build_linear_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let mut body = Vec::new();
@@ -44,6 +46,19 @@ impl<'a> PreviewBuilder<'a> {
         start_idx: usize,
         exit: LinearExit,
     ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+        self.lower_linear_body_with_depth(start_idx, exit, 0)
+    }
+
+    fn lower_linear_body_with_depth(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        depth: usize,
+    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+        if depth > MAX_LINEAR_STRUCTURING_DEPTH {
+            return Ok(None);
+        }
+
         let mut idx = start_idx;
         let mut visited = HashSet::new();
         let mut body = Vec::new();
@@ -95,7 +110,13 @@ impl<'a> PreviewBuilder<'a> {
                     false_target,
                 } => {
                     let Some((tail_stmt, skip_to)) =
-                        self.lower_conditional_tail(cond, true_target, false_target, exit)?
+                        self.lower_conditional_tail(
+                            cond,
+                            true_target,
+                            false_target,
+                            exit,
+                            depth + 1,
+                        )?
                     else {
                         return Ok(None);
                     };
@@ -144,14 +165,23 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         start_idx: usize,
     ) -> Result<Option<LinearExit>, MlilPreviewError> {
-        self.linear_exit_from(start_idx, &mut HashSet::new())
+        if let Some(cached) = self.linear_exit_cache.get(&start_idx) {
+            return Ok(*cached);
+        }
+        let result = self.linear_exit_from(start_idx, &mut HashSet::new(), 0)?;
+        self.linear_exit_cache.insert(start_idx, result);
+        Ok(result)
     }
 
     fn linear_exit_from(
         &mut self,
         idx: usize,
         visited: &mut HashSet<usize>,
+        depth: usize,
     ) -> Result<Option<LinearExit>, MlilPreviewError> {
+        if depth > MAX_LINEAR_STRUCTURING_DEPTH {
+            return Ok(None);
+        }
         if !visited.insert(idx) {
             return Ok(None);
         }
@@ -162,7 +192,7 @@ impl<'a> PreviewBuilder<'a> {
                     return Ok(None);
                 };
                 if self.can_inline_linear_successor(idx, next_idx, visited) {
-                    self.linear_exit_from(next_idx, visited)
+                    self.linear_exit_from(next_idx, visited, depth + 1)
                 } else {
                     Ok(Some(LinearExit::Join(next_idx)))
                 }
@@ -184,8 +214,8 @@ impl<'a> PreviewBuilder<'a> {
                 };
                 let mut true_visited = visited.clone();
                 let mut false_visited = visited.clone();
-                let true_exit = self.linear_exit_from(true_idx, &mut true_visited)?;
-                let false_exit = self.linear_exit_from(false_idx, &mut false_visited)?;
+                let true_exit = self.linear_exit_from(true_idx, &mut true_visited, depth + 1)?;
+                let false_exit = self.linear_exit_from(false_idx, &mut false_visited, depth + 1)?;
                 if true_exit.is_some() && true_exit == false_exit {
                     Ok(true_exit)
                 } else {
@@ -325,7 +355,11 @@ impl<'a> PreviewBuilder<'a> {
         true_target: u64,
         false_target: Option<u64>,
         exit: LinearExit,
+        depth: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        if depth > MAX_LINEAR_STRUCTURING_DEPTH {
+            return Ok(None);
+        }
         let Some(false_target) = false_target else {
             return Ok(None);
         };
@@ -337,7 +371,9 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         if exit == LinearExit::Join(true_idx) {
-            if let Some((false_body, skip_to)) = self.lower_linear_body(false_idx, exit)? {
+            if let Some((false_body, skip_to)) =
+                self.lower_linear_body_with_depth(false_idx, exit, depth + 1)?
+            {
                 return Ok(Some((
                     HirStmt::If {
                         cond: negate_expr(cond),
@@ -349,7 +385,9 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         if exit == LinearExit::Join(false_idx) {
-            if let Some((true_body, skip_to)) = self.lower_linear_body(true_idx, exit)? {
+            if let Some((true_body, skip_to)) =
+                self.lower_linear_body_with_depth(true_idx, exit, depth + 1)?
+            {
                 return Ok(Some((
                     HirStmt::If {
                         cond,
@@ -361,8 +399,8 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
-        let true_branch = self.lower_linear_body(true_idx, exit)?;
-        let false_branch = self.lower_linear_body(false_idx, exit)?;
+        let true_branch = self.lower_linear_body_with_depth(true_idx, exit, depth + 1)?;
+        let false_branch = self.lower_linear_body_with_depth(false_idx, exit, depth + 1)?;
         match (true_branch, false_branch) {
             (Some((then_body, then_skip)), Some((else_body, else_skip))) => Ok(Some((
                 HirStmt::If {
@@ -414,12 +452,16 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {
+        if let Some(cached) = &self.jump_targets_cache {
+            return Ok(cached.clone());
+        }
         let mut targets = HashSet::new();
         for idx in 0..self.pcode.blocks.len() {
             for succ in &self.successors[idx] {
                 targets.insert(self.pcode.blocks[*succ].start_address);
             }
         }
+        self.jump_targets_cache = Some(targets.clone());
         Ok(targets)
     }
 }

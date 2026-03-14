@@ -1,12 +1,44 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    pub(in crate::nir) fn lookup_def_site(
+        &self,
+        vn: &Varnode,
+    ) -> Option<(LoweringSite, &'a PcodeOp)> {
+        if let Some(site) = self.current_lowering_site {
+            let block = &self.pcode.blocks[site.block_idx];
+            if let Some((def_idx, op)) = find_prior_def_in_block(block, site.op_idx, vn) {
+                return Some((
+                    LoweringSite {
+                        block_idx: site.block_idx,
+                        op_idx: def_idx,
+                    },
+                    op,
+                ));
+            }
+        }
+
+        let key = VarnodeKey::from(vn);
+        self.defs.get(&key).map(|def| {
+            (
+                LoweringSite {
+                    block_idx: def.block_idx,
+                    op_idx: def.op_idx,
+                },
+                def.op,
+            )
+        })
+    }
+
     pub(in crate::nir) fn lower_call(
         &mut self,
         op: &PcodeOp,
+        recovered_args: Option<Vec<HirExpr>>,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
-        let target = if let Some(target) = op.inputs.first() {
+        let target = if let Some(target) = self.resolve_call_target_from_asm(op) {
+            target
+        } else if let Some(target) = op.inputs.first() {
             match self.lower_varnode(target, visiting)? {
                 HirExpr::Const(val, _) => self
                     .type_context
@@ -18,12 +50,15 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             "callee".to_string()
         };
-        let args = op
-            .inputs
-            .iter()
-            .skip(1)
-            .map(|input| self.lower_varnode(input, &mut HashSet::new()))
-            .collect::<Result<Vec<_>, _>>()?;
+        let args = if let Some(recovered_args) = recovered_args {
+            recovered_args
+        } else {
+            op.inputs
+                .iter()
+                .skip(1)
+                .map(|input| self.lower_varnode(input, &mut HashSet::new()))
+                .collect::<Result<Vec<_>, _>>()?
+        };
         Ok(HirExpr::Call {
             target,
             args,
@@ -33,6 +68,22 @@ impl<'a> PreviewBuilder<'a> {
                 .map(|out| type_from_size(out.size, false))
                 .unwrap_or(NirType::Unknown),
         })
+    }
+
+    fn resolve_call_target_from_asm(&self, op: &PcodeOp) -> Option<String> {
+        let asm = op.asm_mnemonic.as_deref()?;
+        let addr = parse_call_target_address(asm)?;
+        if let Some(name) = self
+            .type_context
+            .and_then(|ctx| ctx.call_targets.get(&addr))
+            .cloned()
+        {
+            return Some(name);
+        }
+        if matches!(op.opcode, PcodeOpcode::Call) {
+            return Some(format!("sub_{addr:x}"));
+        }
+        None
     }
 
     pub(in crate::nir) fn lower_intrinsic_call(
@@ -70,20 +121,44 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(HirExpr::Var(param));
         }
 
+        if vn.space_id == REGISTER_SPACE_ID
+            && vn.size >= 16
+            && let Some(site) = self.current_lowering_site
+        {
+            let block = &self.pcode.blocks[site.block_idx];
+            if let Some((source, earliest_idx)) =
+                recover_wide_register_source_from_block(block, site.op_idx, vn)
+            {
+                return self.with_lowering_site(
+                    LoweringSite {
+                        block_idx: site.block_idx,
+                        op_idx: earliest_idx,
+                    },
+                    |this| this.lower_varnode(&source, visiting),
+                );
+            }
+        }
+
         if vn.space_id == REGISTER_SPACE_ID {
             return Ok(HirExpr::Var(register_name(vn.offset, vn.size).to_string()));
         }
 
         let key = VarnodeKey::from(vn);
-        if let Some(name) = self.materialized_vns.get(&key) {
-            return Ok(HirExpr::Var(name.clone()));
+        let def_site = self.lookup_def_site(vn);
+        if let Some((_, op)) = def_site {
+            let materialized_key = MaterializedVarnodeKey::new(vn, op);
+            if let Some(name) = self.materialized_vns.get(&materialized_key) {
+                return Ok(HirExpr::Var(name.clone()));
+            }
         }
         if !visiting.insert(key.clone()) {
             return Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)));
         }
 
-        let result = match self.defs.get(&key).copied() {
-            Some(op) => self.lower_def_op(op, visiting),
+        let result = match def_site {
+            Some((site, op)) => self
+                .with_lowering_site(site, |this| this.lower_def_op(op, visiting))
+                .map_err(|err| self.classify_varnode_lowering_error(op, err)),
             None if vn.space_id == UNIQUE_SPACE_ID => {
                 Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)))
             }
@@ -96,6 +171,29 @@ impl<'a> PreviewBuilder<'a> {
         result
     }
 
+    fn classify_varnode_lowering_error(
+        &self,
+        op: &PcodeOp,
+        err: MlilPreviewError,
+    ) -> MlilPreviewError {
+        if !matches!(err, MlilPreviewError::LoweringFailed) {
+            return err;
+        }
+        match op.opcode {
+            PcodeOpcode::Load => MlilPreviewError::UnsupportedExprMemoryBackedVarnode,
+            PcodeOpcode::Indirect => MlilPreviewError::UnsupportedExprIndirectValueSource,
+            PcodeOpcode::Piece | PcodeOpcode::SubPiece => MlilPreviewError::UnsupportedExprPieceShape,
+            PcodeOpcode::PtrAdd | PcodeOpcode::PtrSub => MlilPreviewError::UnsupportedExprPtrArithmetic,
+            PcodeOpcode::Copy
+            | PcodeOpcode::Cast
+            | PcodeOpcode::IntZExt
+            | PcodeOpcode::IntSExt
+            | PcodeOpcode::IntAdd
+            | PcodeOpcode::IntSub => MlilPreviewError::UnsupportedExprAddressMaterialization,
+            _ => MlilPreviewError::UnsupportedExprVarnodeLowering,
+        }
+    }
+
     pub(in crate::nir) fn lower_def_op(
         &mut self,
         op: &PcodeOp,
@@ -104,7 +202,10 @@ impl<'a> PreviewBuilder<'a> {
         match op.opcode {
             PcodeOpcode::Copy => self.lower_varnode(&op.inputs[0], visiting),
             PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
-                let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+                let output = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprAddressMaterialization)?;
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
                 Ok(HirExpr::Cast {
                     ty: type_from_size(output.size, matches!(op.opcode, PcodeOpcode::IntSExt)),
@@ -113,11 +214,17 @@ impl<'a> PreviewBuilder<'a> {
             }
             PcodeOpcode::Load => {
                 if op.inputs.len() < 2 {
-                    return Err(MlilPreviewError::LoweringFailed);
+                    return Err(MlilPreviewError::UnsupportedExprMemoryBackedVarnode);
                 }
-                let out = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
-                if let Some((slot_name, _)) =
-                    self.try_stack_slot_lvalue(&op.inputs[1], type_from_size(out.size, false))
+                let out = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprMemoryBackedVarnode)?;
+                if let Some((slot_name, _)) = self.try_stack_slot_lvalue_for_memory_op(
+                    op,
+                    &op.inputs[1],
+                    type_from_size(out.size, false),
+                )
                 {
                     Ok(HirExpr::Var(slot_name))
                 } else {
@@ -152,13 +259,16 @@ impl<'a> PreviewBuilder<'a> {
             | PcodeOpcode::BoolXor => self.lower_binary_op(op, visiting),
             PcodeOpcode::IntNegate | PcodeOpcode::BoolNegate | PcodeOpcode::Int2Comp => {
                 let expr = self.lower_varnode(&op.inputs[0], visiting)?;
-                let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+                let output = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
                 let ty = type_from_size(output.size, false);
                 let op = match op.opcode {
                     PcodeOpcode::IntNegate => HirUnaryOp::BitNot,
                     PcodeOpcode::BoolNegate => HirUnaryOp::Not,
                     PcodeOpcode::Int2Comp => HirUnaryOp::Neg,
-                    _ => return Err(MlilPreviewError::LoweringFailed),
+                    _ => return Err(MlilPreviewError::UnsupportedExprVarnodeLowering),
                 };
                 Ok(HirExpr::Unary {
                     op,
@@ -176,7 +286,10 @@ impl<'a> PreviewBuilder<'a> {
                 self.lower_intrinsic_call(op, visiting, "__sborrow", NirType::Bool)
             }
             PcodeOpcode::PopCount => {
-                let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+                let output = op
+                    .output
+                    .as_ref()
+                    .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
                 self.lower_intrinsic_call(
                     op,
                     visiting,
@@ -185,7 +298,7 @@ impl<'a> PreviewBuilder<'a> {
                 )
             }
             PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther => {
-                self.lower_call(op, visiting)
+                self.lower_call(op, None, visiting)
             }
             PcodeOpcode::Piece => self.lower_piece_op(op, visiting),
             PcodeOpcode::SubPiece => self.lower_subpiece_op(op, visiting),
@@ -194,7 +307,7 @@ impl<'a> PreviewBuilder<'a> {
                 if let Some(input) = op.inputs.first() {
                     self.lower_varnode(input, visiting)
                 } else {
-                    Err(MlilPreviewError::LoweringFailed)
+                    Err(MlilPreviewError::UnsupportedExprIndirectValueSource)
                 }
             }
             _ => Err(MlilPreviewError::UnsupportedPattern("opcode")),
@@ -239,6 +352,27 @@ impl<'a> PreviewBuilder<'a> {
                 elem_ty,
             });
         }
+        if (op.opcode == PcodeOpcode::PtrAdd || op.opcode == PcodeOpcode::PtrSub)
+            && op.inputs.len() > 1
+            && !op.inputs[1].is_constant
+        {
+            let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
+            let output = op
+                .output
+                .as_ref()
+                .ok_or(MlilPreviewError::UnsupportedExprPtrArithmetic)?;
+            let arith_op = if op.opcode == PcodeOpcode::PtrAdd {
+                HirBinaryOp::Add
+            } else {
+                HirBinaryOp::Sub
+            };
+            return Ok(HirExpr::Binary {
+                op: arith_op,
+                lhs: Box::new(base),
+                rhs: Box::new(rhs),
+                ty: type_from_size(output.size, false),
+            });
+        }
         Ok(HirExpr::PtrOffset {
             base: Box::new(base),
             offset,
@@ -251,11 +385,14 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
         if op.inputs.len() < 2 {
-            return Err(MlilPreviewError::LoweringFailed);
+            return Err(MlilPreviewError::UnsupportedExprVarnodeLowering);
         }
         let lhs = self.lower_varnode(&op.inputs[0], visiting)?;
         let rhs = self.lower_varnode(&op.inputs[1], visiting)?;
-        let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+        let output = op
+            .output
+            .as_ref()
+            .ok_or(MlilPreviewError::UnsupportedExprVarnodeLowering)?;
         let ty = if is_comparison(op.opcode) {
             NirType::Bool
         } else {
@@ -277,4 +414,16 @@ impl<'a> PreviewBuilder<'a> {
             ty,
         })
     }
+}
+
+fn parse_call_target_address(asm: &str) -> Option<u64> {
+    let start = asm.find("0x")?;
+    let hex = asm[start + 2..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_hexdigit())
+        .collect::<String>();
+    if hex.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(&hex, 16).ok()
 }

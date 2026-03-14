@@ -7,9 +7,12 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
         if op.inputs.len() < 2 {
-            return Err(MlilPreviewError::LoweringFailed);
+            return Err(MlilPreviewError::UnsupportedExprPieceShape);
         }
-        let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+        let output = op
+            .output
+            .as_ref()
+            .ok_or(MlilPreviewError::UnsupportedExprPieceShape)?;
         let output_ty = type_from_size(output.size, false);
         if let Some(expr) = self.try_recombine_piece(op, &output_ty, visiting)? {
             return Ok(expr);
@@ -80,12 +83,16 @@ impl<'a> PreviewBuilder<'a> {
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
         if op.inputs.len() < 2 {
-            return Err(MlilPreviewError::LoweringFailed);
+            return Err(MlilPreviewError::UnsupportedExprPieceShape);
         }
-        let output = op.output.as_ref().ok_or(MlilPreviewError::LoweringFailed)?;
+        let output = op
+            .output
+            .as_ref()
+            .ok_or(MlilPreviewError::UnsupportedExprPieceShape)?;
         let output_ty = type_from_size(output.size, false);
         let base = self.lower_varnode(&op.inputs[0], visiting)?;
-        let byte_offset = const_offset(&op.inputs[1]).ok_or(MlilPreviewError::LoweringFailed)?;
+        let byte_offset =
+            const_offset(&op.inputs[1]).ok_or(MlilPreviewError::UnsupportedExprPieceShape)?;
         let shifted = if byte_offset == 0 {
             base
         } else {
@@ -121,7 +128,7 @@ impl<'a> PreviewBuilder<'a> {
         if !visiting.insert(key.clone()) {
             return None;
         }
-        let result = match self.defs.get(&key).copied() {
+        let result = match self.lookup_def_site(vn).map(|(_, op)| op) {
             Some(op)
                 if matches!(
                     op.opcode,

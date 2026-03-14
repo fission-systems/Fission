@@ -89,6 +89,12 @@ pub fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool 
 
 fn sanitize_preview_symbol_name(name: &str) -> String {
     let mut sanitized = name.trim().to_string();
+    if let Some((_, tail)) = sanitized.rsplit_once('!') {
+        sanitized = tail.trim().to_string();
+    }
+    if let Some(stripped) = sanitized.strip_prefix("__imp_") {
+        sanitized = stripped.trim().to_string();
+    }
     for suffix in [" [import]", " [export]"] {
         if let Some(stripped) = sanitized.strip_suffix(suffix) {
             sanitized = stripped.trim_end().to_string();
@@ -107,6 +113,22 @@ fn build_preview_type_context(binary: &LoadedBinary) -> PreviewTypeContext {
         call_targets
             .entry(func.address)
             .or_insert_with(|| sanitize_preview_symbol_name(&func.name));
+    }
+    for (addr, name) in &binary.inner().iat_symbols {
+        if *addr == 0 || name.is_empty() {
+            continue;
+        }
+        call_targets
+            .entry(*addr)
+            .or_insert_with(|| sanitize_preview_symbol_name(name));
+    }
+    for (addr, name) in &binary.inner().global_symbols {
+        if *addr == 0 || name.is_empty() {
+            continue;
+        }
+        call_targets
+            .entry(*addr)
+            .or_insert_with(|| sanitize_preview_symbol_name(name));
     }
 
     let mut call_param_rules = Vec::new();
@@ -293,6 +315,16 @@ fn classify_preview_failure(reason: &str) -> &'static str {
         "unsupported_cfg"
     } else if lower.contains("multiequal") {
         "unsupported_expr_multiequal"
+    } else if lower.contains("unsupported address materialization") {
+        "unsupported_expr_address_materialization"
+    } else if lower.contains("unsupported indirect value source") {
+        "unsupported_expr_indirect_value_source"
+    } else if lower.contains("unsupported piece/subpiece shape") {
+        "unsupported_expr_piece_shape"
+    } else if lower.contains("unsupported ptr arithmetic shape") {
+        "unsupported_expr_ptr_arithmetic"
+    } else if lower.contains("unsupported memory-backed varnode") {
+        "unsupported_expr_memory_backed_varnode"
     } else if lower.contains("value lowering failed on varnode") {
         "unsupported_expr_varnode_lowering"
     } else if lower.contains("loop") || lower.contains("dowhile") || lower.contains("while") {

@@ -33,8 +33,19 @@ inline constexpr size_t k_string_scan_window = 0x120;
 /// tighter bound where that information is available.
 inline constexpr size_t k_follow_flow_limit = 0x10000;
 
+/// Aggressive followFlow upper bound for lightweight preview p-code extraction.
+/// Preview mode only needs enough blocks to drive NIR reconstruction, not full
+/// native decompilation quality on giant dispatcher functions.
+inline constexpr size_t k_preview_follow_flow_limit = 0x4000;
+
 /// Minimum followFlow window after dynamic tightening.
 inline constexpr size_t k_min_follow_flow_limit = 0x200;
+
+/// Maximum instructions allowed during lightweight preview p-code followFlow.
+inline constexpr uint32_t k_preview_max_instructions = 15'000;
+
+/// Timeout budget, in seconds, for lightweight preview p-code followFlow.
+inline constexpr double k_preview_follow_flow_timeout_sec = 1.5;
 
 /// callee relationship scan window inside a function body (bytes).
 inline constexpr size_t k_callee_scan_window = 0x100;

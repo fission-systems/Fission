@@ -6,6 +6,79 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-14
 
+### v26-v35 - Preview Coverage 복구와 `putty` Type-Surface 재상승
+
+이번 구간의 목표는 크게 두 가지였다. 첫째는 `mlil-preview`가 다시 real large-function에서 끝까지 살아남도록 coverage를 복구하는 것, 둘째는 direct preview로 복구된 뒤에도 무너졌던 `putty.exe 0x140006260`의 타입 표면을 다시 끌어올리는 것이었다. 이 과정에서 native decompiler budget, preview builder lowering, linear structuring, stack-slot recovery, call-argument recovery, wide aggregate copy 경로를 모두 손봤다.
+
+#### Added
+
+- preview/native 경계의 coverage 진단과 세분화 강화
+  - unsupported varnode/value lowering 상세 분류 추가
+  - preview 전용 flow/instruction budget 추가
+  - preview linear structuring depth / complexity guard 추가
+- x86 preview bootstrap 유지 및 regression guard 정착
+- direct preview 경로용 stack-slot naming 복구
+  - entry prologue 기반 frame size 추론
+  - `RSP + offset` 패턴을 `local_xx` 식으로 surface
+- indirect import / Win64 calling convention 기반 argument recovery 보강
+  - `GetClientRect` 같은 import call target 이름 복구
+  - `callind` 입력이 불완전한 경우 block-local register setup에서 인자 복구
+- builder 내부 site-sensitive lowering 인프라 추가
+  - `DefSite`
+  - `LoweringSite`
+  - block-local prior-def lookup
+  - def-site-aware materialized varnode tracking
+
+#### Changed
+
+- preview p-code 경로에서 `.data` 스캔, GDT 의존, jump-table recovery를 줄여 giant dispatcher 함수 hang/abort 가능성을 낮춤
+- Rust NIR linear structuring이 giant function에서 재귀 폭주하지 않도록 linear fallback cache와 complexity-based fast path를 추가
+- `putty.exe 0x140001160`의 direct preview 복구를 위해 builder lowering을 보수적으로 완화
+  - recoverable pointer arithmetic / wrapped condition chain / non-essential temp materialization skip
+  - generic `LoweringFailed`를 단계별 상세 category로 세분화
+- wide aggregate copy 복구를 위해
+  - wide register source recovery
+  - `SubPiece` / `IntSub` lane matcher 보강
+  - 16-byte transit output materialization 억제
+  - same-block prior-def 기반 lowering
+  를 순차적으로 추가
+- preview printer는 simple pointer deref를 더 자연스럽게 출력하도록 조정
+
+#### Improved
+
+- `putty.exe 0x140001160`는 다시 `engine_used = mlil_preview` direct output을 회복
+- `everything.exe 0x140183590` direct preview 유지
+- `7zr.exe 0x401000` direct preview 유지
+- `putty.exe 0x140006260`의 preview 출력은 다시 다음 수준까지 회복
+  - `LPRECT param_2`
+  - `GetClientRect(param_1, param_2)`
+  - `local_3c` stack-slot surface
+  - `*param_2 = ...` 형태의 whole-object assignment 경로
+- historical legacy 수준인 `RECT local_3c; *param_2 = local_3c;`에는 아직 한 단계 못 미치지만, raw pointer / anonymous temp 수준에서 크게 올라옴
+
+#### Validation
+
+- `cargo test -p fission-pcode --lib nir::tests -- --nocapture`
+- `cargo test -p fission-pcode --lib nir::tests::type_hints -- --nocapture`
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build --release -p fission-cli --bin fission_cli --features native_decomp`
+- `cargo check -p fission-tauri`
+- compare / regression smoke
+  - `putty.exe 0x140001160`
+  - `putty.exe 0x140006260`
+  - `everything.exe 0x140183590`
+  - `7zr.exe 0x401000`
+
+#### Notes
+
+- 가장 위험했던 두 병목은 정리됐다.
+  - native giant-function flow tracing / hang
+  - Rust linear structuring 재귀 폭주
+- 남은 주요 gap은 `putty.exe 0x140006260`의 마지막 wide aggregate store collapse다.
+  - 현재는 `local_3c`와 `LPRECT param_2`는 복구됐지만
+  - `*param_2 = local_3c;`까지 완전히 접히기 직전에서
+  - real optimized p-code의 마지막 wide-register path를 한 번 더 잡아야 한다.
+
 ### v25 - NIR 모듈 트리 리팩토링 및 유지보수성 정리
 
 v25의 목표는 기능을 더 넣는 것이 아니라, 이미 커진 `nir` 코어를 이후 라운드에서 다루기 쉽게 정리하는 것이었다. 이번 라운드에서는 알고리즘 변경 없이, `builder / normalize / structuring / tests` 축으로 책임을 나누고 flat file split을 실제 directory tree로 승격했다.

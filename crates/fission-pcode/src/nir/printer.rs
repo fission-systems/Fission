@@ -1,5 +1,8 @@
 use super::*;
 
+const MAX_PRINT_STMT_DEPTH: usize = 512;
+const MAX_PRINT_EXPR_DEPTH: usize = 512;
+
 pub(super) fn print_hir_function(func: &HirFunction) -> String {
     let mut out = String::new();
     out.push_str(&format!("{} {}(", print_type(&func.return_type), func.name));
@@ -26,7 +29,7 @@ pub(super) fn print_hir_function(func: &HirFunction) -> String {
         out.push('\n');
     }
     for stmt in &func.body {
-        print_stmt_with_indent(stmt, 1, &mut out);
+        print_stmt_with_indent(stmt, 1, 0, &mut out);
     }
     out.push_str("}\n");
     out
@@ -41,8 +44,10 @@ fn print_binding_type(binding: &NirBinding) -> String {
 
 pub(super) fn print_stmt(stmt: &HirStmt) -> String {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => format!("{} = {};", print_lvalue(lhs), print_expr(rhs)),
-        HirStmt::Expr(expr) => format!("{};", print_expr(expr)),
+        HirStmt::Assign { lhs, rhs } => {
+            format!("{} = {};", print_lvalue(lhs, 0), print_expr(expr_fallback(rhs, 0)))
+        }
+        HirStmt::Expr(expr) => format!("{};", print_expr(expr_fallback(expr, 0))),
         HirStmt::Label(label) => format!("{}:", label),
         HirStmt::Goto(label) => format!("goto {};", label),
         HirStmt::Block(_) => "{ ... }".to_string(),
@@ -50,15 +55,20 @@ pub(super) fn print_stmt(stmt: &HirStmt) -> String {
         HirStmt::If { .. } => "if (...) { ... }".to_string(),
         HirStmt::While { .. } => "while (...) { ... }".to_string(),
         HirStmt::DoWhile { .. } => "do { ... } while (...);".to_string(),
-        HirStmt::Return(Some(expr)) => format!("return {};", print_expr(expr)),
+        HirStmt::Return(Some(expr)) => format!("return {};", print_expr(expr_fallback(expr, 0))),
         HirStmt::Return(None) => "return;".to_string(),
         HirStmt::Break => "break;".to_string(),
         HirStmt::Continue => "continue;".to_string(),
     }
 }
 
-fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
+fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, depth: usize, out: &mut String) {
     let pad = "    ".repeat(indent);
+    if depth > MAX_PRINT_STMT_DEPTH {
+        out.push_str(&pad);
+        out.push_str("/* [FISSION] RECURSION TOO DEEP (statement printer guard) */\n");
+        return;
+    }
     match stmt {
         HirStmt::Assign { .. }
         | HirStmt::Expr(_)
@@ -78,7 +88,7 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
             out.push_str(&pad);
             out.push_str("{\n");
             for stmt in stmts {
-                print_stmt_with_indent(stmt, indent + 1, out);
+                print_stmt_with_indent(stmt, indent + 1, depth + 1, out);
             }
             out.push_str(&pad);
             out.push_str("}\n");
@@ -97,7 +107,7 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
                     out.push_str(&format!("case {}:\n", value));
                 }
                 for stmt in &case.body {
-                    print_stmt_with_indent(stmt, indent + 2, out);
+                    print_stmt_with_indent(stmt, indent + 2, depth + 1, out);
                 }
                 if !matches!(
                     case.body.last(),
@@ -111,7 +121,7 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
                 out.push_str(&pad);
                 out.push_str("    default:\n");
                 for stmt in default {
-                    print_stmt_with_indent(stmt, indent + 2, out);
+                    print_stmt_with_indent(stmt, indent + 2, depth + 1, out);
                 }
                 if !matches!(
                     default.last(),
@@ -130,9 +140,9 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
             else_body,
         } => {
             out.push_str(&pad);
-            out.push_str(&format!("if ({}) {{\n", print_expr(cond)));
+            out.push_str(&format!("if ({}) {{\n", print_expr_prec(cond, 0, 0)));
             for stmt in then_body {
-                print_stmt_with_indent(stmt, indent + 1, out);
+                print_stmt_with_indent(stmt, indent + 1, depth + 1, out);
             }
             out.push_str(&pad);
             out.push('}');
@@ -141,7 +151,7 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
             } else {
                 out.push_str(" else {\n");
                 for stmt in else_body {
-                    print_stmt_with_indent(stmt, indent + 1, out);
+                    print_stmt_with_indent(stmt, indent + 1, depth + 1, out);
                 }
                 out.push_str(&pad);
                 out.push_str("}\n");
@@ -149,9 +159,9 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
         }
         HirStmt::While { cond, body } => {
             out.push_str(&pad);
-            out.push_str(&format!("while ({}) {{\n", print_expr(cond)));
+            out.push_str(&format!("while ({}) {{\n", print_expr_prec(cond, 0, 0)));
             for stmt in body {
-                print_stmt_with_indent(stmt, indent + 1, out);
+                print_stmt_with_indent(stmt, indent + 1, depth + 1, out);
             }
             out.push_str(&pad);
             out.push_str("}\n");
@@ -160,25 +170,34 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, out: &mut String) {
             out.push_str(&pad);
             out.push_str("do {\n");
             for stmt in body {
-                print_stmt_with_indent(stmt, indent + 1, out);
+                print_stmt_with_indent(stmt, indent + 1, depth + 1, out);
             }
             out.push_str(&pad);
-            out.push_str(&format!("}} while ({});\n", print_expr(cond)));
+            out.push_str(&format!("}} while ({});\n", print_expr_prec(cond, 0, 0)));
         }
     }
 }
 
-fn print_lvalue(lhs: &HirLValue) -> String {
+fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
+    if depth > MAX_PRINT_EXPR_DEPTH {
+        return "/* [FISSION] RECURSION TOO DEEP */".to_string();
+    }
     match lhs {
         HirLValue::Var(name) => name.clone(),
-        HirLValue::Deref { ptr, ty } => format!("*({} *)({})", print_type(ty), print_expr(ptr)),
+        HirLValue::Deref { ptr, ty } => {
+            if let Some(target) = peel_simple_deref_target(ptr) {
+                format!("*{target}")
+            } else {
+                format!("*({} *)({})", print_type(ty), print_expr_prec(ptr, 0, depth + 1))
+            }
+        }
         HirLValue::Index {
             base,
             index,
             elem_ty,
         } => {
-            let inner = print_expr(base);
-            let index = print_expr(index);
+            let inner = print_expr_prec(base, 0, depth + 1);
+            let index = print_expr_prec(index, 0, depth + 1);
             match base.as_ref() {
                 HirExpr::Var(name) => format!("{name}[{index}]"),
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
@@ -188,15 +207,18 @@ fn print_lvalue(lhs: &HirLValue) -> String {
 }
 
 pub(super) fn print_expr(expr: &HirExpr) -> String {
-    print_expr_prec(expr, 0)
+    print_expr_prec(expr, 0, 0)
 }
 
-fn print_expr_prec(expr: &HirExpr, parent_prec: u8) -> String {
+fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
+    if depth > MAX_PRINT_EXPR_DEPTH {
+        return "0 /* [FISSION] RECURSION TOO DEEP (expression printer guard) */".to_string();
+    }
     let (text, prec) = match expr {
         HirExpr::Var(name) => (name.clone(), 100),
         HirExpr::Const(value, _) => (value.to_string(), 100),
         HirExpr::Cast { ty, expr } => {
-            let inner = print_expr_prec(expr, 90);
+            let inner = print_expr_prec(expr, 90, depth + 1);
             (format!("({}){}", print_type(ty), inner), 90)
         }
         HirExpr::Unary { op, expr, .. } => {
@@ -205,25 +227,33 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8) -> String {
                 HirUnaryOp::Not => "!",
                 HirUnaryOp::BitNot => "~",
             };
-            let inner = print_expr_prec(expr, 85);
+            let inner = print_expr_prec(expr, 85, depth + 1);
             (format!("{symbol}{inner}"), 85)
         }
         HirExpr::Binary { op, lhs, rhs, .. } => {
             let prec = binary_precedence(*op);
-            let lhs = print_expr_prec(lhs, prec);
-            let rhs = print_expr_prec(rhs, prec + 1);
+            let lhs = print_expr_prec(lhs, prec, depth + 1);
+            let rhs = print_expr_prec(rhs, prec + 1, depth + 1);
             (format!("{lhs} {} {rhs}", print_binary_op(*op)), prec)
         }
         HirExpr::Call { target, args, .. } => {
-            let args = args.iter().map(print_expr).collect::<Vec<_>>().join(", ");
+            let args = args
+                .iter()
+                .map(|arg| print_expr_prec(arg, 0, depth + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
             (format!("{target}({args})"), 100)
         }
         HirExpr::Load { ptr, ty } => {
-            let inner = print_expr(ptr);
-            (format!("*({} *)({inner})", print_type(ty)), 95)
+            if let Some(target) = peel_simple_deref_target(ptr) {
+                (format!("*{target}"), 95)
+            } else {
+                let inner = print_expr_prec(ptr, 0, depth + 1);
+                (format!("*({} *)({inner})", print_type(ty)), 95)
+            }
         }
         HirExpr::PtrOffset { base, offset } => {
-            let inner = print_expr(base);
+            let inner = print_expr_prec(base, 0, depth + 1);
             let text = if *offset == 0 {
                 inner
             } else if *offset > 0 {
@@ -238,8 +268,8 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8) -> String {
             index,
             elem_ty,
         } => {
-            let inner = print_expr(base);
-            let index = print_expr(index);
+            let inner = print_expr_prec(base, 0, depth + 1);
+            let index = print_expr_prec(index, 0, depth + 1);
             let text = match base.as_ref() {
                 HirExpr::Var(name) => format!("{name}[{index}]"),
                 _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
@@ -247,7 +277,7 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8) -> String {
             (text, 95)
         }
         HirExpr::AggregateCopy { src, size } => {
-            let inner = print_expr(src);
+            let inner = print_expr_prec(src, 0, depth + 1);
             (format!("*(fission_agg{} *)({inner})", size), 95)
         }
     };
@@ -257,6 +287,19 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8) -> String {
     } else {
         text
     }
+}
+
+fn peel_simple_deref_target(expr: &HirExpr) -> Option<&str> {
+    match expr {
+        HirExpr::Var(name) => Some(name),
+        HirExpr::Cast { expr, .. } => peel_simple_deref_target(expr),
+        HirExpr::PtrOffset { base, offset } if *offset == 0 => peel_simple_deref_target(base),
+        _ => None,
+    }
+}
+
+fn expr_fallback<'a>(expr: &'a HirExpr, _depth: usize) -> &'a HirExpr {
+    expr
 }
 
 fn binary_precedence(op: HirBinaryOp) -> u8 {

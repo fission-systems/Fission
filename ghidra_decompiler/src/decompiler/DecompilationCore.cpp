@@ -16,11 +16,13 @@
 #include "address.hh"
 #include "block.hh"
 #include "funcdata.hh"
+#include "flow.hh"
 #include "op.hh"
 #include "override.hh"
 #include "varnode.hh"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cctype>
 #include <chrono>
 #include <iomanip>
@@ -881,8 +883,65 @@ public:
 
 std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uint64_t addr) {
     if (!ctx) return "{}";
-    
-    ensure_architecture(ctx);
+
+    struct PreviewFlowBudgetGuard {
+        ghidra::Architecture* arch;
+        ghidra::uint4 original_max_instructions;
+        ghidra::uint4 original_max_jumptable_size;
+        double original_analysis_timeout_sec;
+
+        explicit PreviewFlowBudgetGuard(ghidra::Architecture* arch_ptr)
+            : arch(arch_ptr),
+              original_max_instructions(0),
+              original_max_jumptable_size(0),
+              original_analysis_timeout_sec(0.0) {
+            if (arch == nullptr) {
+                return;
+            }
+            original_max_instructions = arch->max_instructions;
+            original_max_jumptable_size = arch->max_jumptable_size;
+            original_analysis_timeout_sec = arch->analysis_timeout_sec;
+
+            arch->max_instructions = static_cast<ghidra::uint4>(
+                fission::decompiler::k_preview_max_instructions);
+            arch->max_jumptable_size = std::min<ghidra::uint4>(
+                arch->max_jumptable_size,
+                static_cast<ghidra::uint4>(32));
+            if (arch->analysis_timeout_sec <= 0.0 ||
+                arch->analysis_timeout_sec > fission::decompiler::k_preview_follow_flow_timeout_sec) {
+                arch->analysis_timeout_sec =
+                    fission::decompiler::k_preview_follow_flow_timeout_sec;
+            }
+        }
+
+        ~PreviewFlowBudgetGuard() {
+            if (arch == nullptr) {
+                return;
+            }
+            arch->max_instructions = original_max_instructions;
+            arch->max_jumptable_size = original_max_jumptable_size;
+            arch->analysis_timeout_sec = original_analysis_timeout_sec;
+        }
+    };
+
+    auto preview_log = [&](const char* stage) {
+        if (std::getenv("FISSION_PREVIEW_DEBUG_NATIVE") == nullptr) return;
+        fission::utils::log_stream()
+            << "[pcode-preview] addr=0x" << std::hex << addr << std::dec
+            << " stage=" << stage << std::endl;
+    };
+
+    if (!ctx->arch) {
+        preview_log("init_arch_start");
+        ArchInitOptions options;
+        // Preview p-code extraction only needs function recovery and p-code emission.
+        // Full data-section symbol registration and GDT loading are expensive and have been
+        // crash hotspots on large GUI dispatcher functions like PuTTY's giant window proc.
+        options.register_data_symbols = false;
+        options.load_gdt = false;
+        fission::core::initialize_architecture(ctx, options);
+        preview_log("init_arch_done");
+    }
     
     if (!ctx->arch->symboltab) throw std::runtime_error("Symbol table not initialized");
     ghidra::Scope* global_scope = ctx->arch->symboltab->getGlobalScope();
@@ -901,6 +960,13 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
     }
     
     if (!fd) throw std::runtime_error("Failed to get function data");
+    preview_log("func_ready");
+
+    // Preview p-code extraction does not require high-cost jump-table reconstruction.
+    // Large GUI dispatcher functions can spend most of their time in partial clone /
+    // jump-table recovery before we even have raw p-code to serialize.
+    fd->setJumptableRecovery(false);
+    ctx->arch->flowoptions &= ~ghidra::FlowInfo::record_jumploads;
     
     auto serialize_current_pcode = [&]() -> std::string {
         std::ostringstream json;
@@ -1005,15 +1071,31 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
     };
 
     fd->clear();
+    fd->setJumptableRecovery(false);
 
-    ghidra::Address end_addr = start_addr + 0x10000;
+    const size_t preview_follow_flow_limit = std::min<size_t>(
+        compute_follow_flow_limit(ctx, addr),
+        fission::decompiler::k_preview_follow_flow_limit);
+    ghidra::Address end_addr = start_addr + preview_follow_flow_limit;
+    PreviewFlowBudgetGuard preview_budget_guard(ctx->arch.get());
+    if (std::getenv("FISSION_PREVIEW_DEBUG_NATIVE") != nullptr) {
+        fission::utils::log_stream()
+            << "[pcode-preview] addr=0x" << std::hex << addr << std::dec
+            << " budget_bytes=" << preview_follow_flow_limit
+            << " max_instructions=" << fission::decompiler::k_preview_max_instructions
+            << " timeout_sec=" << fission::decompiler::k_preview_follow_flow_timeout_sec
+            << std::endl;
+    }
+    preview_log("followflow_start");
     try {
         fd->followFlow(start_addr, end_addr);
     } catch (...) {}
+    preview_log("followflow_done");
 
     // Preview extraction only needs recovered p-code. Avoid full action-group execution
     // unless the lightweight followFlow path failed to populate any ops.
     std::string lightweight_json = serialize_current_pcode();
+    preview_log(lightweight_json.empty() ? "serialize_empty" : "serialize_nonempty");
     if (!lightweight_json.empty()) {
         return lightweight_json;
     }
@@ -1024,16 +1106,23 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
     try {
         // Clear only this function's data for fresh analysis
         fd->clear();
+        fd->setJumptableRecovery(false);
         
         // Follow control flow to discover instructions
-        // We use a reasonable limit for the end address
-        ghidra::Address end_addr = start_addr + 0x10000; 
+        // We use the same aggressively truncated preview limit as the
+        // lightweight path above so giant dispatcher functions fail fast.
+        ghidra::Address end_addr = start_addr + preview_follow_flow_limit;
+        preview_log("action_followflow_start");
         fd->followFlow(start_addr, end_addr);
+        preview_log("action_followflow_done");
         
         current_action->reset(*fd);
+        preview_log("action_reset_done");
         current_action->perform(*fd);
+        preview_log("action_perform_done");
         
         std::string analyzed_json = serialize_current_pcode();
+        preview_log(analyzed_json.empty() ? "action_serialize_empty" : "action_serialize_nonempty");
         if (!analyzed_json.empty()) {
             return analyzed_json;
         }

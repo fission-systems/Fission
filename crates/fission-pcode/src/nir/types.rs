@@ -271,4 +271,14 @@ pub enum MlilPreviewError {
     UnsupportedExprMultiequal,
     #[error("value lowering failed on varnode")]
     UnsupportedExprVarnodeLowering,
+    #[error("value lowering failed on varnode: unsupported address materialization")]
+    UnsupportedExprAddressMaterialization,
+    #[error("value lowering failed on varnode: unsupported indirect value source")]
+    UnsupportedExprIndirectValueSource,
+    #[error("value lowering failed on varnode: unsupported piece/subpiece shape")]
+    UnsupportedExprPieceShape,
+    #[error("value lowering failed on varnode: unsupported ptr arithmetic shape")]
+    UnsupportedExprPtrArithmetic,
+    #[error("value lowering failed on varnode: unsupported memory-backed varnode")]
+    UnsupportedExprMemoryBackedVarnode,
 }

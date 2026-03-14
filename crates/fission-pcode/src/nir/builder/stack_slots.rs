@@ -13,8 +13,31 @@ impl<'a> PreviewBuilder<'a> {
                 surface_type_name: None,
                 initializer: None,
             });
+            return Some(name.to_string());
+        }
+        if let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied() {
+            let alias_name = format!("param_{}", param_index + 1);
+            self.params.entry(param_index).or_insert_with(|| NirBinding {
+                name: alias_name.clone(),
+                ty: type_from_size(vn.size, false),
+                surface_type_name: None,
+                initializer: None,
+            });
+            return Some(alias_name);
         }
         Some(name.to_string())
+    }
+
+    pub(super) fn try_stack_slot_lvalue_for_memory_op(
+        &mut self,
+        op: &PcodeOp,
+        ptr: &Varnode,
+        ty: NirType,
+    ) -> Option<(String, NirType)> {
+        if let Some((base, offset)) = self.resolve_stack_address_from_memory_op(op) {
+            return self.ensure_stack_slot_binding(base, offset, ty);
+        }
+        self.try_stack_slot_lvalue(ptr, ty)
     }
 
     pub(super) fn try_stack_slot_lvalue(
@@ -23,25 +46,7 @@ impl<'a> PreviewBuilder<'a> {
         ty: NirType,
     ) -> Option<(String, NirType)> {
         let (base, offset) = self.resolve_stack_address(ptr)?;
-        let kind_name = match base {
-            StackBase::Rbp if offset > 0 => format!("param_{:x}", offset),
-            StackBase::Rbp => format!("local_{:x}", offset.unsigned_abs()),
-            StackBase::Rsp => format!("local_{:x}", offset.unsigned_abs()),
-        };
-
-        let entry = self.locals.entry(offset).or_insert_with(|| {
-            let id = self.locals_next_id;
-            self.locals_next_id += 1;
-            StackSlot {
-                id,
-                name: kind_name.clone(),
-                ty: ty.clone(),
-            }
-        });
-        if entry.ty == NirType::Unknown {
-            entry.ty = ty.clone();
-        }
-        Some((entry.name.clone(), entry.ty.clone()))
+        self.ensure_stack_slot_binding(base, offset, ty)
     }
 
     pub(super) fn resolve_stack_address(&self, ptr: &Varnode) -> Option<(StackBase, i64)> {
@@ -67,7 +72,7 @@ impl<'a> PreviewBuilder<'a> {
         if !visiting.insert(key.clone()) {
             return None;
         }
-        let resolved = match self.defs.get(&key).copied() {
+        let resolved = match self.lookup_def_site(ptr).map(|(_, op)| op) {
             Some(op) => match op.opcode {
                 PcodeOpcode::Copy
                 | PcodeOpcode::Cast
@@ -116,5 +121,82 @@ impl<'a> PreviewBuilder<'a> {
         };
         visiting.remove(&key);
         resolved
+    }
+
+    fn ensure_stack_slot_binding(
+        &mut self,
+        base: StackBase,
+        offset: i64,
+        ty: NirType,
+    ) -> Option<(String, NirType)> {
+        let kind_name = match base {
+            StackBase::Rbp if offset > 0 => format!("param_{:x}", offset),
+            StackBase::Rbp => format!("local_{:x}", offset.unsigned_abs()),
+            StackBase::Rsp => format!("local_{:x}", self.rsp_local_display_offset(offset)),
+        };
+
+        let entry = self.locals.entry(offset).or_insert_with(|| {
+            let id = self.locals_next_id;
+            self.locals_next_id += 1;
+            StackSlot {
+                id,
+                name: kind_name.clone(),
+                ty: ty.clone(),
+            }
+        });
+        if entry.ty == NirType::Unknown {
+            entry.ty = ty.clone();
+        }
+        Some((entry.name.clone(), entry.ty.clone()))
+    }
+
+    fn rsp_local_display_offset(&self, offset: i64) -> i64 {
+        if offset >= 0 && self.stack_frame_size > offset {
+            self.stack_frame_size - offset
+        } else {
+            offset.unsigned_abs() as i64
+        }
+    }
+
+    fn resolve_stack_address_from_memory_op(&self, op: &PcodeOp) -> Option<(StackBase, i64)> {
+        let asm = op.asm_mnemonic.as_deref()?.trim().to_ascii_uppercase();
+        let start = asm.find('[')? + 1;
+        let end = asm[start..].find(']')? + start;
+        let mem = asm[start..end].replace(' ', "");
+
+        if let Some(rest) = mem.strip_prefix("RSP") {
+            return parse_stack_displacement(rest).map(|disp| (StackBase::Rsp, disp));
+        }
+        if let Some(rest) = mem.strip_prefix("RBP") {
+            return parse_stack_displacement(rest).map(|disp| (StackBase::Rbp, disp));
+        }
+        if let Some(rest) = mem.strip_prefix("ESP") {
+            return parse_stack_displacement(rest).map(|disp| (StackBase::Rsp, disp));
+        }
+        if let Some(rest) = mem.strip_prefix("EBP") {
+            return parse_stack_displacement(rest).map(|disp| (StackBase::Rbp, disp));
+        }
+        None
+    }
+}
+
+fn parse_stack_displacement(text: &str) -> Option<i64> {
+    if text.is_empty() {
+        return Some(0);
+    }
+    if let Some(rest) = text.strip_prefix('+') {
+        return parse_stack_immediate(rest);
+    }
+    if let Some(rest) = text.strip_prefix('-') {
+        return parse_stack_immediate(rest).map(|val| -val);
+    }
+    None
+}
+
+fn parse_stack_immediate(text: &str) -> Option<i64> {
+    if let Some(hex) = text.strip_prefix("0X") {
+        i64::from_str_radix(hex, 16).ok()
+    } else {
+        text.parse().ok()
     }
 }

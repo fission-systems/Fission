@@ -62,6 +62,116 @@ fn multi_block_preview_lowers_simple_if_without_failing() {
 }
 
 #[test]
+fn multi_block_preview_lowers_wrapped_branch_condition_without_failing() {
+    let cond_raw = uniq(0x390, 1);
+    let cond_wrap = uniq(0x391, 4);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x3900,
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x3900,
+                        output: Some(cond_raw.clone()),
+                        inputs: vec![reg(0x08, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntZExt,
+                        address: 0x3901,
+                        output: Some(cond_wrap.clone()),
+                        inputs: vec![cond_raw],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x3902,
+                        output: None,
+                        inputs: vec![cst(0x3920, 8), cond_wrap],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x3910,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x3910,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x3920,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x3920,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "wrapped_branch", 0x3900, &preview_options())
+        .expect("preview render");
+    assert!(code.contains("return 0;"));
+    assert!(code.contains("return 1;"));
+}
+
+#[test]
+fn malformed_store_is_skipped_without_preview_failure() {
+    let ptr = uniq(0x3a0, 8);
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x3a00,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x3a00,
+                    output: Some(ptr),
+                    inputs: vec![reg(0x28, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x3a01,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x3a02,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "malformed_store", 0x3a00, &preview_options())
+        .expect("preview render");
+    assert!(code.contains("return 0;"));
+}
+
+#[test]
 fn multi_block_preview_lowers_conditional_goto_style_if() {
     let cond = uniq(0x340, 1);
     let func = PcodeFunction {
