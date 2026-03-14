@@ -6,32 +6,44 @@ impl<'a> PreviewBuilder<'a> {
         let targeted = self.collect_jump_targets()?;
         let mut idx = 0usize;
         while idx < self.pcode.blocks.len() {
-            if let Some((stmt, skip_to)) = self.try_lower_switch(idx)? {
+            if let Some((stmt, skip_to)) =
+                Self::ignore_unsupported(self.try_lower_switch(idx))?
+            {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
             }
-            if let Some((stmt, skip_to)) = self.try_lower_dowhile(idx)? {
+            if let Some((stmt, skip_to)) =
+                Self::ignore_unsupported(self.try_lower_dowhile(idx))?
+            {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
             }
-            if let Some((stmt, skip_to)) = self.try_lower_while(idx)? {
+            if let Some((stmt, skip_to)) =
+                Self::ignore_unsupported(self.try_lower_while(idx))?
+            {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
             }
-            if let Some((stmt, skip_to)) = self.try_lower_short_circuit_if(idx)? {
+            if let Some((stmt, skip_to)) =
+                Self::ignore_unsupported(self.try_lower_short_circuit_if(idx))?
+            {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
             }
-            if let Some((stmt, skip_to)) = self.try_lower_if_else(idx)? {
+            if let Some((stmt, skip_to)) =
+                Self::ignore_unsupported(self.try_lower_if_else(idx))?
+            {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
             }
-            if let Some((stmt, skip_to)) = self.try_lower_if(idx)? {
+            if let Some((stmt, skip_to)) =
+                Self::ignore_unsupported(self.try_lower_if(idx))?
+            {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
@@ -80,6 +92,16 @@ impl<'a> PreviewBuilder<'a> {
             idx += 1;
         }
         Ok(body)
+    }
+
+    fn ignore_unsupported<T>(
+        result: Result<Option<T>, MlilPreviewError>,
+    ) -> Result<Option<T>, MlilPreviewError> {
+        match result {
+            Ok(result) => Ok(result),
+            Err(MlilPreviewError::UnsupportedControlFlow) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     fn try_lower_switch(
@@ -385,6 +407,13 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
+        if !cond_prefix
+            .iter()
+            .all(Self::is_trivial_structuring_stmt)
+        {
+            return Ok(None);
+        }
         let Some(next_idx) = self.fallthrough_index(idx) else {
             return Ok(None);
         };
@@ -422,20 +451,31 @@ impl<'a> PreviewBuilder<'a> {
         let Some((body, skip_to)) = self.lower_linear_body(body_idx, exit)? else {
             return Ok(None);
         };
-        Ok(Some((
-            HirStmt::If {
-                cond,
-                then_body: body,
-                else_body: Vec::new(),
-            },
-            skip_to,
-        )))
+        let stmt = HirStmt::If {
+            cond,
+            then_body: body,
+            else_body: Vec::new(),
+        };
+        if cond_prefix.is_empty() {
+            Ok(Some((stmt, skip_to)))
+        } else {
+            let mut wrapped = cond_prefix;
+            wrapped.push(stmt);
+            Ok(Some((HirStmt::Block(wrapped), skip_to)))
+        }
     }
 
     fn try_lower_if_else(
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
+        if !cond_prefix
+            .iter()
+            .all(Self::is_trivial_structuring_stmt)
+        {
+            return Ok(None);
+        }
         if idx + 2 >= self.pcode.blocks.len() {
             return Ok(None);
         }
@@ -480,14 +520,18 @@ impl<'a> PreviewBuilder<'a> {
             LinearExit::Join(join_idx) => join_idx,
             LinearExit::Return | LinearExit::End => then_skip.max(else_skip),
         };
-        Ok(Some((
-            HirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            },
-            skip_to,
-        )))
+        let stmt = HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        };
+        if cond_prefix.is_empty() {
+            Ok(Some((stmt, skip_to)))
+        } else {
+            let mut wrapped = cond_prefix;
+            wrapped.push(stmt);
+            Ok(Some((HirStmt::Block(wrapped), skip_to)))
+        }
     }
 
     fn try_lower_dowhile(
@@ -514,7 +558,11 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         };
 
-        if !self.lower_block_stmts(cond_block)?.is_empty() {
+        let cond_prefix = self.lower_block_stmts(cond_block)?;
+        if !cond_prefix
+            .iter()
+            .all(Self::is_trivial_structuring_stmt)
+        {
             return Ok(None);
         }
 
@@ -547,7 +595,24 @@ impl<'a> PreviewBuilder<'a> {
         if loop_join_idx != idx {
             return Ok(None);
         }
-        Ok(Some((HirStmt::While { cond, body }, exit_idx)))
+        if cond_prefix.is_empty() {
+            return Ok(Some((HirStmt::While { cond, body }, exit_idx)));
+        }
+
+        let mut guarded_body = cond_prefix;
+        guarded_body.push(HirStmt::If {
+            cond: negate_expr(cond),
+            then_body: vec![HirStmt::Break],
+            else_body: Vec::new(),
+        });
+        guarded_body.extend(body);
+        Ok(Some((
+            HirStmt::While {
+                cond: HirExpr::Const(1, NirType::Bool),
+                body: guarded_body,
+            },
+            exit_idx,
+        )))
     }
 
     fn lower_do_while_region(
@@ -649,6 +714,19 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     return Ok(Some((body, self.pcode.blocks.len())));
                 }
+                LoweredTerminator::Cond {
+                    cond,
+                    true_target,
+                    false_target,
+                } => {
+                    let Some((tail_stmt, skip_to)) =
+                        self.lower_conditional_tail(cond, true_target, false_target, exit)?
+                    else {
+                        return Ok(None);
+                    };
+                    body.push(tail_stmt);
+                    return Ok(Some((body, skip_to)));
+                }
                 _ => return Ok(None),
             }
         }
@@ -688,28 +766,55 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn linear_exit(&mut self, start_idx: usize) -> Result<Option<LinearExit>, MlilPreviewError> {
-        let mut idx = start_idx;
-        let mut visited = HashSet::new();
-        loop {
-            if !visited.insert(idx) {
-                return Ok(None);
-            }
-            match self.lower_block_terminator(idx)? {
-                LoweredTerminator::Return(_) => return Ok(Some(LinearExit::Return)),
-                LoweredTerminator::Fallthrough(Some(target))
-                | LoweredTerminator::Goto(target) => {
-                    let Some(next_idx) = self.find_block_index_by_address(target) else {
-                        return Ok(None);
-                    };
-                    if self.can_inline_linear_successor(idx, next_idx, &visited) {
-                        idx = next_idx;
-                        continue;
-                    }
-                    return Ok(Some(LinearExit::Join(next_idx)));
+        self.linear_exit_from(start_idx, &mut HashSet::new())
+    }
+
+    fn linear_exit_from(
+        &mut self,
+        idx: usize,
+        visited: &mut HashSet<usize>,
+    ) -> Result<Option<LinearExit>, MlilPreviewError> {
+        if !visited.insert(idx) {
+            return Ok(None);
+        }
+        match self.lower_block_terminator(idx)? {
+            LoweredTerminator::Return(_) => Ok(Some(LinearExit::Return)),
+            LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
+                let Some(next_idx) = self.find_block_index_by_address(target) else {
+                    return Ok(None);
+                };
+                if self.can_inline_linear_successor(idx, next_idx, visited) {
+                    self.linear_exit_from(next_idx, visited)
+                } else {
+                    Ok(Some(LinearExit::Join(next_idx)))
                 }
-                LoweredTerminator::Fallthrough(None) => return Ok(Some(LinearExit::End)),
-                _ => return Ok(None),
             }
+            LoweredTerminator::Fallthrough(None) => Ok(Some(LinearExit::End)),
+            LoweredTerminator::Cond {
+                true_target,
+                false_target,
+                ..
+            } => {
+                let Some(false_target) = false_target else {
+                    return Ok(None);
+                };
+                let Some(true_idx) = self.find_block_index_by_address(true_target) else {
+                    return Ok(None);
+                };
+                let Some(false_idx) = self.find_block_index_by_address(false_target) else {
+                    return Ok(None);
+                };
+                let mut true_visited = visited.clone();
+                let mut false_visited = visited.clone();
+                let true_exit = self.linear_exit_from(true_idx, &mut true_visited)?;
+                let false_exit = self.linear_exit_from(false_idx, &mut false_visited)?;
+                if true_exit.is_some() && true_exit == false_exit {
+                    Ok(true_exit)
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Ok(None),
         }
     }
 
@@ -733,7 +838,7 @@ impl<'a> PreviewBuilder<'a> {
 
     fn is_trivial_linear_tail(&self, idx: usize) -> bool {
         let block = &self.pcode.blocks[idx];
-        if block.ops.len() > 4 {
+        if block.ops.len() > 16 {
             return false;
         }
         block
@@ -756,7 +861,102 @@ impl<'a> PreviewBuilder<'a> {
                 | PcodeOpcode::Piece
                 | PcodeOpcode::IntZExt
                 | PcodeOpcode::IntSExt
+                | PcodeOpcode::IntLeft
+                | PcodeOpcode::IntRight
+                | PcodeOpcode::IntSRight
+                | PcodeOpcode::IntEqual
+                | PcodeOpcode::IntNotEqual
+                | PcodeOpcode::IntLess
+                | PcodeOpcode::IntLessEqual
+                | PcodeOpcode::IntSLess
+                | PcodeOpcode::IntSLessEqual
+                | PcodeOpcode::BoolAnd
+                | PcodeOpcode::BoolOr
+                | PcodeOpcode::Call
         )
+    }
+
+    fn lower_conditional_tail(
+        &mut self,
+        cond: HirExpr,
+        true_target: u64,
+        false_target: Option<u64>,
+        exit: LinearExit,
+    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let Some(false_target) = false_target else {
+            return Ok(None);
+        };
+        let Some(true_idx) = self.find_block_index_by_address(true_target) else {
+            return Ok(None);
+        };
+        let Some(false_idx) = self.find_block_index_by_address(false_target) else {
+            return Ok(None);
+        };
+
+        if exit == LinearExit::Join(true_idx) {
+            if let Some((false_body, skip_to)) = self.lower_linear_body(false_idx, exit)? {
+                return Ok(Some((
+                    HirStmt::If {
+                        cond: negate_expr(cond),
+                        then_body: false_body,
+                        else_body: Vec::new(),
+                    },
+                    skip_to,
+                )));
+            }
+        }
+        if exit == LinearExit::Join(false_idx) {
+            if let Some((true_body, skip_to)) = self.lower_linear_body(true_idx, exit)? {
+                return Ok(Some((
+                    HirStmt::If {
+                        cond,
+                        then_body: true_body,
+                        else_body: Vec::new(),
+                    },
+                    skip_to,
+                )));
+            }
+        }
+
+        let true_branch = self.lower_linear_body(true_idx, exit)?;
+        let false_branch = self.lower_linear_body(false_idx, exit)?;
+        match (true_branch, false_branch) {
+            (Some((then_body, then_skip)), Some((else_body, else_skip))) => Ok(Some((
+                HirStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                },
+                then_skip.max(else_skip),
+            ))),
+            _ => Ok(None),
+        }
+    }
+
+    fn is_trivial_structuring_stmt(stmt: &HirStmt) -> bool {
+        match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(_),
+                rhs,
+            } => !Self::expr_has_call(rhs),
+            HirStmt::Expr(expr) => !Self::expr_has_call(expr),
+            _ => false,
+        }
+    }
+
+    fn expr_has_call(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Call { .. } => true,
+            HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } => Self::expr_has_call(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::expr_has_call(lhs) || Self::expr_has_call(rhs)
+            }
+            HirExpr::Load { ptr, .. } => Self::expr_has_call(ptr),
+            HirExpr::PtrOffset { base, .. } => Self::expr_has_call(base),
+            HirExpr::Index { base, .. } => Self::expr_has_call(base),
+            HirExpr::AggregateCopy { src, .. } => Self::expr_has_call(src),
+            HirExpr::Var(_, ..) | HirExpr::Const(_, ..) => false,
+        }
     }
 
     fn fallthrough_index(&self, idx: usize) -> Option<usize> {

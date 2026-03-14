@@ -230,6 +230,9 @@ impl PcodeOpcode {
             "INT_ADD" => Self::IntAdd,
             "-" => Self::IntSub,
             "INT_SUB" => Self::IntSub,
+            "*" => Self::IntMult,
+            "/" => Self::IntDiv,
+            "%" => Self::IntRem,
             "CARRY" => Self::IntCarry,
             "INT_CARRY" => Self::IntCarry,
             "SCARRY" => Self::IntSCarry,
@@ -244,6 +247,8 @@ impl PcodeOpcode {
             "INT_AND" => Self::IntAnd,
             "|" => Self::IntOr,
             "INT_OR" => Self::IntOr,
+            "<<" => Self::IntLeft,
+            ">>" => Self::IntRight,
             "INT_LEFT" => Self::IntLeft,
             "INT_RIGHT" => Self::IntRight,
             "INT_SRIGHT" => Self::IntSRight,
@@ -254,6 +259,8 @@ impl PcodeOpcode {
             "INT_SREM" => Self::IntSRem,
             "!" => Self::BoolNegate,
             "BOOL_NEGATE" => Self::BoolNegate,
+            "&&" => Self::BoolAnd,
+            "||" => Self::BoolOr,
             "BOOL_XOR" => Self::BoolXor,
             "BOOL_AND" => Self::BoolAnd,
             "BOOL_OR" => Self::BoolOr,
@@ -753,6 +760,7 @@ mod tests {
     #[test]
     fn test_opcode_parse() {
         assert_eq!(PcodeOpcode::parse("INT_ADD"), PcodeOpcode::IntAdd);
+        assert_eq!(PcodeOpcode::parse("+"), PcodeOpcode::IntAdd);
         assert_eq!(PcodeOpcode::parse("INT_XOR"), PcodeOpcode::IntXor);
         assert_eq!(PcodeOpcode::parse("COPY"), PcodeOpcode::Copy);
         assert_eq!(PcodeOpcode::parse("goto"), PcodeOpcode::Branch);
@@ -760,7 +768,14 @@ mod tests {
         assert_eq!(PcodeOpcode::parse("callind"), PcodeOpcode::CallInd);
         assert_eq!(PcodeOpcode::parse("=="), PcodeOpcode::IntEqual);
         assert_eq!(PcodeOpcode::parse("&"), PcodeOpcode::IntAnd);
+        assert_eq!(PcodeOpcode::parse("*"), PcodeOpcode::IntMult);
+        assert_eq!(PcodeOpcode::parse("/"), PcodeOpcode::IntDiv);
+        assert_eq!(PcodeOpcode::parse("%"), PcodeOpcode::IntRem);
+        assert_eq!(PcodeOpcode::parse("<<"), PcodeOpcode::IntLeft);
+        assert_eq!(PcodeOpcode::parse(">>"), PcodeOpcode::IntRight);
         assert_eq!(PcodeOpcode::parse("!"), PcodeOpcode::BoolNegate);
+        assert_eq!(PcodeOpcode::parse("&&"), PcodeOpcode::BoolAnd);
+        assert_eq!(PcodeOpcode::parse("||"), PcodeOpcode::BoolOr);
         assert_eq!(PcodeOpcode::parse("SUB"), PcodeOpcode::SubPiece);
         assert_eq!(PcodeOpcode::parse("ZEXT"), PcodeOpcode::IntZExt);
     }
