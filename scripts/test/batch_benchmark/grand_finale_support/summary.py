@@ -94,6 +94,13 @@ def summarize_binary(
         int(entry.get("metrics", {}).get("cast_chain_count", 0))
         for entry in preview_engine_used
     )
+    preview_helper_call_total = sum(
+        int(entry.get("metrics", {}).get("helper_call_total", 0))
+        for entry in preview_engine_used
+    )
+    preview_helper_call_counts: Counter[str] = Counter()
+    for entry in preview_engine_used:
+        preview_helper_call_counts.update(entry.get("metrics", {}).get("helper_call_counts", {}))
     preview_residue_total = sum(compute_residue_score(entry) for entry in preview_engine_used)
 
     return {
@@ -146,6 +153,8 @@ def summarize_binary(
         "preview_temp_surface_count": preview_temp_surface_count,
         "mlil_preview_residue": preview_residue_total,
         "mlil_preview_cast_density": preview_cast_density,
+        "mlil_preview_helper_call_total": preview_helper_call_total,
+        "mlil_preview_helper_call_counts": dict(preview_helper_call_counts),
         "residue_rankings": {
             "single_assign_temps": dict(
                 aggregate_residues(fission_entries, "single_assign_temps").most_common(20)
@@ -219,6 +228,8 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         "preview_temp_surface_count": 0,
         "mlil_preview_residue": 0,
         "mlil_preview_cast_density": 0,
+        "mlil_preview_helper_call_total": 0,
+        "mlil_preview_helper_call_counts": Counter(),
         "residue_rankings": {
             "single_assign_temps": Counter(),
             "residue_names": Counter(),
@@ -248,6 +259,10 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         global_report["preview_temp_surface_count"] += report.get("preview_temp_surface_count", 0)
         global_report["mlil_preview_residue"] += report.get("mlil_preview_residue", 0)
         global_report["mlil_preview_cast_density"] += report.get("mlil_preview_cast_density", 0)
+        global_report["mlil_preview_helper_call_total"] += report.get("mlil_preview_helper_call_total", 0)
+        global_report["mlil_preview_helper_call_counts"].update(
+            report.get("mlil_preview_helper_call_counts", {})
+        )
         for key in global_report["residue_rankings"]:
             global_report["residue_rankings"][key].update(report["residue_rankings"][key])
         for offender in report.get("top_residue_offenders", []):
@@ -299,4 +314,7 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         for side, counter in global_report["fallback_counts"].items()
     }
     global_report["control_flow"] = dict(global_report["control_flow"])
+    global_report["mlil_preview_helper_call_counts"] = dict(
+        global_report["mlil_preview_helper_call_counts"].most_common()
+    )
     return global_report

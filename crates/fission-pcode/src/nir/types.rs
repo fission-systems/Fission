@@ -20,6 +20,7 @@ pub struct NirBinding {
     pub name: String,
     pub ty: NirType,
     pub surface_type_name: Option<String>,
+    pub initializer: Option<HirExpr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +103,11 @@ pub struct HirSwitchCase {
 pub enum HirLValue {
     Var(String),
     Deref { ptr: Box<HirExpr>, ty: NirType },
+    Index {
+        base: Box<HirExpr>,
+        index: Box<HirExpr>,
+        elem_ty: NirType,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,7 +144,7 @@ pub enum HirExpr {
     },
     Index {
         base: Box<HirExpr>,
-        index: usize,
+        index: Box<HirExpr>,
         elem_ty: NirType,
     },
     AggregateCopy {
@@ -181,6 +187,7 @@ pub enum HirBinaryOp {
 pub struct MlilPreviewOptions {
     pub pe_x64_only: bool,
     pub is_64bit: bool,
+    pub pointer_size: u32,
     pub format: String,
     pub image_base: u64,
     pub sections: Vec<(u64, u64)>,
@@ -218,6 +225,7 @@ impl MlilPreviewOptions {
         Self {
             pe_x64_only: true,
             is_64bit: binary.is_64bit,
+            pointer_size: if binary.is_64bit { 8 } else { 4 },
             format: binary.format.clone(),
             image_base: binary.inner().image_base,
             sections,
@@ -226,6 +234,10 @@ impl MlilPreviewOptions {
 
     pub(super) fn is_pe_x64(&self) -> bool {
         self.is_64bit && self.format.to_ascii_uppercase().starts_with("PE")
+    }
+
+    pub(super) fn is_supported_pe(&self) -> bool {
+        self.format.to_ascii_uppercase().starts_with("PE")
     }
 
     pub(super) fn is_mapped_global(&self, address: u64) -> bool {
@@ -239,10 +251,24 @@ impl MlilPreviewOptions {
 pub enum MlilPreviewError {
     #[error("mlil-preview currently supports PE x64 only")]
     UnsupportedArchitecture,
+    #[error("unsupported architecture in mlil-preview")]
+    UnsupportedArchitectureDetailed,
     #[error("unsupported control flow in mlil-preview")]
     UnsupportedControlFlow,
+    #[error("unsupported branch target in mlil-preview")]
+    UnsupportedCfgBranchTarget,
+    #[error("unsupported region shape in mlil-preview")]
+    UnsupportedCfgRegionShape,
+    #[error("unsupported phi join in mlil-preview")]
+    UnsupportedCfgPhiJoin,
+    #[error("unsupported indirect call region in mlil-preview")]
+    UnsupportedCfgIndirectCallRegion,
     #[error("unsupported pcode pattern: {0}")]
     UnsupportedPattern(&'static str),
     #[error("value lowering failed")]
     LoweringFailed,
+    #[error("value lowering failed on multiequal")]
+    UnsupportedExprMultiequal,
+    #[error("value lowering failed on varnode")]
+    UnsupportedExprVarnodeLowering,
 }

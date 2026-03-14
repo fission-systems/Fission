@@ -173,6 +173,8 @@ def compare_delta(legacy: dict[str, Any], preview: dict[str, Any]) -> dict[str, 
         - int(legacy_metrics.get("temp_surface_count", 0)),
         "cast_chain_count": int(preview_metrics.get("cast_chain_count", 0))
         - int(legacy_metrics.get("cast_chain_count", 0)),
+        "helper_call_total": int(preview_metrics.get("helper_call_total", 0))
+        - int(legacy_metrics.get("helper_call_total", 0)),
         "residue_score": preview_residue - legacy_residue,
         "code_length": len(preview_code) - len(legacy_code),
         "avg_timing_ms": round(preview_timing - legacy_timing, 3),
@@ -286,6 +288,7 @@ def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
     preview_better_on_temp = 0
     preview_better_on_cast = 0
     preview_better_on_residue = 0
+    preview_better_on_helper = 0
     preview_faster = 0
     legacy_faster = 0
     timing_tie = 0
@@ -304,6 +307,8 @@ def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
             preview_better_on_cast += 1
         if delta["residue_score"] < 0:
             preview_better_on_residue += 1
+        if delta["helper_call_total"] > 0:
+            preview_better_on_helper += 1
         preview = item["preview"]
         preview_used_count += int(preview.get("engine_used") == "mlil_preview" and preview.get("success"))
         preview_fallback_count += int(bool(preview.get("fell_back")))
@@ -328,6 +333,7 @@ def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
         "preview_better_on_temp_count": preview_better_on_temp,
         "preview_better_on_cast_count": preview_better_on_cast,
         "preview_better_on_residue_count": preview_better_on_residue,
+        "preview_better_on_helper_count": preview_better_on_helper,
         "preview_faster_count": preview_faster,
         "legacy_faster_count": legacy_faster,
         "timing_tie_count": timing_tie,
@@ -351,6 +357,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Preview used count: {report['summary']['preview_used_count']}",
         f"- Preview fallback count: {report['summary']['preview_fallback_count']}",
         f"- Preview faster count: {report['summary']['preview_faster_count']}",
+        f"- Preview helper wins: {report['summary']['preview_better_on_helper_count']}",
         f"- Legacy faster count: {report['summary']['legacy_faster_count']}",
         f"- Timing tie count: {report['summary']['timing_tie_count']}",
         f"- Average legacy ms: {report['summary']['avg_legacy_ms']}",
@@ -359,8 +366,8 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         "",
         "## Function Table",
         "",
-        "| Address | Legacy | Preview | Δ goto | Δ temp | Δ cast | Legacy avg ms | Preview avg ms | Speedup | Preview used/fallback |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Address | Legacy | Preview | Δ goto | Δ temp | Δ cast | Δ helper | Legacy avg ms | Preview avg ms | Speedup | Preview used/fallback |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for item in report["functions"]:
         legacy = item["legacy"]
@@ -370,7 +377,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         lines.append(
             f"| `{item['address']}` | {'ok' if legacy.get('success') else 'fail'} | "
             f"{'ok' if preview.get('success') else 'fail'} | {delta['goto_count']} | "
-            f"{delta['temp_surface_count']} | {delta['cast_chain_count']} | "
+            f"{delta['temp_surface_count']} | {delta['cast_chain_count']} | {delta['helper_call_total']} | "
             f"{legacy['timing_stats']['avg_ms']} | {preview['timing_stats']['avg_ms']} | "
             f"{delta['speedup_ratio']} | {preview_state} |"
         )

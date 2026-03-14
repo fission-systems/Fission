@@ -29,9 +29,21 @@ fn reg(offset: u64, size: u32) -> Varnode {
         MlilPreviewOptions {
             pe_x64_only: true,
             is_64bit: true,
+            pointer_size: 8,
             format: "PE".to_string(),
             image_base: 0x1400_0000,
             sections: vec![(0x1400_1000, 0x1400_2000)],
+        }
+    }
+
+    fn preview_options_x86() -> MlilPreviewOptions {
+        MlilPreviewOptions {
+            pe_x64_only: true,
+            is_64bit: false,
+            pointer_size: 4,
+            format: "PE".to_string(),
+            image_base: 0x400000,
+            sections: vec![(0x401000, 0x402000)],
         }
     }
 
@@ -199,6 +211,86 @@ fn reg(offset: u64, size: u32) -> Varnode {
         normalize_stmt(&mut stmt);
         let rendered = print_stmt(&stmt);
         assert_eq!(rendered, "return param_1 % 2;");
+    }
+
+    #[test]
+    fn signed_mod_idiom_with_invalid_shift_does_not_panic() {
+        let base = HirExpr::Var("param_1".to_string());
+        let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs: Box::new(base.clone()),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Shl,
+                lhs: Box::new(HirExpr::Binary {
+                    op: HirBinaryOp::Sar,
+                    lhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(base.clone()),
+                        rhs: Box::new(HirExpr::Binary {
+                            op: HirBinaryOp::And,
+                            lhs: Box::new(HirExpr::Binary {
+                                op: HirBinaryOp::Shr,
+                                lhs: Box::new(base.clone()),
+                                rhs: Box::new(HirExpr::Const(
+                                    63,
+                                    NirType::Int {
+                                        bits: 64,
+                                        signed: false,
+                                    },
+                                )),
+                                ty: NirType::Int {
+                                    bits: 64,
+                                    signed: false,
+                                },
+                            }),
+                            rhs: Box::new(HirExpr::Const(
+                                0,
+                                NirType::Int {
+                                    bits: 64,
+                                    signed: true,
+                                },
+                            )),
+                            ty: NirType::Int {
+                                bits: 64,
+                                signed: true,
+                            },
+                        }),
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: true,
+                        },
+                    }),
+                    rhs: Box::new(HirExpr::Const(
+                        -1,
+                        NirType::Int {
+                            bits: 64,
+                            signed: true,
+                        },
+                    )),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                }),
+                rhs: Box::new(HirExpr::Const(
+                    -1,
+                    NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+            }),
+            ty: NirType::Int {
+                bits: 64,
+                signed: true,
+            },
+        }));
+        normalize_stmt(&mut stmt);
+        assert!(print_stmt(&stmt).contains("<< -1"));
     }
 
     #[test]
@@ -602,11 +694,13 @@ fn reg(offset: u64, size: u32) -> Varnode {
                         signed: true,
                     },
                     surface_type_name: None,
+                    initializer: None,
                 },
                 NirBinding {
                     name: "param_2".to_string(),
                     ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
                     surface_type_name: None,
+                    initializer: None,
                 },
             ],
             locals: vec![],
@@ -655,11 +749,13 @@ fn reg(offset: u64, size: u32) -> Varnode {
                         signed: true,
                     },
                     surface_type_name: None,
+                    initializer: None,
                 },
                 NirBinding {
                     name: "param_2".to_string(),
                     ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
                     surface_type_name: None,
+                    initializer: None,
                 },
             ],
             locals: vec![],
@@ -712,17 +808,20 @@ fn reg(offset: u64, size: u32) -> Varnode {
                         signed: true,
                     },
                     surface_type_name: None,
+                    initializer: None,
                 },
                 NirBinding {
                     name: "param_2".to_string(),
                     ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
                     surface_type_name: None,
+                    initializer: None,
                 },
             ],
             locals: vec![NirBinding {
                 name: "local_3c".to_string(),
                 ty: NirType::Aggregate { size: 16 },
                 surface_type_name: None,
+                initializer: None,
             }],
             return_type: NirType::Unknown,
             body: vec![
@@ -788,17 +887,20 @@ fn reg(offset: u64, size: u32) -> Varnode {
                         signed: true,
                     },
                     surface_type_name: None,
+                    initializer: None,
                 },
                 NirBinding {
                     name: "param_2".to_string(),
                     ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
                     surface_type_name: Some("LPRECT".to_string()),
+                    initializer: None,
                 },
             ],
             locals: vec![NirBinding {
                 name: "local_3c".to_string(),
                 ty: NirType::Aggregate { size: 16 },
                 surface_type_name: None,
+                initializer: None,
             }],
             return_type: NirType::Unknown,
             body: vec![HirStmt::Assign {
@@ -895,6 +997,95 @@ fn reg(offset: u64, size: u32) -> Varnode {
         assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
         assert!(code.contains("return 0;"));
         assert!(code.contains("return 1;"));
+    }
+
+    #[test]
+    fn preview_supports_pe_x86_single_block() {
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401000,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(7, 4)],
+                    asm_mnemonic: None,
+                }],
+            }],
+        };
+
+        let code = render_mlil_preview(&func, "x86_ret", 0x401000, &preview_options_x86())
+            .expect("preview render");
+        assert!(code.contains("return 7;"), "{code}");
+    }
+
+    #[test]
+    fn preview_supports_pe_x86_multiblock_direct_target_branch() {
+        let cond = uniq(0x360, 1);
+        let direct_target = Varnode {
+            space_id: 1,
+            offset: 0x4020,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x4000,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::Copy,
+                            address: 0x4000,
+                            output: Some(cond.clone()),
+                            inputs: vec![cst(1, 1)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::CBranch,
+                            address: 0x4001,
+                            output: None,
+                            inputs: vec![direct_target, cond],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x4010,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x4010,
+                        output: None,
+                        inputs: vec![cst(0, 4), cst(0, 4)],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x4020,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x4020,
+                        output: None,
+                        inputs: vec![cst(0, 4), cst(1, 4)],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        };
+
+        let code = render_mlil_preview(&func, "x86_branchy", 0x4000, &preview_options_x86())
+            .expect("preview render");
+        assert!(code.contains("return 0;"), "{code}");
+        assert!(code.contains("return 1;"), "{code}");
     }
 
     #[test]
@@ -1197,6 +1388,150 @@ fn reg(offset: u64, size: u32) -> Varnode {
         assert!(code.contains("local_10 = 3;"));
         assert!(!code.contains("goto block_3620;"));
         assert!(!code.contains("goto block_3630;"));
+    }
+
+    #[test]
+    fn multi_block_preview_absorbs_shared_trivial_forwarding_return_tail() {
+        let cond = uniq(0x3a0, 1);
+        let ptr = uniq(0x3a1, 8);
+        let phi = uniq(0x3a2, 4);
+        let retv = uniq(0x3a3, 4);
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x3650,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::Copy,
+                            address: 0x3650,
+                            output: Some(cond.clone()),
+                            inputs: vec![reg(0x08, 1)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::CBranch,
+                            address: 0x3651,
+                            output: None,
+                            inputs: vec![cst(0x3670, 8), cond],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x3660,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::IntAdd,
+                            address: 0x3660,
+                            output: Some(ptr.clone()),
+                            inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Store,
+                            address: 0x3661,
+                            output: None,
+                            inputs: vec![cst(0, 4), ptr.clone(), cst(1, 4)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 2,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x3662,
+                            output: None,
+                            inputs: vec![cst(0x3680, 8)],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x3670,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::IntAdd,
+                            address: 0x3670,
+                            output: Some(ptr.clone()),
+                            inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Store,
+                            address: 0x3671,
+                            output: None,
+                            inputs: vec![cst(0, 4), ptr, cst(2, 4)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 2,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x3672,
+                            output: None,
+                            inputs: vec![cst(0x3680, 8)],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 3,
+                    start_address: 0x3680,
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::MultiEqual,
+                            address: 0x3680,
+                            output: Some(phi.clone()),
+                            inputs: vec![cst(0, 4), cst(0, 4)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Copy,
+                            address: 0x3681,
+                            output: Some(retv.clone()),
+                            inputs: vec![phi],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 2,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x3682,
+                            output: None,
+                            inputs: vec![cst(0x3690, 8)],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 4,
+                    start_address: 0x3690,
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x3690,
+                        output: None,
+                        inputs: vec![cst(0, 8), retv],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        };
+
+        let code = render_mlil_preview(&func, "if_else_tail_fn", 0x3650, &preview_options())
+            .expect("preview render");
+        assert!(code.contains("if (!param_1) {") || code.contains("if (param_1) {"));
+        assert!(code.contains("local_10 = 1;"));
+        assert!(code.contains("local_10 = 2;"));
+        assert!(!code.contains("goto block_3680;"));
+        assert!(!code.contains("goto block_3690;"));
     }
 
     #[test]
@@ -2025,6 +2360,643 @@ fn reg(offset: u64, size: u32) -> Varnode {
         normalize_function_body(&mut body);
         assert_eq!(body.len(), 2);
         assert_eq!(print_stmt(&body[1]), "return 7 + local_10;");
+    }
+
+    #[test]
+    fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let idx = HirExpr::Var("idx".to_string());
+        let slot_ptr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::PtrOffset {
+                base: Box::new(HirExpr::Var("param_1".to_string())),
+                offset: 0x20,
+            }),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(idx.clone()),
+                rhs: Box::new(HirExpr::Const(
+                    4,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+        };
+        let mut func = HirFunction {
+            name: "slot_fn".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                initializer: None,
+            }],
+            locals: vec![],
+            return_type: uint_ty.clone(),
+            body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(slot_ptr.clone()),
+                    ty: uint_ty.clone(),
+                }),
+                rhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(slot_ptr),
+                    ty: uint_ty.clone(),
+                }),
+                ty: uint_ty.clone(),
+            }))],
+        };
+
+        normalize_hir_function(&mut func);
+        let rendered = print_hir_function(&func);
+        assert!(
+            func.locals
+                .iter()
+                .any(|binding| binding.name == "slot_20" && binding.initializer.is_some()),
+            "{rendered}"
+        );
+        assert!(rendered.contains("slot_20[idx] + slot_20[idx]"), "{rendered}");
+    }
+
+    #[test]
+    fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let idx = HirExpr::Var("idx".to_string());
+        let slot_ptr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::PtrOffset {
+                base: Box::new(HirExpr::Var("param_1".to_string())),
+                offset: 0x28,
+            }),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(idx.clone()),
+                rhs: Box::new(HirExpr::Const(
+                    4,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+        };
+        let mut func = HirFunction {
+            name: "slot_store_fn".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                initializer: None,
+            }],
+            locals: vec![],
+            return_type: NirType::Unknown,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(slot_ptr.clone()),
+                        ty: uint_ty.clone(),
+                    },
+                    rhs: HirExpr::Const(7, uint_ty.clone()),
+                },
+                HirStmt::Return(Some(HirExpr::Load {
+                    ptr: Box::new(slot_ptr),
+                    ty: uint_ty.clone(),
+                })),
+            ],
+        };
+
+        normalize_hir_function(&mut func);
+        let rendered = print_hir_function(&func);
+        assert!(rendered.contains("slot_28[idx] = 7;"), "{rendered}");
+        assert!(rendered.contains("return slot_28[idx];"), "{rendered}");
+    }
+
+    #[test]
+    fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
+        let byte_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let idx = HirExpr::Var("idx".to_string());
+        let mismatched_ptr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::PtrOffset {
+                base: Box::new(HirExpr::Var("param_1".to_string())),
+                offset: 0x30,
+            }),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(idx),
+                rhs: Box::new(HirExpr::Const(
+                    4,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+        };
+        let mut func = HirFunction {
+            name: "mismatch_fn".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                initializer: None,
+            }],
+            locals: vec![],
+            return_type: byte_ty.clone(),
+            body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(mismatched_ptr.clone()),
+                    ty: byte_ty.clone(),
+                }),
+                rhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(mismatched_ptr),
+                    ty: byte_ty.clone(),
+                }),
+                ty: byte_ty.clone(),
+            }))],
+        };
+
+        normalize_hir_function(&mut func);
+        let rendered = print_hir_function(&func);
+        assert!(!rendered.contains("slot_30["), "{rendered}");
+        assert!(!func.locals.iter().any(|binding| binding.name.starts_with("slot_30")));
+    }
+
+    #[test]
+    fn normalize_hir_function_surfaces_adjacent_lane_slots_under_same_family() {
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let idx = HirExpr::Var("idx".to_string());
+        let lane0_ptr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::PtrOffset {
+                base: Box::new(HirExpr::Var("param_1".to_string())),
+                offset: 0xc9b8,
+            }),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(idx.clone()),
+                rhs: Box::new(HirExpr::Const(
+                    16,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+        };
+        let lane1_ptr = HirExpr::PtrOffset {
+            base: Box::new(lane0_ptr.clone()),
+            offset: 4,
+        };
+        let mut func = HirFunction {
+            name: "family_fn".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                initializer: None,
+            }],
+            locals: vec![],
+            return_type: uint_ty.clone(),
+            body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(lane0_ptr),
+                    ty: uint_ty.clone(),
+                }),
+                rhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(lane1_ptr),
+                    ty: uint_ty.clone(),
+                }),
+                ty: uint_ty.clone(),
+            }))],
+        };
+
+        normalize_hir_function(&mut func);
+        let rendered = print_hir_function(&func);
+        assert!(rendered.contains("slot_c9b8[idx]"), "{rendered}");
+        assert!(rendered.contains("slot_c9b8_lane1[idx]"), "{rendered}");
+    }
+
+    #[test]
+    fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let biased_idx = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("idx".to_string())),
+            rhs: Box::new(HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 64,
+                signed: true,
+            },
+        };
+        let slot_ptr = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::PtrOffset {
+                base: Box::new(HirExpr::Var("param_1".to_string())),
+                offset: 0x20,
+            }),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Mul,
+                lhs: Box::new(biased_idx),
+                rhs: Box::new(HirExpr::Const(
+                    4,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false,
+                    },
+                )),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            }),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+        };
+        let mut func = HirFunction {
+            name: "biased_idx_fn".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                initializer: None,
+            }],
+            locals: vec![],
+            return_type: uint_ty.clone(),
+            body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(slot_ptr.clone()),
+                    ty: uint_ty.clone(),
+                }),
+                rhs: Box::new(HirExpr::Load {
+                    ptr: Box::new(slot_ptr),
+                    ty: uint_ty.clone(),
+                }),
+                ty: uint_ty.clone(),
+            }))],
+        };
+
+        normalize_hir_function(&mut func);
+        let rendered = print_hir_function(&func);
+        assert!(rendered.contains("slot_24[idx] + slot_24[idx]"), "{rendered}");
+    }
+
+    #[test]
+    fn normalize_hir_function_rewrites_flush_bits_to_pseudo_intrinsic() {
+        let mut func = HirFunction {
+            name: "flush_fn".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                initializer: None,
+            }],
+            locals: vec![NirBinding {
+                name: "slot_20".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Int {
+                    bits: 8,
+                    signed: false,
+                })),
+                surface_type_name: None,
+                initializer: Some(HirExpr::Cast {
+                    ty: NirType::Ptr(Box::new(NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    })),
+                    expr: Box::new(HirExpr::PtrOffset {
+                        base: Box::new(HirExpr::Var("param_1".to_string())),
+                        offset: 0x20,
+                    }),
+                }),
+            }],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::Lt,
+                    lhs: Box::new(HirExpr::Const(
+                        7,
+                        NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    )),
+                    rhs: Box::new(HirExpr::Var("bit_count".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Deref {
+                            ptr: Box::new(HirExpr::Var("slot_20".to_string())),
+                            ty: NirType::Int {
+                                bits: 8,
+                                signed: false,
+                            },
+                        },
+                        rhs: HirExpr::Var("accum".to_string()),
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("out_idx".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Add,
+                            lhs: Box::new(HirExpr::Var("out_idx".to_string())),
+                            rhs: Box::new(HirExpr::Const(
+                                1,
+                                NirType::Int {
+                                    bits: 32,
+                                    signed: true,
+                                },
+                            )),
+                            ty: NirType::Int {
+                                bits: 32,
+                                signed: true,
+                            },
+                        },
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("accum".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Shr,
+                            lhs: Box::new(HirExpr::Var("accum".to_string())),
+                            rhs: Box::new(HirExpr::Const(
+                                8,
+                                NirType::Int {
+                                    bits: 32,
+                                    signed: false,
+                                },
+                            )),
+                            ty: NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        },
+                    },
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("bit_count".to_string()),
+                        rhs: HirExpr::Binary {
+                            op: HirBinaryOp::Sub,
+                            lhs: Box::new(HirExpr::Var("bit_count".to_string())),
+                            rhs: Box::new(HirExpr::Const(
+                                8,
+                                NirType::Int {
+                                    bits: 32,
+                                    signed: true,
+                                },
+                            )),
+                            ty: NirType::Int {
+                                bits: 32,
+                                signed: true,
+                            },
+                        },
+                    },
+                ],
+                else_body: Vec::new(),
+            }],
+        };
+
+        normalize_hir_function(&mut func);
+        let rendered = print_hir_function(&func);
+        assert!(rendered.contains("FLUSH_BITS("), "{rendered}");
+    }
+
+    #[test]
+    fn normalize_hir_function_rewrites_table_driven_emit_to_intrinsic() {
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let idx = HirExpr::Var("idx".to_string());
+        let mut func = HirFunction {
+            name: "emit_fn".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                initializer: None,
+            }],
+            locals: vec![
+                NirBinding {
+                    name: "slot_40".to_string(),
+                    ty: NirType::Ptr(Box::new(uint_ty.clone())),
+                    surface_type_name: None,
+                    initializer: Some(HirExpr::Cast {
+                        ty: NirType::Ptr(Box::new(uint_ty.clone())),
+                        expr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("param_1".to_string())),
+                            offset: 0x40,
+                        }),
+                    }),
+                },
+                NirBinding {
+                    name: "slot_44".to_string(),
+                    ty: NirType::Ptr(Box::new(uint_ty.clone())),
+                    surface_type_name: None,
+                    initializer: Some(HirExpr::Cast {
+                        ty: NirType::Ptr(Box::new(uint_ty.clone())),
+                        expr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("param_1".to_string())),
+                            offset: 0x44,
+                        }),
+                    }),
+                },
+            ],
+            return_type: NirType::Unknown,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("accum".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Or,
+                        lhs: Box::new(HirExpr::Var("accum".to_string())),
+                        rhs: Box::new(HirExpr::Binary {
+                            op: HirBinaryOp::Shl,
+                            lhs: Box::new(HirExpr::Index {
+                                base: Box::new(HirExpr::Var("slot_40".to_string())),
+                                index: Box::new(idx.clone()),
+                                elem_ty: uint_ty.clone(),
+                            }),
+                            rhs: Box::new(HirExpr::Var("bit_count".to_string())),
+                            ty: uint_ty.clone(),
+                        }),
+                        ty: uint_ty.clone(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("bit_count".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(HirExpr::Var("bit_count".to_string())),
+                        rhs: Box::new(HirExpr::Index {
+                            base: Box::new(HirExpr::Var("slot_44".to_string())),
+                            index: Box::new(idx),
+                            elem_ty: uint_ty.clone(),
+                        }),
+                        ty: uint_ty.clone(),
+                    },
+                },
+            ],
+        };
+
+        normalize_hir_function(&mut func);
+        let rendered = print_hir_function(&func);
+        assert!(rendered.contains("EMIT_CODE(param_1, slot_40[idx], slot_44[idx]);"));
+    }
+
+    #[test]
+    fn normalize_hir_function_rewrites_slot_based_write_bits_to_intrinsic() {
+        let uint_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let slot_idx = HirExpr::Index {
+            base: Box::new(HirExpr::Var("slot_280".to_string())),
+            index: Box::new(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            elem_ty: uint_ty.clone(),
+        };
+        let bitcount_idx = HirExpr::Index {
+            base: Box::new(HirExpr::Var("slot_284".to_string())),
+            index: Box::new(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            elem_ty: uint_ty.clone(),
+        };
+        let mut func = HirFunction {
+            name: "slot_write_bits_fn".to_string(),
+            params: vec![NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Unknown)),
+                surface_type_name: None,
+                initializer: None,
+            }],
+            locals: vec![
+                NirBinding {
+                    name: "slot_280".to_string(),
+                    ty: NirType::Ptr(Box::new(uint_ty.clone())),
+                    surface_type_name: None,
+                    initializer: Some(HirExpr::Cast {
+                        ty: NirType::Ptr(Box::new(uint_ty.clone())),
+                        expr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("param_1".to_string())),
+                            offset: 0x280,
+                        }),
+                    }),
+                },
+                NirBinding {
+                    name: "slot_284".to_string(),
+                    ty: NirType::Ptr(Box::new(uint_ty.clone())),
+                    surface_type_name: None,
+                    initializer: Some(HirExpr::Cast {
+                        ty: NirType::Ptr(Box::new(uint_ty.clone())),
+                        expr: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(HirExpr::Var("param_1".to_string())),
+                            offset: 0x284,
+                        }),
+                    }),
+                },
+            ],
+            return_type: NirType::Unknown,
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Index {
+                        base: Box::new(HirExpr::Var("slot_280".to_string())),
+                        index: Box::new(HirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        )),
+                        elem_ty: uint_ty.clone(),
+                    },
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Or,
+                        lhs: Box::new(slot_idx.clone()),
+                        rhs: Box::new(HirExpr::Binary {
+                            op: HirBinaryOp::Shl,
+                            lhs: Box::new(HirExpr::Var("value".to_string())),
+                            rhs: Box::new(bitcount_idx.clone()),
+                            ty: uint_ty.clone(),
+                        }),
+                        ty: uint_ty.clone(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Index {
+                        base: Box::new(HirExpr::Var("slot_284".to_string())),
+                        index: Box::new(HirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        )),
+                        elem_ty: uint_ty.clone(),
+                    },
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::Add,
+                        lhs: Box::new(bitcount_idx),
+                        rhs: Box::new(HirExpr::Var("width".to_string())),
+                        ty: uint_ty.clone(),
+                    },
+                },
+            ],
+        };
+
+        normalize_hir_function(&mut func);
+        let rendered = print_hir_function(&func);
+        assert!(rendered.contains("WRITE_BITS(param_1, value, width);"), "{rendered}");
     }
 
     #[test]

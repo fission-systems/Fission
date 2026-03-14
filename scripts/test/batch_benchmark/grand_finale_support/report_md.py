@@ -27,6 +27,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Raw pointer / assembly fallbacks (Fission): {report['global']['fallback_counts']['fission']}",
         f"- Cast chains (Fission/Ghidra): {report['global']['cast_chain_counts']['fission']} / {report['global']['cast_chain_counts']['ghidra']}",
         f"- MLIL preview success / residue / cast density: {report['global']['mlil_preview_success']} / {report['global']['mlil_preview_residue']} / {report['global']['mlil_preview_cast_density']}",
+        f"- MLIL preview helper calls: {report['global'].get('mlil_preview_helper_call_total', 0)} {report['global'].get('mlil_preview_helper_call_counts', {})}",
         "",
         "## Preview vs Legacy",
         "",
@@ -37,6 +38,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"| Goto count | {report['global']['preview_goto_count']} | {report['global']['control_flow']['fission_gotos']} |",
         f"| Temp surface count | {report['global']['preview_temp_surface_count']} | {sum(report['global']['residue_rankings']['residue_families'].get(k, 0) for k in ('uVar','iVar','xVar','bVar','uStack','xStack','axStack'))} |",
         f"| Cast density | {report['global']['mlil_preview_cast_density']} | {report['global']['cast_chain_counts']['fission']} |",
+        f"| Helper calls | {report['global'].get('mlil_preview_helper_call_total', 0)} | n/a |",
         "",
         "## Residue Intel",
         "",
@@ -100,6 +102,11 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
             f"{binary.get('mlil_preview_success', 0)} / "
             f"{binary.get('mlil_preview_residue', 0)} / "
             f"{binary.get('mlil_preview_cast_density', 0)}"
+        )
+        lines.append(
+            f"- MLIL preview helper calls: "
+            f"{binary.get('mlil_preview_helper_call_total', 0)} "
+            f"{binary.get('mlil_preview_helper_call_counts', {})}"
         )
         lines.append(
             f"- Preview engine used / fallback / goto / temp surface: "

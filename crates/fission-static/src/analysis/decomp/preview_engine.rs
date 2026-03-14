@@ -248,15 +248,53 @@ fn render_preview_from_json(
             .open(format!("/tmp/fission_preview_{address:x}.log"))
             .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=before_render\n"));
     }
-    render_mlil_preview_with_context(&pcode, name, address, &options, Some(&type_context))
-        .map(Some)
-        .map_err(|e| format!("mlil-preview unavailable: {e}"))
+    match render_mlil_preview_with_context(&pcode, name, address, &options, Some(&type_context)) {
+        Ok(code) => {
+            if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+                let _ = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(format!("/tmp/fission_preview_{address:x}.log"))
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=render_ok\n"));
+            }
+            Ok(Some(code))
+        }
+        Err(err) => {
+            if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+                let _ = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(format!("/tmp/fission_preview_{address:x}.log"))
+                    .and_then(|mut f| {
+                        std::io::Write::write_all(
+                            &mut f,
+                            format!("[mlil-preview] stage=render_error err={err}\n").as_bytes(),
+                        )
+                    });
+            }
+            Err(format!("mlil-preview unavailable: {err}"))
+        }
+    }
 }
 
 fn classify_preview_failure(reason: &str) -> &'static str {
     let lower = reason.to_ascii_lowercase();
-    if lower.contains("unsupported control flow") {
+    if lower.contains("unsupported architecture") || lower.contains("supports pe x64 only") {
+        "unsupported_arch"
+    } else if lower.contains("unsupported branch target") {
+        "unsupported_cfg_branch_target"
+    } else if lower.contains("unsupported region shape") {
+        "unsupported_cfg_region_shape"
+    } else if lower.contains("unsupported phi join") {
+        "unsupported_cfg_phi_join"
+    } else if lower.contains("unsupported indirect call region") {
+        "unsupported_cfg_indirect_call_region"
+    } else if lower.contains("unsupported control flow") {
         "unsupported_cfg"
+    } else if lower.contains("multiequal") {
+        "unsupported_expr_multiequal"
+    } else if lower.contains("value lowering failed on varnode") {
+        "unsupported_expr_varnode_lowering"
     } else if lower.contains("loop") || lower.contains("dowhile") || lower.contains("while") {
         "unsupported_loop_shape"
     } else if lower.contains("switch") {

@@ -104,6 +104,8 @@ pub(super) fn branch_target_address(vn: &Varnode) -> Option<u64> {
         } else {
             None
         }
+    } else if vn.offset != 0 {
+        Some(vn.offset)
     } else {
         None
     }

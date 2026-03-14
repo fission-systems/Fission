@@ -118,6 +118,12 @@ def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[
         r"\([A-Za-z_][A-Za-z0-9_\s\*]+\)\s*\([A-Za-z_][A-Za-z0-9_\s\*]+\)",
         code,
     )
+    metrics["helper_call_counts"] = {
+        "FLUSH_BITS": count_regex(r"\bFLUSH_BITS\s*\(", code),
+        "WRITE_BITS": count_regex(r"\bWRITE_BITS\s*\(", code),
+        "EMIT_CODE": count_regex(r"\bEMIT_CODE\s*\(", code),
+    }
+    metrics["helper_call_total"] = sum(metrics["helper_call_counts"].values())
 
     residue_names = re.findall(
         r"\b(?:[uibax]Var\d+|(?:u|x|ax)Stack_[0-9a-fA-F]+)\b",

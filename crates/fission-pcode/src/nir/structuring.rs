@@ -2,6 +2,10 @@ use super::*;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        if self.pcode.blocks.len() > 80 {
+            return self.build_linear_multiblock_body();
+        }
+
         let mut body = Vec::new();
         let targeted = self.collect_jump_targets()?;
         let mut idx = 0usize;
@@ -86,10 +90,48 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 LoweredTerminator::Fallthrough(_) => {}
                 LoweredTerminator::Unsupported => {
-                    return Err(MlilPreviewError::UnsupportedControlFlow);
+                    return Err(MlilPreviewError::UnsupportedCfgIndirectCallRegion);
                 }
             }
             idx += 1;
+        }
+        Ok(body)
+    }
+
+    fn build_linear_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        let mut body = Vec::new();
+        let targeted = self.collect_jump_targets()?;
+        for idx in 0..self.pcode.blocks.len() {
+            let block = &self.pcode.blocks[idx];
+            if idx == 0 || targeted.contains(&block.start_address) {
+                body.push(HirStmt::Label(block_label(block.start_address)));
+            }
+            body.extend(self.lower_block_stmts(block)?);
+            match self.lower_block_terminator(idx)? {
+                LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
+                LoweredTerminator::Goto(target) => {
+                    if self.next_block_address(idx) != Some(target) {
+                        body.push(HirStmt::Goto(block_label(target)));
+                    }
+                }
+                LoweredTerminator::Cond {
+                    cond,
+                    true_target,
+                    false_target,
+                } => body.push(HirStmt::If {
+                    cond,
+                    then_body: vec![HirStmt::Goto(block_label(true_target))],
+                    else_body: false_target
+                        .map(block_label)
+                        .map(HirStmt::Goto)
+                        .into_iter()
+                        .collect(),
+                }),
+                LoweredTerminator::Fallthrough(_) => {}
+                LoweredTerminator::Unsupported => {
+                    return Err(MlilPreviewError::UnsupportedCfgIndirectCallRegion);
+                }
+            }
         }
         Ok(body)
     }
@@ -99,7 +141,11 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Option<T>, MlilPreviewError> {
         match result {
             Ok(result) => Ok(result),
-            Err(MlilPreviewError::UnsupportedControlFlow) => Ok(None),
+            Err(MlilPreviewError::UnsupportedControlFlow)
+            | Err(MlilPreviewError::UnsupportedCfgRegionShape)
+            | Err(MlilPreviewError::UnsupportedCfgPhiJoin)
+            | Err(MlilPreviewError::UnsupportedCfgIndirectCallRegion)
+            | Err(MlilPreviewError::UnsupportedCfgBranchTarget) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -112,6 +158,14 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         };
         if parsed.cases.len() < 2 {
+            return Ok(None);
+        }
+        let mut seen_case_values = HashSet::new();
+        if !parsed
+            .cases
+            .iter()
+            .all(|(value, _)| seen_case_values.insert(*value))
+        {
             return Ok(None);
         }
 
@@ -198,7 +252,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             let current_join_idx = self
                 .find_block_index_by_address(true_target)
-                .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
             if let Some(join_idx) = join_idx {
                 if join_idx != current_join_idx {
                     return Ok(None);
@@ -264,7 +318,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             let current_else_idx = self
                 .find_block_index_by_address(true_target)
-                .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
             if current_else_idx <= current_idx {
                 return Ok(None);
             }
@@ -337,7 +391,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let body_idx = self
             .find_block_index_by_address(true_target)
-            .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+            .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
         if body_idx <= idx {
             return Ok(None);
         }
@@ -432,17 +486,17 @@ impl<'a> PreviewBuilder<'a> {
             let exit = if let Some(join_addr) = false_target {
                 let join_idx = self
                     .find_block_index_by_address(join_addr)
-                    .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+                    .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
                 LinearExit::Join(join_idx)
             } else {
                 self.linear_exit(next_idx)?
-                    .ok_or(MlilPreviewError::UnsupportedControlFlow)?
+                    .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?
             };
             (cond, next_idx, exit)
         } else if false_target == Some(next_addr) {
             let join_idx = self
                 .find_block_index_by_address(true_target)
-                .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
             (negate_expr(cond), next_idx, LinearExit::Join(join_idx))
         } else {
             return Ok(None);
@@ -574,7 +628,7 @@ impl<'a> PreviewBuilder<'a> {
         let (cond, exit_idx) = if false_target == Some(body_addr) {
             let exit_idx = self
                 .find_block_index_by_address(true_target)
-                .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
             (negate_expr(cond), exit_idx)
         } else if true_target == body_addr {
             let Some(exit_addr) = false_target else {
@@ -582,7 +636,7 @@ impl<'a> PreviewBuilder<'a> {
             };
             let exit_idx = self
                 .find_block_index_by_address(exit_addr)
-                .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
             (cond, exit_idx)
         } else {
             return Ok(None);
@@ -643,13 +697,13 @@ impl<'a> PreviewBuilder<'a> {
                         };
                         let exit_idx = self
                             .find_block_index_by_address(exit_addr)
-                            .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+                            .ok_or(MlilPreviewError::UnsupportedCfgPhiJoin)?;
                         return Ok(Some((body, cond, exit_idx)));
                     }
                     if false_target == Some(start_addr) {
                         let exit_idx = self
                             .find_block_index_by_address(true_target)
-                            .ok_or(MlilPreviewError::UnsupportedControlFlow)?;
+                            .ok_or(MlilPreviewError::UnsupportedCfgPhiJoin)?;
                         return Ok(Some((body, negate_expr(cond), exit_idx)));
                     }
                     return Ok(None);
@@ -700,6 +754,12 @@ impl<'a> PreviewBuilder<'a> {
                         return Ok(None);
                     };
                     if exit == LinearExit::Join(next_idx) {
+                        return Ok(Some((body, next_idx)));
+                    }
+                    if body.is_empty()
+                        && self.is_trivial_forwarding_block(idx, next_idx)
+                        && self.linear_exit(next_idx)? == Some(exit)
+                    {
                         return Ok(Some((body, next_idx)));
                     }
                     if self.can_inline_linear_successor(idx, next_idx, &visited) {
@@ -829,47 +889,112 @@ impl<'a> PreviewBuilder<'a> {
         }
         if self.predecessors[next_idx]
             .iter()
-            .all(|pred| *pred == idx || visited.contains(pred))
+            .all(|pred| {
+                *pred == idx
+                    || visited.contains(pred)
+                    || self.is_trivial_forwarding_block(*pred, next_idx)
+            })
         {
             return true;
         }
         self.is_trivial_linear_tail(next_idx)
     }
 
-    fn is_trivial_linear_tail(&self, idx: usize) -> bool {
-        let block = &self.pcode.blocks[idx];
-        if block.ops.len() > 16 {
+    fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
+        if idx >= next_idx {
             return false;
         }
-        block
-            .ops
+        let block = &self.pcode.blocks[idx];
+        if block.ops.len() > 8 {
+            return false;
+        }
+        if self.successors[idx].len() != 1 || self.successors[idx][0] != next_idx {
+            return false;
+        }
+        let Some((last, prefix)) = block.ops.split_last() else {
+            return false;
+        };
+        if !prefix
             .iter()
-            .all(|op| self.is_trivial_tail_op(op.opcode))
+            .all(|op| self.is_trivial_forwarding_op(op.opcode))
+        {
+            return false;
+        }
+        self.is_linear_tail_terminator(idx, last.opcode)
+            || self.is_trivial_forwarding_op(last.opcode)
+    }
+
+    fn is_trivial_linear_tail(&self, idx: usize) -> bool {
+        let block = &self.pcode.blocks[idx];
+        if block.ops.len() > 24 {
+            return false;
+        }
+        let Some((last, prefix)) = block.ops.split_last() else {
+            return false;
+        };
+        prefix.iter().all(|op| self.is_trivial_tail_op(op.opcode))
+            && (self.is_linear_tail_terminator(idx, last.opcode)
+                || self.is_trivial_tail_op(last.opcode))
+    }
+
+    fn is_linear_tail_terminator(&self, idx: usize, opcode: PcodeOpcode) -> bool {
+        match opcode {
+            PcodeOpcode::Return => self.successors[idx].is_empty(),
+            PcodeOpcode::Branch => self.successors[idx].len() == 1,
+            _ => false,
+        }
+    }
+
+    fn is_trivial_forwarding_op(&self, opcode: PcodeOpcode) -> bool {
+        matches!(
+            opcode,
+            PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::MultiEqual
+                | PcodeOpcode::Indirect
+                | PcodeOpcode::SubPiece
+                | PcodeOpcode::Piece
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                | PcodeOpcode::PtrAdd
+                | PcodeOpcode::PtrSub
+        )
     }
 
     fn is_trivial_tail_op(&self, opcode: PcodeOpcode) -> bool {
         matches!(
             opcode,
             PcodeOpcode::Copy
+                | PcodeOpcode::Load
                 | PcodeOpcode::Cast
                 | PcodeOpcode::IntAdd
                 | PcodeOpcode::IntSub
+                | PcodeOpcode::IntCarry
+                | PcodeOpcode::IntSCarry
+                | PcodeOpcode::IntSBorrow
+                | PcodeOpcode::Int2Comp
+                | PcodeOpcode::IntNegate
                 | PcodeOpcode::IntAnd
                 | PcodeOpcode::IntOr
                 | PcodeOpcode::IntXor
                 | PcodeOpcode::SubPiece
                 | PcodeOpcode::Piece
+                | PcodeOpcode::MultiEqual
+                | PcodeOpcode::Indirect
                 | PcodeOpcode::IntZExt
                 | PcodeOpcode::IntSExt
                 | PcodeOpcode::IntLeft
                 | PcodeOpcode::IntRight
                 | PcodeOpcode::IntSRight
+                | PcodeOpcode::PtrAdd
+                | PcodeOpcode::PtrSub
                 | PcodeOpcode::IntEqual
                 | PcodeOpcode::IntNotEqual
                 | PcodeOpcode::IntLess
                 | PcodeOpcode::IntLessEqual
                 | PcodeOpcode::IntSLess
                 | PcodeOpcode::IntSLessEqual
+                | PcodeOpcode::BoolNegate
                 | PcodeOpcode::BoolAnd
                 | PcodeOpcode::BoolOr
                 | PcodeOpcode::Call
@@ -953,7 +1078,9 @@ impl<'a> PreviewBuilder<'a> {
             }
             HirExpr::Load { ptr, .. } => Self::expr_has_call(ptr),
             HirExpr::PtrOffset { base, .. } => Self::expr_has_call(base),
-            HirExpr::Index { base, .. } => Self::expr_has_call(base),
+            HirExpr::Index { base, index, .. } => {
+                Self::expr_has_call(base) || Self::expr_has_call(index)
+            }
             HirExpr::AggregateCopy { src, .. } => Self::expr_has_call(src),
             HirExpr::Var(_, ..) | HirExpr::Const(_, ..) => false,
         }

@@ -11,7 +11,16 @@ pub(super) fn print_hir_function(func: &HirFunction) -> String {
     }
     out.push_str(")\n{\n");
     for local in &func.locals {
-        out.push_str(&format!("    {} {};\n", print_binding_type(local), local.name));
+        if let Some(initializer) = &local.initializer {
+            out.push_str(&format!(
+                "    {} {} = {};\n",
+                print_binding_type(local),
+                local.name,
+                print_expr(initializer)
+            ));
+        } else {
+            out.push_str(&format!("    {} {};\n", print_binding_type(local), local.name));
+        }
     }
     if !func.locals.is_empty() {
         out.push('\n');
@@ -163,6 +172,18 @@ fn print_lvalue(lhs: &HirLValue) -> String {
     match lhs {
         HirLValue::Var(name) => name.clone(),
         HirLValue::Deref { ptr, ty } => format!("*({} *)({})", print_type(ty), print_expr(ptr)),
+        HirLValue::Index {
+            base,
+            index,
+            elem_ty,
+        } => {
+            let inner = print_expr(base);
+            let index = print_expr(index);
+            match base.as_ref() {
+                HirExpr::Var(name) => format!("{name}[{index}]"),
+                _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+            }
+        }
     }
 }
 
@@ -218,7 +239,12 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8) -> String {
             elem_ty,
         } => {
             let inner = print_expr(base);
-            (format!("(({} *)({inner}))[{index}]", print_type(elem_ty)), 95)
+            let index = print_expr(index);
+            let text = match base.as_ref() {
+                HirExpr::Var(name) => format!("{name}[{index}]"),
+                _ => format!("(({} *)({inner}))[{index}]", print_type(elem_ty)),
+            };
+            (text, 95)
         }
         HirExpr::AggregateCopy { src, size } => {
             let inner = print_expr(src);

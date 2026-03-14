@@ -13,8 +13,8 @@ mod tests;
 pub use self::types::*;
 use self::{cfg::*, normalize::*, printer::*};
 
-const UNIQUE_SPACE_ID: u64 = 1;
-const REGISTER_SPACE_ID: u64 = 2;
+const UNIQUE_SPACE_ID: u64 = 3;
+const REGISTER_SPACE_ID: u64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StackBase {
@@ -113,19 +113,26 @@ pub fn render_mlil_preview_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
-    if options.pe_x64_only && !options.is_pe_x64() {
-        return Err(MlilPreviewError::UnsupportedArchitecture);
+    if options.pe_x64_only && !options.is_supported_pe() {
+        return Err(MlilPreviewError::UnsupportedArchitectureDetailed);
     }
 
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=build_hir start fn=0x{address:x}");
     }
     let mut builder = PreviewBuilder::new(pcode, options, type_context);
-    let mut hir = builder.build_hir(name, address)?;
+    let mut hir = builder.build_hir(name, address).map_err(|err| {
+        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+            eprintln!(
+                "[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}"
+            );
+        }
+        err
+    })?;
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=normalize start fn=0x{address:x}");
     }
-    normalize_function_body(&mut hir.body);
+    normalize_hir_function(&mut hir);
     if let Some(context) = type_context {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
             eprintln!("[mlil-preview] stage=type_hints start fn=0x{address:x}");
@@ -135,7 +142,11 @@ pub fn render_mlil_preview_with_context(
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
-    Ok(print_hir_function(&hir))
+    let rendered = print_hir_function(&hir);
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        eprintln!("[mlil-preview] stage=print done fn=0x{address:x}");
+    }
+    Ok(rendered)
 }
 
 impl<'a> PreviewBuilder<'a> {
@@ -207,7 +218,7 @@ impl<'a> PreviewBuilder<'a> {
                         .collect(),
                 }),
                 LoweredTerminator::Unsupported => {
-                    return Err(MlilPreviewError::UnsupportedControlFlow);
+                    return Err(MlilPreviewError::UnsupportedCfgIndirectCallRegion);
                 }
             }
         } else {
@@ -234,6 +245,7 @@ impl<'a> PreviewBuilder<'a> {
                     name: slot.name.clone(),
                     ty: slot.ty.clone(),
                     surface_type_name: None,
+                    initializer: None,
                 })
                 .chain(self.temps.values().cloned())
                 .collect(),
@@ -386,7 +398,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             PcodeOpcode::Branch if op.inputs.len() == 1 => {
                 let Some(target) = op.inputs.first().and_then(branch_target_address) else {
-                    return Err(MlilPreviewError::UnsupportedControlFlow);
+                    return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                 };
                 Ok(LoweredTerminator::Goto(target))
             }
@@ -395,7 +407,7 @@ impl<'a> PreviewBuilder<'a> {
                     return Err(MlilPreviewError::LoweringFailed);
                 }
                 let Some(true_target) = branch_target_address(&op.inputs[0]) else {
-                    return Err(MlilPreviewError::UnsupportedControlFlow);
+                    return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                 };
                 let cond = self.lower_varnode(&op.inputs[1], &mut HashSet::new())?;
                 Ok(LoweredTerminator::Cond {
@@ -628,7 +640,7 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(first.clone());
             }
         }
-        Err(MlilPreviewError::UnsupportedControlFlow)
+        Err(MlilPreviewError::UnsupportedExprMultiequal)
     }
 
     fn lower_ptr_op(
@@ -643,11 +655,11 @@ impl<'a> PreviewBuilder<'a> {
             0
         };
         if op.opcode == PcodeOpcode::PtrAdd && op.inputs.len() > 2 && op.inputs[2].is_constant {
-            let index = op.inputs[1].constant_val as usize;
+            let index = self.lower_varnode(&op.inputs[1], visiting)?;
             let elem_ty = type_from_size(op.inputs[2].constant_val as u32, false);
             return Ok(HirExpr::Index {
                 base: Box::new(base),
-                index,
+                index: Box::new(index),
                 elem_ty,
             });
         }
@@ -700,6 +712,7 @@ impl<'a> PreviewBuilder<'a> {
                 name: name.to_string(),
                 ty: type_from_size(vn.size, false),
                 surface_type_name: None,
+                initializer: None,
             });
         }
         Some(name.to_string())
@@ -741,6 +754,8 @@ impl<'a> PreviewBuilder<'a> {
             return match ptr.offset {
                 0x20 => Some((StackBase::Rsp, 0)),
                 0x28 => Some((StackBase::Rbp, 0)),
+                0x10 if !self.options.is_64bit => Some((StackBase::Rsp, 0)),
+                0x14 if !self.options.is_64bit => Some((StackBase::Rbp, 0)),
                 _ => None,
             };
         }
@@ -814,6 +829,7 @@ impl<'a> PreviewBuilder<'a> {
             name: name.clone(),
             ty,
             surface_type_name: None,
+            initializer: None,
         };
         self.materialized_vns.insert(key, name.clone());
         self.temps.insert(name, binding.clone());
@@ -923,7 +939,10 @@ fn collect_call_hints_from_expr(
             collect_call_hints_from_expr(lhs, context, pointer_hints);
             collect_call_hints_from_expr(rhs, context, pointer_hints);
         }
-        HirExpr::Index { base, .. } => collect_call_hints_from_expr(base, context, pointer_hints),
+        HirExpr::Index { base, index, .. } => {
+            collect_call_hints_from_expr(base, context, pointer_hints);
+            collect_call_hints_from_expr(index, context, pointer_hints);
+        }
         HirExpr::Var(_) | HirExpr::Const(_, _) => {}
     }
 }
@@ -990,7 +1009,11 @@ fn peel_surface_var_name_from_expr(expr: &HirExpr) -> Option<&str> {
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => peel_surface_var_name_from_expr(expr),
         HirExpr::PtrOffset { base, offset } if *offset == 0 => peel_surface_var_name_from_expr(base),
-        HirExpr::Index { base, index, .. } if *index == 0 => peel_surface_var_name_from_expr(base),
+        HirExpr::Index { base, index, .. }
+            if matches!(index.as_ref(), HirExpr::Const(0, _)) =>
+        {
+            peel_surface_var_name_from_expr(base)
+        }
         _ => None,
     }
 }
