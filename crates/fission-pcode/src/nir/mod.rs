@@ -1,5 +1,6 @@
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::time::Instant;
 
 mod cfg;
 mod builder;
@@ -149,6 +150,7 @@ pub fn render_mlil_preview_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
+    let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
     let debug_log = |stage: &str| {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
             let _ = std::fs::OpenOptions::new()
@@ -162,6 +164,7 @@ pub fn render_mlil_preview_with_context(
         return Err(MlilPreviewError::UnsupportedArchitectureDetailed);
     }
 
+    let build_start = Instant::now();
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=build_hir start fn=0x{address:x}");
     }
@@ -176,25 +179,56 @@ pub fn render_mlil_preview_with_context(
         debug_log("build_hir_error");
         err
     })?;
+    if diag {
+        eprintln!(
+            "[DIAG] build_hir done: fn=0x{address:x} elapsed={:.3}s body_stmts={} locals={}",
+            build_start.elapsed().as_secs_f64(),
+            hir.body.len(),
+            hir.locals.len()
+        );
+    }
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=normalize start fn=0x{address:x}");
     }
     debug_log("normalize_start");
+    let normalize_start = Instant::now();
     normalize_hir_function(&mut hir);
+    if diag {
+        eprintln!(
+            "[DIAG] normalize stage done: fn=0x{address:x} elapsed={:.3}s body_stmts={} locals={}",
+            normalize_start.elapsed().as_secs_f64(),
+            hir.body.len(),
+            hir.locals.len()
+        );
+    }
     debug_log("normalize_done");
     if let Some(context) = type_context {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
             eprintln!("[mlil-preview] stage=type_hints start fn=0x{address:x}");
         }
         debug_log("type_hints_start");
+        let type_hints_start = Instant::now();
         apply_preview_type_hints(&mut hir, context);
+        if diag {
+            eprintln!(
+                "[DIAG] type_hints done: fn=0x{address:x} elapsed={:.3}s",
+                type_hints_start.elapsed().as_secs_f64()
+            );
+        }
         debug_log("type_hints_done");
     }
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=print start fn=0x{address:x}");
     }
     debug_log("print_start");
+    let print_start = Instant::now();
     let rendered = print_hir_function(&hir);
+    if diag {
+        eprintln!(
+            "[DIAG] print done: fn=0x{address:x} elapsed={:.3}s",
+            print_start.elapsed().as_secs_f64()
+        );
+    }
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         eprintln!("[mlil-preview] stage=print done fn=0x{address:x}");
     }

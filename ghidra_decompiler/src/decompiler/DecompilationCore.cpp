@@ -883,6 +883,8 @@ public:
 
 std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uint64_t addr) {
     if (!ctx) return "{}";
+    const bool diag_enabled = (std::getenv("FISSION_PREVIEW_DIAG") != nullptr);
+    const auto total_start = std::chrono::steady_clock::now();
 
     struct PreviewFlowBudgetGuard {
         ghidra::Architecture* arch;
@@ -930,8 +932,28 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
             << "[pcode-preview] addr=0x" << std::hex << addr << std::dec
             << " stage=" << stage << std::endl;
     };
+    auto diag_log = [&](const char* stage, double elapsed = -1.0) {
+        if (!diag_enabled) return;
+        if (elapsed >= 0.0) {
+            std::fprintf(
+                stderr,
+                "[NATIVE-DIAG] addr=0x%llx stage=%s elapsed_ms=%.1f\n",
+                static_cast<unsigned long long>(addr),
+                stage,
+                elapsed);
+        } else {
+            std::fprintf(
+                stderr,
+                "[NATIVE-DIAG] addr=0x%llx stage=%s\n",
+                static_cast<unsigned long long>(addr),
+                stage);
+        }
+        std::fflush(stderr);
+    };
 
     if (!ctx->arch) {
+        const auto init_start = std::chrono::steady_clock::now();
+        diag_log("init_arch_start");
         preview_log("init_arch_start");
         ArchInitOptions options;
         // Preview p-code extraction only needs function recovery and p-code emission.
@@ -940,6 +962,7 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
         options.register_data_symbols = false;
         options.load_gdt = false;
         fission::core::initialize_architecture(ctx, options);
+        diag_log("init_arch_done", elapsed_ms(init_start));
         preview_log("init_arch_done");
     }
     
@@ -960,6 +983,7 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
     }
     
     if (!fd) throw std::runtime_error("Failed to get function data");
+    diag_log("func_ready", elapsed_ms(total_start));
     preview_log("func_ready");
 
     // Preview p-code extraction does not require high-cost jump-table reconstruction.
@@ -1086,17 +1110,25 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
             << " timeout_sec=" << fission::decompiler::k_preview_follow_flow_timeout_sec
             << std::endl;
     }
+    diag_log("light_followflow_start");
     preview_log("followflow_start");
+    const auto followflow_start = std::chrono::steady_clock::now();
     try {
         fd->followFlow(start_addr, end_addr);
     } catch (...) {}
+    diag_log("light_followflow_done", elapsed_ms(followflow_start));
     preview_log("followflow_done");
 
     // Preview extraction only needs recovered p-code. Avoid full action-group execution
     // unless the lightweight followFlow path failed to populate any ops.
+    const auto light_serialize_start = std::chrono::steady_clock::now();
     std::string lightweight_json = serialize_current_pcode();
+    diag_log(
+        lightweight_json.empty() ? "light_serialize_empty" : "light_serialize_nonempty",
+        elapsed_ms(light_serialize_start));
     preview_log(lightweight_json.empty() ? "serialize_empty" : "serialize_nonempty");
     if (!lightweight_json.empty()) {
+        diag_log("total_done", elapsed_ms(total_start));
         return lightweight_json;
     }
 
@@ -1112,18 +1144,30 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
         // We use the same aggressively truncated preview limit as the
         // lightweight path above so giant dispatcher functions fail fast.
         ghidra::Address end_addr = start_addr + preview_follow_flow_limit;
+        diag_log("action_followflow_start");
         preview_log("action_followflow_start");
+        const auto action_followflow_start = std::chrono::steady_clock::now();
         fd->followFlow(start_addr, end_addr);
+        diag_log("action_followflow_done", elapsed_ms(action_followflow_start));
         preview_log("action_followflow_done");
         
+        const auto action_reset_start = std::chrono::steady_clock::now();
         current_action->reset(*fd);
+        diag_log("action_reset_done", elapsed_ms(action_reset_start));
         preview_log("action_reset_done");
+        const auto action_perform_start = std::chrono::steady_clock::now();
         current_action->perform(*fd);
+        diag_log("action_perform_done", elapsed_ms(action_perform_start));
         preview_log("action_perform_done");
         
+        const auto action_serialize_start = std::chrono::steady_clock::now();
         std::string analyzed_json = serialize_current_pcode();
+        diag_log(
+            analyzed_json.empty() ? "action_serialize_empty" : "action_serialize_nonempty",
+            elapsed_ms(action_serialize_start));
         preview_log(analyzed_json.empty() ? "action_serialize_empty" : "action_serialize_nonempty");
         if (!analyzed_json.empty()) {
+            diag_log("total_done", elapsed_ms(total_start));
             return analyzed_json;
         }
         throw std::runtime_error("Pcode extraction produced no ops");

@@ -13,6 +13,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 /// JSON-parsable field info (matches C++ output)
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -606,6 +607,11 @@ impl DecompilerNative {
     /// Get Pcode JSON for a function at the given address
     pub fn get_pcode(&self, addr: u64) -> Result<String> {
         self.check_valid()?;
+        let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
+        let start = Instant::now();
+        if diag {
+            eprintln!("[FFI-DIAG] decomp_function_pcode start: fn=0x{addr:x}");
+        }
 
         let result_ptr = unsafe { decomp_function_pcode(self.ctx, addr) };
 
@@ -619,6 +625,13 @@ impl DecompilerNative {
             decomp_free_string(result_ptr);
             string
         };
+
+        if diag {
+            eprintln!(
+                "[FFI-DIAG] decomp_function_pcode done: fn=0x{addr:x} elapsed_ms={:.1}",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
+        }
 
         Ok(result)
     }

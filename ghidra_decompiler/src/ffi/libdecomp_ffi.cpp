@@ -376,9 +376,28 @@ extern "C" DECOMP_API char* decomp_function_pcode(DecompContext* ctx, uint64_t a
     if (!ctx) return nullptr;
     
     std::lock_guard<std::mutex> lock(ctx->mutex);
+    const bool diag_enabled = (std::getenv("FISSION_PREVIEW_DIAG") != nullptr);
+    const auto start = std::chrono::steady_clock::now();
+    if (diag_enabled) {
+        std::fprintf(
+            stderr,
+            "[FFI-NATIVE-DIAG] decomp_function_pcode enter: fn=0x%llx\n",
+            static_cast<unsigned long long>(addr));
+        std::fflush(stderr);
+    }
     
     try {
         std::string result = run_decompilation_pcode(ctx, addr);
+        if (diag_enabled) {
+            std::fprintf(
+                stderr,
+                "[FFI-NATIVE-DIAG] decomp_function_pcode done: fn=0x%llx elapsed_ms=%.1f\n",
+                static_cast<unsigned long long>(addr),
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - start
+                ).count());
+            std::fflush(stderr);
+        }
         
         char* output = static_cast<char*>(malloc(result.size() + 1));
         if (output) {

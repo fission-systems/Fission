@@ -59,6 +59,49 @@ pub(super) fn inline_single_use_temps(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
+pub(super) fn eliminate_dead_temp_assigns(stmts: &mut Vec<HirStmt>) -> bool {
+    let mut changed = false;
+    let mut to_remove = vec![false; stmts.len()];
+
+    for (idx, stmt) in stmts.iter().enumerate() {
+        let (name, rhs) = match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } if is_trivial_temp_name(name) => (name, rhs),
+            _ => continue,
+        };
+
+        let uses = count_uses_in_stmt_list(stmts, name);
+        let side_effects = expr_has_side_effects(rhs);
+        if uses == 0 && !side_effects {
+            to_remove[idx] = true;
+            changed = true;
+        }
+    }
+
+    if changed {
+        retain_unmarked_stmts(stmts, &to_remove);
+    }
+    changed
+}
+
+pub(super) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
+    let mut changed = false;
+    func.locals.retain(|binding| {
+        let used = count_uses_in_stmt_list(&func.body, &binding.name) > 0;
+        let keep = !is_trivial_temp_name(&binding.name)
+            || used
+            || binding
+                .initializer
+                .as_ref()
+                .is_some_and(expr_has_side_effects);
+        changed |= !keep;
+        keep
+    });
+    changed
+}
+
 fn retain_unmarked_stmts(stmts: &mut Vec<HirStmt>, to_remove: &[bool]) {
     let mut idx = 0usize;
     stmts.retain(|_| {
@@ -173,9 +216,13 @@ fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
     }
 }
 
+fn count_uses_in_stmt_list(stmts: &[HirStmt], name: &str) -> usize {
+    stmts.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum()
+}
+
 fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
     match lhs {
-        HirLValue::Var(var) => usize::from(var == name),
+        HirLValue::Var(_) => 0,
         HirLValue::Deref { ptr, .. } => count_var_uses(ptr, name),
         HirLValue::Index { base, index, .. } => {
             count_var_uses(base, name) + count_var_uses(index, name)

@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Instant;
 
 mod conditionals;
 mod linear;
@@ -7,20 +8,61 @@ mod switch;
 
 impl<'a> PreviewBuilder<'a> {
     pub(super) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
+        let diag = structuring_diag_enabled();
+        let total_start = Instant::now();
+        if diag {
+            eprintln!(
+                "[DIAG] structuring start: blocks={} edges={} force_linear={}",
+                self.pcode.blocks.len(),
+                self.successors.iter().map(Vec::len).sum::<usize>(),
+                self.should_force_linear_structuring()
+            );
+        }
         if self.should_force_linear_structuring() {
-            return self.build_linear_multiblock_body();
+            let result = self.build_linear_multiblock_body();
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring linear done: elapsed={:.3}s success={}",
+                    total_start.elapsed().as_secs_f64(),
+                    result.is_ok()
+                );
+            }
+            return result;
         }
 
         let mut body = Vec::new();
         let targeted = self.collect_jump_targets()?;
         let mut idx = 0usize;
         while idx < self.pcode.blocks.len() {
+            if diag && idx > 0 && idx % 32 == 0 {
+                eprintln!(
+                    "[DIAG] structuring progress: idx={} elapsed={:.3}s",
+                    idx,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=switch elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
             if let Some((stmt, skip_to)) =
                 Self::ignore_unsupported(self.try_lower_switch(idx))?
             {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
+            }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=dowhile elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
             }
             if let Some((stmt, skip_to)) =
                 Self::ignore_unsupported(self.try_lower_dowhile(idx))?
@@ -29,12 +71,28 @@ impl<'a> PreviewBuilder<'a> {
                 idx = skip_to;
                 continue;
             }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=while elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
             if let Some((stmt, skip_to)) =
                 Self::ignore_unsupported(self.try_lower_while(idx))?
             {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
+            }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=short_if elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
             }
             if let Some((stmt, skip_to)) =
                 Self::ignore_unsupported(self.try_lower_short_circuit_if(idx))?
@@ -43,12 +101,28 @@ impl<'a> PreviewBuilder<'a> {
                 idx = skip_to;
                 continue;
             }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=if_else elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
             if let Some((stmt, skip_to)) =
                 Self::ignore_unsupported(self.try_lower_if_else(idx))?
             {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
+            }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=if elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
             }
             if let Some((stmt, skip_to)) =
                 Self::ignore_unsupported(self.try_lower_if(idx))?
@@ -62,7 +136,23 @@ impl<'a> PreviewBuilder<'a> {
             if idx == 0 || targeted.contains(&block.start_address) {
                 body.push(HirStmt::Label(block_label(block.start_address)));
             }
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} fallback=lower_block_stmts elapsed={:.3}s",
+                    idx,
+                    block.start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
             body.extend(self.lower_block_stmts(block)?);
+            if diag {
+                eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} fallback=lower_block_terminator elapsed={:.3}s",
+                    idx,
+                    block.start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
                 LoweredTerminator::Goto(target) => {
@@ -99,6 +189,13 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
             idx += 1;
+        }
+        if diag {
+            eprintln!(
+                "[DIAG] structuring done: elapsed={:.3}s stmts={}",
+                total_start.elapsed().as_secs_f64(),
+                body.len()
+            );
         }
         Ok(body)
     }
@@ -140,4 +237,8 @@ impl<'a> PreviewBuilder<'a> {
             Err(err) => Err(err),
         }
     }
+}
+
+fn structuring_diag_enabled() -> bool {
+    std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
 }

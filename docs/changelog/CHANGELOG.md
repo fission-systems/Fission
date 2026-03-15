@@ -4,6 +4,69 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-03-15
+
+### v36-v58 - `putty` Aggregate Copy 마감 + x86 Timeout 진단
+
+이번 구간은 두 갈래로 진행됐다. 첫째는 `putty.exe 0x140006260`에서 남아 있던 마지막 aggregate transit temp를 걷어내서 preview 출력이 legacy 수준의 `RECT local_3c; *param_2 = local_3c;`에 도달하게 만드는 것이었고, 둘째는 `7zr.exe` x86 heavy seed timeout이 Rust NIR인지 native extraction인지 경계를 정확히 가르는 것이었다.
+
+#### Added
+
+- aggregate transit temp 정리를 위한 dead temp cleanup pass
+  - unused temp assignment 제거
+  - unused temp local binding prune
+  - nested body까지 재귀 적용되는 cleanup fixed-point
+- preview/native/prepare 경계 진단 로그
+  - `PREPARE-DIAG`
+  - `PREVIEW-DIAG`
+  - `FFI-DIAG`
+  - `FFI-NATIVE-DIAG`
+  - `NATIVE-DIAG`
+- structuring 단계 세부 진단 로그
+  - region-lowering candidate 시도 지점
+  - generic fallback (`lower_block_stmts`, `lower_block_terminator`) 진입 지점
+
+#### Changed
+
+- asm-guided aggregate fallback과 stack-slot recovery를 정리해 `putty.exe 0x140006260`에서
+  - `LPRECT param_2`
+  - `RECT local_3c`
+  - `*param_2 = local_3c;`
+  를 direct preview로 복구
+- dead aggregate transit temp인 `xVar32` assignment/declaration 제거
+- x86 timeout 추적을 위해 native prepare / preview p-code extraction / Rust structuring 경계를 모두 계측 가능하게 조정
+
+#### Improved
+
+- x64 regression closure
+  - `everything.exe` fixed seed 3개 모두 `mlil_preview`
+  - `notepad++.exe` fixed seed 2개 `mlil_preview`, 1개는 legacy/preview 공통 timeout
+  - asm-guided aggregate fallback 오탐 없음
+- `putty.exe 0x140006260` preview 출력은 이제 historical target을 충족
+- x86 `7zr.exe` heavy seed 두 개의 timeout 원인을 native가 아니라 Rust `structuring`으로 좁힘
+  - `0x401804`는 `try_lower_if()` 경로
+  - `0x402778`도 `try_lower_if()` 경로
+
+#### Validation
+
+- `cargo test -p fission-pcode --lib nir::tests::type_hints -- --nocapture`
+- `cargo build --release -p fission-cli --bin fission_cli --features native_decomp`
+- regression / compare
+  - `putty.exe 0x140006260`
+  - `everything.exe` fixed seed 3개
+  - `notepad++.exe` fixed seed 3개
+  - `7zr.exe` fixed seed 5개
+- diagnostic repro
+  - `7zr.exe 0x401804`
+  - `7zr.exe 0x402778`
+
+#### Notes
+
+- x64 쪽 aggregate-copy/type-surface 목표는 사실상 마감됐다.
+- 남은 큰 이슈는 x86 heavy seed에서 `structuring/conditionals.rs::try_lower_if()`가 장기 실행되는 문제다.
+
+---
+
 ## 2026-03-14
 
 ### v26-v35 - Preview Coverage 복구와 `putty` Type-Surface 재상승

@@ -123,7 +123,7 @@ impl<'a> PreviewBuilder<'a> {
         resolved
     }
 
-    fn ensure_stack_slot_binding(
+    pub(super) fn ensure_stack_slot_binding(
         &mut self,
         base: StackBase,
         offset: i64,
@@ -158,7 +158,7 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn resolve_stack_address_from_memory_op(&self, op: &PcodeOp) -> Option<(StackBase, i64)> {
+    pub(super) fn resolve_stack_address_from_memory_op(&self, op: &PcodeOp) -> Option<(StackBase, i64)> {
         let asm = op.asm_mnemonic.as_deref()?.trim().to_ascii_uppercase();
         let start = asm.find('[')? + 1;
         let end = asm[start..].find(']')? + start;

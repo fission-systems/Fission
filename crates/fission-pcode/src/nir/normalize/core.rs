@@ -5,40 +5,69 @@ use super::arith::{
     recognize_mod_div_power_of_two, recognize_wide_integer_recombine,
 };
 use super::bitstream::apply_bitstream_idioms;
-use super::cleanup::{collapse_trivial_assign_returns, inline_single_use_temps};
+use super::cleanup::{
+    collapse_trivial_assign_returns, eliminate_dead_temp_assigns, inline_single_use_temps,
+    prune_unused_temp_bindings,
+};
 use super::slots::{apply_memory_slot_surfacing, normalize_binding_initializers};
+use std::time::Instant;
 
 pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {
-    for stmt in body.iter_mut() {
-        normalize_stmt(stmt);
-    }
-    loop {
-        let mut changed = false;
-        changed |= collapse_trivial_assign_returns(body);
-        changed |= inline_single_use_temps(body);
-        if !changed {
-            break;
-        }
-        for stmt in body.iter_mut() {
-            normalize_stmt(stmt);
-        }
-    }
+    cleanup_stmt_list(body, "<body>", 0);
 }
 
 pub(super) fn normalize_hir_function(func: &mut HirFunction) {
+    let diag = normalize_diag_enabled();
+    let total_start = Instant::now();
+    if diag {
+        eprintln!(
+            "[DIAG] normalize start: {} stmts={} locals={}",
+            func.name,
+            count_hir_stmts(&func.body),
+            func.locals.len()
+        );
+    }
     normalize_binding_initializers(&mut func.locals);
-    normalize_function_body(&mut func.body);
+    cleanup_stmt_list(&mut func.body, &func.name, 0);
+    prune_unused_temp_bindings(func);
     let allow_expensive_passes = !is_large_hir_function(func);
     let mut changed = false;
     if allow_expensive_passes {
+        let pass_start = Instant::now();
         changed |= apply_memory_slot_surfacing(func);
+        if diag {
+            eprintln!(
+                "[DIAG] normalize slots: {} changed={} elapsed={:.3}s",
+                func.name,
+                changed,
+                pass_start.elapsed().as_secs_f64()
+            );
+        }
         normalize_binding_initializers(&mut func.locals);
-        normalize_function_body(&mut func.body);
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        prune_unused_temp_bindings(func);
+        let bitstream_start = Instant::now();
         changed |= apply_bitstream_idioms(func);
+        if diag {
+            eprintln!(
+                "[DIAG] normalize bitstream: {} changed={} elapsed={:.3}s",
+                func.name,
+                changed,
+                bitstream_start.elapsed().as_secs_f64()
+            );
+        }
         if changed {
             normalize_binding_initializers(&mut func.locals);
-            normalize_function_body(&mut func.body);
+            cleanup_stmt_list(&mut func.body, &func.name, 0);
+            prune_unused_temp_bindings(func);
         }
+    }
+    if diag {
+        eprintln!(
+            "[DIAG] normalize done: {} total_elapsed={:.3}s",
+            func.name,
+            total_start.elapsed().as_secs_f64()
+        );
     }
 }
 
@@ -139,6 +168,84 @@ fn normalize_condition_expr(expr: &mut HirExpr) {
     *expr = current;
 }
 
+fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
+    for stmt in stmts.iter_mut() {
+        normalize_stmt(stmt);
+        match stmt {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. } => cleanup_stmt_list(body, func_name, depth + 1),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                cleanup_stmt_list(then_body, func_name, depth + 1);
+                cleanup_stmt_list(else_body, func_name, depth + 1);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    cleanup_stmt_list(&mut case.body, func_name, depth + 1);
+                }
+                cleanup_stmt_list(default, func_name, depth + 1);
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+
+    let diag = normalize_diag_enabled();
+    let loop_start = Instant::now();
+    let mut iterations = 0usize;
+    loop {
+        iterations += 1;
+        let mut changed = false;
+        let mut last_changed_pass = None;
+        if collapse_trivial_assign_returns(stmts) {
+            changed = true;
+            last_changed_pass = Some("collapse_trivial_assign_returns");
+        }
+        if inline_single_use_temps(stmts) {
+            changed = true;
+            last_changed_pass = Some("inline_single_use_temps");
+        }
+        if eliminate_dead_temp_assigns(stmts) {
+            changed = true;
+            last_changed_pass = Some("eliminate_dead_temp_assigns");
+        }
+        if !changed {
+            break;
+        }
+        if diag && iterations % 50 == 0 {
+            eprintln!(
+                "[DIAG] normalize loop: {} depth={} iterations={} elapsed={:.3}s last_changed_pass={}",
+                func_name,
+                depth,
+                iterations,
+                loop_start.elapsed().as_secs_f64(),
+                last_changed_pass.unwrap_or("<none>")
+            );
+        }
+        for stmt in stmts.iter_mut() {
+            normalize_stmt(stmt);
+        }
+    }
+    if diag && (iterations > 1 || loop_start.elapsed().as_millis() > 100) {
+        eprintln!(
+            "[DIAG] normalize loop done: {} depth={} iterations={} elapsed={:.3}s",
+            func_name,
+            depth,
+            iterations,
+            loop_start.elapsed().as_secs_f64()
+        );
+    }
+}
+
 pub(super) fn normalize_expr(expr: &mut HirExpr) {
     match expr {
         HirExpr::Cast { expr: inner, .. } => normalize_expr(inner),
@@ -176,4 +283,8 @@ pub(super) fn normalize_expr(expr: &mut HirExpr) {
         }
     }
     *expr = current;
+}
+
+fn normalize_diag_enabled() -> bool {
+    std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
 }

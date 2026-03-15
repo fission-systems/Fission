@@ -246,6 +246,53 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
 }
 
 #[test]
+fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
+    let mut func = HirFunction {
+        name: "FUN_0x140006260".to_string(),
+        params: vec![NirBinding {
+            name: "param_2".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+            surface_type_name: Some("LPRECT".to_string()),
+            initializer: None,
+        }],
+        locals: vec![NirBinding {
+            name: "local_3c".to_string(),
+            ty: NirType::Aggregate { size: 16 },
+            surface_type_name: Some("RECT".to_string()),
+            initializer: None,
+        }],
+        return_type: NirType::Unknown,
+        body: vec![HirStmt::If {
+            cond: HirExpr::Const(1, NirType::Bool),
+            then_body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("xVar32".to_string()),
+                    rhs: HirExpr::Var("local_3c".to_string()),
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("param_2".to_string())),
+                        ty: NirType::Aggregate { size: 16 },
+                    },
+                    rhs: HirExpr::Var("local_3c".to_string()),
+                },
+            ],
+            else_body: vec![],
+        }],
+    };
+
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    assert!(
+        !rendered.contains("xVar32 = local_3c;"),
+        "rendered:\n{}",
+        rendered
+    );
+    assert!(!rendered.contains("xVar32;"), "rendered:\n{}", rendered);
+    assert!(rendered.contains("*param_2 = local_3c;"), "rendered:\n{}", rendered);
+}
+
+#[test]
 fn preview_type_hints_resolve_indirect_import_call_through_entry_param_alias() {
     let func = PcodeFunction {
         blocks: vec![PcodeBasicBlock {
@@ -598,6 +645,258 @@ fn preview_type_hints_fold_subpiece_lane_aggregate_store_back_to_local() {
                 },
                 PcodeOp {
                     seq_num: 13,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140006267,
+                    output: None,
+                    inputs: vec![cst(1, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .call_targets
+        .insert(0x14012c378, "GetClientRect".to_string());
+    context.call_param_rules.push(PreviewCallParamRule {
+        callee_name: "GetClientRect".to_string(),
+        arg_index: 1,
+        pointer_alias: "LPRECT".to_string(),
+        pointee_alias: "RECT".to_string(),
+        pointer_size: 8,
+        pointee_sizes: vec![16],
+    });
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "FUN_0x140006260",
+        0x140006260,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+
+    assert!(rendered.contains("LPRECT param_2"), "rendered:\n{}", rendered);
+    assert!(rendered.contains("RECT local_34;"), "rendered:\n{}", rendered);
+    assert!(rendered.contains("*param_2 = local_34;"), "rendered:\n{}", rendered);
+}
+
+#[test]
+fn preview_type_hints_fold_full_register_aggregate_store_back_to_local() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140006260,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006260,
+                    output: Some(uniq(0x200, 8)),
+                    inputs: vec![reg(0x30, 8)],
+                    asm_mnemonic: Some("PUSH RSI".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x140006261,
+                    output: Some(reg(0x20, 8)),
+                    inputs: vec![reg(0x20, 8), cst(0x58, 8)],
+                    asm_mnemonic: Some("SUB RSP,0x58".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006262,
+                    output: Some(reg(0x30, 8)),
+                    inputs: vec![reg(0x10, 8)],
+                    asm_mnemonic: Some("MOV RSI,RDX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x140006263,
+                    output: None,
+                    inputs: vec![cst(0x14012c378, 8), reg(0x08, 8), reg(0x10, 8)],
+                    asm_mnemonic: Some("CALL qword ptr [0x14012c378]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1400062af,
+                    output: Some(uniq(0x4e80, 8)),
+                    inputs: vec![cst(0x2c, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOVUPS XMM0, xmmword ptr [RSP + 0x2c]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x1400062af,
+                    output: Some(uniq(0x6c80, 16)),
+                    inputs: vec![cst(0xb3f820180, 8), uniq(0x4e80, 8)],
+                    asm_mnemonic: Some("MOVUPS XMM0, xmmword ptr [RSP + 0x2c]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400062af,
+                    output: Some(reg(0x1200, 16)),
+                    inputs: vec![uniq(0x6c80, 16)],
+                    asm_mnemonic: Some("MOVUPS XMM0, xmmword ptr [RSP + 0x2c]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400062b4,
+                    output: Some(uniq(0x8fd00, 16)),
+                    inputs: vec![reg(0x1200, 16)],
+                    asm_mnemonic: Some("MOVUPS xmmword ptr [RSI], XMM0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 8,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x1400062b4,
+                    output: None,
+                    inputs: vec![cst(0xb3f820180, 8), reg(0x30, 8), uniq(0x8fd00, 16)],
+                    asm_mnemonic: Some("MOVUPS xmmword ptr [RSI], XMM0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 9,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x140006267,
+                    output: None,
+                    inputs: vec![cst(1, 8)],
+                    asm_mnemonic: Some("RET".to_string()),
+                },
+            ],
+        }],
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context
+        .call_targets
+        .insert(0x14012c378, "GetClientRect".to_string());
+    context.call_param_rules.push(PreviewCallParamRule {
+        callee_name: "GetClientRect".to_string(),
+        arg_index: 1,
+        pointer_alias: "LPRECT".to_string(),
+        pointee_alias: "RECT".to_string(),
+        pointer_size: 8,
+        pointee_sizes: vec![16],
+    });
+
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "FUN_0x140006260",
+        0x140006260,
+        &preview_options(),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+
+    assert!(rendered.contains("LPRECT param_2"), "rendered:\n{}", rendered);
+    assert!(rendered.contains("RECT local_34;"), "rendered:\n{}", rendered);
+    assert!(rendered.contains("*param_2 = local_34;"), "rendered:\n{}", rendered);
+}
+
+#[test]
+fn preview_type_hints_fold_qword_lane_aggregate_store_back_to_local() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x140006260,
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006260,
+                    output: Some(uniq(0x200, 8)),
+                    inputs: vec![reg(0x30, 8)],
+                    asm_mnemonic: Some("PUSH RSI".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x140006261,
+                    output: Some(reg(0x20, 8)),
+                    inputs: vec![reg(0x20, 8), cst(0x58, 8)],
+                    asm_mnemonic: Some("SUB RSP,0x58".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x140006262,
+                    output: Some(reg(0x30, 8)),
+                    inputs: vec![reg(0x10, 8)],
+                    asm_mnemonic: Some("MOV RSI,RDX".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 3,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x140006263,
+                    output: None,
+                    inputs: vec![cst(0x14012c378, 8), reg(0x08, 8), reg(0x10, 8)],
+                    asm_mnemonic: Some("CALL qword ptr [0x14012c378]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::IntAdd,
+                    address: 0x1400062af,
+                    output: Some(uniq(0x4e80, 8)),
+                    inputs: vec![cst(0x2c, 8), reg(0x20, 8)],
+                    asm_mnemonic: Some("MOVUPS XMM0, xmmword ptr [RSP + 0x2c]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 5,
+                    opcode: PcodeOpcode::Load,
+                    address: 0x1400062af,
+                    output: Some(uniq(0x6c80, 16)),
+                    inputs: vec![cst(0xb3f820180, 8), uniq(0x4e80, 8)],
+                    asm_mnemonic: Some("MOVUPS XMM0, xmmword ptr [RSP + 0x2c]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400062af,
+                    output: Some(uniq(0x8fd00, 16)),
+                    inputs: vec![uniq(0x6c80, 16)],
+                    asm_mnemonic: Some("MOVUPS XMM0, xmmword ptr [RSP + 0x2c]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 7,
+                    opcode: PcodeOpcode::SubPiece,
+                    address: 0x1400062af,
+                    output: Some(reg(0x1200, 8)),
+                    inputs: vec![uniq(0x8fd00, 16), cst(0, 4)],
+                    asm_mnemonic: Some("MOVUPS XMM0, xmmword ptr [RSP + 0x2c]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 8,
+                    opcode: PcodeOpcode::SubPiece,
+                    address: 0x1400062af,
+                    output: Some(reg(0x1208, 8)),
+                    inputs: vec![uniq(0x8fd00, 16), cst(8, 4)],
+                    asm_mnemonic: Some("MOVUPS XMM0, xmmword ptr [RSP + 0x2c]".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 9,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1400062b4,
+                    output: Some(uniq(0x6c80, 16)),
+                    inputs: vec![reg(0x1200, 16)],
+                    asm_mnemonic: Some("MOVUPS xmmword ptr [RSI], XMM0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 10,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x1400062b4,
+                    output: None,
+                    inputs: vec![cst(0xb3f820180, 8), reg(0x30, 8), uniq(0x6c80, 16)],
+                    asm_mnemonic: Some("MOVUPS xmmword ptr [RSI], XMM0".to_string()),
+                },
+                PcodeOp {
+                    seq_num: 11,
                     opcode: PcodeOpcode::Return,
                     address: 0x140006267,
                     output: None,

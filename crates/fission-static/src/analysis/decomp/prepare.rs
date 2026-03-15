@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 #[cfg(feature = "native_decomp")]
 use std::collections::HashSet;
 #[cfg(feature = "native_decomp")]
+use std::env;
+#[cfg(feature = "native_decomp")]
 use std::sync::Arc;
 #[cfg(feature = "native_decomp")]
 use std::time::Instant;
@@ -53,6 +55,23 @@ pub fn serialize_win_api_signatures_json() -> Option<Arc<str>> {
     serde_json::to_string(&WIN_API_DB.iter().collect::<Vec<_>>())
         .ok()
         .map(Arc::from)
+}
+
+#[cfg(feature = "native_decomp")]
+fn preview_diag_enabled() -> bool {
+    env::var_os("FISSION_PREVIEW_DIAG").is_some()
+}
+
+#[cfg(feature = "native_decomp")]
+fn preview_diag_prepare(binary: &LoadedBinary, stage: &str, start: Instant) {
+    if preview_diag_enabled() {
+        eprintln!(
+            "[PREPARE-DIAG] image_base=0x{:x} stage={} elapsed_ms={:.1}",
+            binary.image_base,
+            stage,
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
 }
 
 #[cfg(feature = "native_decomp")]
@@ -284,6 +303,8 @@ pub fn prepare_native_decompiler_for_binary<'a>(
     binary_data: &[u8],
     options: &mut PrepareOptions<'a>,
 ) -> Result<()> {
+    let total_start = Instant::now();
+
     // Inject Win API signatures for type back-propagation (before load_binary is fine)
     let json_owned: Option<String> = options
         .signatures_json
@@ -305,6 +326,7 @@ pub fn prepare_native_decompiler_for_binary<'a>(
 
     // Load binary image
     let t0 = Instant::now();
+    preview_diag_prepare(binary, "load_binary_start", total_start);
     decomp.load_binary(
         binary_data,
         binary.image_base,
@@ -312,47 +334,59 @@ pub fn prepare_native_decompiler_for_binary<'a>(
         Some(&binary.arch_spec),
         options.compiler_id,
     )?;
+    preview_diag_prepare(binary, "load_binary_done", total_start);
     if let Some(t) = options.timings.as_deref_mut() {
         t.load_binary_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
 
     // Register symbols
     let t0 = Instant::now();
+    preview_diag_prepare(binary, "symbols_start", total_start);
     decomp.add_symbols(&binary.iat_symbols);
     decomp.add_global_symbols(&binary.global_symbols);
+    preview_diag_prepare(binary, "symbols_done", total_start);
     if let Some(t) = options.timings.as_deref_mut() {
         t.symbols_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
 
     // Install symbol provider for on-demand lookups
     let t0 = Instant::now();
+    preview_diag_prepare(binary, "symbol_provider_start", total_start);
     decomp.set_symbol_provider(&binary.functions, &binary.global_symbols, &binary.sections);
+    preview_diag_prepare(binary, "symbol_provider_done", total_start);
     if let Some(t) = options.timings.as_deref_mut() {
         t.symbol_provider_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
 
     // Register memory sections and known functions
     let t0 = Instant::now();
+    preview_diag_prepare(binary, "sections_start", total_start);
     register_memory_sections(decomp, binary, options.verbose);
+    preview_diag_prepare(binary, "sections_done", total_start);
     if let Some(t) = options.timings.as_deref_mut() {
         t.sections_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
 
     let t0 = Instant::now();
+    preview_diag_prepare(binary, "known_functions_start", total_start);
     register_known_functions(decomp, binary, options.verbose);
+    preview_diag_prepare(binary, "known_functions_done", total_start);
     if let Some(t) = options.timings.as_deref_mut() {
         t.known_functions_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
 
     // Load FID databases (best-effort)
     let t0 = Instant::now();
+    preview_diag_prepare(binary, "fid_start", total_start);
     load_fid_databases(decomp, binary, options.compiler_id, options.verbose)?;
+    preview_diag_prepare(binary, "fid_done", total_start);
     if let Some(t) = options.timings.as_deref_mut() {
         t.fid_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
 
     // GDT (type info): best-effort when path is provided
     let t0 = Instant::now();
+    preview_diag_prepare(binary, "gdt_start", total_start);
     if let Some(path) = options.gdt_path {
         if !path.is_empty() {
             if let Err(e) = decomp.set_gdt(path) {
@@ -362,11 +396,15 @@ pub fn prepare_native_decompiler_for_binary<'a>(
             }
         }
     }
+    preview_diag_prepare(binary, "gdt_done", total_start);
     if let Some(t) = options.timings.as_deref_mut() {
         t.gdt_ms = t0.elapsed().as_secs_f64() * 1000.0;
     }
 
+    preview_diag_prepare(binary, "register_inferred_types_start", total_start);
     register_inferred_types_and_params(decomp, binary, options.verbose);
+    preview_diag_prepare(binary, "register_inferred_types_done", total_start);
+    preview_diag_prepare(binary, "prepare_done", total_start);
 
     Ok(())
 }

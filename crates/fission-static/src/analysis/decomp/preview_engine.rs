@@ -7,6 +7,7 @@ use fission_signatures::WIN_API_DB;
 use fission_signatures::win_types::WindowsStructures;
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewEngineMode {
@@ -353,6 +354,7 @@ pub fn select_preview_output<S: PreviewSource>(
     name: &str,
     mode: PreviewEngineMode,
 ) -> Result<PreviewSelection, String> {
+    let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
     match mode {
         PreviewEngineMode::Legacy => Ok(PreviewSelection {
             preview_code: None,
@@ -361,9 +363,19 @@ pub fn select_preview_output<S: PreviewSource>(
             fallback_reason: None,
         }),
         PreviewEngineMode::MlilPreview => {
+            let pcode_start = Instant::now();
+            if diag {
+                eprintln!("[PREVIEW-DIAG] get_pcode start: fn=0x{address:x} mode=mlil_preview");
+            }
             let pcode_json = source
                 .get_pcode_json(address)
                 .map_err(|e| e.to_string())?;
+            if diag {
+                eprintln!(
+                    "[PREVIEW-DIAG] get_pcode done: fn=0x{address:x} mode=mlil_preview elapsed_ms={:.1}",
+                    pcode_start.elapsed().as_secs_f64() * 1000.0
+                );
+            }
             match render_preview_from_json(&pcode_json, binary, address, name, false) {
                 Ok(Some(code)) => Ok(PreviewSelection {
                     preview_code: Some(code),
@@ -388,9 +400,19 @@ pub fn select_preview_output<S: PreviewSource>(
             }
         }
         PreviewEngineMode::Auto => {
+            let pcode_start = Instant::now();
+            if diag {
+                eprintln!("[PREVIEW-DIAG] get_pcode start: fn=0x{address:x} mode=auto");
+            }
             let pcode_json = source
                 .get_pcode_json(address)
                 .map_err(|e| e.to_string())?;
+            if diag {
+                eprintln!(
+                    "[PREVIEW-DIAG] get_pcode done: fn=0x{address:x} mode=auto elapsed_ms={:.1}",
+                    pcode_start.elapsed().as_secs_f64() * 1000.0
+                );
+            }
             match render_preview_from_json(&pcode_json, binary, address, name, true) {
                 Ok(Some(code)) => Ok(PreviewSelection {
                     preview_code: Some(code),
@@ -426,9 +448,20 @@ pub fn rescue_preview_output<S: PreviewSource>(
         return Ok(None);
     }
 
+    let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
+    let pcode_start = Instant::now();
+    if diag {
+        eprintln!("[PREVIEW-DIAG] get_pcode start: fn=0x{address:x} mode=rescue");
+    }
     let pcode_json = source
         .get_pcode_json(address)
         .map_err(|e| e.to_string())?;
+    if diag {
+        eprintln!(
+            "[PREVIEW-DIAG] get_pcode done: fn=0x{address:x} mode=rescue elapsed_ms={:.1}",
+            pcode_start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
     match render_preview_from_json(&pcode_json, binary, address, name, false) {
         Ok(Some(code)) => Ok(Some(PreviewSelection {
             preview_code: Some(code),
