@@ -65,7 +65,10 @@ pub struct HirFunction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirStmt {
-    Assign { lhs: HirLValue, rhs: HirExpr },
+    Assign {
+        lhs: HirLValue,
+        rhs: HirExpr,
+    },
     Expr(HirExpr),
     Block(Vec<HirStmt>),
     Switch {
@@ -102,7 +105,10 @@ pub struct HirSwitchCase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirLValue {
     Var(String),
-    Deref { ptr: Box<HirExpr>, ty: NirType },
+    Deref {
+        ptr: Box<HirExpr>,
+        ty: NirType,
+    },
     Index {
         base: Box<HirExpr>,
         index: Box<HirExpr>,
@@ -230,10 +236,6 @@ impl MlilPreviewOptions {
             image_base: binary.inner().image_base,
             sections,
         }
-    }
-
-    pub(super) fn is_pe_x64(&self) -> bool {
-        self.is_64bit && self.format.to_ascii_uppercase().starts_with("PE")
     }
 
     pub(super) fn is_supported_pe(&self) -> bool {

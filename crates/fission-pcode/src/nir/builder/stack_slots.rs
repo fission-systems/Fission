@@ -5,6 +5,9 @@ impl<'a> PreviewBuilder<'a> {
         if vn.space_id != REGISTER_SPACE_ID {
             return None;
         }
+        if !self.options.is_64bit {
+            return None;
+        }
         let (name, index) = register_name_with_param(vn.offset, vn.size)?;
         if let Some(index) = index {
             self.params.entry(index).or_insert_with(|| NirBinding {
@@ -17,12 +20,14 @@ impl<'a> PreviewBuilder<'a> {
         }
         if let Some(param_index) = self.register_param_aliases.get(&vn.offset).copied() {
             let alias_name = format!("param_{}", param_index + 1);
-            self.params.entry(param_index).or_insert_with(|| NirBinding {
-                name: alias_name.clone(),
-                ty: type_from_size(vn.size, false),
-                surface_type_name: None,
-                initializer: None,
-            });
+            self.params
+                .entry(param_index)
+                .or_insert_with(|| NirBinding {
+                    name: alias_name.clone(),
+                    ty: type_from_size(vn.size, false),
+                    surface_type_name: None,
+                    initializer: None,
+                });
             return Some(alias_name);
         }
         Some(name.to_string())
@@ -158,7 +163,10 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn resolve_stack_address_from_memory_op(&self, op: &PcodeOp) -> Option<(StackBase, i64)> {
+    pub(super) fn resolve_stack_address_from_memory_op(
+        &self,
+        op: &PcodeOp,
+    ) -> Option<(StackBase, i64)> {
         let asm = op.asm_mnemonic.as_deref()?.trim().to_ascii_uppercase();
         let start = asm.find('[')? + 1;
         let end = asm[start..].find(']')? + start;

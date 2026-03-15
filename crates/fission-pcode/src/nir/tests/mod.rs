@@ -1,12 +1,19 @@
 use super::*;
 use crate::pcode::{PcodeBasicBlock, PcodeOp};
 
-mod normalize_arith;
-mod normalize_slots;
-mod normalize_bitstream;
-mod structuring;
 mod bootstrap_x86;
-mod type_hints;
+mod normalize_arith;
+mod normalize_bitstream;
+mod normalize_slots;
+mod structuring_conditionals;
+mod structuring_linear;
+mod structuring_loops;
+mod structuring_misc;
+mod structuring_switch;
+mod type_hints_aggregates;
+mod type_hints_aliases;
+mod type_hints_imports;
+mod type_hints_stack_slots;
 
 fn reg(offset: u64, size: u32) -> Varnode {
     Varnode {

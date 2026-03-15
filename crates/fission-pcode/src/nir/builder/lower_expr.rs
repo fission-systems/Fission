@@ -7,7 +7,9 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<(LoweringSite, &'a PcodeOp)> {
         if let Some(site) = self.current_lowering_site {
             let block = &self.pcode.blocks[site.block_idx];
-            if let Some((def_idx, op)) = find_prior_def_in_block(block, site.op_idx, vn) {
+            if let Some((def_idx, op)) =
+                aggregate_recovery::find_prior_def_in_block(block, site.op_idx, vn)
+            {
                 return Some((
                     LoweringSite {
                         block_idx: site.block_idx,
@@ -39,13 +41,23 @@ impl<'a> PreviewBuilder<'a> {
         let target = if let Some(target) = self.resolve_call_target_from_asm(op) {
             target
         } else if let Some(target) = op.inputs.first() {
-            match self.lower_varnode(target, visiting)? {
-                HirExpr::Const(val, _) => self
+            match self.lower_varnode(target, visiting) {
+                Ok(HirExpr::Const(val, _)) => self
                     .type_context
                     .and_then(|ctx| ctx.call_targets.get(&(val as u64)).cloned())
                     .unwrap_or_else(|| format!("sub_{:x}", val as u64)),
-                HirExpr::Var(name) => name,
-                other => print_expr(&other),
+                Ok(HirExpr::Var(name)) => name,
+                Ok(other) => print_expr(&other),
+                Err(MlilPreviewError::UnsupportedPattern("opcode"))
+                    if matches!(op.opcode, PcodeOpcode::CallInd) =>
+                {
+                    if let Some(target) = self.recover_opaque_callind_target(target) {
+                        target
+                    } else {
+                        return Err(MlilPreviewError::UnsupportedPattern("opcode"));
+                    }
+                }
+                Err(err) => return Err(err),
             }
         } else {
             "callee".to_string()
@@ -105,6 +117,32 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    fn recover_opaque_callind_target(&self, target: &Varnode) -> Option<String> {
+        let (_, producer) = self.lookup_def_site(target)?;
+        let mnemonic = producer.asm_mnemonic.as_deref()?.trim();
+        if !mnemonic.eq_ignore_ascii_case("INT3") {
+            self.debug_callind_target_recovery("callind_target_recovery_rejected_unknown_producer");
+            return None;
+        }
+
+        let swi_num = producer
+            .inputs
+            .iter()
+            .rev()
+            .find(|input| input.is_constant)
+            .map(|input| input.constant_val)
+            .unwrap_or(3);
+        let target = format!("((code *)swi({swi_num}))");
+        self.debug_callind_target_recovery("callind_target_recovered_trap_stub");
+        Some(target)
+    }
+
+    fn debug_callind_target_recovery(&self, label: &str) {
+        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+            eprintln!("[mlil-preview] stage={label}");
+        }
+    }
+
     pub(in crate::nir) fn lower_varnode(
         &mut self,
         vn: &Varnode,
@@ -121,13 +159,20 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(HirExpr::Var(param));
         }
 
+        if !self.options.is_64bit
+            && vn.space_id == REGISTER_SPACE_ID
+            && let Some(name) = x86_register_name(vn.offset, vn.size)
+        {
+            return Ok(HirExpr::Var(name.to_string()));
+        }
+
         if vn.space_id == REGISTER_SPACE_ID
             && vn.size >= 16
             && let Some(site) = self.current_lowering_site
         {
             let block = &self.pcode.blocks[site.block_idx];
             if let Some((source, earliest_idx)) =
-                recover_wide_register_source_from_block(block, site.op_idx, vn)
+                aggregate_recovery::recover_wide_register_source_from_block(block, site.op_idx, vn)
             {
                 return self.with_lowering_site(
                     LoweringSite {
@@ -182,8 +227,12 @@ impl<'a> PreviewBuilder<'a> {
         match op.opcode {
             PcodeOpcode::Load => MlilPreviewError::UnsupportedExprMemoryBackedVarnode,
             PcodeOpcode::Indirect => MlilPreviewError::UnsupportedExprIndirectValueSource,
-            PcodeOpcode::Piece | PcodeOpcode::SubPiece => MlilPreviewError::UnsupportedExprPieceShape,
-            PcodeOpcode::PtrAdd | PcodeOpcode::PtrSub => MlilPreviewError::UnsupportedExprPtrArithmetic,
+            PcodeOpcode::Piece | PcodeOpcode::SubPiece => {
+                MlilPreviewError::UnsupportedExprPieceShape
+            }
+            PcodeOpcode::PtrAdd | PcodeOpcode::PtrSub => {
+                MlilPreviewError::UnsupportedExprPtrArithmetic
+            }
             PcodeOpcode::Copy
             | PcodeOpcode::Cast
             | PcodeOpcode::IntZExt
@@ -224,8 +273,7 @@ impl<'a> PreviewBuilder<'a> {
                     op,
                     &op.inputs[1],
                     type_from_size(out.size, false),
-                )
-                {
+                ) {
                     Ok(HirExpr::Var(slot_name))
                 } else {
                     Ok(HirExpr::Load {

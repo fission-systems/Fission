@@ -163,5 +163,4 @@ impl<'a> PreviewBuilder<'a> {
         visiting.remove(&key);
         result
     }
-
 }

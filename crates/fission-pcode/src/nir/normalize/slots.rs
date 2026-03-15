@@ -1,7 +1,7 @@
-use super::*;
-use std::collections::{HashMap, HashSet};
 use super::cleanup::expr_has_side_effects;
 use super::core::normalize_expr;
+use super::*;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct MemorySlotKey {
@@ -58,6 +58,14 @@ pub(super) fn normalize_binding_initializers(bindings: &mut [NirBinding]) {
 }
 
 pub(super) fn apply_memory_slot_surfacing(func: &mut HirFunction) -> bool {
+    apply_memory_slot_surfacing_with_mode(func, false)
+}
+
+pub(super) fn apply_memory_slot_surfacing_cheap(func: &mut HirFunction) -> bool {
+    apply_memory_slot_surfacing_with_mode(func, true)
+}
+
+fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: bool) -> bool {
     let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::new();
     collect_memory_slot_candidates_from_stmts(&func.body, &mut candidates);
     let mut family_counts = HashMap::<MemorySlotFamilyKey, usize>::new();
@@ -84,16 +92,15 @@ pub(super) fn apply_memory_slot_surfacing(func: &mut HirFunction) -> bool {
         .collect::<HashSet<_>>();
 
     for candidate in candidates.values().filter(|candidate| {
+        if cheap_only && !is_cheap_slot_candidate(candidate) {
+            return false;
+        }
         let family_key = memory_slot_family_key(&candidate.key);
         let family_total = family_counts.get(&family_key).copied().unwrap_or(0);
-        let family_lane_count = family_lanes
-            .get(&family_key)
-            .map(HashSet::len)
-            .unwrap_or(0);
+        let family_lane_count = family_lanes.get(&family_key).map(HashSet::len).unwrap_or(0);
         let exact_indexable = candidate.key.stride.is_none()
             || candidate.key.stride == Some(i64::from(candidate.key.access_size));
-        (exact_indexable && candidate.count >= 2)
-            || (family_total >= 2 && family_lane_count >= 2)
+        (exact_indexable && candidate.count >= 2) || (family_total >= 2 && family_lane_count >= 2)
     }) {
         let family_base = family_base_offsets
             .get(&memory_slot_family_key(&candidate.key))
@@ -121,6 +128,28 @@ pub(super) fn apply_memory_slot_surfacing(func: &mut HirFunction) -> bool {
     }
 
     rewrite_memory_slot_stmts(&mut func.body, &aliases)
+}
+
+fn is_cheap_slot_candidate(candidate: &MemorySlotCandidate) -> bool {
+    is_cheap_slot_base(&candidate.base)
+        && candidate
+            .key
+            .stride
+            .is_none_or(|stride| stride == i64::from(candidate.key.access_size))
+}
+
+fn is_cheap_slot_base(expr: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Var(name) => {
+            matches!(
+                name.as_str(),
+                "esp" | "ebp" | "rsp" | "rbp" | "eax" | "ecx" | "edx" | "ebx" | "esi" | "edi"
+            ) || name.starts_with("param_")
+                || name.starts_with("local_")
+        }
+        HirExpr::Cast { expr, .. } => is_cheap_slot_base(expr),
+        _ => false,
+    }
 }
 
 fn memory_slot_family_key(key: &MemorySlotKey) -> MemorySlotFamilyKey {
@@ -173,7 +202,11 @@ fn collect_memory_slot_candidates_from_stmts(
                 collect_memory_slot_candidates_from_stmts(then_body, candidates);
                 collect_memory_slot_candidates_from_stmts(else_body, candidates);
             }
-            HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::Return(None) | HirStmt::Break | HirStmt::Continue => {}
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
         }
     }
 }
@@ -187,7 +220,9 @@ fn collect_memory_slot_candidates_from_expr(
             collect_memory_slot_candidate_from_ptr(ptr, ty, candidates);
             collect_memory_slot_candidates_from_expr(ptr, candidates);
         }
-        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } | HirExpr::AggregateCopy { src: expr, .. } => {
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
             collect_memory_slot_candidates_from_expr(expr, candidates);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -199,7 +234,9 @@ fn collect_memory_slot_candidates_from_expr(
                 collect_memory_slot_candidates_from_expr(arg, candidates);
             }
         }
-        HirExpr::PtrOffset { base, .. } => collect_memory_slot_candidates_from_expr(base, candidates),
+        HirExpr::PtrOffset { base, .. } => {
+            collect_memory_slot_candidates_from_expr(base, candidates)
+        }
         HirExpr::Index { base, index, .. } => {
             collect_memory_slot_candidates_from_expr(base, candidates);
             collect_memory_slot_candidates_from_expr(index, candidates);
@@ -267,7 +304,11 @@ fn rewrite_memory_slot_stmts(
                 changed |= rewrite_memory_slot_stmts(then_body, aliases);
                 changed |= rewrite_memory_slot_stmts(else_body, aliases);
             }
-            HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::Return(None) | HirStmt::Break | HirStmt::Continue => {}
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
         }
     }
     changed
@@ -322,7 +363,9 @@ fn rewrite_memory_slot_expr(
                 return true;
             }
         }
-        HirExpr::Cast { expr, .. } | HirExpr::Unary { expr, .. } | HirExpr::AggregateCopy { src: expr, .. } => {
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => {
             changed |= rewrite_memory_slot_expr(expr, aliases);
         }
         HirExpr::Binary { lhs, rhs, .. } => {
@@ -512,7 +555,9 @@ fn add_scaled_index(parts: &mut AddressParts, expr: HirExpr, stride: i64) -> Opt
         return None;
     }
     match &parts.scaled_index {
-        Some((existing, existing_stride)) if existing != &expr || *existing_stride != stride => None,
+        Some((existing, existing_stride)) if existing != &expr || *existing_stride != stride => {
+            None
+        }
         Some(_) => Some(()),
         None => {
             parts.scaled_index = Some((expr, stride));

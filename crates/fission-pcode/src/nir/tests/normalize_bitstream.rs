@@ -311,5 +311,8 @@ fn normalize_hir_function_rewrites_slot_based_write_bits_to_intrinsic() {
 
     normalize_hir_function(&mut func);
     let rendered = print_hir_function(&func);
-    assert!(rendered.contains("WRITE_BITS(param_1, value, width);"), "{rendered}");
+    assert!(
+        rendered.contains("WRITE_BITS(param_1, value, width);"),
+        "{rendered}"
+    );
 }

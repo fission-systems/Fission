@@ -28,8 +28,8 @@ fn preview_prints_direct_srem_as_mod() {
         }],
     };
 
-    let code = render_mlil_preview(&func, "mod_ll", 0x2000, &preview_options())
-        .expect("preview render");
+    let code =
+        render_mlil_preview(&func, "mod_ll", 0x2000, &preview_options()).expect("preview render");
     assert!(code.contains("return param_1 % 2;"));
 }
 
@@ -594,7 +594,13 @@ fn normalize_bool_compare_to_zero() {
             rhs: Box::new(HirExpr::Var("flag_b".to_string())),
             ty: NirType::Bool,
         }),
-        rhs: Box::new(HirExpr::Const(0, NirType::Int { bits: 32, signed: false })),
+        rhs: Box::new(HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        )),
         ty: NirType::Bool,
     }));
     normalize_stmt(&mut stmt);
@@ -647,4 +653,208 @@ fn normalize_full_mask_and_wrapper() {
     }));
     normalize_stmt(&mut stmt);
     assert_eq!(print_stmt(&stmt), "return (ushort)uVar1;");
+}
+
+#[test]
+fn flag_intrinsics_zero_fold_to_false() {
+    for target in ["__carry", "__scarry", "__sborrow"] {
+        let mut stmt = HirStmt::Return(Some(HirExpr::Call {
+            target: target.to_string(),
+            args: vec![
+                HirExpr::Var("x".to_string()),
+                HirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            ],
+            ty: NirType::Bool,
+        }));
+        normalize_stmt(&mut stmt);
+        assert_eq!(print_stmt(&stmt), "return 0;");
+    }
+}
+
+#[test]
+fn carry_intrinsic_constant_canonicalizes_to_unsigned_compare() {
+    let mut stmt = HirStmt::Return(Some(HirExpr::Call {
+        target: "__carry".to_string(),
+        args: vec![
+            HirExpr::Var("uVar1".to_string()),
+            HirExpr::Const(
+                4,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
+        ],
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return 4294967292 <= uVar1;");
+}
+
+#[test]
+fn sborrow_compare_canonicalizes_to_signed_less_than() {
+    let a = HirExpr::Var("a".to_string());
+    let b = HirExpr::Var("b".to_string());
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Ne,
+        lhs: Box::new(HirExpr::Call {
+            target: "__sborrow".to_string(),
+            args: vec![a.clone(), b.clone()],
+            ty: NirType::Bool,
+        }),
+        rhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs: Box::new(a.clone()),
+                rhs: Box::new(b.clone()),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            }),
+            rhs: Box::new(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )),
+            ty: NirType::Bool,
+        }),
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return a < b;");
+}
+
+#[test]
+fn sborrow_compare_canonicalizes_to_signed_less_equal() {
+    let a = HirExpr::Var("a".to_string());
+    let b = HirExpr::Var("b".to_string());
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Eq,
+        lhs: Box::new(HirExpr::Call {
+            target: "__sborrow".to_string(),
+            args: vec![a.clone(), b.clone()],
+            ty: NirType::Bool,
+        }),
+        rhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs: Box::new(a.clone()),
+                rhs: Box::new(b.clone()),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            }),
+            ty: NirType::Bool,
+        }),
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return a <= b;");
+}
+
+#[test]
+fn carry_intrinsic_with_non_constant_rhs_is_preserved() {
+    let mut stmt = HirStmt::Return(Some(HirExpr::Call {
+        target: "__carry".to_string(),
+        args: vec![HirExpr::Var("x".to_string()), HirExpr::Var("y".to_string())],
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return __carry(x, y);");
+}
+
+#[test]
+fn sborrow_compare_non_matching_shape_is_preserved() {
+    let a = HirExpr::Var("a".to_string());
+    let b = HirExpr::Var("b".to_string());
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Ne,
+        lhs: Box::new(HirExpr::Call {
+            target: "__sborrow".to_string(),
+            args: vec![a.clone(), b.clone()],
+            ty: NirType::Bool,
+        }),
+        rhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(a.clone()),
+                rhs: Box::new(b.clone()),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            }),
+            rhs: Box::new(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            )),
+            ty: NirType::Bool,
+        }),
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return __sborrow(a, b) != (a + b < 0);");
+}
+
+#[test]
+fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
+    let mut func = HirFunction {
+        name: "flag_temp_cleanup".to_string(),
+        params: vec![],
+        locals: vec![NirBinding {
+            name: "xVar1".to_string(),
+            ty: NirType::Bool,
+            surface_type_name: None,
+            initializer: None,
+        }],
+        return_type: NirType::Unknown,
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("xVar1".to_string()),
+                rhs: HirExpr::Call {
+                    target: "__scarry".to_string(),
+                    args: vec![
+                        HirExpr::Var("eax".to_string()),
+                        HirExpr::Const(
+                            4,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                    ],
+                    ty: NirType::Bool,
+                },
+            },
+            HirStmt::Return(None),
+        ],
+    };
+
+    normalize_hir_function(&mut func);
+
+    assert!(func.locals.is_empty());
+    assert_eq!(func.body, vec![HirStmt::Return(None)]);
 }

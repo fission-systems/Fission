@@ -5,7 +5,8 @@ pub(super) fn build_successor_index_map(
     address_to_index: &HashMap<u64, usize>,
     layout_fallthrough: &[Option<usize>],
 ) -> Vec<Vec<usize>> {
-    pcode.blocks
+    pcode
+        .blocks
         .iter()
         .enumerate()
         .map(|(idx, block)| {
@@ -116,7 +117,10 @@ pub(super) fn block_label(address: u64) -> String {
 }
 
 pub(super) fn fold_logical_chain(mut exprs: Vec<HirExpr>, op: HirBinaryOp) -> HirExpr {
-    debug_assert!(matches!(op, HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr));
+    debug_assert!(matches!(
+        op,
+        HirBinaryOp::LogicalAnd | HirBinaryOp::LogicalOr
+    ));
     let first = exprs.remove(0);
     exprs.into_iter().fold(first, |lhs, rhs| HirExpr::Binary {
         op,

@@ -49,9 +49,7 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) =
-                Self::ignore_unsupported(self.try_lower_switch(idx))?
-            {
+            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_switch(idx))? {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
@@ -64,9 +62,7 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) =
-                Self::ignore_unsupported(self.try_lower_dowhile(idx))?
-            {
+            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_dowhile(idx))? {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
@@ -79,9 +75,7 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) =
-                Self::ignore_unsupported(self.try_lower_while(idx))?
-            {
+            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_while(idx))? {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
@@ -109,9 +103,7 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) =
-                Self::ignore_unsupported(self.try_lower_if_else(idx))?
-            {
+            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_if_else(idx))? {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
@@ -124,9 +116,7 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) =
-                Self::ignore_unsupported(self.try_lower_if(idx))?
-            {
+            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_if(idx))? {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
@@ -211,12 +201,7 @@ impl<'a> PreviewBuilder<'a> {
             .iter()
             .filter(|preds| preds.len() > 1)
             .count();
-        let max_predecessors = self
-            .predecessors
-            .iter()
-            .map(Vec::len)
-            .max()
-            .unwrap_or(0);
+        let max_predecessors = self.predecessors.iter().map(Vec::len).max().unwrap_or(0);
 
         self.pcode.blocks.len() > 32
             && (edge_count > self.pcode.blocks.len().saturating_mul(2)

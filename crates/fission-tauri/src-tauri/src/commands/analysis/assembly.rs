@@ -4,11 +4,11 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 #[cfg(feature = "native_decomp")]
-use fission_static::analysis::decomp::{
-    PreviewEngineMode, PreviewSelection, rescue_preview_output, select_preview_output,
-};
-#[cfg(feature = "native_decomp")]
 use fission_loader::loader::LoadedBinary;
+#[cfg(feature = "native_decomp")]
+use fission_static::analysis::decomp::{
+    rescue_preview_output, select_preview_output, PreviewEngineMode, PreviewSelection,
+};
 use tauri::State;
 
 // ============================================================================
@@ -51,14 +51,9 @@ fn decompile_with_engine(
         Err(e) => {
             let error_text = e.to_string();
             if !matches!(engine_mode, DecompilerEngineMode::Legacy) {
-                if let Some(selection) = rescue_preview_output(
-                    decomp,
-                    binary,
-                    address,
-                    name,
-                    &error_text,
-                )
-                .map_err(CmdError::other)?
+                if let Some(selection) =
+                    rescue_preview_output(decomp, binary, address, name, &error_text)
+                        .map_err(CmdError::other)?
                 {
                     if let Some(code) = selection.preview_code {
                         return Ok(DecompileOutcome {
@@ -130,7 +125,9 @@ pub async fn decompile_function(
         let decomp_result = decomp_lock
             .as_mut()
             .ok_or_else(|| CmdError::other("Decompiler not initialized"))
-            .and_then(|decomp| decompile_with_engine(decomp, binary.as_ref(), address, &func_name, engine_mode));
+            .and_then(|decomp| {
+                decompile_with_engine(decomp, binary.as_ref(), address, &func_name, engine_mode)
+            });
         drop(decomp_lock);
 
         match decomp_result {

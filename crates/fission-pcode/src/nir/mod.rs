@@ -2,15 +2,15 @@ use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
-mod cfg;
 mod builder;
+mod cfg;
 mod normalize;
 mod piece;
 mod printer;
 mod structuring;
-mod types;
 #[cfg(test)]
 mod tests;
+mod types;
 
 pub use self::types::*;
 use self::{builder::*, cfg::*, normalize::*, printer::*};
@@ -89,6 +89,7 @@ struct PreviewBuilder<'a> {
     register_param_aliases: HashMap<u64, usize>,
     stack_frame_size: i64,
     linear_exit_cache: HashMap<usize, Option<LinearExit>>,
+    linear_body_cache: HashMap<LinearBodyCacheKey, Option<(Vec<HirStmt>, usize)>>,
     jump_targets_cache: Option<HashSet<u64>>,
 }
 
@@ -118,12 +119,32 @@ enum LoweredTerminator {
     Unsupported,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum LinearExit {
     Join(usize),
     Return,
     End,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct LinearBodyCacheKey {
+    start_idx: usize,
+    exit: LinearExit,
+}
+
+#[derive(Debug)]
+struct IfLoweringBudget {
+    enabled: bool,
+    start: Instant,
+    subcalls: usize,
+    tripped: bool,
+    idx: usize,
+    block_addr: u64,
+    label: &'static str,
+}
+
+const X86_TRY_LOWER_IF_BUDGET_MS: f64 = 10.0;
+const X86_TRY_LOWER_IF_SUBCALL_LIMIT: usize = 512;
 
 #[derive(Debug, Clone)]
 struct SubpieceOrigin {
@@ -157,7 +178,12 @@ pub fn render_mlil_preview_with_context(
                 .create(true)
                 .append(true)
                 .open(format!("/tmp/fission_preview_{address:x}.log"))
-                .and_then(|mut f| std::io::Write::write_all(&mut f, format!("[mlil-preview] stage={stage}\n").as_bytes()));
+                .and_then(|mut f| {
+                    std::io::Write::write_all(
+                        &mut f,
+                        format!("[mlil-preview] stage={stage}\n").as_bytes(),
+                    )
+                });
         }
     };
     if options.pe_x64_only && !options.is_supported_pe() {
@@ -172,9 +198,7 @@ pub fn render_mlil_preview_with_context(
     let mut builder = PreviewBuilder::new(pcode, options, type_context);
     let mut hir = builder.build_hir(name, address).map_err(|err| {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
-            eprintln!(
-                "[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}"
-            );
+            eprintln!("[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}");
         }
         debug_log("build_hir_error");
         err
@@ -336,8 +360,14 @@ fn is_materializable_output_opcode(opcode: PcodeOpcode) -> bool {
 fn next_temp_name(ty: &NirType, next_id: &mut u32) -> String {
     let prefix = match ty {
         NirType::Bool => "bVar",
-        NirType::Int { bits: 32, signed: true } => "iVar",
-        NirType::Int { bits: 32, signed: false } => "uVar",
+        NirType::Int {
+            bits: 32,
+            signed: true,
+        } => "iVar",
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        } => "uVar",
         _ => "xVar",
     };
     let name = format!("{prefix}{}", *next_id);
@@ -371,6 +401,20 @@ fn register_name(offset: u64, size: u32) -> &'static str {
     register_name_with_param(offset, size)
         .map(|(name, _)| name)
         .unwrap_or("reg")
+}
+
+fn x86_register_name(offset: u64, size: u32) -> Option<&'static str> {
+    match (offset, size) {
+        (0x00, 4) => Some("eax"),
+        (0x04, 4) => Some("ecx"),
+        (0x08, 4) => Some("edx"),
+        (0x0c, 4) => Some("ebx"),
+        (0x10, 4) => Some("esp"),
+        (0x14, 4) => Some("ebp"),
+        (0x18, 4) => Some("esi"),
+        (0x1c, 4) => Some("edi"),
+        _ => None,
+    }
 }
 
 fn expr_type(expr: &HirExpr) -> NirType {

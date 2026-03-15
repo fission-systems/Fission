@@ -22,7 +22,11 @@ pub(super) fn print_hir_function(func: &HirFunction) -> String {
                 print_expr(initializer)
             ));
         } else {
-            out.push_str(&format!("    {} {};\n", print_binding_type(local), local.name));
+            out.push_str(&format!(
+                "    {} {};\n",
+                print_binding_type(local),
+                local.name
+            ));
         }
     }
     if !func.locals.is_empty() {
@@ -45,7 +49,11 @@ fn print_binding_type(binding: &NirBinding) -> String {
 pub(super) fn print_stmt(stmt: &HirStmt) -> String {
     match stmt {
         HirStmt::Assign { lhs, rhs } => {
-            format!("{} = {};", print_lvalue(lhs, 0), print_expr(expr_fallback(rhs, 0)))
+            format!(
+                "{} = {};",
+                print_lvalue(lhs, 0),
+                print_expr(expr_fallback(rhs, 0))
+            )
         }
         HirStmt::Expr(expr) => format!("{};", print_expr(expr_fallback(expr, 0))),
         HirStmt::Label(label) => format!("{}:", label),
@@ -188,7 +196,11 @@ fn print_lvalue(lhs: &HirLValue, depth: usize) -> String {
             if let Some(target) = peel_simple_deref_target(ptr) {
                 format!("*{target}")
             } else {
-                format!("*({} *)({})", print_type(ty), print_expr_prec(ptr, 0, depth + 1))
+                format!(
+                    "*({} *)({})",
+                    print_type(ty),
+                    print_expr_prec(ptr, 0, depth + 1)
+                )
             }
         }
         HirLValue::Index {
@@ -306,7 +318,12 @@ fn binary_precedence(op: HirBinaryOp) -> u8 {
     match op {
         HirBinaryOp::LogicalOr => 10,
         HirBinaryOp::LogicalAnd => 20,
-        HirBinaryOp::Eq | HirBinaryOp::Ne | HirBinaryOp::Lt | HirBinaryOp::Le | HirBinaryOp::SLt | HirBinaryOp::SLe => 30,
+        HirBinaryOp::Eq
+        | HirBinaryOp::Ne
+        | HirBinaryOp::Lt
+        | HirBinaryOp::Le
+        | HirBinaryOp::SLt
+        | HirBinaryOp::SLe => 30,
         HirBinaryOp::Or => 40,
         HirBinaryOp::Xor => 45,
         HirBinaryOp::And => 50,

@@ -43,7 +43,9 @@ impl<'a> PreviewBuilder<'a> {
             });
         }
         merge_adjacent_switch_cases(&mut cases);
-        let Some((default_body, default_skip)) = self.lower_linear_body(parsed.default_idx, exit)? else {
+        let Some((default_body, default_skip)) =
+            self.lower_linear_body(parsed.default_idx, exit)?
+        else {
             return Ok(None);
         };
         max_skip = max_skip.max(default_skip);
@@ -62,7 +64,10 @@ impl<'a> PreviewBuilder<'a> {
         )))
     }
 
-    fn parse_switch_chain(&mut self, start_idx: usize) -> Result<Option<ParsedSwitch>, MlilPreviewError> {
+    fn parse_switch_chain(
+        &mut self,
+        start_idx: usize,
+    ) -> Result<Option<ParsedSwitch>, MlilPreviewError> {
         let mut current_idx = start_idx;
         let mut selector: Option<HirExpr> = None;
         let mut cases = Vec::new();
@@ -93,7 +98,8 @@ impl<'a> PreviewBuilder<'a> {
             let Some(case_idx) = self.find_block_index_by_address(case_target) else {
                 return Ok(None);
             };
-            let Some((case_selector, value)) = extract_eq_const_for_case(&cond, case_on_true) else {
+            let Some((case_selector, value)) = extract_eq_const_for_case(&cond, case_on_true)
+            else {
                 return Ok(None);
             };
             if let Some(existing) = &selector {

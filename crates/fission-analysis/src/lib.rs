@@ -20,9 +20,9 @@ pub use fission_core as core;
 pub use fission_core::{config, constants, errors, logging, prelude as core_prelude, settings};
 pub use fission_static::{analysis, utils};
 
-#[cfg(feature = "interactive_runtime")]
-pub use fission_dynamic::{app, debug, plugin};
 #[cfg(feature = "unpacker_runtime")]
 pub use fission_dynamic::unpacker;
+#[cfg(feature = "interactive_runtime")]
+pub use fission_dynamic::{app, debug, plugin};
 
 pub use fission_ai as ai;

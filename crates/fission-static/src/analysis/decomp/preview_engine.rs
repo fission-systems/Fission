@@ -74,9 +74,11 @@ fn max_multiequal_fanin(pcode: &PcodeFunction) -> usize {
 }
 
 fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
-    pcode.blocks.iter().flat_map(|block| block.ops.iter()).any(|op| {
-        matches!(op.opcode, PcodeOpcode::CallInd | PcodeOpcode::BranchInd)
-    })
+    pcode
+        .blocks
+        .iter()
+        .flat_map(|block| block.ops.iter())
+        .any(|op| matches!(op.opcode, PcodeOpcode::CallInd | PcodeOpcode::BranchInd))
 }
 
 pub fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
@@ -162,10 +164,7 @@ fn build_preview_type_context(binary: &LoadedBinary) -> PreviewTypeContext {
     }
 }
 
-fn resolve_preview_struct_name(
-    type_name: &str,
-    structures: &WindowsStructures,
-) -> Option<String> {
+fn resolve_preview_struct_name(type_name: &str, structures: &WindowsStructures) -> Option<String> {
     if type_name.contains('*') {
         return None;
     }
@@ -188,10 +187,7 @@ fn render_preview_from_json(
     enforce_auto_gate: bool,
 ) -> Result<Option<String>, String> {
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
-        let _ = std::fs::write(
-            format!("/tmp/fission_preview_{address:x}.json"),
-            pcode_json,
-        );
+        let _ = std::fs::write(format!("/tmp/fission_preview_{address:x}.json"), pcode_json);
     }
     let mut pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
@@ -226,10 +222,7 @@ fn render_preview_from_json(
                 term
             );
         }
-        let _ = std::fs::write(
-            format!("/tmp/fission_preview_{address:x}.log"),
-            debug_dump,
-        );
+        let _ = std::fs::write(format!("/tmp/fission_preview_{address:x}.log"), debug_dump);
     }
     if enforce_auto_gate && !auto_mlil_eligible(binary, &pcode) {
         return Ok(None);
@@ -239,7 +232,9 @@ fn render_preview_from_json(
             .create(true)
             .append(true)
             .open(format!("/tmp/fission_preview_{address:x}.log"))
-            .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=before_optimize\n"));
+            .and_then(|mut f| {
+                std::io::Write::write_all(&mut f, b"[mlil-preview] stage=before_optimize\n")
+            });
     }
     let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
     let optimize_result = catch_unwind(AssertUnwindSafe(|| optimizer.optimize(&mut pcode)));
@@ -260,7 +255,9 @@ fn render_preview_from_json(
             .create(true)
             .append(true)
             .open(format!("/tmp/fission_preview_{address:x}.log"))
-            .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=after_optimize\n"));
+            .and_then(|mut f| {
+                std::io::Write::write_all(&mut f, b"[mlil-preview] stage=after_optimize\n")
+            });
     }
     let options = MlilPreviewOptions::from_loaded_binary(binary);
     let type_context = build_preview_type_context(binary);
@@ -269,7 +266,9 @@ fn render_preview_from_json(
             .create(true)
             .append(true)
             .open(format!("/tmp/fission_preview_{address:x}.log"))
-            .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=before_render\n"));
+            .and_then(|mut f| {
+                std::io::Write::write_all(&mut f, b"[mlil-preview] stage=before_render\n")
+            });
     }
     match render_mlil_preview_with_context(&pcode, name, address, &options, Some(&type_context)) {
         Ok(code) => {
@@ -278,7 +277,9 @@ fn render_preview_from_json(
                     .create(true)
                     .append(true)
                     .open(format!("/tmp/fission_preview_{address:x}.log"))
-                    .and_then(|mut f| std::io::Write::write_all(&mut f, b"[mlil-preview] stage=render_ok\n"));
+                    .and_then(|mut f| {
+                        std::io::Write::write_all(&mut f, b"[mlil-preview] stage=render_ok\n")
+                    });
             }
             Ok(Some(code))
         }
@@ -367,9 +368,7 @@ pub fn select_preview_output<S: PreviewSource>(
             if diag {
                 eprintln!("[PREVIEW-DIAG] get_pcode start: fn=0x{address:x} mode=mlil_preview");
             }
-            let pcode_json = source
-                .get_pcode_json(address)
-                .map_err(|e| e.to_string())?;
+            let pcode_json = source.get_pcode_json(address).map_err(|e| e.to_string())?;
             if diag {
                 eprintln!(
                     "[PREVIEW-DIAG] get_pcode done: fn=0x{address:x} mode=mlil_preview elapsed_ms={:.1}",
@@ -404,9 +403,7 @@ pub fn select_preview_output<S: PreviewSource>(
             if diag {
                 eprintln!("[PREVIEW-DIAG] get_pcode start: fn=0x{address:x} mode=auto");
             }
-            let pcode_json = source
-                .get_pcode_json(address)
-                .map_err(|e| e.to_string())?;
+            let pcode_json = source.get_pcode_json(address).map_err(|e| e.to_string())?;
             if diag {
                 eprintln!(
                     "[PREVIEW-DIAG] get_pcode done: fn=0x{address:x} mode=auto elapsed_ms={:.1}",
@@ -453,9 +450,7 @@ pub fn rescue_preview_output<S: PreviewSource>(
     if diag {
         eprintln!("[PREVIEW-DIAG] get_pcode start: fn=0x{address:x} mode=rescue");
     }
-    let pcode_json = source
-        .get_pcode_json(address)
-        .map_err(|e| e.to_string())?;
+    let pcode_json = source.get_pcode_json(address).map_err(|e| e.to_string())?;
     if diag {
         eprintln!(
             "[PREVIEW-DIAG] get_pcode done: fn=0x{address:x} mode=rescue elapsed_ms={:.1}",
@@ -467,7 +462,9 @@ pub fn rescue_preview_output<S: PreviewSource>(
             preview_code: Some(code),
             engine_used: PreviewEngineMode::MlilPreview,
             fell_back: true,
-            fallback_reason: Some(format!("legacy type failure rescued by mlil-preview: {error}")),
+            fallback_reason: Some(format!(
+                "legacy type failure rescued by mlil-preview: {error}"
+            )),
         })),
         Ok(None) => Ok(None),
         Err(_) => Ok(None),

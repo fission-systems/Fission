@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::{HashMap, HashSet};
 
 pub(super) fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
@@ -86,12 +87,39 @@ pub(super) fn eliminate_dead_temp_assigns(stmts: &mut Vec<HirStmt>) -> bool {
     changed
 }
 
+pub(super) fn eliminate_dead_local_clobber_assigns(func: &mut HirFunction) -> bool {
+    eliminate_dead_local_clobber_assigns_in_stmts(&mut func.body, &func.params, &func.locals)
+}
+
 pub(super) fn prune_unused_temp_bindings(func: &mut HirFunction) -> bool {
     let mut changed = false;
     func.locals.retain(|binding| {
         let used = count_uses_in_stmt_list(&func.body, &binding.name) > 0;
         let keep = !is_trivial_temp_name(&binding.name)
             || used
+            || binding
+                .initializer
+                .as_ref()
+                .is_some_and(expr_has_side_effects);
+        changed |= !keep;
+        keep
+    });
+    changed
+}
+
+pub(super) fn prune_unused_dead_local_bindings(func: &mut HirFunction) -> bool {
+    let param_names = func
+        .params
+        .iter()
+        .map(|binding| binding.name.as_str())
+        .collect::<HashSet<_>>();
+    let mut changed = false;
+    func.locals.retain(|binding| {
+        let keep = !is_dead_local_clobber_name(&binding.name)
+            || param_names.contains(binding.name.as_str())
+            || binding.name.starts_with("slot_")
+            || matches!(binding.ty, NirType::Aggregate { .. })
+            || count_uses_in_stmt_list(&func.body, &binding.name) > 0
             || binding
                 .initializer
                 .as_ref()
@@ -109,6 +137,77 @@ fn retain_unmarked_stmts(stmts: &mut Vec<HirStmt>, to_remove: &[bool]) {
         idx += 1;
         keep
     });
+}
+
+fn eliminate_dead_local_clobber_assigns_in_stmts(
+    stmts: &mut Vec<HirStmt>,
+    params: &[NirBinding],
+    locals: &[NirBinding],
+) -> bool {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                eliminate_dead_local_clobber_assigns_in_stmts(body, params, locals);
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                eliminate_dead_local_clobber_assigns_in_stmts(then_body, params, locals);
+                eliminate_dead_local_clobber_assigns_in_stmts(else_body, params, locals);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    eliminate_dead_local_clobber_assigns_in_stmts(&mut case.body, params, locals);
+                }
+                eliminate_dead_local_clobber_assigns_in_stmts(default, params, locals);
+            }
+            _ => {}
+        }
+    }
+
+    let local_types = locals
+        .iter()
+        .map(|binding| (binding.name.as_str(), &binding.ty))
+        .collect::<HashMap<_, _>>();
+    let param_names = params
+        .iter()
+        .map(|binding| binding.name.as_str())
+        .collect::<HashSet<_>>();
+
+    let mut changed = false;
+    let mut to_remove = vec![false; stmts.len()];
+    for (idx, stmt) in stmts.iter().enumerate() {
+        let (name, rhs) = match stmt {
+            HirStmt::Assign {
+                lhs: HirLValue::Var(name),
+                rhs,
+            } => (name.as_str(), rhs),
+            _ => continue,
+        };
+        if !is_dead_local_clobber_name(name)
+            || param_names.contains(name)
+            || name.starts_with("slot_")
+            || expr_has_side_effects(rhs)
+        {
+            continue;
+        }
+        if matches!(
+            local_types.get(name).copied(),
+            Some(NirType::Aggregate { .. } | NirType::Ptr(_))
+        ) {
+            continue;
+        }
+        if count_uses_in_stmt_list(stmts, name) == 0 {
+            to_remove[idx] = true;
+            changed = true;
+        }
+    }
+    if changed {
+        retain_unmarked_stmts(stmts, &to_remove);
+    }
+    changed
 }
 
 fn find_single_use_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str) -> Option<usize> {
@@ -151,10 +250,7 @@ fn stmt_allows_forward_scan(stmt: &HirStmt) -> bool {
 fn stmt_allows_inline_target(stmt: &HirStmt) -> bool {
     matches!(
         stmt,
-        HirStmt::Assign { .. }
-            | HirStmt::Expr(_)
-            | HirStmt::Return(_)
-            | HirStmt::If { .. }
+        HirStmt::Assign { .. } | HirStmt::Expr(_) | HirStmt::Return(_) | HirStmt::If { .. }
     )
 }
 
@@ -177,11 +273,31 @@ fn is_trivial_temp_name(name: &str) -> bool {
         || name.starts_with("bVar")
 }
 
+fn is_dead_local_clobber_name(name: &str) -> bool {
+    if name.starts_with("param_ffff")
+        || name.starts_with("param_fff")
+        || name.starts_with("param_ff")
+    {
+        return true;
+    }
+    let Some(hex) = name.strip_prefix("local_") else {
+        return false;
+    };
+    u64::from_str_radix(hex, 16)
+        .map(|offset| offset <= 0x0c)
+        .unwrap_or(false)
+}
+
 fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
     match stmt {
-        HirStmt::Assign { lhs, rhs } => count_var_uses_in_lvalue(lhs, name) + count_var_uses(rhs, name),
+        HirStmt::Assign { lhs, rhs } => {
+            count_var_uses_in_lvalue(lhs, name) + count_var_uses(rhs, name)
+        }
         HirStmt::Expr(expr) => count_var_uses(expr, name),
-        HirStmt::Block(stmts) => stmts.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum(),
+        HirStmt::Block(stmts) => stmts
+            .iter()
+            .map(|stmt| count_var_uses_in_stmt(stmt, name))
+            .sum(),
         HirStmt::Switch {
             expr,
             cases,
@@ -190,9 +306,17 @@ fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
             count_var_uses(expr, name)
                 + cases
                     .iter()
-                    .map(|case| case.body.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum::<usize>())
+                    .map(|case| {
+                        case.body
+                            .iter()
+                            .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                            .sum::<usize>()
+                    })
                     .sum::<usize>()
-                + default.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum::<usize>()
+                + default
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
         }
         HirStmt::If {
             cond,
@@ -200,24 +324,42 @@ fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
             else_body,
         } => {
             count_var_uses(cond, name)
-                + then_body.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum::<usize>()
-                + else_body.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum::<usize>()
+                + then_body
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
+                + else_body
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
         }
         HirStmt::While { cond, body } => {
             count_var_uses(cond, name)
-                + body.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum::<usize>()
+                + body
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
         }
         HirStmt::DoWhile { body, cond } => {
-            body.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum::<usize>()
+            body.iter()
+                .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                .sum::<usize>()
                 + count_var_uses(cond, name)
         }
         HirStmt::Return(Some(expr)) => count_var_uses(expr, name),
-        HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::Return(None) | HirStmt::Break | HirStmt::Continue => 0,
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => 0,
     }
 }
 
 fn count_uses_in_stmt_list(stmts: &[HirStmt], name: &str) -> usize {
-    stmts.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum()
+    stmts
+        .iter()
+        .map(|stmt| count_var_uses_in_stmt(stmt, name))
+        .sum()
 }
 
 fn count_var_uses_in_lvalue(lhs: &HirLValue, name: &str) -> usize {
@@ -261,8 +403,18 @@ pub(super) fn expr_has_side_effects(expr: &HirExpr) -> bool {
         HirExpr::Index { base, index, .. } => {
             expr_has_side_effects(base) || expr_has_side_effects(index)
         }
-        HirExpr::Call { .. } => true,
+        HirExpr::Call { target, args, .. } => {
+            if is_pure_intrinsic_call(target) {
+                args.iter().any(expr_has_side_effects)
+            } else {
+                true
+            }
+        }
     }
+}
+
+fn is_pure_intrinsic_call(target: &str) -> bool {
+    matches!(target, "__carry" | "__scarry" | "__sborrow")
 }
 
 fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr) {
@@ -318,7 +470,11 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr) {
             replace_var_in_expr(cond, name, replacement);
         }
         HirStmt::Return(Some(expr)) => replace_var_in_expr(expr, name, replacement),
-        HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::Return(None) | HirStmt::Break | HirStmt::Continue => {}
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
     }
 }
 

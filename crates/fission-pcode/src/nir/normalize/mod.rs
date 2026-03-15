@@ -1,10 +1,10 @@
 use super::*;
 
-mod core;
 mod arith;
-mod cleanup;
-mod slots;
 mod bitstream;
+mod cleanup;
+mod core;
+mod slots;
 
 #[allow(dead_code)]
 pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {

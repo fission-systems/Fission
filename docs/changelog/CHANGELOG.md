@@ -6,6 +6,167 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-15
 
+### v63-v68 - C++ Corpus Expansion + x86 Preview Readability Uplift
+
+이번 구간은 새 샘플 코퍼스를 실제로 늘려 preview를 더 넓은 실전 바이너리에 검증하고, 그 과정에서 드러난 x86 병목과 가독성 문제를 순서대로 보수하는 데 집중했다. `WinMerge`, `SumatraPDF`, `CMake`, `EverPlanet_KR`를 추가해 고정 seed를 돌렸고, x86 `try_lower_while()` timeout, trap-like `CallInd`, x86 register/slot surfacing, flag-temp residue를 차례로 정리했다.
+
+#### Added
+
+- 신규 Windows 샘플 코퍼스 검증 세트
+  - `WinMergeU.exe` x64 / x86
+  - `SumatraPDF-3.5.2-32.exe`
+  - `cmake.exe`
+  - `EverPlanet_KR.exe`
+- x86 `CallInd` trap-like target 복구
+  - `INT3` producer를 `((code *)swi(3))` 형태의 opaque callee로 surface
+- x86 readability 테스트 보강
+  - x86 register naming bootstrap test
+  - large-body cheap slot surfacing test
+  - dead non-temp local / dead flag intrinsic temp cleanup test
+- EverPlanet x86 fixed-seed stress corpus
+  - `0x401070`
+  - `0x5d3ef0`
+  - `0x7ae490`
+  - `0xa918d0`
+  - `0xcf3950`
+
+#### Changed
+
+- x86 `try_lower_while()`에 budgeted fallback 추가
+  - `SumatraPDF-3.5.2-32.exe 0x4018f0` timeout 해소
+- x86 register surface를 실제 이름으로 복구
+  - `eax/ecx/edx/ebx/esp/ebp/esi/edi`
+- large HIR에서도 cheap slot surfacing을 계속 돌리도록 normalize gate 분리
+- write-only non-temp local clobber 제거
+  - `local_c = ...`
+  - `param_fffffffc = 0`
+- x86 flag-temp canonicalization 추가
+  - `__carry(x, 0)`, `__scarry(x, 0)`, `__sborrow(x, 0)` → `false`
+  - `__carry(x, c)` constant case를 unsigned compare로 축약
+  - exact `SBORROW` compare shape를 signed `<`, `<=`로 환원
+- dead flag intrinsic temp cleanup 추가
+  - unused `xVar* = __carry/__scarry/__sborrow(...)` 제거
+
+#### Improved
+
+- `SumatraPDF-3.5.2-32.exe` fixed seeds 5개 모두 `mlil_preview`, fallback 0
+  - `0x6b434c`는 x86 `CallInd` 복구로 direct preview 승격
+- `WinMergeU.exe` x86 fixed seeds 5개 모두 `mlil_preview`, fallback 0 유지
+- `EverPlanet_KR.exe` fixed seeds 5개 모두 `mlil_preview`, fallback 0
+  - legacy는 selected seeds 기준 전부 timeout
+- `EverPlanet_KR.exe 0xa918d0` readability 개선
+  - residue score: `207 -> 169 -> 11`
+  - temp surface count: `182 -> 144 -> 11`
+  - code length: `18435 -> 15459 -> 9462`
+  - `__carry/__scarry/__sborrow`: `68/68/19 -> 33/68/18 -> 0/0/0`
+- x64 regression 유지
+  - `putty.exe 0x140006260`: `LPRECT param_2`, `RECT local_3c`, `*param_2 = local_3c;`
+  - `everything.exe 0x140183590`: direct preview 유지
+
+#### Validation
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode --lib nir::tests -- --nocapture`
+- `cargo build --release -p fission-cli --bin fission_cli --features native_decomp`
+- fixed-seed compare reruns
+  - `SumatraPDF-3.5.2-32.exe`
+  - `WinMergeU.exe` x86 / x64
+  - `EverPlanet_KR.exe`
+  - `putty.exe 0x140006260`
+  - `everything.exe 0x140183590`
+
+### v62 - Warning Cleanup + Fixed-Seed Benchmark Closure
+
+`nir` 2차 리팩토링 이후 남아 있던 마감 작업을 정리했다. 이번 라운드는 새 알고리즘 추가 없이 dead warning 둘을 제거하고, `putty` / `everything` / `notepad++` / `7zr` 고정 seed를 다시 측정해 현재 preview 상태를 숫자로 닫는 데 집중했다.
+
+#### Changed
+
+- dead code warning 제거
+  - `MlilPreviewOptions::is_pe_x64()` 제거
+  - `PcodeFunction::to_flat_bytes()` 내부 미사용 `VN_SIZE` 제거
+
+#### Improved
+
+- `cargo test` / `cargo build --release`가 추가 warning 없이 깨끗하게 통과
+- fixed-seed compare closure 재확인
+  - `putty.exe 0x140006260`: `mlil_preview`, fallback 0, `LPRECT param_2` / `RECT local_3c` / `*param_2 = local_3c;` 유지
+  - `everything.exe 0x140183590`: `mlil_preview`, fallback 0
+  - `7zr.exe 0x401000`, `0x401804`, `0x402778`: 모두 `mlil_preview`, fallback 0
+  - `notepad++.exe 0x140037d30`, `0x14010ce08`, `0x1402e0204`: 모두 `mlil_preview`, fallback 0
+- 특히 `notepad++` fixed seed 3개는 legacy가 20초 timeout으로 실패하는 반면 preview는 전부 완료
+
+#### Validation
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode --lib nir::tests -- --nocapture`
+- `cargo build --release -p fission-cli --bin fission_cli --features native_decomp`
+- compare / fixed-seed closure
+  - `putty.exe 0x140006260`
+  - `everything.exe 0x140183590`
+  - `notepad++.exe 0x140037d30`, `0x14010ce08`, `0x1402e0204`
+  - `7zr.exe 0x401000`, `0x401804`, `0x402778`
+
+### v59-v61 - x86 Conditional Structuring 안정화 + `nir` 2차 리팩토링
+
+이번 구간은 두 단계로 마감됐다. 먼저 `7zr.exe` x86 heavy seed에서 long-running 하던 `try_lower_if()` 경로를 bounded fallback과 join/follow-gated candidate 검사로 안정화해 direct preview timeout을 없앴고, 이어서 커진 `nir` 구현을 builder/conditionals/test tree 기준으로 다시 분해해 이후 품질 개선과 regression 추적 비용을 낮췄다.
+
+#### Added
+
+- x86 전용 conditional structuring budget / cache
+  - `try_lower_if()` 10ms / 512 subcall guard
+  - `(start_idx, exit)` 기준 `lower_linear_body()` cache
+- join/follow-gated plain `if` candidate pre-check
+  - ambiguous follow / non-forward join / open body tail rejection
+- `nir` 2차 리팩토링용 하위 모듈 트리
+  - `builder/materialize.rs`
+  - `builder/terminator.rs`
+  - `builder/aggregate_recovery.rs`
+  - `builder/call_recovery.rs`
+  - `builder/entry_analysis.rs`
+  - `structuring/conditionals/{plain_if,short_circuit,if_else,budget}.rs`
+- 대형 test file 분해
+  - `structuring_conditionals.rs`
+  - `structuring_linear.rs`
+  - `structuring_loops.rs`
+  - `structuring_switch.rs`
+  - `structuring_misc.rs`
+  - `type_hints_aliases.rs`
+  - `type_hints_aggregates.rs`
+  - `type_hints_stack_slots.rs`
+  - `type_hints_imports.rs`
+
+#### Changed
+
+- x86 pathological CFG에서는 schema가 명확할 때만 structured `if`를 시도하고, 그 외 shape는 즉시 generic fallback으로 넘기도록 보수화
+- short-circuit 계열은 plain `if`보다 앞에서 같은 join으로 닫히는 조건 체인을 우선 흡수하도록 정리
+- `builder/mod.rs`는 thin entry/state 역할만 남기고, materialization / aggregate recovery / call recovery / entry analysis를 개별 파일로 이동
+- 기존 단일 파일 `structuring/conditionals.rs`는 디렉터리 모듈로 승격
+- `nir/tests/mod.rs`는 공통 fixture/helper만 유지하고, 실제 회귀 테스트는 기능 축별 파일로 재배치
+
+#### Improved
+
+- `7zr.exe 0x401804`, `0x402778`가 더 이상 `try_lower_if()` 장기 실행 때문에 timeout으로 떨어지지 않음
+- `7zr.exe 0x401000`, `0x401804`, `0x402778` 모두 `mlil_preview` direct output 유지
+- `putty.exe 0x140006260`의
+  - `LPRECT param_2`
+  - `RECT local_3c`
+  - `*param_2 = local_3c;`
+  출력 유지
+- `everything.exe 0x140183590`도 `mlil_preview` direct output 유지
+- `nir` 내부 응집도가 높아져 이후 x86 structuring / aggregate recovery 수술 범위를 더 좁게 잡을 수 있게 됨
+
+#### Validation
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode --lib nir::tests -- --nocapture`
+- `cargo build --release -p fission-cli --bin fission_cli --features native_decomp`
+- compare / smoke
+  - `putty.exe 0x140006260`
+  - `everything.exe 0x140183590`
+  - `7zr.exe 0x401000`
+  - `7zr.exe 0x401804`
+  - `7zr.exe 0x402778`
+
 ### v36-v58 - `putty` Aggregate Copy 마감 + x86 Timeout 진단
 
 이번 구간은 두 갈래로 진행됐다. 첫째는 `putty.exe 0x140006260`에서 남아 있던 마지막 aggregate transit temp를 걷어내서 preview 출력이 legacy 수준의 `RECT local_3c; *param_2 = local_3c;`에 도달하게 만드는 것이었고, 둘째는 `7zr.exe` x86 heavy seed timeout이 Rust NIR인지 native extraction인지 경계를 정확히 가르는 것이었다.

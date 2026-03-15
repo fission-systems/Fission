@@ -16,7 +16,10 @@ pub(super) fn apply_preview_type_hints(func: &mut HirFunction, context: &Preview
     let mut local_hints: HashMap<String, String> = HashMap::new();
     collect_local_surface_hints(&func.body, &pointer_hints, func, &mut local_hints);
     for (var_name, surface_type_name) in local_hints {
-        if let Some(binding) = func.locals.iter_mut().find(|binding| binding.name == var_name)
+        if let Some(binding) = func
+            .locals
+            .iter_mut()
+            .find(|binding| binding.name == var_name)
             && binding.surface_type_name.is_none()
         {
             binding.surface_type_name = Some(surface_type_name);
@@ -126,8 +129,10 @@ pub(super) fn collect_local_surface_hints(
                     && let Some(param_name) = peel_surface_var_name_from_expr(ptr)
                     && let Some(local_name) = peel_local_surface_name(rhs)
                     && let Some(rule) = pointer_hints.get(param_name)
-                    && let Some(local_binding) =
-                        func.locals.iter().find(|binding| binding.name == local_name)
+                    && let Some(local_binding) = func
+                        .locals
+                        .iter()
+                        .find(|binding| binding.name == local_name)
                     && let Some(local_size) = binding_byte_size(&local_binding.ty)
                     && rule.pointee_sizes.contains(&local_size)
                 {
@@ -171,10 +176,10 @@ fn peel_surface_var_name_from_expr(expr: &HirExpr) -> Option<&str> {
         HirExpr::Cast { expr, .. }
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => peel_surface_var_name_from_expr(expr),
-        HirExpr::PtrOffset { base, offset } if *offset == 0 => peel_surface_var_name_from_expr(base),
-        HirExpr::Index { base, index, .. }
-            if matches!(index.as_ref(), HirExpr::Const(0, _)) =>
-        {
+        HirExpr::PtrOffset { base, offset } if *offset == 0 => {
+            peel_surface_var_name_from_expr(base)
+        }
+        HirExpr::Index { base, index, .. } if matches!(index.as_ref(), HirExpr::Const(0, _)) => {
             peel_surface_var_name_from_expr(base)
         }
         _ => None,

@@ -5,14 +5,14 @@ use crate::cli::oneshot::common::{
 };
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
-use fission_static::analysis::decomp::postprocess::PostProcessor;
-use fission_static::analysis::decomp::{
-    PreviewEngineMode, PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
-    rescue_preview_output, select_preview_output, serialize_win_api_signatures_json,
-};
 use fission_core::FissionError;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
+use fission_static::analysis::decomp::postprocess::PostProcessor;
+use fission_static::analysis::decomp::{
+    PrepareOptions, PrepareTimings, PreviewEngineMode, prepare_native_decompiler_for_binary,
+    rescue_preview_output, select_preview_output, serialize_win_api_signatures_json,
+};
 use std::fs;
 use std::io::{self, Write};
 use tracing::warn;
@@ -200,14 +200,9 @@ fn decompile_code_with_profile(
         Err(e) => {
             let error_text = e.to_string();
             if !matches!(engine_mode, EngineMode::Legacy) {
-                if let Some(selection) = rescue_preview_output(
-                    decomp,
-                    binary,
-                    address,
-                    name,
-                    &error_text,
-                )
-                .map_err(FissionError::decompiler)?
+                if let Some(selection) =
+                    rescue_preview_output(decomp, binary, address, name, &error_text)
+                        .map_err(FissionError::decompiler)?
                 {
                     if let Some(code) = selection.preview_code {
                         return Ok(RenderedCode {
@@ -426,31 +421,31 @@ fn run_parallel_decompilation<'a>(
                 false,
             );
             let decomp_sec = start.elapsed().as_secs_f64();
-                    let (code_result, postprocess_sec) = match code_result {
-                        Ok(rendered) => {
-                            let postprocess_sec = rendered.postprocess_sec;
-                            (Ok(rendered), postprocess_sec)
-                        }
-                        Err(e) => {
-                            let error_text = e.to_string();
-                            if let Some(fallback) =
-                                make_assembly_fallback(binary, binary_data, func, &error_text)
-                            {
-                                (
-                                    Ok(RenderedCode {
-                                        code: fallback,
-                                        postprocess_sec: 0.0,
-                                        engine_used: PreviewEngineMode::Legacy.as_str(),
-                                        fell_back: true,
-                                        fallback_reason: Some(error_text),
-                                    }),
-                                    0.0,
-                                )
-                            } else {
-                                (Err(e), 0.0)
-                            }
-                        }
-                    };
+            let (code_result, postprocess_sec) = match code_result {
+                Ok(rendered) => {
+                    let postprocess_sec = rendered.postprocess_sec;
+                    (Ok(rendered), postprocess_sec)
+                }
+                Err(e) => {
+                    let error_text = e.to_string();
+                    if let Some(fallback) =
+                        make_assembly_fallback(binary, binary_data, func, &error_text)
+                    {
+                        (
+                            Ok(RenderedCode {
+                                code: fallback,
+                                postprocess_sec: 0.0,
+                                engine_used: PreviewEngineMode::Legacy.as_str(),
+                                fell_back: true,
+                                fallback_reason: Some(error_text),
+                            }),
+                            0.0,
+                        )
+                    } else {
+                        (Err(e), 0.0)
+                    }
+                }
+            };
             let timing = main_decomp.get_last_timing_json().ok();
             entries.push(DecompEntry {
                 address: func.address,

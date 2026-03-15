@@ -88,3 +88,25 @@ fn preview_supports_pe_x86_multiblock_direct_target_branch() {
     assert!(code.contains("return 0;"), "{code}");
     assert!(code.contains("return 1;"), "{code}");
 }
+
+#[test]
+fn preview_names_x86_general_purpose_registers() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x402000,
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Return,
+                address: 0x402000,
+                output: None,
+                inputs: vec![cst(0, 4), reg(0x00, 4)],
+                asm_mnemonic: None,
+            }],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "x86_reg", 0x402000, &preview_options_x86())
+        .expect("preview render");
+    assert!(code.contains("return eax;"), "{code}");
+}

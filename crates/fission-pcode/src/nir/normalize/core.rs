@@ -1,15 +1,18 @@
-use super::*;
 use super::arith::{
-    canonicalize_condition_expr, canonicalize_integer_expr, cleanup_arithmetic_wrappers,
-    collapse_zero_offset_cast, normalize_boolean_logic, recognize_hi_lo_extract,
-    recognize_mod_div_power_of_two, recognize_wide_integer_recombine,
+    canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
+    cleanup_arithmetic_wrappers, collapse_zero_offset_cast, normalize_boolean_logic,
+    recognize_hi_lo_extract, recognize_mod_div_power_of_two, recognize_wide_integer_recombine,
 };
 use super::bitstream::apply_bitstream_idioms;
 use super::cleanup::{
-    collapse_trivial_assign_returns, eliminate_dead_temp_assigns, inline_single_use_temps,
+    collapse_trivial_assign_returns, eliminate_dead_local_clobber_assigns,
+    eliminate_dead_temp_assigns, inline_single_use_temps, prune_unused_dead_local_bindings,
     prune_unused_temp_bindings,
 };
-use super::slots::{apply_memory_slot_surfacing, normalize_binding_initializers};
+use super::slots::{
+    apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, normalize_binding_initializers,
+};
+use super::*;
 use std::time::Instant;
 
 pub(super) fn normalize_function_body(body: &mut Vec<HirStmt>) {
@@ -29,23 +32,38 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     }
     normalize_binding_initializers(&mut func.locals);
     cleanup_stmt_list(&mut func.body, &func.name, 0);
+    eliminate_dead_local_clobber_assigns(func);
     prune_unused_temp_bindings(func);
+    prune_unused_dead_local_bindings(func);
     let allow_expensive_passes = !is_large_hir_function(func);
     let mut changed = false;
-    if allow_expensive_passes {
-        let pass_start = Instant::now();
-        changed |= apply_memory_slot_surfacing(func);
-        if diag {
-            eprintln!(
-                "[DIAG] normalize slots: {} changed={} elapsed={:.3}s",
-                func.name,
-                changed,
-                pass_start.elapsed().as_secs_f64()
-            );
-        }
+    let pass_start = Instant::now();
+    changed |= if allow_expensive_passes {
+        apply_memory_slot_surfacing(func)
+    } else {
+        apply_memory_slot_surfacing_cheap(func)
+    };
+    if diag {
+        eprintln!(
+            "[DIAG] normalize slots: {} changed={} elapsed={:.3}s mode={}",
+            func.name,
+            changed,
+            pass_start.elapsed().as_secs_f64(),
+            if allow_expensive_passes {
+                "full"
+            } else {
+                "cheap"
+            }
+        );
+    }
+    if changed {
         normalize_binding_initializers(&mut func.locals);
         cleanup_stmt_list(&mut func.body, &func.name, 0);
+        eliminate_dead_local_clobber_assigns(func);
         prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    if allow_expensive_passes {
         let bitstream_start = Instant::now();
         changed |= apply_bitstream_idioms(func);
         if diag {
@@ -59,7 +77,9 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         if changed {
             normalize_binding_initializers(&mut func.locals);
             cleanup_stmt_list(&mut func.body, &func.name, 0);
+            eliminate_dead_local_clobber_assigns(func);
             prune_unused_temp_bindings(func);
+            prune_unused_dead_local_bindings(func);
         }
     }
     if diag {
@@ -82,7 +102,10 @@ fn count_hir_stmts(stmts: &[HirStmt]) -> usize {
             | HirStmt::While { body: stmts, .. }
             | HirStmt::DoWhile { body: stmts, .. } => 1 + count_hir_stmts(stmts),
             HirStmt::Switch { cases, default, .. } => {
-                1 + cases.iter().map(|case| count_hir_stmts(&case.body)).sum::<usize>()
+                1 + cases
+                    .iter()
+                    .map(|case| count_hir_stmts(&case.body))
+                    .sum::<usize>()
                     + count_hir_stmts(default)
             }
             HirStmt::If {
@@ -172,9 +195,9 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
     for stmt in stmts.iter_mut() {
         normalize_stmt(stmt);
         match stmt {
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. } => cleanup_stmt_list(body, func_name, depth + 1),
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                cleanup_stmt_list(body, func_name, depth + 1)
+            }
             HirStmt::If {
                 then_body,
                 else_body,
@@ -274,6 +297,7 @@ pub(super) fn normalize_expr(expr: &mut HirExpr) {
             .or_else(|| recognize_mod_div_power_of_two(&current))
             .or_else(|| recognize_hi_lo_extract(&current))
             .or_else(|| recognize_wide_integer_recombine(&current))
+            .or_else(|| canonicalize_flag_intrinsics(&current))
             .or_else(|| normalize_boolean_logic(&current))
             .or_else(|| cleanup_arithmetic_wrappers(&current))
             .or_else(|| collapse_zero_offset_cast(&current));

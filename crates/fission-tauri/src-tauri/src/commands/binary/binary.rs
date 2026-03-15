@@ -39,8 +39,7 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
         };
 
         let sla_dir = find_sla_dir();
-        match fission_static::analysis::decomp::CachingDecompiler::new(&binary_arc, &sla_dir, 200)
-        {
+        match fission_static::analysis::decomp::CachingDecompiler::new(&binary_arc, &sla_dir, 200) {
             Ok(mut decomp) => {
                 let bin_ref = binary_arc.clone();
                 let compiler_id = bin_ref.get_ghidra_compiler_id();

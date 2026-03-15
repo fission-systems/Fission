@@ -68,14 +68,13 @@ fn rewrite_bitstream_stmt_list(
             continue;
         }
         match &mut stmts[idx] {
-            HirStmt::Block(body)
-            | HirStmt::While { body, .. }
-            | HirStmt::DoWhile { body, .. } => {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 changed |= rewrite_bitstream_stmt_list(body, state_roots, default_state);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= rewrite_bitstream_stmt_list(&mut case.body, state_roots, default_state);
+                    changed |=
+                        rewrite_bitstream_stmt_list(&mut case.body, state_roots, default_state);
                 }
                 changed |= rewrite_bitstream_stmt_list(default, state_roots, default_state);
             }
@@ -148,7 +147,8 @@ fn match_write_bits_pair(
 ) -> Option<(String, HirExpr, HirExpr, HirExpr)> {
     let (bitcount_key, value) = parse_write_bits_accumulator(first)?;
     let width = parse_bitcount_increment(second, &bitcount_key)?;
-    let state = infer_state_for_stmts(&[first.clone(), second.clone()], state_roots, default_state)?;
+    let state =
+        infer_state_for_stmts(&[first.clone(), second.clone()], state_roots, default_state)?;
     let call_target = if is_table_lookup_expr(&value) && is_table_lookup_expr(&width) {
         "EMIT_CODE"
     } else {
@@ -158,11 +158,7 @@ fn match_write_bits_pair(
 }
 
 fn parse_write_bits_accumulator(stmt: &HirStmt) -> Option<(String, HirExpr)> {
-    let HirStmt::Assign {
-        lhs,
-        rhs,
-    } = stmt
-    else {
+    let HirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
     let accum_key = lvalue_location_key(lhs)?;
@@ -207,11 +203,7 @@ fn parse_shifted_value<'a>(
 }
 
 fn parse_bitcount_increment(stmt: &HirStmt, bitcount_key: &str) -> Option<HirExpr> {
-    let HirStmt::Assign {
-        lhs,
-        rhs,
-    } = stmt
-    else {
+    let HirStmt::Assign { lhs, rhs } = stmt else {
         return None;
     };
     if lvalue_location_key(lhs).as_deref() != Some(bitcount_key) {
@@ -251,14 +243,17 @@ fn infer_state_for_stmts(
     None
 }
 
-fn infer_state_from_stmt(stmt: &HirStmt, state_roots: &HashMap<String, HirExpr>) -> Option<HirExpr> {
+fn infer_state_from_stmt(
+    stmt: &HirStmt,
+    state_roots: &HashMap<String, HirExpr>,
+) -> Option<HirExpr> {
     match stmt {
         HirStmt::Assign { lhs, rhs } => infer_state_from_lvalue(lhs, state_roots)
             .or_else(|| infer_state_from_expr(rhs, state_roots)),
-        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => infer_state_from_expr(expr, state_roots),
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
+            infer_state_from_expr(expr, state_roots)
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
             for stmt in body {
                 if let Some(state) = infer_state_from_stmt(stmt, state_roots) {
                     return Some(state);
@@ -273,7 +268,11 @@ fn infer_state_from_stmt(stmt: &HirStmt, state_roots: &HashMap<String, HirExpr>)
         } => infer_state_from_expr(cond, state_roots)
             .or_else(|| infer_state_for_stmts(then_body, state_roots, None))
             .or_else(|| infer_state_for_stmts(else_body, state_roots, None)),
-        HirStmt::Switch { expr, cases, default } => infer_state_from_expr(expr, state_roots).or_else(|| {
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => infer_state_from_expr(expr, state_roots).or_else(|| {
             for case in cases {
                 if let Some(state) = infer_state_for_stmts(&case.body, state_roots, None) {
                     return Some(state);
@@ -281,11 +280,18 @@ fn infer_state_from_stmt(stmt: &HirStmt, state_roots: &HashMap<String, HirExpr>)
             }
             infer_state_for_stmts(default, state_roots, None)
         }),
-        HirStmt::Label(_) | HirStmt::Goto(_) | HirStmt::Return(None) | HirStmt::Break | HirStmt::Continue => None,
+        HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(None)
+        | HirStmt::Break
+        | HirStmt::Continue => None,
     }
 }
 
-fn infer_state_from_lvalue(lhs: &HirLValue, state_roots: &HashMap<String, HirExpr>) -> Option<HirExpr> {
+fn infer_state_from_lvalue(
+    lhs: &HirLValue,
+    state_roots: &HashMap<String, HirExpr>,
+) -> Option<HirExpr> {
     match lhs {
         HirLValue::Var(var) => state_roots.get(var).cloned(),
         HirLValue::Deref { ptr, .. } => infer_state_from_expr(ptr, state_roots),
@@ -294,7 +300,10 @@ fn infer_state_from_lvalue(lhs: &HirLValue, state_roots: &HashMap<String, HirExp
     }
 }
 
-fn infer_state_from_expr(expr: &HirExpr, state_roots: &HashMap<String, HirExpr>) -> Option<HirExpr> {
+fn infer_state_from_expr(
+    expr: &HirExpr,
+    state_roots: &HashMap<String, HirExpr>,
+) -> Option<HirExpr> {
     match expr {
         HirExpr::Var(var) => state_roots.get(var).cloned(),
         HirExpr::Cast { expr, .. }
@@ -302,9 +311,8 @@ fn infer_state_from_expr(expr: &HirExpr, state_roots: &HashMap<String, HirExpr>)
         | HirExpr::Load { ptr: expr, .. }
         | HirExpr::PtrOffset { base: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => infer_state_from_expr(expr, state_roots),
-        HirExpr::Binary { lhs, rhs, .. } => {
-            infer_state_from_expr(lhs, state_roots).or_else(|| infer_state_from_expr(rhs, state_roots))
-        }
+        HirExpr::Binary { lhs, rhs, .. } => infer_state_from_expr(lhs, state_roots)
+            .or_else(|| infer_state_from_expr(rhs, state_roots)),
         HirExpr::Call { args, .. } => {
             for arg in args {
                 if let Some(state) = infer_state_from_expr(arg, state_roots) {
@@ -360,11 +368,7 @@ fn is_output_store_stmt(stmt: &HirStmt) -> bool {
 }
 
 fn is_pointer_increment_stmt(stmt: &HirStmt) -> bool {
-    let HirStmt::Assign {
-        lhs,
-        rhs,
-    } = stmt
-    else {
+    let HirStmt::Assign { lhs, rhs } = stmt else {
         return false;
     };
     let Some(lhs_key) = lvalue_location_key(lhs) else {
@@ -384,18 +388,15 @@ fn is_pointer_increment_stmt(stmt: &HirStmt) -> bool {
 }
 
 fn is_shift_byte_stmt(stmt: &HirStmt) -> bool {
-    let HirStmt::Assign {
-        lhs,
-        rhs,
-    } = stmt
-    else {
+    let HirStmt::Assign { lhs, rhs } = stmt else {
         return false;
     };
     let Some(lhs_key) = lvalue_location_key(lhs) else {
         return false;
     };
     let HirExpr::Binary {
-        op: HirBinaryOp::Shr | HirBinaryOp::Sar | HirBinaryOp::Shl | HirBinaryOp::Div | HirBinaryOp::Mul,
+        op:
+            HirBinaryOp::Shr | HirBinaryOp::Sar | HirBinaryOp::Shl | HirBinaryOp::Div | HirBinaryOp::Mul,
         lhs,
         rhs,
         ..
@@ -411,11 +412,7 @@ fn is_shift_byte_stmt(stmt: &HirStmt) -> bool {
 }
 
 fn is_bitcount_adjust_stmt(stmt: &HirStmt) -> bool {
-    let HirStmt::Assign {
-        lhs,
-        rhs,
-    } = stmt
-    else {
+    let HirStmt::Assign { lhs, rhs } = stmt else {
         return false;
     };
     let Some(lhs_key) = lvalue_location_key(lhs) else {

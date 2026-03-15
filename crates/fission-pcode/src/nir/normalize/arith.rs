@@ -4,6 +4,10 @@ pub(super) fn canonicalize_integer_expr(expr: &HirExpr) -> Option<HirExpr> {
     canonicalize_cast_expr(expr)
 }
 
+pub(super) fn canonicalize_flag_intrinsics(expr: &HirExpr) -> Option<HirExpr> {
+    canonicalize_flag_intrinsic_call(expr).or_else(|| canonicalize_sborrow_compare(expr))
+}
+
 pub(super) fn recognize_mod_div_power_of_two(expr: &HirExpr) -> Option<HirExpr> {
     normalize_signed_power_of_two_mod(expr)
         .or_else(|| normalize_unsigned_power_of_two_mod(expr))
@@ -113,7 +117,10 @@ pub(super) fn recognize_wide_integer_recombine(expr: &HirExpr) -> Option<HirExpr
     };
     let high = extract_high_part(hi_expr, *shift_amount, total_bits)?;
     let low = extract_low_part(rhs, *shift_amount)?;
-    if high.source != low.source || high.width_bits != low.width_bits || high.shift_bits != low.shift_bits {
+    if high.source != low.source
+        || high.width_bits != low.width_bits
+        || high.shift_bits != low.shift_bits
+    {
         return None;
     }
     let source_ty = expr_type(&high.source);
@@ -272,7 +279,10 @@ fn canonicalize_cast_expr(expr: &HirExpr) -> Option<HirExpr> {
 }
 
 fn should_preserve_non_scalar_cast(ty: &NirType) -> bool {
-    matches!(ty, NirType::Ptr(_) | NirType::Aggregate { .. } | NirType::Float { .. })
+    matches!(
+        ty,
+        NirType::Ptr(_) | NirType::Aggregate { .. } | NirType::Float { .. }
+    )
 }
 
 fn scalar_cast_signature(ty: &NirType) -> Option<(u32, bool)> {
@@ -368,6 +378,166 @@ pub(super) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SignedDiffSignTest {
+    Negative,
+    Positive,
+}
+
+fn canonicalize_flag_intrinsic_call(expr: &HirExpr) -> Option<HirExpr> {
+    match expr {
+        HirExpr::Call { target, args, .. } if target == "__carry" => {
+            canonicalize_carry_intrinsic_call(args)
+        }
+        HirExpr::Call { target, args, .. } if target == "__scarry" || target == "__sborrow" => {
+            canonicalize_zero_fold_flag_call(args)
+        }
+        _ => None,
+    }
+}
+
+fn canonicalize_carry_intrinsic_call(args: &[HirExpr]) -> Option<HirExpr> {
+    let [lhs, rhs] = args else {
+        return None;
+    };
+    let HirExpr::Const(value, _) = rhs else {
+        return None;
+    };
+    if *value == 0 {
+        return Some(bool_false_expr());
+    }
+    let bits = int_type_bits(&expr_type(rhs)).or_else(|| int_type_bits(&expr_type(lhs)))?;
+    let threshold = wrap_negated_const(*value, bits)?;
+    Some(HirExpr::Binary {
+        op: HirBinaryOp::Le,
+        lhs: Box::new(HirExpr::Const(
+            threshold,
+            NirType::Int {
+                bits,
+                signed: false,
+            },
+        )),
+        rhs: Box::new(lhs.clone()),
+        ty: NirType::Bool,
+    })
+}
+
+fn canonicalize_zero_fold_flag_call(args: &[HirExpr]) -> Option<HirExpr> {
+    let [_, rhs] = args else {
+        return None;
+    };
+    is_zero_const(rhs).then_some(bool_false_expr())
+}
+
+fn canonicalize_sborrow_compare(expr: &HirExpr) -> Option<HirExpr> {
+    let HirExpr::Binary {
+        op: op @ (HirBinaryOp::Eq | HirBinaryOp::Ne),
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+
+    let (a, b, sign_test) = if let Some((a, b)) = match_sborrow_call(lhs) {
+        (a, b, match_signed_diff_sign_test(rhs, a, b)?)
+    } else if let Some((a, b)) = match_sborrow_call(rhs) {
+        (a, b, match_signed_diff_sign_test(lhs, a, b)?)
+    } else {
+        return None;
+    };
+
+    let (cmp_lhs, cmp_rhs, cmp_op) = match (op, sign_test) {
+        (HirBinaryOp::Ne, SignedDiffSignTest::Negative) => (a.clone(), b.clone(), HirBinaryOp::SLt),
+        (HirBinaryOp::Ne, SignedDiffSignTest::Positive) => (b.clone(), a.clone(), HirBinaryOp::SLt),
+        (HirBinaryOp::Eq, SignedDiffSignTest::Positive) => (a.clone(), b.clone(), HirBinaryOp::SLe),
+        (HirBinaryOp::Eq, SignedDiffSignTest::Negative) => (b.clone(), a.clone(), HirBinaryOp::SLe),
+        _ => return None,
+    };
+
+    Some(HirExpr::Binary {
+        op: cmp_op,
+        lhs: Box::new(cmp_lhs),
+        rhs: Box::new(cmp_rhs),
+        ty: NirType::Bool,
+    })
+}
+
+fn match_sborrow_call(expr: &HirExpr) -> Option<(&HirExpr, &HirExpr)> {
+    let HirExpr::Call { target, args, .. } = expr else {
+        return None;
+    };
+    if target != "__sborrow" {
+        return None;
+    }
+    let [lhs, rhs] = args.as_slice() else {
+        return None;
+    };
+    Some((lhs, rhs))
+}
+
+fn match_signed_diff_sign_test(
+    expr: &HirExpr,
+    a: &HirExpr,
+    b: &HirExpr,
+) -> Option<SignedDiffSignTest> {
+    let HirExpr::Binary {
+        op: HirBinaryOp::SLt,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if is_zero_const(rhs) && matches_signed_difference(lhs, a, b) {
+        return Some(SignedDiffSignTest::Negative);
+    }
+    if is_zero_const(lhs) && matches_signed_difference(rhs, a, b) {
+        return Some(SignedDiffSignTest::Positive);
+    }
+    None
+}
+
+fn matches_signed_difference(expr: &HirExpr, a: &HirExpr, b: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::Sub,
+            lhs,
+            rhs,
+            ..
+        } => lhs.as_ref() == a && rhs.as_ref() == b,
+        HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs,
+            rhs,
+            ..
+        } => lhs.as_ref() == a && matches_negated_expr(rhs, b),
+        _ => false,
+    }
+}
+
+fn matches_negated_expr(expr: &HirExpr, inner: &HirExpr) -> bool {
+    match expr {
+        HirExpr::Unary {
+            op: HirUnaryOp::Neg,
+            expr,
+            ..
+        } => expr.as_ref() == inner,
+        HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => {
+            (lhs.as_ref() == inner && is_negative_one_const(rhs))
+                || (rhs.as_ref() == inner && is_negative_one_const(lhs))
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Binary {
@@ -391,7 +561,10 @@ pub(super) fn canonicalize_condition_expr(expr: &HirExpr) -> Option<HirExpr> {
 }
 
 fn is_truthy_condition_type(ty: &NirType) -> bool {
-    matches!(ty, NirType::Unknown | NirType::Bool | NirType::Int { .. } | NirType::Ptr(_))
+    matches!(
+        ty,
+        NirType::Unknown | NirType::Bool | NirType::Int { .. } | NirType::Ptr(_)
+    )
 }
 
 fn normalize_unsigned_power_of_two_mod(expr: &HirExpr) -> Option<HirExpr> {
@@ -793,10 +966,13 @@ pub(super) fn collapse_zero_offset_cast(expr: &HirExpr) -> Option<HirExpr> {
             index,
             elem_ty,
         } if matches!(index.as_ref(), HirExpr::Const(0, _))
-            && !matches!(base.as_ref(), HirExpr::Var(_)) => Some(HirExpr::Load {
-            ptr: base.clone(),
-            ty: elem_ty.clone(),
-        }),
+            && !matches!(base.as_ref(), HirExpr::Var(_)) =>
+        {
+            Some(HirExpr::Load {
+                ptr: base.clone(),
+                ty: elem_ty.clone(),
+            })
+        }
         _ => None,
     }
 }
@@ -915,6 +1091,14 @@ fn is_one_const(expr: &HirExpr) -> bool {
     matches!(expr, HirExpr::Const(1, _))
 }
 
+fn is_negative_one_const(expr: &HirExpr) -> bool {
+    matches!(expr, HirExpr::Const(-1, _))
+}
+
+fn bool_false_expr() -> HirExpr {
+    HirExpr::Const(0, NirType::Bool)
+}
+
 fn is_integer_type(ty: &NirType) -> bool {
     matches!(ty, NirType::Bool | NirType::Int { .. })
 }
@@ -934,6 +1118,20 @@ fn full_mask_for_bits(bits: u32) -> Option<i64> {
         63 => Some(i64::MAX),
         _ => None,
     }
+}
+
+fn wrap_negated_const(value: i64, bits: u32) -> Option<i64> {
+    if bits == 0 || bits > 64 {
+        return None;
+    }
+    let mask = if bits == 64 {
+        u128::from(u64::MAX)
+    } else {
+        (1_u128 << bits) - 1
+    };
+    let unsigned = (value as i128 as u128) & mask;
+    let negated = unsigned.wrapping_neg() & mask;
+    Some(negated as i64)
 }
 
 fn full_mask_for_type(ty: &NirType) -> Option<i64> {

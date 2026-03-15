@@ -646,7 +646,6 @@ impl PcodeFunction {
     /// Serialize to flat binary format.
     pub fn to_flat_bytes(&self) -> Vec<u8> {
         const MAGIC: &[u8; 4] = b"FPCD";
-        const VN_SIZE: usize = 32;
 
         let mut out = Vec::new();
         out.extend_from_slice(MAGIC);

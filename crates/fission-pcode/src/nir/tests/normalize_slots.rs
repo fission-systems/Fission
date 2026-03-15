@@ -45,8 +45,8 @@ fn stack_slot_recovery_names_locals() {
         }],
     };
 
-    let code = render_mlil_preview(&func, "stack_fn", 0x1000, &preview_options())
-        .expect("preview render");
+    let code =
+        render_mlil_preview(&func, "stack_fn", 0x1000, &preview_options()).expect("preview render");
     assert!(code.contains("local_10"));
     assert!(code.contains("return local_10;"));
 }
@@ -199,7 +199,10 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
             .any(|binding| binding.name == "slot_20" && binding.initializer.is_some()),
         "{rendered}"
     );
-    assert!(rendered.contains("slot_20[idx] + slot_20[idx]"), "{rendered}");
+    assert!(
+        rendered.contains("slot_20[idx] + slot_20[idx]"),
+        "{rendered}"
+    );
 }
 
 #[test]
@@ -320,7 +323,12 @@ fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
     normalize_hir_function(&mut func);
     let rendered = print_hir_function(&func);
     assert!(!rendered.contains("slot_30["), "{rendered}");
-    assert!(!func.locals.iter().any(|binding| binding.name.starts_with("slot_30")));
+    assert!(
+        !func
+            .locals
+            .iter()
+            .any(|binding| binding.name.starts_with("slot_30"))
+    );
 }
 
 #[test]
@@ -457,5 +465,205 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
 
     normalize_hir_function(&mut func);
     let rendered = print_hir_function(&func);
-    assert!(rendered.contains("slot_24[idx] + slot_24[idx]"), "{rendered}");
+    assert!(
+        rendered.contains("slot_24[idx] + slot_24[idx]"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
+    let uint_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
+    let idx = HirExpr::Var("idx".to_string());
+    let slot_ptr = HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Var("esp".to_string())),
+        rhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(idx.clone()),
+            rhs: Box::new(HirExpr::Const(
+                4,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }),
+        ty: NirType::Ptr(Box::new(NirType::Unknown)),
+    };
+    let mut body = Vec::new();
+    for i in 0..230 {
+        body.push(HirStmt::Expr(HirExpr::Const(
+            i,
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        )));
+    }
+    body.push(HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Load {
+            ptr: Box::new(slot_ptr.clone()),
+            ty: uint_ty.clone(),
+        }),
+        rhs: Box::new(HirExpr::Load {
+            ptr: Box::new(slot_ptr),
+            ty: uint_ty.clone(),
+        }),
+        ty: uint_ty.clone(),
+    })));
+    let mut func = HirFunction {
+        name: "large_slot_fn".to_string(),
+        params: vec![],
+        locals: vec![],
+        return_type: uint_ty,
+        body,
+    };
+
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    assert!(rendered.contains("slot_0[idx] + slot_0[idx]"), "{rendered}");
+}
+
+#[test]
+fn normalize_hir_function_removes_write_only_non_temp_locals() {
+    let mut func = HirFunction {
+        name: "dead_local_clobber_fn".to_string(),
+        params: vec![NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            surface_type_name: None,
+            initializer: None,
+        }],
+        locals: vec![
+            NirBinding {
+                name: "local_c".to_string(),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                surface_type_name: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "param_fffffffc".to_string(),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                surface_type_name: None,
+                initializer: None,
+            },
+        ],
+        return_type: NirType::Int {
+            bits: 32,
+            signed: false,
+        },
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("local_c".to_string()),
+                rhs: HirExpr::Const(
+                    4198578,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("param_fffffffc".to_string()),
+                rhs: HirExpr::Const(
+                    0,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+            HirStmt::Return(Some(HirExpr::Var("param_1".to_string()))),
+        ],
+    };
+
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    assert!(!rendered.contains("local_c ="), "{rendered}");
+    assert!(!rendered.contains("param_fffffffc ="), "{rendered}");
+    assert!(!rendered.contains("uint local_c;"), "{rendered}");
+    assert!(!rendered.contains("uint param_fffffffc;"), "{rendered}");
+    assert!(rendered.contains("return param_1;"), "{rendered}");
+}
+
+#[test]
+fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
+    let mut func = HirFunction {
+        name: "keep_local_clobber_fn".to_string(),
+        params: vec![],
+        locals: vec![
+            NirBinding {
+                name: "local_c".to_string(),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                surface_type_name: None,
+                initializer: None,
+            },
+            NirBinding {
+                name: "local_10".to_string(),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+                surface_type_name: None,
+                initializer: None,
+            },
+        ],
+        return_type: NirType::Int {
+            bits: 32,
+            signed: false,
+        },
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("local_c".to_string()),
+                rhs: HirExpr::Call {
+                    target: "sub_401000".to_string(),
+                    args: vec![],
+                    ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+            },
+            HirStmt::Assign {
+                lhs: HirLValue::Var("local_10".to_string()),
+                rhs: HirExpr::Const(
+                    7,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            },
+            HirStmt::Return(Some(HirExpr::Var("local_10".to_string()))),
+        ],
+    };
+
+    normalize_hir_function(&mut func);
+    let rendered = print_hir_function(&func);
+    assert!(rendered.contains("local_c = sub_401000();"), "{rendered}");
+    assert!(
+        rendered.contains("return 7;") || rendered.contains("return local_10;"),
+        "{rendered}"
+    );
 }

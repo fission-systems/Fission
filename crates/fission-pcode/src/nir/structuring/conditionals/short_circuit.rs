@@ -1,7 +1,7 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(super) fn try_lower_short_circuit_if(
+    pub(in crate::nir::structuring) fn try_lower_short_circuit_if(
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
@@ -17,10 +17,11 @@ impl<'a> PreviewBuilder<'a> {
         Ok(None)
     }
 
-    pub(super) fn try_lower_short_circuit_and(
+    pub(in crate::nir::structuring) fn try_lower_short_circuit_and(
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let diag = structuring_diag_enabled();
         let mut conds = Vec::new();
         let mut current_idx = idx;
         let mut join_idx: Option<usize> = None;
@@ -42,6 +43,7 @@ impl<'a> PreviewBuilder<'a> {
             }
             let current_join_idx = self
                 .find_block_index_by_address(true_target)
+                .filter(|join_idx| *join_idx > current_idx)
                 .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
             if let Some(join_idx) = join_idx {
                 if join_idx != current_join_idx {
@@ -64,6 +66,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(join_idx) = join_idx else {
                 return Ok(None);
             };
+            self.log_short_circuit_cache(diag, "and", next_idx, LinearExit::Join(join_idx));
             let Some((then_body, skip_to)) =
                 self.lower_linear_body(next_idx, LinearExit::Join(join_idx))?
             else {
@@ -83,10 +86,11 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn try_lower_short_circuit_and_else(
+    pub(in crate::nir::structuring) fn try_lower_short_circuit_and_else(
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let diag = structuring_diag_enabled();
         let mut conds = Vec::new();
         let mut current_idx = idx;
         let mut else_idx: Option<usize> = None;
@@ -134,12 +138,14 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             };
             let then_idx = next_idx;
-            let Some(exit) = self.shared_linear_exit(then_idx, else_idx)? else {
+            let Some(exit) = self.shared_forward_linear_exit(idx, then_idx, else_idx)? else {
                 return Ok(None);
             };
+            self.log_short_circuit_cache(diag, "and_else", then_idx, exit);
             let Some((then_body, then_skip)) = self.lower_linear_body(then_idx, exit)? else {
                 return Ok(None);
             };
+            self.log_short_circuit_cache(diag, "and_else", else_idx, exit);
             let Some((else_body, else_skip)) = self.lower_linear_body(else_idx, exit)? else {
                 return Ok(None);
             };
@@ -161,10 +167,11 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    pub(super) fn try_lower_short_circuit_or(
+    pub(in crate::nir::structuring) fn try_lower_short_circuit_or(
         &mut self,
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let diag = structuring_diag_enabled();
         let LoweredTerminator::Cond {
             cond,
             true_target,
@@ -181,10 +188,8 @@ impl<'a> PreviewBuilder<'a> {
         }
         let body_idx = self
             .find_block_index_by_address(true_target)
+            .filter(|body_idx| *body_idx > idx)
             .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
-        if body_idx <= idx {
-            return Ok(None);
-        }
 
         let mut conds = vec![cond];
         loop {
@@ -195,9 +200,11 @@ impl<'a> PreviewBuilder<'a> {
             );
             if !is_conditional_chain {
                 let false_entry_idx = next_idx;
-                let Some(exit) = self.shared_linear_exit(body_idx, false_entry_idx)? else {
+                let Some(exit) = self.shared_forward_linear_exit(idx, body_idx, false_entry_idx)?
+                else {
                     return Ok(None);
                 };
+                self.log_short_circuit_cache(diag, "or", false_entry_idx, exit);
                 let Some((false_body, false_skip)) =
                     self.lower_linear_body(false_entry_idx, exit)?
                 else {
@@ -206,9 +213,8 @@ impl<'a> PreviewBuilder<'a> {
                 if !false_body.is_empty() {
                     return Ok(None);
                 }
-                let Some((then_body, then_skip)) =
-                    self.lower_linear_body(body_idx, exit)?
-                else {
+                self.log_short_circuit_cache(diag, "or", body_idx, exit);
+                let Some((then_body, then_skip)) = self.lower_linear_body(body_idx, exit)? else {
                     return Ok(None);
                 };
                 if conds.len() < 2 {
@@ -229,9 +235,7 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             let LoweredTerminator::Cond {
-                cond,
-                false_target,
-                ..
+                cond, false_target, ..
             } = self.lower_block_terminator(next_idx)?
             else {
                 return Ok(None);
@@ -244,137 +248,6 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             }
             next_idx = chain_next_idx;
-        }
-    }
-
-    pub(super) fn try_lower_if(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
-        if !cond_prefix
-            .iter()
-            .all(Self::is_trivial_structuring_stmt)
-        {
-            return Ok(None);
-        }
-        let Some(next_idx) = self.fallthrough_index(idx) else {
-            return Ok(None);
-        };
-        let LoweredTerminator::Cond {
-            cond,
-            true_target,
-            false_target,
-        } = self.lower_block_terminator(idx)?
-        else {
-            return Ok(None);
-        };
-
-        let next_addr = self.pcode.blocks[next_idx].start_address;
-
-        let (cond, body_idx, exit) = if true_target == next_addr {
-            let exit = if let Some(join_addr) = false_target {
-                let join_idx = self
-                    .find_block_index_by_address(join_addr)
-                    .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
-                LinearExit::Join(join_idx)
-            } else {
-                self.linear_exit(next_idx)?
-                    .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?
-            };
-            (cond, next_idx, exit)
-        } else if false_target == Some(next_addr) {
-            let join_idx = self
-                .find_block_index_by_address(true_target)
-                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
-            (negate_expr(cond), next_idx, LinearExit::Join(join_idx))
-        } else {
-            return Ok(None);
-        };
-
-        let Some((body, skip_to)) = self.lower_linear_body(body_idx, exit)? else {
-            return Ok(None);
-        };
-        let stmt = HirStmt::If {
-            cond,
-            then_body: body,
-            else_body: Vec::new(),
-        };
-        if cond_prefix.is_empty() {
-            Ok(Some((stmt, skip_to)))
-        } else {
-            let mut wrapped = cond_prefix;
-            wrapped.push(stmt);
-            Ok(Some((HirStmt::Block(wrapped), skip_to)))
-        }
-    }
-
-    pub(super) fn try_lower_if_else(
-        &mut self,
-        idx: usize,
-    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
-        let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
-        if !cond_prefix
-            .iter()
-            .all(Self::is_trivial_structuring_stmt)
-        {
-            return Ok(None);
-        }
-        if idx + 2 >= self.pcode.blocks.len() {
-            return Ok(None);
-        }
-        let LoweredTerminator::Cond {
-            cond,
-            true_target,
-            false_target: Some(false_target),
-        } = self.lower_block_terminator(idx)?
-        else {
-            return Ok(None);
-        };
-
-        let Some(next_idx) = self.fallthrough_index(idx) else {
-            return Ok(None);
-        };
-        let next_addr = self.pcode.blocks[next_idx].start_address;
-
-        let (cond, then_idx, else_idx) = if true_target == next_addr {
-            let Some(else_idx) = self.find_block_index_by_address(false_target) else {
-                return Ok(None);
-            };
-            (cond, next_idx, else_idx)
-        } else if false_target == next_addr {
-            let Some(then_idx) = self.find_block_index_by_address(true_target) else {
-                return Ok(None);
-            };
-            (negate_expr(cond), then_idx, next_idx)
-        } else {
-            return Ok(None);
-        };
-
-        let Some(exit) = self.shared_linear_exit(then_idx, else_idx)? else {
-            return Ok(None);
-        };
-        let Some((then_body, then_skip)) = self.lower_linear_body(then_idx, exit)? else {
-            return Ok(None);
-        };
-        let Some((else_body, else_skip)) = self.lower_linear_body(else_idx, exit)? else {
-            return Ok(None);
-        };
-        let skip_to = match exit {
-            LinearExit::Join(join_idx) => join_idx,
-            LinearExit::Return | LinearExit::End => then_skip.max(else_skip),
-        };
-        let stmt = HirStmt::If {
-            cond,
-            then_body,
-            else_body,
-        };
-        if cond_prefix.is_empty() {
-            Ok(Some((stmt, skip_to)))
-        } else {
-            let mut wrapped = cond_prefix;
-            wrapped.push(stmt);
-            Ok(Some((HirStmt::Block(wrapped), skip_to)))
         }
     }
 }
