@@ -275,6 +275,10 @@ impl PostProcessor {
             processed = self.demangle_swift_symbols(&processed);
         }
 
+        processed = self
+            .normalize_pointer_offset_aliases_cow(&processed)
+            .into_owned();
+
         // Apply field offset replacement if we have type info
         if self.options.field_offsets && !self.inferred_types.is_empty() {
             processed = self.replace_field_offsets(&processed);

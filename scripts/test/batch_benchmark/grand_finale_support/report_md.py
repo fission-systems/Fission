@@ -28,6 +28,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Cast chains (Fission/Ghidra): {report['global']['cast_chain_counts']['fission']} / {report['global']['cast_chain_counts']['ghidra']}",
         f"- MLIL preview success / residue / cast density: {report['global']['mlil_preview_success']} / {report['global']['mlil_preview_residue']} / {report['global']['mlil_preview_cast_density']}",
         f"- MLIL preview helper calls: {report['global'].get('mlil_preview_helper_call_total', 0)} {report['global'].get('mlil_preview_helper_call_counts', {})}",
+        f"- Legacy-needed functions: {report['global'].get('legacy_needed_count', 0)}",
         "",
         "## Preview vs Legacy",
         "",
@@ -67,6 +68,19 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 f"score={offender['residue_score']}, raw_pointer_fallback={offender['raw_pointer_fallback']}, "
                 f"single_assign_temps={offender['single_assign_temp_total']}, "
                 f"top_names={offender['top_residue_names']}"
+            )
+    lines.append("")
+
+    lines.append("## Legacy Needed")
+    if not report["global"].get("legacy_needed_functions"):
+        lines.append("- none")
+    else:
+        for item in report["global"]["legacy_needed_functions"]:
+            lines.append(
+                f"- `{item['binary']}` `{item['address']}` `{item['name']}`: "
+                f"preview_engine={item.get('preview_engine_used')}, "
+                f"fallback={item.get('preview_fallback_kind')}, "
+                f"failure={item.get('preview_failure_kind')}"
             )
     lines.append("")
 
@@ -115,6 +129,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
             f"{binary.get('preview_goto_count', 0)} / "
             f"{binary.get('preview_temp_surface_count', 0)}"
         )
+        lines.append(f"- Legacy-needed functions: {binary.get('legacy_needed_count', 0)}")
         if binary["top_residue_offenders"]:
             lines.append("- Top residue offenders:")
             for offender in binary["top_residue_offenders"]:
@@ -123,6 +138,15 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                     f"score={offender['residue_score']}, raw_pointer_fallback={offender['raw_pointer_fallback']}, "
                     f"single_assign_temps={offender['single_assign_temp_total']}, "
                     f"top_names={offender['top_residue_names']}"
+                )
+        if binary.get("legacy_needed_functions"):
+            lines.append("- Legacy-needed entries:")
+            for item in binary["legacy_needed_functions"]:
+                lines.append(
+                    f"  - `{item['address']}` `{item['name']}`: "
+                    f"preview_engine={item.get('preview_engine_used')}, "
+                    f"fallback={item.get('preview_fallback_kind')}, "
+                    f"failure={item.get('preview_failure_kind')}"
                 )
         lines.append("")
 

@@ -11,6 +11,7 @@ from .metrics import (
     classify_failure_kind,
     collect_code_metrics,
     detect_embedded_failure,
+    extract_fallback_kind,
     normalize_address,
 )
 
@@ -137,6 +138,7 @@ def run_fission_function(
             "engine_used": func.get("engine_used", engine),
             "fell_back": bool(func.get("fell_back", False)),
             "fallback_reason": func.get("fallback_reason"),
+            "fallback_kind": extract_fallback_kind(func.get("fallback_reason")),
         }
     entry = {
         "success": True,
@@ -149,6 +151,7 @@ def run_fission_function(
         "engine_used": func.get("engine_used", engine),
         "fell_back": bool(func.get("fell_back", False)),
         "fallback_reason": func.get("fallback_reason"),
+        "fallback_kind": extract_fallback_kind(func.get("fallback_reason")),
     }
     if failure := detect_embedded_failure(code):
         entry["success"] = False

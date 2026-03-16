@@ -545,44 +545,8 @@ fn classify_preview_failure(reason: &str) -> &'static str {
     let lower = reason.to_ascii_lowercase();
     if lower.contains("preview_timeout") || lower.contains("worker timed out") {
         "preview_timeout"
-    } else if lower.contains("unsupported architecture") || lower.contains("supports pe x64 only") {
-        "unsupported_arch"
-    } else if lower.contains("unsupported branch target") {
-        "unsupported_cfg_branch_target"
-    } else if lower.contains("unsupported region shape") {
-        "unsupported_cfg_region_shape"
-    } else if lower.contains("unsupported phi join") {
-        "unsupported_cfg_phi_join"
-    } else if lower.contains("unsupported indirect call region") {
-        "unsupported_cfg_indirect_call_region"
-    } else if lower.contains("unsupported control flow") {
-        "unsupported_cfg"
-    } else if lower.contains("multiequal") {
-        "unsupported_expr_multiequal"
-    } else if lower.contains("unsupported address materialization") {
-        "unsupported_expr_address_materialization"
-    } else if lower.contains("unsupported indirect value source") {
-        "unsupported_expr_indirect_value_source"
-    } else if lower.contains("unsupported piece/subpiece shape") {
-        "unsupported_expr_piece_shape"
-    } else if lower.contains("unsupported ptr arithmetic shape") {
-        "unsupported_expr_ptr_arithmetic"
-    } else if lower.contains("unsupported memory-backed varnode") {
-        "unsupported_expr_memory_backed_varnode"
-    } else if lower.contains("value lowering failed on varnode") {
-        "unsupported_expr_varnode_lowering"
-    } else if lower.contains("loop") || lower.contains("dowhile") || lower.contains("while") {
-        "unsupported_loop_shape"
-    } else if lower.contains("switch") {
-        "unsupported_switch_shape"
-    } else if lower.contains("ptr") || lower.contains("load") || lower.contains("store") {
-        "unsupported_memory_pattern"
-    } else if lower.contains("multiequal") || lower.contains("phi") {
-        "unsupported_phi_merge"
-    } else if lower.contains("call") {
-        "unsupported_call_boundary"
     } else {
-        "unsupported_expr"
+        "preview_unsupported"
     }
 }
 
@@ -663,8 +627,10 @@ pub fn select_preview_output<S: PreviewSource>(
                 Ok(None) => Ok(PreviewSelection {
                     preview_code: None,
                     engine_used: PreviewEngineMode::Legacy,
-                    fell_back: false,
-                    fallback_reason: None,
+                    fell_back: true,
+                    fallback_reason: Some(classified_preview_error(
+                        "mlil-preview skipped: function not supported by preview builder",
+                    )),
                 }),
                 Err(err) => Ok(PreviewSelection {
                     preview_code: None,
@@ -707,7 +673,7 @@ pub fn rescue_preview_output<S: PreviewSource>(
             engine_used: PreviewEngineMode::MlilPreview,
             fell_back: true,
             fallback_reason: Some(format!(
-                "legacy type failure rescued by mlil-preview: {error}"
+                "legacy_fallback: legacy type failure rescued by mlil-preview: {error}"
             )),
         })),
         Ok(None) => Ok(None),

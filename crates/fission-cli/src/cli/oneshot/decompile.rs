@@ -1,18 +1,20 @@
 use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::common::{
-    EngineMode, apply_profile, init_decompiler, resolve_compiler_id, resolve_engine_mode,
-    resolve_profile,
+    EngineMode, apply_profile, fallback_reason_with_kind, init_decompiler, resolve_compiler_id,
+    resolve_engine_mode, resolve_profile,
 };
 use crate::cli::oneshot::disasm::render_function_disassembly_text;
 use crate::cli::output::OutputSilencer;
 use fission_core::FissionError;
 use fission_ffi::DecompilerNative;
+use fission_loader::loader::types::{InferredFieldInfo, InferredTypeInfo};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decomp::postprocess::PostProcessor;
 use fission_static::analysis::decomp::{
     PrepareOptions, PrepareTimings, PreviewEngineMode, prepare_native_decompiler_for_binary,
     rescue_preview_output, select_preview_output, serialize_win_api_signatures_json,
 };
+use std::env;
 use std::fs;
 use std::io::{self, Write};
 use tracing::warn;
@@ -80,20 +82,16 @@ fn should_use_assembly_fallback(error: &str) -> bool {
         || lower.contains("ghidra lowlevelerror")
 }
 
-fn classify_fallback_kind(error: &str) -> &'static str {
+fn classify_native_failure_kind(error: &str) -> &'static str {
     let lower = error.to_ascii_lowercase();
-    if lower.contains("duplicate variablepiece") {
-        "type"
-    } else if lower.contains("control flow analysis error") || lower.contains("followflow") {
-        "control_flow"
-    } else if lower.contains("preview_timeout") {
+    if lower.contains("preview_timeout") {
         "preview_timeout"
     } else if lower.contains("could not find op at target address")
         || lower.contains("ghidra lowlevelerror")
     {
-        "native_pcode"
+        "native_pcode_failure"
     } else {
-        "other"
+        "legacy_fallback"
     }
 }
 
@@ -106,7 +104,7 @@ fn make_assembly_fallback(
     if !should_use_assembly_fallback(error) {
         return None;
     }
-    let error_class = classify_fallback_kind(error);
+    let error_class = classify_native_failure_kind(error);
     let asm = render_function_disassembly_text(binary, binary_data, func.address).ok()?;
     Some(format!(
         "// Assembly fallback: {}\n// Function: {} @ 0x{:x}\n// Error class: {}\n\n{}",
@@ -144,18 +142,123 @@ struct RenderedCode {
     fallback_reason: Option<String>,
 }
 
+fn inferred_type_identity(ty: &InferredTypeInfo) -> (&str, u64, &str) {
+    (&ty.name, ty.metadata_address, &ty.mangled_name)
+}
+
+fn merge_type_fields(existing: &mut Vec<InferredFieldInfo>, incoming: Vec<InferredFieldInfo>) {
+    for field in incoming {
+        if let Some(current) = existing
+            .iter_mut()
+            .find(|current| current.offset == field.offset)
+        {
+            if current.name.is_empty() && !field.name.is_empty() {
+                current.name = field.name.clone();
+            }
+            if current.type_name.is_empty() && !field.type_name.is_empty() {
+                current.type_name = field.type_name.clone();
+            }
+            if current.size == 0 && field.size != 0 {
+                current.size = field.size;
+            }
+            continue;
+        }
+        existing.push(field);
+    }
+}
+
+fn merge_inferred_types(
+    function_types: Vec<InferredTypeInfo>,
+    loader_types: &[InferredTypeInfo],
+) -> Vec<InferredTypeInfo> {
+    let mut merged: Vec<InferredTypeInfo> = Vec::new();
+    for ty in function_types
+        .into_iter()
+        .chain(loader_types.iter().cloned())
+    {
+        if let Some(existing) = merged.iter_mut().find(|current| {
+            let (name, metadata_address, mangled_name) = inferred_type_identity(current);
+            let (incoming_name, incoming_metadata, incoming_mangled) = inferred_type_identity(&ty);
+            metadata_address != 0 && incoming_metadata != 0 && metadata_address == incoming_metadata
+                || (!mangled_name.is_empty()
+                    && !incoming_mangled.is_empty()
+                    && mangled_name == incoming_mangled)
+                || (!name.is_empty() && !incoming_name.is_empty() && name == incoming_name)
+        }) {
+            if existing.kind.is_empty() && !ty.kind.is_empty() {
+                existing.kind = ty.kind.clone();
+            }
+            if existing.mangled_name.is_empty() && !ty.mangled_name.is_empty() {
+                existing.mangled_name = ty.mangled_name.clone();
+            }
+            if existing.metadata_address == 0 && ty.metadata_address != 0 {
+                existing.metadata_address = ty.metadata_address;
+            }
+            if existing.size == 0 && ty.size != 0 {
+                existing.size = ty.size;
+            }
+            merge_type_fields(&mut existing.fields, ty.fields);
+            continue;
+        }
+        merged.push(ty);
+    }
+    merged
+}
+
+fn type_diag_enabled() -> bool {
+    env::var_os("FISSION_TYPE_DIAG").is_some()
+}
+
+fn log_type_diag(
+    address: u64,
+    function_types: &[InferredTypeInfo],
+    loader_types: &[InferredTypeInfo],
+    merged_types: &[InferredTypeInfo],
+) {
+    if !type_diag_enabled() {
+        return;
+    }
+
+    let count_fields =
+        |items: &[InferredTypeInfo]| -> usize { items.iter().map(|ty| ty.fields.len()).sum() };
+    let sample_names = |items: &[InferredTypeInfo]| -> String {
+        items
+            .iter()
+            .take(5)
+            .map(|ty| ty.name.as_str())
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    eprintln!(
+        "[TYPE-DIAG] addr=0x{:x} function_types={} function_fields={} loader_types={} loader_fields={} merged_types={} merged_fields={} samples=[{}]",
+        address,
+        function_types.len(),
+        count_fields(function_types),
+        loader_types.len(),
+        count_fields(loader_types),
+        merged_types.len(),
+        count_fields(merged_types),
+        sample_names(merged_types),
+    );
+}
+
 fn render_legacy_code(
+    address: u64,
     binary: &LoadedBinary,
     result: fission_ffi::DecompilationResult,
 ) -> (String, f64) {
+    let function_types = result.inferred_types;
+    let merged_types = merge_inferred_types(function_types.clone(), &binary.inferred_types);
+    log_type_diag(
+        address,
+        &function_types,
+        &binary.inferred_types,
+        &merged_types,
+    );
     let postprocessor = PostProcessor::new()
-        .with_inferred_types(
-            result
-                .inferred_types
-                .into_iter()
-                .chain(binary.inferred_types.iter().cloned())
-                .collect(),
-        )
+        .with_inferred_types(merged_types)
         .with_string_map(Some(binary.inner().string_map.clone()));
     let postprocess_start = std::time::Instant::now();
     let code = postprocessor.process(&result.code);
@@ -164,10 +267,11 @@ fn render_legacy_code(
 }
 
 fn legacy_rendered_code(
+    address: u64,
     binary: &LoadedBinary,
     result: fission_ffi::DecompilationResult,
 ) -> RenderedCode {
-    let (code, postprocess_sec) = render_legacy_code(binary, result);
+    let (code, postprocess_sec) = render_legacy_code(address, binary, result);
     RenderedCode {
         code,
         postprocess_sec,
@@ -212,9 +316,9 @@ fn decompile_code_with_profile(
             .is_some_and(|reason| reason.to_ascii_lowercase().contains("preview_timeout"))
     {
         return Err(FissionError::decompiler(
-            preview
-                .fallback_reason
-                .unwrap_or_else(|| "preview_timeout".to_string()),
+            preview.fallback_reason.unwrap_or_else(|| {
+                fallback_reason_with_kind("preview_timeout", "preview timed out")
+            }),
         ));
     }
 
@@ -241,7 +345,7 @@ fn decompile_code_with_profile(
             return Err(e);
         }
     };
-    let mut rendered = legacy_rendered_code(binary, result);
+    let mut rendered = legacy_rendered_code(address, binary, result);
     rendered.fell_back = preview.fell_back;
     rendered.fallback_reason = preview.fallback_reason;
     Ok(rendered)
@@ -332,7 +436,7 @@ fn run_sequential_decompilation<'a>(
                     make_assembly_fallback(binary, binary_data, func, &error_text)
                 {
                     if effective_json {
-                        let fallback_class = classify_fallback_kind(&error_text);
+                        let fallback_class = classify_native_failure_kind(&error_text);
                         let mut entry = serde_json::json!({
                             "address": format!("0x{:x}", func.address),
                             "name": func.name,
@@ -340,7 +444,7 @@ fn run_sequential_decompilation<'a>(
                             "engine_used": PreviewEngineMode::Legacy.as_str(),
                             "fell_back": true,
                             "fallback": "assembly",
-                            "fallback_reason": error_text,
+                            "fallback_reason": fallback_reason_with_kind("assembly_fallback", &error_text),
                             "fallback_class": fallback_class
                         });
                         if cli.benchmark {
@@ -370,7 +474,8 @@ fn run_sequential_decompilation<'a>(
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
                         "engine_used": PreviewEngineMode::Legacy.as_str(),
-                        "fell_back": false,
+                        "fell_back": true,
+                        "fallback_reason": fallback_reason_with_kind(classify_native_failure_kind(&error_text), &error_text),
                         "error": error_text
                     });
                     if cli.benchmark {
@@ -462,7 +567,10 @@ fn run_parallel_decompilation<'a>(
                                 postprocess_sec: 0.0,
                                 engine_used: PreviewEngineMode::Legacy.as_str(),
                                 fell_back: true,
-                                fallback_reason: Some(error_text),
+                                fallback_reason: Some(fallback_reason_with_kind(
+                                    "assembly_fallback",
+                                    &error_text,
+                                )),
                             }),
                             0.0,
                         )
@@ -551,7 +659,10 @@ fn run_parallel_decompilation<'a>(
                                     postprocess_sec: 0.0,
                                     engine_used: PreviewEngineMode::Legacy.as_str(),
                                     fell_back: true,
-                                    fallback_reason: Some(error_text),
+                                    fallback_reason: Some(fallback_reason_with_kind(
+                                        "assembly_fallback",
+                                        &error_text,
+                                    )),
                                 }),
                                 0.0,
                             )
@@ -646,7 +757,8 @@ fn run_parallel_decompilation<'a>(
                         "address": format!("0x{:x}", entry.address),
                         "name": entry.name,
                         "engine_used": PreviewEngineMode::Legacy.as_str(),
-                        "fell_back": false,
+                        "fell_back": true,
+                        "fallback_reason": fallback_reason_with_kind(classify_native_failure_kind(&e.to_string()), e.to_string()),
                         "error": e.to_string()
                     });
                     if cli.benchmark {
@@ -739,10 +851,15 @@ pub(super) fn run_decompilation(
     }
     if let Some(other) = unknown_engine {
         eprintln!(
-            "[!] Unknown --engine '{}', using auto (legacy|mlil-preview|auto)",
+            "[!] Unknown --engine '{}', using auto (mlil-preview|auto)",
             other
         );
         warn!(engine = other, "unknown decompilation engine, using auto");
+    }
+    if matches!(engine_mode, EngineMode::Legacy) && cli.verbose {
+        eprintln!(
+            "[*] '--engine legacy' is a hidden compatibility mode; preview-first remains the product default"
+        );
     }
     if deprecated_preview_alias && cli.verbose {
         eprintln!(

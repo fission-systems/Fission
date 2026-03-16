@@ -24,6 +24,19 @@ struct DecompileOutcome {
 }
 
 #[cfg(feature = "native_decomp")]
+fn normalize_gui_engine_mode(mode: DecompilerEngineMode) -> DecompilerEngineMode {
+    match mode {
+        DecompilerEngineMode::Legacy => DecompilerEngineMode::Auto,
+        other => other,
+    }
+}
+
+#[cfg(feature = "native_decomp")]
+fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
+    format!("{kind}: {}", detail.as_ref())
+}
+
+#[cfg(feature = "native_decomp")]
 fn decompile_with_engine(
     decomp: &mut fission_static::analysis::decomp::CachingDecompiler,
     binary: &LoadedBinary,
@@ -31,7 +44,7 @@ fn decompile_with_engine(
     name: &str,
     engine_mode: DecompilerEngineMode,
 ) -> Result<DecompileOutcome, CmdError> {
-    let preview_mode = match engine_mode {
+    let preview_mode = match normalize_gui_engine_mode(engine_mode) {
         DecompilerEngineMode::Legacy => PreviewEngineMode::Legacy,
         DecompilerEngineMode::MlilPreview => PreviewEngineMode::MlilPreview,
         DecompilerEngineMode::Auto => PreviewEngineMode::Auto,
@@ -50,7 +63,10 @@ fn decompile_with_engine(
         Ok(code) => Ok(outcome_from_preview_selection(code, preview)),
         Err(e) => {
             let error_text = e.to_string();
-            if !matches!(engine_mode, DecompilerEngineMode::Legacy) {
+            if !matches!(
+                normalize_gui_engine_mode(engine_mode),
+                DecompilerEngineMode::Legacy
+            ) {
                 if let Some(selection) =
                     rescue_preview_output(decomp, binary, address, name, &error_text, None)
                         .map_err(CmdError::other)?
@@ -147,8 +163,11 @@ pub async fn decompile_function(
                 function_name: func_name,
                 address: format!("0x{:x}", address),
                 engine_used: DecompilerEngineMode::Legacy,
-                fell_back: false,
-                fallback_reason: Some(e.to_string()),
+                fell_back: true,
+                fallback_reason: Some(fallback_reason_with_kind(
+                    "native_pcode_failure",
+                    e.to_string(),
+                )),
             }),
         }
     }
@@ -163,8 +182,11 @@ pub async fn decompile_function(
             function_name: func_name,
             address: format!("0x{:x}", address),
             engine_used: DecompilerEngineMode::Legacy,
-            fell_back: false,
-            fallback_reason: Some("native decompiler not available".to_string()),
+            fell_back: true,
+            fallback_reason: Some(fallback_reason_with_kind(
+                "native_pcode_failure",
+                "native decompiler not available",
+            )),
         })
     }
 }

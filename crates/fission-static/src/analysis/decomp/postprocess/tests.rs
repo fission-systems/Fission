@@ -1,5 +1,6 @@
 use super::PostProcessor;
 use super::condition::negate_condition;
+use fission_loader::loader::types::{InferredFieldInfo, InferredTypeInfo};
 
 #[test]
 fn test_switch_from_if_else_assign_multiline() {
@@ -958,6 +959,162 @@ fn test_var_sweep_inlines_single_use_temp_into_return() {
     assert!(
         output.contains("return (ulonglong)(iVar1 != 0);"),
         "must inline cast expression into return: {}",
+        output
+    );
+}
+
+#[test]
+fn test_field_offset_replacement_preserves_metadata_precedence() {
+    let metadata = InferredTypeInfo {
+        name: "MetaType".to_string(),
+        mangled_name: String::new(),
+        kind: "struct".to_string(),
+        fields: vec![InferredFieldInfo {
+            name: "meta_field".to_string(),
+            type_name: "int".to_string(),
+            offset: 0x18,
+            size: 4,
+        }],
+        size: 0,
+        metadata_address: 0x1000,
+    };
+    let loader = InferredTypeInfo {
+        name: "LoaderType".to_string(),
+        mangled_name: String::new(),
+        kind: "struct".to_string(),
+        fields: vec![InferredFieldInfo {
+            name: "loader_field".to_string(),
+            type_name: "int".to_string(),
+            offset: 0x18,
+            size: 4,
+        }],
+        size: 0,
+        metadata_address: 0,
+    };
+    let input = "value = *(param_1 + 0x18);";
+    let output = PostProcessor::new()
+        .with_inferred_types(vec![metadata, loader])
+        .replace_field_offsets(input);
+    assert!(
+        output.contains("param_1->meta_field/* @0x18 */"),
+        "must keep metadata field name precedence: {}",
+        output
+    );
+    assert!(
+        !output.contains("loader_field"),
+        "must not let loader field override metadata field: {}",
+        output
+    );
+}
+
+#[test]
+fn test_field_offset_replacement_normalizes_pointer_offset_aliases() {
+    let inferred = InferredTypeInfo {
+        name: "Session".to_string(),
+        mangled_name: String::new(),
+        kind: "struct".to_string(),
+        fields: vec![InferredFieldInfo {
+            name: "cfg".to_string(),
+            type_name: "int".to_string(),
+            offset: 0xbc8,
+            size: 8,
+        }],
+        size: 0,
+        metadata_address: 0x2000,
+    };
+    let input = r#"unique0x00004880 = register0x00000008 + 0xbc8;
+value = *unique0x00004880;"#;
+    let output = PostProcessor::new()
+        .with_inferred_types(vec![inferred])
+        .replace_field_offsets(input);
+    assert!(
+        output.contains("value = register0x00000008->cfg/* @0xbc8 */;"),
+        "must rewrite temp pointer alias into field access: {}",
+        output
+    );
+    assert!(
+        !output.contains("unique0x00004880 ="),
+        "must remove consumed pointer-offset alias assignment: {}",
+        output
+    );
+}
+
+#[test]
+fn test_process_normalizes_pointer_offset_aliases_without_field_info() {
+    let inferred = InferredTypeInfo {
+        name: "Dummy".to_string(),
+        mangled_name: String::new(),
+        kind: "struct".to_string(),
+        fields: vec![],
+        size: 0,
+        metadata_address: 0,
+    };
+    let input = r#"unique0x00004880 = register0x00000008 + 0xbc8;
+value = *unique0x00004880;"#;
+    let output = PostProcessor::new()
+        .with_inferred_types(vec![inferred])
+        .process(input);
+    assert!(
+        output.contains("value = register0x00000008[0xbc8];"),
+        "must still normalize pointer-offset aliases even without field metadata: {}",
+        output
+    );
+    assert!(
+        !output.contains("unique0x00004880 ="),
+        "must remove consumed alias assignment in full process path: {}",
+        output
+    );
+}
+
+#[test]
+fn test_process_normalizes_pointer_offset_aliases_in_non_deref_uses() {
+    let inferred = InferredTypeInfo {
+        name: "Dummy".to_string(),
+        mangled_name: String::new(),
+        kind: "struct".to_string(),
+        fields: vec![],
+        size: 0,
+        metadata_address: 0,
+    };
+    let input = r#"unique0x00004880 = register0x00000008 + 0xbc8;
+value = foo(unique0x00004880);"#;
+    let output = PostProcessor::new()
+        .with_inferred_types(vec![inferred])
+        .process(input);
+    assert!(
+        output.contains("value = foo((register0x00000008 + 0xbc8));"),
+        "must normalize pointer-offset aliases in non-deref uses: {}",
+        output
+    );
+    assert!(
+        !output.contains("unique0x00004880 ="),
+        "must remove consumed alias assignment for non-deref uses: {}",
+        output
+    );
+}
+
+#[test]
+fn test_field_offset_replacement_rewrites_decimal_array_index_for_x86_surface() {
+    let inferred = InferredTypeInfo {
+        name: "WinMergeState".to_string(),
+        mangled_name: String::new(),
+        kind: "struct".to_string(),
+        fields: vec![InferredFieldInfo {
+            name: "flags".to_string(),
+            type_name: "uint".to_string(),
+            offset: 24,
+            size: 4,
+        }],
+        size: 0,
+        metadata_address: 0x3000,
+    };
+    let input = "value = register0x00000014[24];";
+    let output = PostProcessor::new()
+        .with_inferred_types(vec![inferred])
+        .replace_field_offsets(input);
+    assert!(
+        output.contains("value = register0x00000014->flags/* @24 */;"),
+        "must rewrite decimal x86-style register index into field access: {}",
         output
     );
 }

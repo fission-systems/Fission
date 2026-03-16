@@ -70,12 +70,46 @@ def summarize_binary(
                 total.update(entry.get("fallback_counts", {}))
         return total
 
+    def aggregate_fallback_kinds(entries: dict[str, dict[str, Any]]) -> Counter[str]:
+        total: Counter[str] = Counter()
+        for entry in entries.values():
+            kind = entry.get("fallback_kind")
+            if kind:
+                total[kind] += 1
+        return total
+
     def preview_engine_entries(entries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         return [
             entry
             for entry in entries.values()
             if entry.get("success") and entry.get("engine_used") == "mlil_preview"
         ]
+
+    def collect_legacy_needed_functions() -> list[dict[str, Any]]:
+        legacy_needed: list[dict[str, Any]] = []
+        for addr, _ in functions:
+            normalized = normalize_address(addr)
+            fission_entry = fission_entries.get(normalized)
+            if not fission_entry or not fission_entry.get("success"):
+                continue
+            preview_entry = preview_entries.get(normalized, {})
+            preview_direct = (
+                preview_entry.get("success")
+                and preview_entry.get("engine_used") == "mlil_preview"
+                and not preview_entry.get("fell_back")
+            )
+            if preview_direct:
+                continue
+            legacy_needed.append(
+                {
+                    "address": fission_entry.get("address", addr),
+                    "name": fission_entry.get("name", ""),
+                    "preview_engine_used": preview_entry.get("engine_used"),
+                    "preview_fallback_kind": preview_entry.get("fallback_kind"),
+                    "preview_failure_kind": preview_entry.get("failure_kind"),
+                }
+            )
+        return legacy_needed
 
     fission_successes = sum(1 for entry in fission_entries.values() if entry.get("success"))
     ghidra_successes = sum(1 for entry in ghidra_entries.values() if entry.get("success"))
@@ -102,6 +136,7 @@ def summarize_binary(
     for entry in preview_engine_used:
         preview_helper_call_counts.update(entry.get("metrics", {}).get("helper_call_counts", {}))
     preview_residue_total = sum(compute_residue_score(entry) for entry in preview_engine_used)
+    legacy_needed_functions = collect_legacy_needed_functions()
 
     return {
         "binary": binary_name,
@@ -134,6 +169,10 @@ def summarize_binary(
             "fission": dict(aggregate_fallbacks(fission_entries).most_common()),
             "ghidra": dict(aggregate_fallbacks(ghidra_entries).most_common()),
         },
+        "fallback_kind_counts": {
+            "fission": dict(aggregate_fallback_kinds(fission_entries).most_common()),
+            "ghidra": dict(aggregate_fallback_kinds(ghidra_entries).most_common()),
+        },
         "cast_chain_counts": {
             "fission": sum(
                 int(entry.get("metrics", {}).get("cast_chain_count", 0))
@@ -155,6 +194,8 @@ def summarize_binary(
         "mlil_preview_cast_density": preview_cast_density,
         "mlil_preview_helper_call_total": preview_helper_call_total,
         "mlil_preview_helper_call_counts": dict(preview_helper_call_counts),
+        "legacy_needed_count": len(legacy_needed_functions),
+        "legacy_needed_functions": legacy_needed_functions[:10],
         "residue_rankings": {
             "single_assign_temps": dict(
                 aggregate_residues(fission_entries, "single_assign_temps").most_common(20)
@@ -217,6 +258,10 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
             "fission": Counter(),
             "ghidra": Counter(),
         },
+        "fallback_kind_counts": {
+            "fission": Counter(),
+            "ghidra": Counter(),
+        },
         "cast_chain_counts": {
             "fission": 0,
             "ghidra": 0,
@@ -230,6 +275,8 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         "mlil_preview_cast_density": 0,
         "mlil_preview_helper_call_total": 0,
         "mlil_preview_helper_call_counts": Counter(),
+        "legacy_needed_count": 0,
+        "legacy_needed_functions": [],
         "residue_rankings": {
             "single_assign_temps": Counter(),
             "residue_names": Counter(),
@@ -250,6 +297,12 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         global_report["type_preservation_counts"]["ghidra"].update(report["type_preservation_counts"]["ghidra"])
         global_report["fallback_counts"]["fission"].update(report["fallback_counts"]["fission"])
         global_report["fallback_counts"]["ghidra"].update(report["fallback_counts"]["ghidra"])
+        global_report["fallback_kind_counts"]["fission"].update(
+            report.get("fallback_kind_counts", {}).get("fission", {})
+        )
+        global_report["fallback_kind_counts"]["ghidra"].update(
+            report.get("fallback_kind_counts", {}).get("ghidra", {})
+        )
         global_report["cast_chain_counts"]["fission"] += report["cast_chain_counts"]["fission"]
         global_report["cast_chain_counts"]["ghidra"] += report["cast_chain_counts"]["ghidra"]
         global_report["mlil_preview_success"] += report.get("mlil_preview_success", 0)
@@ -263,6 +316,9 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
         global_report["mlil_preview_helper_call_counts"].update(
             report.get("mlil_preview_helper_call_counts", {})
         )
+        global_report["legacy_needed_count"] += report.get("legacy_needed_count", 0)
+        for entry in report.get("legacy_needed_functions", []):
+            global_report["legacy_needed_functions"].append({"binary": report["binary"], **entry})
         for key in global_report["residue_rankings"]:
             global_report["residue_rankings"][key].update(report["residue_rankings"][key])
         for offender in report.get("top_residue_offenders", []):
@@ -301,6 +357,13 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
             item["address"],
         ),
     )[:10]
+    global_report["legacy_needed_functions"] = sorted(
+        global_report["legacy_needed_functions"],
+        key=lambda item: (
+            item.get("binary", ""),
+            item.get("address", ""),
+        ),
+    )[:20]
     global_report["failure_class_counts"] = {
         side: dict(counter)
         for side, counter in global_report["failure_class_counts"].items()
@@ -312,6 +375,10 @@ def aggregate_global_report(binary_reports: list[dict[str, Any]]) -> dict[str, A
     global_report["fallback_counts"] = {
         side: dict(counter)
         for side, counter in global_report["fallback_counts"].items()
+    }
+    global_report["fallback_kind_counts"] = {
+        side: dict(counter)
+        for side, counter in global_report["fallback_kind_counts"].items()
     }
     global_report["control_flow"] = dict(global_report["control_flow"])
     global_report["mlil_preview_helper_call_counts"] = dict(

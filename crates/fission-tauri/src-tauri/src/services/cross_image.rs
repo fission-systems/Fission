@@ -4,7 +4,7 @@ use iced_x86::{Decoder, DecoderOptions, FlowControl, OpKind};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-const MAX_SIBLING_MODULES: usize = 16;
+const MAX_SIBLING_MODULES: usize = 24;
 const MAX_SIBLING_BYTES: u64 = 200 * 1024 * 1024;
 const MAX_WRAPPER_SIZE: u64 = 16;
 
@@ -42,27 +42,43 @@ pub fn collect_folder_propagated_renames(
 }
 
 fn load_sibling_modules(current: &LoadedBinary, folder: &Path) -> Vec<SiblingModule> {
-    let current_path = Path::new(&current.path);
-    let current_name = current_path
-        .file_name()
-        .map(|name| name.to_string_lossy().to_ascii_lowercase());
+    let current_path = Path::new(&current.path)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(&current.path));
+    let mut sibling_paths = collect_candidate_module_paths(folder);
+    sibling_paths.retain(|path| path != &current_path);
 
-    let Ok(entries) = std::fs::read_dir(folder) else {
+    sibling_paths.sort();
+    sibling_paths.truncate(MAX_SIBLING_MODULES);
+
+    sibling_paths
+        .into_iter()
+        .filter_map(|path| LoadedBinary::from_file(&path).ok())
+        .map(|binary| summarize_sibling_module(&binary))
+        .collect()
+}
+
+fn collect_candidate_module_paths(folder: &Path) -> Vec<PathBuf> {
+    let mut candidates = collect_modules_in_dir(folder);
+    let plugins_dir = folder.join("plugins");
+    if plugins_dir.is_dir() {
+        candidates.extend(collect_modules_in_dir(&plugins_dir));
+    }
+    candidates
+}
+
+fn collect_modules_in_dir(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
 
-    let mut sibling_paths: Vec<PathBuf> = entries
+    entries
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| path.is_file())
         .filter(|path| {
             path.extension()
                 .and_then(|ext| ext.to_str())
                 .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "exe" | "dll"))
-                .unwrap_or(false)
-        })
-        .filter(|path| {
-            path.file_name()
-                .map(|name| Some(name.to_string_lossy().to_ascii_lowercase()) != current_name)
                 .unwrap_or(false)
         })
         .filter(|path| {
@@ -77,15 +93,7 @@ fn load_sibling_modules(current: &LoadedBinary, folder: &Path) -> Vec<SiblingMod
                 .map(|meta| meta.len() <= MAX_SIBLING_BYTES)
                 .unwrap_or(false)
         })
-        .collect();
-
-    sibling_paths.sort();
-    sibling_paths.truncate(MAX_SIBLING_MODULES);
-
-    sibling_paths
-        .into_iter()
-        .filter_map(|path| LoadedBinary::from_file(&path).ok())
-        .map(|binary| summarize_sibling_module(&binary))
+        .filter_map(|path| path.canonicalize().ok().or(Some(path)))
         .collect()
 }
 
@@ -103,7 +111,7 @@ fn summarize_sibling_module(binary: &LoadedBinary) -> SiblingModule {
 
     let strong_names = binary
         .functions_iter()
-        .filter(|func| !is_weak_name(&func.name))
+        .filter(|func| is_strong_name(&func.name))
         .map(|func| func.name.trim().to_string())
         .filter(|name| !name.is_empty())
         .collect::<HashSet<_>>();
@@ -307,7 +315,20 @@ fn parse_import_symbol(import_symbol: &str) -> Option<(&str, &str)> {
 
 fn is_weak_name(name: &str) -> bool {
     let trimmed = name.trim();
-    trimmed.is_empty() || trimmed.starts_with("sub_") || trimmed.starts_with("FUN_")
+    trimmed.is_empty()
+        || trimmed.starts_with("sub_")
+        || trimmed.starts_with("FUN_")
+        || trimmed.starts_with("func_")
+        || trimmed.starts_with("Ordinal_")
+        || trimmed.starts_with("j_")
+        || trimmed.starts_with("thunk_")
+        || trimmed.starts_with("nullsub_")
+        || trimmed.starts_with("loc_")
+        || trimmed.starts_with("LAB_")
+}
+
+fn is_strong_name(name: &str) -> bool {
+    !is_weak_name(name)
 }
 
 #[cfg(test)]
@@ -463,5 +484,43 @@ mod tests {
             !propagated.is_empty(),
             "expected some propagated names from ida76sp1 siblings"
         );
+    }
+
+    #[test]
+    fn plugin_scope_candidates_include_plugins_subdir() {
+        let sample = Path::new("/Users/sjkim1127/Fission/samples/windows/x64/ida76sp1/ida64.dll");
+        if !sample.exists() {
+            return;
+        }
+
+        let folder = sample.parent().expect("ida76sp1 folder");
+        let candidates = collect_candidate_module_paths(folder);
+        assert!(
+            candidates.iter().any(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().eq_ignore_ascii_case("hexrays.dll"))
+                    .unwrap_or(false)
+            }),
+            "expected plugins/hexrays.dll to be included in propagation scope"
+        );
+    }
+
+    #[test]
+    fn weak_name_heuristics_cover_wrappers_and_ordinals() {
+        for name in [
+            "sub_401000",
+            "FUN_140001000",
+            "func_1234",
+            "Ordinal_12",
+            "j_KnownFunc",
+            "thunk_Reset",
+            "nullsub_1",
+            "loc_401020",
+            "LAB_42",
+        ] {
+            assert!(is_weak_name(name), "{name} should be weak");
+        }
+        assert!(is_strong_name("KnownFunc"));
+        assert!(is_strong_name("?Reset@Widget@@QEAAXXZ"));
     }
 }

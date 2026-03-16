@@ -11,6 +11,23 @@ use tracing::warn;
 // Private helpers
 // ============================================================================
 
+fn normalize_decompiler_options(mut options: DecompilerOptions) -> DecompilerOptions {
+    if matches!(
+        options.engine_mode,
+        crate::dto::DecompilerEngineMode::Legacy
+    ) {
+        options.engine_mode = crate::dto::DecompilerEngineMode::Auto;
+    }
+    options
+}
+
+fn normalize_settings(mut settings: crate::dto::AppSettings) -> crate::dto::AppSettings {
+    settings.decompiler_options = settings
+        .decompiler_options
+        .map(normalize_decompiler_options);
+    settings
+}
+
 /// Path to the settings file inside the OS app-data directory.
 fn settings_path(app_handle: &tauri::AppHandle) -> CmdResult<std::path::PathBuf> {
     let data_dir = app_handle
@@ -36,13 +53,15 @@ pub async fn get_settings(app_handle: tauri::AppHandle) -> CmdResult<crate::dto:
     let json = std::fs::read_to_string(&path)
         .map_err(|e| CmdError::other(format!("Read settings failed: {e}")))?;
     // If schema is corrupt or outdated, fall back to defaults silently
-    Ok(serde_json::from_str(&json).unwrap_or_else(|_| {
-        warn!(
-            file = SETTINGS_FILENAME,
-            "settings invalid or schema changed, using defaults"
-        );
-        crate::dto::AppSettings::default()
-    }))
+    Ok(normalize_settings(
+        serde_json::from_str(&json).unwrap_or_else(|_| {
+            warn!(
+                file = SETTINGS_FILENAME,
+                "settings invalid or schema changed, using defaults"
+            );
+            crate::dto::AppSettings::default()
+        }),
+    ))
 }
 
 /// Persist application settings.
@@ -52,6 +71,7 @@ pub async fn save_settings(
     app_handle: tauri::AppHandle,
 ) -> CmdResult<()> {
     let path = settings_path(&app_handle)?;
+    let settings = normalize_settings(settings);
     let json = serde_json::to_string_pretty(&settings)
         .map_err(|e| CmdError::other(format!("Serialise settings failed: {e}")))?;
     std::fs::write(&path, json)
@@ -80,6 +100,7 @@ pub async fn apply_decompiler_options(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> CmdResult<()> {
+    let options = normalize_decompiler_options(options);
     // Apply to the native decompiler if loaded
     #[cfg(feature = "native_decomp")]
     {

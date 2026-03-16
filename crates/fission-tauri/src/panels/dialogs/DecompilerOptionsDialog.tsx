@@ -199,11 +199,10 @@ export default function DecompilerOptionsDialog({
                             <div className="decomp-opts__section-title">Ghidra Engine Analysis</div>
                             <SelectRow
                                 label="Decompiler Engine"
-                                description="Choose legacy Ghidra output, MLIL preview, or auto preview-first mode"
+                                description="Choose MLIL preview directly or keep preview-first auto routing"
                                 value={options.engine_mode}
                                 options={[
                                     { value: "auto", label: "Auto (Preview when safe)" },
-                                    { value: "legacy", label: "Legacy" },
                                     { value: "mlil_preview", label: "MLIL Preview" },
                                 ]}
                                 onChange={(v) => {

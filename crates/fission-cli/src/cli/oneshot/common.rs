@@ -11,6 +11,10 @@ pub(super) enum EngineMode {
     Auto,
 }
 
+pub(super) fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
+    format!("{kind}: {}", detail.as_ref())
+}
+
 pub(super) fn init_decompiler(verbose: bool) -> DecompilerNative {
     let sla_dir = find_sla_dir();
 

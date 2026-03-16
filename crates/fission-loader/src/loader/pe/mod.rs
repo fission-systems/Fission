@@ -3,6 +3,7 @@ use crate::loader::types::{
 };
 use crate::prelude::*;
 use binrw::BinRead;
+use fission_core::core_constants::IMAGE_FILE_MACHINE_ARM64;
 use std::io::Cursor;
 
 mod coff;
@@ -43,6 +44,7 @@ impl PeLoader {
         let arch_spec = match pe_file.nt_headers.file_header.machine {
             0x8664 => "x86:LE:64:default", // AMD64
             0x014c => "x86:LE:32:default", // I386
+            IMAGE_FILE_MACHINE_ARM64 => "AARCH64:LE:64:v8A",
             _ => {
                 if is_64bit {
                     "x86:LE:64:default"
@@ -591,5 +593,42 @@ mod tests {
         assert_eq!(bin.sections.len(), 1);
         assert_eq!(bin.sections[0].name, ".text");
         assert_eq!(bin.sections[0].is_executable, true);
+    }
+
+    #[test]
+    fn test_parse_synthetic_pe_arm64_sets_aarch64_arch_spec() {
+        let mut data = vec![0u8; 1024];
+
+        data[0] = 0x4D;
+        data[1] = 0x5A;
+        data[0x3C] = 0x40;
+
+        data[0x40] = 0x50;
+        data[0x41] = 0x45;
+
+        data[0x44] = 0x64;
+        data[0x45] = 0xAA; // Machine = 0xAA64 (ARM64)
+        data[0x46] = 0x01;
+        data[0x54] = 0xF0; // SizeOfOptionalHeader = 240 (PE32+)
+        data[0x55] = 0x00;
+
+        data[0x58] = 0x0B;
+        data[0x59] = 0x02; // Magic = 0x20B (PE32+)
+        data[0x58 + 108] = 16; // NumberOfRvaAndSizes
+
+        let section_offset = 0x148;
+        data[section_offset] = b'.';
+        data[section_offset + 1] = b't';
+        data[section_offset + 2] = b'e';
+        data[section_offset + 3] = b'x';
+        data[section_offset + 4] = b't';
+        data[section_offset + 36] = 0x20;
+        data[section_offset + 39] = 0x60;
+
+        let result = PeLoader::parse(DataBuffer::Heap(data), "arm64.exe".to_string());
+        assert!(result.is_ok());
+        let bin = result.expect("arm64 pe should parse");
+        assert_eq!(bin.arch_spec, "AARCH64:LE:64:v8A");
+        assert!(bin.is_64bit);
     }
 }

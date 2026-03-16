@@ -168,7 +168,7 @@ pub static CAST_PTR_OFFSET: Lazy<Regex> = Lazy::new(|| {
 
 /// Array index pattern: var[0xNN]
 pub static ARRAY_INDEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(\w+)\[\s*(0x[0-9a-fA-F]+)\s*\]")
+    Regex::new(r"(\w+)\[\s*(0x[0-9a-fA-F]+|\d+)\s*\]")
         .unwrap_or_else(|e| panic!("regex should compile: {}", e))
 });
 

@@ -14,6 +14,23 @@ interface Token {
     value: string;
 }
 
+function decompileStatusLabel(result: DecompileResult): string {
+    const reason = result.fallback_reason ?? "";
+    if (reason.startsWith("assembly_fallback:")) {
+        return "MLIL Preview -> Assembly fallback";
+    }
+    if (reason.startsWith("legacy_fallback:") || reason.startsWith("preview_unsupported:") || reason.startsWith("preview_timeout:")) {
+        return "MLIL Preview -> Native fallback";
+    }
+    if (reason.startsWith("native_pcode_failure:")) {
+        return "Native decompiler";
+    }
+    if (result.engine_used === "mlil_preview") {
+        return result.fell_back ? "MLIL Preview rescue" : "MLIL Preview";
+    }
+    return "Native decompiler";
+}
+
 const KEYWORDS = new Set([
     "if", "else", "while", "for", "do", "switch", "case", "default", "return",
     "break", "continue", "goto", "struct", "union", "enum", "typedef",
@@ -204,13 +221,7 @@ export default function DecompileView({
                     <div className="decomp-view__header-left">
                         <span className="decomp-view__func-name">{result.function_name}</span>
                         <span className="decomp-view__func-name">{result.address}</span>
-                        <span className="decomp-view__func-name">
-                            {result.fell_back
-                                ? "MLIL Preview -> Legacy fallback"
-                                : result.engine_used === "mlil_preview"
-                                  ? "MLIL Preview"
-                                  : "Legacy"}
-                        </span>
+                        <span className="decomp-view__func-name">{decompileStatusLabel(result)}</span>
                     </div>
                     <button
                         className="decomp-view__copy-btn"

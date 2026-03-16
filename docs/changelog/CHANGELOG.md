@@ -8,6 +8,75 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-16
 
+## 2026-03-17
+
+### v75-v78 - Preview-First Retirement Prep + Type Absorption Expansion + ARM64 Detection Scaffolding
+
+이번 구간은 세 축으로 진행됐다. 첫째는 preview-first를 제품 기본 정책으로 더 굳히고, legacy를 내부 fallback / compat 경로로만 남기기 위한 taxonomy와 usage inventory를 정리하는 작업이었다. 둘째는 x64 `putty/cmake` hard case와 x86 `WinMerge/EverPlanet` hard case에서 Rust-side type absorption을 확장해, pointer-offset alias와 `register[offset]` surface가 field replacement 후보에서 덜 빠지게 만드는 것이었다. 셋째는 `ida76sp1` 포터블 코퍼스 기준 cross-image propagation 2차의 첫 단계로 `plugins/` 범위까지 sibling scan을 넓히고, Windows ARM64 spike를 위한 최소 PE architecture detection scaffolding을 추가하는 것이었다.
+
+#### Added
+
+- legacy-needed benchmark/report artifact 집계
+  - preview direct가 아닌 성공 함수 목록을 binary/global summary에 별도 기록
+- x86 decimal index field replacement regression test
+  - `register[24]` 같은 decimal surface도 `->field/* @24 */` 후보로 검증
+- `plugins/` 포함 cross-image propagation scope test
+  - `ida76sp1/plugins/hexrays.dll`가 auto-propagation 대상에 실제 포함되는지 smoke 검증
+- Windows ARM64 spike baseline note
+  - 현재 blocker와 다음 bring-up 체크리스트를 `docs/benchmark/windows_arm64_spike.md`에 기록
+- synthetic PE ARM64 loader test
+  - `IMAGE_FILE_MACHINE_ARM64`가 `AARCH64:LE:64:v8A`로 매핑되는지 검증
+
+#### Changed
+
+- preview-first retirement prep
+  - GUI에서 legacy를 사용자 workflow로 더 이상 취급하지 않도록 정리
+  - CLI `--engine legacy`는 hidden compat mode 의미를 유지
+  - fallback taxonomy를 `preview_timeout`, `preview_unsupported`, `native_pcode_failure`, `legacy_fallback`, `assembly_fallback` 기준으로 계속 고정
+- x64/x86 공용 type absorption 보강
+  - inferred type merge를 metadata-first로 유지
+  - pointer-offset alias의 line-local forward substitution 유지/확장
+  - `register[offset]` array index surface를 hex뿐 아니라 decimal까지 field replacement 후보로 흡수
+- x86 hard case surface 보강
+  - `WinMergeU.exe 0x407050`, `EverPlanet_KR.exe 0xa918d0` 같은 x86 giant function에서 decimal/stack-like index가 공용 postprocess에서 빠지지 않도록 조정
+- cross-image propagation 2차의 첫 단계
+  - same-folder scan에 더해 `plugins/` 하위 DLL까지 sibling candidate로 포함
+  - weak-name 판정을 `sub_`, `FUN_`, `func_`, `Ordinal_`, `j_`, `thunk_`, `nullsub_`, `loc_`, `LAB_`까지 확대
+- Windows PE loader / CLI surface
+  - PE ARM64 machine type을 `AARCH64:LE:64:v8A`로 인식
+  - CLI `binary-info --json` / terminal output에서 ARM64를 `x86_64`가 아니라 `arm64` / `ARM64 (64-bit)`로 표시
+
+#### Improved
+
+- `putty.exe 0x140006380`
+  - 재사용 alias 때문에 남던 `unique0x... = register + offset` residue를 공용 type absorption으로 더 잘 정리
+  - `register[offset]` surface 증가
+- x86 hard case observability
+  - hard case summary에서 `unique_surface_count`, `field_access_count`, `offset_index_count`를 바로 읽을 수 있게 됨
+- legacy deprecation observability
+  - 어떤 함수가 아직 preview direct가 아니어서 legacy/native fallback 결과에 의존하는지 report에서 바로 확인 가능
+- `ida76sp1`
+  - `plugins/hexrays.dll`까지 propagation scope에 포함돼 sibling-based auto rename 실효성 확대
+
+#### Validation
+
+- `cargo fmt --all`
+- `cargo test -p fission-static --features native_decomp field_offset_replacement -- --nocapture`
+- `cargo test -p fission-loader test_parse_synthetic_pe -- --nocapture`
+- `cargo test -p fission-tauri cross_image -- --nocapture`
+- `cargo test -p fission-pcode --lib nir::tests -- --nocapture`
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-tauri`
+- `python3 -m py_compile`
+  - `scripts/test/batch_benchmark/grand_finale_support/metrics.py`
+  - `scripts/test/batch_benchmark/grand_finale_support/summary.py`
+  - `scripts/test/batch_benchmark/grand_finale_support/report_md.py`
+
+#### Notes
+
+- `EverPlanet_KR.exe 0xa918d0`와 `WinMergeU.exe 0x407050`는 현재 legacy output 기준 `unique0x` residue는 이미 거의 0이었고, 이번 라운드의 실제 목적은 x86 `[]` / field surface를 더 잘 흡수하게 만드는 것이었다.
+- Windows ARM64 spike는 아직 정식 지원 단계가 아니며, 실제 Windows ARM64 PE 샘플이 repo에 없어서 fixed-seed baseline JSON/Markdown은 다음 라운드로 넘겼다.
+
 ### v69-v74 - x64 Timeout Closure + Portable Multi-DLL Symbol Propagation
 
 이번 구간은 두 축으로 마감됐다. 첫째는 x86/x64 giant function에서 남아 있던 마지막 branch/readability residue를 줄이고, `ida76sp1` 코퍼스에서 발생한 preview long-running case를 subprocess isolation으로 명시적 fallback으로 바꾸는 것이었다. 둘째는 포터블 멀티-DLL 폴더를 하나의 앱 집합으로 보고, sibling EXE/DLL의 import/export/thunk 관계만 이용해 현재 모듈의 weak `sub_*` 이름을 자동 복구하는 cross-image symbol propagation 1차 구현을 추가하는 것이었다.

@@ -62,6 +62,22 @@ def classify_failure_kind(message: str | None) -> str:
     return "other"
 
 
+def extract_fallback_kind(reason: str | None) -> str | None:
+    if not reason:
+        return None
+    prefix, _, _ = reason.partition(":")
+    normalized = prefix.strip().lower()
+    if normalized in {
+        "preview_timeout",
+        "preview_unsupported",
+        "native_pcode_failure",
+        "legacy_fallback",
+        "assembly_fallback",
+    }:
+        return normalized
+    return None
+
+
 def collect_type_preservation_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[str, int]:
     hits: Counter[str] = Counter()
     signature = code.split("{", 1)[0]
@@ -83,6 +99,9 @@ def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[
         "for_count": count_regex(r"\bfor\s*\(", code),
         "do_while_count": count_regex(r"\bdo\s*\{", code),
         "while_count": count_regex(r"\bwhile\s*\(", code),
+        "unique_surface_count": count_regex(r"\bunique0x[0-9a-fA-F]+\b", code),
+        "field_access_count": count_regex(r"->\w+(?:/\* @[^*]+ \*/)?", code),
+        "offset_index_count": count_regex(r"\b\w+\[\s*(?:0x[0-9a-fA-F]+|\d+)\s*\]", code),
     }
 
     type_hits: Counter[str] = Counter()

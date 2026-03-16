@@ -3,6 +3,19 @@ use std::io::{self, Write};
 
 pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
+    let (arch_json, bits) = if binary.arch_spec.starts_with("AARCH64") {
+        ("arm64", 64)
+    } else if binary.arch_spec.starts_with("x86") {
+        if binary.is_64bit {
+            ("x86_64", 64)
+        } else {
+            ("x86", 32)
+        }
+    } else if binary.is_64bit {
+        ("64-bit", 64)
+    } else {
+        ("32-bit", 32)
+    };
 
     if json {
         writeln!(
@@ -11,8 +24,8 @@ pub(super) fn print_binary_info(binary: &LoadedBinary, json: bool) -> io::Result
             serde_json::to_string_pretty(&serde_json::json!({
                 "path": binary.path,
                 "format": binary.format,
-                "arch": if binary.is_64bit { "x86_64" } else { "x86" },
-                "bits": if binary.is_64bit { 64 } else { 32 },
+                "arch": arch_json,
+                "bits": bits,
                 "entry": format!("0x{:x}", binary.entry_point),
                 "image_base": format!("0x{:x}", binary.image_base),
                 "sections": binary.sections.len(),

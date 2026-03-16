@@ -182,8 +182,8 @@ export function useBinary({ log, onOpenTabs, onResetTabs }: UseBinaryOptions) {
                     function_name: functionName,
                     address: addressText,
                     engine_used: "legacy",
-                    fell_back: false,
-                    fallback_reason: String(err),
+                    fell_back: true,
+                    fallback_reason: `native_pcode_failure: ${String(err)}`,
                 };
                 setDecompileCache((prev) => ({ ...prev, [tabId]: fallback }));
                 setDecompileStatus((prev) => ({ ...prev, [tabId]: "error" }));

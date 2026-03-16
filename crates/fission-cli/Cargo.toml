@@ -47,3 +47,4 @@ test = false
 name = "fission_preview_worker"
 path = "src/bin/fission_preview_worker.rs"
 test = false
+required-features = ["native_decomp"]

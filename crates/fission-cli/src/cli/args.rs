@@ -70,7 +70,7 @@ pub struct OneShotArgs {
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
 
-    /// Decompilation engine (legacy|mlil-preview|auto)
+    /// Decompilation engine (auto|mlil-preview; legacy is accepted as a hidden compat mode)
     #[arg(long, value_name = "ENGINE")]
     pub engine: Option<String>,
 

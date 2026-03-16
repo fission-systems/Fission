@@ -1,24 +1,107 @@
 use crate::analysis::decomp::postprocess::PostProcessor;
 use crate::utils::patterns::*;
+use once_cell::sync::Lazy;
 use fission_loader::loader::types::DwarfLocation;
+use regex::Regex;
 use std::borrow::Cow;
 
+static OFFSET_ALIAS_ASSIGN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?m)^(?P<indent>\s*)(?P<alias>unique0x[0-9a-fA-F]+)\s*=\s*(?P<base>\w+)\s*\+\s*(?P<offset>0x[0-9a-fA-F]+|\d+);\s*$",
+    )
+    .unwrap_or_else(|e| panic!("invalid OFFSET_ALIAS_ASSIGN regex: {e}"))
+});
+
 impl PostProcessor {
+    fn parse_offset_literal(offset_str: &str) -> Option<u32> {
+        if let Some(hex) = offset_str
+            .strip_prefix("0x")
+            .or_else(|| offset_str.strip_prefix("0X"))
+        {
+            return u32::from_str_radix(hex, 16).ok();
+        }
+        offset_str.parse().ok()
+    }
+
+    pub(super) fn normalize_pointer_offset_aliases_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
+        if !OFFSET_ALIAS_ASSIGN.is_match(code) {
+            return Cow::Borrowed(code);
+        }
+
+        let mut lines: Vec<String> = code.lines().map(ToString::to_string).collect();
+        let mut aliases: std::collections::HashMap<String, (String, String)> =
+            std::collections::HashMap::new();
+        let mut removable_assignments: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+
+        for (line_idx, line) in lines.clone().into_iter().enumerate() {
+            if let Some(caps) = OFFSET_ALIAS_ASSIGN.captures(&line) {
+                aliases.insert(
+                    caps["alias"].to_string(),
+                    (caps["base"].to_string(), caps["offset"].to_string()),
+                );
+                continue;
+            }
+
+            let mut normalized_line = line;
+            for (alias, (base, offset)) in &aliases {
+                let token_pattern = format!(r"\b{}\b", regex::escape(alias));
+                let token_re = Regex::new(&token_pattern)
+                    .unwrap_or_else(|e| panic!("invalid token regex: {e}"));
+                if token_re.is_match(&normalized_line) {
+                    for (assign_idx, assign_line) in lines.iter().enumerate() {
+                        if assign_idx >= line_idx {
+                            break;
+                        }
+                        if OFFSET_ALIAS_ASSIGN
+                            .captures(assign_line)
+                            .is_some_and(|caps| caps["alias"] == *alias)
+                        {
+                            removable_assignments.insert(assign_idx);
+                        }
+                    }
+                    normalized_line = token_re
+                        .replace_all(&normalized_line, format!("({base} + {offset})"))
+                        .to_string();
+                }
+            }
+            lines[line_idx] = normalized_line;
+        }
+
+        let result = lines
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, line)| (!removable_assignments.contains(&idx)).then_some(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if result == code {
+            Cow::Borrowed(code)
+        } else {
+            Cow::Owned(result)
+        }
+    }
+
     /// Replace pointer offset accesses with field names
     /// e.g., *(ptr + 0x18) -> this->counter (if offset 24 maps to 'counter')
     pub(super) fn replace_field_offsets_cow<'a>(&self, code: &'a str) -> Cow<'a, str> {
-        let mut result = code.to_string();
+        let normalized = self.normalize_pointer_offset_aliases_cow(code);
+        let mut result = normalized.as_ref().to_string();
 
         let mut offset_map: std::collections::HashMap<u32, String> =
             std::collections::HashMap::new();
         for ty in &self.inferred_types {
             for field in &ty.fields {
-                offset_map.insert(field.offset, field.name.clone());
+                if field.name.is_empty() {
+                    continue;
+                }
+                offset_map
+                    .entry(field.offset)
+                    .or_insert_with(|| field.name.clone());
             }
         }
 
         if offset_map.is_empty() {
-            return Cow::Borrowed(code);
+            return normalized;
         }
 
         result = PTR_OFFSET
@@ -26,11 +109,7 @@ impl PostProcessor {
                 let base = &caps[1];
                 let offset_str = &caps[2];
 
-                let offset: u32 = if offset_str.starts_with("0x") || offset_str.starts_with("0X") {
-                    u32::from_str_radix(&offset_str[2..], 16).unwrap_or(0)
-                } else {
-                    offset_str.parse().unwrap_or(0)
-                };
+                let offset = Self::parse_offset_literal(offset_str).unwrap_or(0);
 
                 if let Some(field_name) = offset_map.get(&offset) {
                     format!("{}->{}/* @{} */", base, field_name, offset_str)
@@ -45,11 +124,7 @@ impl PostProcessor {
                 let base = &caps[1];
                 let offset_str = &caps[2];
 
-                let offset: u32 = if offset_str.starts_with("0x") || offset_str.starts_with("0X") {
-                    u32::from_str_radix(&offset_str[2..], 16).unwrap_or(0)
-                } else {
-                    offset_str.parse().unwrap_or(0)
-                };
+                let offset = Self::parse_offset_literal(offset_str).unwrap_or(0);
 
                 if let Some(field_name) = offset_map.get(&offset) {
                     format!("{}->{}/* @{} */", base, field_name, offset_str)
@@ -64,7 +139,7 @@ impl PostProcessor {
                 let base = &caps[1];
                 let offset_str = &caps[2];
 
-                let offset: u32 = u32::from_str_radix(&offset_str[2..], 16).unwrap_or(0);
+                let offset = Self::parse_offset_literal(offset_str).unwrap_or(0);
 
                 if let Some(field_name) = offset_map.get(&offset) {
                     format!("{}->{}/* @{} */", base, field_name, offset_str)

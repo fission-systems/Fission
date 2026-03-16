@@ -137,7 +137,7 @@ pub fn select_preview_output<S: PreviewSource>(
                     engine_used: PreviewEngineMode::Legacy,
                     fell_back: true,
                     fallback_reason: Some(
-                        "mlil-preview skipped: function not supported by preview builder"
+                        "preview_unsupported: mlil-preview skipped: function not supported by preview builder"
                             .to_string(),
                     ),
                 }),
@@ -145,7 +145,7 @@ pub fn select_preview_output<S: PreviewSource>(
                     preview_code: None,
                     engine_used: PreviewEngineMode::Legacy,
                     fell_back: true,
-                    fallback_reason: Some(err),
+                    fallback_reason: Some(format!("preview_unsupported: {err}")),
                 }),
             }
         }
@@ -168,14 +168,17 @@ pub fn select_preview_output<S: PreviewSource>(
                 Ok(None) => Ok(PreviewSelection {
                     preview_code: None,
                     engine_used: PreviewEngineMode::Legacy,
-                    fell_back: false,
-                    fallback_reason: None,
+                    fell_back: true,
+                    fallback_reason: Some(
+                        "preview_unsupported: mlil-preview skipped: function not supported by preview builder"
+                            .to_string(),
+                    ),
                 }),
                 Err(err) => Ok(PreviewSelection {
                     preview_code: None,
                     engine_used: PreviewEngineMode::Legacy,
                     fell_back: true,
-                    fallback_reason: Some(err),
+                    fallback_reason: Some(format!("preview_unsupported: {err}")),
                 }),
             }
         }
