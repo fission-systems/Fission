@@ -6,6 +6,87 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-15
 
+## 2026-03-16
+
+### v69-v74 - x64 Timeout Closure + Portable Multi-DLL Symbol Propagation
+
+이번 구간은 두 축으로 마감됐다. 첫째는 x86/x64 giant function에서 남아 있던 마지막 branch/readability residue를 줄이고, `ida76sp1` 코퍼스에서 발생한 preview long-running case를 subprocess isolation으로 명시적 fallback으로 바꾸는 것이었다. 둘째는 포터블 멀티-DLL 폴더를 하나의 앱 집합으로 보고, sibling EXE/DLL의 import/export/thunk 관계만 이용해 현재 모듈의 weak `sub_*` 이름을 자동 복구하는 cross-image symbol propagation 1차 구현을 추가하는 것이었다.
+
+#### Added
+
+- x86 branch-condition recovery 보강
+  - exact `TEST`/`CMP` bool tree를 terminator lowering에서 직접 읽어 `== 0`, `!= 0`, signed/unsigned compare로 복구
+- preview render subprocess worker
+  - heavy preview render를 별도 worker process에서 실행
+  - timeout 시 worker kill 후 explicit fallback
+- `ida76sp1` x64 fixed-seed baseline / watchlist artifact
+  - `ida64.exe`
+  - `idat64.exe`
+  - `ida64.dll`
+  - `ida.dll`
+  - `plugins/hexrays.dll`
+- Tauri backend cross-image propagation service
+  - same-folder sibling `*.exe` / `*.dll` scan
+  - import/export/thunk-only rename candidate resolution
+  - in-memory auto rename provenance tracking
+
+#### Changed
+
+- non-float scalar self-equality / boolean simplification 추가
+  - `x == x -> true`
+  - `x != x -> false`
+  - `if (!reg && reg == reg)` 같은 잔여식 정리
+- dead flag intrinsic temp cleanup 강화
+  - unused `__carry/__scarry/__sborrow` assignment를 dead-store cleanup에서 제거
+- `ida76sp1` watchlist timeout 2건을 in-process retry가 아니라 subprocess isolation + `preview_timeout` fallback으로 정리
+  - `ida64.dll 0x101fa177`
+  - `hexrays.dll 0x17088330`
+- `hexrays.dll 0x170057f0`는 ambiguous empty preview 상태가 아니라 non-empty assembly fallback으로 고정
+- `open_file` 직후 현재 바이너리 부모 폴더를 one-shot 스캔해 sibling import/export/thunk 기반 auto rename을 `renamed_functions`에 직접 병합
+- 수동 rename / project-loaded rename은 auto-propagated rename보다 우선하도록 GUI state provenance 추가
+
+#### Improved
+
+- `EverPlanet_KR.exe 0xa918d0`
+  - `if (!reg && reg == reg)` occurrence 제거
+  - `reg == reg` residue 제거
+  - `code_length` 추가 감소
+- `ida76sp1` baseline closure
+  - `ida64.exe`: direct preview `4/5`
+  - `idat64.exe`: direct preview `4/5`
+  - `ida64.dll`: direct preview `4/5`, timeout 1건은 explicit fallback으로 정리
+  - `ida.dll`: direct preview `4/5`
+  - `hexrays.dll`: direct preview `3/5`, 나머지는 explicit legacy/assembly fallback
+- `ida64.dll 0x101fa177`, `hexrays.dll 0x17088330`는 더 이상 20초 hang으로 남지 않음
+- `ida76sp1/ida64.dll` 실코퍼스 smoke 기준 sibling scan에서 non-zero propagated rename 확인
+- 기존 회귀 유지
+  - `putty.exe 0x140006260`: `LPRECT param_2`, `RECT local_3c`, `*param_2 = local_3c;`
+  - `everything.exe 0x140183590`: direct preview 유지
+  - `WinMergeU.exe` x86 / `EverPlanet_KR.exe` x86 direct preview 유지
+
+#### Validation
+
+- `cargo fmt --all`
+- `cargo test -p fission-pcode --lib nir::tests -- --nocapture`
+- `cargo test -p fission-static --features native_decomp preview_worker_ -- --nocapture`
+- `cargo test -p fission-tauri cross_image -- --nocapture`
+- `cargo build --release -p fission-cli --bin fission_cli --bin fission_preview_worker --features native_decomp`
+- `cargo build -p fission-tauri`
+- compare / watchlist reruns
+  - `ida64.dll 0x101fa177`
+  - `hexrays.dll 0x17088330`
+  - `hexrays.dll 0x170057f0`
+  - `ida76sp1` fixed-seed 5개 바이너리 전체
+  - `putty.exe 0x140006260`
+  - `everything.exe 0x140183590`
+  - `WinMergeU.exe` x86
+  - `EverPlanet_KR.exe` x86
+
+#### Notes
+
+- giant function direct preview 비율은 계속 올릴 수 있지만, 이번 라운드부터는 “hang하지 않고 명시적으로 fallback한다”가 baseline safety net으로 들어갔다.
+- cross-image propagation 1차 구현은 보수적으로 `import/export/thunk` 관계만 사용하며, body hash / CFG similarity / aggressive FID body matching은 아직 넣지 않았다.
+
 ### v63-v68 - C++ Corpus Expansion + x86 Preview Readability Uplift
 
 이번 구간은 새 샘플 코퍼스를 실제로 늘려 preview를 더 넓은 실전 바이너리에 검증하고, 그 과정에서 드러난 x86 병목과 가독성 문제를 순서대로 보수하는 데 집중했다. `WinMerge`, `SumatraPDF`, `CMake`, `EverPlanet_KR`를 추가해 고정 seed를 돌렸고, x86 `try_lower_while()` timeout, trap-like `CallInd`, x86 register/slot surfacing, flag-temp residue를 차례로 정리했다.
@@ -601,7 +682,7 @@ v14의 목표는 `mlil-preview` rescue를 성공으로 간주하지 않고, lega
 
 ## 2026-03-11
 
-### Experimental Fission MLIL/NIR 경로를 제품 경로에 통합
+### v10-v12 - Experimental Fission MLIL/NIR 경로를 제품 경로에 통합
 
 Ghidra C 출력 후처리만으로는 IDA Pro / Binary Ninja 급의 일관된 가독성을 만들기 어렵다는 판단 아래,
 Ghidra를 `lift + CFG + baseline type recovery + hard-fail containment` 계층으로 축소하고

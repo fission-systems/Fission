@@ -126,6 +126,18 @@ def run_fission_function(
 
     func = payload.get("functions", [{}])[0]
     code = func.get("code", "")
+    if error_text := func.get("error"):
+        return {
+            "success": False,
+            "address": func.get("address", address),
+            "name": func.get("name", ""),
+            "failure_kind": classify_failure_kind(error_text),
+            "failure_detail": error_text,
+            "wall_sec": round(wall_sec, 6),
+            "engine_used": func.get("engine_used", engine),
+            "fell_back": bool(func.get("fell_back", False)),
+            "fallback_reason": func.get("fallback_reason"),
+        }
     entry = {
         "success": True,
         "address": func.get("address", address),

@@ -2,9 +2,11 @@
 
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
+use crate::services::cross_image::{apply_propagated_renames, collect_folder_propagated_renames};
 use crate::state::AppState;
 use fission_core::{find_sla_dir, format_addr};
 use fission_loader::loader::LoadedBinary;
+use std::path::Path;
 use std::sync::Arc;
 use tauri::State;
 use tracing::{error, warn};
@@ -28,8 +30,20 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     .map_err(|e| CmdError::other(format!("Task failed: {e}")))??;
 
     let info = binary_to_info(&binary);
-
     let binary_arc = Arc::new(binary);
+    let propagation_folder = Path::new(&binary_arc.path)
+        .parent()
+        .map(|path| path.to_path_buf());
+    let propagated_renames = if let Some(folder) = propagation_folder {
+        let binary_for_propagation = binary_arc.clone();
+        tokio::task::spawn_blocking(move || {
+            collect_folder_propagated_renames(binary_for_propagation.as_ref(), &folder)
+        })
+        .await
+        .map_err(|e| CmdError::other(format!("Propagation task failed: {e}")))?
+    } else {
+        Default::default()
+    };
 
     // Initialize decompiler if native_decomp feature is enabled
     #[cfg(feature = "native_decomp")]
@@ -83,7 +97,24 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     inner.loaded_binary = Some(binary_arc);
     inner.comments.clear();
     inner.renamed_functions.clear();
+    inner.manual_renamed_functions.clear();
+    inner.auto_renamed_functions.clear();
     inner.bookmarks.clear();
+    let loaded_binary = inner.loaded_binary.clone();
+    if let Some(binary) = loaded_binary.as_ref() {
+        let manual = inner.manual_renamed_functions.clone();
+        let mut renamed_functions = std::mem::take(&mut inner.renamed_functions);
+        let mut auto_renamed_functions = std::mem::take(&mut inner.auto_renamed_functions);
+        let _ = apply_propagated_renames(
+            binary,
+            &mut renamed_functions,
+            &manual,
+            &mut auto_renamed_functions,
+            propagated_renames,
+        );
+        inner.renamed_functions = renamed_functions;
+        inner.auto_renamed_functions = auto_renamed_functions;
+    }
 
     // Enable binary-dependent menu items
     if let Some(handles) = state.menu_handles.get() {

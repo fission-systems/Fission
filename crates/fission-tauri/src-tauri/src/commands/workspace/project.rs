@@ -125,6 +125,8 @@ pub async fn load_project(
         .iter()
         .filter_map(|(addr_str, name)| parse_address(addr_str).map(|a| (a, name.clone())))
         .collect();
+    inner.manual_renamed_functions = inner.renamed_functions.keys().copied().collect();
+    inner.auto_renamed_functions.clear();
 
     inner.bookmarks = project.bookmarks.clone();
 
@@ -189,6 +191,8 @@ pub async fn load_snapshot(path: String, state: State<'_, AppState>) -> CmdResul
         .iter()
         .filter_map(|(addr_str, name)| parse_address(addr_str).map(|a| (a, name.clone())))
         .collect();
+    inner.manual_renamed_functions = inner.renamed_functions.keys().copied().collect();
+    inner.auto_renamed_functions.clear();
     inner.bookmarks = snapshot.bookmarks.clone();
     Ok(snapshot)
 }

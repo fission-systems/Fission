@@ -36,7 +36,7 @@ fn decompile_with_engine(
         DecompilerEngineMode::MlilPreview => PreviewEngineMode::MlilPreview,
         DecompilerEngineMode::Auto => PreviewEngineMode::Auto,
     };
-    let preview = select_preview_output(decomp, binary, address, name, preview_mode)
+    let preview = select_preview_output(decomp, binary, address, name, preview_mode, None)
         .map_err(CmdError::other)?;
     if let Some(code) = preview.preview_code {
         return Ok(DecompileOutcome {
@@ -52,7 +52,7 @@ fn decompile_with_engine(
             let error_text = e.to_string();
             if !matches!(engine_mode, DecompilerEngineMode::Legacy) {
                 if let Some(selection) =
-                    rescue_preview_output(decomp, binary, address, name, &error_text)
+                    rescue_preview_output(decomp, binary, address, name, &error_text, None)
                         .map_err(CmdError::other)?
                 {
                     if let Some(code) = selection.preview_code {

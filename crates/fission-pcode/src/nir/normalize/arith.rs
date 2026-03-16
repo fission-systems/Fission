@@ -325,6 +325,22 @@ fn should_drop_inner_scalar_cast(
 pub(super) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
     match expr {
         HirExpr::Binary {
+            op: HirBinaryOp::Eq,
+            lhs,
+            rhs,
+            ..
+        } if lhs == rhs && is_self_comparable_non_float_type(&expr_type(lhs)) => {
+            Some(bool_true_expr())
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ..
+        } if lhs == rhs && is_self_comparable_non_float_type(&expr_type(lhs)) => {
+            Some(bool_false_expr())
+        }
+        HirExpr::Binary {
             op: HirBinaryOp::Ne,
             lhs,
             rhs,
@@ -374,6 +390,42 @@ pub(super) fn normalize_boolean_logic(expr: &HirExpr) -> Option<HirExpr> {
             }),
             _ => None,
         },
+        HirExpr::Binary {
+            op: HirBinaryOp::LogicalAnd,
+            lhs,
+            rhs,
+            ..
+        } => {
+            if is_bool_true_expr(lhs) {
+                Some((**rhs).clone())
+            } else if is_bool_true_expr(rhs) {
+                Some((**lhs).clone())
+            } else if is_bool_false_expr(lhs) || is_bool_false_expr(rhs) {
+                Some(bool_false_expr())
+            } else if lhs == rhs {
+                Some((**lhs).clone())
+            } else {
+                None
+            }
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::LogicalOr,
+            lhs,
+            rhs,
+            ..
+        } => {
+            if is_bool_false_expr(lhs) {
+                Some((**rhs).clone())
+            } else if is_bool_false_expr(rhs) {
+                Some((**lhs).clone())
+            } else if is_bool_true_expr(lhs) || is_bool_true_expr(rhs) {
+                Some(bool_true_expr())
+            } else if lhs == rhs {
+                Some((**lhs).clone())
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -1056,6 +1108,26 @@ pub(super) fn cleanup_arithmetic_wrappers(expr: &HirExpr) -> Option<HirExpr> {
             lhs,
             rhs,
             ..
+        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Or,
+            lhs,
+            rhs,
+            ..
+        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => Some((**lhs).clone()),
+        HirExpr::Binary {
+            op: HirBinaryOp::Xor,
+            lhs,
+            rhs,
+            ..
+        } if lhs == rhs && source_is_scalarish(&expr_type(lhs)) => {
+            Some(HirExpr::Const(0, expr_type(lhs)))
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs,
+            rhs,
+            ..
         } if is_full_mask_const(rhs.as_ref(), &expr_type(lhs)) => Some((**lhs).clone()),
         HirExpr::Binary {
             op: HirBinaryOp::And,
@@ -1099,8 +1171,27 @@ fn bool_false_expr() -> HirExpr {
     HirExpr::Const(0, NirType::Bool)
 }
 
+fn bool_true_expr() -> HirExpr {
+    HirExpr::Const(1, NirType::Bool)
+}
+
+fn is_bool_false_expr(expr: &HirExpr) -> bool {
+    matches!(expr, HirExpr::Const(0, NirType::Bool))
+}
+
+fn is_bool_true_expr(expr: &HirExpr) -> bool {
+    matches!(expr, HirExpr::Const(1, NirType::Bool))
+}
+
 fn is_integer_type(ty: &NirType) -> bool {
     matches!(ty, NirType::Bool | NirType::Int { .. })
+}
+
+fn is_self_comparable_non_float_type(ty: &NirType) -> bool {
+    matches!(
+        ty,
+        NirType::Unknown | NirType::Bool | NirType::Int { .. } | NirType::Ptr(_)
+    )
 }
 
 pub(super) fn int_type_bits(ty: &NirType) -> Option<u32> {

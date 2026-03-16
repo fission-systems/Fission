@@ -45,7 +45,7 @@ pub(super) fn inline_single_use_temps(stmts: &mut Vec<HirStmt>) -> bool {
             }
         };
 
-        let Some(target_idx) = find_single_use_forward_target(stmts, idx, &name) else {
+        let Some(target_idx) = find_inline_forward_target(stmts, idx, &name) else {
             idx += 1;
             continue;
         };
@@ -210,7 +210,7 @@ fn eliminate_dead_local_clobber_assigns_in_stmts(
     changed
 }
 
-fn find_single_use_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str) -> Option<usize> {
+fn find_inline_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str) -> Option<usize> {
     let mut scan_idx = def_idx + 1;
     while scan_idx < stmts.len() {
         let stmt = &stmts[scan_idx];
@@ -219,7 +219,7 @@ fn find_single_use_forward_target(stmts: &[HirStmt], def_idx: usize, name: &str)
         if redefines {
             return None;
         }
-        if uses == 1 && stmt_allows_inline_target(stmt) {
+        if uses > 0 && stmt_allows_inline_target(stmt) {
             return Some(scan_idx);
         }
         if !stmt_allows_forward_scan(stmt) {

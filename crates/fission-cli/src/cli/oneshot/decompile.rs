@@ -75,6 +75,9 @@ fn should_use_assembly_fallback(error: &str) -> bool {
     lower.contains("duplicate variablepiece")
         || lower.contains("control flow analysis error")
         || lower.contains("followflow")
+        || lower.contains("preview_timeout")
+        || lower.contains("could not find op at target address")
+        || lower.contains("ghidra lowlevelerror")
 }
 
 fn classify_fallback_kind(error: &str) -> &'static str {
@@ -83,6 +86,12 @@ fn classify_fallback_kind(error: &str) -> &'static str {
         "type"
     } else if lower.contains("control flow analysis error") || lower.contains("followflow") {
         "control_flow"
+    } else if lower.contains("preview_timeout") {
+        "preview_timeout"
+    } else if lower.contains("could not find op at target address")
+        || lower.contains("ghidra lowlevelerror")
+    {
+        "native_pcode"
     } else {
         "other"
     }
@@ -175,6 +184,7 @@ fn decompile_code_with_profile(
     binary: &LoadedBinary,
     address: u64,
     name: &str,
+    timeout_ms: Option<u64>,
     _verbose: bool,
 ) -> Result<RenderedCode, FissionError> {
     let preview_mode = match engine_mode {
@@ -182,7 +192,7 @@ fn decompile_code_with_profile(
         EngineMode::MlilPreview => PreviewEngineMode::MlilPreview,
         EngineMode::Auto => PreviewEngineMode::Auto,
     };
-    let preview = select_preview_output(decomp, binary, address, name, preview_mode)
+    let preview = select_preview_output(decomp, binary, address, name, preview_mode, timeout_ms)
         .map_err(FissionError::decompiler)?;
 
     if let Some(code) = preview.preview_code {
@@ -195,13 +205,26 @@ fn decompile_code_with_profile(
         });
     }
 
+    if preview.fell_back
+        && preview
+            .fallback_reason
+            .as_deref()
+            .is_some_and(|reason| reason.to_ascii_lowercase().contains("preview_timeout"))
+    {
+        return Err(FissionError::decompiler(
+            preview
+                .fallback_reason
+                .unwrap_or_else(|| "preview_timeout".to_string()),
+        ));
+    }
+
     let result = match decomp.decompile_with_metadata(address) {
         Ok(result) => result,
         Err(e) => {
             let error_text = e.to_string();
             if !matches!(engine_mode, EngineMode::Legacy) {
                 if let Some(selection) =
-                    rescue_preview_output(decomp, binary, address, name, &error_text)
+                    rescue_preview_output(decomp, binary, address, name, &error_text, timeout_ms)
                         .map_err(FissionError::decompiler)?
                 {
                     if let Some(code) = selection.preview_code {
@@ -254,6 +277,7 @@ fn run_sequential_decompilation<'a>(
             binary,
             func.address,
             &func.name,
+            cli.timeout_ms,
             cli.verbose,
         ) {
             Ok(rendered) => {
@@ -418,6 +442,7 @@ fn run_parallel_decompilation<'a>(
                 binary,
                 func.address,
                 &func.name,
+                cli.timeout_ms,
                 false,
             );
             let decomp_sec = start.elapsed().as_secs_f64();
@@ -506,6 +531,7 @@ fn run_parallel_decompilation<'a>(
                     binary,
                     func.address,
                     &func.name,
+                    cli.timeout_ms,
                     false,
                 );
                 let decomp_sec = start.elapsed().as_secs_f64();
@@ -924,6 +950,7 @@ pub(super) fn decompile_and_output(
         binary,
         addr,
         name,
+        cli.timeout_ms,
         cli.verbose,
     ) {
         Ok(rendered) => {

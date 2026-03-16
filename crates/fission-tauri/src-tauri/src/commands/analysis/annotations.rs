@@ -27,10 +27,14 @@ pub async fn rename_function(
     if new_name.trim().is_empty() {
         // Remove the rename (revert to original)
         inner.renamed_functions.remove(&address);
+        inner.manual_renamed_functions.remove(&address);
+        inner.auto_renamed_functions.remove(&address);
     } else {
         inner
             .renamed_functions
             .insert(address, new_name.trim().to_string());
+        inner.manual_renamed_functions.insert(address);
+        inner.auto_renamed_functions.remove(&address);
     }
 
     Ok(())

@@ -1,0 +1,101 @@
+{
+  "corpus": "ida76sp1",
+  "generated_on": "2026-03-16",
+  "selection_policy": {
+    "filter": "Exclude [import] and [thunk] entries from --list results.",
+    "seed_count_per_binary": 5,
+    "strategy": "Deterministic address quantiles over the filtered function list: first, 25%, 50%, 75%, tail. For DLLs, export entries are allowed only when they naturally land in the filtered quantiles."
+  },
+  "binaries": [
+    {
+      "binary": "/Users/sjkim1127/Fission/samples/windows/x64/ida76sp1/ida64.exe",
+      "role": "GUI host executable",
+      "function_count_filtered": 10484,
+      "addresses": [
+        "0x140001010",
+        "0x140091590",
+        "0x140128400",
+        "0x1401c2c50",
+        "0x140250ff0"
+      ],
+      "baseline": {
+        "direct_preview": 4,
+        "fallback": 0,
+        "legacy": 1,
+        "timeouts": 0
+      }
+    },
+    {
+      "binary": "/Users/sjkim1127/Fission/samples/windows/x64/ida76sp1/idat64.exe",
+      "role": "Console host executable",
+      "function_count_filtered": 5318,
+      "addresses": [
+        "0x180001050",
+        "0x180051aa0",
+        "0x18009c360",
+        "0x1800ec508",
+        "0x18011b5f0"
+      ],
+      "baseline": {
+        "direct_preview": 4,
+        "fallback": 0,
+        "legacy": 1,
+        "timeouts": 0
+      }
+    },
+    {
+      "binary": "/Users/sjkim1127/Fission/samples/windows/x64/ida76sp1/ida64.dll",
+      "role": "Shared GUI/runtime DLL",
+      "function_count_filtered": 11344,
+      "addresses": [
+        "0x1000e900",
+        "0x100a2590",
+        "0x10152e20",
+        "0x101fa177",
+        "0x1038eb10"
+      ],
+      "baseline": {
+        "direct_preview": 4,
+        "fallback": 0,
+        "legacy": 1,
+        "timeouts": 1
+      }
+    },
+    {
+      "binary": "/Users/sjkim1127/Fission/samples/windows/x64/ida76sp1/ida.dll",
+      "role": "Shared analysis/runtime DLL",
+      "function_count_filtered": 11240,
+      "addresses": [
+        "0x1000e8f0",
+        "0x1009f3f0",
+        "0x1014b4c0",
+        "0x101f0ae0",
+        "0x10382ab0"
+      ],
+      "baseline": {
+        "direct_preview": 4,
+        "fallback": 0,
+        "legacy": 1,
+        "timeouts": 0
+      }
+    },
+    {
+      "binary": "/Users/sjkim1127/Fission/samples/windows/x64/ida76sp1/plugins/hexrays.dll",
+      "role": "Representative plugin DLL",
+      "function_count_filtered": 8022,
+      "addresses": [
+        "0x170057f0",
+        "0x17088330",
+        "0x1712e7f0",
+        "0x171db1a0",
+        "0x17325760"
+      ],
+      "baseline": {
+        "direct_preview": 3,
+        "fallback": 0,
+        "legacy": 2,
+        "timeouts": 1
+      }
+    }
+  ]
+}

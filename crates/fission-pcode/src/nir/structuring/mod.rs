@@ -191,7 +191,12 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn should_force_linear_structuring(&self) -> bool {
+        let total_ops: usize = self.pcode.blocks.iter().map(|block| block.ops.len()).sum();
         if self.pcode.blocks.len() > 80 {
+            return true;
+        }
+
+        if self.options.is_64bit && self.pcode.blocks.len() >= 28 && total_ops >= 350 {
             return true;
         }
 

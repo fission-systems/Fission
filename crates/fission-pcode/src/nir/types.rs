@@ -189,7 +189,7 @@ pub enum HirBinaryOp {
     SLe,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MlilPreviewOptions {
     pub pe_x64_only: bool,
     pub is_64bit: bool,
@@ -199,13 +199,13 @@ pub struct MlilPreviewOptions {
     pub sections: Vec<(u64, u64)>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PreviewTypeContext {
     pub call_targets: HashMap<u64, String>,
     pub call_param_rules: Vec<PreviewCallParamRule>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PreviewCallParamRule {
     pub callee_name: String,
     pub arg_index: usize,

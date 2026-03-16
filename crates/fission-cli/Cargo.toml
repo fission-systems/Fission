@@ -42,3 +42,8 @@ libc = "0.2"
 name = "fission_cli"
 path = "src/bin/fission_cli.rs"
 test = false
+
+[[bin]]
+name = "fission_preview_worker"
+path = "src/bin/fission_preview_worker.rs"
+test = false

@@ -3,10 +3,11 @@
 use crate::dto::BookmarkDto;
 use crate::dto::DebugStateDto;
 use crate::menu::MenuHandles;
+use crate::services::cross_image::PropagationReason;
 use fission_dynamic::debug::ttd::Timeline;
 use fission_dynamic::plugin::PluginManager;
 use fission_loader::loader::LoadedBinary;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -34,6 +35,12 @@ pub struct InnerState {
 
     /// User-defined function renames keyed by address
     pub renamed_functions: HashMap<u64, String>,
+
+    /// Addresses explicitly renamed by the user or restored from a project.
+    pub manual_renamed_functions: HashSet<u64>,
+
+    /// In-memory provenance for auto-propagated names.
+    pub auto_renamed_functions: HashMap<u64, PropagationReason>,
 
     /// User bookmarks
     pub bookmarks: Vec<BookmarkDto>,

@@ -858,3 +858,167 @@ fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
     assert!(func.locals.is_empty());
     assert_eq!(func.body, vec![HirStmt::Return(None)]);
 }
+
+#[test]
+fn self_equality_on_integer_like_value_collapses_to_true() {
+    let reg = HirExpr::Var("reg".to_string());
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Eq,
+        lhs: Box::new(reg.clone()),
+        rhs: Box::new(reg),
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return 1;");
+}
+
+#[test]
+fn self_inequality_on_integer_like_value_collapses_to_false() {
+    let reg = HirExpr::Var("reg".to_string());
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Ne,
+        lhs: Box::new(reg.clone()),
+        rhs: Box::new(reg),
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return 0;");
+}
+
+#[test]
+fn logical_and_with_self_equality_tautology_collapses() {
+    let reg = HirExpr::Var("reg".to_string());
+    let mut stmt = HirStmt::If {
+        cond: HirExpr::Binary {
+            op: HirBinaryOp::LogicalAnd,
+            lhs: Box::new(HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(reg.clone()),
+                ty: NirType::Bool,
+            }),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Eq,
+                lhs: Box::new(reg.clone()),
+                rhs: Box::new(reg),
+                ty: NirType::Bool,
+            }),
+            ty: NirType::Bool,
+        },
+        then_body: vec![HirStmt::Return(None)],
+        else_body: vec![],
+    };
+    normalize_stmt(&mut stmt);
+    match stmt {
+        HirStmt::If { cond, .. } => assert_eq!(
+            cond,
+            HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(HirExpr::Var("reg".to_string())),
+                ty: NirType::Bool,
+            }
+        ),
+        _ => panic!("expected if stmt"),
+    }
+}
+
+#[test]
+fn float_self_equality_is_not_folded() {
+    let x = HirExpr::Var("fVar1".to_string());
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Eq,
+        lhs: Box::new(HirExpr::Cast {
+            ty: NirType::Float { bits: 32 },
+            expr: Box::new(x.clone()),
+        }),
+        rhs: Box::new(HirExpr::Cast {
+            ty: NirType::Float { bits: 32 },
+            expr: Box::new(x),
+        }),
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return (float)fVar1 == (float)fVar1;");
+}
+
+#[test]
+fn repeated_integer_bitwise_identity_simplifies() {
+    let x = HirExpr::Var("eax".to_string());
+    let mut stmt = HirStmt::Return(Some(HirExpr::Binary {
+        op: HirBinaryOp::Eq,
+        lhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs: Box::new(x.clone()),
+            rhs: Box::new(x),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }),
+        rhs: Box::new(HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        )),
+        ty: NirType::Bool,
+    }));
+    normalize_stmt(&mut stmt);
+    assert_eq!(print_stmt(&stmt), "return eax == 0;");
+}
+
+#[test]
+fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
+    let mut func = HirFunction {
+        name: "inline_condition_temp".to_string(),
+        params: vec![],
+        locals: vec![NirBinding {
+            name: "uVar1".to_string(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+            surface_type_name: None,
+            initializer: None,
+        }],
+        return_type: NirType::Unknown,
+        body: vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("uVar1".to_string()),
+                rhs: HirExpr::Var("eax".to_string()),
+            },
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::LogicalAnd,
+                    lhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Ne,
+                        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
+                        rhs: Box::new(HirExpr::Const(
+                            0,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        )),
+                        ty: NirType::Bool,
+                    }),
+                    rhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Eq,
+                        lhs: Box::new(HirExpr::Var("uVar1".to_string())),
+                        rhs: Box::new(HirExpr::Var("uVar1".to_string())),
+                        ty: NirType::Bool,
+                    }),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Return(None)],
+                else_body: vec![],
+            },
+        ],
+    };
+
+    normalize_hir_function(&mut func);
+
+    assert!(func.locals.is_empty());
+    let rendered = print_hir_function(&func);
+    assert!(rendered.contains("if (eax)"), "rendered:\n{}", rendered);
+}

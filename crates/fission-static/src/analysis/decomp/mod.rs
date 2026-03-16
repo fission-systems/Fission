@@ -44,8 +44,8 @@ pub use prepare::{
 };
 #[cfg(feature = "native_decomp")]
 pub use preview_engine::{
-    PreviewEngineMode, PreviewSelection, PreviewSource, rescue_preview_output,
-    select_preview_output,
+    PreviewEngineMode, PreviewSelection, PreviewSource, PreviewWorkerRequest,
+    PreviewWorkerResponse, execute_preview_worker, rescue_preview_output, select_preview_output,
 };
 
 #[cfg(feature = "native_decomp")]

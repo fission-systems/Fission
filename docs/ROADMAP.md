@@ -113,6 +113,12 @@ v13 기준 preview는 의미 있는 수준까지 올라왔지만 아직 full rep
 - raw JSON은 artifact로, 요약본은 문서로
 - `everything`, `putty`, `cmkr` 회귀 세트 유지
 
+추가 코퍼스:
+- `ida76sp1`
+  - x64 멀티-DLL C++/plugin corpus
+  - 목적: large C++ GUI + shared DLL + plugin ecosystem regression
+  - 향후 확장: cross-image symbol/type propagation 실험용
+
 ## Out of Scope For Now
 
 당장 우선순위가 아닌 항목:

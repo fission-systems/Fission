@@ -159,11 +159,10 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(HirExpr::Var(param));
         }
 
-        if !self.options.is_64bit
-            && vn.space_id == REGISTER_SPACE_ID
-            && let Some(name) = x86_register_name(vn.offset, vn.size)
-        {
-            return Ok(HirExpr::Var(name.to_string()));
+        if !self.options.is_64bit && vn.space_id == REGISTER_SPACE_ID {
+            if let Some(name) = x86_register_name(vn.offset, vn.size) {
+                return Ok(HirExpr::Var(name.to_string()));
+            }
         }
 
         if vn.space_id == REGISTER_SPACE_ID

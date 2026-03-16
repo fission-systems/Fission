@@ -90,6 +90,13 @@ impl<'a> PreviewBuilder<'a> {
 
         let mut body = Vec::new();
         if self.pcode.blocks.len() == 1 {
+            if preview_builder_diag_enabled() {
+                eprintln!(
+                    "[DIAG] build_hir single_block_start: block=0x{:x} ops={}",
+                    self.pcode.blocks[0].start_address,
+                    self.pcode.blocks[0].ops.len()
+                );
+            }
             let block = &self.pcode.blocks[0];
             body.extend(self.lower_block_stmts(block)?);
             match self.lower_block_terminator(0)? {
@@ -115,8 +122,25 @@ impl<'a> PreviewBuilder<'a> {
                     return Err(MlilPreviewError::UnsupportedCfgIndirectCallRegion);
                 }
             }
+            if preview_builder_diag_enabled() {
+                eprintln!("[DIAG] build_hir single_block_done: stmts={}", body.len());
+            }
         } else {
+            if preview_builder_diag_enabled() {
+                eprintln!(
+                    "[DIAG] build_hir multiblock_start: blocks={} ops={}",
+                    self.pcode.blocks.len(),
+                    self.pcode
+                        .blocks
+                        .iter()
+                        .map(|block| block.ops.len())
+                        .sum::<usize>()
+                );
+            }
             body = self.build_multiblock_body()?;
+            if preview_builder_diag_enabled() {
+                eprintln!("[DIAG] build_hir multiblock_done: stmts={}", body.len());
+            }
         }
 
         let return_type = body
@@ -200,4 +224,8 @@ impl<'a> PreviewBuilder<'a> {
             );
         }
     }
+}
+
+fn preview_builder_diag_enabled() -> bool {
+    std::env::var_os("FISSION_PREVIEW_DIAG").is_some()
 }
