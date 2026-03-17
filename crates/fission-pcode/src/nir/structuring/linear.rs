@@ -13,9 +13,12 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let mut body = Vec::new();
         let targeted = self.collect_jump_targets()?;
+        let mut emitted_labels = HashSet::new();
         for idx in 0..self.pcode.blocks.len() {
             let block = &self.pcode.blocks[idx];
-            if idx == 0 || targeted.contains(&block.start_address) {
+            if (idx == 0 || targeted.contains(&block.start_address))
+                && emitted_labels.insert(block.start_address)
+            {
                 body.push(HirStmt::Label(block_label(block.start_address)));
             }
             body.extend(self.lower_block_stmts(block)?);
@@ -45,7 +48,10 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
-        Ok(body)
+        let mut body = cleanup_redundant_labels(body);
+        while self.promote_single_entry_guarded_tail_regions(&mut body) {}
+        self.discover_guarded_tail_candidates(&body);
+        Ok(cleanup_redundant_labels(body))
     }
 
     pub(crate) fn lower_linear_body(
@@ -320,7 +326,7 @@ impl<'a> PreviewBuilder<'a> {
         self.is_trivial_linear_tail(next_idx)
     }
 
-    fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
+    pub(super) fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
         if idx >= next_idx {
             return false;
         }
@@ -530,7 +536,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn find_block_index_by_address(&self, address: u64) -> Option<usize> {
-        self.address_to_index.get(&address).copied()
+        canonical_block_index_for_address(self.pcode, &self.address_to_index, address)
     }
 
     pub(super) fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {

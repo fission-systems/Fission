@@ -3,10 +3,11 @@
 use crate::dto::BookmarkDto;
 use crate::dto::DebugStateDto;
 use crate::menu::MenuHandles;
-use crate::services::cross_image::PropagationReason;
+use crate::services::cross_image::{AutoRenameKind, PropagationReason};
 use fission_dynamic::debug::ttd::Timeline;
 use fission_dynamic::plugin::PluginManager;
 use fission_loader::loader::LoadedBinary;
+use fission_static::analysis::decomp::{FactProvenance, FactStore};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -40,10 +41,42 @@ pub struct InnerState {
     pub manual_renamed_functions: HashSet<u64>,
 
     /// In-memory provenance for auto-propagated names.
-    pub auto_renamed_functions: HashMap<u64, PropagationReason>,
+    pub auto_renamed_functions: HashMap<u64, AutoRenameKind>,
+
+    /// Session-scoped source of truth for symbol/type/name facts.
+    pub fact_store: Option<FactStore>,
 
     /// User bookmarks
     pub bookmarks: Vec<BookmarkDto>,
+}
+
+fn fact_provenance_from_auto(reason: AutoRenameKind) -> FactProvenance {
+    match reason {
+        AutoRenameKind::StrongFid => FactProvenance::StrongFid,
+        AutoRenameKind::CrossImage(PropagationReason::ImportExport) => {
+            FactProvenance::CrossImageImportExport
+        }
+        AutoRenameKind::CrossImage(PropagationReason::Thunk) => FactProvenance::CrossImageThunk,
+    }
+}
+
+impl InnerState {
+    pub fn rebuild_fact_store(&mut self) {
+        let Some(binary) = self.loaded_binary.as_ref() else {
+            self.fact_store = None;
+            return;
+        };
+
+        let mut store = FactStore::from_binary(binary);
+        for (addr, name) in &self.renamed_functions {
+            if self.manual_renamed_functions.contains(addr) {
+                store.ingest_name_fact(*addr, name.clone(), FactProvenance::UserRename);
+            } else if let Some(reason) = self.auto_renamed_functions.get(addr).copied() {
+                store.ingest_name_fact(*addr, name.clone(), fact_provenance_from_auto(reason));
+            }
+        }
+        self.fact_store = Some(store);
+    }
 }
 
 /// Thread-safe application state wrapper.

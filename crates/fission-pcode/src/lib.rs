@@ -25,7 +25,8 @@ pub use pcode::*;
 // Re-export optimizer
 pub use nir::{
     HirExpr, HirFunction, HirStmt, MlilPreviewError, MlilPreviewOptions, NirBlock, NirFunction,
-    NirTerminator, NirType, NirValueId, PreviewCallParamRule, PreviewTypeContext, StackSlotId,
-    render_mlil_preview, render_mlil_preview_with_context,
+    NirTerminator, NirType, NirValueId, PreviewBuildStats, PreviewCallParamRule,
+    PreviewTypeContext, StackSlotId, render_mlil_preview, render_mlil_preview_with_context,
+    take_last_preview_build_stats,
 };
 pub use pcode::optimizer::{PcodeOptimizer, PcodeOptimizerConfig};

@@ -2,6 +2,7 @@
 
 use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
+use crate::services::cross_image::AutoRenameKind;
 use crate::state::AppState;
 use tauri::State;
 
@@ -33,6 +34,7 @@ pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<Func
     // Replace the Arc with the updated binary
     let binary_arc = std::sync::Arc::new(binary);
     inner.loaded_binary = Some(binary_arc.clone());
+    inner.rebuild_fact_store();
     let _ = found; // delta surfaced to the frontend via the returned slice length
 
     let functions = crate::commands::binary::functions_to_dtos(&binary_arc, &renames);
@@ -59,6 +61,7 @@ pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<Fu
     let renames = inner.renamed_functions.clone();
     let binary_arc = std::sync::Arc::new(binary);
     inner.loaded_binary = Some(binary_arc.clone());
+    inner.rebuild_fact_store();
 
     let functions = crate::commands::binary::functions_to_dtos(&binary_arc, &renames);
 
@@ -186,12 +189,16 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
     for (addr, new_name) in &identified {
         let prev_name = prev_names.get(addr).cloned().unwrap_or_default();
         inner.renamed_functions.insert(*addr, new_name.clone());
+        inner
+            .auto_renamed_functions
+            .insert(*addr, AutoRenameKind::StrongFid);
         matches.push(FidMatchDto {
             address: format!("0x{:x}", addr),
             name: new_name.clone(),
             previous_name: prev_name,
         });
     }
+    inner.rebuild_fact_store();
 
     let matched = matches.len();
 

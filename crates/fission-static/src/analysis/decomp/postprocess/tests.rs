@@ -274,6 +274,49 @@ label_1:
 }
 
 #[test]
+fn test_goto_cleanup_folds_braced_if_else_goto_form() {
+    let input = r#"int test(int x)
+{
+  if (x) {
+    goto label_then;
+  } else {
+    goto label_else;
+  }
+label_then:
+  return 1;
+label_else:
+  return 2;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(
+        !output.contains("goto label_then;"),
+        "must fold then goto: {}",
+        output
+    );
+    assert!(
+        !output.contains("goto label_else;"),
+        "must fold else goto: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_then:") && !output.contains("label_else:"),
+        "must remove dead labels: {}",
+        output
+    );
+    assert!(
+        output.contains("if ("),
+        "must preserve structured conditional: {}",
+        output
+    );
+    assert!(
+        output.contains("return 1;") && output.contains("return 2;"),
+        "must preserve both branch bodies: {}",
+        output
+    );
+}
+
+#[test]
 fn test_goto_cleanup_folds_canonical_if_else() {
     let input = r#"int test(int x)
 {

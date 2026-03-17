@@ -163,6 +163,26 @@ mod tests {
     }
 
     #[test]
+    fn test_rewrite_tier_assignment_for_representative_passes() {
+        use super::super::pass::RewriteTier;
+
+        let registry = create_default_registry().expect("default registry");
+        let arithmetic = registry
+            .get_metadata("arithmetic_idioms")
+            .expect("arithmetic_idioms metadata");
+        let field_offsets = registry
+            .get_metadata("field_offsets")
+            .expect("field_offsets metadata");
+        let rename = registry
+            .get_metadata("rename_semantic_vars")
+            .expect("rename_semantic_vars metadata");
+
+        assert_eq!(arithmetic.tier, RewriteTier::IdiomRecovery);
+        assert_eq!(field_offsets.tier, RewriteTier::Polish);
+        assert_eq!(rename.tier, RewriteTier::Polish);
+    }
+
+    #[test]
     fn test_execute_default_passes() {
         let code = r#"
 int test() {

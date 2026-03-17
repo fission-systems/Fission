@@ -21,6 +21,8 @@ pub struct PassMetadata {
     pub description: &'static str,
     /// Category for grouping (e.g., "arithmetic", "control-flow", "naming")
     pub category: PassCategory,
+    /// Architectural ownership tier for this rewrite.
+    pub tier: RewriteTier,
 }
 
 /// Category classification for passes
@@ -38,6 +40,17 @@ pub enum PassCategory {
     LanguageSpecific,
     /// Type-based transformations
     TypeBased,
+}
+
+/// Architectural ownership tier for a rewrite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RewriteTier {
+    /// Meaning-preserving low-level normalization before higher-level reasoning.
+    Canonicalization,
+    /// Recovery of compiler idioms or higher-level source constructs.
+    IdiomRecovery,
+    /// Pure presentation cleanup close to final rendering.
+    Polish,
 }
 
 /// Result type for pass execution
@@ -384,6 +397,7 @@ mod tests {
                 name: self.id,
                 description: "Test pass",
                 category: PassCategory::Cleanup,
+                tier: RewriteTier::Polish,
             }
         }
 
@@ -403,6 +417,7 @@ mod tests {
                 name: self.id,
                 description: "Borrow pass",
                 category: PassCategory::Cleanup,
+                tier: RewriteTier::Polish,
             }
         }
 

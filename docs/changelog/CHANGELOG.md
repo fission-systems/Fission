@@ -10,6 +10,23 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-17
 
+### Private AI Layer Repository Boundary Cleanup
+
+공개 리포 경계를 더 선명하게 하기 위해 `fission-ai`를 오픈소스 workspace와 Git tracking 범위에서 분리했다. 이번 변경의 목적은 코어 디컴파일/분석 엔진은 공개하되, 향후 AI product/API orchestration 레이어는 비공개로 유지하는 저장소 경계를 먼저 고정하는 것이다.
+
+#### Changed
+
+- 공개 workspace 범위 조정
+  - workspace member에서 `crates/fission-ai` 제거
+  - `fission-analysis`의 `fission-ai` dependency 및 re-export 제거
+- Git 공개 범위 정리
+  - `.gitignore`에 `crates/fission-ai/` 추가
+  - `crates/fission-ai/*`를 Git tracking에서 제거해 이후 GitHub 공개 범위에서 제외
+
+#### Validation
+
+- `cargo build -p fission-analysis --features native_decomp`
+
 ### v75-v78 - Preview-First Retirement Prep + Type Absorption Expansion + ARM64 Detection Scaffolding
 
 이번 구간은 세 축으로 진행됐다. 첫째는 preview-first를 제품 기본 정책으로 더 굳히고, legacy를 내부 fallback / compat 경로로만 남기기 위한 taxonomy와 usage inventory를 정리하는 작업이었다. 둘째는 x64 `putty/cmake` hard case와 x86 `WinMerge/EverPlanet` hard case에서 Rust-side type absorption을 확장해, pointer-offset alias와 `register[offset]` surface가 field replacement 후보에서 덜 빠지게 만드는 것이었다. 셋째는 `ida76sp1` 포터블 코퍼스 기준 cross-image propagation 2차의 첫 단계로 `plugins/` 범위까지 sibling scan을 넓히고, Windows ARM64 spike를 위한 최소 PE architecture detection scaffolding을 추가하는 것이었다.

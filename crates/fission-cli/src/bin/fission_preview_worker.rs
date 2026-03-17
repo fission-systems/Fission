@@ -12,6 +12,7 @@ fn main() -> io::Result<()> {
         Err(err) => PreviewWorkerResponse {
             success: false,
             code: None,
+            build_stats: None,
             error: Some(format!("preview worker request parse failed: {err}")),
         },
     };

@@ -4,7 +4,9 @@
 //! post-processing passes, wrapping the methods from PostProcessor.
 
 use super::PostProcessor;
-use super::pass::{PassCategory, PassContext, PassMetadata, PassResult, PostProcessPass};
+use super::pass::{
+    PassCategory, PassContext, PassMetadata, PassResult, PostProcessPass, RewriteTier,
+};
 use std::borrow::Cow;
 
 fn pass_output<'a>(input: &'a str, output: String) -> PassResult<'a> {
@@ -31,6 +33,7 @@ impl PostProcessPass for ArithmeticIdiomsPass {
             name: "Arithmetic Idiom Recovery",
             description: "Simplifies sign extension, division, CONCAT operations",
             category: PassCategory::Arithmetic,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -51,6 +54,7 @@ impl PostProcessPass for MulPow2ToShiftPass {
             name: "Multiply to Shift",
             description: "Converts multiplication by power-of-2 to left shift in bitwise context",
             category: PassCategory::Arithmetic,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -73,6 +77,7 @@ impl PostProcessPass for WhileTrueToCondPass {
             name: "While-True to While-Condition",
             description: "Converts while(true) with break to while(condition)",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -95,6 +100,7 @@ impl PostProcessPass for WhileTrueToForPass {
             name: "While-True to For-Loop",
             description: "Converts while(true) with init/exit/update to for loop",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -117,6 +123,7 @@ impl PostProcessPass for WhileCondToForPass {
             name: "While-Condition to For-Loop",
             description: "Converts while(cond) to for loop when init/increment detected",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -139,6 +146,7 @@ impl PostProcessPass for DoWhileToForPass {
             name: "Do-While to For-Loop",
             description: "Converts do-while to for loop with increment",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -161,6 +169,7 @@ impl PostProcessPass for WhileTrueToForEverPass {
             name: "While-True to For-Ever",
             description: "Converts while(true) to for(;;)",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -183,6 +192,7 @@ impl PostProcessPass for SimplifyIfStructurePass {
             name: "Simplify If-Structure",
             description: "Removes empty else blocks and simplifies if-return patterns",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -205,6 +215,7 @@ impl PostProcessPass for SwitchReconstructionPass {
             name: "Switch Reconstruction (BST)",
             description: "Reconstructs switch from binary search tree patterns",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -223,6 +234,7 @@ impl PostProcessPass for SwitchFromIfElseAssignPass {
             name: "Switch Reconstruction (If-Else)",
             description: "Reconstructs switch from if-else assignment chains",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -247,6 +259,7 @@ impl PostProcessPass for SwitchCaseClusteringPass {
             name: "Switch Case Clustering",
             description: "Clusters adjacent switch cases with common bodies or linear assignments",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -273,6 +286,7 @@ impl PostProcessPass for RemoveConstantConditionsPass {
             name: "Remove Constant Conditions",
             description: "Removes dead branches with constant conditions",
             category: PassCategory::Cleanup,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -300,6 +314,7 @@ impl PostProcessPass for RemoveDeadAssignmentsPass {
             name: "Remove Dead Assignments",
             description: "Removes unused local variable assignments",
             category: PassCategory::Cleanup,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -331,6 +346,7 @@ impl PostProcessPass for DerefToArrayIndexPass {
             name: "Deref to Array Index",
             description: "Converts *(a + N) to a[N]",
             category: PassCategory::Cleanup,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -349,6 +365,7 @@ impl PostProcessPass for BitopToLogicopPass {
             name: "Bitwise to Logical Operators",
             description: "Converts bitwise operators to logical in conditions",
             category: PassCategory::Cleanup,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -371,6 +388,7 @@ impl PostProcessPass for RenameInductionVarsPass {
             name: "Rename Induction Variables",
             description: "Renames loop counters to i, j, k",
             category: PassCategory::Naming,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -393,6 +411,7 @@ impl PostProcessPass for RenameSemanticVarsPass {
             name: "Rename Semantic Variables",
             description: "Renames variables based on semantic context (argc/argv, result, etc.)",
             category: PassCategory::Naming,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -411,6 +430,7 @@ impl PostProcessPass for LoopIdiomsPass {
             name: "Loop Idiom Recognition",
             description: "Recognizes common loop patterns (strlen, popcount, memset)",
             category: PassCategory::Naming,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -437,6 +457,7 @@ impl PostProcessPass for RemoveRustBoilerplatePass {
             name: "Remove Rust Boilerplate",
             description: "Removes Rust-specific panic and safety checks",
             category: PassCategory::LanguageSpecific,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -456,6 +477,7 @@ impl PostProcessPass for RemoveGoBoilerplatePass {
             name: "Remove Go Boilerplate",
             description: "Removes Go-specific panic patterns",
             category: PassCategory::LanguageSpecific,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -475,6 +497,7 @@ impl PostProcessPass for SwiftDemanglePass {
             name: "Swift Symbol Demangling",
             description: "Demangles Swift symbols",
             category: PassCategory::LanguageSpecific,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -498,6 +521,7 @@ impl PostProcessPass for FieldOffsetReplacementPass {
             name: "Field Offset Replacement",
             description: "Replaces numeric offsets with field names using type info",
             category: PassCategory::TypeBased,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -525,6 +549,7 @@ impl PostProcessPass for InsertMissingCastsPass {
             name: "Insert Missing Casts",
             description: "Inserts missing type casts for assignments",
             category: PassCategory::TypeBased,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -543,6 +568,7 @@ impl PostProcessPass for ApplyDwarfNamesPass {
             name: "Apply DWARF Names",
             description: "Substitutes variable/parameter names from DWARF debug info",
             category: PassCategory::TypeBased,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -570,6 +596,7 @@ impl PostProcessPass for PromoteRectParamsPass {
             name: "Promote WinAPI Struct Params",
             description: "Promotes downgraded uint8_t array-pointer params into WinAPI structure pointers via signature DB",
             category: PassCategory::TypeBased,
+            tier: RewriteTier::Polish,
         }
     }
 
@@ -588,6 +615,7 @@ impl PostProcessPass for CleanSlatePass {
             name: "Clean Ghidra Artifacts",
             description: "Rewrites promoted structure writes and collapses trivial CONCAT scalar artifacts",
             category: PassCategory::Cleanup,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -610,6 +638,7 @@ impl PostProcessPass for AggregateSweepPass {
             name: "Aggregate Copy Cleanup",
             description: "Normalizes whole-object CONCAT and byte-array copy residue into aggregate-typed assignments",
             category: PassCategory::Cleanup,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -632,6 +661,7 @@ impl PostProcessPass for InlineSingleUseTempsPass {
             name: "Inline Single-Use Temps",
             description: "Inlines trivial single-assignment temporary variables into their immediate use sites",
             category: PassCategory::Cleanup,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -654,6 +684,7 @@ impl PostProcessPass for NormalizeStackArtifactsPass {
             name: "Normalize Stack Artifacts",
             description: "Renames exposed Stack_ locals and rewrites piece access into explicit pointer casts",
             category: PassCategory::Naming,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -676,6 +707,7 @@ impl PostProcessPass for NormalizePieceAccessesPass {
             name: "Normalize Piece Accesses",
             description: "Rewrites generic Ghidra _offset_size_ piece syntax into explicit pointer casts, including globals and wide aggregates",
             category: PassCategory::Cleanup,
+            tier: RewriteTier::Canonicalization,
         }
     }
 
@@ -698,6 +730,7 @@ impl PostProcessPass for GotoCleanupPass {
             name: "Goto Cleanup",
             description: "Removes trivial gotos, inlines pass-through labels, and folds canonical goto-based if/else patterns",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 
@@ -720,6 +753,7 @@ impl PostProcessPass for GotoLoopToDoWhilePass {
             name: "Goto Loop to Do-While",
             description: "Converts single-label back-edge goto loops into do-while form",
             category: PassCategory::ControlFlow,
+            tier: RewriteTier::IdiomRecovery,
         }
     }
 

@@ -4,7 +4,7 @@
 //! the implementation is split into dedicated crates:
 //! - `fission-static`
 //! - `fission-dynamic`
-//! - `fission-ai`
+//! - private product/AI layers kept outside this compatibility crate
 
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![allow(clippy::module_name_repetitions)]
@@ -24,5 +24,3 @@ pub use fission_static::{analysis, utils};
 pub use fission_dynamic::unpacker;
 #[cfg(feature = "interactive_runtime")]
 pub use fission_dynamic::{app, debug, plugin};
-
-pub use fission_ai as ai;

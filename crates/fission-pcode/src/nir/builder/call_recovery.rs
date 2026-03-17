@@ -1,6 +1,21 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn fallback_call_arg_surface_expr(&self, output: &Varnode) -> Option<HirExpr> {
+        if output.space_id != REGISTER_SPACE_ID {
+            return None;
+        }
+
+        if !self.options.is_64bit
+            && let Some(name) = x86_register_name(output.offset, output.size)
+        {
+            return Some(HirExpr::Var(name.to_string()));
+        }
+
+        register_name_with_param(output.offset, output.size)
+            .map(|(name, _)| HirExpr::Var(name.to_string()))
+    }
+
     pub(in crate::nir::builder) fn recover_call_args_from_block(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -31,9 +46,9 @@ impl<'a> PreviewBuilder<'a> {
             if param_index >= recovered.len() || recovered[param_index].is_some() {
                 continue;
             }
-            let expr = self
-                .lower_varnode(output, &mut HashSet::new())
-                .map_err(|err| {
+            let expr = match self.lower_varnode(output, &mut HashSet::new()) {
+                Ok(expr) => expr,
+                Err(err) => {
                     self.debug_lowering_error(
                         "call_arg_recovery",
                         block.start_address,
@@ -41,8 +56,25 @@ impl<'a> PreviewBuilder<'a> {
                         prev.opcode,
                         &err,
                     );
-                    err
-                })?;
+                    if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
+                        self.record_unsupported_inventory_event(
+                            "call_recovery",
+                            Some(output),
+                            Some(prev),
+                            Some(prev.opcode),
+                            Some(block.start_address),
+                            Some(u64::from(prev.seq_num)),
+                            false,
+                            "call_arg_recovery_lowering_failed",
+                        );
+                    }
+                    if let Some(fallback) = self.fallback_call_arg_surface_expr(output) {
+                        fallback
+                    } else {
+                        continue;
+                    }
+                }
+            };
             recovered[param_index] = Some(expr);
         }
 

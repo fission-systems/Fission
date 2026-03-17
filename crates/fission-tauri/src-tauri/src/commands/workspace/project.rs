@@ -127,6 +127,7 @@ pub async fn load_project(
         .collect();
     inner.manual_renamed_functions = inner.renamed_functions.keys().copied().collect();
     inner.auto_renamed_functions.clear();
+    inner.rebuild_fact_store();
 
     inner.bookmarks = project.bookmarks.clone();
 
@@ -193,6 +194,7 @@ pub async fn load_snapshot(path: String, state: State<'_, AppState>) -> CmdResul
         .collect();
     inner.manual_renamed_functions = inner.renamed_functions.keys().copied().collect();
     inner.auto_renamed_functions.clear();
+    inner.rebuild_fact_store();
     inner.bookmarks = snapshot.bookmarks.clone();
     Ok(snapshot)
 }

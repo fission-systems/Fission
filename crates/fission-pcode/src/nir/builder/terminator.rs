@@ -28,10 +28,16 @@ impl<'a> PreviewBuilder<'a> {
                     let Some(target) = op.inputs.first().and_then(branch_target_address) else {
                         return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                     };
+                    let Some(target) = this.canonical_target_address(target) else {
+                        return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
+                    };
                     Ok(LoweredTerminator::Goto(target))
                 }
                 PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
                     let Some(true_target) = branch_target_address(&op.inputs[0]) else {
+                        return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
+                    };
+                    let Some(true_target) = this.canonical_target_address(true_target) else {
                         return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                     };
                     let cond = this

@@ -25,6 +25,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Failure classes (Ghidra): {report['global']['failure_class_counts']['ghidra']}",
         f"- Type preservation hits (Fission): {report['global']['type_preservation_counts']['fission']}",
         f"- Raw pointer / assembly fallbacks (Fission): {report['global']['fallback_counts']['fission']}",
+        f"- Fallback kinds (Fission): {report['global']['fallback_kind_counts']['fission']}",
         f"- Cast chains (Fission/Ghidra): {report['global']['cast_chain_counts']['fission']} / {report['global']['cast_chain_counts']['ghidra']}",
         f"- MLIL preview success / residue / cast density: {report['global']['mlil_preview_success']} / {report['global']['mlil_preview_residue']} / {report['global']['mlil_preview_cast_density']}",
         f"- MLIL preview helper calls: {report['global'].get('mlil_preview_helper_call_total', 0)} {report['global'].get('mlil_preview_helper_call_counts', {})}",
@@ -106,6 +107,10 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         lines.append(
             f"- Failure classes: Fission {binary['failure_class_counts']['fission']} | "
             f"Ghidra {binary['failure_class_counts']['ghidra']}"
+        )
+        lines.append(
+            f"- Fallback kinds: Fission {binary.get('fallback_kind_counts', {}).get('fission', {})} | "
+            f"Ghidra {binary.get('fallback_kind_counts', {}).get('ghidra', {})}"
         )
         lines.append(
             f"- Cast chains: Fission {binary['cast_chain_counts']['fission']} | "

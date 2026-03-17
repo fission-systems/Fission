@@ -46,7 +46,12 @@ def run_command_json(
         return None, "invalid_json", time.perf_counter() - start
 
 
-def list_functions_with_fission(root_dir: Path, binary_path: Path, fission_bin: Path) -> list[tuple[str, str]]:
+def list_functions_with_fission(
+    root_dir: Path,
+    binary_path: Path,
+    fission_bin: Path,
+    timeout_sec: int | None = None,
+) -> list[tuple[str, str]]:
     cmd = [str(fission_bin), str(binary_path), "--list"]
     res = subprocess.run(
         cmd,
@@ -55,6 +60,7 @@ def list_functions_with_fission(root_dir: Path, binary_path: Path, fission_bin: 
         stderr=subprocess.PIPE,
         text=True,
         check=True,
+        timeout=timeout_sec,
     )
     functions: list[tuple[str, str]] = []
     for line in res.stdout.splitlines():
@@ -152,6 +158,7 @@ def run_fission_function(
         "fell_back": bool(func.get("fell_back", False)),
         "fallback_reason": func.get("fallback_reason"),
         "fallback_kind": extract_fallback_kind(func.get("fallback_reason")),
+        "preview_build_stats": func.get("preview_build_stats"),
     }
     if failure := detect_embedded_failure(code):
         entry["success"] = False

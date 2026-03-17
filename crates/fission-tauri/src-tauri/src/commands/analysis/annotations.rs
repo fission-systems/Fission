@@ -37,6 +37,8 @@ pub async fn rename_function(
         inner.auto_renamed_functions.remove(&address);
     }
 
+    inner.rebuild_fact_store();
+
     Ok(())
 }
 

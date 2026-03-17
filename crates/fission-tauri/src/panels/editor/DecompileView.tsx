@@ -14,18 +14,36 @@ interface Token {
     value: string;
 }
 
+function isUnstructuredPreviewCode(code: string | undefined): boolean {
+    if (!code) return false;
+    if (code.includes("goto ")) return true;
+    return code.split("\n").some((line) => {
+        const trimmed = line.trim();
+        return trimmed.endsWith(":") && !trimmed.startsWith("case ") && trimmed !== "default:";
+    });
+}
+
 function decompileStatusLabel(result: DecompileResult): string {
     const reason = result.fallback_reason ?? "";
     if (reason.startsWith("assembly_fallback:")) {
         return "MLIL Preview -> Assembly fallback";
     }
-    if (reason.startsWith("legacy_fallback:") || reason.startsWith("preview_unsupported:") || reason.startsWith("preview_timeout:")) {
+    if (reason.startsWith("preview_timeout:")) {
+        return "MLIL Preview -> Preview timeout";
+    }
+    if (reason.startsWith("preview_unsupported:")) {
+        return "MLIL Preview -> Preview unsupported";
+    }
+    if (reason.startsWith("legacy_fallback:")) {
         return "MLIL Preview -> Native fallback";
     }
     if (reason.startsWith("native_pcode_failure:")) {
-        return "Native decompiler";
+        return "MLIL Preview -> Native p-code failure";
     }
     if (result.engine_used === "mlil_preview") {
+        if (!result.fell_back && isUnstructuredPreviewCode(result.code)) {
+            return "MLIL Preview (unstructured)";
+        }
         return result.fell_back ? "MLIL Preview rescue" : "MLIL Preview";
     }
     return "Native decompiler";

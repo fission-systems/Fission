@@ -145,6 +145,31 @@ label_out:
 }
 
 #[test]
+fn test_goto_cleanup_folds_braced_if_else_goto_form() {
+    let input = r#"int test(int x)
+{
+  if (x) {
+    goto label_then;
+  } else {
+    goto label_else;
+  }
+label_then:
+  return 1;
+label_else:
+  return 2;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(!output.contains("goto label_then;"), "must fold then goto: {}", output);
+    assert!(!output.contains("goto label_else;"), "must fold else goto: {}", output);
+    assert!(
+        output.contains("if (x) {") && output.contains("} else {"),
+        "must preserve structured if/else: {}",
+        output
+    );
+}
+
+#[test]
 fn test_negate_condition_basic_cases() {
     assert_eq!(negate_condition("x >= 10"), "x < 10");
     assert_eq!(negate_condition("!done"), "done");
@@ -268,6 +293,49 @@ label_1:
     assert!(
         output.contains("return 1;"),
         "must preserve inlined return: {}",
+        output
+    );
+}
+
+#[test]
+fn test_goto_cleanup_folds_braced_if_else_goto_form() {
+    let input = r#"int test(int x)
+{
+  if (x) {
+    goto label_then;
+  } else {
+    goto label_else;
+  }
+label_then:
+  return 1;
+label_else:
+  return 2;
+}"#;
+
+    let output = PostProcessor::cleanup_gotos(input);
+    assert!(
+        !output.contains("goto label_then;"),
+        "must fold then goto: {}",
+        output
+    );
+    assert!(
+        !output.contains("goto label_else;"),
+        "must fold else goto: {}",
+        output
+    );
+    assert!(
+        !output.contains("label_then:") && !output.contains("label_else:"),
+        "must remove dead labels: {}",
+        output
+    );
+    assert!(
+        output.contains("if ("),
+        "must preserve structured conditional: {}",
+        output
+    );
+    assert!(
+        output.contains("return 1;") && output.contains("return 2;"),
+        "must preserve both branch bodies: {}",
         output
     );
 }

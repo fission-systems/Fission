@@ -261,6 +261,7 @@ impl PcodeOpcode {
             "BOOL_NEGATE" => Self::BoolNegate,
             "&&" => Self::BoolAnd,
             "||" => Self::BoolOr,
+            "~" => Self::IntNegate,
             "BOOL_XOR" => Self::BoolXor,
             "BOOL_AND" => Self::BoolAnd,
             "BOOL_OR" => Self::BoolOr,
@@ -295,6 +296,8 @@ impl PcodeOpcode {
             "NEW" => Self::New,
             "INSERT" => Self::Insert,
             "EXTRACT" => Self::Extract,
+            "syscall" => Self::CallOther,
+            "SYSCALL" => Self::CallOther,
             "POPCOUNT" => Self::PopCount,
             _ => Self::Unknown,
         }
@@ -775,7 +778,9 @@ mod tests {
         assert_eq!(PcodeOpcode::parse("!"), PcodeOpcode::BoolNegate);
         assert_eq!(PcodeOpcode::parse("&&"), PcodeOpcode::BoolAnd);
         assert_eq!(PcodeOpcode::parse("||"), PcodeOpcode::BoolOr);
+        assert_eq!(PcodeOpcode::parse("~"), PcodeOpcode::IntNegate);
         assert_eq!(PcodeOpcode::parse("SUB"), PcodeOpcode::SubPiece);
+        assert_eq!(PcodeOpcode::parse("syscall"), PcodeOpcode::CallOther);
         assert_eq!(PcodeOpcode::parse("ZEXT"), PcodeOpcode::IntZExt);
     }
 

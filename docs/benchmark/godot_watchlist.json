@@ -1,0 +1,51 @@
+{
+  "corpus": "godot",
+  "generated_on": "2026-03-17",
+  "selection_policy": {
+    "filter": "Use the x64 .pdata exception table as a one-time function-range source; do not depend on routine fission_cli --list reruns for this binary.",
+    "seed_count": 3,
+    "strategy": "Manual curation over .pdata-derived candidates to preserve smaller-heavy, heavy, and giant worst-case timeout watchlist roles."
+  },
+  "binary": {
+    "path": "/Users/sjkim1127/Fission/samples/windows/x64/Godot_v4.6.1-stable_win64.exe",
+    "role": "x64 large-engine stress/watchlist corpus",
+    "size_mb": 164.33,
+    "pdb_present": false,
+    "pdata_function_count": 209650,
+    "addresses": [
+      "0x144574a30",
+      "0x14435bac0",
+      "0x141e17130"
+    ],
+    "baseline": {
+      "direct_preview": 0,
+      "explicit_fallback": 0,
+      "legacy_success": 0,
+      "timeouts": 3
+    },
+    "watchlist": [
+      {
+        "address": "0x144574a30",
+        "role": "smaller-heavy",
+        "size_bytes": 121,
+        "reason": "Relatively small .pdata body that still fails to produce either legacy or preview output within the 20s compare budget."
+      },
+      {
+        "address": "0x14435bac0",
+        "role": "heavy",
+        "size_bytes": 5713,
+        "reason": "Heavy x64 engine body that is useful for fallback-resilience and timeout-closure tracking."
+      },
+      {
+        "address": "0x141e17130",
+        "role": "giant",
+        "size_bytes": 296491,
+        "reason": "One of the largest .pdata-derived functions in the binary; worst-case giant-function timeout watchlist target."
+      }
+    ],
+    "artifacts": {
+      "json": "/tmp/godot_watchlist/Godot_v4.6.1-stable_win64_legacy_vs_preview.json",
+      "markdown": "/tmp/godot_watchlist/Godot_v4.6.1-stable_win64_legacy_vs_preview.md"
+    }
+  }
+}

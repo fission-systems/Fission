@@ -44,17 +44,22 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
-        let address_to_index = pcode
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(idx, block)| (block.start_address, idx))
-            .collect::<HashMap<_, _>>();
+        let address_to_index = build_address_to_index_map(pcode);
         let layout_fallthrough = build_layout_fallthrough_map(pcode);
         let successors = build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
         let predecessors = build_predecessor_index_map(&successors);
         let register_param_aliases = entry_analysis::collect_entry_register_param_aliases(pcode);
         let stack_frame_size = entry_analysis::infer_entry_stack_frame_size(pcode, options);
+        if preview_builder_diag_enabled() {
+            let duplicate_starts = duplicate_block_start_count(pcode);
+            if duplicate_starts > 0 {
+                eprintln!(
+                    "[DIAG] build_hir duplicate_block_starts={} unique_block_starts={}",
+                    duplicate_starts,
+                    address_to_index.len()
+                );
+            }
+        }
         Self {
             pcode,
             options,
@@ -76,6 +81,29 @@ impl<'a> PreviewBuilder<'a> {
             linear_exit_cache: HashMap::new(),
             linear_body_cache: HashMap::new(),
             jump_targets_cache: None,
+            active_trace_id: None,
+            last_trace_id: None,
+            next_trace_id: 1,
+            lowering_site_depth: 0,
+            promotion_candidate_count: 0,
+            promoted_region_count: 0,
+            promotion_rejected_by_shape_count: 0,
+            promotion_rejected_by_gate_count: 0,
+            discovery_seen_guarded_tail_like_shape_count: 0,
+            discovery_rejected_noncanonical_layout_count: 0,
+            canonicalized_guarded_tail_shape_count: 0,
+            canonicalization_failed_multiple_payload_entries: 0,
+            canonicalization_failed_interleaved_join_uses: 0,
+            canonicalization_failed_nonterminal_join_label: 0,
+            canonicalization_failed_nested_tail_escape: 0,
+            canonicalized_interleaved_join_use_count: 0,
+            canonicalization_failed_alias_not_fallthrough_count: 0,
+            canonicalization_failed_join_has_external_ref_count: 0,
+            canonicalization_failed_payload_crosses_join_count: 0,
+            rejected_must_emit_label: 0,
+            rejected_not_single_pred_succ: 0,
+            rejected_external_entry: 0,
+            rejected_loop_or_switch_target: 0,
         }
     }
 
@@ -172,16 +200,57 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
+    pub(super) fn preview_build_stats(&self) -> PreviewBuildStats {
+        PreviewBuildStats {
+            promotion_candidate_count: self.promotion_candidate_count,
+            promoted_region_count: self.promoted_region_count,
+            promotion_rejected_by_shape_count: self.promotion_rejected_by_shape_count,
+            promotion_rejected_by_gate_count: self.promotion_rejected_by_gate_count,
+            discovery_seen_guarded_tail_like_shape_count: self
+                .discovery_seen_guarded_tail_like_shape_count,
+            discovery_rejected_noncanonical_layout_count: self
+                .discovery_rejected_noncanonical_layout_count,
+            canonicalized_guarded_tail_shape_count: self.canonicalized_guarded_tail_shape_count,
+            canonicalization_failed_multiple_payload_entries: self
+                .canonicalization_failed_multiple_payload_entries,
+            canonicalization_failed_interleaved_join_uses: self
+                .canonicalization_failed_interleaved_join_uses,
+            canonicalization_failed_nonterminal_join_label: self
+                .canonicalization_failed_nonterminal_join_label,
+            canonicalization_failed_nested_tail_escape: self
+                .canonicalization_failed_nested_tail_escape,
+            canonicalized_interleaved_join_use_count: self.canonicalized_interleaved_join_use_count,
+            canonicalization_failed_alias_not_fallthrough_count: self
+                .canonicalization_failed_alias_not_fallthrough_count,
+            canonicalization_failed_join_has_external_ref_count: self
+                .canonicalization_failed_join_has_external_ref_count,
+            canonicalization_failed_payload_crosses_join_count: self
+                .canonicalization_failed_payload_crosses_join_count,
+            rejected_must_emit_label: self.rejected_must_emit_label,
+            rejected_not_single_pred_succ: self.rejected_not_single_pred_succ,
+            rejected_external_entry: self.rejected_external_entry,
+            rejected_loop_or_switch_target: self.rejected_loop_or_switch_target,
+        }
+    }
+
     fn with_lowering_site<T>(&mut self, site: LoweringSite, f: impl FnOnce(&mut Self) -> T) -> T {
         let prev = self.current_lowering_site;
+        self.lowering_site_depth += 1;
         self.current_lowering_site = Some(site);
         let result = f(self);
         self.current_lowering_site = prev;
+        self.lowering_site_depth = self.lowering_site_depth.saturating_sub(1);
         result
     }
 
     pub(super) fn next_block_address(&self, idx: usize) -> Option<u64> {
         self.layout_fallthrough[idx].map(|next_idx| self.pcode.blocks[next_idx].start_address)
+    }
+
+    pub(super) fn canonical_target_address(&self, address: u64) -> Option<u64> {
+        let target_idx =
+            canonical_block_index_for_address(self.pcode, &self.address_to_index, address)?;
+        Some(self.pcode.blocks[target_idx].start_address)
     }
 
     pub(super) fn ensure_temp_binding_for_output(
@@ -218,11 +287,148 @@ impl<'a> PreviewBuilder<'a> {
         err: &MlilPreviewError,
     ) {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
-            eprintln!(
+            let message = format!(
                 "[mlil-preview] stage={} block=0x{:x} seq=0x{:x} opcode={:?} err={}",
                 stage, block_addr, seq, opcode, err
             );
+            eprintln!("{message}");
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(format!(
+                    "/tmp/fission_preview_{:x}.log",
+                    self.function_address()
+                ))
+                .and_then(|mut f| {
+                    std::io::Write::write_all(&mut f, format!("{message}\n").as_bytes())
+                });
         }
+
+        if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
+            self.record_unsupported_inventory_event(
+                stage,
+                None,
+                None,
+                Some(opcode),
+                Some(block_addr),
+                Some(seq),
+                true,
+                "builder_root",
+            );
+        }
+    }
+
+    fn function_address(&self) -> u64 {
+        self.pcode
+            .blocks
+            .first()
+            .map(|block| block.start_address)
+            .unwrap_or_default()
+    }
+
+    fn preview_log_path(&self) -> String {
+        format!("/tmp/fission_preview_{:x}.log", self.function_address())
+    }
+
+    fn unsupported_inventory_path(&self) -> String {
+        format!(
+            "/tmp/fission_preview_{:x}_unsupported.json",
+            self.function_address()
+        )
+    }
+
+    fn next_trace_id(&mut self) -> u64 {
+        let trace_id = self.next_trace_id;
+        self.next_trace_id += 1;
+        trace_id
+    }
+
+    fn inventory_trace_id(&self) -> Option<u64> {
+        self.active_trace_id.or(self.last_trace_id)
+    }
+
+    fn format_varnode(&self, vn: &Varnode) -> String {
+        format!(
+            "space={} off=0x{:x} size={} const={} val={}",
+            vn.space_id, vn.offset, vn.size, vn.is_constant, vn.constant_val
+        )
+    }
+
+    fn format_op_snippet(&self, op: &PcodeOp) -> String {
+        let output = op
+            .output
+            .as_ref()
+            .map(|vn| self.format_varnode(vn))
+            .unwrap_or_else(|| "<none>".to_string());
+        let inputs = op
+            .inputs
+            .iter()
+            .map(|vn| self.format_varnode(vn))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "addr=0x{:x} seq=0x{:x} opcode={:?} out={} inputs=[{}] asm={}",
+            op.address,
+            op.seq_num,
+            op.opcode,
+            output,
+            inputs,
+            op.asm_mnemonic.as_deref().unwrap_or("<none>")
+        )
+    }
+
+    pub(super) fn record_unsupported_inventory_event(
+        &self,
+        stage: &str,
+        vn: Option<&Varnode>,
+        op: Option<&PcodeOp>,
+        opcode: Option<PcodeOpcode>,
+        block_addr: Option<u64>,
+        seq: Option<u64>,
+        fatal: bool,
+        context: &str,
+    ) {
+        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_none() {
+            return;
+        }
+        let trace_id = self.inventory_trace_id().unwrap_or(0);
+
+        let def_op = vn
+            .and_then(|vn| self.lookup_def_site(vn))
+            .map(|(_, def)| format!("{:?}", def.opcode));
+        let snippet = op
+            .map(|op| self.format_op_snippet(op))
+            .or_else(|| {
+                vn.and_then(|vn| self.lookup_def_site(vn))
+                    .map(|(_, def)| self.format_op_snippet(def))
+            })
+            .unwrap_or_else(|| "<none>".to_string());
+        let event = serde_json::json!({
+            "trace_id": trace_id,
+            "stage": stage,
+            "opcode": opcode.map(|op| format!("{op:?}")),
+            "address": op.map(|op| op.address).or(block_addr),
+            "block_start": block_addr
+                .or_else(|| self.current_lowering_site.map(|site| self.pcode.blocks[site.block_idx].start_address)),
+            "varnode": vn.map(|vn| self.format_varnode(vn)),
+            "def_op": def_op,
+            "def_chain_depth": self.lowering_site_depth,
+            "snippet": snippet,
+            "fatal": fatal,
+            "context": context,
+            "seq": op.map(|op| u64::from(op.seq_num)).or(seq),
+        });
+
+        let path = self.unsupported_inventory_path();
+        let mut events = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Vec<serde_json::Value>>(&raw).ok())
+            .unwrap_or_default();
+        events.push(event);
+        let _ = std::fs::write(
+            path,
+            serde_json::to_vec_pretty(&events).unwrap_or_else(|_| b"[]".to_vec()),
+        );
     }
 }
 

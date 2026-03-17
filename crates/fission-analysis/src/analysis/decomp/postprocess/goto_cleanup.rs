@@ -14,6 +14,13 @@ static IF_GOTO_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 static LABEL_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*([A-Za-z_]\w*)\s*:\s*$").expect("valid label regex"));
+static IF_BLOCK_OPEN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\s*)if\s*\((.+)\)\s*\{\s*$").expect("valid if-block-open regex")
+});
+static ELSE_BLOCK_OPEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\}\s*else\s*\{\s*$").expect("valid else-open regex"));
+static BLOCK_CLOSE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\}\s*$").expect("valid block-close regex"));
 
 fn parse_goto(line: &str) -> Option<&str> {
     GOTO_RE
@@ -37,6 +44,20 @@ fn parse_label(line: &str) -> Option<&str> {
         .captures(line)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str())
+}
+
+fn parse_if_block_open(line: &str) -> Option<(&str, &str)> {
+    IF_BLOCK_OPEN_RE.captures(line).and_then(|caps| {
+        Some((caps.get(1)?.as_str(), caps.get(2)?.as_str().trim()))
+    })
+}
+
+fn is_else_block_open(line: &str) -> bool {
+    ELSE_BLOCK_OPEN_RE.is_match(line)
+}
+
+fn is_block_close(line: &str) -> bool {
+    BLOCK_CLOSE_RE.is_match(line)
 }
 
 fn is_simple_statement(line: &str) -> bool {
@@ -115,6 +136,57 @@ fn remove_self_fallthrough_gotos(lines: &[String]) -> Vec<String> {
         result.push(lines[idx].clone());
         idx += 1;
     }
+    result
+}
+
+fn normalize_braced_if_gotos(lines: &[String]) -> Vec<String> {
+    let mut result = Vec::with_capacity(lines.len());
+    let mut idx = 0;
+
+    while idx < lines.len() {
+        let Some((indent, cond)) = parse_if_block_open(&lines[idx]) else {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        };
+        let Some(then_label) = lines.get(idx + 1).and_then(|line| parse_goto(line)) else {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        };
+
+        if lines.get(idx + 2).is_some_and(|line| is_block_close(line)) {
+            result.push(format!("{indent}if ({cond}) goto {then_label};"));
+            idx += 3;
+            continue;
+        }
+
+        let Some(true) = lines.get(idx + 2).map(|line| is_else_block_open(line)) else {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        };
+        if !true {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        }
+        let Some(else_label) = lines.get(idx + 3).and_then(|line| parse_goto(line)) else {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        };
+        if !lines.get(idx + 4).is_some_and(|line| is_block_close(line)) {
+            result.push(lines[idx].clone());
+            idx += 1;
+            continue;
+        }
+
+        result.push(format!("{indent}if ({cond}) goto {then_label};"));
+        result.push(format!("{indent}goto {else_label};"));
+        idx += 5;
+    }
+
     result
 }
 
@@ -578,7 +650,9 @@ impl PostProcessor {
             let next = remove_dead_labels(&inline_single_use_labels(
                 &inline_terminal_label_blocks(&sink_label_prefixes(
                     &merge_adjacent_if_goto_chains(&fold_guarded_if_gotos(&fold_if_else_gotos(
-                        &thread_chained_gotos(&remove_self_fallthrough_gotos(&lines)),
+                        &thread_chained_gotos(&remove_self_fallthrough_gotos(
+                            &normalize_braced_if_gotos(&lines),
+                        )),
                     ))),
                 )),
             ))

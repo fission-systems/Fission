@@ -7,7 +7,8 @@ use crate::state::AppState;
 use fission_loader::loader::LoadedBinary;
 #[cfg(feature = "native_decomp")]
 use fission_static::analysis::decomp::{
-    rescue_preview_output, select_preview_output, PreviewEngineMode, PreviewSelection,
+    native_failure_routing_decision, rescue_preview_output, select_preview_output,
+    PreviewEngineMode, PreviewSelection,
 };
 use tauri::State;
 
@@ -29,11 +30,6 @@ fn normalize_gui_engine_mode(mode: DecompilerEngineMode) -> DecompilerEngineMode
         DecompilerEngineMode::Legacy => DecompilerEngineMode::Auto,
         other => other,
     }
-}
-
-#[cfg(feature = "native_decomp")]
-fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
-    format!("{kind}: {}", detail.as_ref())
 }
 
 #[cfg(feature = "native_decomp")]
@@ -88,7 +84,8 @@ fn decompile_with_engine(
 
 #[cfg(feature = "native_decomp")]
 fn outcome_from_preview_selection(code: String, selection: PreviewSelection) -> DecompileOutcome {
-    let engine_used = match selection.engine_used {
+    let routing = selection.routing_decision();
+    let engine_used = match routing.engine_used {
         PreviewEngineMode::Legacy => DecompilerEngineMode::Legacy,
         PreviewEngineMode::MlilPreview => DecompilerEngineMode::MlilPreview,
         PreviewEngineMode::Auto => DecompilerEngineMode::Auto,
@@ -96,8 +93,8 @@ fn outcome_from_preview_selection(code: String, selection: PreviewSelection) -> 
     DecompileOutcome {
         code,
         engine_used,
-        fell_back: selection.fell_back,
-        fallback_reason: selection.fallback_reason,
+        fell_back: routing.fell_back,
+        fallback_reason: routing.fallback_reason,
     }
 }
 
@@ -112,9 +109,10 @@ pub async fn decompile_function(
     let (func_name, binary) = {
         let inner = state.inner.lock().await;
         let func_name = inner
-            .renamed_functions
-            .get(&address)
-            .cloned()
+            .fact_store
+            .as_ref()
+            .and_then(|store| store.resolved_name(address).map(ToString::to_string))
+            .or_else(|| inner.renamed_functions.get(&address).cloned())
             .or_else(|| {
                 inner
                     .loaded_binary
@@ -155,20 +153,24 @@ pub async fn decompile_function(
                 fell_back: result.fell_back,
                 fallback_reason: result.fallback_reason,
             }),
-            Err(e) => Ok(DecompileResult {
-                code: format!(
-                    "// Decompilation failed: {}\n// Function: {}\n// Address: 0x{:x}\n",
-                    e, func_name, address
-                ),
-                function_name: func_name,
-                address: format!("0x{:x}", address),
-                engine_used: DecompilerEngineMode::Legacy,
-                fell_back: true,
-                fallback_reason: Some(fallback_reason_with_kind(
-                    "native_pcode_failure",
-                    e.to_string(),
-                )),
-            }),
+            Err(e) => {
+                let routing = native_failure_routing_decision(&e.to_string());
+                Ok(DecompileResult {
+                    code: format!(
+                        "// Decompilation failed: {}\n// Function: {}\n// Address: 0x{:x}\n",
+                        e, func_name, address
+                    ),
+                    function_name: func_name,
+                    address: format!("0x{:x}", address),
+                    engine_used: match routing.engine_used {
+                        PreviewEngineMode::Legacy => DecompilerEngineMode::Legacy,
+                        PreviewEngineMode::MlilPreview => DecompilerEngineMode::MlilPreview,
+                        PreviewEngineMode::Auto => DecompilerEngineMode::Auto,
+                    },
+                    fell_back: routing.fell_back,
+                    fallback_reason: routing.fallback_reason,
+                })
+            }
         }
     }
 
@@ -183,7 +185,7 @@ pub async fn decompile_function(
             address: format!("0x{:x}", address),
             engine_used: DecompilerEngineMode::Legacy,
             fell_back: true,
-            fallback_reason: Some(fallback_reason_with_kind(
+            fallback_reason: Some(fission_static::analysis::decomp::fallback_reason_with_kind(
                 "native_pcode_failure",
                 "native decompiler not available",
             )),

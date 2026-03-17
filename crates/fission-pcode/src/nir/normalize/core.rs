@@ -5,9 +5,12 @@ use super::arith::{
 };
 use super::bitstream::apply_bitstream_idioms;
 use super::cleanup::{
-    collapse_trivial_assign_returns, eliminate_dead_local_clobber_assigns,
-    eliminate_dead_temp_assigns, inline_single_use_temps, prune_unused_dead_local_bindings,
-    prune_unused_temp_bindings,
+    cleanup_redundant_boundary_labels, collapse_trivial_assign_returns,
+    eliminate_dead_local_clobber_assigns, eliminate_dead_temp_assigns,
+    fuse_single_predecessor_boundaries, inline_single_use_temps, promote_guarded_jump_target_tail,
+    prune_unused_dead_local_bindings, prune_unused_temp_bindings,
+    remove_unreferenced_leading_labels, simplify_empty_and_constant_ifs,
+    simplify_fallthrough_edges,
 };
 use super::slots::{
     apply_memory_slot_surfacing, apply_memory_slot_surfacing_cheap, normalize_binding_initializers,
@@ -240,6 +243,30 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
         if eliminate_dead_temp_assigns(stmts) {
             changed = true;
             last_changed_pass = Some("eliminate_dead_temp_assigns");
+        }
+        if simplify_empty_and_constant_ifs(stmts) {
+            changed = true;
+            last_changed_pass = Some("simplify_empty_and_constant_ifs");
+        }
+        if simplify_fallthrough_edges(stmts) {
+            changed = true;
+            last_changed_pass = Some("simplify_fallthrough_edges");
+        }
+        if fuse_single_predecessor_boundaries(stmts) {
+            changed = true;
+            last_changed_pass = Some("fuse_single_predecessor_boundaries");
+        }
+        if promote_guarded_jump_target_tail(stmts) {
+            changed = true;
+            last_changed_pass = Some("promote_guarded_jump_target_tail");
+        }
+        if cleanup_redundant_boundary_labels(stmts) {
+            changed = true;
+            last_changed_pass = Some("cleanup_redundant_boundary_labels");
+        }
+        if remove_unreferenced_leading_labels(stmts) {
+            changed = true;
+            last_changed_pass = Some("remove_unreferenced_leading_labels");
         }
         if !changed {
             break;

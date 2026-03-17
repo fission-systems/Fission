@@ -146,6 +146,9 @@ impl<'a> PreviewBuilder<'a> {
                     true_target,
                     false_target,
                 } => {
+                    if self.region_has_external_entry(&visited, start_idx) {
+                        return Ok(None);
+                    }
                     let start_addr = self.pcode.blocks[start_idx].start_address;
                     if true_target == start_addr {
                         let Some(exit_addr) = false_target else {

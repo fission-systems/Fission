@@ -12,7 +12,7 @@ pub(super) enum EngineMode {
 }
 
 pub(super) fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
-    format!("{kind}: {}", detail.as_ref())
+    fission_static::analysis::decomp::fallback_reason_with_kind(kind, detail)
 }
 
 pub(super) fn init_decompiler(verbose: bool) -> DecompilerNative {

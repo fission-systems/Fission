@@ -115,6 +115,7 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
         inner.renamed_functions = renamed_functions;
         inner.auto_renamed_functions = auto_renamed_functions;
     }
+    inner.rebuild_fact_store();
 
     // Enable binary-dependent menu items
     if let Some(handles) = state.menu_handles.get() {

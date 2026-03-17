@@ -1,0 +1,38 @@
+{
+  "corpus": "powder",
+  "generated_on": "2026-03-17",
+  "selection_policy": {
+    "filter": "Exclude [import] entries and zero-sized functions from --list results.",
+    "seed_count": 5,
+    "strategy": "Deterministic size quantiles over the filtered internal function list, then replace the trivial smallest quantile with a more representative small function. Final set: small, medium, medium-heavy, heavy, giant."
+  },
+  "binary": {
+    "path": "/Users/sjkim1127/Fission/samples/windows/x64/Powder.exe",
+    "role": "x64 game / simulation single-EXE corpus",
+    "function_count_total": 17297,
+    "function_count_filtered": 16729,
+    "addresses": [
+      "0x140394a5d",
+      "0x1401e6049",
+      "0x1404b761c",
+      "0x140161bc0",
+      "0x14043f1c8"
+    ],
+    "baseline": {
+      "direct_preview": 4,
+      "fallback": 1,
+      "legacy": 1,
+      "timeouts": 0
+    },
+    "watchlist": [
+      {
+        "address": "0x14043f1c8",
+        "reason": "giant function; preview does not complete directly and currently ends as explicit assembly fallback"
+      },
+      {
+        "address": "0x140394a5d",
+        "reason": "direct preview succeeds but still shows xVar/reg readability residue"
+      }
+    ]
+  }
+}

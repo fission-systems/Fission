@@ -4,7 +4,7 @@
 //! actual string content when the address corresponds to a known string
 //! in `.rdata`/`.rodata`.
 
-use super::pass::{PassCategory, PassMetadata, PassResult, PostProcessPass};
+use super::pass::{PassCategory, PassMetadata, PassResult, PostProcessPass, RewriteTier};
 use regex::Regex;
 use std::borrow::Cow;
 
@@ -48,6 +48,7 @@ impl PostProcessPass for ReplaceStringPointersPass {
             name: "Replace String Pointers",
             description: "Replaces address literals with actual string content from .rdata/.rodata",
             category: PassCategory::TypeBased,
+            tier: RewriteTier::Polish,
         }
     }
 

@@ -1,7 +1,8 @@
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
     MlilPreviewOptions, PcodeFunction, PcodeOpcode, PcodeOptimizer, PcodeOptimizerConfig,
-    PreviewCallParamRule, PreviewTypeContext, render_mlil_preview_with_context,
+    PreviewBuildStats, PreviewCallParamRule, PreviewTypeContext, render_mlil_preview_with_context,
+    take_last_preview_build_stats,
 };
 use fission_signatures::WIN_API_DB;
 use fission_signatures::win_types::WindowsStructures;
@@ -32,9 +33,126 @@ impl PreviewEngineMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreviewSelection {
     pub preview_code: Option<String>,
+    pub build_stats: Option<PreviewBuildStats>,
     pub engine_used: PreviewEngineMode,
     pub fell_back: bool,
     pub fallback_reason: Option<String>,
+    pub fallback_kind: Option<&'static str>,
+    pub preview_surface: Option<PreviewSurfaceKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewRoutingDecision {
+    pub engine_used: PreviewEngineMode,
+    pub fell_back: bool,
+    pub fallback_reason: Option<String>,
+    pub fallback_kind: Option<&'static str>,
+    pub preview_surface: Option<PreviewSurfaceKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewSurfaceKind {
+    Structured,
+    Unstructured,
+}
+
+pub struct PreviewRoutingResolver;
+
+impl PreviewRoutingResolver {
+    pub fn from_selection(selection: &PreviewSelection) -> PreviewRoutingDecision {
+        PreviewRoutingDecision {
+            engine_used: selection.engine_used,
+            fell_back: selection.fell_back,
+            fallback_reason: selection.fallback_reason.clone(),
+            fallback_kind: selection.fallback_kind,
+            preview_surface: selection.preview_surface,
+        }
+    }
+
+    pub fn legacy_mode() -> PreviewSelection {
+        PreviewSelection {
+            preview_code: None,
+            build_stats: None,
+            engine_used: PreviewEngineMode::Legacy,
+            fell_back: false,
+            fallback_reason: None,
+            fallback_kind: None,
+            preview_surface: None,
+        }
+    }
+
+    pub fn preview_success(
+        code: String,
+        build_stats: Option<PreviewBuildStats>,
+        fell_back: bool,
+        fallback_reason: Option<String>,
+    ) -> PreviewSelection {
+        PreviewSelection {
+            preview_surface: Some(classify_preview_surface(&code)),
+            preview_code: Some(code),
+            build_stats,
+            engine_used: PreviewEngineMode::MlilPreview,
+            fell_back,
+            fallback_kind: extract_fallback_kind(fallback_reason.as_deref()),
+            fallback_reason,
+        }
+    }
+
+    pub fn preview_fallback(reason: impl AsRef<str>) -> PreviewSelection {
+        let fallback_reason = classified_preview_error(reason.as_ref());
+        PreviewSelection {
+            preview_code: None,
+            build_stats: None,
+            engine_used: PreviewEngineMode::Legacy,
+            fell_back: true,
+            fallback_kind: extract_fallback_kind(Some(fallback_reason.as_str())),
+            fallback_reason: Some(fallback_reason),
+            preview_surface: None,
+        }
+    }
+
+    pub fn native_failure(error: &str) -> PreviewRoutingDecision {
+        let kind = classify_native_failure_kind(error);
+        PreviewRoutingDecision {
+            engine_used: PreviewEngineMode::Legacy,
+            fell_back: true,
+            fallback_reason: Some(fallback_reason_with_kind(kind, error)),
+            fallback_kind: Some(kind),
+            preview_surface: None,
+        }
+    }
+}
+
+impl PreviewSelection {
+    pub fn routing_decision(&self) -> PreviewRoutingDecision {
+        PreviewRoutingResolver::from_selection(self)
+    }
+}
+
+fn extract_fallback_kind(reason: Option<&str>) -> Option<&'static str> {
+    let reason = reason?;
+    let prefix = reason.split(':').next()?.trim().to_ascii_lowercase();
+    match prefix.as_str() {
+        "preview_timeout" => Some("preview_timeout"),
+        "preview_unsupported" => Some("preview_unsupported"),
+        "native_pcode_failure" => Some("native_pcode_failure"),
+        "legacy_fallback" => Some("legacy_fallback"),
+        "assembly_fallback" => Some("assembly_fallback"),
+        _ => None,
+    }
+}
+
+fn classify_preview_surface(code: &str) -> PreviewSurfaceKind {
+    let has_goto = code.contains("goto ");
+    let has_label = code.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.ends_with(':') && !trimmed.starts_with("case ") && !trimmed.starts_with("default:")
+    });
+    if has_goto || has_label {
+        PreviewSurfaceKind::Unstructured
+    } else {
+        PreviewSurfaceKind::Structured
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -50,6 +168,7 @@ pub struct PreviewWorkerRequest {
 pub struct PreviewWorkerResponse {
     pub success: bool,
     pub code: Option<String>,
+    pub build_stats: Option<PreviewBuildStats>,
     pub error: Option<String>,
 }
 
@@ -250,7 +369,7 @@ fn preview_diag_event(address: u64, stage: &str, detail: impl AsRef<str>) {
 fn execute_preview_worker_request(
     request: &PreviewWorkerRequest,
     timeout_ms: u64,
-) -> Result<String, String> {
+) -> Result<(String, Option<PreviewBuildStats>), String> {
     let Some(worker_path) = resolve_preview_worker_path() else {
         return Err("preview worker unavailable".to_string());
     };
@@ -281,7 +400,7 @@ fn execute_preview_worker_request(
     drop(stdin);
 
     let start = Instant::now();
-    loop {
+    let exit_status = loop {
         if let Some(status) = child
             .try_wait()
             .map_err(|e| format!("mlil-preview worker wait failed: {e}"))?
@@ -294,7 +413,7 @@ fn execute_preview_worker_request(
                     start.elapsed().as_secs_f64() * 1000.0
                 ),
             );
-            break;
+            break status;
         }
         if start.elapsed() >= Duration::from_millis(timeout_ms) {
             preview_diag_event(
@@ -309,7 +428,7 @@ fn execute_preview_worker_request(
             ));
         }
         thread::sleep(Duration::from_millis(10));
-    }
+    };
 
     let mut stdout = String::new();
     if let Some(mut pipe) = child.stdout.take() {
@@ -317,12 +436,20 @@ fn execute_preview_worker_request(
             .map_err(|e| format!("mlil-preview worker stdout read failed: {e}"))?;
     }
 
+    if stdout.trim().is_empty() {
+        return Err(format!(
+            "mlil-preview worker exited with status {exit_status} without JSON response"
+        ));
+    }
+
     let response: PreviewWorkerResponse = serde_json::from_str(&stdout)
         .map_err(|e| format!("mlil-preview worker response parse failed: {e}"))?;
 
     if response.success {
-        response
-            .code
+        let PreviewWorkerResponse {
+            code, build_stats, ..
+        } = response;
+        code.map(|code| (code, build_stats))
             .ok_or_else(|| "mlil-preview worker returned success without code".to_string())
     } else {
         Err(response
@@ -346,7 +473,9 @@ fn resolve_preview_struct_name(type_name: &str, structures: &WindowsStructures) 
     None
 }
 
-fn render_preview_request(request: &PreviewWorkerRequest) -> Result<String, String> {
+fn render_preview_request(
+    request: &PreviewWorkerRequest,
+) -> Result<(String, Option<PreviewBuildStats>), String> {
     let parse_start = Instant::now();
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let _ = std::fs::write(
@@ -447,6 +576,7 @@ fn render_preview_request(request: &PreviewWorkerRequest) -> Result<String, Stri
         Some(&request.type_context),
     ) {
         Ok(code) => {
+            let build_stats = take_last_preview_build_stats();
             preview_diag_stage(request.address, "render_preview_done", render_start);
             if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
                 let _ = std::fs::OpenOptions::new()
@@ -457,7 +587,7 @@ fn render_preview_request(request: &PreviewWorkerRequest) -> Result<String, Stri
                         std::io::Write::write_all(&mut f, b"[mlil-preview] stage=render_ok\n")
                     });
             }
-            Ok(code)
+            Ok((code, build_stats))
         }
         Err(err) => {
             preview_diag_stage(request.address, "render_preview_error", render_start);
@@ -480,14 +610,16 @@ fn render_preview_request(request: &PreviewWorkerRequest) -> Result<String, Stri
 
 pub fn execute_preview_worker(request: &PreviewWorkerRequest) -> PreviewWorkerResponse {
     match render_preview_request(request) {
-        Ok(code) => PreviewWorkerResponse {
+        Ok((code, build_stats)) => PreviewWorkerResponse {
             success: true,
             code: Some(code),
+            build_stats,
             error: None,
         },
         Err(error) => PreviewWorkerResponse {
             success: false,
             code: None,
+            build_stats: None,
             error: Some(error),
         },
     }
@@ -500,7 +632,7 @@ fn render_preview_from_json(
     name: &str,
     enforce_auto_gate: bool,
     timeout_ms: Option<u64>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, Option<PreviewBuildStats>)>, String> {
     let parse_start = Instant::now();
     let pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
@@ -520,13 +652,13 @@ fn render_preview_from_json(
     if should_use_preview_worker(binary, &pcode, enforce_auto_gate) {
         let worker_timeout_ms = preview_worker_timeout_ms(timeout_ms);
         match execute_preview_worker_request(&request, worker_timeout_ms) {
-            Ok(code) => {
+            Ok((code, build_stats)) => {
                 preview_diag_event(
                     address,
                     "worker_render_done",
                     format!("budget_ms={worker_timeout_ms}"),
                 );
-                return Ok(Some(code));
+                return Ok(Some((code, build_stats)));
             }
             Err(err) if err == "preview worker unavailable" => {
                 preview_diag_event(address, "worker_unavailable", "falling back to in-process");
@@ -536,7 +668,7 @@ fn render_preview_from_json(
     }
 
     match render_preview_request(&request) {
-        Ok(code) => Ok(Some(code)),
+        Ok(result) => Ok(Some(result)),
         Err(err) => Err(err),
     }
 }
@@ -551,7 +683,28 @@ fn classify_preview_failure(reason: &str) -> &'static str {
 }
 
 fn classified_preview_error(reason: &str) -> String {
-    format!("{}: {}", classify_preview_failure(reason), reason)
+    fallback_reason_with_kind(classify_preview_failure(reason), reason)
+}
+
+pub fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
+    format!("{kind}: {}", detail.as_ref())
+}
+
+pub fn classify_native_failure_kind(error: &str) -> &'static str {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("preview_timeout") {
+        "preview_timeout"
+    } else if lower.contains("could not find op at target address")
+        || lower.contains("ghidra lowlevelerror")
+    {
+        "native_pcode_failure"
+    } else {
+        "legacy_fallback"
+    }
+}
+
+pub fn native_failure_routing_decision(error: &str) -> PreviewRoutingDecision {
+    PreviewRoutingResolver::native_failure(error)
 }
 
 pub fn select_preview_output<S: PreviewSource>(
@@ -564,12 +717,7 @@ pub fn select_preview_output<S: PreviewSource>(
 ) -> Result<PreviewSelection, String> {
     let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
     match mode {
-        PreviewEngineMode::Legacy => Ok(PreviewSelection {
-            preview_code: None,
-            engine_used: PreviewEngineMode::Legacy,
-            fell_back: false,
-            fallback_reason: None,
-        }),
+        PreviewEngineMode::Legacy => Ok(PreviewRoutingResolver::legacy_mode()),
         PreviewEngineMode::MlilPreview => {
             let pcode_start = Instant::now();
             if diag {
@@ -583,26 +731,16 @@ pub fn select_preview_output<S: PreviewSource>(
                 );
             }
             match render_preview_from_json(&pcode_json, binary, address, name, false, timeout_ms) {
-                Ok(Some(code)) => Ok(PreviewSelection {
-                    preview_code: Some(code),
-                    engine_used: PreviewEngineMode::MlilPreview,
-                    fell_back: false,
-                    fallback_reason: None,
-                }),
-                Ok(None) => Ok(PreviewSelection {
-                    preview_code: None,
-                    engine_used: PreviewEngineMode::Legacy,
-                    fell_back: true,
-                    fallback_reason: Some(classified_preview_error(
-                        "mlil-preview skipped: function not supported by preview builder",
-                    )),
-                }),
-                Err(err) => Ok(PreviewSelection {
-                    preview_code: None,
-                    engine_used: PreviewEngineMode::Legacy,
-                    fell_back: true,
-                    fallback_reason: Some(classified_preview_error(&err)),
-                }),
+                Ok(Some((code, build_stats))) => Ok(PreviewRoutingResolver::preview_success(
+                    code,
+                    build_stats,
+                    false,
+                    None,
+                )),
+                Ok(None) => Ok(PreviewRoutingResolver::preview_fallback(
+                    "mlil-preview skipped: function not supported by preview builder",
+                )),
+                Err(err) => Ok(PreviewRoutingResolver::preview_fallback(&err)),
             }
         }
         PreviewEngineMode::Auto => {
@@ -618,26 +756,16 @@ pub fn select_preview_output<S: PreviewSource>(
                 );
             }
             match render_preview_from_json(&pcode_json, binary, address, name, true, timeout_ms) {
-                Ok(Some(code)) => Ok(PreviewSelection {
-                    preview_code: Some(code),
-                    engine_used: PreviewEngineMode::MlilPreview,
-                    fell_back: false,
-                    fallback_reason: None,
-                }),
-                Ok(None) => Ok(PreviewSelection {
-                    preview_code: None,
-                    engine_used: PreviewEngineMode::Legacy,
-                    fell_back: true,
-                    fallback_reason: Some(classified_preview_error(
-                        "mlil-preview skipped: function not supported by preview builder",
-                    )),
-                }),
-                Err(err) => Ok(PreviewSelection {
-                    preview_code: None,
-                    engine_used: PreviewEngineMode::Legacy,
-                    fell_back: true,
-                    fallback_reason: Some(classified_preview_error(&err)),
-                }),
+                Ok(Some((code, build_stats))) => Ok(PreviewRoutingResolver::preview_success(
+                    code,
+                    build_stats,
+                    false,
+                    None,
+                )),
+                Ok(None) => Ok(PreviewRoutingResolver::preview_fallback(
+                    "mlil-preview skipped: function not supported by preview builder",
+                )),
+                Err(err) => Ok(PreviewRoutingResolver::preview_fallback(&err)),
             }
         }
     }
@@ -668,14 +796,14 @@ pub fn rescue_preview_output<S: PreviewSource>(
         );
     }
     match render_preview_from_json(&pcode_json, binary, address, name, false, timeout_ms) {
-        Ok(Some(code)) => Ok(Some(PreviewSelection {
-            preview_code: Some(code),
-            engine_used: PreviewEngineMode::MlilPreview,
-            fell_back: true,
-            fallback_reason: Some(format!(
+        Ok(Some((code, build_stats))) => Ok(Some(PreviewRoutingResolver::preview_success(
+            code,
+            build_stats,
+            true,
+            Some(format!(
                 "legacy_fallback: legacy type failure rescued by mlil-preview: {error}"
             )),
-        })),
+        ))),
         Ok(None) => Ok(None),
         Err(_) => Ok(None),
     }
@@ -731,6 +859,56 @@ mod tests {
         assert_eq!(
             preview_worker_timeout_ms(Some(30_000)),
             PREVIEW_WORKER_TIMEOUT_CAP_MS
+        );
+    }
+
+    #[test]
+    fn native_failure_routing_uses_taxonomy() {
+        let decision = native_failure_routing_decision("Could not find op at target address");
+        assert_eq!(decision.engine_used, PreviewEngineMode::Legacy);
+        assert!(decision.fell_back);
+        assert_eq!(
+            decision.fallback_reason.as_deref(),
+            Some("native_pcode_failure: Could not find op at target address")
+        );
+    }
+
+    #[test]
+    fn preview_selection_exposes_routing_decision() {
+        let selection = PreviewSelection {
+            preview_code: None,
+            build_stats: None,
+            engine_used: PreviewEngineMode::Legacy,
+            fell_back: true,
+            fallback_reason: Some("preview_timeout: worker timed out".to_string()),
+            fallback_kind: Some("preview_timeout"),
+            preview_surface: None,
+        };
+        let decision = selection.routing_decision();
+        assert_eq!(decision.engine_used, PreviewEngineMode::Legacy);
+        assert!(decision.fell_back);
+        assert_eq!(decision.fallback_kind, Some("preview_timeout"));
+        assert_eq!(
+            decision.fallback_reason.as_deref(),
+            Some("preview_timeout: worker timed out")
+        );
+    }
+
+    #[test]
+    fn preview_success_classifies_unstructured_surface() {
+        let selection = PreviewRoutingResolver::preview_success(
+            "label_1:\n  goto label_1;".to_string(),
+            None,
+            false,
+            None,
+        );
+        assert_eq!(
+            selection.preview_surface,
+            Some(PreviewSurfaceKind::Unstructured)
+        );
+        assert_eq!(
+            selection.routing_decision().preview_surface,
+            Some(PreviewSurfaceKind::Unstructured)
         );
     }
 }

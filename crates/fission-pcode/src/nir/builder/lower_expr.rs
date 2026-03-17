@@ -1,6 +1,18 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn debug_preview_log(&self, message: &str) {
+        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_none() {
+            return;
+        }
+        eprint!("{message}");
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.preview_log_path())
+            .and_then(|mut f| std::io::Write::write_all(&mut f, message.as_bytes()));
+    }
+
     pub(in crate::nir) fn lookup_def_site(
         &self,
         vn: &Varnode,
@@ -38,6 +50,27 @@ impl<'a> PreviewBuilder<'a> {
         recovered_args: Option<Vec<HirExpr>>,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
+        let created_trace = if self.active_trace_id.is_none() {
+            let trace_id = self.next_trace_id();
+            self.active_trace_id = Some(trace_id);
+            true
+        } else {
+            false
+        };
+        let result = self.lower_call_inner(op, recovered_args, visiting);
+        if created_trace {
+            self.last_trace_id = self.active_trace_id;
+            self.active_trace_id = None;
+        }
+        result
+    }
+
+    fn lower_call_inner(
+        &mut self,
+        op: &PcodeOp,
+        recovered_args: Option<Vec<HirExpr>>,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
         let target = if let Some(target) = self.resolve_call_target_from_asm(op) {
             target
         } else if let Some(target) = op.inputs.first() {
@@ -54,10 +87,51 @@ impl<'a> PreviewBuilder<'a> {
                     if let Some(target) = self.recover_opaque_callind_target(target) {
                         target
                     } else {
+                        self.record_unsupported_inventory_event(
+                            "call_target_unsupported",
+                            Some(target),
+                            Some(op),
+                            Some(op.opcode),
+                            self.current_lowering_site
+                                .map(|site| self.pcode.blocks[site.block_idx].start_address),
+                            Some(u64::from(op.seq_num)),
+                            true,
+                            "callind_target_recovery_failed",
+                        );
+                        self.debug_preview_log(&format!(
+                            "[mlil-preview] stage=call_target_unsupported asm={} target_space={} target_off=0x{:x} target_size={}\n",
+                            op.asm_mnemonic.as_deref().unwrap_or("<none>"),
+                            target.space_id,
+                            target.offset,
+                            target.size
+                        ));
                         return Err(MlilPreviewError::UnsupportedPattern("opcode"));
                     }
                 }
-                Err(err) => return Err(err),
+                Err(err) => {
+                    if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
+                        self.record_unsupported_inventory_event(
+                            "call_target_lowering_error",
+                            Some(target),
+                            Some(op),
+                            Some(op.opcode),
+                            self.current_lowering_site
+                                .map(|site| self.pcode.blocks[site.block_idx].start_address),
+                            Some(u64::from(op.seq_num)),
+                            false,
+                            "call_target_lowering_error",
+                        );
+                        self.debug_preview_log(&format!(
+                            "[mlil-preview] stage=call_target_lowering_error opcode={:?} asm={} target_space={} target_off=0x{:x} target_size={}\n",
+                            op.opcode,
+                            op.asm_mnemonic.as_deref().unwrap_or("<none>"),
+                            target.space_id,
+                            target.offset,
+                            target.size
+                        ));
+                    }
+                    return Err(err);
+                }
             }
         } else {
             "callee".to_string()
@@ -148,6 +222,26 @@ impl<'a> PreviewBuilder<'a> {
         vn: &Varnode,
         visiting: &mut HashSet<VarnodeKey>,
     ) -> Result<HirExpr, MlilPreviewError> {
+        let created_trace = if self.active_trace_id.is_none() {
+            let trace_id = self.next_trace_id();
+            self.active_trace_id = Some(trace_id);
+            true
+        } else {
+            false
+        };
+        let result = self.lower_varnode_inner(vn, visiting);
+        if created_trace {
+            self.last_trace_id = self.active_trace_id;
+            self.active_trace_id = None;
+        }
+        result
+    }
+
+    fn lower_varnode_inner(
+        &mut self,
+        vn: &Varnode,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
         if vn.is_constant {
             return Ok(HirExpr::Const(
                 vn.constant_val,
@@ -202,7 +296,22 @@ impl<'a> PreviewBuilder<'a> {
         let result = match def_site {
             Some((site, op)) => self
                 .with_lowering_site(site, |this| this.lower_def_op(op, visiting))
-                .map_err(|err| self.classify_varnode_lowering_error(op, err)),
+                .map_err(|err| {
+                    let classified = self.classify_varnode_lowering_error(op, err);
+                    if matches!(classified, MlilPreviewError::UnsupportedPattern("opcode")) {
+                        self.record_unsupported_inventory_event(
+                            "lower_varnode",
+                            Some(vn),
+                            Some(op),
+                            Some(op.opcode),
+                            Some(self.pcode.blocks[site.block_idx].start_address),
+                            Some(u64::from(op.seq_num)),
+                            false,
+                            "varnode_def_lowering_failed",
+                        );
+                    }
+                    classified
+                }),
             None if vn.space_id == UNIQUE_SPACE_ID => {
                 Ok(HirExpr::Var(format!("tmp_{:x}", vn.offset)))
             }
@@ -243,6 +352,26 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(in crate::nir) fn lower_def_op(
+        &mut self,
+        op: &PcodeOp,
+        visiting: &mut HashSet<VarnodeKey>,
+    ) -> Result<HirExpr, MlilPreviewError> {
+        let created_trace = if self.active_trace_id.is_none() {
+            let trace_id = self.next_trace_id();
+            self.active_trace_id = Some(trace_id);
+            true
+        } else {
+            false
+        };
+        let result = self.lower_def_op_inner(op, visiting);
+        if created_trace {
+            self.last_trace_id = self.active_trace_id;
+            self.active_trace_id = None;
+        }
+        result
+    }
+
+    fn lower_def_op_inner(
         &mut self,
         op: &PcodeOp,
         visiting: &mut HashSet<VarnodeKey>,
@@ -357,7 +486,25 @@ impl<'a> PreviewBuilder<'a> {
                     Err(MlilPreviewError::UnsupportedExprIndirectValueSource)
                 }
             }
-            _ => Err(MlilPreviewError::UnsupportedPattern("opcode")),
+            _ => {
+                self.record_unsupported_inventory_event(
+                    "lower_def_op_unsupported",
+                    op.output.as_ref(),
+                    Some(op),
+                    Some(op.opcode),
+                    self.current_lowering_site
+                        .map(|site| self.pcode.blocks[site.block_idx].start_address),
+                    Some(u64::from(op.seq_num)),
+                    false,
+                    "opcode_not_lowered",
+                );
+                self.debug_preview_log(&format!(
+                    "[mlil-preview] stage=lower_def_op_unsupported opcode={:?} asm={}\n",
+                    op.opcode,
+                    op.asm_mnemonic.as_deref().unwrap_or("<none>")
+                ));
+                Err(MlilPreviewError::UnsupportedPattern("opcode"))
+            }
         }
     }
 

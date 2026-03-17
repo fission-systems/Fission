@@ -200,6 +200,32 @@ impl<'a> PreviewBuilder<'a> {
             );
             if !is_conditional_chain {
                 let false_entry_idx = next_idx;
+                if conds.len() == 1
+                    && let Some(LinearExit::Join(join_idx)) = self.linear_exit(body_idx)?
+                    && join_idx > idx
+                    && (false_entry_idx == join_idx
+                        || self.is_trivial_forwarding_block(false_entry_idx, join_idx))
+                {
+                    self.log_short_circuit_cache(
+                        diag,
+                        "or_single_guarded_body",
+                        body_idx,
+                        LinearExit::Join(join_idx),
+                    );
+                    let Some((then_body, skip_to)) =
+                        self.lower_linear_body(body_idx, LinearExit::Join(join_idx))?
+                    else {
+                        return Ok(None);
+                    };
+                    return Ok(Some((
+                        HirStmt::If {
+                            cond: conds[0].clone(),
+                            then_body,
+                            else_body: Vec::new(),
+                        },
+                        skip_to,
+                    )));
+                }
                 let Some(exit) = self.shared_forward_linear_exit(idx, body_idx, false_entry_idx)?
                 else {
                     return Ok(None);
@@ -217,9 +243,6 @@ impl<'a> PreviewBuilder<'a> {
                 let Some((then_body, then_skip)) = self.lower_linear_body(body_idx, exit)? else {
                     return Ok(None);
                 };
-                if conds.len() < 2 {
-                    return Ok(None);
-                }
                 let skip_to = match exit {
                     LinearExit::Join(join_idx) => join_idx,
                     LinearExit::Return | LinearExit::End => then_skip.max(false_skip),

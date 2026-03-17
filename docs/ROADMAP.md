@@ -13,7 +13,10 @@
 2. **mlil-preview 경로 확장**
    - Ghidra p-code를 입력으로 받는 Fission NIR/HIR + Rust printer
    - 제품 기본 경로로 고정하는 단계
-3. **문서/벤치/지표 정리**
+3. **Session Fact Store 확립**
+   - rename / FID / cross-image / inferred type / debug facts를 단일 집계층으로 수렴
+   - decompile path와 UI가 같은 사실 소스를 보게 정리
+4. **문서/벤치/지표 정리**
    - preview / native / assembly fallback을 분리 측정
    - 품질 개선과 legacy 퇴역 기준을 수치로 관리
 
@@ -90,6 +93,7 @@ v13 기준 preview는 의미 있는 수준까지 올라왔지만 아직 full rep
 장기적으로는 아래 구조를 더 강화하는 것이 핵심이다.
 
 - Ghidra: lift / CFG / baseline type recovery / fail containment
+- Session Fact Store: symbol / type / name fact aggregation
 - Fission NIR: normalization / stack abstraction / temp coalescing
 - Fission HIR: structured pseudocode
 - Rust printer: 최종 출력
@@ -103,6 +107,16 @@ v13 기준 preview는 의미 있는 수준까지 올라왔지만 아직 full rep
 - preview 채택률 상승
 - preview 출력 품질 안정화
 - legacy를 explicit fallback / compat path로만 남기기
+
+### 3. Rewrite Ownership 재정렬
+
+새 규칙은 아래 3층 중 하나로만 넣는다.
+
+- canonicalization
+- idiom recovery
+- polish
+
+즉 postprocess 문자열 규칙을 계속 누적하기보다, 가능한 한 NIR/HIR 또는 structured preview ownership으로 옮기는 방향을 우선한다.
 
 ## GUI / Product
 

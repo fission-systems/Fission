@@ -86,6 +86,12 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Repeat each engine N times to collect timing statistics",
     )
+    parser.add_argument(
+        "--list-timeout",
+        type=int,
+        default=15,
+        help="Best-effort timeout in seconds for optional --list name resolution; timeout falls back to address-only reporting.",
+    )
     return parser.parse_args()
 
 
@@ -126,10 +132,10 @@ def resolve_addresses(args: argparse.Namespace, binary_name: str) -> list[str]:
     return deduped
 
 
-def resolve_names(binary_path: Path, fission_bin: Path, addresses: list[str]) -> dict[str, str]:
+def resolve_names(binary_path: Path, fission_bin: Path, addresses: list[str], list_timeout: int) -> dict[str, str]:
     names = {normalize_address(addr): "" for addr in addresses}
     try:
-        functions = list_functions_with_fission(ROOT_DIR, binary_path, fission_bin)
+        functions = list_functions_with_fission(ROOT_DIR, binary_path, fission_bin, timeout_sec=list_timeout)
     except Exception:  # noqa: BLE001
         return names
     for address, name in functions:
@@ -277,10 +283,112 @@ def compare_function(
         "name": name,
         "legacy": legacy,
         "preview": preview,
+        "preview_surface_kind": classify_preview_surface(preview),
+        "promotion_candidate_count": (
+            (preview.get("preview_build_stats") or {}).get("promotion_candidate_count", 0)
+        ),
+        "promoted_region_count": (
+            (preview.get("preview_build_stats") or {}).get("promoted_region_count", 0)
+        ),
+        "promotion_rejected_by_shape_count": (
+            (preview.get("preview_build_stats") or {}).get("promotion_rejected_by_shape_count", 0)
+        ),
+        "promotion_rejected_by_gate_count": (
+            (preview.get("preview_build_stats") or {}).get("promotion_rejected_by_gate_count", 0)
+        ),
+        "discovery_seen_guarded_tail_like_shape_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "discovery_seen_guarded_tail_like_shape_count", 0
+            )
+        ),
+        "discovery_rejected_noncanonical_layout_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "discovery_rejected_noncanonical_layout_count", 0
+            )
+        ),
+        "canonicalized_guarded_tail_shape_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalized_guarded_tail_shape_count", 0
+            )
+        ),
+        "canonicalization_failed_multiple_payload_entries": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_multiple_payload_entries", 0
+            )
+        ),
+        "canonicalization_failed_interleaved_join_uses": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_interleaved_join_uses", 0
+            )
+        ),
+        "canonicalization_failed_nonterminal_join_label": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_nonterminal_join_label", 0
+            )
+        ),
+        "canonicalization_failed_nested_tail_escape": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_nested_tail_escape", 0
+            )
+        ),
+        "canonicalized_interleaved_join_use_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalized_interleaved_join_use_count", 0
+            )
+        ),
+        "canonicalization_failed_alias_not_fallthrough_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_alias_not_fallthrough_count", 0
+            )
+        ),
+        "canonicalization_failed_join_has_external_ref_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_join_has_external_ref_count", 0
+            )
+        ),
+        "canonicalization_failed_payload_crosses_join_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_payload_crosses_join_count", 0
+            )
+        ),
+        "rejected_must_emit_label": (
+            (preview.get("preview_build_stats") or {}).get("rejected_must_emit_label", 0)
+        ),
+        "rejected_not_single_pred_succ": (
+            (preview.get("preview_build_stats") or {}).get("rejected_not_single_pred_succ", 0)
+        ),
+        "rejected_external_entry": (
+            (preview.get("preview_build_stats") or {}).get("rejected_external_entry", 0)
+        ),
+        "rejected_loop_or_switch_target": (
+            (preview.get("preview_build_stats") or {}).get("rejected_loop_or_switch_target", 0)
+        ),
+        "legacy_dependent": is_legacy_dependent(preview),
         "delta": compare_delta(legacy, preview),
         "code": code_bundle,
         "diff": unified_diff_text(code_bundle["legacy"], code_bundle["preview"], address),
     }
+
+
+def classify_preview_surface(preview: dict[str, Any]) -> str | None:
+    if not preview.get("success"):
+        return None
+    if preview.get("engine_used") != "mlil_preview":
+        return None
+    code = preview.get("code", "")
+    if "goto " in code:
+        return "unstructured"
+    for line in code.splitlines():
+        trimmed = line.strip()
+        if trimmed.endswith(":") and not trimmed.startswith("case ") and trimmed != "default:":
+            return "unstructured"
+    return "structured"
+
+
+def is_legacy_dependent(preview: dict[str, Any]) -> bool:
+    if not preview.get("success"):
+        return False
+    return not (preview.get("engine_used") == "mlil_preview" and not preview.get("fell_back"))
 
 
 def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -294,6 +402,28 @@ def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
     timing_tie = 0
     preview_used_count = 0
     preview_fallback_count = 0
+    preview_unstructured_count = 0
+    fallback_kind_counts: dict[str, int] = {}
+    legacy_dependent_functions: list[dict[str, Any]] = []
+    promotion_candidate_total = 0
+    promoted_region_total = 0
+    promotion_rejected_by_shape_total = 0
+    promotion_rejected_by_gate_total = 0
+    discovery_seen_guarded_tail_like_shape_total = 0
+    discovery_rejected_noncanonical_layout_total = 0
+    canonicalized_guarded_tail_shape_total = 0
+    canonicalization_failed_multiple_payload_entries_total = 0
+    canonicalization_failed_interleaved_join_uses_total = 0
+    canonicalization_failed_nonterminal_join_label_total = 0
+    canonicalization_failed_nested_tail_escape_total = 0
+    canonicalized_interleaved_join_use_total = 0
+    canonicalization_failed_alias_not_fallthrough_total = 0
+    canonicalization_failed_join_has_external_ref_total = 0
+    canonicalization_failed_payload_crosses_join_total = 0
+    rejected_must_emit_label_total = 0
+    rejected_not_single_pred_succ_total = 0
+    rejected_external_entry_total = 0
+    rejected_loop_or_switch_target_total = 0
     legacy_avg_samples: list[float] = []
     preview_avg_samples: list[float] = []
     speedup_samples: list[float] = []
@@ -312,6 +442,66 @@ def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
         preview = item["preview"]
         preview_used_count += int(preview.get("engine_used") == "mlil_preview" and preview.get("success"))
         preview_fallback_count += int(bool(preview.get("fell_back")))
+        preview_unstructured_count += int(item.get("preview_surface_kind") == "unstructured")
+        promotion_candidate_total += int(item.get("promotion_candidate_count", 0))
+        promoted_region_total += int(item.get("promoted_region_count", 0))
+        promotion_rejected_by_shape_total += int(item.get("promotion_rejected_by_shape_count", 0))
+        promotion_rejected_by_gate_total += int(item.get("promotion_rejected_by_gate_count", 0))
+        discovery_seen_guarded_tail_like_shape_total += int(
+            item.get("discovery_seen_guarded_tail_like_shape_count", 0)
+        )
+        discovery_rejected_noncanonical_layout_total += int(
+            item.get("discovery_rejected_noncanonical_layout_count", 0)
+        )
+        canonicalized_guarded_tail_shape_total += int(
+            item.get("canonicalized_guarded_tail_shape_count", 0)
+        )
+        canonicalization_failed_multiple_payload_entries_total += int(
+            item.get("canonicalization_failed_multiple_payload_entries", 0)
+        )
+        canonicalization_failed_interleaved_join_uses_total += int(
+            item.get("canonicalization_failed_interleaved_join_uses", 0)
+        )
+        canonicalization_failed_nonterminal_join_label_total += int(
+            item.get("canonicalization_failed_nonterminal_join_label", 0)
+        )
+        canonicalization_failed_nested_tail_escape_total += int(
+            item.get("canonicalization_failed_nested_tail_escape", 0)
+        )
+        canonicalized_interleaved_join_use_total += int(
+            item.get("canonicalized_interleaved_join_use_count", 0)
+        )
+        canonicalization_failed_alias_not_fallthrough_total += int(
+            item.get("canonicalization_failed_alias_not_fallthrough_count", 0)
+        )
+        canonicalization_failed_join_has_external_ref_total += int(
+            item.get("canonicalization_failed_join_has_external_ref_count", 0)
+        )
+        canonicalization_failed_payload_crosses_join_total += int(
+            item.get("canonicalization_failed_payload_crosses_join_count", 0)
+        )
+        rejected_must_emit_label_total += int(item.get("rejected_must_emit_label", 0))
+        rejected_not_single_pred_succ_total += int(
+            item.get("rejected_not_single_pred_succ", 0)
+        )
+        rejected_external_entry_total += int(item.get("rejected_external_entry", 0))
+        rejected_loop_or_switch_target_total += int(
+            item.get("rejected_loop_or_switch_target", 0)
+        )
+        fallback_kind = preview.get("fallback_kind")
+        if fallback_kind:
+            fallback_kind_counts[fallback_kind] = fallback_kind_counts.get(fallback_kind, 0) + 1
+        if item.get("legacy_dependent"):
+            legacy_dependent_functions.append(
+                {
+                    "address": item["address"],
+                    "name": item["name"],
+                    "preview_engine_used": preview.get("engine_used"),
+                    "preview_fallback_kind": preview.get("fallback_kind"),
+                    "preview_failure_kind": preview.get("failure_kind"),
+                    "preview_surface_kind": item.get("preview_surface_kind"),
+                }
+            )
         legacy_avg = float(item["legacy"]["timing_stats"]["avg_ms"])
         preview_avg = float(preview["timing_stats"]["avg_ms"])
         legacy_avg_samples.append(legacy_avg)
@@ -329,6 +519,7 @@ def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
         "function_count": len(functions),
         "preview_used_count": preview_used_count,
         "preview_fallback_count": preview_fallback_count,
+        "preview_unstructured_count": preview_unstructured_count,
         "preview_better_on_goto_count": preview_better_on_goto,
         "preview_better_on_temp_count": preview_better_on_temp,
         "preview_better_on_cast_count": preview_better_on_cast,
@@ -340,6 +531,28 @@ def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_legacy_ms": round(sum(legacy_avg_samples) / len(legacy_avg_samples), 3) if legacy_avg_samples else 0.0,
         "avg_preview_ms": round(sum(preview_avg_samples) / len(preview_avg_samples), 3) if preview_avg_samples else 0.0,
         "avg_speedup_ratio": round(sum(speedup_samples) / len(speedup_samples), 3) if speedup_samples else 0.0,
+        "fallback_kind_counts": fallback_kind_counts,
+        "promotion_candidate_count": promotion_candidate_total,
+        "promoted_region_count": promoted_region_total,
+        "promotion_rejected_by_shape_count": promotion_rejected_by_shape_total,
+        "promotion_rejected_by_gate_count": promotion_rejected_by_gate_total,
+        "discovery_seen_guarded_tail_like_shape_count": discovery_seen_guarded_tail_like_shape_total,
+        "discovery_rejected_noncanonical_layout_count": discovery_rejected_noncanonical_layout_total,
+        "canonicalized_guarded_tail_shape_count": canonicalized_guarded_tail_shape_total,
+        "canonicalization_failed_multiple_payload_entries": canonicalization_failed_multiple_payload_entries_total,
+        "canonicalization_failed_interleaved_join_uses": canonicalization_failed_interleaved_join_uses_total,
+        "canonicalization_failed_nonterminal_join_label": canonicalization_failed_nonterminal_join_label_total,
+        "canonicalization_failed_nested_tail_escape": canonicalization_failed_nested_tail_escape_total,
+        "canonicalized_interleaved_join_use_count": canonicalized_interleaved_join_use_total,
+        "canonicalization_failed_alias_not_fallthrough_count": canonicalization_failed_alias_not_fallthrough_total,
+        "canonicalization_failed_join_has_external_ref_count": canonicalization_failed_join_has_external_ref_total,
+        "canonicalization_failed_payload_crosses_join_count": canonicalization_failed_payload_crosses_join_total,
+        "rejected_must_emit_label": rejected_must_emit_label_total,
+        "rejected_not_single_pred_succ": rejected_not_single_pred_succ_total,
+        "rejected_external_entry": rejected_external_entry_total,
+        "rejected_loop_or_switch_target": rejected_loop_or_switch_target_total,
+        "legacy_dependent_count": len(legacy_dependent_functions),
+        "legacy_dependent_functions": legacy_dependent_functions,
     }
 
 
@@ -356,6 +569,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Compared functions: {report['summary']['function_count']}",
         f"- Preview used count: {report['summary']['preview_used_count']}",
         f"- Preview fallback count: {report['summary']['preview_fallback_count']}",
+        f"- Preview unstructured count: {report['summary'].get('preview_unstructured_count', 0)}",
         f"- Preview faster count: {report['summary']['preview_faster_count']}",
         f"- Preview helper wins: {report['summary']['preview_better_on_helper_count']}",
         f"- Legacy faster count: {report['summary']['legacy_faster_count']}",
@@ -363,11 +577,32 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Average legacy ms: {report['summary']['avg_legacy_ms']}",
         f"- Average preview ms: {report['summary']['avg_preview_ms']}",
         f"- Average speedup ratio: {report['summary']['avg_speedup_ratio']}",
+        f"- Fallback kind counts: {report['summary'].get('fallback_kind_counts', {})}",
+        f"- Promotion candidate count: {report['summary'].get('promotion_candidate_count', 0)}",
+        f"- Promoted region count: {report['summary'].get('promoted_region_count', 0)}",
+        f"- Promotion rejected by shape: {report['summary'].get('promotion_rejected_by_shape_count', 0)}",
+        f"- Promotion rejected by gate: {report['summary'].get('promotion_rejected_by_gate_count', 0)}",
+        f"- Discovery saw guarded-tail-like shape: {report['summary'].get('discovery_seen_guarded_tail_like_shape_count', 0)}",
+        f"- Discovery rejected noncanonical layout: {report['summary'].get('discovery_rejected_noncanonical_layout_count', 0)}",
+        f"- Canonicalized guarded-tail shape: {report['summary'].get('canonicalized_guarded_tail_shape_count', 0)}",
+        f"- Canonicalization failed multiple payload entries: {report['summary'].get('canonicalization_failed_multiple_payload_entries', 0)}",
+        f"- Canonicalization failed interleaved join uses: {report['summary'].get('canonicalization_failed_interleaved_join_uses', 0)}",
+        f"- Canonicalization failed nonterminal join label: {report['summary'].get('canonicalization_failed_nonterminal_join_label', 0)}",
+        f"- Canonicalization failed nested tail escape: {report['summary'].get('canonicalization_failed_nested_tail_escape', 0)}",
+        f"- Canonicalized interleaved join use: {report['summary'].get('canonicalized_interleaved_join_use_count', 0)}",
+        f"- Canonicalization failed alias not fallthrough: {report['summary'].get('canonicalization_failed_alias_not_fallthrough_count', 0)}",
+        f"- Canonicalization failed join has external ref: {report['summary'].get('canonicalization_failed_join_has_external_ref_count', 0)}",
+        f"- Canonicalization failed payload crosses join: {report['summary'].get('canonicalization_failed_payload_crosses_join_count', 0)}",
+        f"- Rejected must-emit label: {report['summary'].get('rejected_must_emit_label', 0)}",
+        f"- Rejected not single-pred/succ: {report['summary'].get('rejected_not_single_pred_succ', 0)}",
+        f"- Rejected external entry: {report['summary'].get('rejected_external_entry', 0)}",
+        f"- Rejected loop/switch target: {report['summary'].get('rejected_loop_or_switch_target', 0)}",
+        f"- Legacy-dependent count: {report['summary'].get('legacy_dependent_count', 0)}",
         "",
         "## Function Table",
         "",
-        "| Address | Legacy | Preview | Δ goto | Δ temp | Δ cast | Δ helper | Legacy avg ms | Preview avg ms | Speedup | Preview used/fallback |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Address | Legacy | Preview | Δ goto | Δ temp | Δ cast | Δ helper | Legacy avg ms | Preview avg ms | Speedup | Preview used/fallback | Surface | Promote cand/promoted | Reject shape/gate |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- |",
     ]
     for item in report["functions"]:
         legacy = item["legacy"]
@@ -379,8 +614,22 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
             f"{'ok' if preview.get('success') else 'fail'} | {delta['goto_count']} | "
             f"{delta['temp_surface_count']} | {delta['cast_chain_count']} | {delta['helper_call_total']} | "
             f"{legacy['timing_stats']['avg_ms']} | {preview['timing_stats']['avg_ms']} | "
-            f"{delta['speedup_ratio']} | {preview_state} |"
+            f"{delta['speedup_ratio']} | {preview_state} | {item.get('preview_surface_kind')} | "
+            f"{item.get('promotion_candidate_count', 0)}/{item.get('promoted_region_count', 0)} | "
+            f"{item.get('promotion_rejected_by_shape_count', 0)}/{item.get('promotion_rejected_by_gate_count', 0)} |"
         )
+    lines.extend(["", "## Legacy-Dependent", ""])
+    if not report["summary"].get("legacy_dependent_functions"):
+        lines.append("- none")
+    else:
+        for item in report["summary"]["legacy_dependent_functions"]:
+            lines.append(
+                f"- `{item['address']}` `{item['name']}`: "
+                f"preview_engine={item.get('preview_engine_used')}, "
+                f"fallback={item.get('preview_fallback_kind')}, "
+                f"failure={item.get('preview_failure_kind')}, "
+                f"surface={item.get('preview_surface_kind')}"
+            )
     lines.extend(["", "## Details", ""])
     for item in report["functions"]:
         lines.extend(
@@ -392,6 +641,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 f"- Legacy timing stats: {item['legacy']['timing_stats']}",
                 f"- Preview timing stats: {item['preview']['timing_stats']}",
                 f"- Delta: {item['delta']}",
+                f"- Promotion stats: candidates={item.get('promotion_candidate_count', 0)}, promoted={item.get('promoted_region_count', 0)}, rejected_shape={item.get('promotion_rejected_by_shape_count', 0)}, rejected_gate={item.get('promotion_rejected_by_gate_count', 0)}, seen_guarded_tail_like={item.get('discovery_seen_guarded_tail_like_shape_count', 0)}, rejected_noncanonical={item.get('discovery_rejected_noncanonical_layout_count', 0)}, canonicalized={item.get('canonicalized_guarded_tail_shape_count', 0)}, canonicalized_interleaved={item.get('canonicalized_interleaved_join_use_count', 0)}, failed_multi_payload={item.get('canonicalization_failed_multiple_payload_entries', 0)}, failed_interleaved_join={item.get('canonicalization_failed_interleaved_join_uses', 0)}, failed_alias_not_fallthrough={item.get('canonicalization_failed_alias_not_fallthrough_count', 0)}, failed_join_has_external_ref={item.get('canonicalization_failed_join_has_external_ref_count', 0)}, failed_payload_crosses_join={item.get('canonicalization_failed_payload_crosses_join_count', 0)}, failed_nonterminal_join={item.get('canonicalization_failed_nonterminal_join_label', 0)}, failed_nested_escape={item.get('canonicalization_failed_nested_tail_escape', 0)}, must_emit={item.get('rejected_must_emit_label', 0)}, not_single_pred_succ={item.get('rejected_not_single_pred_succ', 0)}, external_entry={item.get('rejected_external_entry', 0)}, loop_or_switch={item.get('rejected_loop_or_switch_target', 0)}",
                 "",
                 "#### Legacy",
                 "```c",
@@ -428,7 +678,7 @@ def main() -> int:
     if not addresses:
         raise SystemExit("No function addresses selected; use --addresses or --from-summary/--top-offenders")
     struct_ptr_aliases = load_struct_pointer_aliases(BASE_TYPES_JSON)
-    names = resolve_names(binary_path, args.fission_bin, addresses)
+    names = resolve_names(binary_path, args.fission_bin, addresses, args.list_timeout)
 
     results: list[dict[str, Any]] = []
     for normalized in addresses:

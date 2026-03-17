@@ -1,5 +1,45 @@
 use super::*;
 
+pub(super) fn build_address_to_index_map(pcode: &PcodeFunction) -> HashMap<u64, usize> {
+    let mut address_to_index = HashMap::new();
+    for (idx, block) in pcode.blocks.iter().enumerate() {
+        address_to_index.entry(block.start_address).or_insert(idx);
+    }
+    address_to_index
+}
+
+pub(super) fn canonical_block_start_for_address(
+    pcode: &PcodeFunction,
+    address: u64,
+) -> Option<u64> {
+    let mut starts = pcode
+        .blocks
+        .iter()
+        .map(|block| block.start_address)
+        .collect::<Vec<_>>();
+    starts.sort_unstable();
+    starts.dedup();
+
+    let idx = starts.partition_point(|start| *start <= address);
+    idx.checked_sub(1).map(|idx| starts[idx])
+}
+
+pub(super) fn canonical_block_index_for_address(
+    pcode: &PcodeFunction,
+    address_to_index: &HashMap<u64, usize>,
+    address: u64,
+) -> Option<usize> {
+    let canonical = canonical_block_start_for_address(pcode, address)?;
+    address_to_index.get(&canonical).copied()
+}
+
+pub(super) fn duplicate_block_start_count(pcode: &PcodeFunction) -> usize {
+    pcode
+        .blocks
+        .len()
+        .saturating_sub(build_address_to_index_map(pcode).len())
+}
+
 pub(super) fn build_successor_index_map(
     pcode: &PcodeFunction,
     address_to_index: &HashMap<u64, usize>,
@@ -15,8 +55,10 @@ pub(super) fn build_successor_index_map(
                 Some(op) if op.opcode == PcodeOpcode::Return => {}
                 Some(op) if op.opcode == PcodeOpcode::Branch && op.inputs.len() == 1 => {
                     if let Some(target) = op.inputs.first().and_then(branch_target_address) {
-                        if let Some(target_idx) = address_to_index.get(&target) {
-                            succs.push(*target_idx);
+                        if let Some(target_idx) =
+                            canonical_block_index_for_address(pcode, address_to_index, target)
+                        {
+                            succs.push(target_idx);
                         }
                     }
                 }
@@ -25,8 +67,10 @@ pub(super) fn build_successor_index_map(
                         || (op.opcode == PcodeOpcode::Branch && op.inputs.len() >= 2) =>
                 {
                     if let Some(target) = op.inputs.first().and_then(branch_target_address) {
-                        if let Some(target_idx) = address_to_index.get(&target) {
-                            succs.push(*target_idx);
+                        if let Some(target_idx) =
+                            canonical_block_index_for_address(pcode, address_to_index, target)
+                        {
+                            succs.push(target_idx);
                         }
                     }
                     if let Some(next_idx) = layout_fallthrough[idx] {
@@ -58,21 +102,29 @@ pub(super) fn build_predecessor_index_map(successors: &[Vec<usize>]) -> Vec<Vec<
 }
 
 pub(super) fn build_layout_fallthrough_map(pcode: &PcodeFunction) -> Vec<Option<usize>> {
-    let mut order = pcode
+    let address_to_index = build_address_to_index_map(pcode);
+    let mut starts = pcode
         .blocks
         .iter()
-        .enumerate()
-        .map(|(idx, block)| (block.start_address, idx))
+        .map(|block| block.start_address)
         .collect::<Vec<_>>();
-    order.sort_unstable_by_key(|(addr, _)| *addr);
+    starts.sort_unstable();
+    starts.dedup();
 
-    let mut layout_fallthrough = vec![None; pcode.blocks.len()];
-    for pair in order.windows(2) {
-        let (_, idx) = pair[0];
-        let (_, next_idx) = pair[1];
-        layout_fallthrough[idx] = Some(next_idx);
+    let mut next_distinct = HashMap::new();
+    for pair in starts.windows(2) {
+        let current = pair[0];
+        let next = pair[1];
+        if let Some(next_idx) = address_to_index.get(&next) {
+            next_distinct.insert(current, *next_idx);
+        }
     }
-    layout_fallthrough
+
+    pcode
+        .blocks
+        .iter()
+        .map(|block| next_distinct.get(&block.start_address).copied())
+        .collect()
 }
 
 pub(super) fn block_terminator_op(block: &crate::pcode::PcodeBasicBlock) -> Option<&PcodeOp> {

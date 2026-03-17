@@ -63,6 +63,29 @@ pub struct HirFunction {
     pub body: Vec<HirStmt>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PreviewBuildStats {
+    pub promotion_candidate_count: usize,
+    pub promoted_region_count: usize,
+    pub promotion_rejected_by_shape_count: usize,
+    pub promotion_rejected_by_gate_count: usize,
+    pub discovery_seen_guarded_tail_like_shape_count: usize,
+    pub discovery_rejected_noncanonical_layout_count: usize,
+    pub canonicalized_guarded_tail_shape_count: usize,
+    pub canonicalization_failed_multiple_payload_entries: usize,
+    pub canonicalization_failed_interleaved_join_uses: usize,
+    pub canonicalization_failed_nonterminal_join_label: usize,
+    pub canonicalization_failed_nested_tail_escape: usize,
+    pub canonicalized_interleaved_join_use_count: usize,
+    pub canonicalization_failed_alias_not_fallthrough_count: usize,
+    pub canonicalization_failed_join_has_external_ref_count: usize,
+    pub canonicalization_failed_payload_crosses_join_count: usize,
+    pub rejected_must_emit_label: usize,
+    pub rejected_not_single_pred_succ: usize,
+    pub rejected_external_entry: usize,
+    pub rejected_loop_or_switch_target: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HirStmt {
     Assign {

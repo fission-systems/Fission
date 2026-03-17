@@ -93,8 +93,13 @@ def collect_type_preservation_metrics(code: str, struct_ptr_aliases: dict[str, s
 
 
 def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[str, Any]:
+    must_emit_labels = set(
+        re.findall(r"\bgoto\s+([A-Za-z_]\w*)\s*;", code, flags=re.MULTILINE)
+    )
     metrics = {
         "goto_count": count_regex(r"\bgoto\s+[A-Za-z_]\w*\s*;", code),
+        "top_level_label_count": count_regex(r"^block_[0-9a-fA-F]+:\s*$", code),
+        "must_emit_label_count": len(must_emit_labels),
         "switch_count": count_regex(r"\bswitch\s*\(", code),
         "for_count": count_regex(r"\bfor\s*\(", code),
         "do_while_count": count_regex(r"\bdo\s*\{", code),
@@ -102,7 +107,15 @@ def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[
         "unique_surface_count": count_regex(r"\bunique0x[0-9a-fA-F]+\b", code),
         "field_access_count": count_regex(r"->\w+(?:/\* @[^*]+ \*/)?", code),
         "offset_index_count": count_regex(r"\b\w+\[\s*(?:0x[0-9a-fA-F]+|\d+)\s*\]", code),
+        "empty_if_count": len(
+            re.findall(r"if\s*\([^)]*\)\s*\{\s*\n\s*\}", code, flags=re.MULTILINE)
+        ),
+        "constant_if_count": count_regex(r"\bif\s*\(\s*(?:0|1)\s*\)\s*\{", code),
     }
+    metrics["single_pred_non_emitted_boundary_count"] = max(
+        int(metrics["top_level_label_count"]) - int(metrics["must_emit_label_count"]),
+        0,
+    )
 
     type_hits: Counter[str] = Counter()
     for alias in struct_ptr_aliases:

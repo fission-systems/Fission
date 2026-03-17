@@ -14,6 +14,12 @@ pub enum PropagationReason {
     Thunk,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AutoRenameKind {
+    StrongFid,
+    CrossImage(PropagationReason),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropagatedRename {
     pub name: String,
@@ -148,7 +154,7 @@ pub fn apply_propagated_renames(
     current: &LoadedBinary,
     renamed_functions: &mut HashMap<u64, String>,
     manual_renamed_functions: &HashSet<u64>,
-    auto_renamed_functions: &mut HashMap<u64, PropagationReason>,
+    auto_renamed_functions: &mut HashMap<u64, AutoRenameKind>,
     propagated: HashMap<u64, PropagatedRename>,
 ) -> usize {
     let mut applied = 0usize;
@@ -173,7 +179,7 @@ pub fn apply_propagated_renames(
         }
 
         renamed_functions.insert(address, candidate.name.clone());
-        auto_renamed_functions.insert(address, candidate.reason);
+        auto_renamed_functions.insert(address, AutoRenameKind::CrossImage(candidate.reason));
         applied += 1;
     }
 

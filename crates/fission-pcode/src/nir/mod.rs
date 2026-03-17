@@ -1,4 +1,5 @@
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
@@ -13,7 +14,11 @@ mod tests;
 mod types;
 
 pub use self::types::*;
-use self::{builder::*, cfg::*, normalize::*, printer::*};
+use self::{builder::*, cfg::*, normalize::*, printer::*, structuring::*};
+
+thread_local! {
+    static LAST_PREVIEW_BUILD_STATS: RefCell<Option<PreviewBuildStats>> = const { RefCell::new(None) };
+}
 
 const UNIQUE_SPACE_ID: u64 = 3;
 const REGISTER_SPACE_ID: u64 = 1;
@@ -91,6 +96,29 @@ struct PreviewBuilder<'a> {
     linear_exit_cache: HashMap<usize, Option<LinearExit>>,
     linear_body_cache: HashMap<LinearBodyCacheKey, Option<(Vec<HirStmt>, usize)>>,
     jump_targets_cache: Option<HashSet<u64>>,
+    active_trace_id: Option<u64>,
+    last_trace_id: Option<u64>,
+    next_trace_id: u64,
+    lowering_site_depth: usize,
+    promotion_candidate_count: usize,
+    promoted_region_count: usize,
+    promotion_rejected_by_shape_count: usize,
+    promotion_rejected_by_gate_count: usize,
+    discovery_seen_guarded_tail_like_shape_count: usize,
+    discovery_rejected_noncanonical_layout_count: usize,
+    canonicalized_guarded_tail_shape_count: usize,
+    canonicalization_failed_multiple_payload_entries: usize,
+    canonicalization_failed_interleaved_join_uses: usize,
+    canonicalization_failed_nonterminal_join_label: usize,
+    canonicalization_failed_nested_tail_escape: usize,
+    canonicalized_interleaved_join_use_count: usize,
+    canonicalization_failed_alias_not_fallthrough_count: usize,
+    canonicalization_failed_join_has_external_ref_count: usize,
+    canonicalization_failed_payload_crosses_join_count: usize,
+    rejected_must_emit_label: usize,
+    rejected_not_single_pred_succ: usize,
+    rejected_external_entry: usize,
+    rejected_loop_or_switch_target: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -171,6 +199,9 @@ pub fn render_mlil_preview_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<String, MlilPreviewError> {
+    LAST_PREVIEW_BUILD_STATS.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
     let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
     let debug_log = |stage: &str| {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
@@ -186,6 +217,9 @@ pub fn render_mlil_preview_with_context(
                 });
         }
     };
+    if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+        let _ = std::fs::remove_file(format!("/tmp/fission_preview_{address:x}_unsupported.json"));
+    }
     if options.pe_x64_only && !options.is_supported_pe() {
         return Err(MlilPreviewError::UnsupportedArchitectureDetailed);
     }
@@ -200,9 +234,22 @@ pub fn render_mlil_preview_with_context(
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
             eprintln!("[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}");
         }
+        if matches!(err, MlilPreviewError::UnsupportedPattern("opcode")) {
+            builder.record_unsupported_inventory_event(
+                "build_hir_error",
+                None,
+                None,
+                None,
+                Some(address),
+                None,
+                true,
+                "render_mlil_preview_with_context",
+            );
+        }
         debug_log("build_hir_error");
         err
     })?;
+    let mut build_stats = builder.preview_build_stats();
     if diag {
         eprintln!(
             "[DIAG] build_hir done: fn=0x{address:x} elapsed={:.3}s body_stmts={} locals={}",
@@ -217,6 +264,44 @@ pub fn render_mlil_preview_with_context(
     debug_log("normalize_start");
     let normalize_start = Instant::now();
     normalize_hir_function(&mut hir);
+    let normalized_discovery_stats = discover_guarded_tail_candidates_for_stats(&hir.body);
+    build_stats.promotion_candidate_count += normalized_discovery_stats.promotion_candidate_count;
+    build_stats.promoted_region_count += normalized_discovery_stats.promoted_region_count;
+    build_stats.promotion_rejected_by_shape_count +=
+        normalized_discovery_stats.promotion_rejected_by_shape_count;
+    build_stats.promotion_rejected_by_gate_count +=
+        normalized_discovery_stats.promotion_rejected_by_gate_count;
+    build_stats.discovery_seen_guarded_tail_like_shape_count +=
+        normalized_discovery_stats.discovery_seen_guarded_tail_like_shape_count;
+    build_stats.discovery_rejected_noncanonical_layout_count +=
+        normalized_discovery_stats.discovery_rejected_noncanonical_layout_count;
+    build_stats.canonicalized_guarded_tail_shape_count +=
+        normalized_discovery_stats.canonicalized_guarded_tail_shape_count;
+    build_stats.canonicalization_failed_multiple_payload_entries +=
+        normalized_discovery_stats.canonicalization_failed_multiple_payload_entries;
+    build_stats.canonicalization_failed_interleaved_join_uses +=
+        normalized_discovery_stats.canonicalization_failed_interleaved_join_uses;
+    build_stats.canonicalization_failed_nonterminal_join_label +=
+        normalized_discovery_stats.canonicalization_failed_nonterminal_join_label;
+    build_stats.canonicalization_failed_nested_tail_escape +=
+        normalized_discovery_stats.canonicalization_failed_nested_tail_escape;
+    build_stats.canonicalized_interleaved_join_use_count +=
+        normalized_discovery_stats.canonicalized_interleaved_join_use_count;
+    build_stats.canonicalization_failed_alias_not_fallthrough_count +=
+        normalized_discovery_stats.canonicalization_failed_alias_not_fallthrough_count;
+    build_stats.canonicalization_failed_join_has_external_ref_count +=
+        normalized_discovery_stats.canonicalization_failed_join_has_external_ref_count;
+    build_stats.canonicalization_failed_payload_crosses_join_count +=
+        normalized_discovery_stats.canonicalization_failed_payload_crosses_join_count;
+    build_stats.rejected_must_emit_label += normalized_discovery_stats.rejected_must_emit_label;
+    build_stats.rejected_not_single_pred_succ +=
+        normalized_discovery_stats.rejected_not_single_pred_succ;
+    build_stats.rejected_external_entry += normalized_discovery_stats.rejected_external_entry;
+    build_stats.rejected_loop_or_switch_target +=
+        normalized_discovery_stats.rejected_loop_or_switch_target;
+    LAST_PREVIEW_BUILD_STATS.with(|slot| {
+        *slot.borrow_mut() = Some(build_stats);
+    });
     if diag {
         eprintln!(
             "[DIAG] normalize stage done: fn=0x{address:x} elapsed={:.3}s body_stmts={} locals={}",
@@ -258,6 +343,10 @@ pub fn render_mlil_preview_with_context(
     }
     debug_log("print_done");
     Ok(rendered)
+}
+
+pub fn take_last_preview_build_stats() -> Option<PreviewBuildStats> {
+    LAST_PREVIEW_BUILD_STATS.with(|slot| slot.borrow_mut().take())
 }
 
 fn is_comparison(opcode: PcodeOpcode) -> bool {

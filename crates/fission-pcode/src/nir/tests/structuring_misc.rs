@@ -1,4 +1,8 @@
 use super::*;
+use crate::nir::structuring::{
+    cleanup_redundant_labels, discover_guarded_tail_candidates_for_test,
+    promote_single_entry_guarded_tail_regions_for_test,
+};
 #[test]
 fn multi_block_preview_lowers_wrapped_branch_condition_without_failing() {
     let cond_raw = uniq(0x390, 1);
@@ -245,6 +249,500 @@ fn piece_recombines_matching_subpieces_back_to_source_value() {
     let code = render_mlil_preview(&func, "piece_recombine_fn", 0x6100, &preview_options())
         .expect("preview render");
     assert!(code.contains("return param_1;"));
+}
+
+#[test]
+fn redundant_adjacent_labels_are_folded_to_canonical_target() {
+    let body = vec![
+        HirStmt::Label("block_1000".to_string()),
+        HirStmt::Label("block_1004".to_string()),
+        HirStmt::Goto("block_1000".to_string()),
+    ];
+
+    let cleaned = cleanup_redundant_labels(body);
+    assert_eq!(
+        cleaned,
+        vec![
+            HirStmt::Label("block_1004".to_string()),
+            HirStmt::Goto("block_1004".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn normalize_removes_constant_false_and_empty_if_residue() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(HirExpr::Var("reg".to_string())),
+                ty: NirType::Bool,
+            },
+            then_body: Vec::new(),
+            else_body: Vec::new(),
+        },
+        HirStmt::If {
+            cond: HirExpr::Const(0, NirType::Bool),
+            then_body: vec![HirStmt::Goto("block_aa0".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Label("block_keep".to_string()),
+    ];
+
+    normalize_function_body(&mut body);
+
+    assert_eq!(body, vec![HirStmt::Label("block_keep".to_string())]);
+}
+
+#[test]
+fn normalize_removes_if_goto_immediate_next_label() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_join".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+    ];
+
+    normalize_function_body(&mut body);
+
+    assert_eq!(
+        body,
+        vec![
+            HirStmt::Label("block_join".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+        ]
+    );
+}
+
+#[test]
+fn normalize_rewrites_two_way_branch_with_fallthrough_target_to_one_way_branch() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_exit".to_string())],
+            else_body: vec![HirStmt::Goto("block_fallthrough".to_string())],
+        },
+        HirStmt::Label("block_fallthrough".to_string()),
+        HirStmt::Return(Some(HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        ))),
+        HirStmt::Label("block_exit".to_string()),
+        HirStmt::Return(Some(HirExpr::Const(
+            1,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        ))),
+    ];
+
+    normalize_function_body(&mut body);
+
+    assert_eq!(
+        body,
+        vec![
+            HirStmt::If {
+                cond: HirExpr::Var("reg".to_string()),
+                then_body: vec![HirStmt::Goto("block_exit".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(Some(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ))),
+            HirStmt::Label("block_exit".to_string()),
+            HirStmt::Return(Some(HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ))),
+        ]
+    );
+}
+
+#[test]
+fn normalize_removes_unreferenced_leading_entry_label() {
+    let mut body = vec![
+        HirStmt::Label("block_entry".to_string()),
+        HirStmt::Expr(HirExpr::Var("reg".to_string())),
+        HirStmt::Return(Some(HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        ))),
+    ];
+
+    normalize_function_body(&mut body);
+
+    assert_eq!(
+        body,
+        vec![
+            HirStmt::Expr(HirExpr::Var("reg".to_string())),
+            HirStmt::Return(Some(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ))),
+        ]
+    );
+}
+
+#[test]
+fn normalize_fuses_single_predecessor_boundary_segment_under_negated_if() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_join".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Assign {
+            lhs: HirLValue::Var("tmp_1".to_string()),
+            rhs: HirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
+        },
+        HirStmt::Expr(HirExpr::Var("tmp_1".to_string())),
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+    ];
+
+    normalize_function_body(&mut body);
+
+    assert_eq!(
+        body,
+        vec![
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("reg".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    HirStmt::Assign {
+                        lhs: HirLValue::Var("tmp_1".to_string()),
+                        rhs: HirExpr::Const(
+                            1,
+                            NirType::Int {
+                                bits: 32,
+                                signed: false,
+                            },
+                        ),
+                    },
+                    HirStmt::Expr(HirExpr::Var("tmp_1".to_string())),
+                ],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+        ]
+    );
+}
+
+#[test]
+fn normalize_fuses_boundary_segment_with_nested_if() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_join".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("pre".to_string())),
+        HirStmt::If {
+            cond: HirExpr::Var("flag".to_string()),
+            then_body: vec![HirStmt::Expr(HirExpr::Var("body".to_string()))],
+            else_body: Vec::new(),
+        },
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+    ];
+
+    normalize_function_body(&mut body);
+
+    assert_eq!(
+        body,
+        vec![
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("reg".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    HirStmt::Expr(HirExpr::Var("pre".to_string())),
+                    HirStmt::If {
+                        cond: HirExpr::Var("flag".to_string()),
+                        then_body: vec![HirStmt::Expr(HirExpr::Var("body".to_string()))],
+                        else_body: Vec::new(),
+                    },
+                ],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(Some(HirExpr::Var("reg".to_string()))),
+        ]
+    );
+}
+
+#[test]
+fn normalize_promotes_guarded_jump_target_tail() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("cond_a".to_string()),
+            then_body: vec![HirStmt::Goto("block_body".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::If {
+            cond: HirExpr::Var("cond_b".to_string()),
+            then_body: vec![HirStmt::Goto("block_join".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Label("block_body".to_string()),
+        HirStmt::Expr(HirExpr::Var("body".to_string())),
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Return(Some(HirExpr::Const(
+            0,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        ))),
+    ];
+
+    normalize_function_body(&mut body);
+
+    assert_eq!(
+        body,
+        vec![
+            HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::LogicalOr,
+                    lhs: Box::new(HirExpr::Var("cond_a".to_string())),
+                    rhs: Box::new(HirExpr::Unary {
+                        op: HirUnaryOp::Not,
+                        expr: Box::new(HirExpr::Var("cond_b".to_string())),
+                        ty: NirType::Bool,
+                    }),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![HirStmt::Expr(HirExpr::Var("body".to_string()))],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(Some(HirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ))),
+        ]
+    );
+}
+
+#[test]
+fn structuring_promotes_single_entry_guarded_tail_region() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::If {
+            cond: HirExpr::Var("flag".to_string()),
+            then_body: vec![HirStmt::Expr(HirExpr::Var("side".to_string()))],
+            else_body: Vec::new(),
+        },
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
+
+    assert_eq!(stats.promotion_candidate_count, 1);
+    assert_eq!(stats.promoted_region_count, 1);
+    assert_eq!(
+        body,
+        vec![
+            HirStmt::If {
+                cond: HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Var("reg".to_string())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    HirStmt::Expr(HirExpr::Var("middle".to_string())),
+                    HirStmt::If {
+                        cond: HirExpr::Var("flag".to_string()),
+                        then_body: vec![HirStmt::Expr(HirExpr::Var("side".to_string()))],
+                        else_body: Vec::new(),
+                    },
+                ],
+                else_body: Vec::new(),
+            },
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ]
+    );
+}
+
+#[test]
+fn structuring_candidate_discovery_counts_internal_label_gate_rejection() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_inner".to_string()),
+        HirStmt::Expr(HirExpr::Var("inner".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 0);
+    assert_eq!(stats.promoted_region_count, 0);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 1);
+    assert_eq!(stats.promotion_rejected_by_gate_count, 0);
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 1);
+}
+
+#[test]
+fn structuring_candidate_discovery_allows_leading_label_before_payload() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Label("block_leading".to_string()),
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 1);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 0);
+    assert_eq!(stats.promotion_rejected_by_gate_count, 0);
+    assert_eq!(stats.canonicalized_guarded_tail_shape_count, 1);
+}
+
+#[test]
+fn structuring_candidate_discovery_counts_missing_target_as_noncanonical_shape() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 0);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 1);
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 1);
+    assert_eq!(stats.canonicalization_failed_nonterminal_join_label, 1);
+}
+
+#[test]
+fn structuring_candidate_discovery_counts_nested_tail_escape() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 0);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 1);
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 1);
+    assert_eq!(stats.canonicalization_failed_nested_tail_escape, 1);
+}
+
+#[test]
+fn structuring_candidate_discovery_counts_interleaved_referenced_label_use() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 0);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 1);
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 1);
+    assert_eq!(stats.canonicalization_failed_alias_not_fallthrough_count, 1);
+}
+
+#[test]
+fn structuring_candidate_discovery_canonicalizes_local_fallthrough_alias_label() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 1);
+    assert_eq!(stats.canonicalized_interleaved_join_use_count, 1);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 0);
+    assert_eq!(stats.promotion_rejected_by_gate_count, 0);
 }
 
 #[test]
