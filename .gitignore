@@ -113,3 +113,6 @@ artifacts/
 
 # Local benchmark scratch file
 /test_bench.json
+
+# Local benchmark scratch file
+/test_bench.json
