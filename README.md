@@ -35,6 +35,79 @@ Preview currently supports real PE x64 work, bootstrap-level PE x86 coverage on 
 
 License: AGPL-3.0-or-later. Contributions are accepted under the Contributor License Agreement in [`CLA.md`](./CLA.md).
 
+## What Works Today
+
+If you are evaluating Fission today, the most accurate short version is:
+
+- the repository is real, buildable, and under active development
+- the CLI and analysis crates are the most mature parts of the workspace
+- the Tauri desktop app is real and wired into the same engine stack
+- `legacy` is still the stable default path for serious use
+- `mlil-preview` is the forward architecture path and already useful on covered functions
+- PE x64 currently has the strongest preview coverage
+- PE x86 preview exists, but coverage is still limited and seed-driven
+- broader dynamic-analysis, network-analysis, and AI workflow layers are part of the long-term direction, not the fully realized present-day state
+
+## Quick Start
+
+Build the native decompiler first, then build the CLI:
+
+```bash
+git clone https://github.com/sjkim1127/Fission.git
+cd Fission
+
+cd ghidra_decompiler
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cd ..
+
+cargo build --release --bin fission_cli
+```
+
+Basic CLI usage:
+
+```bash
+# Binary info
+./target/release/fission_cli <binary> --info
+
+# One-shot decompilation
+./target/release/fission_cli <binary> --decomp <address>
+
+# Interactive REPL
+./target/release/fission_cli <binary>
+```
+
+For detailed build steps, see [`docs/build/BUILD.md`](./docs/build/BUILD.md).  
+For CLI examples, see [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md).
+
+## Engine Modes
+
+| Engine | Role today | Notes |
+|---|---|---|
+| `legacy` | Stable default | Native Ghidra decompilation with Rust-side cleanup and enrichment |
+| `mlil-preview` | Forward architecture path | Ghidra p-code lift into Rust-owned NIR/HIR, structuring, normalization, and printing |
+
+In practical terms:
+
+- use `legacy` when you want the safest current path
+- use `mlil-preview` when evaluating the future Rust-owned decompiler direction
+- expect the two paths to differ in type surfacing, readability, and large-function coverage
+
+## Where To Look First
+
+If you are new to the repository, start here:
+
+1. [`docs/architecture/ARCHITECTURE.md`](./docs/architecture/ARCHITECTURE.md)  
+   The architectural source of truth.
+2. [`docs/ROADMAP.md`](./docs/ROADMAP.md)  
+   Current direction and priority areas.
+3. [`docs/build/BUILD.md`](./docs/build/BUILD.md)  
+   How to build the native core and Rust workspace.
+4. [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md)  
+   Practical CLI usage.
+5. [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)  
+   Recent technical milestones.
+
 ## Community
 
 - Discord: [Fission community server](https://discord.gg/dgzqGwBpcE)
