@@ -6,7 +6,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 
-Rust reverse-engineering and decompilation workspace focused on **static analysis**, **p-code-driven reconstruction**, and a **desktop analysis workflow**.
+Rust reverse-engineering and decompilation workspace focused on **static analysis**, **p-code-driven reconstruction**, and a **desktop analysis workflow**, with a long-term direction toward a unified platform that brings together static, dynamic, and network analysis.
 
 This repository is still an **early-stage** and **immature public codebase**. The direction is real and the core engine is advancing quickly, but the project is still under heavy development, parts of the repository are rough, and the public-facing docs are still being cleaned up.
 
@@ -16,7 +16,7 @@ Fission is converging on a simple architecture:
 - **Rust as the decompiler brain**
 - **CLI and Tauri as product surfaces over the same core**
 
-Its long-term direction goes beyond single-function pseudocode. Fission is aimed at **project-level software restoration**: recovering structure, behavior, and intent from compiled artifacts, with AI eventually acting as a deeply tool-coupled workflow layer on top of the decompiler and analysis stack.
+Its long-term direction goes beyond single-function pseudocode. Fission is aimed at **project-level software restoration**: recovering structure, behavior, and intent from compiled artifacts, while growing toward a unified platform that combines static, dynamic, and network analysis and absorbs the strengths of traditionally fragmented reverse-engineering tools into one workflow. AI is intended to sit on top of that stack as a deeply tool-coupled workflow layer.
 
 The repository currently includes:
 
@@ -56,11 +56,14 @@ Fission is not trying to be a thin UI around Ghidra or just another decompiler f
 
 The longer-term goal is **project-level restoration**: not reconstructing the exact original source code bit-for-bit, but recovering a usable understanding of how a program is structured, what it does, and what kind of system it is trying to implement.
 
+That long-term direction also means treating Fission as more than a decompiler. The project is aiming toward an integrated reverse-engineering platform that can combine **static analysis**, **dynamic analysis**, and **network-facing analysis**, while absorbing the strongest parts of what are usually separate and fragmented tools into a single workflow.
+
 That means going beyond questions like "what does this function do?" and moving toward:
 
 - how the application is organized as a whole
 - what behaviors and workflows it exposes to users
 - what domain concepts, protocols, and state machines exist inside the binary
+- how runtime behavior and network behavior connect back to that static structure
 - how those can be reconstructed into a meaningful project again
 
 The current architecture is converging on:

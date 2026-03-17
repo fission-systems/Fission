@@ -595,7 +595,9 @@ cargo doc --document-private-items
 
 ## License
 
-By contributing to Fission, you agree that your contributions will be licensed under the MIT License.
+By contributing to Fission, you agree that your contributions are governed by the repository license and the Contributor License Agreement in [`CLA.md`](./CLA.md).
+
+For the public repository, the project license is AGPL-3.0-or-later.
 
 ---
 
