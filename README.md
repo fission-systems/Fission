@@ -1,10 +1,14 @@
 # Fission
 
+![Fission logo](./image/logo.png)
+
 [![CI](https://github.com/sjkim1127/Fission/actions/workflows/ci.yml/badge.svg)](https://github.com/sjkim1127/Fission/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 
 Rust reverse-engineering and decompilation workspace focused on **static analysis**, **p-code-driven reconstruction**, and a **desktop analysis workflow**.
+
+This repository is still an **early prototype** and an **immature public codebase**. The direction is real and the core engine is advancing quickly, but the project is still under heavy development, parts of the repository are rough, and the public-facing docs are still being cleaned up.
 
 Fission is converging on a simple architecture:
 
@@ -27,9 +31,14 @@ Current engine status:
 - `legacy`: native Ghidra decompilation + Rust postprocess, still the stable path
 - `mlil-preview`: Ghidra p-code -> Rust NIR/HIR -> structuring -> printer, the forward architecture path
 
-Preview currently supports real PE x64 work, bootstrap-level PE x86 coverage on selected seeds, stack-slot recovery, multi-block control flow reconstruction, short-circuit folding, and Rust-owned pseudocode printing. It is still experimental, but it is no longer just a prototype.
+Preview currently supports real PE x64 work, bootstrap-level PE x86 coverage on selected seeds, stack-slot recovery, multi-block control flow reconstruction, short-circuit folding, and Rust-owned pseudocode printing. It is still experimental, and the repository should still be treated as an evolving prototype rather than a mature end-user product.
 
 License: AGPL-3.0-or-later. Contributions are accepted under the Contributor License Agreement in [`CLA.md`](./CLA.md).
+
+## Community
+
+- Discord: [Fission community server](https://discord.gg/dgzqGwBpcE)
+- LinkedIn: [Sung Joo Kim](https://www.linkedin.com/in/sung-joo-kim-718a93303/)
 
 ## Screenshots
 

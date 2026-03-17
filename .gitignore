@@ -110,3 +110,6 @@ artifacts/
 
 # Private product/API layer
 /crates/fission-ai/
+
+# Local benchmark scratch file
+/test_bench.json

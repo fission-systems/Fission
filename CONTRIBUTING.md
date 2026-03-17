@@ -103,7 +103,7 @@ Contributions are made through pull requests. See [Pull Request Process](#pull-r
 
 ## Contributor License Agreement
 
-Fission accepts contributions under the Contributor License Agreement in [`/Users/sjkim1127/Fission/CLA.md`](/Users/sjkim1127/Fission/CLA.md).
+Fission accepts contributions under the Contributor License Agreement in [`CLA.md`](./CLA.md).
 
 By submitting a pull request or other intentional contribution to the project, you agree to that CLA.
 
@@ -113,7 +113,7 @@ This is required so the core engine can remain open while preserving the ability
 
 Fission uses repository-level licensing as the default source of truth:
 
-- the repository license is defined by [`/Users/sjkim1127/Fission/LICENSE`](/Users/sjkim1127/Fission/LICENSE)
+- the repository license is defined by [`LICENSE`](./LICENSE)
 - public Rust packages also declare `license = "AGPL-3.0-or-later"` in their `Cargo.toml`
 
 Current source header policy:

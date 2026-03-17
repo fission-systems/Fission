@@ -10,4 +10,4 @@
 
 ## Legal
 
-- [ ] I have read [`CLA.md`](/Users/sjkim1127/Fission/CLA.md) and agree to the Contributor License Agreement for this contribution
+- [ ] I have read [`CLA.md`](../CLA.md) and agree to the Contributor License Agreement for this contribution
