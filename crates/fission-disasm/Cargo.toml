@@ -2,6 +2,7 @@
 name = "fission-disasm"
 version = "0.1.0"
 edition = "2024"
+license = "AGPL-3.0-or-later"
 authors = ["Fission Dev Team"]
 description = "Disassembly engine for Fission using iced-x86"
 

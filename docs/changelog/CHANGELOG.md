@@ -10,6 +10,30 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-03-17
 
+### Repository Licensing + CLA Setup
+
+공개 저장소 기준 라이선스를 AGPL-3.0으로 고정하고, 향후 오픈코어 운영을 위한 Contributor License Agreement 문서를 추가했다. 목적은 코어 엔진은 AGPL-3.0으로 공개하되, 외부 기여분을 장기적으로 오픈소스/상용 양쪽에서 관리 가능한 법적 경계로 정리하는 것이다.
+
+#### Added
+
+- 루트 라이선스 파일
+  - `LICENSE`에 GNU AGPL-3.0 전문 추가
+- Contributor License Agreement
+  - `CLA.md` 추가
+- GitHub PR 템플릿
+  - 기여자가 CLA 동의 여부를 체크할 수 있는 pull request template 추가
+
+#### Changed
+
+- README 공개 메타데이터
+  - 저장소 라이선스를 AGPL-3.0으로 명시
+  - CLA 안내 링크 추가
+- Rust package metadata
+  - 공개 workspace `Cargo.toml`들에 `license = "AGPL-3.0-or-later"` 반영
+- CONTRIBUTING 가이드
+  - 기여 전 CLA 동의가 필요하다는 정책 추가
+  - 소스 파일 헤더는 전면 삽입 대신 repository-level license + 필요 시 SPDX short header를 쓰는 정책으로 고정
+
 ### Private AI Layer Repository Boundary Cleanup
 
 공개 리포 경계를 더 선명하게 하기 위해 `fission-ai`를 오픈소스 workspace와 Git tracking 범위에서 분리했다. 이번 변경의 목적은 코어 디컴파일/분석 엔진은 공개하되, 향후 AI product/API orchestration 레이어는 비공개로 유지하는 저장소 경계를 먼저 고정하는 것이다.

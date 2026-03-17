@@ -8,6 +8,8 @@ First off, thank you for considering contributing to Fission! It's people like y
 
 - [Code of Conduct](#code-of-conduct)
 - [How Can I Contribute?](#how-can-i-contribute)
+- [Contributor License Agreement](#contributor-license-agreement)
+- [License And Source Header Policy](#license-and-source-header-policy)
 - [Development Setup](#development-setup)
 - [Coding Standards](#coding-standards)
 - [Commit Guidelines](#commit-guidelines)
@@ -98,6 +100,41 @@ Contributions are made through pull requests. See [Pull Request Process](#pull-r
 - Bug fixes with clear reproduction steps
 - Adding support for new binary formats
 - Improving error messages
+
+## Contributor License Agreement
+
+Fission accepts contributions under the Contributor License Agreement in [`/Users/sjkim1127/Fission/CLA.md`](/Users/sjkim1127/Fission/CLA.md).
+
+By submitting a pull request or other intentional contribution to the project, you agree to that CLA.
+
+This is required so the core engine can remain open while preserving the ability to operate Fission as an open-core project.
+
+## License And Source Header Policy
+
+Fission uses repository-level licensing as the default source of truth:
+
+- the repository license is defined by [`/Users/sjkim1127/Fission/LICENSE`](/Users/sjkim1127/Fission/LICENSE)
+- public Rust packages also declare `license = "AGPL-3.0-or-later"` in their `Cargo.toml`
+
+Current source header policy:
+
+- do **not** mass-insert long copyright headers into every source file
+- prefer a clean repository-level license with package metadata
+- add a short SPDX header only when it is specifically useful or required
+
+Use a short SPDX-style header in cases like:
+
+- new standalone source files that may be copied out of the repository
+- generated files that need explicit provenance
+- files containing imported or adapted third-party material that require attribution
+
+Preferred short header format:
+
+```text
+// SPDX-License-Identifier: AGPL-3.0-or-later
+```
+
+Do not add mixed or ad-hoc custom headers without a clear reason. If a contribution introduces third-party code or unusual attribution requirements, document that explicitly in the pull request.
 
 ---
 

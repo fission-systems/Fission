@@ -5,6 +5,7 @@ edition = "2024"
 authors = ["Fission Dev Team"]
 description = "FFI exports for Fission - C/C++ interop layer"
 repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
 readme = "../../README.md"
 keywords = ["fission", "ffi", "c-bindings", "decompiler"]
 categories = ["development-tools::ffi"]

@@ -5,6 +5,7 @@ edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Function signature database for Fission"
 repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
 keywords = ["signatures", "windows-api", "msvc"]
 categories = ["development-tools"]
 

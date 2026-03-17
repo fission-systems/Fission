@@ -5,6 +5,7 @@ edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Fission compatibility facade for static and dynamic analysis crates"
 repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
 readme = "../../README.md"
 keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]
 categories = ["development-tools::debugging"]

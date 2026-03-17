@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Fission - Tauri GUI"
 authors = ["Fission Dev Team"]
 edition = "2021"
+license = "AGPL-3.0-or-later"
 
 [lib]
 name = "fission_tauri_lib"

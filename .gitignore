@@ -52,6 +52,7 @@ cargo_error*.txt
 # Temporary files created during development
 memory_loadimage.hh
 memory_loadimage.cc
+/putty_single.c
 
 # Submodule build directories
 ghidra_decompiler/build/
