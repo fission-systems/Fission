@@ -1,4 +1,8 @@
-# LLVM 기반 디컴파일러 개선 아이디어 (2026-01-13)
+# LLVM-Based Decompiler Improvement Ideas (2026-01-13)
+
+> ⚠️ **Status: Exploratory, Not Active Roadmap**
+> This document captures speculative LLVM-inspired ideas.
+> It is useful as research context, not as an active implementation plan.
 
 LLVM 프로젝트의 최신 최적화 패스 및 분석 기법을 역으로 적용하여 Fission 디컴파일러의 품질을 혁신적으로 향상시키기 위한 아이디어 리스트입니다.
 

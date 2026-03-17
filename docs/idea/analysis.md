@@ -1,4 +1,8 @@
-# 분석 및 자동화 아이디어 (2026-01-10)
+# Analysis and Automation Ideas (2026-01-10)
+
+> ⚠️ **Status: Stale / Historical Idea Note**
+> This note captures exploratory ideas from 2026-01-10.
+> It is not an active roadmap document.
 
 ## 1. 테인트(Taint) 분석
 

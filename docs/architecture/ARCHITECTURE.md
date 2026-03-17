@@ -1,37 +1,37 @@
 # Architecture
 
-이 문서는 현재 Fission의 **실제 아키텍처 기준 문서**다.  
-2026-03 이후 기준 모델은 “Ghidra를 최종 디컴파일러로 고치는 것”이 아니라, **Ghidra를 lift service로 제한하고 Rust가 decompiler brain을 소유하는 구조**다.
+This document is the **current architectural source of truth** for Fission.  
+As of March 2026, the target model is no longer “keep fixing Ghidra as the final decompiler.” The project is converging on a structure where **Ghidra is constrained to a lift service and Rust owns the decompiler brain**.
 
 ## Top-Level Contract
 
-Fission은 아래 4층 계약으로 본다.
+Fission is organized around four primary layers:
 
 1. **Lift Service**
 2. **Canonical IR**
 3. **Structured IR**
 4. **Presentation**
 
-그리고 이 계층들 옆에 **Session Fact Store** 와 **Preview-First Routing Policy** 가 제품 규칙으로 붙는다.
+Alongside those layers, the product also relies on a **Session Fact Store** and a **Preview-First Routing Policy**.
 
-핵심 방향:
+Core direction:
 
-- native/Ghidra는 **decode + p-code + CFG skeleton + baseline ABI/type facts + failure isolation**
-- Rust는 **정규화, 구조화, 고수준 표현, 최종 printer**
-- 타입/이름/FID/cross-image 정보는 **Fact Store** 에서 충돌 해결 후 소비
-- giant/unsupported 함수는 **preview unstructured 또는 explicit fallback** 으로 안전하게 종료
+- native/Ghidra provides **decode + p-code + CFG skeleton + baseline ABI/type facts + failure isolation**
+- Rust owns **normalization, structuring, higher-level representation, and the final printer**
+- type/name/FID/cross-image facts are consumed only after conflicts are resolved in the **Fact Store**
+- giant or unsupported functions must terminate safely through **unstructured preview output or explicit fallback**
 
 ## Layer Responsibilities
 
 ### 1. Lift Service
 
-구성:
+Components:
 
 - `ghidra_decompiler`
 - `fission-ffi`
 - native prepare / timeout / p-code extraction
 
-책임:
+Responsibilities:
 
 - instruction semantics
 - p-code generation
@@ -39,77 +39,77 @@ Fission은 아래 4층 계약으로 본다.
 - baseline ABI/type facts
 - native timeout / payload / failure containment
 
-비책임:
+Non-responsibilities:
 
-- 최종 가독성
+- final readability
 - high-level structuring quality
 - naming polish
 - expression beautification
 
-즉 native는 **품질 레이어가 아니라 안정적인 입력 계약층**이다.
+In other words, native is **not a quality layer**. It is a stable input-contract layer.
 
 ### 2. Canonical IR
 
-구성:
+Components:
 
 - `fission-pcode` NIR SSA
 - canonical HIR
 
-책임:
+Responsibilities:
 
-- 의미 보존 저수준 정규화
+- semantics-preserving low-level normalization
 - temp/coalesce
-- flag/carry/sborrow 같은 low-level surface 표준화
-- 구조화 전에 케이스 수를 줄이는 canonicalization
+- standardization of low-level surfaces such as flag/carry/sborrow
+- canonicalization that reduces case count before structuring
 
-원칙:
+Principles:
 
-- 새 규칙은 가능하면 먼저 여기 넣는다
-- canonicalization은 target-specific prettification이 아니라 **의미 보존 표준형**을 만든다
+- new rules should land here first whenever possible
+- canonicalization should produce a **semantics-preserving standard form**, not target-specific prettification
 
 ### 3. Structured IR
 
-구성:
+Components:
 
 - preview structuring
 - structured pseudocode AST
 
-책임:
+Responsibilities:
 
 - if / loop / switch recovery
 - short-circuit / compare reconstruction
-- goto/label 허용 unstructured preview fallback
+- unstructured preview fallback that still permits goto/label output
 
-원칙:
+Principles:
 
-- giant function에서 무리해서 틀린 high-level 코드를 만들지 않는다
-- 구조화가 부분적으로만 가능하면 **unstructured preview pseudocode** 로 착지한다
+- do not force incorrect high-level code for giant functions
+- if structuring is only partially possible, land on **unstructured preview pseudocode**
 
 ### 4. Presentation
 
-구성:
+Components:
 
 - Rust printer
 - legacy/native postprocess
 - UI/CLI rendering surface
 
-책임:
+Responsibilities:
 
 - naming polish
 - cast/field/format cleanup
 - display-oriented simplification
 - benchmark/export surface
 
-원칙:
+Principles:
 
-- printer 직전 polish는 허용하되, 구조 의미를 바꾸는 규칙은 상위 IR에서 해결한다
-- 문자열 후처리는 유지 가능하지만, 새 품질 투자 기본 위치는 canonical/structured IR이다
+- polish immediately before printing is allowed, but rules that change structural meaning must be solved in upper IR layers
+- string-based postprocessing may remain, but new quality investment should default to canonical or structured IR
 
 ## Session Fact Store
 
-`Fact Store` 는 이름/타입/심볼 사실의 **세션 단위 source of truth** 다.
+The `Fact Store` is the **session-scoped source of truth** for name, type, and symbol facts.
 
-현재 핵심 타입:
+Current core types:
 
 - `FactStore`
 - `FunctionFacts`
@@ -117,7 +117,7 @@ Fission은 아래 4층 계약으로 본다.
 - `TypeFact`
 - `FactProvenance`
 
-역할:
+Role:
 
 - loader symbols / imports / exports
 - native per-function inferred types
@@ -127,24 +127,24 @@ Fission은 아래 4층 계약으로 본다.
 - user rename
 - cross-image propagated rename
 
-을 한 레이어에서 병합하고, decompiler path와 UI가 이를 조회하게 한다.
+These are merged in one layer, and both the decompiler path and the UI query that merged view.
 
-현재 우선순위:
+Current precedence:
 
-- **이름**: user/project > explicit import/export or binary symbol > strong FID > cross-image > weak autogenerated
-- **타입/필드**: native function metadata > loader inferred types > debug naming facts
+- **Names**: user/project > explicit import/export or binary symbol > strong FID > cross-image > weak autogenerated
+- **Types/fields**: native function metadata > loader inferred types > debug naming facts
 
-중요한 점:
+Important points:
 
-- Fact Store는 **추론 엔진이 아니다**
-- “무엇이 사실이고, 충돌 시 무엇을 채택할지”를 정리하는 집계층이다
-- project save/load 포맷은 아직 바꾸지 않고, session/runtime source of truth로 먼저 운영한다
+- the Fact Store is **not an inference engine**
+- it is an aggregation layer that decides what is considered fact and what wins on conflict
+- project save/load format is not changed yet; the Fact Store operates first as the session/runtime source of truth
 
 ## Preview-First Routing Policy
 
-`select_preview_output()` 계열은 preview/native/assembly/legacy 라우팅의 **단일 정책 소스**다.
+`select_preview_output()` and related helpers are the **single policy source** for preview/native/assembly/legacy routing.
 
-fallback taxonomy는 아래를 고정한다.
+The fallback taxonomy is fixed to:
 
 - `preview_timeout`
 - `preview_unsupported`
@@ -152,47 +152,47 @@ fallback taxonomy는 아래를 고정한다.
 - `legacy_fallback`
 - `assembly_fallback`
 
-제품 계약:
+Product contract:
 
-- preview-first가 기본 정책
-- `legacy`는 hidden compat/native fallback output 의미만 유지
-- hang은 허용하지 않고, giant function은 반드시 explicit outcome으로 끝난다
+- preview-first is the default policy
+- `legacy` remains only as hidden compat/native fallback output
+- hangs are not acceptable; giant functions must always end in an explicit outcome
 
-giant/unsupported 함수 처리 원칙:
+Rules for giant or unsupported functions:
 
-1. structured preview 가능하면 direct preview
-2. 구조화 실패지만 preview AST는 만들 수 있으면 unstructured preview pseudocode
-3. preview build/budget 실패면 explicit native or assembly fallback
+1. If structured preview is possible, use direct preview
+2. If structuring fails but a preview AST still exists, emit unstructured preview pseudocode
+3. If preview build/budget fails, use explicit native or assembly fallback
 
-즉 “예쁘게 못 풀면 틀리게 만들지 말고, preview unstructured 또는 explicit fallback으로 끝낸다”가 기준이다.
+The rule is simple: if it cannot be made pretty, do not make it wrong. End with unstructured preview or an explicit fallback instead.
 
 ## Rewrite Ownership
 
-규칙은 3층으로 운영한다.
+Rewrite rules are managed in three tiers.
 
 ### Canonicalization
 
-- 의미 보존 저수준 표준화
-- 위치: NIR/HIR
+- semantics-preserving low-level standardization
+- location: NIR/HIR
 
 ### Idiom Recovery
 
-- 비교식, flag, aggregate, higher-level idiom 복원
-- 위치: HIR / structured AST
+- recovery of comparisons, flags, aggregates, and higher-level idioms
+- location: HIR / structured AST
 
 ### Polish
 
 - naming, cast, field, formatting surface
-- 위치: printer 직전, legacy/native postprocess
+- location: immediately before printing, plus legacy/native postprocess
 
-원칙:
+Principles:
 
-- 새 규칙은 이 세 층 중 어느 소유인지 먼저 정한 뒤 넣는다
-- tier가 명확하지 않으면 일단 문서화하고 보류한다
+- every new rule must first declare which of these tiers owns it
+- if the tier is unclear, document it first and defer the change
 
 ## Workspace Structure
 
-주요 crate 역할:
+Main crate responsibilities:
 
 - `fission-loader`
   - binary parsing
@@ -216,22 +216,22 @@ giant/unsupported 함수 처리 원칙:
 - `fission-cli` / `fission-tauri`
   - orchestration only
 
-원칙:
+Principles:
 
-- CLI/GUI는 policy와 orchestration만 담당
-- 품질 로직은 `fission-static` / `fission-pcode`
-- unsafe/native 변경은 `fission-ffi` 또는 prepare 경계에서만 처리
+- CLI/GUI own only policy and orchestration
+- quality logic belongs in `fission-static` and `fission-pcode`
+- unsafe/native changes should be isolated to `fission-ffi` or the prepare boundary
 
 ## Current Direction
 
-현재 Fission의 장기 목표는 다음 문장으로 요약된다.
+Fission's long-term direction can be summarized in one sentence:
 
-**Ghidra를 최종 디컴파일러로 후처리하는 것이 아니라, Ghidra를 lift service로 사용하고 Rust가 decompiler brain을 소유하는 구조로 수렴한다.**
+**Fission is not converging on “post-process Ghidra as the final decompiler.” It is converging on “use Ghidra as a lift service while Rust owns the decompiler brain.”**
 
-이 목표를 위해 현재 우선순위는:
+Current priorities:
 
-1. Session Fact Store 확립
-2. preview-first routing 일원화
-3. canonical / idiom / polish ownership 재분류
-4. legacy를 compat/fallback으로만 축소
-5. 그 다음 Windows ARM64 spike
+1. Establish the Session Fact Store
+2. Unify preview-first routing
+3. Reclassify ownership across canonical / idiom / polish tiers
+4. Reduce legacy to compat/fallback only
+5. Then move on to the Windows ARM64 spike

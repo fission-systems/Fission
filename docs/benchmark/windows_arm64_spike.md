@@ -8,7 +8,7 @@
 
 ## Current Blocker
 
-- There is no real Windows ARM64 sample binary in [`/Users/sjkim1127/Fission/samples`](/Users/sjkim1127/Fission/samples) to build a fixed-seed baseline from.
+- There is no real Windows ARM64 sample binary in [`samples/`](../../samples) to build a fixed-seed baseline from.
 - Existing ARM64 samples are macOS Mach-O only, and `ida76sp1` `hexarm64.dll` / `procs/arm64.dll` are x86-64 host DLLs, not ARM64 PE targets.
 
 ## Next Bring-Up Checks

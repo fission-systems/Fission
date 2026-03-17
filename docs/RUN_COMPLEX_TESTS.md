@@ -1,64 +1,64 @@
-# 🧪 복잡한 테스트 자동 실행 가이드
+# Complex Test Suite Guide
 
-## CI vs 풀 품질 테스트
+## CI vs Full Quality Runs
 
-- **CI (매 커밋/PR)**  
-  - Ghidra를 내려받거나 실행하지 **않습니다**.  
-  - **가벼운 Fission 단독 스모크 테스트**만 실행합니다:  
-    `scripts/test/decomp_smoke_ci.sh` — 작은 C++ 테스트 바이너리 하나에 대해 Fission 디컴파일을 한 번 실행하고, 종료 코드 0(크래시 없음)을 확인합니다.
-- **풀 품질 벤치마크 (Ghidra 사용)**  
-  - `run_complex_tests.py`, `compare_decompilers_v2.py` 등은 **로컬**에서 실행하거나,  
-  - **스케줄/수동** 워크플로(`Decompilation Quality` workflow)에서만 실행하는 것을 권장합니다.  
-  - CI 비용·시간을 줄이기 위해 매 커밋마다 Ghidra 품질 비교는 하지 않습니다.
+- **CI (every commit / PR)**
+  - does **not** download or execute Ghidra
+  - runs only a **lightweight Fission-only smoke test**:
+    `scripts/test/decomp_smoke_ci.sh` decompiles one small C++ test binary and checks for exit code `0` (no crash)
+- **Full quality benchmark (with Ghidra)**
+  - scripts such as `run_complex_tests.py` and `compare_decompilers_v2.py` are intended for **local runs**
+  - or for **scheduled / manually triggered workflows** such as the `Decompilation Quality` workflow
+  - full Ghidra quality comparison is intentionally not run on every commit because of CI cost and runtime
 
-## 개요
+## Overview
 
-`run_complex_tests.py`는 6개의 복잡한 테스트 케이스를 자동으로 실행하고 Ghidra와 비교하여 결과를 생성하는 스크립트입니다.
+`run_complex_tests.py` runs six complex test cases automatically and compares Fission output against Ghidra.
 
-## 테스트 케이스
+## Test Cases
 
-| 번호 | 테스트 | 카테고리 | 난이도 | 설명 |
-|------|--------|----------|--------|------|
-| 1 | **Nested Loops** | Control Flow | ⭐⭐⭐ | 중첩 루프, break/continue, goto |
-| 2 | **Switch-Case** | Control Flow | ⭐⭐ | Fall-through, 중첩 switch |
-| 3 | **Recursion** | Control Flow | ⭐⭐⭐⭐ | 단순/다중/상호 재귀 |
-| 4 | **Complex Structs** | Data Structures | ⭐⭐⭐⭐ | 중첩 구조체, Union |
-| 5 | **Function Pointers** | Pointers | ⭐⭐⭐⭐⭐ | 함수 포인터, 콜백 |
-| 6 | **Virtual Functions** | C++ Features | ⭐⭐⭐⭐⭐ | 가상 함수, vtable |
+| # | Test | Category | Difficulty | Description |
+|---|------|----------|------------|-------------|
+| 1 | **Nested Loops** | Control Flow | ⭐⭐⭐ | nested loops, break/continue, goto |
+| 2 | **Switch-Case** | Control Flow | ⭐⭐ | fall-through, nested switch |
+| 3 | **Recursion** | Control Flow | ⭐⭐⭐⭐ | simple, multiple, and mutual recursion |
+| 4 | **Complex Structs** | Data Structures | ⭐⭐⭐⭐ | nested structs, union usage |
+| 5 | **Function Pointers** | Pointers | ⭐⭐⭐⭐⭐ | function pointers, callbacks |
+| 6 | **Virtual Functions** | C++ Features | ⭐⭐⭐⭐⭐ | virtual functions, vtables |
 
-## 사전 준비
+## Prerequisites
 
-### 1. 테스트 바이너리 빌드
+### 1. Build the Test Binaries
 ```bash
 cd test
 ./build_all_tests.sh
 ./extract_functions.sh
 ```
 
-### 2. 필요한 도구 확인
+### 2. Required Tooling
 - Python 3.6+
-- Ghidra (환경 변수 설정 필요)
-- Fission (빌드 완료)
+- Ghidra (environment variables configured as needed)
+- Fission built locally
 
-## 실행 방법
+## Running the Suite
 
-### 전체 테스트 실행
+### Run All Tests
 ```bash
-cd /Users/sjkim1127/Fission
+cd /path/to/Fission
 python3 scripts/run_complex_tests.py
 ```
 
-### 출력 예시
+### Example Output
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            🧪 Fission Complex Test Suite Runner                
+            🧪 Fission Complex Test Suite Runner
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Output directory: scripts/result_complex_tests_20260108_170000
 Total test cases: 6
 
 ─────────────────────────────────────────────────────────────────
-                          🚀 Running Tests                         
+                          🚀 Running Tests
 ─────────────────────────────────────────────────────────────────
 
 [1/6] [Control Flow] Nested Loops
@@ -74,9 +74,9 @@ Total test cases: 6
   ...
 ```
 
-## 생성되는 결과물
+## Generated Artifacts
 
-### 1. 디렉토리 구조
+### 1. Directory Structure
 ```
 scripts/result_complex_tests_YYYYMMDD_HHMMSS/
 ├── result_nested_loops/
@@ -88,11 +88,11 @@ scripts/result_complex_tests_YYYYMMDD_HHMMSS/
 ├── result_complex_structs/
 ├── result_function_pointers/
 ├── result_virtual_functions/
-├── complex_tests_summary.json     # 전체 요약
-└── complex_tests_report.html      # HTML 리포트
+├── complex_tests_summary.json
+└── complex_tests_report.html
 ```
 
-### 2. JSON 요약 (complex_tests_summary.json)
+### 2. JSON Summary (`complex_tests_summary.json`)
 ```json
 {
   "timestamp": "2026-01-08T17:00:00",
@@ -102,27 +102,27 @@ scripts/result_complex_tests_YYYYMMDD_HHMMSS/
   "timeout": 0,
   "average_similarity": 82.45,
   "total_duration": 324.5,
-  "tests": [...]
+  "tests": []
 }
 ```
 
-### 3. HTML 리포트 (complex_tests_report.html)
-- 시각적 대시보드
-- 카테고리별 결과
-- Similarity 색상 코딩
-- 클릭 가능한 상세 정보
+### 3. HTML Report (`complex_tests_report.html`)
+- visual dashboard
+- category-by-category results
+- color-coded similarity values
+- clickable drill-down details
 
-## 결과 분석
+## Interpreting Results
 
-### Similarity 등급
-- **90%+**: 🟢 Excellent - Ghidra와 거의 동일
-- **80-89%**: 🔵 Good - 약간의 차이
-- **70-79%**: 🟡 Fair - 개선 필요
-- **<70%**: 🔴 Poor - 많은 개선 필요
+### Similarity Tiers
+- **90%+**: 🟢 Excellent
+- **80-89%**: 🔵 Good
+- **70-79%**: 🟡 Fair
+- **<70%**: 🔴 Poor
 
-### 예상 결과
-| 테스트 | 예상 Similarity |
-|--------|----------------|
+### Expected Ranges
+| Test | Expected Similarity |
+|------|---------------------|
 | Switch-Case | 90-95% |
 | Nested Loops | 85-90% |
 | Recursion | 80-85% |
@@ -130,80 +130,80 @@ scripts/result_complex_tests_YYYYMMDD_HHMMSS/
 | Function Pointers | 70-80% |
 | Virtual Functions | 65-75% |
 
-## 고급 옵션
+## Advanced Usage
 
-### 개별 테스트 실행
-스크립트를 수정하여 특정 테스트만 실행:
+### Run Selected Tests Only
+Edit `run_complex_tests.py` to keep only the cases you want:
+
 ```python
-# run_complex_tests.py 내부
 TEST_CASES = [
-    # 원하는 테스트만 남기고 주석 처리
-    TestCase(...),
+    # Keep only the desired tests here
 ]
 ```
 
-### 타임아웃 조정
+### Adjust Timeout
 ```python
-# 기본: 600초 (10분)
-timeout=600  # 더 복잡한 테스트는 늘리기
+# Default: 600 seconds
+timeout = 600
 ```
 
-## 문제 해결
+## Troubleshooting
 
-### 1. Ghidra 경로 오류
+### 1. Ghidra Path Errors
 ```bash
 export GHIDRA_HOME=/path/to/ghidra_11.4.2_PUBLIC
 ```
 
-### 2. Fission 빌드 오류
+### 2. Fission Build Errors
 ```bash
-cd /Users/sjkim1127/Fission
+cd /path/to/Fission
 cargo build --release
 ```
 
-### 3. 주소 파일 없음
+### 3. Missing Address Files
 ```bash
 cd test
 ./extract_functions.sh
 ```
 
-### 4. 메모리 부족
-- 테스트를 개별 실행
-- Ghidra 힙 크기 증가
+### 4. Out of Memory
+- run tests individually
+- increase the Ghidra heap size
 
-## 성능 최적화
+## Performance Notes
 
-### 병렬 실행 (주의: 메모리 사용량 증가)
-현재는 순차 실행이지만, 필요시 수정 가능:
+### Parallel Execution
+The current flow is sequential, but it can be extended if needed:
+
 ```python
 from concurrent.futures import ThreadPoolExecutor
-# 병렬 실행 로직 추가
+# Add parallel execution logic if needed
 ```
 
-### 캐싱
-- Ghidra 프로젝트 재사용
-- 중간 결과 저장
+### Caching
+- reuse Ghidra projects
+- persist intermediate results
 
-## 결과 활용
+## How to Use the Results
 
-### 1. 개선 우선순위 결정
-Similarity가 낮은 카테고리 집중
+### 1. Prioritize Improvements
+Focus first on categories with the lowest similarity.
 
-### 2. 회귀 테스트
-코드 변경 후 재실행하여 품질 유지 확인
+### 2. Run Regression Checks
+Re-run after code changes to confirm quality is preserved.
 
-### 3. 벤치마크
-버전별 성능 비교
+### 3. Benchmark Versions
+Compare output quality and speed across revisions.
 
-### 4. 문서화
-발견된 한계와 우수 사례 기록
+### 4. Document Findings
+Record known limitations and strong cases as they are discovered.
 
-## 추가 정보
+## Additional References
 
-- 테스트 소스: `examples/control_flow/`, `examples/data_structures/`, etc.
-- 비교 스크립트: `scripts/compare_decompilers_v2.py`
-- 빌드 가이드: `examples/README_TESTS.md`
+- test sources: `examples/control_flow/`, `examples/data_structures/`, etc.
+- comparison script: `scripts/compare_decompilers_v2.py`
+- test build guide: `examples/README_TESTS.md`
 
-## 문의 및 기여
+## Support and Contributions
 
-버그 발견이나 개선 제안은 GitHub Issues로 등록해주세요.
+If you find a bug or have an improvement idea, open a GitHub issue.

@@ -15,30 +15,30 @@ One-shot mode is designed for automation, CI/CD pipelines, and quick single-purp
 
 ### Basic Syntax
 
-바이너리 이름: **`fission_cli`** (`cargo build --release --bin fission_cli`로 빌드).
+Binary name: **`fission_cli`** (build it with `cargo build --release --bin fission_cli`).
 
 ```bash
-fission_cli <binary_path> [options]              # one-shot: 플래그에 따라 분석 후 종료
-fission_cli <binary_path>                         # REPL: 추가 플래그 없으면 대화형 셸 진입
-fission_cli <binary_path> --decomp <address>      # 디컴파일
-fission_cli <binary_path> --asm <address> [--count N]  # 디스어셈블
+fission_cli <binary_path> [options]                   # one-shot: analyze according to flags, then exit
+fission_cli <binary_path>                             # REPL: enter the interactive shell when no extra flags are given
+fission_cli <binary_path> --decomp <address>          # decompile
+fission_cli <binary_path> --asm <address> [--count N] # disassemble
 ```
 
-- **플래그 없이 바이너리만**: REPL 모드 진입 (대화형 셸).
-- **플래그와 함께**: 해당 분석만 수행 후 즉시 종료(one-shot).
+- **Binary only, no flags**: enter REPL mode (interactive shell).
+- **With flags**: run the requested analysis and exit immediately (one-shot).
 
 ### Behavior
 
-- **REPL 모드**
+- **REPL mode**
   ```bash
   fission_cli binary.exe
-  # 대화형 셸 진입, load/open 후 명령 입력
+  # Enter the interactive shell, then run commands after load/open
   ```
 
-- **One-shot 분석**
+- **One-shot analysis**
   ```bash
   fission_cli binary.exe --info
-  # 바이너리 정보 출력 후 즉시 종료
+  # Print binary information and exit immediately
   ```
 
 ---
@@ -130,11 +130,11 @@ fission_cli binary.exe --strings | wc -l
 
 ### Cross-references (REPL)
 
-One-shot 플래그로는 제공되지 않습니다. **REPL 모드**에서 사용하세요:
+This is not currently exposed as a one-shot flag. Use it from **REPL mode**:
 
 ```bash
 fission_cli binary.exe
-# 프롬프트에서: xrefs 0x140001234  (또는 x)
+# At the prompt: xrefs 0x140001234  (or x)
 ```
 
 **Use cases**:
@@ -238,7 +238,7 @@ def find_references(binary, address):
     """Find all references to an address (use REPL or Tauri GUI; one-shot has no --xrefs)"""
     # REPL: fission_cli binary.exe then "xrefs 0x..."
     result = subprocess.run(
-        ['fission_cli', binary, '--info'],  # one-shot; xrefs는 REPL에서
+        ['fission_cli', binary, '--info'],  # one-shot; xrefs is available in REPL
         capture_output=True,
         text=True
     )
@@ -257,11 +257,11 @@ All flags that accept addresses support multiple formats:
 | Hexadecimal (no prefix) | `140001000` | Interpreted as hex if valid |
 | Decimal | `5368713216` | Plain decimal number |
 
-**Examples** (주소는 디컴파일/디스어셈블 등에서 사용):
+**Examples** (addresses are used by decompilation, disassembly, and similar commands):
 ```bash
 fission_cli binary.exe --decomp 0x140001000
 fission_cli binary.exe --asm 0x140001000
-# xrefs는 REPL: fission_cli binary.exe → xrefs 0x140001000
+# xrefs is REPL-only: fission_cli binary.exe → xrefs 0x140001000
 ```
 
 ---

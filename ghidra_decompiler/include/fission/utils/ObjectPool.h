@@ -9,7 +9,7 @@ namespace fission {
 template <typename T, size_t BlockSize = 8192>
 class ThreadLocalObjectPool {
 private:
-  // T의 메모리 정렬(Alignment) 요구사항을 완벽히 맞추기 위해 alignas 적용
+  // Use alignas(T) so the node fully satisfies T's alignment requirements.
   union alignas(T) Node {
     char data[sizeof(T)];
     Node* next;
@@ -21,7 +21,7 @@ private:
   void allocateBlock() {
     Node* newBlock = ::new Node[BlockSize];
     blocks.push_back(newBlock);
-    // Free-list 체인 연결
+    // Link the free-list chain.
     for (size_t i = 0; i < BlockSize - 1; ++i) {
       newBlock[i].next = &newBlock[i + 1];
     }

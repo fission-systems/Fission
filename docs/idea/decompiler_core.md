@@ -1,4 +1,8 @@
-# 디컴파일러 코어 개선 아이디어 (2026-01-10)
+# Decompiler Core Improvement Ideas (2026-01-10)
+
+> ⚠️ **Status: Stale / Historical Idea Note**
+> This note captures exploratory core-engine ideas from 2026-01-10.
+> It is not an active roadmap document.
 
 ## 1. WASM 디컴파일 지원
 

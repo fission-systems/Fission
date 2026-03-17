@@ -1,138 +1,138 @@
-# 🧪 Fission 테스트 아키텍처
+# Fission Testing Architecture
 
-## 현재 시스템 구조
+## Current System Structure
 
-### ✅ PyGhidra 사용 중!
+### PyGhidra Is Already in Use
 
-현재 Fission은 이미 **pyghidra 2.2.1**을 사용하여 Ghidra를 자동화하고 있습니다.
+Fission already uses **pyghidra 2.2.1** to automate Ghidra in headless workflows.
 
 ```
-테스트 흐름:
+Test flow:
 ┌─────────────────────────────────────────────────────────┐
-│  run_complex_tests.py (자동화 러너)                     │
-│  ├─ 6개 테스트 케이스 순회                              │
-│  └─ 각 테스트마다 compare_decompilers_v2.py 호출        │
+│  run_complex_tests.py (automation runner)              │
+│  ├─ Iterates over 6 test cases                         │
+│  └─ Calls compare_decompilers_v2.py for each test      │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│  compare_decompilers_v2.py (비교 엔진)                  │
-│  ├─ Ghidra: pyghidra_decompile.py 호출 ✅               │
-│  ├─ Fission: fission_cli --decomp 호출                  │
-│  └─ 결과 비교 및 similarity 계산                        │
+│  compare_decompilers_v2.py (comparison engine)         │
+│  ├─ Ghidra: calls pyghidra_decompile.py                │
+│  ├─ Fission: calls fission_cli --decomp                │
+│  └─ Compares outputs and computes similarity           │
 └─────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────┐
-│  pyghidra_decompile.py (Ghidra 래퍼)                    │
-│  └─ pyghidra.open_program() 사용 ✅                     │
-│     ├─ 바이너리 로드 및 자동 분석                       │
-│     ├─ 함수 디스어셈블리 추출                           │
-│     └─ 디컴파일 결과 생성                               │
+│  pyghidra_decompile.py (Ghidra wrapper)                │
+│  └─ Uses pyghidra.open_program()                       │
+│     ├─ Loads the binary and runs auto-analysis         │
+│     ├─ Extracts function disassembly                   │
+│     └─ Produces decompilation output                   │
 └─────────────────────────────────────────────────────────┘
 ```
 
-## PyGhidra의 장점
+## Why PyGhidra Is Useful
 
-### 1. **자동화 친화적**
+### 1. Automation-Friendly
 ```python
 with pyghidra.open_program(binary_path, analyze=True) as flat_api:
     program = flat_api.getCurrentProgram()
-    # Ghidra API 직접 사용 가능
+    # Direct access to the Ghidra API
 ```
 
-### 2. **GUI 불필요**
-- Headless 모드로 실행
-- CI/CD 파이프라인 통합 가능
-- 서버 환경에서도 실행 가능
+### 2. No GUI Required
+- Runs in headless mode
+- Works well in CI/CD pipelines
+- Usable on server environments
 
-### 3. **빠른 실행**
-- Ghidra GUI 로딩 없음
-- Python에서 직접 제어
-- 프로젝트 생성/관리 자동화
+### 3. Fast to Launch
+- No Ghidra GUI startup cost
+- Direct Python control
+- Easy project creation and management automation
 
-### 4. **안정성**
-- Java 프로세스 격리
-- 타임아웃 제어
-- 에러 핸들링 용이
+### 4. Operationally Stable
+- Java process isolation
+- Timeout control
+- Straightforward error handling
 
-## 현재 구현 상세
+## Current Implementation
 
-### 1. pyghidra_decompile.py
+### 1. `pyghidra_decompile.py`
 ```python
-# 위치: scripts/ghidra/pyghidra_decompile.py
+# Location: scripts/ghidra/pyghidra_decompile.py
 
-주요 기능:
-✅ 바이너리 로드 (PE/ELF 지원)
-✅ 자동 분석 (analyze=True)
-✅ 함수 디스어셈블리 추출
-✅ 디컴파일 수행
-✅ 결과 포맷팅
+Key functionality:
++ Load binaries (PE/ELF supported)
++ Run auto-analysis (`analyze=True`)
++ Extract function disassembly
++ Run decompilation
++ Format output
 
-출력 형식:
-- Assembly Listing (주소, 니모닉, 오퍼랜드)
-- Decompiled Code (C-like 코드)
-- 함수 메타데이터
+Output format:
+- Assembly listing (address, mnemonic, operands)
+- Decompiled code (C-like output)
+- Function metadata
 ```
 
-### 2. compare_decompilers_v2.py
+### 2. `compare_decompilers_v2.py`
 ```python
-# 위치: scripts/compare/compare_decompilers_v2.py
+# Location: scripts/compare/compare_decompilers_v2.py
 
-주요 기능:
-✅ Ghidra + Fission 병렬 실행
-✅ 출력 정규화 (ANSI 제거, 노이즈 필터링)
-✅ Similarity 계산 (difflib 사용)
-✅ 타이밍 측정
-✅ JSON/HTML 리포트 생성
+Key functionality:
++ Run Ghidra and Fission side by side
++ Normalize output (strip ANSI, filter noise)
++ Compute similarity (`difflib`)
++ Measure timing
++ Produce JSON/HTML reports
 
-비교 메트릭:
+Comparison metrics:
 - Line-by-line similarity
-- 코드 구조 분석
-- 성능 비교 (실행 시간)
+- Code structure analysis
+- Performance comparison (execution time)
 ```
 
-### 3. run_complex_tests.py
+### 3. `run_complex_tests.py`
 ```python
-# 위치: scripts/run_complex_tests.py
+# Location: scripts/run_complex_tests.py
 
-주요 기능:
-✅ 6개 복잡한 테스트 자동 실행
-✅ 카테고리별 결과 정리
-✅ 통계 분석 (난이도별, 카테고리별)
-✅ HTML 리포트 생성
-✅ 진행 상황 실시간 표시
+Key functionality:
++ Run 6 complex tests automatically
++ Organize results by category
++ Compute summary statistics (difficulty, category)
++ Generate HTML reports
++ Show live progress
 
-테스트 대상:
-1. Control Flow (3개)
-2. Data Structures (1개)
-3. Pointers (1개)
-4. C++ Features (1개)
+Test groups:
+1. Control Flow (3)
+2. Data Structures (1)
+3. Pointers (1)
+4. C++ Features (1)
 ```
 
-## PyGhidra 설정
+## PyGhidra Configuration
 
-### 현재 환경
+### Current Environment
 ```bash
 PyGhidra Version: 2.2.1
-Ghidra Path: /Users/sjkim1127/Fission/ghidra_11.4.2_PUBLIC
+Ghidra Path: /path/to/ghidra_11.4.2_PUBLIC
 Python: 3.x
 ```
 
-### 설정 확인
+### Verification
 ```bash
-# PyGhidra 설치 확인
+# Check PyGhidra installation
 python3 -c "import pyghidra; print(pyghidra.__version__)"
 
-# Ghidra 경로 확인
+# Check Ghidra path
 echo $GHIDRA_INSTALL_DIR
 
-# 또는 스크립트에서 자동 설정
+# Or verify the auto-configuration in the script
 # scripts/ghidra/pyghidra_decompile.py:15-16
 ```
 
-## 성능 최적화
+## Performance Considerations
 
-### 1. 분석 캐싱
-PyGhidra는 자동으로 Ghidra 프로젝트를 생성하고 캐싱합니다:
+### 1. Analysis Caching
+PyGhidra automatically creates and caches Ghidra projects:
 ```
 ~/.local/share/pyghidra/projects/
 ├── project_ABC123/
@@ -141,40 +141,40 @@ PyGhidra는 자동으로 Ghidra 프로젝트를 생성하고 캐싱합니다:
 │   └── ...
 ```
 
-### 2. 병렬 실행 가능성
-현재는 순차 실행이지만, 개선 가능:
+### 2. Parallel Execution Potential
+The current flow is sequential, but it can be improved:
 ```python
 from concurrent.futures import ProcessPoolExecutor
 
-# 여러 바이너리를 병렬로 처리
+# Process multiple binaries in parallel
 with ProcessPoolExecutor(max_workers=4) as executor:
     futures = [executor.submit(run_test, test) for test in tests]
 ```
 
-⚠️ **주의**: Ghidra는 메모리 사용량이 많으므로 동시 실행 수 제한 필요
+Warning: Ghidra is memory-heavy, so concurrency limits are important.
 
-### 3. 타임아웃 설정
+### 3. Timeout Configuration
 ```python
 # compare_decompilers_v2.py
-timeout=600  # 10분
+timeout=600  # 10 minutes
 
-# 큰 바이너리는 더 긴 타임아웃 필요
-timeout=1200  # 20분
+# Large binaries may need a longer timeout
+timeout=1200  # 20 minutes
 ```
 
-## 테스트 실행 예제
+## Example Test Runs
 
-### 간단한 테스트
+### Simple Test
 ```bash
-# 단일 함수 디컴파일 (PyGhidra 사용)
+# Single-function decompilation via PyGhidra
 python3 scripts/ghidra/pyghidra_decompile.py \
     examples/bin_x64/nested_loops_x64.exe \
     0x450
 ```
 
-### 비교 테스트
+### Comparison Test
 ```bash
-# Ghidra vs Fission 비교
+# Ghidra vs Fission comparison
 python3 scripts/compare_decompilers_v2.py \
     examples/bin_x64/nested_loops_x64.exe \
     examples/addresses/nested_loops_addrs.txt \
@@ -182,87 +182,91 @@ python3 scripts/compare_decompilers_v2.py \
     --batch
 ```
 
-### 전체 테스트 스위트
+### Full Test Suite
 ```bash
-# 모든 복잡한 테스트 실행 (PyGhidra 사용)
+# Run all complex tests
 python3 scripts/run_complex_tests.py
 ```
 
-## 문제 해결
+## Troubleshooting
 
-### 1. PyGhidra 설치 오류
+### 1. PyGhidra Installation Problems
 ```bash
-# 재설치
+# Reinstall
 pip3 uninstall pyghidra
 pip3 install pyghidra
 
-# 또는 개발 버전
+# Or use the development version
 pip3 install git+https://github.com/Defense-Cyber-Crime-Center/pyghidra.git
 ```
 
-### 2. Ghidra 경로 문제
+### 2. Ghidra Path Problems
 ```bash
-# 환경 변수 설정
+# Set the environment variable
 export GHIDRA_INSTALL_DIR=/path/to/ghidra_11.4.2_PUBLIC
 
-# 또는 스크립트 수정
+# Or change the script directly
 # scripts/ghidra/pyghidra_decompile.py:15
 ghidra_path = "/custom/path/to/ghidra"
 ```
 
-### 3. 메모리 부족
+### 3. Out of Memory
 ```bash
-# Ghidra JVM 힙 크기 조정
+# Increase the Ghidra JVM heap
 export _JAVA_OPTIONS="-Xmx8G"
 
-# 또는 동시 실행 수 줄이기
-max_workers=2  # 병렬 실행 시
+# Or reduce concurrency
+max_workers=2
 ```
 
-### 4. Java 버전 문제
+### 4. Java Version Problems
 ```bash
-# Ghidra 11.4.2는 Java 17+ 필요
+# Ghidra 11.4.2 requires Java 17+
 java -version
 
-# Java 설정
+# Set Java explicitly
 export JAVA_HOME=/path/to/java17
 ```
 
-## 향후 개선 방향
+## Future Improvements
 
-### 1. ✅ 이미 구현됨
-- [x] PyGhidra 통합
-- [x] 자동화된 테스트 실행
-- [x] Similarity 계산
-- [x] HTML 리포트 생성
+### Already Implemented
+- [x] PyGhidra integration
+- [x] Automated test execution
+- [x] Similarity calculation
+- [x] HTML report generation
 
-### 2. 🔄 개선 가능
-- [ ] 병렬 실행 (메모리 관리 필요)
-- [ ] 분석 결과 캐싱 최적화
-- [ ] 타임아웃 동적 조정
-- [ ] 실패한 테스트 재시도 로직
+### Possible Improvements
+- [ ] Parallel execution with memory-aware scheduling
+- [ ] Better caching of analysis results
+- [ ] Dynamic timeout adjustment
+- [ ] Retry logic for failed tests
 
-### 3. 🆕 새로운 기능
-- [ ] 실시간 대시보드
-- [ ] 히스토리 추적 (버전별 비교)
-- [ ] CI/CD 통합
-- [ ] Slack/이메일 알림
+### Potential New Features
+- [ ] Live dashboard
+- [ ] Historical tracking across versions
+- [ ] CI/CD integration
+- [ ] Slack/email notifications
 
-## 참고 자료
+## References
 
-- **PyGhidra 문서**: https://github.com/Defense-Cyber-Crime-Center/pyghidra
+- **PyGhidra docs**: https://github.com/Defense-Cyber-Crime-Center/pyghidra
 - **Ghidra API**: https://ghidra.re/ghidra_docs/api/
-- **프로젝트 구조**: `scripts/README.md`
-- **테스트 가이드**: `examples/README_TESTS.md`
+- **Project structure**: `scripts/README.md`
+- **Test guide**: `examples/README_TESTS.md`
 
-## 요약
+## Summary
 
-✅ **PyGhidra를 이미 사용하고 있습니다!**
+PyGhidra is already part of the Fission testing stack.
 
-현재 시스템은:
-- PyGhidra로 Ghidra 자동화
-- 완전한 헤드리스 모드 실행
-- 빠르고 안정적인 테스트 파이프라인
-- 포괄적인 결과 분석 및 리포팅
+The current system provides:
+- Ghidra automation through PyGhidra
+- Fully headless execution
+- A fast and stable testing pipeline
+- Broad result analysis and reporting
 
-추가 작업 없이 바로 `python3 scripts/run_complex_tests.py`로 테스트 시작 가능합니다! 🚀
+You can start running tests immediately with:
+
+```bash
+python3 scripts/run_complex_tests.py
+```

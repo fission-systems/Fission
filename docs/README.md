@@ -91,10 +91,11 @@ Representative documents:
 - deeper analysis notes about the decompiler, postprocess, type propagation, and FID behavior
 - experiment and validation notes
 
-This folder contains many design/reference notes. Some documents may lag behind the latest implementation state. Treat architecture and changelog documents as the final authority.
+This folder should be treated as **internal analysis notes**, not source of truth. Many documents capture research, experiments, and intermediate reasoning and may lag behind the latest implementation state. Treat architecture, roadmap, and changelog documents as the final authority.
 
 Representative documents:
 
+- [`docs/analysis/README.md`](./analysis/README.md)
 - [`docs/analysis/KNOWN_ISSUES.md`](./analysis/KNOWN_ISSUES.md)
 - [`docs/analysis/PASS_SYSTEM.md`](./analysis/PASS_SYSTEM.md)
 - [`docs/analysis/POSTPROCESS_MODULES.md`](./analysis/POSTPROCESS_MODULES.md)
@@ -115,6 +116,7 @@ Important note:
 
 - [`docs/gui/GUI_GUIDE.md`](./gui/GUI_GUIDE.md) documents an older egui-era UI
 - the current product UI reference is the Tauri frontend plus the root README
+- this folder should be treated as **historical / reference-only** unless a document explicitly says otherwise
 
 ### `docs/idea`
 
@@ -122,7 +124,11 @@ Important note:
 - investigation notes
 - long-term experiment directions
 
-This folder is not source of truth. Cross-check anything here against the architecture, roadmap, and changelog before implementing from it.
+This folder should be treated as **internal idea notes**. It is not source of truth. Cross-check anything here against the architecture, roadmap, and changelog before implementing from it.
+
+Representative document:
+
+- [`docs/idea/README.md`](./idea/README.md)
 
 ### `docs/plan`
 

@@ -1,4 +1,8 @@
-# 플러그인 시스템 확장 아이디어 (2026-01-10)
+# Plugin System Expansion Ideas (2026-01-10)
+
+> ⚠️ **Status: Stale / Historical Idea Note**
+> This note captures exploratory plugin ideas from 2026-01-10.
+> It is not an active roadmap document.
 
 ## 1. WASM 플러그인 샌드박스
 

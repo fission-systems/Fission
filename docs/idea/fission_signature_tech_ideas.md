@@ -1,4 +1,8 @@
-# Fission 독창적 시그니처 기술 아이디어 (2026-01-13)
+# Fission Signature Technology Ideas (2026-01-13)
+
+> ⚠️ **Status: Exploratory, Not Active Roadmap**
+> This document captures speculative signature-related product ideas.
+> It should be treated as exploratory research rather than an active implementation plan.
 
 Ghidra나 IDA와 같은 기존 도구들을 단순히 따라가는 것을 넘어, Fission만이 제공할 수 있는 독보적이고 혁신적인 "Signature" 기술 아이디어들입니다.
 

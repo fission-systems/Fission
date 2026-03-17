@@ -1,4 +1,8 @@
-# Vendor 프로젝트 기반 혁신 아이디어 (2026-01-13)
+# Vendor-Inspired Research Ideas (2026-01-13)
+
+> ⚠️ **Status: Exploratory, Not Active Roadmap**
+> This document captures speculative research directions derived from third-party tools.
+> It should be treated as research context, not as an active implementation plan.
 
 `vendor` 디렉토리에 포함된 세계적인 오픈소스 보안 도구들의 핵심 메커니즘을 분석하여 Fission에 통합할 수 있는 고급 기능 아이디어입니다.
 

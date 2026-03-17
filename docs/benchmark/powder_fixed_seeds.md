@@ -1,15 +1,15 @@
 # Powder Fixed Seeds
 
-[`/Users/sjkim1127/Fission/samples/windows/x64/Powder.exe`](/Users/sjkim1127/Fission/samples/windows/x64/Powder.exe) 는 x64 단일 EXE 게임/시뮬레이션 코퍼스다. utility 계열보다 상태 머신, event/update loop, custom data structure, giant function shape를 보기 좋아서 x64 실전 회귀 세트로 편입한다.
+[`samples/windows/x64/Powder.exe`](../../samples/windows/x64/Powder.exe) is an x64 single-EXE game/simulation corpus. Compared with utility-style binaries, it is useful for studying state machines, event/update loops, custom data structures, and giant-function shapes, so it is part of the x64 practical regression set.
 
 ## Seed Policy
 
 - source: `fission_cli --list`
-- filter: `[import]` 제외, zero-sized 함수 제외
-- strategy: internal non-zero function list의 size quantile을 기준으로 `small / medium / medium-heavy / heavy / giant` 5개를 고정
-- 목적: x64 게임 계열 단일 EXE에서 direct preview, fallback kind, giant function readability를 반복 측정
+- filter: exclude `[import]` and zero-sized functions
+- strategy: fix five seeds from the internal non-zero function list using size quantiles: `small / medium / medium-heavy / heavy / giant`
+- purpose: repeatedly measure direct preview, fallback distribution, and giant-function readability on an x64 game-style single EXE
 
-정식 seed manifest는 [`/Users/sjkim1127/Fission/docs/benchmark/powder_fixed_seeds.json`](/Users/sjkim1127/Fission/docs/benchmark/powder_fixed_seeds.json)에 둔다.
+The canonical seed manifest lives in [`powder_fixed_seeds.json`](./powder_fixed_seeds.json).
 
 ## Fixed Seeds
 
@@ -25,23 +25,22 @@
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `Powder.exe` | 16729 | 4 | 1 | 1 | 0 |
 
-## Baseline Artifacts
+## Artifact Policy
 
-- [`/tmp/powder_x64_fixed5/Powder_legacy_vs_preview.md`](/tmp/powder_x64_fixed5/Powder_legacy_vs_preview.md)
-- [`/tmp/powder_x64_fixed5/Powder_legacy_vs_preview.json`](/tmp/powder_x64_fixed5/Powder_legacy_vs_preview.json)
+The checked-in seed manifest is the stable benchmark reference. Large compare outputs are generated locally and should be treated as ephemeral artifacts rather than repository source of truth.
 
 ## Initial Read
 
-1. `4/5`는 direct `mlil_preview`로 완료된다.
-2. legacy는 selected seeds 기준 `5/5` 전부 실패했다.
-3. `0x14043f1c8`는 giant function이고 현재 direct preview 대신 explicit assembly fallback으로 끝난다.
-4. `0x140394a5d`는 direct preview는 되지만 `xVar`/`reg` readability residue가 남아 있어 품질 타깃으로 좋다.
+1. `4/5` complete through direct `mlil_preview`.
+2. The legacy path failed on all `5/5` selected seeds in that round.
+3. `0x14043f1c8` is a giant-function case that currently ends in explicit assembly fallback rather than direct preview.
+4. `0x140394a5d` succeeds in direct preview but still leaves `xVar` / `reg` readability residue, making it a strong quality target.
 
 ## Watchlist
 
 1. `0x14043f1c8`
    - x64 giant fallback case
-   - direct preview 복구 가능성 / timeout-free explicit fallback 유지 여부를 계속 본다
+   - continue tracking whether direct preview becomes possible while preserving timeout-free explicit fallback behavior
 2. `0x140394a5d`
    - direct preview readability case
-   - temp/reg/branch surface 정리 타깃
+   - target for temp / register / branch-surface cleanup

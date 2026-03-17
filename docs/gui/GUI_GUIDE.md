@@ -1,12 +1,15 @@
 # GUI User Guide
 
-> ⚠️ **Legacy Notice:** 이 문서는 **egui 기반 GUI**를 기준으로 작성되었습니다.  
-> 현재 공식 데스크톱 앱은 **Tauri 2 + React 19** (`crates/fission-tauri`)이며,  
-> 최신 UI 플로우·IPC·단축키는 **루트 [README.md](../../README.md)**의 "GUI — Tauri Desktop App" 섹션과 `docs/ROADMAP.md`를 참고하세요.
+> ⚠️ **Archived Document:** This guide was written for the older **egui-based GUI**.
+> The current desktop app is **Tauri 2 + React 19** in `crates/fission-tauri`.
+> For the current UI direction, workflows, and product surface, use the root [README.md](../../README.md) and [`docs/ROADMAP.md`](../ROADMAP.md) instead.
+
+> ⚠️ **Historical Reference Only**
+> This file is kept for historical context. It is not the source of truth for the current public UI.
 
 ## Overview
 
-Fission features a modern, VS Code-inspired graphical interface built with egui. This guide covers all GUI features, keyboard shortcuts, and workflows.
+This document describes the older egui GUI. It is preserved only as historical reference material for previous UI concepts, shortcuts, and layout ideas.
 
 **Interface Highlights:**
 - 🎨 **Catppuccin Theme** - Easy on the eyes with multiple color variants

@@ -1,7 +1,8 @@
 [workspace]
 resolver = "2"
-# Tauri GUI 크레이트: 경로가 없다면 아래 한 줄을 주석 처리하면 cargo/rust-analyzer가 나머지 워크스페이스만 로드합니다.
-# 자세한 내용은 docs/build/BUILD.md "Rust 워크스페이스 / rust-analyzer" 섹션 참고.
+# Tauri GUI crate: if this path is unavailable, comment out the member below
+# so Cargo and rust-analyzer can still load the rest of the workspace.
+# See docs/build/BUILD.md, "Rust workspace / rust-analyzer".
 members = [
     "crates/fission-core",
     "crates/fission-disasm",

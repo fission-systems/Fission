@@ -1,8 +1,9 @@
 # ESSENTIAL IMPROVEMENTS (2026-01-11)
 
-> ⚠️ **Status:** 이 문서는 2026-01-11 시점의 아이디어 메모입니다.  
-> 최신 우선순위/계획은 `docs/ROADMAP.md`를 기준으로 보고,  
-> 여기 내용은 세부 배경/레퍼런스로만 사용하는 것을 권장합니다.
+> ⚠️ **Status: Stale / Historical Idea Note**
+> This note reflects ideas captured on 2026-01-11.
+> It is not an active roadmap document.
+> Use `docs/ROADMAP.md` for current priorities.
 
 ## 1. Function Identification (FID) Integrity Check
 

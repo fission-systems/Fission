@@ -1,326 +1,266 @@
-# 디컴파일러 추가 개선 방향
+# Additional Decompiler Improvement Directions
 
-## 현재 상태
-- **평균 Similarity**: 97.86% (Ghidra 대비)
-- **완전 일치 함수**: 3/4 (75%)
-- **주요 성과**: 스타일 표준화, 타입 전파, 문자열 인라인
+This note summarizes the next areas that were identified after the early high-similarity cleanup work. At the time of writing, the baseline looked strong on simple cases but still left room for improvement in practical readability, complex control flow, and deeper type recovery.
 
-## 남은 개선 영역
+## Snapshot At The Time
 
-### 우선순위 A: 미세 조정 (98-99% 달성)
+- average similarity: **97.86%** against the selected Ghidra baseline
+- exact-match functions: **3/4**
+- strongest improvements already landed:
+  - style standardization
+  - type propagation
+  - string inlining
 
-#### 1. 포인터 타입 추론 개선 (난이도: 중, 효과: 3%)
-**현재 문제**:
+## Remaining Improvement Areas
+
+### Priority A: Fine-Tuning Toward 98-99%
+
+#### 1. Better Pointer Type Inference
+
+**Current issue**
+
 ```c
 // Ghidra
-uint *local_18;  // create_item() 리턴 타입을 Item*로 추론
+uint *local_18;
 
 // Fission
-void *local_18;  // void*로 추론
+void *local_18;
 ```
 
-**원인**:
-- `create_item()` 함수의 리턴 타입이 `void*`로 추론됨
-- 구조체 포인터 타입 정보가 전파되지 않음
+**Root cause**
 
-**해결 방법**:
-- `TypePropagator`에서 `malloc` 계열 함수 후 초기화 패턴 감지
-- 구조체 필드 접근 패턴을 역추적하여 타입 추론
-- Ghidra의 `ActionInferTypes`와 비교하여 누락된 규칙 확인
+- the return type of `create_item()` was inferred as `void*`
+- struct-pointer information was not being propagated far enough
 
-**예상 효과**: main 함수 similarity 91.43% → 94%
+**Suggested direction**
 
----
+- detect allocator + initialization patterns in `TypePropagator`
+- backtrack field-access patterns to infer struct pointer types
+- compare missing behavior against Ghidra's `ActionInferTypes`
 
-#### 2. 명시적 캐스팅 추가 (난이도: 중, 효과: 3%)
-**현재 문제**:
+**Expected effect:** raise a representative `main` similarity from about `91.43%` to roughly `94%`
+
+#### 2. More Explicit Cast Insertion
+
+**Current issue**
+
 ```c
 // Ghidra
-sum_array((longlong)&local_38,5);  // 명시적 캐스팅
+sum_array((longlong)&local_38,5);
 
 // Fission
-sum_array(&local_38,5);             // 암시적 변환
+sum_array(&local_38,5);
 ```
 
-**원인**:
-- Ghidra의 `ActionSetCasts`가 더 적극적으로 캐스팅 삽입
-- 함수 프로토타입과 실제 인자 타입 불일치 시 캐스팅 생성
+**Root cause**
 
-**해결 방법**:
-- `ActionSetCasts` 분석 및 비교
-- 함수 호출 시 인자 타입 체크 강화
-- 포인터→정수 변환 시 명시적 캐스팅 추가
+- Ghidra's `ActionSetCasts` inserted casts more aggressively
+- Fission under-emitted casts when the prototype and argument type differed
 
-**예상 효과**: main 함수 similarity 91.43% → 94%
+**Suggested direction**
 
-**구현 파일**: `ghidra_decompiler/decompile/coreaction.cc` (`ActionSetCasts`)
+- review `ActionSetCasts`
+- strengthen argument-type checking at call sites
+- explicitly emit pointer→integer casts where needed
 
----
+**Expected effect:** another small readability/similarity gain on complex functions
 
-#### 3. 헤더 주석 제거 옵션 (난이도: 하, 효과: 2%)
-**현재 문제**:
+#### 3. Optional Header-Comment Suppression
+
+**Current issue**
+
 ```c
-// Fission만 추가
 // ============================================
 // Function: main @ 0x140001680
 // ============================================
 ```
 
-**해결 방법**:
-- PostProcessor에 `--ghidra-compat` 플래그 추가
-- 함수 헤더 주석 생성을 선택적으로 비활성화
+**Suggested direction**
 
-**예상 효과**: 벤치마크 호환성 향상
+- make function-header comment emission optional
+- gate it behind a compatibility / formatting flag
 
----
+**Expected effect:** better benchmark compatibility and cleaner output
 
-### 우선순위 B: 복잡한 코드 지원 (실용성 향상)
+### Priority B: Support for More Complex Code
 
-#### 4. 복잡한 제어 흐름 개선 (난이도: 높, 효과: 중)
-**테스트 필요한 패턴**:
-- ✅ 단순 if-else (작동)
-- ✅ 단순 for 루프 (작동)
-- ❓ 중첩 루프
-- ❓ switch-case (많은 케이스)
-- ❓ do-while 루프
-- ❓ goto/break/continue 복합
-- ❓ 재귀 함수
+#### 4. Complex Control Flow
 
-**새로운 테스트 케이스 필요**:
+Patterns that needed broader verification:
+
+- nested loops
+- large `switch` statements
+- `do-while`
+- mixed `goto` / `break` / `continue`
+- recursion
+
+The main goal here was not to replace Ghidra's core CFG work, but to validate and strengthen the post-structuring and readability pipeline on harder real-world shapes.
+
+#### 5. C++ Support
+
+Main gaps:
+
+- vtable identification
+- constructor / destructor pattern handling
+- template-instance naming
+- namespace recovery
+
+Suggested improvement areas:
+
+- stronger C++ structure analysis
+- vtable pointer detection and virtual-call interpretation
+- RTTI parsing
+- better demangling
+
+#### 6. Better Struct Recovery Accuracy
+
+**Current state**
+
+- basic struct-field detection worked
+- nested structs were partially supported
+- accuracy was still inconsistent
+
+**Target**
+
+Move from coarse field ranges like:
+
 ```c
-// examples/complex_control_flow.c
-void nested_loops() {
-    for (int i = 0; i < 10; i++) {
-        for (int j = 0; j < 10; j++) {
-            if (i == j) break;
-            process(i, j);
-        }
-    }
-}
-
-int switch_test(int x) {
-    switch(x) {
-        case 1: return 10;
-        case 2: return 20;
-        case 3: return 30;
-        default: return 0;
-    }
-}
-
-int recursive_factorial(int n) {
-    if (n <= 1) return 1;
-    return n * recursive_factorial(n - 1);
-}
-```
-
-**기대 결과**: 이미 Ghidra 엔진을 사용하므로 대부분 작동할 것으로 예상
-
----
-
-#### 5. C++ 코드 지원 (난이도: 매우 높, 효과: 높)
-**현재 한계**:
-- 가상 함수 테이블 (vtable) 인식 부족
-- 생성자/소멸자 자동 호출 패턴 미감지
-- 템플릿 인스턴스화 이름 복원 불가
-- 네임스페이스 처리 미흡
-
-**필요한 개선**:
-- C++ 구조체 분석기 강화
-- vtable 포인터 감지 및 가상 함수 해석
-- RTTI (Run-Time Type Information) 파싱
-- 디맹글링 (name demangling) 개선
-
-**Ghidra 비교**: Ghidra도 C++ 디컴파일이 완벽하지 않음
-
----
-
-#### 6. 구조체 복구 정확도 향상 (난이도: 높, 효과: 중)
-**현재 상태**:
-- ✅ 기본 구조체 필드 감지
-- ✅ 중첩 구조체 지원
-- ⚠️ 정확도가 항상 100%는 아님
-
-**개선 방향**:
-```c
-// 현재: 때때로 불완전한 구조체
 struct unknown_struct {
     int field_0;
-    undefined field_4[28];  // 세부 필드 미감지
-};
-
-// 목표: 더 정확한 필드 분리
-struct Item {
-    int id;          // field_0
-    char name[32];   // field_4
-    double value;    // field_36
+    undefined field_4[28];
 };
 ```
 
-**해결 방법**:
-- 필드 접근 패턴 더 많이 수집
-- 타입 크기 힌트 활용
-- 초기화 패턴 분석 (strcpy, memcpy 등)
+toward more specific layouts such as:
 
----
-
-### 우선순위 C: 새로운 기능 (장기 개선)
-
-#### 7. 고급 최적화 역추적 (난이도: 매우 높, 효과: 매우 높)
-**목표**: 컴파일러 최적화를 역추적하여 원본에 가까운 코드 생성
-
-**예시**:
 ```c
-// 최적화된 어셈블리
-mov eax, [rdi]
-lea eax, [rax + rax*2]  // x * 3 = x + x*2
-shl eax, 2               // * 4
-ret
+struct Item {
+    int id;
+    char name[32];
+    double value;
+};
+```
 
-// 현재 디컴파일
+Suggested directions:
+
+- collect more field-access patterns
+- use stronger size hints
+- analyze initialization patterns such as `strcpy` / `memcpy`
+
+### Priority C: Longer-Term Research
+
+#### 7. Reverse High-Level Optimizations
+
+Goal: reconstruct simpler source-like forms from optimized instruction patterns.
+
+Example:
+
+```c
+// current decompilation
 return (x + x * 2) << 2;
 
-// 목표 디컴파일
-return x * 12;  // 상수 곱셈으로 단순화
+// desired high-level simplification
+return x * 12;
 ```
 
-**Ghidra 비교**: Ghidra도 완벽하지 않음, 연구 주제
+#### 8. Semantic Variable Naming
 
----
-
-#### 8. 의미론적 변수 이름 추론 (난이도: 매우 높, 효과: 높)
-**목표**: 변수 용도를 분석하여 의미 있는 이름 제안
+Move beyond local naming patterns toward more context-aware variable naming:
 
 ```c
-// 현재
+// current
 int local_c;
 int local_10;
 
-// 목표 (AI 기반)
+// aspirational
 int result;
 int count;
 ```
 
-**방법**:
-- 변수 사용 패턴 분석
-- 함수 호출 컨텍스트
-- 상수값 패턴
-- 머신러닝 모델 (선택적)
+Potential inputs:
 
-**Ghidra 비교**: Ghidra는 이 기능 없음, 연구 주제
+- variable-use patterns
+- call context
+- constant-value patterns
+- optional ML/LLM assistance
 
----
+#### 9. Broader Architecture Coverage
 
-#### 9. 다른 아키텍처 지원 확대 (난이도: 중, 효과: 중)
-**현재 지원**:
-- ✅ x86/x86-64
-- ⚠️ ARM/ARM64 (제한적)
-- ❌ MIPS
-- ❌ PowerPC
-- ❌ RISC-V
+At the time:
 
-**필요 작업**:
-- Ghidra의 SLEIGH 언어 스펙 추가 통합
-- 아키텍처별 calling convention
-- 아키텍처별 특수 명령어 처리
+- x86 / x86-64 were the strongest paths
+- ARM / ARM64 existed only partially
+- MIPS, PowerPC, and RISC-V were still future work
 
----
+### Priority D: Performance
 
-### 우선순위 D: 성능 최적화
+#### 10. Faster Decompilation
 
-#### 10. 디컴파일 속도 향상 (난이도: 중, 효과: 중)
-**현재 상태**:
-- Ghidra: 평균 2.744초
-- Fission: 평균 3.457초 (26% 느림)
+At the time of this note:
 
-**병목 지점**:
-1. 데이터 섹션 스캔 (매 함수마다 재실행)
-2. 타입 전파 반복 (여러 번 re-run)
-3. FFI 오버헤드
+- Ghidra average: `2.744s`
+- Fission average: `3.457s` (about `26%` slower)
 
-**최적화 방법**:
-- 데이터 섹션 스캔을 바이너리당 1회로 제한 (현재 구현됨)
-- 타입 전파 알고리즘 최적화
-- 캐싱 전략 강화
-- Rust↔C++ FFI 최적화
+Suspected bottlenecks:
 
-**목표**: Ghidra와 동등한 속도 (2.7초)
+1. repeated data-section scans
+2. repeated type-propagation reruns
+3. FFI overhead
 
----
+Suggested directions:
 
-## 권장 우선순위
+- keep data-section scans to once per binary
+- optimize type-propagation passes
+- strengthen caching
+- reduce Rust↔C++ overhead
 
-### 즉시 시작 가능 (1-2주)
-1. ✅ **헤더 주석 제거 옵션** (난이도: 하)
-   - 빠른 구현, 벤치마크 호환성 향상
-   
-2. ✅ **명시적 캐스팅 추가** (난이도: 중)
-   - 3% similarity 향상 가능
-   - `ActionSetCasts` 분석 및 적용
+## Recommended Priority Order
 
-### 중기 목표 (1-2개월)
-3. ✅ **포인터 타입 추론 개선** (난이도: 중)
-   - 구조체 포인터 타입 복구
-   - 3% similarity 향상 가능
+### Short-Term (1-2 Weeks)
 
-4. ✅ **복잡한 제어 흐름 테스트** (난이도: 중)
-   - 새로운 테스트 케이스 작성
-   - 기존 기능 검증 + 버그 발견
+1. optional header-comment suppression
+2. explicit cast insertion improvements
 
-5. ✅ **디컴파일 속도 최적화** (난이도: 중)
-   - 26% 속도 개선 가능
+### Mid-Term (1-2 Months)
 
-### 장기 목표 (3-6개월)
-6. ✅ **구조체 복구 정확도 향상** (난이도: 높)
-   - 실용적 디컴파일 품질 향상
+3. pointer type inference improvements
+4. broader complex-control-flow validation
+5. decompilation speed optimization
 
-7. ✅ **C++ 코드 지원** (난이도: 매우 높)
-   - vtable, 생성자/소멸자 등
-   - 시장 차별화 요소
+### Longer-Term (3-6 Months)
 
-### 연구 주제 (장기)
-8. ✅ **고급 최적화 역추적** (난이도: 매우 높)
-9. ✅ **의미론적 변수 이름 추론** (난이도: 매우 높)
+6. stronger struct recovery
+7. better C++ support
 
----
+### Research Topics
 
-## 실용성 vs 벤치마크
+8. optimization reverse-tracking
+9. semantic variable naming
 
-### 벤치마크 점수 향상 (98-99% 목표)
-- 우선순위 A (1-3번) 집중
-- 예상 소요: 2-4주
-- 예상 결과: 98.5% similarity
+## Practicality vs Benchmarking
 
-### 실용적 디컴파일 품질 향상
-- 우선순위 B (4-6번) 집중
-- 복잡한 실제 바이너리 처리 능력 향상
-- 예상 소요: 2-3개월
+### If the goal is benchmark maximization
 
----
+Focus on the fine-tuning items first:
 
-## 결론
+- pointer inference
+- explicit casts
+- formatting compatibility
 
-### 현재 Fission의 위치
-- ✅ **기본 기능**: 완벽 (100% 단순 함수)
-- ✅ **표준 준수**: 우수 (97.86% Ghidra 호환)
-- ⚠️ **복잡한 코드**: 검증 필요
-- ⚠️ **성능**: 약간 느림 (26%)
+### If the goal is practical tooling quality
 
-### 추천 경로
+Focus on:
 
-**만약 목표가 "완벽한 벤치마크 점수"라면**:
-→ 우선순위 A (1-3번) 집중
-→ 2-4주 소요
-→ 98-99% 달성 가능
+- complex real-world control flow
+- struct recovery
+- C++ support
 
-**만약 목표가 "실용적인 도구"라면**:
-→ 우선순위 B (4-6번) 집중
-→ 복잡한 실제 코드 테스트
-→ 2-3개월 소요
+## Conclusion
 
-**현재 상태 유지도 훌륭함**:
-→ 97.86%는 이미 프로덕션 품질
-→ 대부분의 사용 사례에 충분
-→ 다른 기능 개발에 집중 가능
+At the time of this note, Fission already looked strong:
 
-### 최종 평가
-**Fission은 이미 매우 우수한 디컴파일러입니다.** 추가 개선은 "좋음"에서 "완벽"으로 가는 과정이며, 투자 대비 효과를 고려해야 합니다.
+- simple-function quality was effectively solved
+- Ghidra-style surface compatibility was high
+- remaining work was concentrated in harder real-world cases and deeper semantic recovery
+
+The main tradeoff was no longer “good vs bad,” but “excellent benchmark polish vs broader practical capability.”

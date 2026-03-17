@@ -398,8 +398,8 @@ cargo build --release --bin fission_cli --no-default-features
 | Feature | Description | Default |
 |---------|-------------|---------|
 | `native_decomp` | Built-in Ghidra decompiler (fission-cli, fission-ffi) | ✅ in fission-cli |
-| `gui` | Tauri 2.x + React 19 desktop GUI — 빌드: `cd crates/fission-tauri && npm run tauri build` | 별도 앱 |
-| `cli` | CLI 바이너리: `fission_cli` | `cargo build --bin fission_cli` |
+| `gui` | Tauri 2.x + React 19 desktop GUI — build with `cd crates/fission-tauri && npm run tauri build` | Separate app |
+| `cli` | CLI binary: `fission_cli` | `cargo build --bin fission_cli` |
 | `tui` | Terminal UI (ratatui) | ❌ No |
 
 ### Optimization Levels
@@ -768,41 +768,41 @@ dumpbin /dependents target\release\fission_cli.exe
 
 ---
 
-## Rust 워크스페이스 / rust-analyzer
+## Rust workspace / rust-analyzer
 
 ### `failed to read .../fission-tauri/src-tauri/Cargo.toml` (No such file or directory)
 
-- **원인**: 루트 `Cargo.toml`의 워크스페이스 멤버 `crates/fission-tauri/src-tauri` 경로에 `Cargo.toml`이 없을 때 발생합니다.
-- **조치**:
-  1. **전체 클론/동기화 확인**: `git status`, `git pull` 후 `ls crates/fission-tauri/src-tauri/Cargo.toml`로 파일 존재 여부 확인.
-  2. **GUI 없이 작업할 때**:  
-     - 루트 `Cargo.toml`에서 `"crates/fission-tauri/src-tauri",` 한 줄을 **주석 처리**하거나,  
-     - `cp Cargo.toml.workspace-cli-only Cargo.toml` 로 CLI 전용 워크스페이스로 교체할 수 있습니다.  
-     GUI 빌드가 필요해지면 `git checkout Cargo.toml` 로 원복하고 해당 경로가 있는지 확인하세요.
-  3. **rust-analyzer 재시작**: 수정 후 `Ctrl+Shift+P` → "Rust-analyzer: Restart server".
+- **Cause**: This happens when the workspace member path `crates/fission-tauri/src-tauri` in the root `Cargo.toml` does not contain a `Cargo.toml`.
+- **Action**:
+  1. **Verify the full clone/sync state**: run `git status`, `git pull`, then `ls crates/fission-tauri/src-tauri/Cargo.toml` to confirm the file exists.
+  2. **If you are working without the GUI**:
+     - comment out the `"crates/fission-tauri/src-tauri",` line in the root `Cargo.toml`, or
+     - replace the workspace with the CLI-only variant by running `cp Cargo.toml.workspace-cli-only Cargo.toml`.
+     When you need the GUI build again, restore the default file with `git checkout Cargo.toml` and confirm the path exists.
+  3. **Restart rust-analyzer**: `Ctrl+Shift+P` → `Rust-analyzer: Restart server`.
 
 ### `file not found: .../fission-cli/src/bin/ffi_test.rs`
 
-- **원인**: 예전에 있던 `ffi_test` 바이너리가 제거된 뒤에도 IDE/rust-analyzer가 해당 파일을 열거나 인덱스에 남아 있을 때 발생할 수 있습니다.
-- **조치**:
-  1. `ffi_test.rs` 탭이 열려 있으면 **닫기**.
-  2. **Rust-analyzer 재시작**: `Ctrl+Shift+P` → "Rust-analyzer: Restart server".
-  3. 현재 `fission-cli`에는 `fission_cli` 바이너리만 정의되어 있으므로, `ffi_test` 참조는 제거된 상태가 정상입니다.
+- **Cause**: This can happen when the old `ffi_test` binary was removed but the IDE or rust-analyzer still has the file open or cached in its index.
+- **Action**:
+  1. Close the `ffi_test.rs` tab if it is still open.
+  2. **Restart rust-analyzer**: `Ctrl+Shift+P` → `Rust-analyzer: Restart server`.
+  3. `fission-cli` now defines only the `fission_cli` binary, so it is normal for `ffi_test` references to be gone.
 
 ---
 
 ## Decompiler logging
 
-디컴파일러 준비(바이너리 로드·섹션·심볼·FID 등)는 fission-analysis의 `prepare_native_decompiler_for_binary` 한 경로만 사용하며, CLI와 GUI가 동일한 진입점을 호출한다. 구조는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)의 "Per-binary decompiler preparation" 참고. 초기화 비용은 `--benchmark` 시 JSON `_meta.prepare_timings`로 단계별 확인 가능하다. 성능 최적화 우선순위는 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)의 "Decompiler performance optimization priorities" 참고.
+Decompiler preparation (binary load, sections, symbols, FID, and related setup) now flows through a single path: `prepare_native_decompiler_for_binary` in `fission-analysis`. Both the CLI and GUI call the same entry point. See [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) for the per-binary preparation contract. Initialization cost can be inspected step-by-step through JSON `_meta.prepare_timings` when `--benchmark` is enabled. Performance priorities are also documented in [ARCHITECTURE.md](../architecture/ARCHITECTURE.md).
 
-디컴파일러(C++) 진단 로그는 다음으로만 제어합니다.
+Decompiler (C++) diagnostic logging is controlled only through the following paths:
 
-- **설정**: `fission.toml`의 `[decompiler]`에서 `log_verbose`(기본 `false`), `log_file`(기본 `""`). 비어 있지 않으면 해당 경로에 append.
-- **CLI**: `--verbose` 플래그로 오버라이드. 실제 적용값은 `config.decompiler.log_verbose || cli.verbose`.
-- **에러**: 실패 시 항상 `last_error` → Rust `Result`로 전달되며, 로그 스트림과 별개입니다.
-- **OutputSilencer**: CLI에서 verbose가 아닐 때 stderr를 `/dev/null`로 리다이렉트해, C++에서 로그를 꺼도 서드파티가 쓴 stderr를 막습니다.
+- **Config**: use `[decompiler]` in `fission.toml`, with `log_verbose` (default `false`) and `log_file` (default `""`). If `log_file` is non-empty, logs are appended there.
+- **CLI**: overridden by `--verbose`. The effective value is `config.decompiler.log_verbose || cli.verbose`.
+- **Errors**: failures always propagate through `last_error` into a Rust `Result`, independently of the log stream.
+- **OutputSilencer**: when the CLI is not verbose, stderr is redirected to `/dev/null` so third-party stderr output is suppressed even if C++ logging is disabled.
 
-자세한 계약은 [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)의 "Decompiler Logging and Errors"를 참고하세요.
+See [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) for the detailed logging and error-handling contract.
 
 ---
 
@@ -828,7 +828,7 @@ dumpbin /dependents target\release\fission_cli.exe
 1. Install Rust + CMake + C++ compiler + zlib
 2. Build decompiler: `cd ghidra_decompiler && cmake -B build && cmake --build build && cd ..`
 3. Build Fission CLI: `cargo build --release --bin fission_cli`
-4. Run: `./target/release/fission_cli` (GUI는 `crates/fission-tauri`에서 `npm run tauri dev`)
+4. Run: `./target/release/fission_cli` (for the GUI, run `npm run tauri dev` in `crates/fission-tauri`)
 
 **Most common issues**:
 - ❌ CMake not found → Install CMake

@@ -1,7 +1,8 @@
-# CLI 전용 워크스페이스 (Tauri GUI 없이)
-# 사용법: src-tauri 경로가 없어서 "failed to load manifest for workspace member" 에러가 날 때
+# CLI-only workspace variant (without the Tauri GUI)
+# Use this when the src-tauri path is unavailable and Cargo reports
+# "failed to load manifest for workspace member".
 #   cp Cargo.toml.workspace-cli-only Cargo.toml
-# 원복: git checkout Cargo.toml
+# Restore the default workspace with: git checkout Cargo.toml
 
 [workspace]
 resolver = "2"

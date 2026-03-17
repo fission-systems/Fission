@@ -1,4 +1,8 @@
-# 디버거 통합 아이디어 (2026-01-10)
+# Debugger Integration Ideas (2026-01-10)
+
+> ⚠️ **Status: Stale / Historical Idea Note**
+> This note captures exploratory debugger ideas from 2026-01-10.
+> It is not an active roadmap document.
 
 ## 1. 리버스 디버깅 (RR/TTD)
 

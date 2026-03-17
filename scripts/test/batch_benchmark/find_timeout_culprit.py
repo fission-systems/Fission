@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-타임아웃(무한 루프) 유발 함수 식별 스크립트
+Identify functions that trigger timeouts or hang-like behavior.
 
-putty.exe --decomp-limit 20 실행 시 900초 타임아웃을 유발하는 특정 함수를 찾습니다.
-각 함수를 개별로 --decomp <addr> 실행하여, 주어진 시간 내 완료 여부를 확인합니다.
+This script helps find the specific function responsible for a long timeout,
+such as a 900-second timeout during `putty.exe --decomp-limit 20`.
+It runs each function individually with `--decomp <addr>` and checks whether
+the decompilation finishes within the given time budget.
 
-사용법:
+Usage:
   python scripts/test/batch_benchmark/find_timeout_culprit.py samples/windows/x64/putty.exe
   python scripts/test/batch_benchmark/find_timeout_culprit.py putty.exe --limit 20 --timeout 120
 """
@@ -212,29 +214,29 @@ def main() -> int:
     print("=" * 60)
 
     if timed_out:
-        print(f"\n*** TIMEOUT (>={args.timeout}s) — 가능한 무한 루프/극단적 병목 ***")
+        print(f"\n*** TIMEOUT (>={args.timeout}s) — possible infinite loop or extreme bottleneck ***")
         for r in timed_out:
             print(f"  #{r['index']} {r['address']}  {r['name']}")
-        print("\n프로파일링 권장:")
+        print("\nSuggested profiling commands:")
         if timed_out:
             first = timed_out[0]
             print(f"  cargo flamegraph --bin fission_cli -- {binary} --decomp {first['address']}")
-            print(f"  # 또는 macOS: xcrun xctrace record --template 'Time Profiler' -- \\")
+            print(f"  # Or on macOS: xcrun xctrace record --template 'Time Profiler' -- \\")
             print(f"  #   ./target/release/fission_cli {binary} --decomp {first['address']}")
 
     if failed and not all(r in timed_out for r in failed):
-        print(f"\n실패 (exit != 0):")
+        print(f"\nFailed (exit != 0):")
         for r in failed:
             print(f"  #{r['index']} {r['address']}  {r['name']}")
 
     if slow:
-        print(f"\n느림 (60s 초과, 타임아웃은 아님):")
+        print(f"\nSlow (>60s, but not a timeout):")
         for r, sec in sorted(slow, key=lambda x: -x[1])[:5]:
             print(f"  #{r['index']} {r['address']}  {r['name']}: {sec:.1f}s")
 
     if not timed_out and not failed:
-        print("\n모든 함수가 제한 시간 내 완료됨.")
-        print("  → 타임아웃 원인은 병렬 실행 시 상호작용이거나, 초기화 단계일 수 있습니다.")
+        print("\nAll tested functions completed within the time limit.")
+        print("  -> The timeout may instead come from parallel-execution interactions or initialization overhead.")
 
     return 0 if not timed_out else 1
 

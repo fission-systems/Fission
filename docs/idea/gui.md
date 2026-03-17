@@ -1,4 +1,8 @@
-# GUI 개선 아이디어 (2026-01-10)
+# GUI Improvement Ideas (2026-01-10)
+
+> ⚠️ **Status: Stale / Historical Idea Note**
+> This note captures older GUI ideas from 2026-01-10.
+> It is not an active roadmap document.
 
 ## 1. 그래프 뷰 상호작용 (Graph View Interaction)
 

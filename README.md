@@ -8,7 +8,7 @@
 
 Rust reverse-engineering and decompilation workspace focused on **static analysis**, **p-code-driven reconstruction**, and a **desktop analysis workflow**.
 
-This repository is still an **early prototype** and an **immature public codebase**. The direction is real and the core engine is advancing quickly, but the project is still under heavy development, parts of the repository are rough, and the public-facing docs are still being cleaned up.
+This repository is still an **early-stage** and **immature public codebase**. The direction is real and the core engine is advancing quickly, but the project is still under heavy development, parts of the repository are rough, and the public-facing docs are still being cleaned up.
 
 Fission is converging on a simple architecture:
 
@@ -31,7 +31,7 @@ Current engine status:
 - `legacy`: native Ghidra decompilation + Rust postprocess, still the stable path
 - `mlil-preview`: Ghidra p-code -> Rust NIR/HIR -> structuring -> printer, the forward architecture path
 
-Preview currently supports real PE x64 work, bootstrap-level PE x86 coverage on selected seeds, stack-slot recovery, multi-block control flow reconstruction, short-circuit folding, and Rust-owned pseudocode printing. It is still experimental, and the repository should still be treated as an evolving prototype rather than a mature end-user product.
+Preview currently supports real PE x64 work, bootstrap-level PE x86 coverage on selected seeds, stack-slot recovery, multi-block control flow reconstruction, short-circuit folding, and Rust-owned pseudocode printing. It is still experimental, and the repository should still be treated as an evolving engineering codebase rather than a mature end-user product.
 
 License: AGPL-3.0-or-later. Contributions are accepted under the Contributor License Agreement in [`CLA.md`](./CLA.md).
 
@@ -114,7 +114,7 @@ This path now supports:
 - slot-family recovery groundwork
 - preview-only pseudo intrinsics such as `WRITE_BITS`, `FLUSH_BITS`, and `EMIT_CODE`
 
-It still remains experimental. The important difference is that it is now a real product path exposed in both CLI and desktop UI, not an isolated prototype.
+It still remains experimental. The important difference is that it is now a real product path exposed in both CLI and desktop UI, not an isolated demo path.
 
 ## Verified Recent Milestones
 
@@ -567,5 +567,5 @@ The clearest way to summarize the current status is:
 
 - `legacy` is stable and useful
 - `mlil-preview` is real and increasingly capable
-- `nir` is now an organized subsystem rather than a prototype blob
+- `nir` is now an organized subsystem rather than an experimental blob
 - the project direction is clear: Fission should own more of the high-level decompiler stack over time
