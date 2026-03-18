@@ -1,8 +1,6 @@
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo};
-use fission_pcode::{PreviewCallParamRule, PreviewTypeContext};
-use fission_signatures::WIN_API_DB;
-use fission_signatures::win_types::WindowsStructures;
+use fission_pcode::PreviewTypeContext;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -180,46 +178,7 @@ impl FactStore {
     }
 
     pub fn build_preview_type_context(&self, binary: &LoadedBinary) -> PreviewTypeContext {
-        let mut call_targets = HashMap::new();
-
-        for (address, fact) in self.iter_resolved_name_facts() {
-            if address == 0 || fact.name.is_empty() {
-                continue;
-            }
-            call_targets.insert(address, sanitize_preview_symbol_name(&fact.name));
-        }
-
-        for func in &binary.functions {
-            if func.address == 0 || func.name.is_empty() {
-                continue;
-            }
-            call_targets
-                .entry(func.address)
-                .or_insert_with(|| sanitize_preview_symbol_name(&func.name));
-        }
-
-        for (address, name) in &binary.inner().iat_symbols {
-            if *address == 0 || name.is_empty() {
-                continue;
-            }
-            call_targets
-                .entry(*address)
-                .or_insert_with(|| sanitize_preview_symbol_name(name));
-        }
-
-        for (address, name) in &binary.inner().global_symbols {
-            if *address == 0 || name.is_empty() {
-                continue;
-            }
-            call_targets
-                .entry(*address)
-                .or_insert_with(|| sanitize_preview_symbol_name(name));
-        }
-
-        PreviewTypeContext {
-            call_targets,
-            call_param_rules: build_preview_call_param_rules(),
-        }
+        crate::analysis::decomp::preview_context::build_preview_type_context(binary, self, 0)
     }
 }
 
@@ -343,65 +302,6 @@ fn is_weak_name(name: &str) -> bool {
         || trimmed.starts_with("Ordinal_")
         || trimmed.starts_with("thunk_")
         || trimmed.starts_with("j_")
-}
-
-fn sanitize_preview_symbol_name(name: &str) -> String {
-    let mut sanitized = name.trim().to_string();
-    if let Some((_, tail)) = sanitized.rsplit_once('!') {
-        sanitized = tail.trim().to_string();
-    }
-    if let Some(stripped) = sanitized.strip_prefix("__imp_") {
-        sanitized = stripped.trim().to_string();
-    }
-    for suffix in [" [import]", " [export]"] {
-        if let Some(stripped) = sanitized.strip_suffix(suffix) {
-            sanitized = stripped.trim_end().to_string();
-        }
-    }
-    sanitized
-}
-
-fn build_preview_call_param_rules() -> Vec<PreviewCallParamRule> {
-    let structures = WindowsStructures::new();
-    let mut call_param_rules = Vec::new();
-    for sig in WIN_API_DB.iter() {
-        for (arg_index, param) in sig.params.iter().enumerate() {
-            let Some(struct_name) = resolve_preview_struct_name(&param.type_name, &structures)
-            else {
-                continue;
-            };
-            let Some(struct_def) = structures.get(&struct_name) else {
-                continue;
-            };
-            if struct_def.size_64 == 0 {
-                continue;
-            }
-            call_param_rules.push(PreviewCallParamRule {
-                callee_name: sig.name.clone(),
-                arg_index,
-                pointer_alias: param.type_name.clone(),
-                pointee_alias: struct_name,
-                pointer_size: 8,
-                pointee_sizes: vec![struct_def.size_64 as u32],
-            });
-        }
-    }
-    call_param_rules
-}
-
-fn resolve_preview_struct_name(type_name: &str, structures: &WindowsStructures) -> Option<String> {
-    if type_name.contains('*') {
-        return None;
-    }
-    for prefix in ["LP", "P"] {
-        let Some(candidate) = type_name.strip_prefix(prefix) else {
-            continue;
-        };
-        if structures.get(candidate).is_some() {
-            return Some(candidate.to_string());
-        }
-    }
-    None
 }
 
 #[cfg(test)]

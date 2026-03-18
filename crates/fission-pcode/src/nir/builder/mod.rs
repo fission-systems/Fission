@@ -190,11 +190,12 @@ impl<'a> PreviewBuilder<'a> {
             params: self.params.values().cloned().collect(),
             locals: self
                 .locals
-                .values()
-                .map(|slot| NirBinding {
+                .iter()
+                .map(|(offset, slot)| NirBinding {
                     name: slot.name.clone(),
                     ty: slot.ty.clone(),
                     surface_type_name: None,
+                    origin: Some(NirBindingOrigin::StackOffset(*offset)),
                     initializer: None,
                 })
                 .chain(self.temps.values().cloned())
@@ -283,6 +284,7 @@ impl<'a> PreviewBuilder<'a> {
             name: name.clone(),
             ty,
             surface_type_name: None,
+            origin: Some(NirBindingOrigin::Temp),
             initializer: None,
         };
         self.materialized_vns.insert(key, name.clone());

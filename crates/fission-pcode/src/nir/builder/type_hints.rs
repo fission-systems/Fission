@@ -1,6 +1,8 @@
 use super::*;
 
 pub(super) fn apply_preview_type_hints(func: &mut HirFunction, context: &PreviewTypeContext) {
+    apply_function_name_hints(func, context);
+
     let mut pointer_hints: HashMap<String, PreviewCallParamRule> = HashMap::new();
     collect_call_type_hints(&func.body, context, &mut pointer_hints);
 
@@ -24,6 +26,64 @@ pub(super) fn apply_preview_type_hints(func: &mut HirFunction, context: &Preview
         {
             binding.surface_type_name = Some(surface_type_name);
         }
+    }
+}
+
+fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContext) {
+    let Some(hints) = &context.function_hints else {
+        return;
+    };
+
+    let mut renames = Vec::new();
+    let mut reserved_names = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| binding.name.clone())
+        .collect::<HashSet<_>>();
+
+    for binding in &mut func.params {
+        let Some(NirBindingOrigin::ParamIndex(index)) = binding.origin else {
+            continue;
+        };
+        let Some(new_name) = hints.param_names.get(index) else {
+            continue;
+        };
+        let new_name = new_name.trim();
+        if new_name.is_empty() || new_name == binding.name {
+            continue;
+        }
+        if reserved_names.contains(new_name) {
+            continue;
+        }
+        reserved_names.remove(&binding.name);
+        reserved_names.insert(new_name.to_string());
+        renames.push((binding.name.clone(), new_name.to_string()));
+        binding.name = new_name.to_string();
+    }
+
+    for binding in &mut func.locals {
+        let Some(NirBindingOrigin::StackOffset(offset)) = binding.origin else {
+            continue;
+        };
+        let Some(new_name) = hints.stack_local_names.get(&offset) else {
+            continue;
+        };
+        let new_name = new_name.trim();
+        if new_name.is_empty() || new_name == binding.name {
+            continue;
+        }
+        if reserved_names.contains(new_name) {
+            continue;
+        }
+        reserved_names.remove(&binding.name);
+        reserved_names.insert(new_name.to_string());
+        renames.push((binding.name.clone(), new_name.to_string()));
+        binding.name = new_name.to_string();
+    }
+
+    if !renames.is_empty() {
+        rename_vars_in_stmts(&mut func.body, &renames);
     }
 }
 
@@ -201,6 +261,88 @@ fn find_binding_mut<'a>(func: &'a mut HirFunction, name: &str) -> Option<&'a mut
         return Some(param);
     }
     func.locals.iter_mut().find(|binding| binding.name == name)
+}
+
+fn rename_vars_in_stmts(body: &mut [HirStmt], renames: &[(String, String)]) {
+    for stmt in body {
+        match stmt {
+            HirStmt::Assign { lhs, rhs } => {
+                rename_var_in_lvalue(lhs, renames);
+                rename_var_in_expr(rhs, renames);
+            }
+            HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => rename_var_in_expr(expr, renames),
+            HirStmt::Block(stmts)
+            | HirStmt::While { body: stmts, .. }
+            | HirStmt::DoWhile { body: stmts, .. } => rename_vars_in_stmts(stmts, renames),
+            HirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                rename_var_in_expr(expr, renames);
+                for case in cases {
+                    rename_vars_in_stmts(&mut case.body, renames);
+                }
+                rename_vars_in_stmts(default, renames);
+            }
+            HirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                rename_var_in_expr(cond, renames);
+                rename_vars_in_stmts(then_body, renames);
+                rename_vars_in_stmts(else_body, renames);
+            }
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+}
+
+fn rename_var_in_lvalue(lvalue: &mut HirLValue, renames: &[(String, String)]) {
+    match lvalue {
+        HirLValue::Var(name) => rename_var_name(name, renames),
+        HirLValue::Deref { ptr, .. } => rename_var_in_expr(ptr, renames),
+        HirLValue::Index { base, index, .. } => {
+            rename_var_in_expr(base, renames);
+            rename_var_in_expr(index, renames);
+        }
+    }
+}
+
+fn rename_var_in_expr(expr: &mut HirExpr, renames: &[(String, String)]) {
+    match expr {
+        HirExpr::Var(name) => rename_var_name(name, renames),
+        HirExpr::Cast { expr, .. }
+        | HirExpr::Unary { expr, .. }
+        | HirExpr::Load { ptr: expr, .. }
+        | HirExpr::AggregateCopy { src: expr, .. } => rename_var_in_expr(expr, renames),
+        HirExpr::Binary { lhs, rhs, .. } => {
+            rename_var_in_expr(lhs, renames);
+            rename_var_in_expr(rhs, renames);
+        }
+        HirExpr::Call { args, .. } => {
+            for arg in args {
+                rename_var_in_expr(arg, renames);
+            }
+        }
+        HirExpr::PtrOffset { base, .. } => rename_var_in_expr(base, renames),
+        HirExpr::Index { base, index, .. } => {
+            rename_var_in_expr(base, renames);
+            rename_var_in_expr(index, renames);
+        }
+        HirExpr::Const(_, _) => {}
+    }
+}
+
+fn rename_var_name(name: &mut String, renames: &[(String, String)]) {
+    if let Some((_, replacement)) = renames.iter().find(|(from, _)| from == name) {
+        *name = replacement.clone();
+    }
 }
 
 fn binding_byte_size(ty: &NirType) -> Option<u32> {

@@ -14,6 +14,7 @@ impl<'a> PreviewBuilder<'a> {
                 name: name.to_string(),
                 ty: type_from_size(vn.size, false),
                 surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(index)),
                 initializer: None,
             });
             return Some(name.to_string());
@@ -26,6 +27,7 @@ impl<'a> PreviewBuilder<'a> {
                     name: alias_name.clone(),
                     ty: type_from_size(vn.size, false),
                     surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(param_index)),
                     initializer: None,
                 });
             return Some(alias_name);

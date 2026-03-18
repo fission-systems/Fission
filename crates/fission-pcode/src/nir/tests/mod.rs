@@ -12,6 +12,7 @@ mod structuring_misc;
 mod structuring_switch;
 mod type_hints_aggregates;
 mod type_hints_aliases;
+mod type_hints_function_hints;
 mod type_hints_imports;
 mod type_hints_stack_slots;
 

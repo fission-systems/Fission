@@ -32,6 +32,7 @@
 pub mod cache;
 pub mod facts;
 pub mod postprocess;
+pub(crate) mod preview_context;
 #[cfg(feature = "native_decomp")]
 pub mod prepare;
 #[cfg(feature = "native_decomp")]

@@ -260,8 +260,11 @@ fn sanitize_preview_symbol_name(name: &str) -> String {
 fn build_preview_type_context_from_facts(
     binary: &LoadedBinary,
     fact_store: &FactStore,
+    address: u64,
 ) -> PreviewTypeContext {
-    fact_store.build_preview_type_context(binary)
+    crate::analysis::decomp::preview_context::build_preview_type_context(
+        binary, fact_store, address,
+    )
 }
 
 fn make_preview_request(
@@ -687,7 +690,7 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                     pcode_start.elapsed().as_secs_f64() * 1000.0
                 );
             }
-            let type_context = build_preview_type_context_from_facts(binary, fact_store);
+            let type_context = build_preview_type_context_from_facts(binary, fact_store, address);
             match render_preview_from_json_with_type_context(
                 &pcode_json,
                 binary,
@@ -721,7 +724,7 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                     pcode_start.elapsed().as_secs_f64() * 1000.0
                 );
             }
-            let type_context = build_preview_type_context_from_facts(binary, fact_store);
+            let type_context = build_preview_type_context_from_facts(binary, fact_store, address);
             match render_preview_from_json_with_type_context(
                 &pcode_json,
                 binary,
@@ -791,7 +794,7 @@ pub fn rescue_preview_output_with_facts<S: PreviewSource>(
             pcode_start.elapsed().as_secs_f64() * 1000.0
         );
     }
-    let type_context = build_preview_type_context_from_facts(binary, fact_store);
+    let type_context = build_preview_type_context_from_facts(binary, fact_store, address);
     match render_preview_from_json_with_type_context(
         &pcode_json,
         binary,
@@ -854,6 +857,7 @@ mod tests {
                     pointer_size: 8,
                     pointee_sizes: vec![2],
                 }],
+                function_hints: None,
             },
         };
 
@@ -950,7 +954,7 @@ mod tests {
             crate::analysis::decomp::FactProvenance::StrongFid,
         );
 
-        let context = build_preview_type_context_from_facts(&binary, &facts);
+        let context = build_preview_type_context_from_facts(&binary, &facts, 0x401000);
         assert_eq!(
             context.call_targets.get(&0x401000).map(String::as_str),
             Some("RenamedTarget")
@@ -965,7 +969,7 @@ mod tests {
             .build()
             .expect("build test binary");
         let facts = FactStore::from_binary(&binary);
-        let context = build_preview_type_context_from_facts(&binary, &facts);
+        let context = build_preview_type_context_from_facts(&binary, &facts, 0);
 
         assert!(context.call_param_rules.iter().any(|rule| {
             rule.callee_name == "GetWindowRect"
@@ -992,6 +996,7 @@ mod tests {
                 pointer_size: 8,
                 pointee_sizes: vec![2],
             }],
+            function_hints: None,
         };
 
         let request = make_preview_request("{}", &binary, 0x401000, "sub_401000", type_context);

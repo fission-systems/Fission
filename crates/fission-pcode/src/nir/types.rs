@@ -20,7 +20,15 @@ pub struct NirBinding {
     pub name: String,
     pub ty: NirType,
     pub surface_type_name: Option<String>,
+    pub origin: Option<NirBindingOrigin>,
     pub initializer: Option<HirExpr>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NirBindingOrigin {
+    ParamIndex(usize),
+    StackOffset(i64),
+    Temp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,6 +238,7 @@ pub struct MlilPreviewOptions {
 pub struct PreviewTypeContext {
     pub call_targets: HashMap<u64, String>,
     pub call_param_rules: Vec<PreviewCallParamRule>,
+    pub function_hints: Option<PreviewFunctionHints>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -240,6 +249,13 @@ pub struct PreviewCallParamRule {
     pub pointee_alias: String,
     pub pointer_size: u32,
     pub pointee_sizes: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PreviewFunctionHints {
+    pub param_names: Vec<String>,
+    pub stack_local_names: HashMap<i64, String>,
+    pub return_type_name: Option<String>,
 }
 
 impl MlilPreviewOptions {

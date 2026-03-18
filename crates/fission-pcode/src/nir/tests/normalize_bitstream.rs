@@ -8,6 +8,7 @@ fn normalize_hir_function_rewrites_flush_bits_to_pseudo_intrinsic() {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
+            origin: None,
             initializer: None,
         }],
         locals: vec![NirBinding {
@@ -17,6 +18,7 @@ fn normalize_hir_function_rewrites_flush_bits_to_pseudo_intrinsic() {
                 signed: false,
             })),
             surface_type_name: None,
+            origin: None,
             initializer: Some(HirExpr::Cast {
                 ty: NirType::Ptr(Box::new(NirType::Int {
                     bits: 8,
@@ -130,6 +132,7 @@ fn normalize_hir_function_rewrites_table_driven_emit_to_intrinsic() {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
+            origin: None,
             initializer: None,
         }],
         locals: vec![
@@ -137,6 +140,7 @@ fn normalize_hir_function_rewrites_table_driven_emit_to_intrinsic() {
                 name: "slot_40".to_string(),
                 ty: NirType::Ptr(Box::new(uint_ty.clone())),
                 surface_type_name: None,
+                origin: None,
                 initializer: Some(HirExpr::Cast {
                     ty: NirType::Ptr(Box::new(uint_ty.clone())),
                     expr: Box::new(HirExpr::PtrOffset {
@@ -149,6 +153,7 @@ fn normalize_hir_function_rewrites_table_driven_emit_to_intrinsic() {
                 name: "slot_44".to_string(),
                 ty: NirType::Ptr(Box::new(uint_ty.clone())),
                 surface_type_name: None,
+                origin: None,
                 initializer: Some(HirExpr::Cast {
                     ty: NirType::Ptr(Box::new(uint_ty.clone())),
                     expr: Box::new(HirExpr::PtrOffset {
@@ -233,6 +238,7 @@ fn normalize_hir_function_rewrites_slot_based_write_bits_to_intrinsic() {
             name: "param_1".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Unknown)),
             surface_type_name: None,
+            origin: None,
             initializer: None,
         }],
         locals: vec![
@@ -240,6 +246,7 @@ fn normalize_hir_function_rewrites_slot_based_write_bits_to_intrinsic() {
                 name: "slot_280".to_string(),
                 ty: NirType::Ptr(Box::new(uint_ty.clone())),
                 surface_type_name: None,
+                origin: None,
                 initializer: Some(HirExpr::Cast {
                     ty: NirType::Ptr(Box::new(uint_ty.clone())),
                     expr: Box::new(HirExpr::PtrOffset {
@@ -252,6 +259,7 @@ fn normalize_hir_function_rewrites_slot_based_write_bits_to_intrinsic() {
                 name: "slot_284".to_string(),
                 ty: NirType::Ptr(Box::new(uint_ty.clone())),
                 surface_type_name: None,
+                origin: None,
                 initializer: Some(HirExpr::Cast {
                     ty: NirType::Ptr(Box::new(uint_ty.clone())),
                     expr: Box::new(HirExpr::PtrOffset {

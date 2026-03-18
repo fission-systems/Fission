@@ -117,6 +117,7 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
             name: alias,
             ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
             surface_type_name: None,
+            origin: None,
             initializer: Some(HirExpr::Cast {
                 ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
                 expr: Box::new(HirExpr::PtrOffset {
