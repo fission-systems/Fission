@@ -1,12 +1,10 @@
+use crate::analysis::decomp::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
     MlilPreviewOptions, PcodeFunction, PcodeOpcode, PcodeOptimizer, PcodeOptimizerConfig,
-    PreviewBuildStats, PreviewCallParamRule, PreviewTypeContext, render_mlil_preview_with_context,
+    PreviewBuildStats, PreviewTypeContext, render_mlil_preview_with_context,
     take_last_preview_build_stats,
 };
-use fission_signatures::WIN_API_DB;
-use fission_signatures::win_types::WindowsStructures;
-use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::process::{Command, Stdio};
@@ -242,6 +240,7 @@ pub fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool 
         && max_multiequal_fanin(pcode) <= 4
 }
 
+#[cfg(test)]
 fn sanitize_preview_symbol_name(name: &str) -> String {
     let mut sanitized = name.trim().to_string();
     if let Some((_, tail)) = sanitized.rsplit_once('!') {
@@ -259,60 +258,30 @@ fn sanitize_preview_symbol_name(name: &str) -> String {
 }
 
 fn build_preview_type_context(binary: &LoadedBinary) -> PreviewTypeContext {
-    let structures = WindowsStructures::new();
-    let mut call_targets = HashMap::new();
-    for func in &binary.functions {
-        if func.address == 0 || func.name.is_empty() {
-            continue;
-        }
-        call_targets
-            .entry(func.address)
-            .or_insert_with(|| sanitize_preview_symbol_name(&func.name));
-    }
-    for (addr, name) in &binary.inner().iat_symbols {
-        if *addr == 0 || name.is_empty() {
-            continue;
-        }
-        call_targets
-            .entry(*addr)
-            .or_insert_with(|| sanitize_preview_symbol_name(name));
-    }
-    for (addr, name) in &binary.inner().global_symbols {
-        if *addr == 0 || name.is_empty() {
-            continue;
-        }
-        call_targets
-            .entry(*addr)
-            .or_insert_with(|| sanitize_preview_symbol_name(name));
-    }
+    let fact_store = FactStore::from_binary(binary);
+    build_preview_type_context_from_facts(binary, &fact_store)
+}
 
-    let mut call_param_rules = Vec::new();
-    for sig in WIN_API_DB.iter() {
-        for (arg_index, param) in sig.params.iter().enumerate() {
-            let Some(struct_name) = resolve_preview_struct_name(&param.type_name, &structures)
-            else {
-                continue;
-            };
-            let Some(struct_def) = structures.get(&struct_name) else {
-                continue;
-            };
-            if struct_def.size_64 == 0 {
-                continue;
-            }
-            call_param_rules.push(PreviewCallParamRule {
-                callee_name: sig.name.clone(),
-                arg_index,
-                pointer_alias: param.type_name.clone(),
-                pointee_alias: struct_name,
-                pointer_size: 8,
-                pointee_sizes: vec![struct_def.size_64 as u32],
-            });
-        }
-    }
+fn build_preview_type_context_from_facts(
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+) -> PreviewTypeContext {
+    fact_store.build_preview_type_context(binary)
+}
 
-    PreviewTypeContext {
-        call_targets,
-        call_param_rules,
+fn make_preview_request(
+    pcode_json: &str,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    type_context: PreviewTypeContext,
+) -> PreviewWorkerRequest {
+    PreviewWorkerRequest {
+        pcode_json: pcode_json.to_string(),
+        address,
+        name: name.to_string(),
+        options: MlilPreviewOptions::from_loaded_binary(binary),
+        type_context,
     }
 }
 
@@ -456,21 +425,6 @@ fn execute_preview_worker_request(
             .error
             .unwrap_or_else(|| "mlil-preview worker failed without error".to_string()))
     }
-}
-
-fn resolve_preview_struct_name(type_name: &str, structures: &WindowsStructures) -> Option<String> {
-    if type_name.contains('*') {
-        return None;
-    }
-    for prefix in ["LP", "P"] {
-        let Some(candidate) = type_name.strip_prefix(prefix) else {
-            continue;
-        };
-        if structures.get(candidate).is_some() {
-            return Some(candidate.to_string());
-        }
-    }
-    None
 }
 
 fn render_preview_request(
@@ -633,6 +587,26 @@ fn render_preview_from_json(
     enforce_auto_gate: bool,
     timeout_ms: Option<u64>,
 ) -> Result<Option<(String, Option<PreviewBuildStats>)>, String> {
+    render_preview_from_json_with_type_context(
+        pcode_json,
+        binary,
+        address,
+        name,
+        enforce_auto_gate,
+        timeout_ms,
+        build_preview_type_context(binary),
+    )
+}
+
+fn render_preview_from_json_with_type_context(
+    pcode_json: &str,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    enforce_auto_gate: bool,
+    timeout_ms: Option<u64>,
+    type_context: PreviewTypeContext,
+) -> Result<Option<(String, Option<PreviewBuildStats>)>, String> {
     let parse_start = Instant::now();
     let pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
@@ -641,13 +615,7 @@ fn render_preview_from_json(
         return Ok(None);
     }
 
-    let request = PreviewWorkerRequest {
-        pcode_json: pcode_json.to_string(),
-        address,
-        name: name.to_string(),
-        options: MlilPreviewOptions::from_loaded_binary(binary),
-        type_context: build_preview_type_context(binary),
-    };
+    let request = make_preview_request(pcode_json, binary, address, name, type_context);
 
     if should_use_preview_worker(binary, &pcode, enforce_auto_gate) {
         let worker_timeout_ms = preview_worker_timeout_ms(timeout_ms);
@@ -812,6 +780,10 @@ pub fn rescue_preview_output<S: PreviewSource>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fission_core::common::types::FunctionInfo;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+    use fission_pcode::PreviewCallParamRule;
+    use std::collections::HashMap;
 
     #[test]
     fn preview_worker_request_roundtrip() {
@@ -910,5 +882,89 @@ mod tests {
             selection.routing_decision().preview_surface,
             Some(PreviewSurfaceKind::Unstructured)
         );
+    }
+
+    #[test]
+    fn fact_store_names_drive_preview_call_targets() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "sub_401000".to_string(),
+                address: 0x401000,
+                size: 0,
+                is_export: false,
+                is_import: false,
+            })
+            .build()
+            .expect("build test binary");
+        let mut facts = FactStore::from_binary(&binary);
+        facts.ingest_name_fact(
+            0x401000,
+            "RenamedTarget".to_string(),
+            crate::analysis::decomp::FactProvenance::StrongFid,
+        );
+
+        let context = build_preview_type_context_from_facts(&binary, &facts);
+        assert_eq!(
+            context.call_targets.get(&0x401000).map(String::as_str),
+            Some("RenamedTarget")
+        );
+    }
+
+    #[test]
+    fn preview_context_builder_preserves_call_param_rules() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        let context = build_preview_type_context(&binary);
+
+        assert!(context.call_param_rules.iter().any(|rule| {
+            rule.callee_name == "GetWindowRect"
+                && !rule.pointer_alias.is_empty()
+                && !rule.pointee_alias.is_empty()
+                && !rule.pointee_sizes.is_empty()
+        }));
+    }
+
+    #[test]
+    fn make_preview_request_reuses_external_type_context() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        let type_context = PreviewTypeContext {
+            call_targets: HashMap::from([(0x401000, "KnownName".to_string())]),
+            call_param_rules: vec![PreviewCallParamRule {
+                callee_name: "MessageBoxW".to_string(),
+                arg_index: 1,
+                pointer_alias: "LPCWSTR".to_string(),
+                pointee_alias: "WCHAR".to_string(),
+                pointer_size: 8,
+                pointee_sizes: vec![2],
+            }],
+        };
+
+        let request = make_preview_request("{}", &binary, 0x401000, "sub_401000", type_context);
+        assert_eq!(
+            request
+                .type_context
+                .call_targets
+                .get(&0x401000)
+                .map(String::as_str),
+            Some("KnownName")
+        );
+    }
+
+    #[test]
+    fn sanitize_preview_symbol_name_strips_import_prefixes_and_suffixes() {
+        assert_eq!(
+            sanitize_preview_symbol_name("__imp_MessageBoxW"),
+            "MessageBoxW"
+        );
+        assert_eq!(sanitize_preview_symbol_name("foo [import]"), "foo");
     }
 }

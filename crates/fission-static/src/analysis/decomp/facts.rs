@@ -1,5 +1,8 @@
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo};
+use fission_pcode::{PreviewCallParamRule, PreviewTypeContext};
+use fission_signatures::WIN_API_DB;
+use fission_signatures::win_types::WindowsStructures;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -126,6 +129,12 @@ impl FactStore {
             .max_by_key(|fact| name_fact_priority(fact.provenance))
     }
 
+    pub fn iter_resolved_name_facts(&self) -> impl Iterator<Item = (u64, &NameFact)> + '_ {
+        self.name_facts
+            .iter()
+            .filter_map(|(address, _)| self.chosen_name_fact(*address).map(|fact| (*address, fact)))
+    }
+
     pub fn merged_inferred_types(&self, address: u64) -> Vec<InferredTypeInfo> {
         merge_type_fact_layers(
             self.native_type_facts
@@ -167,6 +176,49 @@ impl FactStore {
             name_facts: self.name_facts.get(&address).cloned().unwrap_or_default(),
             type_facts,
             dwarf_info: self.dwarf_functions.get(&address).cloned(),
+        }
+    }
+
+    pub fn build_preview_type_context(&self, binary: &LoadedBinary) -> PreviewTypeContext {
+        let mut call_targets = HashMap::new();
+
+        for (address, fact) in self.iter_resolved_name_facts() {
+            if address == 0 || fact.name.is_empty() {
+                continue;
+            }
+            call_targets.insert(address, sanitize_preview_symbol_name(&fact.name));
+        }
+
+        for func in &binary.functions {
+            if func.address == 0 || func.name.is_empty() {
+                continue;
+            }
+            call_targets
+                .entry(func.address)
+                .or_insert_with(|| sanitize_preview_symbol_name(&func.name));
+        }
+
+        for (address, name) in &binary.inner().iat_symbols {
+            if *address == 0 || name.is_empty() {
+                continue;
+            }
+            call_targets
+                .entry(*address)
+                .or_insert_with(|| sanitize_preview_symbol_name(name));
+        }
+
+        for (address, name) in &binary.inner().global_symbols {
+            if *address == 0 || name.is_empty() {
+                continue;
+            }
+            call_targets
+                .entry(*address)
+                .or_insert_with(|| sanitize_preview_symbol_name(name));
+        }
+
+        PreviewTypeContext {
+            call_targets,
+            call_param_rules: build_preview_call_param_rules(),
         }
     }
 }
@@ -293,9 +345,70 @@ fn is_weak_name(name: &str) -> bool {
         || trimmed.starts_with("j_")
 }
 
+fn sanitize_preview_symbol_name(name: &str) -> String {
+    let mut sanitized = name.trim().to_string();
+    if let Some((_, tail)) = sanitized.rsplit_once('!') {
+        sanitized = tail.trim().to_string();
+    }
+    if let Some(stripped) = sanitized.strip_prefix("__imp_") {
+        sanitized = stripped.trim().to_string();
+    }
+    for suffix in [" [import]", " [export]"] {
+        if let Some(stripped) = sanitized.strip_suffix(suffix) {
+            sanitized = stripped.trim_end().to_string();
+        }
+    }
+    sanitized
+}
+
+fn build_preview_call_param_rules() -> Vec<PreviewCallParamRule> {
+    let structures = WindowsStructures::new();
+    let mut call_param_rules = Vec::new();
+    for sig in WIN_API_DB.iter() {
+        for (arg_index, param) in sig.params.iter().enumerate() {
+            let Some(struct_name) = resolve_preview_struct_name(&param.type_name, &structures)
+            else {
+                continue;
+            };
+            let Some(struct_def) = structures.get(&struct_name) else {
+                continue;
+            };
+            if struct_def.size_64 == 0 {
+                continue;
+            }
+            call_param_rules.push(PreviewCallParamRule {
+                callee_name: sig.name.clone(),
+                arg_index,
+                pointer_alias: param.type_name.clone(),
+                pointee_alias: struct_name,
+                pointer_size: 8,
+                pointee_sizes: vec![struct_def.size_64 as u32],
+            });
+        }
+    }
+    call_param_rules
+}
+
+fn resolve_preview_struct_name(type_name: &str, structures: &WindowsStructures) -> Option<String> {
+    if type_name.contains('*') {
+        return None;
+    }
+    for prefix in ["LP", "P"] {
+        let Some(candidate) = type_name.strip_prefix(prefix) else {
+            continue;
+        };
+        if structures.get(candidate).is_some() {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fission_core::common::types::FunctionInfo;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
 
     fn inferred_type(
         name: &str,
@@ -370,5 +483,82 @@ mod tests {
             Some("KnownName")
         );
         assert!(snapshot.dwarf_info.is_some());
+    }
+
+    #[test]
+    fn preview_context_prefers_stronger_name_fact_over_generated_name() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .add_function(FunctionInfo {
+                name: "sub_401000".to_string(),
+                address: 0x401000,
+                size: 0,
+                is_export: false,
+                is_import: false,
+            })
+            .build()
+            .expect("build test binary");
+
+        let mut store = FactStore::from_binary(&binary);
+        store.ingest_name_fact(
+            0x401000,
+            "sub_401000".to_string(),
+            FactProvenance::WeakAutogenerated,
+        );
+        store.ingest_name_fact(0x401000, "KnownName".to_string(), FactProvenance::StrongFid);
+
+        let context = store.build_preview_type_context(&binary);
+        assert_eq!(
+            context.call_targets.get(&0x401000).map(String::as_str),
+            Some("KnownName")
+        );
+    }
+
+    #[test]
+    fn preview_context_sanitizes_import_and_global_names() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .add_iat_symbol(0x500000, "__imp_MessageBoxW".to_string())
+            .add_global_symbol(0x600000, "foo [import]".to_string())
+            .build()
+            .expect("build test binary");
+
+        let store = FactStore::from_binary(&binary);
+        let context = store.build_preview_type_context(&binary);
+
+        assert_eq!(
+            context.call_targets.get(&0x500000).map(String::as_str),
+            Some("MessageBoxW")
+        );
+        assert_eq!(
+            context.call_targets.get(&0x600000).map(String::as_str),
+            Some("foo")
+        );
+    }
+
+    #[test]
+    fn preview_context_keeps_winapi_call_param_rules() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        let store = FactStore::from_binary(&binary);
+
+        let context = store.build_preview_type_context(&binary);
+        let rule = context
+            .call_param_rules
+            .iter()
+            .find(|rule| {
+                rule.callee_name == "GetWindowRect"
+                    && !rule.pointer_alias.is_empty()
+                    && !rule.pointee_alias.is_empty()
+                    && !rule.pointee_sizes.is_empty()
+            })
+            .expect("GetWindowRect preview rule");
+
+        assert_eq!(rule.pointer_size, 8);
     }
 }
