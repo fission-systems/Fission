@@ -10,87 +10,8 @@
       "0xa918d0"
     ]
   },
-  "quality_surface": [
-    {
-      "binary": "test_structs_classes_x64_O0",
-      "address": "0x140001c80",
-      "name": "d_make_name",
-      "fact_density_score": 0,
-      "quality_potential_score": 3,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success",
-        "slot_alias_candidate",
-        "unstructured_heavy"
-      ]
-    },
-    {
-      "binary": "test_structs_classes_x64_O0",
-      "address": "0x140001000",
-      "name": "__mingw_invalidParameterHandler",
-      "fact_density_score": 0,
-      "quality_potential_score": 2,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success"
-      ]
-    },
-    {
-      "binary": "test_string_memory_x64_O0",
-      "address": "0x140001000",
-      "name": "__mingw_invalidParameterHandler",
-      "fact_density_score": 0,
-      "quality_potential_score": 2,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success"
-      ]
-    },
-    {
-      "binary": "test_string_memory_x64_O0",
-      "address": "0x140001440",
-      "name": "__gcc_deregister_frame",
-      "fact_density_score": 0,
-      "quality_potential_score": 2,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success"
-      ]
-    },
-    {
-      "binary": "test_calling_conventions_x64_O0",
-      "address": "0x140001000",
-      "name": "__mingw_invalidParameterHandler",
-      "fact_density_score": 0,
-      "quality_potential_score": 2,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success"
-      ]
-    },
-    {
-      "binary": "test_calling_conventions_x64_O0",
-      "address": "0x140001440",
-      "name": "__gcc_deregister_frame",
-      "fact_density_score": 0,
-      "quality_potential_score": 2,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success"
-      ]
-    },
-    {
-      "binary": "test_real_world_algorithms_x64_O0",
-      "address": "0x140001aca",
-      "name": "rb_pop(RingBuffer*, unsigned char*)",
-      "fact_density_score": 0,
-      "quality_potential_score": 4,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success",
-        "slot_alias_candidate"
-      ]
-    },
+  "quality_explicit_facts": [],
+  "quality_heuristic_surface": [
     {
       "binary": "test_real_world_algorithms_x64_O0",
       "address": "0x140001450",
@@ -101,28 +22,6 @@
         "low_cfg_risk",
         "preview_direct_success",
         "slot_alias_candidate"
-      ]
-    },
-    {
-      "binary": "test_control_flow_x64_O0",
-      "address": "0x140001000",
-      "name": "__mingw_invalidParameterHandler",
-      "fact_density_score": 0,
-      "quality_potential_score": 2,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success"
-      ]
-    },
-    {
-      "binary": "test_control_flow_x64_O0",
-      "address": "0x140001440",
-      "name": "__gcc_deregister_frame",
-      "fact_density_score": 0,
-      "quality_potential_score": 2,
-      "reason_tags": [
-        "low_cfg_risk",
-        "preview_direct_success"
       ]
     },
     {

@@ -53,12 +53,29 @@ def preview_hint_total(entry: dict[str, Any]) -> int:
     return sum(int(value or 0) for value in stats.values())
 
 
-def candidate_passes_quality_prefilter(entry: dict[str, Any]) -> bool:
+def candidate_passes_explicit_quality_prefilter(entry: dict[str, Any]) -> bool:
     return (
-        explicit_fact_total(entry) >= 2 or preview_hint_total(entry) > 0
-    ) and bool(entry.get("preview_direct_success")) and not bool(
-        entry.get("has_indirect_control_flow")
-    ) and int(entry.get("pcode_op_count", 0) or 0) <= 800
+        explicit_fact_total(entry) >= 2
+        and bool(entry.get("preview_direct_success"))
+        and not bool(entry.get("has_indirect_control_flow"))
+        and int(entry.get("pcode_op_count", 0) or 0) <= 800
+    )
+
+
+def candidate_passes_heuristic_quality_prefilter(entry: dict[str, Any]) -> bool:
+    reason_tags = set(entry.get("reason_tags") or [])
+    return (
+        bool(entry.get("preview_direct_success"))
+        and not bool(entry.get("has_indirect_control_flow"))
+        and (
+            preview_hint_total(entry) > 0
+            or bool(
+                reason_tags.intersection(
+                    {"heuristic_pointer_alias", "heuristic_local_surface", "slot_alias_candidate"}
+                )
+            )
+        )
+    )
 
 
 def curated_quality_entry(entry: dict[str, Any]) -> dict[str, Any]:
@@ -70,4 +87,3 @@ def curated_quality_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "quality_potential_score": int(entry.get("quality_potential_score", 0) or 0),
         "reason_tags": list(entry.get("reason_tags") or []),
     }
-

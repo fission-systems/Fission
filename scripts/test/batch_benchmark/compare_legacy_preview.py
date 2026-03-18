@@ -92,7 +92,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--corpus-kind",
         default="ad_hoc",
-        help="Corpus classification label to embed into artifacts (for example: timeout_rescue, quality_surface)",
+        help="Corpus classification label to embed into artifacts (for example: timeout_rescue, quality_explicit_facts, quality_heuristic_surface)",
     )
     parser.add_argument(
         "--corpus-file",
@@ -403,6 +403,7 @@ def compare_function(
     repeat: int,
     with_ghidra: bool,
     ghidra_dir: Path,
+    corpus_kind: str,
     corpus_seed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     legacy = run_engine_repeated(
@@ -444,6 +445,7 @@ def compare_function(
     return {
         "address": f"0x{address}",
         "name": name,
+        "corpus_kind": corpus_kind,
         "corpus_seed": corpus_seed,
         "pyghidra": ghidra_entry,
         "legacy": legacy,
@@ -728,8 +730,25 @@ def summarize_results(functions: list[dict[str, Any]], with_ghidra: bool) -> dic
 
 
 def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
-    with_ghidra = any(item.get("pyghidra") is not None for item in report["functions"])
+    with_ghidra = bool(report.get("with_ghidra")) or any(
+        item.get("pyghidra") is not None for item in report["functions"]
+    )
+    corpus_kind = report.get("corpus_kind", "ad_hoc")
     title = "# 3-Way Fixed-Seed Benchmark" if with_ghidra else "# Legacy vs MLIL Preview Comparison"
+    quality_heading = "## Quality Summary"
+    quality_focus_lines: list[str] = []
+    if corpus_kind == "quality_explicit_facts":
+        quality_heading = "## Explicit-Facts Quality Summary"
+        quality_focus_lines = [
+            "- Focus: explicit function-scoped facts from DWARF/loader-derived hints",
+            "- Expectation: explicit name/type hits should dominate; heuristic-only seeds should not appear here",
+        ]
+    elif corpus_kind == "quality_heuristic_surface":
+        quality_heading = "## Heuristic-Surface Quality Summary"
+        quality_focus_lines = [
+            "- Focus: heuristic pointer/local surface wins and slot-alias-driven type carry-through",
+            "- Expectation: non-zero preview hint stats can come from heuristic and derived-origin paths even when explicit facts are sparse",
+        ]
     lines = [
         title,
         "",
@@ -788,8 +807,12 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         )
     lines.extend([
         "",
-        "## Quality Summary",
+        quality_heading,
         "",
+    ])
+    if quality_focus_lines:
+        lines.extend(quality_focus_lines + [""])
+    lines.extend([
         "| Engine | Named params | Named locals | Surfaced param types | Surfaced local types | Surfaced return type |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ])
@@ -889,6 +912,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 f"- Preview quality metrics: {item['preview'].get('quality_metrics')}",
                 f"- pyghidra quality metrics: {(item.get('pyghidra') or {}).get('quality_metrics')}",
                 f"- Preview hint stats: {item.get('preview_hint_stats')}",
+                f"- Corpus kind: {item.get('corpus_kind')}",
                 f"- Corpus seed: {item.get('corpus_seed')}",
                 f"- Pair deltas: {item['three_way_delta']}",
                 f"- Promotion stats: candidates={item.get('promotion_candidate_count', 0)}, promoted={item.get('promoted_region_count', 0)}, rejected_shape={item.get('promotion_rejected_by_shape_count', 0)}, rejected_gate={item.get('promotion_rejected_by_gate_count', 0)}, seen_guarded_tail_like={item.get('discovery_seen_guarded_tail_like_shape_count', 0)}, rejected_noncanonical={item.get('discovery_rejected_noncanonical_layout_count', 0)}, canonicalized={item.get('canonicalized_guarded_tail_shape_count', 0)}, canonicalized_interleaved={item.get('canonicalized_interleaved_join_use_count', 0)}, canonicalized_local_nonfallthrough={item.get('canonicalized_local_nonfallthrough_alias_count', 0)}, failed_multi_payload={item.get('canonicalization_failed_multiple_payload_entries', 0)}, failed_interleaved_join={item.get('canonicalization_failed_interleaved_join_uses', 0)}, failed_alias_not_fallthrough={item.get('canonicalization_failed_alias_not_fallthrough_count', 0)}, failed_alias_multi_pred={item.get('canonicalization_failed_alias_has_multiple_internal_predecessors_count', 0)}, failed_alias_nonlocal_ref={item.get('canonicalization_failed_alias_has_nonlocal_ref_count', 0)}, failed_alias_body_not_trivial={item.get('canonicalization_failed_alias_body_not_trivial_count', 0)}, failed_join_has_external_ref={item.get('canonicalization_failed_join_has_external_ref_count', 0)}, failed_payload_crosses_join={item.get('canonicalization_failed_payload_crosses_join_count', 0)}, failed_nonterminal_join={item.get('canonicalization_failed_nonterminal_join_label', 0)}, failed_nested_escape={item.get('canonicalization_failed_nested_tail_escape', 0)}, must_emit={item.get('rejected_must_emit_label', 0)}, not_single_pred_succ={item.get('rejected_not_single_pred_succ', 0)}, external_entry={item.get('rejected_external_entry', 0)}, loop_or_switch={item.get('rejected_loop_or_switch_target', 0)}",
@@ -925,10 +949,8 @@ def main() -> int:
         raise SystemExit("--repeat must be >= 1")
 
     addresses, corpus_metadata = resolve_addresses(args, binary_name)
-    if not addresses:
-        raise SystemExit("No function addresses selected; use --addresses or --from-summary/--top-offenders")
     struct_ptr_aliases = load_struct_pointer_aliases(BASE_TYPES_JSON)
-    names = resolve_names(binary_path, args.fission_bin, addresses, args.list_timeout)
+    names = resolve_names(binary_path, args.fission_bin, addresses, args.list_timeout) if addresses else {}
 
     results: list[dict[str, Any]] = []
     for normalized in addresses:
@@ -945,6 +967,7 @@ def main() -> int:
             args.repeat,
             args.with_ghidra,
             args.ghidra_dir,
+            args.corpus_kind,
             corpus_metadata.get(normalized),
         )
         results.append(result)
@@ -953,6 +976,7 @@ def main() -> int:
         "binary": str(binary_path),
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "repeat": args.repeat,
+        "with_ghidra": args.with_ghidra,
         "corpus_kind": args.corpus_kind,
         "cache_mode": "warm",
         "functions": results,

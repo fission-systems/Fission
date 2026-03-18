@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 from grand_finale_support.corpus_candidates import (
-    candidate_passes_quality_prefilter,
+    candidate_passes_explicit_quality_prefilter,
+    candidate_passes_heuristic_quality_prefilter,
     curated_quality_entry,
     preview_hint_total,
     run_candidate_inventory,
@@ -29,10 +30,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-limit", type=int)
     parser.add_argument("--per-binary-limit", type=int, default=4)
     parser.add_argument(
-        "--manual-seed",
+        "--manual-explicit-seed",
         action="append",
         default=[],
-        help="Extra binary@0xaddr seeds to force-inventory and consider",
+        help="Extra binary@0xaddr seeds to force-inventory into the explicit-facts pool",
+    )
+    parser.add_argument(
+        "--manual-heuristic-seed",
+        action="append",
+        default=[],
+        help="Extra binary@0xaddr seeds to force-inventory into the heuristic-surface pool",
     )
     return parser.parse_args()
 
@@ -70,7 +77,8 @@ def main() -> int:
         raise SystemExit(f"Fission binary not found: {args.fission_bin}")
 
     all_candidates: list[dict] = []
-    curated_entries: list[dict] = []
+    curated_explicit_entries: list[dict] = []
+    curated_heuristic_entries: list[dict] = []
 
     binary_paths = [Path(item).resolve() for item in args.binaries]
     for binary_path in binary_paths:
@@ -83,32 +91,24 @@ def main() -> int:
         )
         candidates = report.get("candidates", [])
         all_candidates.extend(candidates)
-        primary = sorted(
-            [entry for entry in candidates if candidate_passes_quality_prefilter(entry)],
+        explicit_primary = sorted(
+            [entry for entry in candidates if candidate_passes_explicit_quality_prefilter(entry)],
             key=candidate_sort_key,
             reverse=True,
         )
-        selected = primary[: args.per_binary_limit]
-        if len(selected) < args.per_binary_limit:
-            selected_keys = {(entry["binary"], entry["address"]) for entry in selected}
-            fallback = sorted(
-                [
-                    entry
-                    for entry in candidates
-                    if bool(entry.get("preview_direct_success"))
-                    and not bool(entry.get("has_indirect_control_flow"))
-                    and (entry["binary"], entry["address"]) not in selected_keys
-                ],
-                key=candidate_sort_key,
-                reverse=True,
-            )
-            for entry in fallback:
-                selected.append(entry)
-                if len(selected) >= args.per_binary_limit:
-                    break
-        curated_entries.extend(curated_quality_entry(entry) for entry in selected)
+        curated_explicit_entries.extend(
+            curated_quality_entry(entry) for entry in explicit_primary[: args.per_binary_limit]
+        )
 
-    for seed in args.manual_seed:
+        heuristic_primary = sorted(
+            [entry for entry in candidates if candidate_passes_heuristic_quality_prefilter(entry)],
+            key=candidate_sort_key,
+            reverse=True,
+        )
+        selected = heuristic_primary[: args.per_binary_limit]
+        curated_heuristic_entries.extend(curated_quality_entry(entry) for entry in selected)
+
+    for seed in args.manual_explicit_seed:
         binary_str, address = parse_manual_seed(seed)
         binary_path = Path(binary_str).resolve()
         report = run_candidate_inventory(
@@ -120,23 +120,46 @@ def main() -> int:
         )
         candidates = report.get("candidates", [])
         all_candidates.extend(candidates)
-        curated_entries.extend(curated_quality_entry(entry) for entry in candidates)
+        curated_explicit_entries.extend(curated_quality_entry(entry) for entry in candidates)
 
-    deduped_curated: list[dict] = []
-    seen = set()
-    for entry in curated_entries:
-        key = (entry["binary"], entry["address"])
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped_curated.append(entry)
+    for seed in args.manual_heuristic_seed:
+        binary_str, address = parse_manual_seed(seed)
+        binary_path = Path(binary_str).resolve()
+        report = run_candidate_inventory(
+            ROOT_DIR,
+            binary_path,
+            args.fission_bin,
+            timeout_ms=args.timeout_ms,
+            address=address,
+        )
+        candidates = report.get("candidates", [])
+        all_candidates.extend(candidates)
+        curated_heuristic_entries.extend(curated_quality_entry(entry) for entry in candidates)
+
+    def dedupe(entries: list[dict]) -> list[dict]:
+        deduped: list[dict] = []
+        seen = set()
+        for entry in entries:
+            key = (entry["binary"], entry["address"])
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(entry)
+        return deduped
+
+    deduped_explicit = dedupe(curated_explicit_entries)
+    explicit_keys = {(entry["binary"], entry["address"]) for entry in deduped_explicit}
+    deduped_heuristic = [
+        entry for entry in dedupe(curated_heuristic_entries) if (entry["binary"], entry["address"]) not in explicit_keys
+    ]
 
     args.candidates_file.parent.mkdir(parents=True, exist_ok=True)
     args.candidates_file.write_text(json.dumps({"candidates": all_candidates}, indent=2))
 
     curated_corpus = {
         "timeout_rescue": load_timeout_rescue(args.corpus_file),
-        "quality_surface": deduped_curated,
+        "quality_explicit_facts": deduped_explicit,
+        "quality_heuristic_surface": deduped_heuristic,
     }
     args.corpus_file.write_text(json.dumps(curated_corpus, indent=2))
     print(f"[+] Wrote candidates JSON to {args.candidates_file}")
