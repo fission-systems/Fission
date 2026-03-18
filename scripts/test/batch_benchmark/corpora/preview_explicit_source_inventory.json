@@ -121,6 +121,106 @@
       "has_loader_types": false,
       "priority": "medium",
       "notes": "PDB sidecar exists, but current FactStore/inventory path did not surface explicit function-scoped facts."
+    },
+    {
+      "binary": "fauxware.exe",
+      "path": "/Users/sjkim1127/Fission/samples/other/binaries-master/tests/x86_64/windows/fauxware.exe",
+      "toolchain": "msvc",
+      "debug_info_kind": "pdb",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "priority": "medium",
+      "notes": "Has a local fauxware.pdb sidecar, but current preview candidate inventory found zero explicit-facts functions under the strict scan."
+    },
+    {
+      "binary": "fauxware-wide.exe",
+      "path": "/Users/sjkim1127/Fission/samples/other/binaries-master/tests/x86_64/windows/fauxware-wide.exe",
+      "toolchain": "msvc",
+      "debug_info_kind": "unknown",
+      "has_debug_info_like_data": false,
+      "has_loader_types": false,
+      "priority": "low",
+      "notes": "Expanded x64 source-pool candidate from samples/other. Strict inventory scan produced zero explicit-facts functions."
+    },
+    {
+      "binary": "msvc_cfg_0_debug.exe",
+      "path": "/Users/sjkim1127/Fission/samples/other/binaries-master/tests/x86_64/windows/msvc_cfg_0_debug.exe",
+      "toolchain": "msvc",
+      "debug_info_kind": "unknown",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "priority": "medium",
+      "notes": "Debug-flavored x64 PE from samples/other. Current explicit scan still yielded zero strict explicit candidates."
+    },
+    {
+      "binary": "GetProcAddress.exe",
+      "path": "/Users/sjkim1127/Fission/samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe",
+      "toolchain": "unknown",
+      "debug_info_kind": "unknown",
+      "has_debug_info_like_data": false,
+      "has_loader_types": true,
+      "priority": "medium",
+      "notes": "Inventory scan timed out before producing candidate data. Keep as a medium-priority rescan target rather than promoting it into explicit corpus logic."
+    },
+    {
+      "binary": "BitBlaster.exe",
+      "path": "/Users/sjkim1127/Fission/samples/other/binaries-master/tests/x86_64/BitBlaster.exe",
+      "toolchain": "unknown",
+      "debug_info_kind": "unknown",
+      "has_debug_info_like_data": false,
+      "has_loader_types": false,
+      "priority": "medium",
+      "notes": "Preview candidate inventory timed out. This is a rescan candidate, not evidence of explicit-facts success."
+    },
+    {
+      "binary": "vcruntime_test.exe",
+      "path": "/Users/sjkim1127/Fission/samples/other/binaries-master/tests/x86_64/decompiler/vcruntime_test.exe",
+      "toolchain": "unknown",
+      "debug_info_kind": "unknown",
+      "has_debug_info_like_data": false,
+      "has_loader_types": false,
+      "priority": "low",
+      "notes": "Decompiler fixture from samples/other. Strict inventory scan found zero explicit-facts candidates."
+    },
+    {
+      "binary": "SimpleTest.exe",
+      "path": "/Users/sjkim1127/Fission/vendor/llvm-project-main/llvm/unittests/DebugInfo/PDB/Inputs/SimpleTest.exe",
+      "toolchain": "msvc/llvm-pdb",
+      "debug_info_kind": "pdb",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "priority": "medium",
+      "notes": "Adjacent to SimpleTest.pdb and worth scanning, but current strict inventory still found zero explicit-facts candidates."
+    },
+    {
+      "binary": "test-columns.exe",
+      "path": "/Users/sjkim1127/Fission/vendor/llvm-project-main/llvm/test/tools/llvm-symbolizer/pdb/Inputs/test-columns.exe",
+      "toolchain": "msvc/llvm-pdb",
+      "debug_info_kind": "pdb",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "priority": "medium",
+      "notes": "PDB-backed LLVM symbolizer input. Current scan produced zero explicit-facts candidates under strict filtering."
+    },
+    {
+      "binary": "test-pdb-types.exe",
+      "path": "/Users/sjkim1127/Fission/vendor/llvm-project-main/lldb/unittests/SymbolFile/PDB/Inputs/test-pdb-types.exe",
+      "toolchain": "msvc/llvm-pdb",
+      "debug_info_kind": "pdb",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "priority": "medium",
+      "notes": "PDB/type-focused LLDB input. Current strict scan produced zero explicit-facts candidates."
+    },
+    {
+      "binary": "has_pdb.exe",
+      "path": "/Users/sjkim1127/Fission/vendor/llvm-project-main/llvm/test/tools/llvm-readobj/COFF/Inputs/has_pdb.exe",
+      "toolchain": "msvc/llvm-pdb",
+      "debug_info_kind": "pdb",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "priority": "medium",
+      "notes": "COFF/PDB test input. Candidate inventory timed out, so it remains a source-expansion lead rather than an explicit seed."
     }
   ]
 }

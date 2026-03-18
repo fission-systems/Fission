@@ -9,6 +9,57 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-18
 
+### P4.8 / P4.8.2 - Explicit-Facts PE Source Expansion
+
+This round focused on finding PE samples that can actually exercise the new explicit preview hint paths without weakening the meaning of the strict explicit corpus.
+
+The main result was diagnostic rather than cosmetic:
+
+- the strict `quality_explicit_facts` corpus remains intentionally empty,
+- blocked explicit candidates are now tracked separately,
+- and the remaining bottleneck is clearly sample scarcity plus lack of direct-preview overlap, not corpus/refinement logic.
+
+#### Added
+
+- explicit source inventory metadata
+  - expanded the PE candidate pool with LLVM, `samples/other`, and other debug-info-rich Windows binaries
+  - recorded per-source metadata including:
+    - `toolchain`
+    - `debug_info_kind`
+    - `has_loader_types`
+    - `priority`
+    - `notes`
+- blocked explicit candidate tracking
+  - added a dedicated blocked-candidate artifact instead of weakening the strict explicit corpus
+
+#### Changed
+
+- explicit corpus discipline
+  - kept `quality_explicit_facts` strict rather than filling it with provisional fallback seeds
+  - continued to require:
+    - `explicit_fact_total >= 2`
+    - `preview_direct_success == true`
+    - `has_indirect_control_flow == false`
+    - `pcode_op_count <= 800`
+- blocked-candidate reporting
+  - normalized blocked explicit candidates under the current taxonomy
+  - preserved raw fallback information where the engine still reports only coarse `preview_unsupported` results
+  - added summary counts for:
+    - blocked-reason distribution
+    - newly scanned zero-explicit sources
+    - newly scanned timeout sources
+
+#### Current State
+
+- strict explicit corpus: still empty by design
+- blocked explicit candidates:
+  - `main-debug.exe`
+  - `addr.exe`
+- dominant blocked reason:
+  - `preview_non_success_unknown`
+
+This means the benchmark/reporting pipeline is no longer the limiting factor. The next step is better fact-rich PE source acquisition, not provisional promotion of blocked seeds.
+
 ### v104 - 3-Way Benchmark Expansion (`pyghidra` vs `legacy` vs `preview`)
 
 This round expanded the public benchmarking story from two separate comparisons into a consistent 3-way model:

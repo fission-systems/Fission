@@ -43,11 +43,41 @@
   "scan_summary": {
     "strict_explicit_corpus_population_succeeded": false,
     "quality_explicit_facts_still_empty": true,
+    "block_reason_counts": {
+      "preview_non_success_unknown": 2
+    },
+    "source_expansion_summary": {
+      "new_zero_explicit_sources": [
+        "fauxware.exe",
+        "fauxware-wide.exe",
+        "msvc_cfg_0_debug.exe",
+        "TLS.exe",
+        "not_packed_pe64.exe",
+        "simple_crackme_x64.exe",
+        "control_flow_guard_test.exe",
+        "vcstdlib_test.exe",
+        "vcruntime_test.exe",
+        "fastfail.exe",
+        "ipnathlp.dll",
+        "msvcr120.dll",
+        "test_rol.exe",
+        "SimpleTest.exe",
+        "test-columns.exe",
+        "test-pdb-types.exe",
+        "main.exe"
+      ],
+      "new_timeout_sources": [
+        "GetProcAddress.exe",
+        "BitBlaster.exe",
+        "has_pdb.exe"
+      ]
+    },
     "notes": [
       "Current explicit-facts bottleneck is sample scarcity, not corpus split logic.",
       "LLVM test PE binaries produced a small number of explicit candidates, but none satisfied direct-preview success.",
       "Observed blocked candidates currently normalize to preview_non_success_unknown because the raw fallback kind is only preview_unsupported and does not yet identify a narrower engine stage.",
-      "Current heuristic corpus remains valid and separated; explicit corpus needs additional PE sources rather than provisional blocked-seed promotion."
+      "Current heuristic corpus remains valid and separated; explicit corpus needs additional PE sources rather than provisional blocked-seed promotion.",
+      "Recent source expansion across samples/other and additional LLVM PDB-backed test inputs widened the search pool, but did not yet produce a strict explicit direct-preview seed."
     ]
   }
 }
