@@ -1,7 +1,10 @@
 use super::*;
 
-pub(super) fn apply_preview_type_hints(func: &mut HirFunction, context: &PreviewTypeContext) {
-    apply_function_name_hints(func, context);
+pub(super) fn apply_preview_type_hints(
+    func: &mut HirFunction,
+    context: &PreviewTypeContext,
+) -> PreviewHintStats {
+    let mut stats = apply_function_name_hints(func, context);
 
     let mut pointer_hints: HashMap<String, PreviewCallParamRule> = HashMap::new();
     collect_call_type_hints(&func.body, context, &mut pointer_hints);
@@ -12,6 +15,7 @@ pub(super) fn apply_preview_type_hints(func: &mut HirFunction, context: &Preview
             && binding_byte_size(&binding.ty) == Some(hint.pointer_size)
         {
             binding.surface_type_name = Some(hint.pointer_alias.clone());
+            stats.heuristic_pointer_alias_hits += 1;
         }
     }
 
@@ -25,13 +29,20 @@ pub(super) fn apply_preview_type_hints(func: &mut HirFunction, context: &Preview
             && binding.surface_type_name.is_none()
         {
             binding.surface_type_name = Some(surface_type_name);
+            stats.heuristic_local_surface_hits += 1;
         }
     }
+
+    stats
 }
 
-fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContext) {
+fn apply_function_name_hints(
+    func: &mut HirFunction,
+    context: &PreviewTypeContext,
+) -> PreviewHintStats {
+    let mut stats = PreviewHintStats::default();
     let Some(hints) = &context.function_hints else {
-        return;
+        return stats;
     };
 
     let mut renames = Vec::new();
@@ -60,6 +71,7 @@ fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContex
         reserved_names.insert(new_name.to_string());
         renames.push((binding.name.clone(), new_name.to_string()));
         binding.name = new_name.to_string();
+        stats.explicit_param_name_hits += 1;
     }
 
     for binding in &mut func.locals {
@@ -80,6 +92,7 @@ fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContex
         reserved_names.insert(new_name.to_string());
         renames.push((binding.name.clone(), new_name.to_string()));
         binding.name = new_name.to_string();
+        stats.explicit_local_name_hits += 1;
     }
 
     if !renames.is_empty() {
@@ -96,11 +109,12 @@ fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContex
         let type_name = type_name.trim();
         if !type_name.is_empty() {
             binding.surface_type_name = Some(type_name.to_string());
+            stats.explicit_param_type_hits += 1;
         }
     }
 
     for binding in &mut func.locals {
-        let Some(offset) = stack_origin_offset(binding.origin) else {
+        let Some((offset, is_derived)) = stack_origin_offset(binding.origin) else {
             continue;
         };
         let Some(type_name) = hints.stack_local_type_names.get(&offset) else {
@@ -109,6 +123,10 @@ fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContex
         let type_name = type_name.trim();
         if !type_name.is_empty() {
             binding.surface_type_name = Some(type_name.to_string());
+            stats.explicit_local_type_hits += 1;
+            if is_derived {
+                stats.derived_origin_type_hits += 1;
+            }
         }
     }
 
@@ -119,13 +137,16 @@ fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContex
         .filter(|name| !name.is_empty())
     {
         func.surface_return_type_name = Some(return_type_name.to_string());
+        stats.explicit_return_type_hit += 1;
     }
+
+    stats
 }
 
-fn stack_origin_offset(origin: Option<NirBindingOrigin>) -> Option<i64> {
+fn stack_origin_offset(origin: Option<NirBindingOrigin>) -> Option<(i64, bool)> {
     match origin {
-        Some(NirBindingOrigin::StackOffset(offset))
-        | Some(NirBindingOrigin::DerivedFromStackOffset(offset)) => Some(offset),
+        Some(NirBindingOrigin::StackOffset(offset)) => Some((offset, false)),
+        Some(NirBindingOrigin::DerivedFromStackOffset(offset)) => Some((offset, true)),
         _ => None,
     }
 }

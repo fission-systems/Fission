@@ -291,3 +291,85 @@ fn preview_type_hints_explicit_function_types_override_heuristic_aliases() {
         Some("MY_RECT_PTR")
     );
 }
+
+#[test]
+fn preview_type_hints_collect_hint_stats() {
+    let mut func = HirFunction {
+        name: "FUN_0x140001000".to_string(),
+        params: vec![
+            NirBinding {
+                name: "param_1".to_string(),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            },
+            NirBinding {
+                name: "param_2".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        locals: vec![
+            NirBinding {
+                name: "local_20".to_string(),
+                ty: NirType::Aggregate { size: 16 },
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(-0x20)),
+                initializer: None,
+            },
+            NirBinding {
+                name: "slot_20".to_string(),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::DerivedFromStackOffset(-0x20)),
+                initializer: None,
+            },
+        ],
+        return_type: NirType::Unknown,
+        surface_return_type_name: None,
+        body: vec![HirStmt::Expr(HirExpr::Call {
+            target: "GetClientRect".to_string(),
+            args: vec![
+                HirExpr::Var("param_1".to_string()),
+                HirExpr::Var("param_2".to_string()),
+            ],
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        })],
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context.call_param_rules.push(PreviewCallParamRule {
+        callee_name: "GetClientRect".to_string(),
+        arg_index: 1,
+        pointer_alias: "LPRECT".to_string(),
+        pointee_alias: "RECT".to_string(),
+        pointer_size: 8,
+        pointee_sizes: vec![16],
+    });
+    context.function_hints = Some(PreviewFunctionHints {
+        param_names: vec!["hwnd".to_string()],
+        param_type_names: HashMap::from([(0, "HWND".to_string())]),
+        stack_local_names: HashMap::from([(-0x20, "rect".to_string())]),
+        stack_local_type_names: HashMap::from([(-0x20, "RECT".to_string())]),
+        return_type_name: Some("BOOL".to_string()),
+    });
+
+    let stats = apply_preview_type_hints(&mut func, &context);
+
+    assert_eq!(stats.explicit_param_name_hits, 1);
+    assert_eq!(stats.explicit_local_name_hits, 1);
+    assert_eq!(stats.explicit_param_type_hits, 1);
+    assert_eq!(stats.explicit_local_type_hits, 2);
+    assert_eq!(stats.explicit_return_type_hit, 1);
+    assert_eq!(stats.heuristic_pointer_alias_hits, 1);
+    assert_eq!(stats.derived_origin_type_hits, 1);
+}

@@ -9,8 +9,11 @@ mod stack_slots;
 mod terminator;
 mod type_hints;
 
-pub(super) fn apply_preview_type_hints(func: &mut HirFunction, context: &PreviewTypeContext) {
-    type_hints::apply_preview_type_hints(func, context);
+pub(super) fn apply_preview_type_hints(
+    func: &mut HirFunction,
+    context: &PreviewTypeContext,
+) -> PreviewHintStats {
+    type_hints::apply_preview_type_hints(func, context)
 }
 
 #[cfg(test)]

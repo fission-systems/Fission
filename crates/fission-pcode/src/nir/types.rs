@@ -243,6 +243,18 @@ pub struct PreviewTypeContext {
     pub function_hints: Option<PreviewFunctionHints>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PreviewHintStats {
+    pub explicit_param_name_hits: usize,
+    pub explicit_local_name_hits: usize,
+    pub explicit_param_type_hits: usize,
+    pub explicit_local_type_hits: usize,
+    pub explicit_return_type_hit: usize,
+    pub heuristic_pointer_alias_hits: usize,
+    pub heuristic_local_surface_hits: usize,
+    pub derived_origin_type_hits: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PreviewCallParamRule {
     pub callee_name: String,

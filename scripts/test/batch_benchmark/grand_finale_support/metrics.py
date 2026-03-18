@@ -122,6 +122,140 @@ def collect_type_preservation_metrics(code: str, struct_ptr_aliases: dict[str, s
     return dict(hits)
 
 
+GENERIC_LOCAL_PREFIXES = ("local_", "slot_", "uVar", "iVar", "puVar", "bVar", "cVar", "auVar", "temp_")
+RAW_TYPE_NAMES = {
+    "undefined",
+    "int",
+    "uint",
+    "short",
+    "ushort",
+    "char",
+    "uchar",
+    "longlong",
+    "ulonglong",
+    "float",
+    "double",
+}
+
+
+def _is_generic_function_name(name: str) -> bool:
+    return name.startswith("FUN_") or name.startswith("sub_")
+
+
+def _is_generic_param_name(name: str) -> bool:
+    return name.startswith("param_")
+
+
+def _is_generic_local_name(name: str) -> bool:
+    return any(name.startswith(prefix) for prefix in GENERIC_LOCAL_PREFIXES)
+
+
+def _is_raw_surface_type(type_name: str) -> bool:
+    normalized = type_name.strip()
+    if not normalized:
+        return True
+    if normalized in RAW_TYPE_NAMES:
+        return True
+    if re.fullmatch(r"fission_agg\d+", normalized):
+        return True
+    return False
+
+
+def _split_type_and_name(fragment: str) -> tuple[str, str] | None:
+    fragment = fragment.strip()
+    if not fragment or fragment == "void":
+        return None
+    match = re.match(r"(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)$", fragment)
+    if not match:
+        return None
+    type_name = match.group(1).strip()
+    name = match.group(2).strip()
+    return type_name, name
+
+
+def collect_quality_metrics(code: str) -> dict[str, Any]:
+    signature_match = re.search(
+        r"^\s*(?P<ret>[A-Za-z_][A-Za-z0-9_\s\*]*?)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\((?P<params>[^)]*)\)",
+        code,
+        flags=re.MULTILINE,
+    )
+    function_name = signature_match.group("name") if signature_match else ""
+    return_type = signature_match.group("ret").strip() if signature_match else ""
+    params_blob = signature_match.group("params") if signature_match else ""
+
+    named_param_count = 0
+    generic_param_name_count = 0
+    surfaced_param_type_count = 0
+    for param in [part.strip() for part in params_blob.split(",") if part.strip()]:
+        parsed = _split_type_and_name(param)
+        if parsed is None:
+            continue
+        type_name, name = parsed
+        if _is_generic_param_name(name):
+            generic_param_name_count += 1
+        else:
+            named_param_count += 1
+        if not _is_raw_surface_type(type_name):
+            surfaced_param_type_count += 1
+
+    named_local_count = 0
+    generic_local_name_count = 0
+    surfaced_local_type_count = 0
+    slot_alias_count = 0
+    for line in code.splitlines():
+        stripped = line.strip()
+        if not stripped or "(" in stripped:
+            continue
+        if stripped.startswith(("if ", "while ", "for ", "switch ", "return ", "goto ", "case ", "default:", "break;", "continue;", "}")):
+            continue
+        if not stripped.endswith(";"):
+            continue
+        decl = stripped[:-1]
+        decl = decl.split("=", 1)[0].rstrip()
+        parsed = _split_type_and_name(decl)
+        if parsed is None:
+            continue
+        type_name, name = parsed
+        if _is_generic_local_name(name):
+            generic_local_name_count += 1
+        else:
+            named_local_count += 1
+        if name.startswith("slot_"):
+            slot_alias_count += 1
+        if not _is_raw_surface_type(type_name):
+            surfaced_local_type_count += 1
+
+    return {
+        "label_count": count_regex(r"^\s*[A-Za-z_]\w*:\s*$", code),
+        "named_param_count": named_param_count,
+        "named_local_count": named_local_count,
+        "surfaced_param_type_count": surfaced_param_type_count,
+        "surfaced_local_type_count": surfaced_local_type_count,
+        "surfaced_return_type_present": bool(return_type) and not _is_raw_surface_type(return_type),
+        "slot_alias_count": slot_alias_count,
+        "function_name_is_generic": _is_generic_function_name(function_name),
+        "param_name_generic_count": generic_param_name_count,
+        "local_name_generic_count": generic_local_name_count,
+    }
+
+
+def extract_quality_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "goto_count",
+        "label_count",
+        "named_param_count",
+        "named_local_count",
+        "surfaced_param_type_count",
+        "surfaced_local_type_count",
+        "surfaced_return_type_present",
+        "slot_alias_count",
+        "function_name_is_generic",
+        "param_name_generic_count",
+        "local_name_generic_count",
+    )
+    return {key: metrics.get(key) for key in keys}
+
+
 def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[str, Any]:
     must_emit_labels = set(
         re.findall(r"\bgoto\s+([A-Za-z_]\w*)\s*;", code, flags=re.MULTILINE)
@@ -203,6 +337,7 @@ def collect_code_metrics(code: str, struct_ptr_aliases: dict[str, str]) -> dict[
         int(metrics["residue_families"].get(key, 0))
         for key in ("uVar", "iVar", "xVar", "bVar", "uStack", "xStack", "axStack")
     )
+    metrics.update(collect_quality_metrics(code))
     return metrics
 
 

@@ -13,6 +13,7 @@ fn main() -> io::Result<()> {
             success: false,
             code: None,
             build_stats: None,
+            hint_stats: None,
             error: Some(format!("preview worker request parse failed: {err}")),
         },
     };

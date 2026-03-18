@@ -18,6 +18,7 @@ use self::{builder::*, cfg::*, normalize::*, printer::*, structuring::*};
 
 thread_local! {
     static LAST_PREVIEW_BUILD_STATS: RefCell<Option<PreviewBuildStats>> = const { RefCell::new(None) };
+    static LAST_PREVIEW_HINT_STATS: RefCell<Option<PreviewHintStats>> = const { RefCell::new(None) };
 }
 
 const UNIQUE_SPACE_ID: u64 = 3;
@@ -206,6 +207,9 @@ pub fn render_mlil_preview_with_context(
     LAST_PREVIEW_BUILD_STATS.with(|slot| {
         *slot.borrow_mut() = None;
     });
+    LAST_PREVIEW_HINT_STATS.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
     let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
     let debug_log = |stage: &str| {
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
@@ -330,7 +334,10 @@ pub fn render_mlil_preview_with_context(
         }
         debug_log("type_hints_start");
         let type_hints_start = Instant::now();
-        apply_preview_type_hints(&mut hir, context);
+        let hint_stats = apply_preview_type_hints(&mut hir, context);
+        LAST_PREVIEW_HINT_STATS.with(|slot| {
+            *slot.borrow_mut() = Some(hint_stats);
+        });
         if diag {
             eprintln!(
                 "[DIAG] type_hints done: fn=0x{address:x} elapsed={:.3}s",
@@ -360,6 +367,10 @@ pub fn render_mlil_preview_with_context(
 
 pub fn take_last_preview_build_stats() -> Option<PreviewBuildStats> {
     LAST_PREVIEW_BUILD_STATS.with(|slot| slot.borrow_mut().take())
+}
+
+pub fn take_last_preview_hint_stats() -> Option<PreviewHintStats> {
+    LAST_PREVIEW_HINT_STATS.with(|slot| slot.borrow_mut().take())
 }
 
 fn is_comparison(opcode: PcodeOpcode) -> bool {

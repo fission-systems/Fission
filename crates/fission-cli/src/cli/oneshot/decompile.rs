@@ -8,7 +8,7 @@ use crate::cli::output::OutputSilencer;
 use fission_core::FissionError;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_pcode::PreviewBuildStats;
+use fission_pcode::{PreviewBuildStats, PreviewHintStats};
 use fission_static::analysis::decomp::postprocess::PostProcessor;
 use fission_static::analysis::decomp::{
     FactStore, PrepareOptions, PrepareTimings, PreviewEngineMode, classify_native_failure_kind,
@@ -128,6 +128,7 @@ struct RenderedCode {
     fell_back: bool,
     fallback_reason: Option<String>,
     preview_build_stats: Option<PreviewBuildStats>,
+    preview_hint_stats: Option<PreviewHintStats>,
 }
 
 fn render_legacy_code(
@@ -169,6 +170,7 @@ fn legacy_rendered_code(
         fell_back: false,
         fallback_reason: None,
         preview_build_stats: None,
+        preview_hint_stats: None,
     }
 }
 
@@ -207,6 +209,7 @@ fn decompile_code_with_profile(
             fell_back: false,
             fallback_reason: None,
             preview_build_stats: preview.build_stats,
+            preview_hint_stats: preview.hint_stats,
         });
     }
 
@@ -247,6 +250,7 @@ fn decompile_code_with_profile(
                             fell_back: true,
                             fallback_reason: selection.fallback_reason,
                             preview_build_stats: selection.build_stats,
+                            preview_hint_stats: selection.hint_stats,
                         });
                     }
                 }
@@ -257,6 +261,7 @@ fn decompile_code_with_profile(
     let mut rendered = legacy_rendered_code(address, binary, &mut fact_store, result);
     rendered.fell_back = preview.fell_back;
     rendered.fallback_reason = preview.fallback_reason;
+    rendered.preview_hint_stats = preview.hint_stats;
     Ok(rendered)
 }
 
@@ -317,6 +322,9 @@ fn run_sequential_decompilation<'a>(
                     });
                     if let Some(stats) = rendered.preview_build_stats {
                         entry["preview_build_stats"] = serde_json::json!(stats);
+                    }
+                    if let Some(stats) = rendered.preview_hint_stats {
+                        entry["preview_hint_stats"] = serde_json::json!(stats);
                     }
                     if cli.benchmark {
                         entry["decomp_sec"] =
@@ -491,6 +499,7 @@ fn run_parallel_decompilation<'a>(
                                     &error_text,
                                 )),
                                 preview_build_stats: None,
+                                preview_hint_stats: None,
                             }),
                             0.0,
                         )
@@ -584,6 +593,7 @@ fn run_parallel_decompilation<'a>(
                                         &error_text,
                                     )),
                                     preview_build_stats: None,
+                                    preview_hint_stats: None,
                                 }),
                                 0.0,
                             )
@@ -645,6 +655,9 @@ fn run_parallel_decompilation<'a>(
                     });
                     if let Some(stats) = rendered.preview_build_stats {
                         json_entry["preview_build_stats"] = serde_json::json!(stats);
+                    }
+                    if let Some(stats) = rendered.preview_hint_stats {
+                        json_entry["preview_hint_stats"] = serde_json::json!(stats);
                     }
                     if cli.benchmark {
                         json_entry["decomp_sec"] = serde_json::json!(
@@ -1013,6 +1026,7 @@ pub(super) fn decompile_and_output(
                     "fell_back": rendered.fell_back,
                     "fallback_reason": rendered.fallback_reason,
                     "preview_build_stats": rendered.preview_build_stats,
+                    "preview_hint_stats": rendered.preview_hint_stats,
                 }))
                 .map_err(|e| {
                     io::Error::new(

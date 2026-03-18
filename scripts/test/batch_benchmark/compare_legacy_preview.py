@@ -13,6 +13,7 @@ from grand_finale_support.metrics import (
     collect_code_metrics,
     compute_residue_score,
     compute_timing_stats,
+    extract_quality_metrics,
     load_struct_pointer_aliases,
     normalize_address,
 )
@@ -28,6 +29,7 @@ DEFAULT_OUTPUT_DIR = ROOT_DIR / "artifacts" / "compare_legacy_preview"
 DEFAULT_GHIDRA_DIR = ROOT_DIR / "vendor" / "ghidra" / "ghidra_11.4.2_PUBLIC"
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
+DEFAULT_CORPUS_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_quality_corpus.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -88,6 +90,17 @@ def parse_args() -> argparse.Namespace:
         help="Repeat each engine N times to collect timing statistics",
     )
     parser.add_argument(
+        "--corpus-kind",
+        default="ad_hoc",
+        help="Corpus classification label to embed into artifacts (for example: timeout_rescue, quality_surface)",
+    )
+    parser.add_argument(
+        "--corpus-file",
+        type=Path,
+        default=DEFAULT_CORPUS_FILE,
+        help="Optional corpus seed file. When present, addresses for the target binary are loaded from the selected corpus kind.",
+    )
+    parser.add_argument(
         "--list-timeout",
         type=int,
         default=15,
@@ -120,8 +133,18 @@ def load_summary_addresses(summary_path: Path, binary_name: str, top_offenders: 
     return selected
 
 
+def load_corpus_addresses(corpus_path: Path, corpus_kind: str, binary_name: str) -> list[str]:
+    if not corpus_path.exists():
+        return []
+    data = json.loads(corpus_path.read_text())
+    corpus = data.get(corpus_kind, {})
+    addresses = corpus.get(binary_name, [])
+    return [normalize_address(addr) for addr in addresses]
+
+
 def resolve_addresses(args: argparse.Namespace, binary_name: str) -> list[str]:
     addresses = [normalize_address(addr) for addr in args.addresses]
+    addresses.extend(load_corpus_addresses(args.corpus_file, args.corpus_kind, binary_name))
     if args.from_summary:
         addresses.extend(normalize_address(addr) for addr in load_summary_addresses(args.from_summary, binary_name, args.top_offenders))
     deduped: list[str] = []
@@ -198,6 +221,7 @@ def compare_pair(left: dict[str, Any] | None, right: dict[str, Any] | None) -> d
 def summarize_engine_result(label: str, result: dict[str, Any] | None) -> dict[str, Any]:
     result = result or {}
     metrics = result.get("metrics", {})
+    quality_metrics = result.get("quality_metrics") or extract_quality_metrics(metrics)
     return {
         "label": label,
         "success": bool(result.get("success")),
@@ -213,6 +237,11 @@ def summarize_engine_result(label: str, result: dict[str, Any] | None) -> dict[s
         "constant_if_count": int(metrics.get("constant_if_count", 0)),
         "residue_score": compute_residue_score(result) if result.get("success") else 0,
         "preview_surface_kind": result.get("preview_surface_kind"),
+        "named_param_count": int(quality_metrics.get("named_param_count", 0) or 0),
+        "named_local_count": int(quality_metrics.get("named_local_count", 0) or 0),
+        "surfaced_param_type_count": int(quality_metrics.get("surfaced_param_type_count", 0) or 0),
+        "surfaced_local_type_count": int(quality_metrics.get("surfaced_local_type_count", 0) or 0),
+        "surfaced_return_type_present": bool(quality_metrics.get("surfaced_return_type_present", False)),
     }
 
 
@@ -389,6 +418,7 @@ def compare_function(
         "pyghidra": ghidra_entry,
         "legacy": legacy,
         "preview": preview,
+        "preview_hint_stats": preview.get("preview_hint_stats"),
         "preview_surface_kind": classify_preview_surface(preview),
         "promotion_candidate_count": (
             (preview.get("preview_build_stats") or {}).get("promotion_candidate_count", 0)
@@ -546,9 +576,24 @@ def summarize_engine_collection(
         "empty_if_total": sum(int((row.get("metrics") or {}).get("empty_if_count", 0)) for row in success_rows),
         "constant_if_total": sum(int((row.get("metrics") or {}).get("constant_if_count", 0)) for row in success_rows),
         "residue_total": sum(compute_residue_score(row) for row in success_rows),
+        "named_param_total": sum(int((row.get("quality_metrics") or {}).get("named_param_count", 0)) for row in success_rows),
+        "named_local_total": sum(int((row.get("quality_metrics") or {}).get("named_local_count", 0)) for row in success_rows),
+        "surfaced_param_type_total": sum(int((row.get("quality_metrics") or {}).get("surfaced_param_type_count", 0)) for row in success_rows),
+        "surfaced_local_type_total": sum(int((row.get("quality_metrics") or {}).get("surfaced_local_type_count", 0)) for row in success_rows),
+        "surfaced_return_type_count": sum(1 for row in success_rows if bool((row.get("quality_metrics") or {}).get("surfaced_return_type_present", False))),
         "preview_surface_structured_count": sum(1 for item in functions if label == "preview" and item.get("preview_surface_kind") == "structured"),
         "direct_preview_success_count": sum(1 for row in rows if label == "preview" and row.get("success") and row.get("engine_used") == "mlil_preview" and not row.get("fell_back")),
         "fallback_count": sum(1 for row in rows if bool(row.get("fell_back"))),
+        "preview_hint_stats": ({
+            "explicit_param_name_hits": sum(int((row.get("preview_hint_stats") or {}).get("explicit_param_name_hits", 0)) for row in success_rows),
+            "explicit_local_name_hits": sum(int((row.get("preview_hint_stats") or {}).get("explicit_local_name_hits", 0)) for row in success_rows),
+            "explicit_param_type_hits": sum(int((row.get("preview_hint_stats") or {}).get("explicit_param_type_hits", 0)) for row in success_rows),
+            "explicit_local_type_hits": sum(int((row.get("preview_hint_stats") or {}).get("explicit_local_type_hits", 0)) for row in success_rows),
+            "explicit_return_type_hit": sum(int((row.get("preview_hint_stats") or {}).get("explicit_return_type_hit", 0)) for row in success_rows),
+            "heuristic_pointer_alias_hits": sum(int((row.get("preview_hint_stats") or {}).get("heuristic_pointer_alias_hits", 0)) for row in success_rows),
+            "heuristic_local_surface_hits": sum(int((row.get("preview_hint_stats") or {}).get("heuristic_local_surface_hits", 0)) for row in success_rows),
+            "derived_origin_type_hits": sum(int((row.get("preview_hint_stats") or {}).get("derived_origin_type_hits", 0)) for row in success_rows),
+        } if label == "preview" else None),
     }
 
 
@@ -660,6 +705,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         "",
         f"- Generated: {report['generated_at']}",
         f"- Binary: `{report['binary']}`",
+        f"- Corpus kind: `{report.get('corpus_kind', 'ad_hoc')}`",
         f"- Repeat count: {report['repeat']}",
         f"- Cache mode: `{report.get('cache_mode', 'warm')}`",
         "",
@@ -710,6 +756,33 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
             f"{entry.get('goto_total', 0)} | {entry.get('top_level_label_total', 0)} | "
             f"{entry.get('empty_if_total', 0)} | {entry.get('constant_if_total', 0)} | {entry.get('residue_total', 0)} |"
         )
+    lines.extend([
+        "",
+        "## Quality Summary",
+        "",
+        "| Engine | Named params | Named locals | Surfaced param types | Surfaced local types | Surfaced return type |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for label, entry in report["summary"].get("engines", {}).items():
+        lines.append(
+            f"| `{label}` | {entry.get('named_param_total', 0)} | {entry.get('named_local_total', 0)} | "
+            f"{entry.get('surfaced_param_type_total', 0)} | {entry.get('surfaced_local_type_total', 0)} | "
+            f"{entry.get('surfaced_return_type_count', 0)} |"
+        )
+    if preview_hint_stats := report["summary"].get("engines", {}).get("preview", {}).get("preview_hint_stats"):
+        lines.extend([
+            "",
+            "### Preview Hint Stats",
+            "",
+            f"- Explicit param name hits: {preview_hint_stats.get('explicit_param_name_hits', 0)}",
+            f"- Explicit local name hits: {preview_hint_stats.get('explicit_local_name_hits', 0)}",
+            f"- Explicit param type hits: {preview_hint_stats.get('explicit_param_type_hits', 0)}",
+            f"- Explicit local type hits: {preview_hint_stats.get('explicit_local_type_hits', 0)}",
+            f"- Explicit return type hits: {preview_hint_stats.get('explicit_return_type_hit', 0)}",
+            f"- Heuristic pointer alias hits: {preview_hint_stats.get('heuristic_pointer_alias_hits', 0)}",
+            f"- Heuristic local surface hits: {preview_hint_stats.get('heuristic_local_surface_hits', 0)}",
+            f"- Derived-origin type hits: {preview_hint_stats.get('derived_origin_type_hits', 0)}",
+        ])
     lines.extend([
         "",
         "## Pairwise Deltas",
@@ -782,6 +855,10 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 f"- Legacy timing stats: {item['legacy']['timing_stats']}",
                 f"- Preview timing stats: {item['preview']['timing_stats']}",
                 f"- pyghidra timing stats: {(item.get('pyghidra') or {}).get('timing_stats')}",
+                f"- Legacy quality metrics: {item['legacy'].get('quality_metrics')}",
+                f"- Preview quality metrics: {item['preview'].get('quality_metrics')}",
+                f"- pyghidra quality metrics: {(item.get('pyghidra') or {}).get('quality_metrics')}",
+                f"- Preview hint stats: {item.get('preview_hint_stats')}",
                 f"- Pair deltas: {item['three_way_delta']}",
                 f"- Promotion stats: candidates={item.get('promotion_candidate_count', 0)}, promoted={item.get('promoted_region_count', 0)}, rejected_shape={item.get('promotion_rejected_by_shape_count', 0)}, rejected_gate={item.get('promotion_rejected_by_gate_count', 0)}, seen_guarded_tail_like={item.get('discovery_seen_guarded_tail_like_shape_count', 0)}, rejected_noncanonical={item.get('discovery_rejected_noncanonical_layout_count', 0)}, canonicalized={item.get('canonicalized_guarded_tail_shape_count', 0)}, canonicalized_interleaved={item.get('canonicalized_interleaved_join_use_count', 0)}, canonicalized_local_nonfallthrough={item.get('canonicalized_local_nonfallthrough_alias_count', 0)}, failed_multi_payload={item.get('canonicalization_failed_multiple_payload_entries', 0)}, failed_interleaved_join={item.get('canonicalization_failed_interleaved_join_uses', 0)}, failed_alias_not_fallthrough={item.get('canonicalization_failed_alias_not_fallthrough_count', 0)}, failed_alias_multi_pred={item.get('canonicalization_failed_alias_has_multiple_internal_predecessors_count', 0)}, failed_alias_nonlocal_ref={item.get('canonicalization_failed_alias_has_nonlocal_ref_count', 0)}, failed_alias_body_not_trivial={item.get('canonicalization_failed_alias_body_not_trivial_count', 0)}, failed_join_has_external_ref={item.get('canonicalization_failed_join_has_external_ref_count', 0)}, failed_payload_crosses_join={item.get('canonicalization_failed_payload_crosses_join_count', 0)}, failed_nonterminal_join={item.get('canonicalization_failed_nonterminal_join_label', 0)}, failed_nested_escape={item.get('canonicalization_failed_nested_tail_escape', 0)}, must_emit={item.get('rejected_must_emit_label', 0)}, not_single_pred_succ={item.get('rejected_not_single_pred_succ', 0)}, external_entry={item.get('rejected_external_entry', 0)}, loop_or_switch={item.get('rejected_loop_or_switch_target', 0)}",
                 "",
@@ -844,6 +921,7 @@ def main() -> int:
         "binary": str(binary_path),
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "repeat": args.repeat,
+        "corpus_kind": args.corpus_kind,
         "cache_mode": "warm",
         "functions": results,
         "summary": summarize_results(results, with_ghidra=args.with_ghidra),

@@ -11,6 +11,7 @@ from .metrics import (
     classify_failure_kind,
     collect_code_metrics,
     detect_embedded_failure,
+    extract_quality_metrics,
     extract_fallback_kind,
     normalize_address,
 )
@@ -185,6 +186,7 @@ def run_fission_function(
         "fallback_reason": func.get("fallback_reason"),
         "fallback_kind": extract_fallback_kind(func.get("fallback_reason")),
         "preview_build_stats": func.get("preview_build_stats"),
+        "preview_hint_stats": func.get("preview_hint_stats"),
         "resources": resources,
     }
     if failure := detect_embedded_failure(code):
@@ -195,6 +197,7 @@ def run_fission_function(
             entry["fallback_counts"] = {"assembly_fallback": 1}
         return entry
     entry["metrics"] = collect_code_metrics(code, struct_ptr_aliases)
+    entry["quality_metrics"] = extract_quality_metrics(entry["metrics"])
     return entry
 
 
@@ -258,6 +261,7 @@ def run_ghidra_binary_with_meta(
                         entry["success"] = True
                         entry["code"] = code
                         entry["metrics"] = collect_code_metrics(code, struct_ptr_aliases)
+                        entry["quality_metrics"] = extract_quality_metrics(entry["metrics"])
                     else:
                         entry["failure_kind"] = "other"
                         entry["failure_detail"] = "decompile_incomplete"
