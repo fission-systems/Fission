@@ -31,6 +31,7 @@ fn normalize_hir_function_rewrites_flush_bits_to_pseudo_intrinsic() {
             }),
         }],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![HirStmt::If {
             cond: HirExpr::Binary {
                 op: HirBinaryOp::Lt,
@@ -164,6 +165,7 @@ fn normalize_hir_function_rewrites_table_driven_emit_to_intrinsic() {
             },
         ],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![
             HirStmt::Assign {
                 lhs: HirLValue::Var("accum".to_string()),
@@ -270,6 +272,7 @@ fn normalize_hir_function_rewrites_slot_based_write_bits_to_intrinsic() {
             },
         ],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![
             HirStmt::Assign {
                 lhs: HirLValue::Index {

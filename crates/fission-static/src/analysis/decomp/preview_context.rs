@@ -1,9 +1,9 @@
 use crate::analysis::decomp::FactStore;
-use fission_loader::loader::types::DwarfLocation;
 use fission_loader::loader::LoadedBinary;
+use fission_loader::loader::types::DwarfLocation;
 use fission_pcode::{PreviewCallParamRule, PreviewFunctionHints, PreviewTypeContext};
-use fission_signatures::win_types::WindowsStructures;
 use fission_signatures::WIN_API_DB;
+use fission_signatures::win_types::WindowsStructures;
 use std::collections::HashMap;
 
 pub(crate) fn build_preview_type_context(
@@ -64,12 +64,32 @@ fn build_preview_function_hints(
         .iter()
         .map(|param| param.name.trim().to_string())
         .collect::<Vec<_>>();
+    let param_type_names = dwarf
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, param)| {
+            let type_name = param.type_name.trim();
+            (!type_name.is_empty()).then(|| (index, type_name.to_string()))
+        })
+        .collect::<HashMap<_, _>>();
     let stack_local_names = dwarf
         .local_vars
         .iter()
         .filter_map(|local| match local.location {
             DwarfLocation::StackOffset(offset) if !local.name.trim().is_empty() => {
                 Some((offset, local.name.trim().to_string()))
+            }
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let stack_local_type_names = dwarf
+        .local_vars
+        .iter()
+        .filter_map(|local| match local.location {
+            DwarfLocation::StackOffset(offset) => {
+                let type_name = local.type_name.trim();
+                (!type_name.is_empty()).then(|| (offset, type_name.to_string()))
             }
             _ => None,
         })
@@ -81,12 +101,19 @@ fn build_preview_function_hints(
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned);
 
-    if param_names.is_empty() && stack_local_names.is_empty() && return_type_name.is_none() {
+    if param_names.is_empty()
+        && param_type_names.is_empty()
+        && stack_local_names.is_empty()
+        && stack_local_type_names.is_empty()
+        && return_type_name.is_none()
+    {
         None
     } else {
         Some(PreviewFunctionHints {
             param_names,
+            param_type_names,
             stack_local_names,
+            stack_local_type_names,
             return_type_name,
         })
     }

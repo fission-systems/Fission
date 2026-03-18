@@ -85,6 +85,41 @@ fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContex
     if !renames.is_empty() {
         rename_vars_in_stmts(&mut func.body, &renames);
     }
+
+    for binding in &mut func.params {
+        let Some(NirBindingOrigin::ParamIndex(index)) = binding.origin else {
+            continue;
+        };
+        let Some(type_name) = hints.param_type_names.get(&index) else {
+            continue;
+        };
+        let type_name = type_name.trim();
+        if !type_name.is_empty() {
+            binding.surface_type_name = Some(type_name.to_string());
+        }
+    }
+
+    for binding in &mut func.locals {
+        let Some(NirBindingOrigin::StackOffset(offset)) = binding.origin else {
+            continue;
+        };
+        let Some(type_name) = hints.stack_local_type_names.get(&offset) else {
+            continue;
+        };
+        let type_name = type_name.trim();
+        if !type_name.is_empty() {
+            binding.surface_type_name = Some(type_name.to_string());
+        }
+    }
+
+    if let Some(return_type_name) = hints
+        .return_type_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        func.surface_return_type_name = Some(return_type_name.to_string());
+    }
 }
 
 fn collect_call_type_hints(

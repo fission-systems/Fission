@@ -201,6 +201,7 @@ impl<'a> PreviewBuilder<'a> {
                 .chain(self.temps.values().cloned())
                 .collect(),
             return_type,
+            surface_return_type_name: None,
             body,
         })
     }

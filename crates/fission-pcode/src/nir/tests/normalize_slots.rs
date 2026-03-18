@@ -178,6 +178,7 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
         }],
         locals: vec![],
         return_type: uint_ty.clone(),
+        surface_return_type_name: None,
         body: vec![HirStmt::Return(Some(HirExpr::Binary {
             op: HirBinaryOp::Add,
             lhs: Box::new(HirExpr::Load {
@@ -247,6 +248,7 @@ fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
         }],
         locals: vec![],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![
             HirStmt::Assign {
                 lhs: HirLValue::Deref {
@@ -309,6 +311,7 @@ fn normalize_hir_function_does_not_surface_stride_mismatch_as_slot_index() {
         }],
         locals: vec![],
         return_type: byte_ty.clone(),
+        surface_return_type_name: None,
         body: vec![HirStmt::Return(Some(HirExpr::Binary {
             op: HirBinaryOp::Add,
             lhs: Box::new(HirExpr::Load {
@@ -379,6 +382,7 @@ fn normalize_hir_function_surfaces_adjacent_lane_slots_under_same_family() {
         }],
         locals: vec![],
         return_type: uint_ty.clone(),
+        surface_return_type_name: None,
         body: vec![HirStmt::Return(Some(HirExpr::Binary {
             op: HirBinaryOp::Add,
             lhs: Box::new(HirExpr::Load {
@@ -454,6 +458,7 @@ fn normalize_hir_function_canonicalizes_index_bias_into_slot_index() {
         }],
         locals: vec![],
         return_type: uint_ty.clone(),
+        surface_return_type_name: None,
         body: vec![HirStmt::Return(Some(HirExpr::Binary {
             op: HirBinaryOp::Add,
             lhs: Box::new(HirExpr::Load {
@@ -530,6 +535,7 @@ fn normalize_hir_function_applies_cheap_slot_surfacing_to_large_body() {
         params: vec![],
         locals: vec![],
         return_type: uint_ty,
+        surface_return_type_name: None,
         body,
     };
 
@@ -578,6 +584,7 @@ fn normalize_hir_function_removes_write_only_non_temp_locals() {
             bits: 32,
             signed: false,
         },
+        surface_return_type_name: None,
         body: vec![
             HirStmt::Assign {
                 lhs: HirLValue::Var("local_c".to_string()),
@@ -643,6 +650,7 @@ fn normalize_hir_function_keeps_read_locals_and_side_effectful_writes() {
             bits: 32,
             signed: false,
         },
+        surface_return_type_name: None,
         body: vec![
             HirStmt::Assign {
                 lhs: HirLValue::Var("local_c".to_string()),

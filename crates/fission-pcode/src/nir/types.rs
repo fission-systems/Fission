@@ -68,6 +68,7 @@ pub struct HirFunction {
     pub params: Vec<NirBinding>,
     pub locals: Vec<NirBinding>,
     pub return_type: NirType,
+    pub surface_return_type_name: Option<String>,
     pub body: Vec<HirStmt>,
 }
 
@@ -254,7 +255,9 @@ pub struct PreviewCallParamRule {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PreviewFunctionHints {
     pub param_names: Vec<String>,
+    pub param_type_names: HashMap<usize, String>,
     pub stack_local_names: HashMap<i64, String>,
+    pub stack_local_type_names: HashMap<i64, String>,
     pub return_type_name: Option<String>,
 }
 

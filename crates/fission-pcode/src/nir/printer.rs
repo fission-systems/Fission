@@ -5,7 +5,11 @@ const MAX_PRINT_EXPR_DEPTH: usize = 512;
 
 pub(super) fn print_hir_function(func: &HirFunction) -> String {
     let mut out = String::new();
-    out.push_str(&format!("{} {}(", print_type(&func.return_type), func.name));
+    let return_type = func
+        .surface_return_type_name
+        .clone()
+        .unwrap_or_else(|| print_type(&func.return_type));
+    out.push_str(&format!("{return_type} {}(", func.name));
     for (idx, param) in func.params.iter().enumerate() {
         if idx > 0 {
             out.push_str(", ");

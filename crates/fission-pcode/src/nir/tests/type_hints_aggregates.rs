@@ -30,6 +30,7 @@ fn preview_type_hints_surface_known_local_aggregate_alias() {
             initializer: None,
         }],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![
             HirStmt::Expr(HirExpr::Call {
                 target: "GetClientRect".to_string(),
@@ -118,6 +119,7 @@ fn preview_type_hints_surface_local_alias_through_aggregate_copy_wrapper() {
             initializer: None,
         }],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![HirStmt::Assign {
             lhs: HirLValue::Deref {
                 ptr: Box::new(HirExpr::Cast {
@@ -175,6 +177,7 @@ fn normalize_removes_dead_aggregate_temp_after_direct_store_recovery() {
             initializer: None,
         }],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![HirStmt::If {
             cond: HirExpr::Const(1, NirType::Bool),
             then_body: vec![

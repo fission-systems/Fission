@@ -832,6 +832,7 @@ fn normalize_hir_function_removes_dead_flag_intrinsic_temp() {
             initializer: None,
         }],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![
             HirStmt::Assign {
                 lhs: HirLValue::Var("xVar1".to_string()),
@@ -984,6 +985,7 @@ fn normalize_hir_function_inlines_multi_use_temp_within_single_if_condition() {
             initializer: None,
         }],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![
             HirStmt::Assign {
                 lhs: HirLValue::Var("uVar1".to_string()),

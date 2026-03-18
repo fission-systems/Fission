@@ -24,6 +24,7 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
         ],
         locals: vec![],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![HirStmt::Expr(HirExpr::Call {
             target: "GetClientRect".to_string(),
             args: vec![
@@ -78,6 +79,7 @@ fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
         ],
         locals: vec![],
         return_type: NirType::Unknown,
+        surface_return_type_name: None,
         body: vec![HirStmt::Expr(HirExpr::Call {
             target: "GetClientRect".to_string(),
             args: vec![
