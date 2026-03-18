@@ -252,7 +252,9 @@ enum GuardedTailCanonicalizationFailure {
     NonterminalJoinLabel,
     NestedTailEscape,
     AliasNotFallthrough,
-    JoinHasExternalRef,
+    AliasHasMultipleInternalPredecessors,
+    AliasHasNonlocalRef,
+    AliasBodyNotTrivial,
     PayloadCrossesJoin,
 }
 
@@ -296,8 +298,14 @@ impl<'a> PreviewBuilder<'a> {
             GuardedTailCanonicalizationFailure::AliasNotFallthrough => {
                 self.canonicalization_failed_alias_not_fallthrough_count += 1;
             }
-            GuardedTailCanonicalizationFailure::JoinHasExternalRef => {
-                self.canonicalization_failed_join_has_external_ref_count += 1;
+            GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors => {
+                self.canonicalization_failed_alias_has_multiple_internal_predecessors_count += 1;
+            }
+            GuardedTailCanonicalizationFailure::AliasHasNonlocalRef => {
+                self.canonicalization_failed_alias_has_nonlocal_ref_count += 1;
+            }
+            GuardedTailCanonicalizationFailure::AliasBodyNotTrivial => {
+                self.canonicalization_failed_alias_body_not_trivial_count += 1;
             }
             GuardedTailCanonicalizationFailure::PayloadCrossesJoin => {
                 self.canonicalization_failed_payload_crosses_join_count += 1;
@@ -315,13 +323,48 @@ impl<'a> PreviewBuilder<'a> {
         refs
     }
 
+    fn is_local_alias_forward_segment(segment: &[HirStmt], next_label: &str) -> bool {
+        let mut saw_forward_goto = false;
+        for stmt in segment {
+            if is_ignorable_discovery_stmt(stmt) {
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
+                    saw_forward_goto = true;
+                }
+                _ => return false,
+            }
+        }
+        saw_forward_goto
+    }
+
+    fn resolve_alias_redirect(
+        label: &str,
+        redirects: &HashMap<String, Option<String>>,
+    ) -> Option<String> {
+        let mut current = label.to_string();
+        let mut seen = HashSet::new();
+        while let Some(next) = redirects.get(&current) {
+            if !seen.insert(current.clone()) {
+                return Some(current);
+            }
+            match next {
+                Some(next_label) => current = next_label.clone(),
+                None => return None,
+            }
+        }
+        Some(current)
+    }
+
     fn canonicalize_interleaved_local_aliases(
         &mut self,
         body: &[HirStmt],
         referenced: &HashMap<String, usize>,
     ) -> Result<Vec<HirStmt>, GuardedTailCanonicalizationFailure> {
         let local_refs = Self::local_goto_positions_by_label(body);
-        let mut alias_labels = HashSet::new();
+        let mut alias_redirects = HashMap::new();
+        let mut canonicalized_local_nonfallthrough = 0usize;
 
         for (idx, stmt) in body.iter().enumerate() {
             let HirStmt::Label(label) = stmt else {
@@ -332,20 +375,47 @@ impl<'a> PreviewBuilder<'a> {
             };
             let total_refs = referenced.get(label).copied().unwrap_or(0);
             if total_refs > goto_positions.len() {
-                return Err(GuardedTailCanonicalizationFailure::JoinHasExternalRef);
+                return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
             }
-            if goto_positions.iter().any(|pos| {
-                *pos >= idx
-                    || body[pos + 1..idx]
-                        .iter()
-                        .any(|stmt| !is_ignorable_discovery_stmt(stmt))
-            }) {
+            if goto_positions.iter().any(|pos| *pos >= idx) {
                 return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
             }
+            let has_non_ignorable_gap = goto_positions.iter().any(|pos| {
+                body[pos + 1..idx]
+                    .iter()
+                    .any(|stmt| !is_ignorable_discovery_stmt(stmt))
+            });
             let next_label_idx =
                 (idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)));
             let payload_end = next_label_idx.unwrap_or(body.len());
-            if body[idx + 1..payload_end].iter().any(|stmt| {
+            let segment = &body[idx + 1..payload_end];
+            if let Some(next_label_idx) = next_label_idx
+                && let HirStmt::Label(next_label) = &body[next_label_idx]
+                && Self::is_local_alias_forward_segment(segment, next_label)
+            {
+                if has_non_ignorable_gap {
+                    if goto_positions.len() != 1 {
+                        return Err(
+                            GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors,
+                        );
+                    }
+                    canonicalized_local_nonfallthrough += 1;
+                }
+                alias_redirects.insert(label.clone(), Some(next_label.clone()));
+                continue;
+            }
+            if has_non_ignorable_gap {
+                if segment.iter().any(|stmt| {
+                    matches!(
+                        stmt,
+                        HirStmt::Goto(_) | HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue
+                    )
+                }) {
+                    return Err(GuardedTailCanonicalizationFailure::PayloadCrossesJoin);
+                }
+                return Err(GuardedTailCanonicalizationFailure::AliasBodyNotTrivial);
+            }
+            if segment.iter().any(|stmt| {
                 matches!(
                     stmt,
                     HirStmt::Goto(_) | HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue
@@ -353,19 +423,26 @@ impl<'a> PreviewBuilder<'a> {
             }) {
                 return Err(GuardedTailCanonicalizationFailure::PayloadCrossesJoin);
             }
-            alias_labels.insert(label.clone());
+            alias_redirects.insert(label.clone(), None);
         }
 
-        if alias_labels.is_empty() {
+        if alias_redirects.is_empty() {
             return Ok(body.to_vec());
         }
 
-        self.canonicalized_interleaved_join_use_count += alias_labels.len();
+        self.canonicalized_interleaved_join_use_count += alias_redirects.len();
+        self.canonicalized_local_nonfallthrough_alias_count += canonicalized_local_nonfallthrough;
         Ok(body
             .iter()
             .filter_map(|stmt| match stmt {
-                HirStmt::Goto(label) if alias_labels.contains(label) => None,
-                HirStmt::Label(label) if alias_labels.contains(label) => None,
+                HirStmt::Goto(label) if alias_redirects.contains_key(label) => {
+                    match Self::resolve_alias_redirect(label, &alias_redirects) {
+                        Some(resolved) if resolved != *label => Some(HirStmt::Goto(resolved)),
+                        Some(_) => Some(stmt.clone()),
+                        None => None,
+                    }
+                }
+                HirStmt::Label(label) if alias_redirects.contains_key(label) => None,
                 other => Some(other.clone()),
             })
             .collect())

@@ -112,7 +112,11 @@ struct PreviewBuilder<'a> {
     canonicalization_failed_nonterminal_join_label: usize,
     canonicalization_failed_nested_tail_escape: usize,
     canonicalized_interleaved_join_use_count: usize,
+    canonicalized_local_nonfallthrough_alias_count: usize,
     canonicalization_failed_alias_not_fallthrough_count: usize,
+    canonicalization_failed_alias_has_multiple_internal_predecessors_count: usize,
+    canonicalization_failed_alias_has_nonlocal_ref_count: usize,
+    canonicalization_failed_alias_body_not_trivial_count: usize,
     canonicalization_failed_join_has_external_ref_count: usize,
     canonicalization_failed_payload_crosses_join_count: usize,
     rejected_must_emit_label: usize,
@@ -287,8 +291,17 @@ pub fn render_mlil_preview_with_context(
         normalized_discovery_stats.canonicalization_failed_nested_tail_escape;
     build_stats.canonicalized_interleaved_join_use_count +=
         normalized_discovery_stats.canonicalized_interleaved_join_use_count;
+    build_stats.canonicalized_local_nonfallthrough_alias_count +=
+        normalized_discovery_stats.canonicalized_local_nonfallthrough_alias_count;
     build_stats.canonicalization_failed_alias_not_fallthrough_count +=
         normalized_discovery_stats.canonicalization_failed_alias_not_fallthrough_count;
+    build_stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count +=
+        normalized_discovery_stats
+            .canonicalization_failed_alias_has_multiple_internal_predecessors_count;
+    build_stats.canonicalization_failed_alias_has_nonlocal_ref_count +=
+        normalized_discovery_stats.canonicalization_failed_alias_has_nonlocal_ref_count;
+    build_stats.canonicalization_failed_alias_body_not_trivial_count +=
+        normalized_discovery_stats.canonicalization_failed_alias_body_not_trivial_count;
     build_stats.canonicalization_failed_join_has_external_ref_count +=
         normalized_discovery_stats.canonicalization_failed_join_has_external_ref_count;
     build_stats.canonicalization_failed_payload_crosses_join_count +=

@@ -11,17 +11,9 @@ import statistics
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from pathlib import Path
 from typing import Any
-
-try:
-    import psutil
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
-
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_RESULTS_DIR = ROOT_DIR / "artifacts" / "batch_benchmark"
@@ -29,6 +21,7 @@ DEFAULT_GHIDRA_DIRS = (
     ROOT_DIR / "vendor" / "ghidra" / "ghidra_11.4.2_PUBLIC",
     ROOT_DIR / "ghidra_11.4.2_PUBLIC",
 )
+BASE_TYPES_JSON = ROOT_DIR / "crates" / "fission-signatures" / "data" / "win_types" / "base_types.json"
 
 BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
@@ -40,6 +33,13 @@ AUTO_VAR_RE = re.compile(
     r"[A-Za-z0-9_]*\b"
 )
 SYNTHETIC_FAILURE_PREFIX = "// Decompilation failed:"
+
+from grand_finale_support.metrics import collect_code_metrics, load_struct_pointer_aliases
+from grand_finale_support.resource_monitor import (
+    HAS_PSUTIL,
+    run_popen_with_resource_monitor,
+    start_self_resource_monitor,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -220,103 +220,6 @@ def similarity_percent(left: str, right: str) -> float:
     return round(difflib.SequenceMatcher(None, left, right).ratio() * 100.0, 2)
 
 
-def _collect_process_resources(
-    pid: int,
-    interval_sec: float,
-    result_holder: dict[str, Any],
-) -> None:
-    """Background thread: sample process until it exits. Writes into result_holder."""
-    rss_list: list[float] = []
-    cpu_list: list[float] = []
-    try:
-        proc = psutil.Process(pid)
-        proc.cpu_percent()
-        while True:
-            try:
-                if not proc.is_running():
-                    break
-            except psutil.NoSuchProcess:
-                break
-            try:
-                rss_list.append(proc.memory_info().rss / (1024 * 1024))
-                cpu_list.append(proc.cpu_percent(interval=interval_sec))
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                break
-    except psutil.NoSuchProcess:
-        pass
-    result_holder["max_rss_mb"] = round(max(rss_list), 2) if rss_list else 0.0
-    result_holder["avg_rss_mb"] = round(statistics.fmean(rss_list), 2) if rss_list else 0.0
-    result_holder["avg_cpu_pct"] = round(statistics.fmean(cpu_list), 2) if cpu_list else 0.0
-    result_holder["max_cpu_pct"] = round(max(cpu_list), 2) if cpu_list else 0.0
-    result_holder["sample_count"] = len(rss_list)
-
-
-def run_popen_with_resource_monitor(
-    popen: subprocess.Popen[Any],
-    timeout_sec: float,
-    interval_sec: float = 0.5,
-) -> tuple[subprocess.CompletedProcess[Any], dict[str, Any]]:
-    """Run popen, monitor resources in background, wait for exit. Returns (completed, resources)."""
-    result_holder: dict[str, Any] = {}
-    t = threading.Thread(
-        target=_collect_process_resources,
-        args=(popen.pid, interval_sec, result_holder),
-        daemon=True,
-    )
-    t.start()
-    try:
-        returncode = popen.wait(timeout=timeout_sec)
-        t.join(timeout=5.0)
-        stdout = popen.stdout.read() if popen.stdout else ""
-        stderr = popen.stderr.read() if popen.stderr else ""
-        completed = subprocess.CompletedProcess(
-            args=popen.args, returncode=returncode, stdout=stdout, stderr=stderr
-        )
-        return completed, result_holder
-    except subprocess.TimeoutExpired:
-        t.join(timeout=1.0)
-        popen.kill()
-        try:
-            stdout = popen.stdout.read() if popen.stdout else ""
-            stderr = popen.stderr.read() if popen.stderr else ""
-        except Exception:
-            stdout, stderr = "", ""
-        popen.wait(timeout=5)
-        raise subprocess.TimeoutExpired(popen.args, timeout_sec, stdout, stderr)
-
-
-def start_self_resource_monitor(
-    interval_sec: float = 0.5,
-) -> tuple[threading.Thread, dict[str, Any], threading.Event]:
-    """Start background thread sampling current process. Returns (thread, result_holder, stop_event)."""
-    result_holder: dict[str, Any] = {}
-    stop_event = threading.Event()
-
-    def collect() -> None:
-        rss_list: list[float] = []
-        cpu_list: list[float] = []
-        try:
-            proc = psutil.Process(os.getpid())
-            proc.cpu_percent()
-            while not stop_event.is_set():
-                try:
-                    rss_list.append(proc.memory_info().rss / (1024 * 1024))
-                    cpu_list.append(proc.cpu_percent(interval=interval_sec))
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    break
-        except Exception:
-            pass
-        result_holder["max_rss_mb"] = round(max(rss_list), 2) if rss_list else 0.0
-        result_holder["avg_rss_mb"] = round(statistics.fmean(rss_list), 2) if rss_list else 0.0
-        result_holder["avg_cpu_pct"] = round(statistics.fmean(cpu_list), 2) if cpu_list else 0.0
-        result_holder["max_cpu_pct"] = round(max(cpu_list), 2) if cpu_list else 0.0
-        result_holder["sample_count"] = len(rss_list)
-
-    t = threading.Thread(target=collect, daemon=True)
-    t.start()
-    return t, result_holder, stop_event
-
-
 NATIVE_TIMING_PHASE_KEYS = (
     "follow_flow_ms",
     "main_perform_ms",
@@ -382,11 +285,14 @@ def run_fission_full(
     timeout_sec: int,
     profile: str,
     compiler_id: str | None,
+    struct_ptr_aliases: dict[str, str],
+    public_engine: str,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    raw_output_path = output_dir / "fission_full.json"
-    stdout_log_path = output_dir / "fission_stdout.log"
-    stderr_log_path = output_dir / "fission_stderr.log"
+    cli_engine = "legacy" if public_engine == "legacy" else "mlil_preview"
+    raw_output_path = output_dir / f"{public_engine}_full.json"
+    stdout_log_path = output_dir / f"{public_engine}_stdout.log"
+    stderr_log_path = output_dir / f"{public_engine}_stderr.log"
     temp_output = tempfile.NamedTemporaryFile(prefix="fission-benchmark-", suffix=".json", delete=False)
     temp_output.close()
 
@@ -394,6 +300,8 @@ def run_fission_full(
         str(fission_bin),
         str(binary_path),
         "--decomp-all",
+        "--engine",
+        cli_engine,
         "--benchmark",
         "--ghidra-compat",
         "--profile",
@@ -491,11 +399,17 @@ def run_fission_full(
             "failure_kind": failure_kind,
             "decomp_sec": float(entry.get("decomp_sec", 0.0) or 0.0),
             "native_timing": entry.get("native_timing"),
+            "metrics": collect_code_metrics(code, struct_ptr_aliases) if actual_success else {},
+            "engine_used": entry.get("engine_used", cli_engine),
+            "fell_back": bool(entry.get("fell_back", False)),
+            "fallback_kind": entry.get("fallback_reason"),
         }
 
     meta = dict(payload.get("_meta", {}))
     meta["wall_clock_sec"] = round(wall_clock_sec, 6)
     meta["raw_output_path"] = str(raw_output_path)
+    meta["public_engine"] = public_engine
+    meta["cache_mode"] = "warm"
     if resources:
         meta["resources"] = resources
 
@@ -513,6 +427,7 @@ def run_ghidra_full(
     output_dir: Path,
     per_function_timeout_sec: int,
     skip_thunks: bool,
+    struct_ptr_aliases: dict[str, str],
     limit: int | None = None,
 ) -> dict[str, Any]:
     os.environ["GHIDRA_INSTALL_DIR"] = str(ghidra_dir)
@@ -602,6 +517,9 @@ def run_ghidra_full(
                 "error": error,
                 "failure_kind": failure_kind,
                 "decomp_sec": round(elapsed, 6),
+                "metrics": collect_code_metrics(code, struct_ptr_aliases) if actual_success else {},
+                "engine_used": "pyghidra",
+                "fell_back": False,
             }
 
             if limit is not None and len(entries) >= limit:
@@ -630,6 +548,7 @@ def run_ghidra_full(
         "wall_clock_sec": round(wall_clock_sec, 6),
         "per_function_timeout_sec": per_function_timeout_sec,
         "skip_thunks": skip_thunks,
+        "cache_mode": "warm",
     }
     if ghidra_resources:
         meta_dict["resources"] = ghidra_resources
@@ -648,189 +567,196 @@ def run_ghidra_full(
     }
 
 
-def build_comparison(
-    binary_path: Path,
-    fission: dict[str, Any],
-    ghidra: dict[str, Any],
+def summarize_engine_failures(entries: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "reported_success_count": sum(1 for entry in entries.values() if entry.get("reported_success", False)),
+        "success_count": sum(1 for entry in entries.values() if entry.get("success")),
+        "timeout_count": sum(1 for entry in entries.values() if entry.get("failure_kind") == "timeout"),
+        "explicit_error_count": sum(1 for entry in entries.values() if entry.get("failure_kind") == "explicit_error"),
+        "synthetic_failure_count": sum(1 for entry in entries.values() if entry.get("failure_kind") == "synthetic_failure"),
+        "unknown_failure_count": sum(1 for entry in entries.values() if entry.get("failure_kind") == "unknown_failure"),
+    }
+
+
+def summarize_engine_quality(entries: dict[str, dict[str, Any]], *, preview: bool = False) -> dict[str, Any]:
+    success_entries = [entry for entry in entries.values() if entry.get("success")]
+    goto_values = [int((entry.get("metrics") or {}).get("goto_count", 0)) for entry in success_entries]
+    label_values = [int((entry.get("metrics") or {}).get("top_level_label_count", 0)) for entry in success_entries]
+    return {
+        "goto_total": sum(goto_values),
+        "goto_median": round(statistics.median(goto_values), 3) if goto_values else 0.0,
+        "top_level_label_total": sum(label_values),
+        "top_level_label_median": round(statistics.median(label_values), 3) if label_values else 0.0,
+        "empty_if_total": sum(int((entry.get("metrics") or {}).get("empty_if_count", 0)) for entry in success_entries),
+        "constant_if_total": sum(int((entry.get("metrics") or {}).get("constant_if_count", 0)) for entry in success_entries),
+        "preview_direct_success_count": sum(1 for entry in success_entries if preview and entry.get("engine_used") == "mlil_preview" and not entry.get("fell_back")),
+        "legacy_fallback_count": sum(1 for entry in entries.values() if preview and entry.get("fell_back")),
+    }
+
+
+def build_pairwise_engine_comparison(
+    left_label: str,
+    left: dict[str, Any],
+    right_label: str,
+    right: dict[str, Any],
 ) -> dict[str, Any]:
-    fission_entries = fission["entries"]
-    ghidra_entries = ghidra["entries"]
-
-    fission_addrs = set(fission_entries)
-    ghidra_addrs = set(ghidra_entries)
-    shared_addrs = sorted(fission_addrs & ghidra_addrs, key=lambda addr: int(addr, 16))
-    fission_only = sorted(fission_addrs - ghidra_addrs, key=lambda addr: int(addr, 16))
-    ghidra_only = sorted(ghidra_addrs - fission_addrs, key=lambda addr: int(addr, 16))
-
-    comparisons: list[dict[str, Any]] = []
-    successful_pairs: list[dict[str, Any]] = []
-    aggregate_fission_parts: list[str] = []
-    aggregate_ghidra_parts: list[str] = []
+    left_entries = left["entries"]
+    right_entries = right["entries"]
+    left_addrs = set(left_entries)
+    right_addrs = set(right_entries)
+    shared_addrs = sorted(left_addrs & right_addrs, key=lambda addr: int(addr, 16))
+    left_only = sorted(left_addrs - right_addrs, key=lambda addr: int(addr, 16))
+    right_only = sorted(right_addrs - left_addrs, key=lambda addr: int(addr, 16))
+    rows: list[dict[str, Any]] = []
+    successful_rows: list[dict[str, Any]] = []
+    aggregate_left_parts: list[str] = []
+    aggregate_right_parts: list[str] = []
 
     for address in shared_addrs:
-        f_entry = fission_entries[address]
-        g_entry = ghidra_entries[address]
-
-        raw_similarity = similarity_percent(f_entry.get("code", ""), g_entry.get("code", ""))
-        normalized_similarity = similarity_percent(
-            f_entry.get("normalized_code", ""),
-            g_entry.get("normalized_code", ""),
-        )
-
+        left_entry = left_entries[address]
+        right_entry = right_entries[address]
+        raw_similarity = similarity_percent(left_entry.get("code", ""), right_entry.get("code", ""))
+        normalized_similarity = similarity_percent(left_entry.get("normalized_code", ""), right_entry.get("normalized_code", ""))
         row = {
             "address": address,
-            "fission_name": f_entry.get("name", ""),
-            "ghidra_name": g_entry.get("name", ""),
-            "fission_success": f_entry.get("success", False),
-            "ghidra_success": g_entry.get("success", False),
-            "fission_failure_kind": f_entry.get("failure_kind"),
-            "ghidra_failure_kind": g_entry.get("failure_kind"),
-            "fission_decomp_sec": f_entry.get("decomp_sec", 0.0),
-            "ghidra_decomp_sec": g_entry.get("decomp_sec", 0.0),
+            f"{left_label}_name": left_entry.get("name", ""),
+            f"{right_label}_name": right_entry.get("name", ""),
+            f"{left_label}_success": left_entry.get("success", False),
+            f"{right_label}_success": right_entry.get("success", False),
+            f"{left_label}_failure_kind": left_entry.get("failure_kind"),
+            f"{right_label}_failure_kind": right_entry.get("failure_kind"),
+            f"{left_label}_decomp_sec": left_entry.get("decomp_sec", 0.0),
+            f"{right_label}_decomp_sec": right_entry.get("decomp_sec", 0.0),
             "raw_similarity": raw_similarity,
             "normalized_similarity": normalized_similarity,
-            "fission_error": f_entry.get("error"),
-            "ghidra_error": g_entry.get("error"),
-            "fission_native_timing": f_entry.get("native_timing"),
+            f"{left_label}_error": left_entry.get("error"),
+            f"{right_label}_error": right_entry.get("error"),
         }
-        comparisons.append(row)
+        rows.append(row)
+        if left_entry.get("success") and right_entry.get("success"):
+            successful_rows.append(row)
+            aggregate_left_parts.append(left_entry.get("normalized_code", ""))
+            aggregate_right_parts.append(right_entry.get("normalized_code", ""))
 
-        if f_entry.get("success") and g_entry.get("success"):
-            successful_pairs.append(row)
-            aggregate_fission_parts.append(f_entry.get("normalized_code", ""))
-            aggregate_ghidra_parts.append(g_entry.get("normalized_code", ""))
-
-    normalized_scores = [row["normalized_similarity"] for row in successful_pairs]
-    raw_scores = [row["raw_similarity"] for row in successful_pairs]
-
-    fission_failure_breakdown = {
-        "reported_success_count": sum(
-            1 for entry in fission_entries.values() if entry.get("reported_success", False)
-        ),
-        "success_count": sum(1 for entry in fission_entries.values() if entry["success"]),
-        "explicit_error_count": sum(
-            1 for entry in fission_entries.values() if entry.get("failure_kind") == "explicit_error"
-        ),
-        "synthetic_failure_count": sum(
-            1
-            for entry in fission_entries.values()
-            if entry.get("failure_kind") == "synthetic_failure"
-        ),
-        "unknown_failure_count": sum(
-            1 for entry in fission_entries.values() if entry.get("failure_kind") == "unknown_failure"
-        ),
-    }
-    ghidra_failure_breakdown = {
-        "success_count": sum(1 for entry in ghidra_entries.values() if entry["success"]),
-        "explicit_error_count": sum(
-            1 for entry in ghidra_entries.values() if entry.get("failure_kind") == "explicit_error"
-        ),
-        "synthetic_failure_count": sum(
-            1
-            for entry in ghidra_entries.values()
-            if entry.get("failure_kind") == "synthetic_failure"
-        ),
-        "unknown_failure_count": sum(
-            1 for entry in ghidra_entries.values() if entry.get("failure_kind") == "unknown_failure"
-        ),
+    normalized_scores = [row["normalized_similarity"] for row in successful_rows]
+    raw_scores = [row["raw_similarity"] for row in successful_rows]
+    return {
+        "left_label": left_label,
+        "right_label": right_label,
+        "comparisons": rows,
+        "left_only": left_only,
+        "right_only": right_only,
+        "summary": {
+            "shared_count": len(shared_addrs),
+            "left_only_count": len(left_only),
+            "right_only_count": len(right_only),
+            "both_success_count": len(successful_rows),
+            "aggregate_normalized_similarity": similarity_percent("\n".join(aggregate_left_parts), "\n".join(aggregate_right_parts)),
+            "avg_normalized_similarity": round(statistics.fmean(normalized_scores), 2) if normalized_scores else 0.0,
+            "median_normalized_similarity": round(statistics.median(normalized_scores), 2) if normalized_scores else 0.0,
+            "avg_raw_similarity": round(statistics.fmean(raw_scores), 2) if raw_scores else 0.0,
+        },
     }
 
-    aggregate_similarity = similarity_percent(
-        "\n".join(aggregate_fission_parts),
-        "\n".join(aggregate_ghidra_parts),
-    )
+
+def build_comparison(
+    binary_path: Path,
+    pyghidra: dict[str, Any],
+    legacy: dict[str, Any],
+    preview: dict[str, Any],
+) -> dict[str, Any]:
+    pair_py_legacy = build_pairwise_engine_comparison("pyghidra", pyghidra, "legacy", legacy)
+    pair_legacy_preview = build_pairwise_engine_comparison("legacy", legacy, "preview", preview)
+    pair_py_preview = build_pairwise_engine_comparison("pyghidra", pyghidra, "preview", preview)
 
     summary = {
         "binary": str(binary_path),
-        "fission": {
-            **fission["meta"],
-            "function_count": len(fission_entries),
-            **fission_failure_breakdown,
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "cache_mode": "warm",
+        "engines": {
+            "pyghidra": {
+                **pyghidra["meta"],
+                "function_count": len(pyghidra["entries"]),
+                **summarize_engine_failures(pyghidra["entries"]),
+                **summarize_engine_quality(pyghidra["entries"]),
+            },
+            "legacy": {
+                **legacy["meta"],
+                "function_count": len(legacy["entries"]),
+                **summarize_engine_failures(legacy["entries"]),
+                **summarize_engine_quality(legacy["entries"]),
+            },
+            "preview": {
+                **preview["meta"],
+                "function_count": len(preview["entries"]),
+                **summarize_engine_failures(preview["entries"]),
+                **summarize_engine_quality(preview["entries"], preview=True),
+            },
         },
-        "ghidra": {
-            **ghidra["meta"],
-            "function_count": len(ghidra_entries),
-            **ghidra_failure_breakdown,
-        },
-        "matching": {
-            "shared_count": len(shared_addrs),
-            "fission_only_count": len(fission_only),
-            "ghidra_only_count": len(ghidra_only),
-            "both_success_count": len(successful_pairs),
-            "coverage_vs_fission_pct": round(
-                len(shared_addrs) * 100.0 / len(fission_entries), 2
-            )
-            if fission_entries
-            else 0.0,
-            "coverage_vs_ghidra_pct": round(
-                len(shared_addrs) * 100.0 / len(ghidra_entries), 2
-            )
-            if ghidra_entries
-            else 0.0,
+        "coverage": {
+            "pyghidra_vs_legacy": pair_py_legacy["summary"],
+            "legacy_vs_preview": pair_legacy_preview["summary"],
+            "pyghidra_vs_preview": pair_py_preview["summary"],
         },
         "quality": {
-            "aggregate_normalized_similarity": aggregate_similarity,
-            "avg_normalized_similarity": round(statistics.fmean(normalized_scores), 2)
-            if normalized_scores
-            else 0.0,
-            "median_normalized_similarity": round(statistics.median(normalized_scores), 2)
-            if normalized_scores
-            else 0.0,
-            "min_normalized_similarity": round(min(normalized_scores), 2)
-            if normalized_scores
-            else 0.0,
-            "max_normalized_similarity": round(max(normalized_scores), 2)
-            if normalized_scores
-            else 0.0,
-            "avg_raw_similarity": round(statistics.fmean(raw_scores), 2)
-            if raw_scores
-            else 0.0,
+            "pyghidra_vs_legacy": pair_py_legacy["summary"],
+            "legacy_vs_preview": pair_legacy_preview["summary"],
+            "pyghidra_vs_preview": pair_py_preview["summary"],
         },
         "resources": {
-            "fission_max_rss_mb": round(
-                float(fission["meta"].get("resources", {}).get("max_rss_mb", 0.0)), 2
-            ),
-            "fission_avg_cpu_pct": round(
-                float(fission["meta"].get("resources", {}).get("avg_cpu_pct", 0.0)), 2
-            ),
-            "ghidra_max_rss_mb": round(
-                float(ghidra["meta"].get("resources", {}).get("max_rss_mb", 0.0)), 2
-            ),
-            "ghidra_avg_cpu_pct": round(
-                float(ghidra["meta"].get("resources", {}).get("avg_cpu_pct", 0.0)), 2
-            ),
+            "pyghidra": pyghidra["meta"].get("resources", {}),
+            "legacy": legacy["meta"].get("resources", {}),
+            "preview": preview["meta"].get("resources", {}),
         },
         "speed": {
-            "fission_total_sec": round(float(fission["meta"].get("total_decomp_sec", 0.0)), 6),
-            "fission_postprocess_sec": round(
-                float(fission["meta"].get("total_postprocess_sec", 0.0)), 6
-            ),
-            "ghidra_total_sec": round(float(ghidra["meta"].get("total_decomp_sec", 0.0)), 6),
-            "fission_init_sec": round(float(fission["meta"].get("init_sec", 0.0)), 6),
-            "ghidra_init_sec": round(float(ghidra["meta"].get("init_sec", 0.0)), 6),
-            "fission_wall_sec": round(float(fission["meta"].get("wall_clock_sec", 0.0)), 6),
-            "ghidra_wall_sec": round(float(ghidra["meta"].get("wall_clock_sec", 0.0)), 6),
-            "wall_speedup_vs_ghidra": round(
-                float(ghidra["meta"].get("wall_clock_sec", 0.0))
-                / max(float(fission["meta"].get("wall_clock_sec", 0.0)), 1e-9),
-                3,
-            ),
+            "pyghidra": {
+                "init_sec": round(float(pyghidra["meta"].get("init_sec", 0.0)), 6),
+                "total_decomp_sec": round(float(pyghidra["meta"].get("total_decomp_sec", 0.0)), 6),
+                "wall_sec": round(float(pyghidra["meta"].get("wall_clock_sec", 0.0)), 6),
+            },
+            "legacy": {
+                "init_sec": round(float(legacy["meta"].get("init_sec", 0.0)), 6),
+                "total_decomp_sec": round(float(legacy["meta"].get("total_decomp_sec", 0.0)), 6),
+                "postprocess_sec": round(float(legacy["meta"].get("total_postprocess_sec", 0.0)), 6),
+                "wall_sec": round(float(legacy["meta"].get("wall_clock_sec", 0.0)), 6),
+                "wall_speedup_vs_pyghidra": round(float(pyghidra["meta"].get("wall_clock_sec", 0.0)) / max(float(legacy["meta"].get("wall_clock_sec", 0.0)), 1e-9), 3),
+            },
+            "preview": {
+                "init_sec": round(float(preview["meta"].get("init_sec", 0.0)), 6),
+                "total_decomp_sec": round(float(preview["meta"].get("total_decomp_sec", 0.0)), 6),
+                "postprocess_sec": round(float(preview["meta"].get("total_postprocess_sec", 0.0)), 6),
+                "wall_sec": round(float(preview["meta"].get("wall_clock_sec", 0.0)), 6),
+                "wall_speedup_vs_legacy": round(float(legacy["meta"].get("wall_clock_sec", 0.0)) / max(float(preview["meta"].get("wall_clock_sec", 0.0)), 1e-9), 3),
+            },
         },
         "samples": {
-            "lowest_similarity": sorted(
-                successful_pairs, key=lambda row: row["normalized_similarity"]
-            )[:20],
-            "fission_only_addresses": fission_only[:20],
-            "ghidra_only_addresses": ghidra_only[:20],
-            "fission_hot_path_phases": summarize_native_hot_paths(fission_entries),
+            "pyghidra_vs_legacy_lowest_similarity": sorted(pair_py_legacy["comparisons"], key=lambda row: row["normalized_similarity"])[:20],
+            "legacy_vs_preview_lowest_similarity": sorted(pair_legacy_preview["comparisons"], key=lambda row: row["normalized_similarity"])[:20],
+            "pyghidra_vs_preview_lowest_similarity": sorted(pair_py_preview["comparisons"], key=lambda row: row["normalized_similarity"])[:20],
+            "legacy_hot_path_phases": summarize_native_hot_paths(legacy["entries"]),
+            "preview_hot_path_phases": summarize_native_hot_paths(preview["entries"]),
         },
+        "public_summary_line": "",
     }
+
+    summary["public_summary_line"] = (
+        f"legacy vs pyghidra wall speedup {summary['speed']['legacy']['wall_speedup_vs_pyghidra']}x; "
+        f"preview vs legacy wall speedup {summary['speed']['preview']['wall_speedup_vs_legacy']}x; "
+        f"preview direct-success {summary['engines']['preview']['preview_direct_success_count']}/{summary['engines']['preview']['function_count']}"
+    )
 
     return {
         "summary": summary,
-        "comparisons": comparisons,
-        "fission_only": fission_only,
-        "ghidra_only": ghidra_only,
+        "pairwise": {
+            "pyghidra_vs_legacy": pair_py_legacy,
+            "legacy_vs_preview": pair_legacy_preview,
+            "pyghidra_vs_preview": pair_py_preview,
+        },
+        "engines": {
+            "pyghidra": pyghidra,
+            "legacy": legacy,
+            "preview": preview,
+        },
     }
 
 
@@ -845,71 +771,79 @@ def write_summary_files(
         json.dump(benchmark, handle, indent=2)
 
     summary = benchmark["summary"]
-    low_rows = summary["samples"]["lowest_similarity"]
-    hot_rows = summary["samples"].get("fission_hot_path_phases", [])
+    low_rows = summary["samples"]["legacy_vs_preview_lowest_similarity"]
+    hot_rows = summary["samples"].get("preview_hot_path_phases", [])
     lines = [
         f"# Whole Decomp Benchmark: {Path(summary['binary']).name}",
         "",
+        "## Why 3-Way",
+        "",
+        "- `pyghidra`: Python-host baseline",
+        "- `legacy`: native FFI baseline",
+        "- `preview`: Rust preview pipeline",
+        "",
         "## Summary",
         "",
-        f"- Shared functions: {summary['matching']['shared_count']}",
-        f"- Both decompiled successfully: {summary['matching']['both_success_count']}",
-        f"- Aggregate normalized similarity: {summary['quality']['aggregate_normalized_similarity']:.2f}%",
-        f"- Average normalized similarity: {summary['quality']['avg_normalized_similarity']:.2f}%",
-        f"- Fission wall clock: {summary['speed']['fission_wall_sec']:.3f}s",
-        f"- Ghidra wall clock: {summary['speed']['ghidra_wall_sec']:.3f}s",
-        f"- Wall speedup vs Ghidra: {summary['speed']['wall_speedup_vs_ghidra']:.3f}x",
+        f"- Generated: {summary['generated_at']}",
+        f"- Cache mode: `{summary['cache_mode']}`",
+        f"- Public summary: {summary['public_summary_line']}",
         "",
-        "## Resources (requires psutil)",
+        "## Speed",
         "",
+        f"- pyghidra wall: {summary['speed']['pyghidra']['wall_sec']:.3f}s",
+        f"- legacy wall: {summary['speed']['legacy']['wall_sec']:.3f}s",
+        f"- preview wall: {summary['speed']['preview']['wall_sec']:.3f}s",
+        f"- legacy vs pyghidra speedup: {summary['speed']['legacy']['wall_speedup_vs_pyghidra']:.3f}x",
+        f"- preview vs legacy speedup: {summary['speed']['preview']['wall_speedup_vs_legacy']:.3f}x",
+        "",
+        "## Engine Coverage / Quality",
+        "",
+        "| Engine | Success | Failure | Timeout | goto total | label total | empty if | constant if |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
-    res = summary.get("resources", {})
-    if res.get("fission_max_rss_mb") or res.get("ghidra_max_rss_mb"):
-        lines.extend(
-            [
-                f"- Fission max RSS: {res.get('fission_max_rss_mb', 0):.2f} MB, avg CPU: {res.get('fission_avg_cpu_pct', 0):.2f}%",
-                f"- Ghidra max RSS: {res.get('ghidra_max_rss_mb', 0):.2f} MB, avg CPU: {res.get('ghidra_avg_cpu_pct', 0):.2f}%",
-            ]
+    for label, engine in summary["engines"].items():
+        lines.append(
+            f"| `{label}` | {engine.get('success_count', 0)} | {engine.get('failure_count', 0)} | "
+            f"{engine.get('timeout_count', 0)} | {engine.get('goto_total', 0)} | "
+            f"{engine.get('top_level_label_total', 0)} | {engine.get('empty_if_total', 0)} | "
+            f"{engine.get('constant_if_total', 0)} |"
         )
+    lines.extend([
+        "",
+        "## Pairwise Quality",
+        "",
+        "| Pair | Shared | Both success | Aggregate norm sim | Avg norm sim |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ])
+    for label, pair in summary["quality"].items():
+        lines.append(
+            f"| `{label}` | {pair.get('shared_count', 0)} | {pair.get('both_success_count', 0)} | "
+            f"{pair.get('aggregate_normalized_similarity', 0):.2f}% | {pair.get('avg_normalized_similarity', 0):.2f}% |"
+        )
+    lines.extend(["", "## Resources (requires psutil)", ""])
+    resources = summary.get("resources", {})
+    if any(resources.get(label, {}).get("max_rss_mb", 0.0) for label in ("pyghidra", "legacy", "preview")):
+        for label in ("pyghidra", "legacy", "preview"):
+            res = resources.get(label, {})
+            lines.append(
+                f"- {label}: max RSS {res.get('max_rss_mb', 0):.2f} MB, avg CPU {res.get('avg_cpu_pct', 0):.2f}%"
+            )
     else:
         lines.append("- Install `pip install psutil` for resource usage metrics.")
-    lines.extend(
-        [
-            "",
-            "## Coverage",
-            "",
-            f"- Fission functions: {summary['fission']['function_count']} (success {summary['fission']['success_count']})",
-            f"- Fission reported-success before cleanup: {summary['fission']['reported_success_count']}",
-            f"- Fission explicit errors: {summary['fission']['explicit_error_count']}",
-            f"- Fission synthetic failures: {summary['fission']['synthetic_failure_count']}",
-            f"- Ghidra functions: {summary['ghidra']['function_count']} (success {summary['ghidra']['success_count']})",
-            f"- Fission-only addresses: {summary['matching']['fission_only_count']}",
-            f"- Ghidra-only addresses: {summary['matching']['ghidra_only_count']}",
-            "",
-            "## Speed Breakdown",
-            "",
-            f"- Fission init: {summary['speed']['fission_init_sec']:.3f}s",
-            f"- Fission pure decomp: {summary['speed']['fission_total_sec']:.3f}s",
-            f"- Fission postprocess: {summary['speed']['fission_postprocess_sec']:.3f}s",
-            f"- Ghidra pure decomp: {summary['speed']['ghidra_total_sec']:.3f}s",
-            "",
-            "## Lowest Similarity Samples",
-            "",
-        ],
-    )
+    lines.extend(["", "## Representative Lowest Similarity (`legacy_vs_preview`)", ""])
 
     if low_rows:
-        lines.append("| Address | Fission | Ghidra | Norm Similarity |")
+        lines.append("| Address | Legacy | Preview | Norm Similarity |")
         lines.append("|---|---|---|---:|")
         for row in low_rows[:10]:
             lines.append(
-                f"| `{row['address']}` | `{row['fission_name']}` | `{row['ghidra_name']}` | "
+                f"| `{row['address']}` | `{row['legacy_name']}` | `{row['preview_name']}` | "
                 f"{row['normalized_similarity']:.2f}% |"
             )
     else:
         lines.append("- No shared successful functions to compare.")
 
-    lines.extend(["", "## Fission Native Hot Paths", ""])
+    lines.extend(["", "## Preview Native Hot Paths", ""])
     if hot_rows:
         lines.append("| Address | Function | Decomp Sec | Top Phases | Helper Counts |")
         lines.append("|---|---|---:|---|---|")
@@ -933,7 +867,8 @@ def write_summary_files(
             "",
             "## Artifacts",
             "",
-            "- `fission_full.json`: raw Fission whole-decomp output",
+            "- `legacy_full.json`: raw native FFI legacy output",
+            "- `preview_full.json`: raw Rust preview output",
             "- `ghidra_full.json`: raw pyghidra whole-decomp output",
             "- `benchmark_summary.json`: merged metrics and per-function comparison",
         ]
@@ -948,52 +883,33 @@ def write_summary_files(
 def print_console_summary(summary: dict[str, Any], output_dir: Path) -> None:
     print("\n=== Whole Decomp Benchmark Summary ===")
     print(f"Binary: {summary['binary']}")
+    print(summary["public_summary_line"])
     print(
-        f"Shared={summary['matching']['shared_count']} "
-        f"BothSuccess={summary['matching']['both_success_count']} "
-        f"FissionOnly={summary['matching']['fission_only_count']} "
-        f"GhidraOnly={summary['matching']['ghidra_only_count']}"
+        f"pyghidra wall={summary['speed']['pyghidra']['wall_sec']:.3f}s | "
+        f"legacy wall={summary['speed']['legacy']['wall_sec']:.3f}s | "
+        f"preview wall={summary['speed']['preview']['wall_sec']:.3f}s"
     )
     print(
-        f"Quality: aggregate={summary['quality']['aggregate_normalized_similarity']:.2f}% "
-        f"avg={summary['quality']['avg_normalized_similarity']:.2f}% "
-        f"median={summary['quality']['median_normalized_similarity']:.2f}%"
-    )
-    print(
-        f"Fission: init={summary['speed']['fission_init_sec']:.3f}s "
-        f"decomp={summary['speed']['fission_total_sec']:.3f}s "
-        f"post={summary['speed']['fission_postprocess_sec']:.3f}s "
-        f"wall={summary['speed']['fission_wall_sec']:.3f}s"
-    )
-    print(
-        f"Ghidra:  init={summary['speed']['ghidra_init_sec']:.3f}s "
-        f"decomp={summary['speed']['ghidra_total_sec']:.3f}s "
-        f"wall={summary['speed']['ghidra_wall_sec']:.3f}s"
-    )
-    print(
-        f"Fission failures: explicit={summary['fission']['explicit_error_count']} "
-        f"synthetic={summary['fission']['synthetic_failure_count']} "
-        f"reported_success={summary['fission']['reported_success_count']}"
-    )
-    print(
-        f"Wall speedup vs Ghidra: {summary['speed']['wall_speedup_vs_ghidra']:.3f}x"
+        f"legacy vs pyghidra similarity={summary['quality']['pyghidra_vs_legacy']['avg_normalized_similarity']:.2f}% | "
+        f"legacy vs preview similarity={summary['quality']['legacy_vs_preview']['avg_normalized_similarity']:.2f}%"
     )
     res = summary.get("resources", {})
-    if res.get("fission_max_rss_mb") or res.get("ghidra_max_rss_mb"):
+    if any(res.get(label, {}).get("max_rss_mb", 0.0) for label in ("pyghidra", "legacy", "preview")):
         print(
-            f"Resources: Fission max_rss={res.get('fission_max_rss_mb', 0):.2f}MB avg_cpu={res.get('fission_avg_cpu_pct', 0):.2f}% | "
-            f"Ghidra max_rss={res.get('ghidra_max_rss_mb', 0):.2f}MB avg_cpu={res.get('ghidra_avg_cpu_pct', 0):.2f}%"
+            f"Resources: pyghidra max_rss={res.get('pyghidra', {}).get('max_rss_mb', 0):.2f}MB | "
+            f"legacy max_rss={res.get('legacy', {}).get('max_rss_mb', 0):.2f}MB | "
+            f"preview max_rss={res.get('preview', {}).get('max_rss_mb', 0):.2f}MB"
         )
     elif not HAS_PSUTIL:
         print("Resources: (install psutil for metrics)")
-    hot_rows = summary["samples"].get("fission_hot_path_phases", [])
+    hot_rows = summary["samples"].get("preview_hot_path_phases", [])
     if hot_rows:
         top = hot_rows[0]
         phases = ", ".join(
             f"{phase['phase']}={phase['ms']:.3f}ms" for phase in top["top_native_phases"]
         )
         print(
-            f"Top Fission hot path: {top['address']} {top['name']} "
+            f"Top preview hot path: {top['address']} {top['name']} "
             f"(decomp={top['decomp_sec']:.6f}s, {phases}, "
             f"callee={top['callee_preanalysis_count']}, "
             f"callgraph={top['callgraph_reanalysis_count']})"
@@ -1022,18 +938,38 @@ def main() -> int:
     if args.limit:
         print(f"[*] Limit: first {args.limit} functions only")
 
-    fission = run_fission_full(
+    struct_ptr_aliases = load_struct_pointer_aliases(BASE_TYPES_JSON)
+
+    legacy = run_fission_full(
         binary_path=binary_path,
         fission_bin=fission_bin,
         output_dir=output_dir,
         timeout_sec=args.timeout,
         profile=args.profile,
         compiler_id=args.compiler_id,
+        struct_ptr_aliases=struct_ptr_aliases,
+        public_engine="legacy",
         limit=args.limit,
     )
     print(
-        f"[*] Fission complete: functions={len(fission['entries'])}, "
-        f"wall={float(fission['meta'].get('wall_clock_sec', 0.0)):.3f}s"
+        f"[*] Legacy complete: functions={len(legacy['entries'])}, "
+        f"wall={float(legacy['meta'].get('wall_clock_sec', 0.0)):.3f}s"
+    )
+
+    preview = run_fission_full(
+        binary_path=binary_path,
+        fission_bin=fission_bin,
+        output_dir=output_dir,
+        timeout_sec=args.timeout,
+        profile=args.profile,
+        compiler_id=args.compiler_id,
+        struct_ptr_aliases=struct_ptr_aliases,
+        public_engine="preview",
+        limit=args.limit,
+    )
+    print(
+        f"[*] Preview complete: functions={len(preview['entries'])}, "
+        f"wall={float(preview['meta'].get('wall_clock_sec', 0.0)):.3f}s"
     )
 
     ghidra = run_ghidra_full(
@@ -1042,6 +978,7 @@ def main() -> int:
         output_dir=output_dir,
         per_function_timeout_sec=args.ghidra_func_timeout,
         skip_thunks=args.skip_thunks,
+        struct_ptr_aliases=struct_ptr_aliases,
         limit=args.limit,
     )
     print(
@@ -1049,7 +986,7 @@ def main() -> int:
         f"wall={float(ghidra['meta'].get('wall_clock_sec', 0.0)):.3f}s"
     )
 
-    benchmark = build_comparison(binary_path, fission, ghidra)
+    benchmark = build_comparison(binary_path, ghidra, legacy, preview)
     write_summary_files(output_dir, benchmark)
     print_console_summary(benchmark["summary"], output_dir)
     return 0

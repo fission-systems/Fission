@@ -97,7 +97,11 @@ impl<'a> PreviewBuilder<'a> {
             canonicalization_failed_nonterminal_join_label: 0,
             canonicalization_failed_nested_tail_escape: 0,
             canonicalized_interleaved_join_use_count: 0,
+            canonicalized_local_nonfallthrough_alias_count: 0,
             canonicalization_failed_alias_not_fallthrough_count: 0,
+            canonicalization_failed_alias_has_multiple_internal_predecessors_count: 0,
+            canonicalization_failed_alias_has_nonlocal_ref_count: 0,
+            canonicalization_failed_alias_body_not_trivial_count: 0,
             canonicalization_failed_join_has_external_ref_count: 0,
             canonicalization_failed_payload_crosses_join_count: 0,
             rejected_must_emit_label: 0,
@@ -220,8 +224,16 @@ impl<'a> PreviewBuilder<'a> {
             canonicalization_failed_nested_tail_escape: self
                 .canonicalization_failed_nested_tail_escape,
             canonicalized_interleaved_join_use_count: self.canonicalized_interleaved_join_use_count,
+            canonicalized_local_nonfallthrough_alias_count: self
+                .canonicalized_local_nonfallthrough_alias_count,
             canonicalization_failed_alias_not_fallthrough_count: self
                 .canonicalization_failed_alias_not_fallthrough_count,
+            canonicalization_failed_alias_has_multiple_internal_predecessors_count: self
+                .canonicalization_failed_alias_has_multiple_internal_predecessors_count,
+            canonicalization_failed_alias_has_nonlocal_ref_count: self
+                .canonicalization_failed_alias_has_nonlocal_ref_count,
+            canonicalization_failed_alias_body_not_trivial_count: self
+                .canonicalization_failed_alias_body_not_trivial_count,
             canonicalization_failed_join_has_external_ref_count: self
                 .canonicalization_failed_join_has_external_ref_count,
             canonicalization_failed_payload_crosses_join_count: self

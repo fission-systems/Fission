@@ -14,6 +14,11 @@ from .metrics import (
     extract_fallback_kind,
     normalize_address,
 )
+from .resource_monitor import (
+    HAS_PSUTIL,
+    run_popen_with_resource_monitor,
+    start_self_resource_monitor,
+)
 
 
 def run_command_json(
@@ -21,29 +26,48 @@ def run_command_json(
     cwd: Path,
     env: dict[str, str] | None = None,
     timeout: int = 90,
-) -> tuple[dict[str, Any] | None, str | None, float]:
+) -> tuple[dict[str, Any] | None, str | None, float, dict[str, Any] | None]:
     start = time.perf_counter()
     try:
-        res = subprocess.run(
-            cmd,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=True,
-            env=env,
-        )
+        if HAS_PSUTIL:
+            popen = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+            res, resources = run_popen_with_resource_monitor(popen, timeout_sec=timeout)
+            if res.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    res.returncode,
+                    res.args,
+                    output=res.stdout,
+                    stderr=res.stderr,
+                )
+        else:
+            res = subprocess.run(
+                cmd,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+                check=True,
+                env=env,
+            )
+            resources = None
     except subprocess.TimeoutExpired:
-        return None, "timeout", time.perf_counter() - start
+        return None, "timeout", time.perf_counter() - start, None
     except subprocess.CalledProcessError as exc:
         error = exc.stderr.strip() or exc.stdout.strip() or "command_failed"
-        return None, error, time.perf_counter() - start
+        return None, error, time.perf_counter() - start, None
 
     try:
-        return json.loads(res.stdout), None, time.perf_counter() - start
+        return json.loads(res.stdout), None, time.perf_counter() - start, resources
     except json.JSONDecodeError:
-        return None, "invalid_json", time.perf_counter() - start
+        return None, "invalid_json", time.perf_counter() - start, resources
 
 
 def list_functions_with_fission(
@@ -122,13 +146,14 @@ def run_fission_function(
         "--no-header",
         "--no-warnings",
     ]
-    payload, error, wall_sec = run_command_json(cmd, cwd=root_dir, timeout=timeout_sec)
+    payload, error, wall_sec, resources = run_command_json(cmd, cwd=root_dir, timeout=timeout_sec)
     if payload is None:
         return {
             "success": False,
             "failure_kind": classify_failure_kind(error),
             "failure_detail": error,
             "wall_sec": round(wall_sec, 6),
+            "resources": resources,
         }
 
     func = payload.get("functions", [{}])[0]
@@ -145,6 +170,7 @@ def run_fission_function(
             "fell_back": bool(func.get("fell_back", False)),
             "fallback_reason": func.get("fallback_reason"),
             "fallback_kind": extract_fallback_kind(func.get("fallback_reason")),
+            "resources": resources,
         }
     entry = {
         "success": True,
@@ -159,6 +185,7 @@ def run_fission_function(
         "fallback_reason": func.get("fallback_reason"),
         "fallback_kind": extract_fallback_kind(func.get("fallback_reason")),
         "preview_build_stats": func.get("preview_build_stats"),
+        "resources": resources,
     }
     if failure := detect_embedded_failure(code):
         entry["success"] = False
@@ -171,13 +198,13 @@ def run_fission_function(
     return entry
 
 
-def run_ghidra_binary(
+def run_ghidra_binary_with_meta(
     binary_path: Path,
     functions: list[tuple[str, str]],
     ghidra_dir: Path,
     timeout_sec: int,
     struct_ptr_aliases: dict[str, str],
-) -> tuple[float, dict[str, dict[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     os.environ["GHIDRA_INSTALL_DIR"] = str(ghidra_dir)
     import pyghidra
 
@@ -187,6 +214,11 @@ def run_ghidra_binary(
 
     results: dict[str, dict[str, Any]] = {}
     load_start = time.perf_counter()
+    res_thread = None
+    res_holder: dict[str, Any] = {}
+    res_stop = None
+    if HAS_PSUTIL:
+        res_thread, res_holder, res_stop = start_self_resource_monitor(interval_sec=0.5)
     with pyghidra.open_program(str(binary_path), analyze=True) as flat_api:
         program = flat_api.getCurrentProgram()
         monitor = ConsoleTaskMonitor()
@@ -234,4 +266,37 @@ def run_ghidra_binary(
                 entry["error"] = str(exc)
             entry["decomp_sec"] = round(time.perf_counter() - start, 6)
             results[normalize_address(addr_str)] = entry
-    return init_sec, results
+        try:
+            decomp.dispose()
+        except Exception:
+            pass
+
+    wall_sec = time.perf_counter() - load_start
+    if HAS_PSUTIL and res_stop is not None and res_thread is not None:
+        res_stop.set()
+        res_thread.join(timeout=3.0)
+
+    meta: dict[str, Any] = {
+        "backend": "pyghidra",
+        "init_sec": round(init_sec, 6),
+        "wall_sec": round(wall_sec, 6),
+        "resources": res_holder if res_holder else {},
+    }
+    return meta, results
+
+
+def run_ghidra_binary(
+    binary_path: Path,
+    functions: list[tuple[str, str]],
+    ghidra_dir: Path,
+    timeout_sec: int,
+    struct_ptr_aliases: dict[str, str],
+) -> tuple[float, dict[str, dict[str, Any]]]:
+    meta, results = run_ghidra_binary_with_meta(
+        binary_path,
+        functions,
+        ghidra_dir,
+        timeout_sec,
+        struct_ptr_aliases,
+    )
+    return float(meta.get("init_sec", 0.0)), results

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import statistics
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,35 @@ def load_struct_pointer_aliases(base_types_json: Path) -> dict[str, str]:
         if item.get("is_pointer") and name.startswith("LP") and len(name) > 2:
             aliases[name] = name[2:]
     return aliases
+
+
+def compute_timing_stats(samples_sec: list[float]) -> dict[str, Any]:
+    ms = [round(sample * 1000.0, 3) for sample in samples_sec]
+    if not ms:
+        return {
+            "runs": 0,
+            "min_ms": 0.0,
+            "max_ms": 0.0,
+            "avg_ms": 0.0,
+            "median_ms": 0.0,
+            "p95_ms": 0.0,
+        }
+
+    sorted_ms = sorted(ms)
+    if len(sorted_ms) == 1:
+        p95_ms = sorted_ms[0]
+    else:
+        index = min(max(int(round(0.95 * (len(sorted_ms) - 1))), 0), len(sorted_ms) - 1)
+        p95_ms = sorted_ms[index]
+
+    return {
+        "runs": len(ms),
+        "min_ms": round(min(ms), 3),
+        "max_ms": round(max(ms), 3),
+        "avg_ms": round(statistics.fmean(ms), 3),
+        "median_ms": round(statistics.median(ms), 3),
+        "p95_ms": round(p95_ms, 3),
+    }
 
 
 def count_regex(pattern: str, text: str) -> int:

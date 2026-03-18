@@ -7,6 +7,72 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-03-18
+
+### v104 - 3-Way Benchmark Expansion (`pyghidra` vs `legacy` vs `preview`)
+
+This round expanded the public benchmarking story from two separate comparisons into a consistent 3-way model:
+
+- `pyghidra` as the Python-host baseline,
+- `legacy` as the native FFI / Ghidra core baseline,
+- `preview` as the Rust-owned decompiler pipeline.
+
+The main goal was not a single blended score, but a benchmark shape that shows where overhead, fallback behavior, and readability improvements come from.
+
+#### Added
+
+- shared resource monitor helper for benchmark scripts
+  - added `scripts/test/batch_benchmark/grand_finale_support/resource_monitor.py`
+  - reused the same optional `psutil`-based RSS / CPU sampling model in both benchmark modes
+- function-level 3-way artifact shape
+  - `compare_legacy_preview.py` now emits `pyghidra`, `legacy`, and `preview` together
+  - added `three_way_delta` and `winner_summary` per function
+- whole-binary 3-way raw outputs
+  - now writes `legacy_full.json`, `preview_full.json`, and `ghidra_full.json`
+
+#### Changed
+
+- fixed-seed function-level comparison
+  - promoted `compare_legacy_preview.py` into the main 3-way fixed-seed comparison path
+  - kept existing `legacy` / `preview` fields for backward compatibility
+  - added engine-level summaries and pairwise deltas:
+    - `pyghidra_vs_legacy`
+    - `legacy_vs_preview`
+    - `pyghidra_vs_preview`
+- timing and resource metrics
+  - added shared timing stats with `p95_ms`
+  - added best-effort per-run resource summaries:
+    - `max_rss_mb`
+    - `avg_rss_mb`
+    - `avg_cpu_pct`
+    - `max_cpu_pct`
+- whole-binary benchmark summary
+  - replaced the old 2-way summary with explicit engine buckets:
+    - `pyghidra`
+    - `legacy`
+    - `preview`
+  - added pairwise quality/similarity sections and a public-ready summary line
+- benchmark documentation
+  - updated `scripts/test/batch_benchmark/README.md` to describe both benchmark modes and the 3-way engine model
+
+#### Validation
+
+- `python3 -m py_compile`
+  - `scripts/test/batch_benchmark/compare_legacy_preview.py`
+  - `scripts/test/batch_benchmark/full_decomp_benchmark.py`
+  - `scripts/test/batch_benchmark/grand_finale_support/*.py`
+- `cargo build -p fission-cli --features native_decomp`
+- function-level 3-way smoke
+  - `test_control_flow_x64_O0.exe 0x140001010`
+  - artifact:
+    - `/tmp/v104_compare_smoke2/test_control_flow_x64_O0_legacy_vs_preview.json`
+    - `/tmp/v104_compare_smoke2/test_control_flow_x64_O0_legacy_vs_preview.md`
+- whole-binary 3-way smoke
+  - `test_control_flow_x64_O0.exe --limit 1`
+  - artifact:
+    - `/tmp/v104_full_smoke2/benchmark_summary.json`
+    - `/tmp/v104_full_smoke2/benchmark_summary.md`
+
 ## 2026-03-17
 
 ### Repository Licensing + CLA Setup

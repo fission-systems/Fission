@@ -12,13 +12,14 @@ from typing import Any
 from grand_finale_support.metrics import (
     collect_code_metrics,
     compute_residue_score,
+    compute_timing_stats,
     load_struct_pointer_aliases,
     normalize_address,
 )
 from grand_finale_support.runners import (
     list_functions_with_fission,
     run_fission_function,
-    run_ghidra_binary,
+    run_ghidra_binary_with_meta,
 )
 
 
@@ -54,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-ghidra",
         action="store_true",
-        help="Also include Ghidra output for side-by-side comparison",
+        help="Also include the pyghidra baseline as a first-class third engine",
     )
     parser.add_argument(
         "--output-dir",
@@ -145,49 +146,6 @@ def resolve_names(binary_path: Path, fission_bin: Path, addresses: list[str], li
     return names
 
 
-def timing_stats(samples: list[float]) -> dict[str, Any]:
-    ms = [round(sample * 1000.0, 3) for sample in samples]
-    if not ms:
-        return {
-            "runs": 0,
-            "min_ms": 0.0,
-            "max_ms": 0.0,
-            "avg_ms": 0.0,
-            "median_ms": 0.0,
-        }
-    return {
-        "runs": len(ms),
-        "min_ms": round(min(ms), 3),
-        "max_ms": round(max(ms), 3),
-        "avg_ms": round(sum(ms) / len(ms), 3),
-        "median_ms": round(statistics.median(ms), 3),
-    }
-
-
-def compare_delta(legacy: dict[str, Any], preview: dict[str, Any]) -> dict[str, Any]:
-    legacy_metrics = legacy.get("metrics", {})
-    preview_metrics = preview.get("metrics", {})
-    legacy_residue = compute_residue_score(legacy) if legacy.get("success") else 0
-    preview_residue = compute_residue_score(preview) if preview.get("success") else 0
-    legacy_code = legacy.get("code", "")
-    preview_code = preview.get("code", "")
-    legacy_timing = legacy.get("timing_stats", {}).get("avg_ms", 0.0)
-    preview_timing = preview.get("timing_stats", {}).get("avg_ms", 0.0)
-    return {
-        "goto_count": int(preview_metrics.get("goto_count", 0)) - int(legacy_metrics.get("goto_count", 0)),
-        "temp_surface_count": int(preview_metrics.get("temp_surface_count", 0))
-        - int(legacy_metrics.get("temp_surface_count", 0)),
-        "cast_chain_count": int(preview_metrics.get("cast_chain_count", 0))
-        - int(legacy_metrics.get("cast_chain_count", 0)),
-        "helper_call_total": int(preview_metrics.get("helper_call_total", 0))
-        - int(legacy_metrics.get("helper_call_total", 0)),
-        "residue_score": preview_residue - legacy_residue,
-        "code_length": len(preview_code) - len(legacy_code),
-        "avg_timing_ms": round(preview_timing - legacy_timing, 3),
-        "speedup_ratio": round((legacy_timing / preview_timing), 3) if preview_timing > 0 else None,
-    }
-
-
 def unified_diff_text(legacy_code: str, preview_code: str, address: str) -> str:
     diff = difflib.unified_diff(
         legacy_code.splitlines(),
@@ -198,6 +156,88 @@ def unified_diff_text(legacy_code: str, preview_code: str, address: str) -> str:
     )
     text = "\n".join(diff)
     return text or "(no diff)"
+
+
+def compare_pair(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any]:
+    left = left or {}
+    right = right or {}
+    left_metrics = left.get("metrics", {})
+    right_metrics = right.get("metrics", {})
+    left_residue = compute_residue_score(left) if left.get("success") else 0
+    right_residue = compute_residue_score(right) if right.get("success") else 0
+    left_code = left.get("code", "")
+    right_code = right.get("code", "")
+    left_timing = float((left.get("timing_stats") or {}).get("avg_ms", 0.0) or 0.0)
+    right_timing = float((right.get("timing_stats") or {}).get("avg_ms", 0.0) or 0.0)
+    left_success = bool(left.get("success"))
+    right_success = bool(right.get("success"))
+    return {
+        "success_transition": f"{'ok' if left_success else 'fail'}->{'ok' if right_success else 'fail'}",
+        "goto_count": int(right_metrics.get("goto_count", 0)) - int(left_metrics.get("goto_count", 0)),
+        "top_level_label_count": int(right_metrics.get("top_level_label_count", 0))
+        - int(left_metrics.get("top_level_label_count", 0)),
+        "must_emit_label_count": int(right_metrics.get("must_emit_label_count", 0))
+        - int(left_metrics.get("must_emit_label_count", 0)),
+        "empty_if_count": int(right_metrics.get("empty_if_count", 0))
+        - int(left_metrics.get("empty_if_count", 0)),
+        "constant_if_count": int(right_metrics.get("constant_if_count", 0))
+        - int(left_metrics.get("constant_if_count", 0)),
+        "temp_surface_count": int(right_metrics.get("temp_surface_count", 0))
+        - int(left_metrics.get("temp_surface_count", 0)),
+        "cast_chain_count": int(right_metrics.get("cast_chain_count", 0))
+        - int(left_metrics.get("cast_chain_count", 0)),
+        "helper_call_total": int(right_metrics.get("helper_call_total", 0))
+        - int(left_metrics.get("helper_call_total", 0)),
+        "residue_score": right_residue - left_residue,
+        "code_length": len(right_code) - len(left_code),
+        "avg_timing_ms": round(right_timing - left_timing, 3),
+        "speedup_ratio": round((left_timing / right_timing), 3) if right_timing > 0 else None,
+    }
+
+
+def summarize_engine_result(label: str, result: dict[str, Any] | None) -> dict[str, Any]:
+    result = result or {}
+    metrics = result.get("metrics", {})
+    return {
+        "label": label,
+        "success": bool(result.get("success")),
+        "failure_kind": result.get("failure_kind"),
+        "failure_detail": result.get("failure_detail"),
+        "engine_used": result.get("engine_used", label),
+        "fell_back": bool(result.get("fell_back", False)),
+        "fallback_kind": result.get("fallback_kind"),
+        "avg_ms": float((result.get("timing_stats") or {}).get("avg_ms", 0.0) or 0.0),
+        "goto_count": int(metrics.get("goto_count", 0)),
+        "top_level_label_count": int(metrics.get("top_level_label_count", 0)),
+        "empty_if_count": int(metrics.get("empty_if_count", 0)),
+        "constant_if_count": int(metrics.get("constant_if_count", 0)),
+        "residue_score": compute_residue_score(result) if result.get("success") else 0,
+        "preview_surface_kind": result.get("preview_surface_kind"),
+    }
+
+
+def winner_summary(legacy: dict[str, Any], preview: dict[str, Any], pyghidra: dict[str, Any] | None) -> dict[str, Any]:
+    engine_rows = [
+        summarize_engine_result("legacy", legacy),
+        summarize_engine_result("preview", preview),
+    ]
+    if pyghidra is not None:
+        engine_rows.append(summarize_engine_result("pyghidra", pyghidra))
+
+    successful_rows = [row for row in engine_rows if row["success"]]
+    timing_winner = min(successful_rows, key=lambda row: row["avg_ms"])["label"] if successful_rows else None
+    goto_winner = min(successful_rows, key=lambda row: row["goto_count"])["label"] if successful_rows else None
+    label_winner = min(successful_rows, key=lambda row: row["top_level_label_count"])["label"] if successful_rows else None
+    residue_winner = min(successful_rows, key=lambda row: row["residue_score"])["label"] if successful_rows else None
+    structured = [row["label"] for row in successful_rows if row.get("preview_surface_kind") == "structured"]
+    return {
+        "timing_winner": timing_winner,
+        "goto_winner": goto_winner,
+        "label_winner": label_winner,
+        "residue_winner": residue_winner,
+        "structured_engines": structured,
+        "successful_engines": [row["label"] for row in successful_rows],
+    }
 
 
 def run_engine_repeated(
@@ -212,6 +252,7 @@ def run_engine_repeated(
 ) -> dict[str, Any]:
     attempts: list[dict[str, Any]] = []
     timings: list[float] = []
+    resource_samples: list[dict[str, Any]] = []
     for _ in range(repeat):
         result = run_fission_function(
             ROOT_DIR,
@@ -224,12 +265,74 @@ def run_engine_repeated(
         )
         attempts.append(result)
         timings.append(float(result.get("wall_sec", 0.0)))
+        if result.get("resources"):
+            resource_samples.append(result["resources"])
     preferred = next((entry for entry in attempts if entry.get("success")), attempts[0])
     preferred = dict(preferred)
     preferred.setdefault("address", address)
     preferred.setdefault("name", name)
     preferred["timing_ms"] = round(float(preferred.get("wall_sec", 0.0)) * 1000.0, 3)
-    preferred["timing_stats"] = timing_stats(timings)
+    preferred["timing_stats"] = compute_timing_stats(timings)
+    if resource_samples:
+        preferred["resources"] = {
+            "max_rss_mb": round(max(sample.get("max_rss_mb", 0.0) for sample in resource_samples), 2),
+            "avg_rss_mb": round(sum(sample.get("avg_rss_mb", 0.0) for sample in resource_samples) / len(resource_samples), 2),
+            "avg_cpu_pct": round(sum(sample.get("avg_cpu_pct", 0.0) for sample in resource_samples) / len(resource_samples), 2),
+            "max_cpu_pct": round(max(sample.get("max_cpu_pct", 0.0) for sample in resource_samples), 2),
+        }
+    return preferred
+
+
+def run_pyghidra_repeated(
+    binary_path: Path,
+    address: str,
+    name: str,
+    ghidra_dir: Path,
+    timeout_sec: int,
+    struct_ptr_aliases: dict[str, str],
+    repeat: int,
+) -> dict[str, Any]:
+    attempts: list[dict[str, Any]] = []
+    wall_samples: list[float] = []
+    init_samples: list[float] = []
+    resource_samples: list[dict[str, Any]] = []
+    for _ in range(repeat):
+        meta, entries = run_ghidra_binary_with_meta(
+            binary_path,
+            [(f"0x{address}", name)],
+            ghidra_dir,
+            timeout_sec,
+            struct_ptr_aliases,
+        )
+        result = dict(entries.get(normalize_address(address), {}))
+        if not result:
+            result = {
+                "address": f"0x{address}",
+                "name": name,
+                "success": False,
+                "failure_kind": "missing_function",
+            }
+        result["engine_used"] = "pyghidra"
+        result["fell_back"] = False
+        result["fallback_kind"] = None
+        attempts.append(result)
+        wall_samples.append(float(meta.get("wall_sec", 0.0) or 0.0))
+        init_samples.append(float(meta.get("init_sec", 0.0) or 0.0))
+        if meta.get("resources"):
+            resource_samples.append(meta["resources"])
+
+    preferred = next((entry for entry in attempts if entry.get("success")), attempts[0])
+    preferred = dict(preferred)
+    preferred["timing_stats"] = compute_timing_stats(wall_samples)
+    preferred["init_timing_stats"] = compute_timing_stats(init_samples)
+    preferred["timing_ms"] = float(preferred["timing_stats"]["avg_ms"])
+    if resource_samples:
+        preferred["resources"] = {
+            "max_rss_mb": round(max(sample.get("max_rss_mb", 0.0) for sample in resource_samples), 2),
+            "avg_rss_mb": round(sum(sample.get("avg_rss_mb", 0.0) for sample in resource_samples) / len(resource_samples), 2),
+            "avg_cpu_pct": round(sum(sample.get("avg_cpu_pct", 0.0) for sample in resource_samples) / len(resource_samples), 2),
+            "max_cpu_pct": round(max(sample.get("max_cpu_pct", 0.0) for sample in resource_samples), 2),
+        }
     return preferred
 
 
@@ -264,23 +367,26 @@ def compare_function(
         "mlil_preview",
         repeat,
     )
+    ghidra_entry: dict[str, Any] | None = None
     code_bundle: dict[str, Any] = {
         "legacy": legacy.get("code", ""),
         "preview": preview.get("code", ""),
     }
     if with_ghidra:
-        _, ghidra_entries = run_ghidra_binary(
+        ghidra_entry = run_pyghidra_repeated(
             binary_path,
-            [(f"0x{address}", name)],
+            address,
+            name,
             ghidra_dir,
             timeout_sec,
             struct_ptr_aliases,
+            repeat,
         )
-        ghidra_entry = ghidra_entries.get(normalize_address(address), {})
-        code_bundle["ghidra"] = ghidra_entry.get("code", "")
+        code_bundle["pyghidra"] = ghidra_entry.get("code", "")
     return {
         "address": f"0x{address}",
         "name": name,
+        "pyghidra": ghidra_entry,
         "legacy": legacy,
         "preview": preview,
         "preview_surface_kind": classify_preview_surface(preview),
@@ -336,9 +442,29 @@ def compare_function(
                 "canonicalized_interleaved_join_use_count", 0
             )
         ),
+        "canonicalized_local_nonfallthrough_alias_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalized_local_nonfallthrough_alias_count", 0
+            )
+        ),
         "canonicalization_failed_alias_not_fallthrough_count": (
             (preview.get("preview_build_stats") or {}).get(
                 "canonicalization_failed_alias_not_fallthrough_count", 0
+            )
+        ),
+        "canonicalization_failed_alias_has_multiple_internal_predecessors_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_alias_has_multiple_internal_predecessors_count", 0
+            )
+        ),
+        "canonicalization_failed_alias_has_nonlocal_ref_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_alias_has_nonlocal_ref_count", 0
+            )
+        ),
+        "canonicalization_failed_alias_body_not_trivial_count": (
+            (preview.get("preview_build_stats") or {}).get(
+                "canonicalization_failed_alias_body_not_trivial_count", 0
             )
         ),
         "canonicalization_failed_join_has_external_ref_count": (
@@ -364,7 +490,13 @@ def compare_function(
             (preview.get("preview_build_stats") or {}).get("rejected_loop_or_switch_target", 0)
         ),
         "legacy_dependent": is_legacy_dependent(preview),
-        "delta": compare_delta(legacy, preview),
+        "delta": compare_pair(legacy, preview),
+        "three_way_delta": {
+            "pyghidra_vs_legacy": compare_pair(ghidra_entry, legacy) if ghidra_entry else None,
+            "legacy_vs_preview": compare_pair(legacy, preview),
+            "pyghidra_vs_preview": compare_pair(ghidra_entry, preview) if ghidra_entry else None,
+        },
+        "winner_summary": winner_summary(legacy, preview, ghidra_entry),
         "code": code_bundle,
         "diff": unified_diff_text(code_bundle["legacy"], code_bundle["preview"], address),
     }
@@ -391,104 +523,63 @@ def is_legacy_dependent(preview: dict[str, Any]) -> bool:
     return not (preview.get("engine_used") == "mlil_preview" and not preview.get("fell_back"))
 
 
-def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
-    preview_better_on_goto = 0
-    preview_better_on_temp = 0
-    preview_better_on_cast = 0
-    preview_better_on_residue = 0
-    preview_better_on_helper = 0
-    preview_faster = 0
-    legacy_faster = 0
-    timing_tie = 0
-    preview_used_count = 0
-    preview_fallback_count = 0
-    preview_unstructured_count = 0
+def summarize_engine_collection(
+    functions: list[dict[str, Any]],
+    label: str,
+) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for item in functions:
+        row = item.get(label)
+        if row is not None:
+            rows.append(row)
+    success_rows = [row for row in rows if row.get("success")]
+    avg_ms_samples = [float((row.get("timing_stats") or {}).get("avg_ms", 0.0) or 0.0) for row in rows]
+    return {
+        "function_count": len(rows),
+        "success_count": sum(1 for row in rows if row.get("success")),
+        "failure_count": sum(1 for row in rows if not row.get("success")),
+        "timeout_count": sum(1 for row in rows if row.get("failure_kind") == "timeout"),
+        "avg_ms": round(sum(avg_ms_samples) / len(avg_ms_samples), 3) if avg_ms_samples else 0.0,
+        "median_ms": round(statistics.median(avg_ms_samples), 3) if avg_ms_samples else 0.0,
+        "goto_total": sum(int((row.get("metrics") or {}).get("goto_count", 0)) for row in success_rows),
+        "top_level_label_total": sum(int((row.get("metrics") or {}).get("top_level_label_count", 0)) for row in success_rows),
+        "empty_if_total": sum(int((row.get("metrics") or {}).get("empty_if_count", 0)) for row in success_rows),
+        "constant_if_total": sum(int((row.get("metrics") or {}).get("constant_if_count", 0)) for row in success_rows),
+        "residue_total": sum(compute_residue_score(row) for row in success_rows),
+        "preview_surface_structured_count": sum(1 for item in functions if label == "preview" and item.get("preview_surface_kind") == "structured"),
+        "direct_preview_success_count": sum(1 for row in rows if label == "preview" and row.get("success") and row.get("engine_used") == "mlil_preview" and not row.get("fell_back")),
+        "fallback_count": sum(1 for row in rows if bool(row.get("fell_back"))),
+    }
+
+
+def summarize_pairwise(functions: list[dict[str, Any]], pair_key: str) -> dict[str, Any]:
+    deltas = [item["three_way_delta"][pair_key] for item in functions if item["three_way_delta"].get(pair_key)]
+    if not deltas:
+        return {}
+    speedup_samples = [delta["speedup_ratio"] for delta in deltas if delta.get("speedup_ratio") is not None]
+    return {
+        "count": len(deltas),
+        "avg_timing_ms_delta": round(sum(delta["avg_timing_ms"] for delta in deltas) / len(deltas), 3),
+        "avg_speedup_ratio": round(sum(speedup_samples) / len(speedup_samples), 3) if speedup_samples else 0.0,
+        "better_on_goto_count": sum(1 for delta in deltas if delta["goto_count"] < 0),
+        "better_on_label_count": sum(1 for delta in deltas if delta["top_level_label_count"] < 0),
+        "better_on_empty_if_count": sum(1 for delta in deltas if delta["empty_if_count"] < 0),
+        "better_on_constant_if_count": sum(1 for delta in deltas if delta["constant_if_count"] < 0),
+        "better_on_residue_count": sum(1 for delta in deltas if delta["residue_score"] < 0),
+        "success_transitions": {
+            transition: sum(1 for delta in deltas if delta["success_transition"] == transition)
+            for transition in sorted({delta["success_transition"] for delta in deltas})
+        },
+    }
+
+
+def summarize_results(functions: list[dict[str, Any]], with_ghidra: bool) -> dict[str, Any]:
+    preview = [item["preview"] for item in functions]
     fallback_kind_counts: dict[str, int] = {}
     legacy_dependent_functions: list[dict[str, Any]] = []
-    promotion_candidate_total = 0
-    promoted_region_total = 0
-    promotion_rejected_by_shape_total = 0
-    promotion_rejected_by_gate_total = 0
-    discovery_seen_guarded_tail_like_shape_total = 0
-    discovery_rejected_noncanonical_layout_total = 0
-    canonicalized_guarded_tail_shape_total = 0
-    canonicalization_failed_multiple_payload_entries_total = 0
-    canonicalization_failed_interleaved_join_uses_total = 0
-    canonicalization_failed_nonterminal_join_label_total = 0
-    canonicalization_failed_nested_tail_escape_total = 0
-    canonicalized_interleaved_join_use_total = 0
-    canonicalization_failed_alias_not_fallthrough_total = 0
-    canonicalization_failed_join_has_external_ref_total = 0
-    canonicalization_failed_payload_crosses_join_total = 0
-    rejected_must_emit_label_total = 0
-    rejected_not_single_pred_succ_total = 0
-    rejected_external_entry_total = 0
-    rejected_loop_or_switch_target_total = 0
-    legacy_avg_samples: list[float] = []
-    preview_avg_samples: list[float] = []
-    speedup_samples: list[float] = []
     for item in functions:
-        delta = item["delta"]
-        if delta["goto_count"] < 0:
-            preview_better_on_goto += 1
-        if delta["temp_surface_count"] < 0:
-            preview_better_on_temp += 1
-        if delta["cast_chain_count"] < 0:
-            preview_better_on_cast += 1
-        if delta["residue_score"] < 0:
-            preview_better_on_residue += 1
-        if delta["helper_call_total"] > 0:
-            preview_better_on_helper += 1
-        preview = item["preview"]
-        preview_used_count += int(preview.get("engine_used") == "mlil_preview" and preview.get("success"))
-        preview_fallback_count += int(bool(preview.get("fell_back")))
-        preview_unstructured_count += int(item.get("preview_surface_kind") == "unstructured")
-        promotion_candidate_total += int(item.get("promotion_candidate_count", 0))
-        promoted_region_total += int(item.get("promoted_region_count", 0))
-        promotion_rejected_by_shape_total += int(item.get("promotion_rejected_by_shape_count", 0))
-        promotion_rejected_by_gate_total += int(item.get("promotion_rejected_by_gate_count", 0))
-        discovery_seen_guarded_tail_like_shape_total += int(
-            item.get("discovery_seen_guarded_tail_like_shape_count", 0)
-        )
-        discovery_rejected_noncanonical_layout_total += int(
-            item.get("discovery_rejected_noncanonical_layout_count", 0)
-        )
-        canonicalized_guarded_tail_shape_total += int(
-            item.get("canonicalized_guarded_tail_shape_count", 0)
-        )
-        canonicalization_failed_multiple_payload_entries_total += int(
-            item.get("canonicalization_failed_multiple_payload_entries", 0)
-        )
-        canonicalization_failed_interleaved_join_uses_total += int(
-            item.get("canonicalization_failed_interleaved_join_uses", 0)
-        )
-        canonicalization_failed_nonterminal_join_label_total += int(
-            item.get("canonicalization_failed_nonterminal_join_label", 0)
-        )
-        canonicalization_failed_nested_tail_escape_total += int(
-            item.get("canonicalization_failed_nested_tail_escape", 0)
-        )
-        canonicalized_interleaved_join_use_total += int(
-            item.get("canonicalized_interleaved_join_use_count", 0)
-        )
-        canonicalization_failed_alias_not_fallthrough_total += int(
-            item.get("canonicalization_failed_alias_not_fallthrough_count", 0)
-        )
-        canonicalization_failed_join_has_external_ref_total += int(
-            item.get("canonicalization_failed_join_has_external_ref_count", 0)
-        )
-        canonicalization_failed_payload_crosses_join_total += int(
-            item.get("canonicalization_failed_payload_crosses_join_count", 0)
-        )
-        rejected_must_emit_label_total += int(item.get("rejected_must_emit_label", 0))
-        rejected_not_single_pred_succ_total += int(
-            item.get("rejected_not_single_pred_succ", 0)
-        )
-        rejected_external_entry_total += int(item.get("rejected_external_entry", 0))
-        rejected_loop_or_switch_target_total += int(
-            item.get("rejected_loop_or_switch_target", 0)
-        )
-        fallback_kind = preview.get("fallback_kind")
+        preview_row = item["preview"]
+        fallback_kind = preview_row.get("fallback_kind")
         if fallback_kind:
             fallback_kind_counts[fallback_kind] = fallback_kind_counts.get(fallback_kind, 0) + 1
         if item.get("legacy_dependent"):
@@ -496,73 +587,81 @@ def summarize_results(functions: list[dict[str, Any]]) -> dict[str, Any]:
                 {
                     "address": item["address"],
                     "name": item["name"],
-                    "preview_engine_used": preview.get("engine_used"),
-                    "preview_fallback_kind": preview.get("fallback_kind"),
-                    "preview_failure_kind": preview.get("failure_kind"),
+                    "preview_engine_used": preview_row.get("engine_used"),
+                    "preview_fallback_kind": preview_row.get("fallback_kind"),
+                    "preview_failure_kind": preview_row.get("failure_kind"),
                     "preview_surface_kind": item.get("preview_surface_kind"),
                 }
             )
-        legacy_avg = float(item["legacy"]["timing_stats"]["avg_ms"])
-        preview_avg = float(preview["timing_stats"]["avg_ms"])
-        legacy_avg_samples.append(legacy_avg)
-        preview_avg_samples.append(preview_avg)
-        if preview_avg > 0:
-            ratio = legacy_avg / preview_avg
-            speedup_samples.append(ratio)
-            if abs(legacy_avg - preview_avg) <= 0.5:
-                timing_tie += 1
-            elif ratio > 1.0:
-                preview_faster += 1
-            else:
-                legacy_faster += 1
-    return {
+
+    summary = {
         "function_count": len(functions),
-        "preview_used_count": preview_used_count,
-        "preview_fallback_count": preview_fallback_count,
-        "preview_unstructured_count": preview_unstructured_count,
-        "preview_better_on_goto_count": preview_better_on_goto,
-        "preview_better_on_temp_count": preview_better_on_temp,
-        "preview_better_on_cast_count": preview_better_on_cast,
-        "preview_better_on_residue_count": preview_better_on_residue,
-        "preview_better_on_helper_count": preview_better_on_helper,
-        "preview_faster_count": preview_faster,
-        "legacy_faster_count": legacy_faster,
-        "timing_tie_count": timing_tie,
-        "avg_legacy_ms": round(sum(legacy_avg_samples) / len(legacy_avg_samples), 3) if legacy_avg_samples else 0.0,
-        "avg_preview_ms": round(sum(preview_avg_samples) / len(preview_avg_samples), 3) if preview_avg_samples else 0.0,
-        "avg_speedup_ratio": round(sum(speedup_samples) / len(speedup_samples), 3) if speedup_samples else 0.0,
+        "preview_used_count": sum(1 for row in preview if row.get("engine_used") == "mlil_preview" and row.get("success")),
+        "preview_fallback_count": sum(1 for row in preview if bool(row.get("fell_back"))),
+        "preview_unstructured_count": sum(1 for item in functions if item.get("preview_surface_kind") == "unstructured"),
         "fallback_kind_counts": fallback_kind_counts,
-        "promotion_candidate_count": promotion_candidate_total,
-        "promoted_region_count": promoted_region_total,
-        "promotion_rejected_by_shape_count": promotion_rejected_by_shape_total,
-        "promotion_rejected_by_gate_count": promotion_rejected_by_gate_total,
-        "discovery_seen_guarded_tail_like_shape_count": discovery_seen_guarded_tail_like_shape_total,
-        "discovery_rejected_noncanonical_layout_count": discovery_rejected_noncanonical_layout_total,
-        "canonicalized_guarded_tail_shape_count": canonicalized_guarded_tail_shape_total,
-        "canonicalization_failed_multiple_payload_entries": canonicalization_failed_multiple_payload_entries_total,
-        "canonicalization_failed_interleaved_join_uses": canonicalization_failed_interleaved_join_uses_total,
-        "canonicalization_failed_nonterminal_join_label": canonicalization_failed_nonterminal_join_label_total,
-        "canonicalization_failed_nested_tail_escape": canonicalization_failed_nested_tail_escape_total,
-        "canonicalized_interleaved_join_use_count": canonicalized_interleaved_join_use_total,
-        "canonicalization_failed_alias_not_fallthrough_count": canonicalization_failed_alias_not_fallthrough_total,
-        "canonicalization_failed_join_has_external_ref_count": canonicalization_failed_join_has_external_ref_total,
-        "canonicalization_failed_payload_crosses_join_count": canonicalization_failed_payload_crosses_join_total,
-        "rejected_must_emit_label": rejected_must_emit_label_total,
-        "rejected_not_single_pred_succ": rejected_not_single_pred_succ_total,
-        "rejected_external_entry": rejected_external_entry_total,
-        "rejected_loop_or_switch_target": rejected_loop_or_switch_target_total,
+        "promotion_candidate_count": sum(int(item.get("promotion_candidate_count", 0)) for item in functions),
+        "promoted_region_count": sum(int(item.get("promoted_region_count", 0)) for item in functions),
+        "promotion_rejected_by_shape_count": sum(int(item.get("promotion_rejected_by_shape_count", 0)) for item in functions),
+        "promotion_rejected_by_gate_count": sum(int(item.get("promotion_rejected_by_gate_count", 0)) for item in functions),
+        "discovery_seen_guarded_tail_like_shape_count": sum(int(item.get("discovery_seen_guarded_tail_like_shape_count", 0)) for item in functions),
+        "discovery_rejected_noncanonical_layout_count": sum(int(item.get("discovery_rejected_noncanonical_layout_count", 0)) for item in functions),
+        "canonicalized_guarded_tail_shape_count": sum(int(item.get("canonicalized_guarded_tail_shape_count", 0)) for item in functions),
+        "canonicalization_failed_multiple_payload_entries": sum(int(item.get("canonicalization_failed_multiple_payload_entries", 0)) for item in functions),
+        "canonicalization_failed_interleaved_join_uses": sum(int(item.get("canonicalization_failed_interleaved_join_uses", 0)) for item in functions),
+        "canonicalization_failed_nonterminal_join_label": sum(int(item.get("canonicalization_failed_nonterminal_join_label", 0)) for item in functions),
+        "canonicalization_failed_nested_tail_escape": sum(int(item.get("canonicalization_failed_nested_tail_escape", 0)) for item in functions),
+        "canonicalized_interleaved_join_use_count": sum(int(item.get("canonicalized_interleaved_join_use_count", 0)) for item in functions),
+        "canonicalized_local_nonfallthrough_alias_count": sum(int(item.get("canonicalized_local_nonfallthrough_alias_count", 0)) for item in functions),
+        "canonicalization_failed_alias_not_fallthrough_count": sum(int(item.get("canonicalization_failed_alias_not_fallthrough_count", 0)) for item in functions),
+        "canonicalization_failed_alias_has_multiple_internal_predecessors_count": sum(int(item.get("canonicalization_failed_alias_has_multiple_internal_predecessors_count", 0)) for item in functions),
+        "canonicalization_failed_alias_has_nonlocal_ref_count": sum(int(item.get("canonicalization_failed_alias_has_nonlocal_ref_count", 0)) for item in functions),
+        "canonicalization_failed_alias_body_not_trivial_count": sum(int(item.get("canonicalization_failed_alias_body_not_trivial_count", 0)) for item in functions),
+        "canonicalization_failed_join_has_external_ref_count": sum(int(item.get("canonicalization_failed_join_has_external_ref_count", 0)) for item in functions),
+        "canonicalization_failed_payload_crosses_join_count": sum(int(item.get("canonicalization_failed_payload_crosses_join_count", 0)) for item in functions),
+        "rejected_must_emit_label": sum(int(item.get("rejected_must_emit_label", 0)) for item in functions),
+        "rejected_not_single_pred_succ": sum(int(item.get("rejected_not_single_pred_succ", 0)) for item in functions),
+        "rejected_external_entry": sum(int(item.get("rejected_external_entry", 0)) for item in functions),
+        "rejected_loop_or_switch_target": sum(int(item.get("rejected_loop_or_switch_target", 0)) for item in functions),
         "legacy_dependent_count": len(legacy_dependent_functions),
         "legacy_dependent_functions": legacy_dependent_functions,
+        "engines": {
+            "legacy": summarize_engine_collection(functions, "legacy"),
+            "preview": summarize_engine_collection(functions, "preview"),
+        },
+        "engine_pairs": {
+            "legacy_vs_preview": summarize_pairwise(functions, "legacy_vs_preview"),
+        },
     }
+    if with_ghidra:
+        summary["engines"]["pyghidra"] = summarize_engine_collection(functions, "pyghidra")
+        summary["engine_pairs"]["pyghidra_vs_legacy"] = summarize_pairwise(functions, "pyghidra_vs_legacy")
+        summary["engine_pairs"]["pyghidra_vs_preview"] = summarize_pairwise(functions, "pyghidra_vs_preview")
+        py_engine = summary["engines"]["pyghidra"]
+        legacy_engine = summary["engines"]["legacy"]
+        preview_engine = summary["engines"]["preview"]
+        summary["public_summary_line"] = (
+            f"legacy vs pyghidra avg speedup {summary['engine_pairs']['pyghidra_vs_legacy'].get('avg_speedup_ratio', 0)}x; "
+            f"preview vs legacy residue wins {summary['engine_pairs']['legacy_vs_preview'].get('better_on_residue_count', 0)}/{len(functions)}; "
+            f"timeouts pyghidra={py_engine['timeout_count']}, legacy={legacy_engine['timeout_count']}, preview={preview_engine['timeout_count']}"
+        )
+    else:
+        summary["public_summary_line"] = (
+            f"preview vs legacy residue wins {summary['engine_pairs']['legacy_vs_preview'].get('better_on_residue_count', 0)}/{len(functions)}"
+        )
+    return summary
 
 
 def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
+    with_ghidra = any(item.get("pyghidra") is not None for item in report["functions"])
+    title = "# 3-Way Fixed-Seed Benchmark" if with_ghidra else "# Legacy vs MLIL Preview Comparison"
     lines = [
-        "# Legacy vs MLIL Preview Comparison",
+        title,
         "",
         f"- Generated: {report['generated_at']}",
         f"- Binary: `{report['binary']}`",
         f"- Repeat count: {report['repeat']}",
+        f"- Cache mode: `{report.get('cache_mode', 'warm')}`",
         "",
         "## Summary",
         "",
@@ -570,14 +669,8 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Preview used count: {report['summary']['preview_used_count']}",
         f"- Preview fallback count: {report['summary']['preview_fallback_count']}",
         f"- Preview unstructured count: {report['summary'].get('preview_unstructured_count', 0)}",
-        f"- Preview faster count: {report['summary']['preview_faster_count']}",
-        f"- Preview helper wins: {report['summary']['preview_better_on_helper_count']}",
-        f"- Legacy faster count: {report['summary']['legacy_faster_count']}",
-        f"- Timing tie count: {report['summary']['timing_tie_count']}",
-        f"- Average legacy ms: {report['summary']['avg_legacy_ms']}",
-        f"- Average preview ms: {report['summary']['avg_preview_ms']}",
-        f"- Average speedup ratio: {report['summary']['avg_speedup_ratio']}",
         f"- Fallback kind counts: {report['summary'].get('fallback_kind_counts', {})}",
+        f"- Public summary: {report['summary'].get('public_summary_line', '')}",
         f"- Promotion candidate count: {report['summary'].get('promotion_candidate_count', 0)}",
         f"- Promoted region count: {report['summary'].get('promoted_region_count', 0)}",
         f"- Promotion rejected by shape: {report['summary'].get('promotion_rejected_by_shape_count', 0)}",
@@ -599,25 +692,71 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"- Rejected loop/switch target: {report['summary'].get('rejected_loop_or_switch_target', 0)}",
         f"- Legacy-dependent count: {report['summary'].get('legacy_dependent_count', 0)}",
         "",
+        "## Why 3-Way",
+        "",
+        "- `pyghidra`: Python-host baseline",
+        "- `legacy`: native FFI baseline",
+        "- `preview`: Rust preview pipeline",
+        "",
+        "## Engine Summary",
+        "",
+    ]
+    engine_table_header = "| Engine | Success | Failure | Timeout | Avg ms | Median ms | goto total | label total | empty if | constant if | residue total |"
+    lines.extend([engine_table_header, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"])
+    for label, entry in report["summary"].get("engines", {}).items():
+        lines.append(
+            f"| `{label}` | {entry.get('success_count', 0)} | {entry.get('failure_count', 0)} | "
+            f"{entry.get('timeout_count', 0)} | {entry.get('avg_ms', 0.0)} | {entry.get('median_ms', 0.0)} | "
+            f"{entry.get('goto_total', 0)} | {entry.get('top_level_label_total', 0)} | "
+            f"{entry.get('empty_if_total', 0)} | {entry.get('constant_if_total', 0)} | {entry.get('residue_total', 0)} |"
+        )
+    lines.extend([
+        "",
+        "## Pairwise Deltas",
+        "",
+        "| Pair | Avg speedup | Avg timing delta ms | Better goto | Better labels | Better empty if | Better const if | Better residue |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for label, entry in report["summary"].get("engine_pairs", {}).items():
+        lines.append(
+            f"| `{label}` | {entry.get('avg_speedup_ratio', 0.0)} | {entry.get('avg_timing_ms_delta', 0.0)} | "
+            f"{entry.get('better_on_goto_count', 0)} | {entry.get('better_on_label_count', 0)} | "
+            f"{entry.get('better_on_empty_if_count', 0)} | {entry.get('better_on_constant_if_count', 0)} | "
+            f"{entry.get('better_on_residue_count', 0)} |"
+        )
+    lines.extend([
+        "",
         "## Function Table",
         "",
-        "| Address | Legacy | Preview | Δ goto | Δ temp | Δ cast | Δ helper | Legacy avg ms | Preview avg ms | Speedup | Preview used/fallback | Surface | Promote cand/promoted | Reject shape/gate |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- |",
-    ]
+    ])
+    if with_ghidra:
+        lines.extend([
+            "| Address | pyghidra | Legacy | Preview | pyghidra ms | Legacy ms | Preview ms | py->leg speedup | leg->prev speedup | Winner |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        ])
+    else:
+        lines.extend([
+            "| Address | Legacy | Preview | Legacy ms | Preview ms | leg->prev speedup | Winner |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        ])
     for item in report["functions"]:
         legacy = item["legacy"]
         preview = item["preview"]
-        delta = item["delta"]
-        preview_state = f"{preview.get('engine_used', '')}/{str(bool(preview.get('fell_back'))).lower()}"
-        lines.append(
-            f"| `{item['address']}` | {'ok' if legacy.get('success') else 'fail'} | "
-            f"{'ok' if preview.get('success') else 'fail'} | {delta['goto_count']} | "
-            f"{delta['temp_surface_count']} | {delta['cast_chain_count']} | {delta['helper_call_total']} | "
-            f"{legacy['timing_stats']['avg_ms']} | {preview['timing_stats']['avg_ms']} | "
-            f"{delta['speedup_ratio']} | {preview_state} | {item.get('preview_surface_kind')} | "
-            f"{item.get('promotion_candidate_count', 0)}/{item.get('promoted_region_count', 0)} | "
-            f"{item.get('promotion_rejected_by_shape_count', 0)}/{item.get('promotion_rejected_by_gate_count', 0)} |"
-        )
+        delta = item["three_way_delta"]["legacy_vs_preview"]
+        winner = item.get("winner_summary", {}).get("timing_winner")
+        if with_ghidra:
+            pyghidra = item.get("pyghidra") or {}
+            py_to_leg = (item["three_way_delta"].get("pyghidra_vs_legacy") or {}).get("speedup_ratio")
+            lines.append(
+                f"| `{item['address']}` | {'ok' if pyghidra.get('success') else 'fail'} | {'ok' if legacy.get('success') else 'fail'} | "
+                f"{'ok' if preview.get('success') else 'fail'} | {pyghidra.get('timing_stats', {}).get('avg_ms', 0.0)} | "
+                f"{legacy['timing_stats']['avg_ms']} | {preview['timing_stats']['avg_ms']} | {py_to_leg} | {delta['speedup_ratio']} | `{winner}` |"
+            )
+        else:
+            lines.append(
+                f"| `{item['address']}` | {'ok' if legacy.get('success') else 'fail'} | {'ok' if preview.get('success') else 'fail'} | "
+                f"{legacy['timing_stats']['avg_ms']} | {preview['timing_stats']['avg_ms']} | {delta['speedup_ratio']} | `{winner}` |"
+            )
     lines.extend(["", "## Legacy-Dependent", ""])
     if not report["summary"].get("legacy_dependent_functions"):
         lines.append("- none")
@@ -638,10 +777,13 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 "",
                 f"- Legacy success: {item['legacy'].get('success')}",
                 f"- Preview success: {item['preview'].get('success')}",
+                f"- pyghidra success: {(item.get('pyghidra') or {}).get('success')}",
+                f"- Winner summary: {item.get('winner_summary')}",
                 f"- Legacy timing stats: {item['legacy']['timing_stats']}",
                 f"- Preview timing stats: {item['preview']['timing_stats']}",
-                f"- Delta: {item['delta']}",
-                f"- Promotion stats: candidates={item.get('promotion_candidate_count', 0)}, promoted={item.get('promoted_region_count', 0)}, rejected_shape={item.get('promotion_rejected_by_shape_count', 0)}, rejected_gate={item.get('promotion_rejected_by_gate_count', 0)}, seen_guarded_tail_like={item.get('discovery_seen_guarded_tail_like_shape_count', 0)}, rejected_noncanonical={item.get('discovery_rejected_noncanonical_layout_count', 0)}, canonicalized={item.get('canonicalized_guarded_tail_shape_count', 0)}, canonicalized_interleaved={item.get('canonicalized_interleaved_join_use_count', 0)}, failed_multi_payload={item.get('canonicalization_failed_multiple_payload_entries', 0)}, failed_interleaved_join={item.get('canonicalization_failed_interleaved_join_uses', 0)}, failed_alias_not_fallthrough={item.get('canonicalization_failed_alias_not_fallthrough_count', 0)}, failed_join_has_external_ref={item.get('canonicalization_failed_join_has_external_ref_count', 0)}, failed_payload_crosses_join={item.get('canonicalization_failed_payload_crosses_join_count', 0)}, failed_nonterminal_join={item.get('canonicalization_failed_nonterminal_join_label', 0)}, failed_nested_escape={item.get('canonicalization_failed_nested_tail_escape', 0)}, must_emit={item.get('rejected_must_emit_label', 0)}, not_single_pred_succ={item.get('rejected_not_single_pred_succ', 0)}, external_entry={item.get('rejected_external_entry', 0)}, loop_or_switch={item.get('rejected_loop_or_switch_target', 0)}",
+                f"- pyghidra timing stats: {(item.get('pyghidra') or {}).get('timing_stats')}",
+                f"- Pair deltas: {item['three_way_delta']}",
+                f"- Promotion stats: candidates={item.get('promotion_candidate_count', 0)}, promoted={item.get('promoted_region_count', 0)}, rejected_shape={item.get('promotion_rejected_by_shape_count', 0)}, rejected_gate={item.get('promotion_rejected_by_gate_count', 0)}, seen_guarded_tail_like={item.get('discovery_seen_guarded_tail_like_shape_count', 0)}, rejected_noncanonical={item.get('discovery_rejected_noncanonical_layout_count', 0)}, canonicalized={item.get('canonicalized_guarded_tail_shape_count', 0)}, canonicalized_interleaved={item.get('canonicalized_interleaved_join_use_count', 0)}, canonicalized_local_nonfallthrough={item.get('canonicalized_local_nonfallthrough_alias_count', 0)}, failed_multi_payload={item.get('canonicalization_failed_multiple_payload_entries', 0)}, failed_interleaved_join={item.get('canonicalization_failed_interleaved_join_uses', 0)}, failed_alias_not_fallthrough={item.get('canonicalization_failed_alias_not_fallthrough_count', 0)}, failed_alias_multi_pred={item.get('canonicalization_failed_alias_has_multiple_internal_predecessors_count', 0)}, failed_alias_nonlocal_ref={item.get('canonicalization_failed_alias_has_nonlocal_ref_count', 0)}, failed_alias_body_not_trivial={item.get('canonicalization_failed_alias_body_not_trivial_count', 0)}, failed_join_has_external_ref={item.get('canonicalization_failed_join_has_external_ref_count', 0)}, failed_payload_crosses_join={item.get('canonicalization_failed_payload_crosses_join_count', 0)}, failed_nonterminal_join={item.get('canonicalization_failed_nonterminal_join_label', 0)}, failed_nested_escape={item.get('canonicalization_failed_nested_tail_escape', 0)}, must_emit={item.get('rejected_must_emit_label', 0)}, not_single_pred_succ={item.get('rejected_not_single_pred_succ', 0)}, external_entry={item.get('rejected_external_entry', 0)}, loop_or_switch={item.get('rejected_loop_or_switch_target', 0)}",
                 "",
                 "#### Legacy",
                 "```c",
@@ -654,8 +796,8 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 "```",
             ]
         )
-        if ghidra_code := item["code"].get("ghidra"):
-            lines.extend(["", "#### Ghidra", "```c", ghidra_code, "```"])
+        if ghidra_code := item["code"].get("pyghidra"):
+            lines.extend(["", "#### pyghidra", "```c", ghidra_code, "```"])
         lines.extend(["", "#### Unified Diff", "```diff", item["diff"], "```", ""])
     output_path.write_text("\n".join(lines))
 
@@ -702,8 +844,9 @@ def main() -> int:
         "binary": str(binary_path),
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "repeat": args.repeat,
+        "cache_mode": "warm",
         "functions": results,
-        "summary": summarize_results(results),
+        "summary": summarize_results(results, with_ghidra=args.with_ghidra),
     }
     json_path = output_dir / f"{binary_name}_legacy_vs_preview.json"
     md_path = output_dir / f"{binary_name}_legacy_vs_preview.md"
