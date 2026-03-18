@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-03-18",
+  "corpus_kind": "quality_explicit_facts",
+  "direct_preview_explicit_candidates": [],
+  "blocked_explicit_candidates": [
+    {
+      "binary": "main-debug.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/llvm_explicit_facts/main-debug.exe",
+      "address": "0x401110",
+      "name": "main",
+      "explicit_fact_total": 2,
+      "fact_density_score": 6,
+      "preview_direct_success": false,
+      "block_reason": "preview_direct_failure",
+      "preview_surface_kind": null,
+      "pcode_op_count": 21,
+      "has_indirect_control_flow": false,
+      "reason_tags": [
+        "dwarf_locals",
+        "return_type"
+      ]
+    },
+    {
+      "binary": "addr.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/llvm_explicit_facts/addr.exe",
+      "address": "0x400540",
+      "name": "main",
+      "explicit_fact_total": 2,
+      "fact_density_score": 6,
+      "preview_direct_success": false,
+      "block_reason": "preview_direct_failure",
+      "preview_surface_kind": null,
+      "pcode_op_count": 41,
+      "has_indirect_control_flow": false,
+      "reason_tags": [
+        "dwarf_locals",
+        "return_type"
+      ]
+    }
+  ],
+  "scan_summary": {
+    "strict_explicit_corpus_population_succeeded": false,
+    "quality_explicit_facts_still_empty": true,
+    "notes": [
+      "Current explicit-facts bottleneck is sample scarcity, not corpus split logic.",
+      "LLVM test PE binaries produced a small number of explicit candidates, but none satisfied direct-preview success.",
+      "Current heuristic corpus remains valid and separated; explicit corpus needs additional PE sources rather than provisional blocked-seed promotion."
+    ]
+  }
+}

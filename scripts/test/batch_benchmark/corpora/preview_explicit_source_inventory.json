@@ -1,0 +1,69 @@
+{
+  "generated_at": "2026-03-18",
+  "goal": "Identify PE x64 candidates that can populate quality_explicit_facts with non-zero explicit preview hint hits.",
+  "sources": [
+    {
+      "binary": "test_structs_classes_x64_O0.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/test_structs_classes_x64_O0.exe",
+      "has_debug_info_like_data": false,
+      "has_loader_types": false,
+      "notes": "Current regression corpus binary. Useful for heuristic/structuring checks, not explicit-facts bootstrap."
+    },
+    {
+      "binary": "test_real_world_algorithms_x64_O0.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/test_real_world_algorithms_x64_O0.exe",
+      "has_debug_info_like_data": false,
+      "has_loader_types": false,
+      "notes": "Current heuristic-quality seed source. Slot-alias candidates exist, but explicit DWARF facts were not observed."
+    },
+    {
+      "binary": "putty.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/putty.exe",
+      "has_debug_info_like_data": false,
+      "has_loader_types": true,
+      "notes": "Heuristic quality corpus source. Produces non-zero heuristic hint stats but not explicit function-scoped facts."
+    },
+    {
+      "binary": "main-debug.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/llvm_explicit_facts/main-debug.exe",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "notes": "Observed DWARF-like function facts on main(); current preview inventory shows preview_unsupported rather than direct preview success."
+    },
+    {
+      "binary": "addr.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/llvm_explicit_facts/addr.exe",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "notes": "Observed DWARF-like function facts on main(); current preview inventory shows no direct preview success."
+    },
+    {
+      "binary": "coff-dwarf.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/llvm_explicit_facts/coff-dwarf.exe",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "notes": "Likely DWARF-bearing COFF test binary, but limited inventory scans did not yield explicit candidates."
+    },
+    {
+      "binary": "test.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/llvm_explicit_facts/test.exe",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "notes": "PDB-backed LLVM symbolizer sample. Included for explicit-facts scanning, but current inventory runs time out before yielding direct-preview explicit seeds."
+    },
+    {
+      "binary": "test-pdb.exe",
+      "path": "/Users/sjkim1127/Fission/samples/windows/x64/llvm_explicit_facts/test-pdb.exe",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "notes": "PDB-backed LLDB sample. Current inventory does not surface explicit function-scoped facts, but it remains part of the expanded PE source pool."
+    },
+    {
+      "binary": "ksi.dll",
+      "path": "/Users/sjkim1127/Fission/vendor/ProcessHacker-master/KSystemInformer/bin-signed/amd64/ksi.dll",
+      "has_debug_info_like_data": true,
+      "has_loader_types": false,
+      "notes": "PDB sidecar exists, but current FactStore/inventory path did not surface explicit function-scoped facts."
+    }
+  ]
+}
