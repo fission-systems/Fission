@@ -28,6 +28,7 @@ pub struct NirBinding {
 pub enum NirBindingOrigin {
     ParamIndex(usize),
     StackOffset(i64),
+    DerivedFromStackOffset(i64),
     Temp,
 }
 

@@ -208,6 +208,163 @@ fn normalize_hir_function_surfaces_repeated_slot_accesses_as_alias() {
 }
 
 #[test]
+fn normalize_hir_function_preserves_stack_origin_on_surfaced_slot_alias() {
+    let uint_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
+    let idx = HirExpr::Var("idx".to_string());
+    let slot_ptr = HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Var("local_base".to_string())),
+        rhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(idx.clone()),
+            rhs: Box::new(HirExpr::Const(
+                4,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+        }),
+        ty: NirType::Ptr(Box::new(NirType::Unknown)),
+    };
+    let mut func = HirFunction {
+        name: "slot_origin_fn".to_string(),
+        params: vec![],
+        locals: vec![NirBinding {
+            name: "local_base".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-0x20)),
+            initializer: None,
+        }],
+        return_type: uint_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Load {
+                ptr: Box::new(slot_ptr.clone()),
+                ty: uint_ty.clone(),
+            }),
+            rhs: Box::new(HirExpr::Load {
+                ptr: Box::new(slot_ptr),
+                ty: uint_ty.clone(),
+            }),
+            ty: uint_ty.clone(),
+        }))],
+    };
+
+    normalize_hir_function(&mut func);
+
+    let alias_binding = func
+        .locals
+        .iter()
+        .find(|binding| binding.name.starts_with("slot_"))
+        .expect("slot alias local should be surfaced");
+    assert_eq!(
+        alias_binding.origin,
+        Some(NirBindingOrigin::DerivedFromStackOffset(-0x20))
+    );
+}
+
+#[test]
+fn preview_type_hints_apply_stack_local_type_to_surfaced_slot_alias() {
+    let uint_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
+    let idx = HirExpr::Var("idx".to_string());
+    let slot_ptr = HirExpr::Binary {
+        op: HirBinaryOp::Add,
+        lhs: Box::new(HirExpr::Var("local_base".to_string())),
+        rhs: Box::new(HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(idx.clone()),
+            rhs: Box::new(HirExpr::Const(
+                4,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            )),
+            ty: NirType::Int {
+                bits: 64,
+                signed: false,
+            },
+        }),
+        ty: NirType::Ptr(Box::new(NirType::Unknown)),
+    };
+    let mut func = HirFunction {
+        name: "slot_hint_fn".to_string(),
+        params: vec![],
+        locals: vec![NirBinding {
+            name: "local_base".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-0x20)),
+            initializer: None,
+        }],
+        return_type: uint_ty.clone(),
+        surface_return_type_name: None,
+        body: vec![HirStmt::Return(Some(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Load {
+                ptr: Box::new(slot_ptr.clone()),
+                ty: uint_ty.clone(),
+            }),
+            rhs: Box::new(HirExpr::Load {
+                ptr: Box::new(slot_ptr),
+                ty: uint_ty.clone(),
+            }),
+            ty: uint_ty.clone(),
+        }))],
+    };
+
+    normalize_hir_function(&mut func);
+
+    let context = PreviewTypeContext {
+        call_targets: HashMap::new(),
+        call_param_rules: Vec::new(),
+        function_hints: Some(PreviewFunctionHints {
+            param_names: Vec::new(),
+            param_type_names: HashMap::new(),
+            stack_local_names: HashMap::from([(-0x20, "base_ptr".to_string())]),
+            stack_local_type_names: HashMap::from([(-0x20, "RECT".to_string())]),
+            return_type_name: None,
+        }),
+    };
+
+    apply_preview_type_hints(&mut func, &context);
+
+    let direct_binding = func
+        .locals
+        .iter()
+        .find(|binding| binding.name == "base_ptr")
+        .expect("direct stack local should still be renamed");
+    assert_eq!(
+        direct_binding.origin,
+        Some(NirBindingOrigin::StackOffset(-0x20))
+    );
+
+    let alias_binding = func
+        .locals
+        .iter()
+        .find(|binding| binding.name.starts_with("slot_"))
+        .expect("slot alias local should be surfaced");
+    assert_eq!(
+        alias_binding.origin,
+        Some(NirBindingOrigin::DerivedFromStackOffset(-0x20))
+    );
+    assert_eq!(alias_binding.surface_type_name.as_deref(), Some("RECT"));
+}
+
+#[test]
 fn normalize_hir_function_rewrites_slot_store_as_index_lvalue() {
     let uint_ty = NirType::Int {
         bits: 32,

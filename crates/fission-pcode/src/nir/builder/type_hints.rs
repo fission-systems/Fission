@@ -100,7 +100,7 @@ fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContex
     }
 
     for binding in &mut func.locals {
-        let Some(NirBindingOrigin::StackOffset(offset)) = binding.origin else {
+        let Some(offset) = stack_origin_offset(binding.origin) else {
             continue;
         };
         let Some(type_name) = hints.stack_local_type_names.get(&offset) else {
@@ -119,6 +119,14 @@ fn apply_function_name_hints(func: &mut HirFunction, context: &PreviewTypeContex
         .filter(|name| !name.is_empty())
     {
         func.surface_return_type_name = Some(return_type_name.to_string());
+    }
+}
+
+fn stack_origin_offset(origin: Option<NirBindingOrigin>) -> Option<i64> {
+    match origin {
+        Some(NirBindingOrigin::StackOffset(offset))
+        | Some(NirBindingOrigin::DerivedFromStackOffset(offset)) => Some(offset),
+        _ => None,
     }
 }
 

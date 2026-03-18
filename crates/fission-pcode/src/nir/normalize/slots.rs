@@ -113,11 +113,12 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
                 elem_ty: candidate.elem_ty.clone(),
             },
         );
+        let derived_origin = derive_slot_alias_origin(func, &candidate.base);
         func.locals.push(NirBinding {
             name: alias,
             ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
             surface_type_name: None,
-            origin: None,
+            origin: derived_origin,
             initializer: Some(HirExpr::Cast {
                 ty: NirType::Ptr(Box::new(candidate.elem_ty.clone())),
                 expr: Box::new(HirExpr::PtrOffset {
@@ -129,6 +130,26 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut HirFunction, cheap_only: boo
     }
 
     rewrite_memory_slot_stmts(&mut func.body, &aliases)
+}
+
+fn derive_slot_alias_origin(func: &HirFunction, base: &HirExpr) -> Option<NirBindingOrigin> {
+    match base {
+        HirExpr::Var(name) => func
+            .params
+            .iter()
+            .chain(func.locals.iter())
+            .find(|binding| binding.name == *name)
+            .and_then(|binding| match binding.origin {
+                Some(NirBindingOrigin::StackOffset(offset))
+                | Some(NirBindingOrigin::DerivedFromStackOffset(offset)) => {
+                    Some(NirBindingOrigin::DerivedFromStackOffset(offset))
+                }
+                _ => None,
+            }),
+        HirExpr::Cast { expr, .. } => derive_slot_alias_origin(func, expr),
+        HirExpr::PtrOffset { base, .. } => derive_slot_alias_origin(func, base),
+        _ => None,
+    }
 }
 
 fn is_cheap_slot_candidate(candidate: &MemorySlotCandidate) -> bool {
