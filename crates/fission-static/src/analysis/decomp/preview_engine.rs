@@ -821,6 +821,9 @@ pub fn rescue_preview_output_with_facts<S: PreviewSource>(
 mod tests {
     use super::*;
     use fission_core::common::types::FunctionInfo;
+    use fission_loader::loader::types::{
+        DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
+    };
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
     use fission_pcode::PreviewCallParamRule;
     use std::collections::HashMap;
@@ -1065,5 +1068,55 @@ mod tests {
         .expect("rescue helper");
 
         assert!(selection.is_none());
+    }
+
+    #[test]
+    fn preview_request_carries_function_scoped_hints_from_dwarf_facts() {
+        let mut binary =
+            LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+                .format("PE")
+                .is_64bit(true)
+                .add_function(FunctionInfo {
+                    name: "sub_401000".to_string(),
+                    address: 0x401000,
+                    size: 0,
+                    is_export: false,
+                    is_import: false,
+                })
+                .build()
+                .expect("build test binary");
+        binary.dwarf_functions.insert(
+            0x401000,
+            DwarfFunctionInfo {
+                address: 0x401000,
+                name: "KnownName".to_string(),
+                return_type: Some("BOOL".to_string()),
+                params: vec![DwarfParamInfo {
+                    name: "hwnd".to_string(),
+                    type_name: "HWND".to_string(),
+                    location: DwarfLocation::Register("RCX".to_string()),
+                }],
+                local_vars: vec![DwarfLocalVar {
+                    name: "rect".to_string(),
+                    type_name: "RECT".to_string(),
+                    location: DwarfLocation::StackOffset(-0x20),
+                }],
+            },
+        );
+        let facts = FactStore::from_binary(&binary);
+        let type_context = build_preview_type_context_from_facts(&binary, &facts, 0x401000);
+        let request = make_preview_request("{}", &binary, 0x401000, "sub_401000", type_context);
+
+        let hints = request
+            .type_context
+            .function_hints
+            .as_ref()
+            .expect("function-scoped preview hints");
+        assert_eq!(hints.param_names, vec!["hwnd".to_string()]);
+        assert_eq!(
+            hints.stack_local_names.get(&-0x20).map(String::as_str),
+            Some("rect")
+        );
+        assert_eq!(hints.return_type_name.as_deref(), Some("BOOL"));
     }
 }
