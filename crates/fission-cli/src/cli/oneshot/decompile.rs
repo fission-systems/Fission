@@ -8,13 +8,16 @@ use crate::cli::output::OutputSilencer;
 use fission_core::FissionError;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_pcode::{PreviewBuildStats, PreviewHintStats};
+use fission_pcode::{PcodeFunction, PcodeOpcode, PreviewBuildStats, PreviewHintStats};
 use fission_static::analysis::decomp::postprocess::PostProcessor;
+use fission_static::analysis::decomp::preview_engine::auto_mlil_eligible;
 use fission_static::analysis::decomp::{
-    FactStore, PrepareOptions, PrepareTimings, PreviewEngineMode, classify_native_failure_kind,
-    log_type_diag, prepare_native_decompiler_for_binary, rescue_preview_output_with_facts,
-    select_preview_output_with_facts, serialize_win_api_signatures_json,
+    FactStore, PrepareOptions, PrepareTimings, PreviewEngineMode, PreviewSurfaceKind,
+    classify_native_failure_kind, log_type_diag, prepare_native_decompiler_for_binary,
+    rescue_preview_output_with_facts, select_preview_output_with_facts,
+    serialize_win_api_signatures_json,
 };
+use serde::Serialize;
 use std::fs;
 use std::io::{self, Write};
 use tracing::warn;
@@ -129,6 +132,175 @@ struct RenderedCode {
     fallback_reason: Option<String>,
     preview_build_stats: Option<PreviewBuildStats>,
     preview_hint_stats: Option<PreviewHintStats>,
+}
+
+#[derive(Debug, Serialize)]
+struct PreviewCandidateInventory {
+    binary: String,
+    binary_path: String,
+    format: String,
+    arch_spec: String,
+    candidate_count: usize,
+    candidates: Vec<PreviewCandidateEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct PreviewCandidateEntry {
+    binary: String,
+    address: String,
+    name: String,
+    has_dwarf_function: bool,
+    dwarf_param_count: usize,
+    dwarf_local_count: usize,
+    has_dwarf_return_type: bool,
+    loader_type_count: usize,
+    fact_density_score: i32,
+    preview_direct_success: bool,
+    preview_fallback_kind: Option<String>,
+    pcode_block_count: usize,
+    pcode_op_count: usize,
+    has_indirect_control_flow: bool,
+    auto_eligible: bool,
+    preview_surface_kind: Option<String>,
+    quality_potential_score: i32,
+    reason_tags: Vec<String>,
+    preview_hint_stats: Option<PreviewHintStats>,
+}
+
+fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
+    pcode.blocks.iter().map(|block| block.ops.len()).sum()
+}
+
+fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
+    pcode
+        .blocks
+        .iter()
+        .flat_map(|block| block.ops.iter())
+        .any(|op| matches!(op.opcode, PcodeOpcode::CallInd | PcodeOpcode::BranchInd))
+}
+
+fn slot_alias_candidate(code: &str) -> bool {
+    code.contains("slot_")
+}
+
+fn preview_surface_kind_str(kind: Option<PreviewSurfaceKind>) -> Option<String> {
+    match kind {
+        Some(PreviewSurfaceKind::Structured) => Some("structured".to_string()),
+        Some(PreviewSurfaceKind::Unstructured) => Some("unstructured".to_string()),
+        None => None,
+    }
+}
+
+fn fact_density_score(
+    has_dwarf_function: bool,
+    dwarf_param_count: usize,
+    dwarf_local_count: usize,
+    has_dwarf_return_type: bool,
+    loader_type_count: usize,
+) -> i32 {
+    let mut score = 0;
+    if has_dwarf_function {
+        score += 3;
+    }
+    score += dwarf_param_count as i32;
+    score += dwarf_local_count as i32;
+    if has_dwarf_return_type {
+        score += 2;
+    }
+    if loader_type_count > 0 {
+        score += 1;
+    }
+    score
+}
+
+fn build_quality_tags_and_score(
+    dwarf_param_count: usize,
+    dwarf_local_count: usize,
+    has_dwarf_return_type: bool,
+    loader_type_count: usize,
+    preview_direct_success: bool,
+    preview_surface_kind: Option<PreviewSurfaceKind>,
+    pcode_block_count: usize,
+    pcode_op_count: usize,
+    has_indirect_control_flow: bool,
+    preview_code: Option<&str>,
+    preview_hint_stats: Option<PreviewHintStats>,
+) -> (i32, Vec<String>) {
+    let mut score = 0;
+    let mut tags = Vec::new();
+
+    if dwarf_param_count > 0 {
+        score += 2;
+        tags.push("dwarf_params".to_string());
+    }
+    if dwarf_local_count > 0 {
+        score += 2;
+        tags.push("dwarf_locals".to_string());
+    }
+    if has_dwarf_return_type {
+        score += 1;
+        tags.push("return_type".to_string());
+    }
+    if loader_type_count > 0 {
+        score += 1;
+        tags.push("loader_types".to_string());
+    }
+    if preview_direct_success {
+        score += 2;
+        tags.push("preview_direct_success".to_string());
+    }
+    if !has_indirect_control_flow && pcode_block_count <= 12 && pcode_op_count <= 600 {
+        tags.push("low_cfg_risk".to_string());
+    }
+    if preview_code.is_some_and(slot_alias_candidate) {
+        score += 2;
+        tags.push("slot_alias_candidate".to_string());
+    }
+    if preview_surface_kind == Some(PreviewSurfaceKind::Unstructured) {
+        score -= 1;
+        tags.push("unstructured_heavy".to_string());
+    }
+    if pcode_op_count > 800 {
+        score -= 2;
+        tags.push("large_pcode".to_string());
+    }
+    if let Some(stats) = preview_hint_stats {
+        if stats.explicit_param_name_hits > 0 || stats.explicit_local_name_hits > 0 {
+            tags.push("explicit_name_hints".to_string());
+        }
+        if stats.explicit_param_type_hits > 0
+            || stats.explicit_local_type_hits > 0
+            || stats.explicit_return_type_hit > 0
+        {
+            tags.push("explicit_type_hints".to_string());
+        }
+        if stats.heuristic_pointer_alias_hits > 0 {
+            tags.push("heuristic_pointer_alias".to_string());
+        }
+        if stats.heuristic_local_surface_hits > 0 {
+            tags.push("heuristic_local_surface".to_string());
+        }
+        if stats.derived_origin_type_hits > 0 {
+            tags.push("derived_origin_type".to_string());
+        }
+    }
+
+    tags.sort();
+    tags.dedup();
+    (score, tags)
+}
+
+fn write_output_bytes(cli: &OneShotArgs, body: &str) -> io::Result<()> {
+    if let Some(ref output_path) = cli.output {
+        fs::write(output_path, body.as_bytes())?;
+        if cli.verbose {
+            eprintln!("[✓] Output written to: {}", output_path.display());
+        }
+    } else {
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(body.as_bytes())?;
+    }
+    Ok(())
 }
 
 fn render_legacy_code(
@@ -263,6 +435,152 @@ fn decompile_code_with_profile(
     rendered.fallback_reason = preview.fallback_reason;
     rendered.preview_hint_stats = preview.hint_stats;
     Ok(rendered)
+}
+
+pub(super) fn emit_preview_candidate_inventory(
+    cli: &OneShotArgs,
+    binary: &LoadedBinary,
+    binary_data: &[u8],
+) -> io::Result<()> {
+    let mut decomp = init_decompiler(cli.verbose);
+    let (selected_profile, _) = resolve_profile(cli.profile.as_deref());
+    apply_profile(&mut decomp, selected_profile);
+    let (compiler_id, _) = resolve_compiler_id(binary, cli.compiler_id.as_deref());
+    let gdt_path_owned = fission_core::PATHS
+        .get_gdt_path(binary.is_64bit)
+        .and_then(|p| p.to_str().map(String::from));
+    let signatures_json = serialize_win_api_signatures_json();
+    let mut prepare_timings = PrepareTimings::default();
+    let mut prepare_options = PrepareOptions {
+        compiler_id: compiler_id.as_deref(),
+        verbose: cli.verbose,
+        timings: Some(&mut prepare_timings),
+        gdt_path: gdt_path_owned.as_deref(),
+        signatures_json: signatures_json.as_deref(),
+        timeout_ms: cli.timeout_ms,
+    };
+    prepare_native_decompiler_for_binary(&mut decomp, binary, binary_data, &mut prepare_options)
+        .map_err(|e| io::Error::other(format!("prepare decompiler failed: {e}")))?;
+
+    let fact_store = FactStore::from_binary(binary);
+    let binary_name = cli
+        .binary
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let mut functions = binary.functions.clone();
+    functions.sort_by_key(|func| func.address);
+    if let Some(address) = cli.address {
+        functions.retain(|func| func.address == address);
+    } else if let Some(limit) = cli.preview_candidate_limit {
+        functions.truncate(limit);
+    }
+
+    let mut candidates = Vec::with_capacity(functions.len());
+    for func in &functions {
+        let dwarf = fact_store.dwarf_function(func.address);
+        let has_dwarf_function = dwarf.is_some();
+        let dwarf_param_count = dwarf.map(|info| info.params.len()).unwrap_or(0);
+        let dwarf_local_count = dwarf.map(|info| info.local_vars.len()).unwrap_or(0);
+        let has_dwarf_return_type = dwarf
+            .and_then(|info| info.return_type.as_deref())
+            .is_some_and(|name| !name.trim().is_empty());
+        let loader_type_count = fact_store.merged_inferred_types(func.address).len();
+        let fact_density_score = fact_density_score(
+            has_dwarf_function,
+            dwarf_param_count,
+            dwarf_local_count,
+            has_dwarf_return_type,
+            loader_type_count,
+        );
+
+        let mut pcode_block_count = 0usize;
+        let mut pcode_op_count = 0usize;
+        let mut has_indirect = false;
+        let mut auto_eligible = false;
+        let mut preview_direct_success = false;
+        let mut preview_fallback_kind = None;
+        let mut preview_surface_kind = None;
+        let mut preview_hint_stats = None;
+        let mut preview_code = None;
+
+        if let Ok(pcode_json) = decomp.get_pcode(func.address)
+            && let Ok(pcode) = PcodeFunction::from_json(&pcode_json)
+        {
+            pcode_block_count = pcode.blocks.len();
+            pcode_op_count = pcode_total_ops(&pcode);
+            has_indirect = contains_indirect_control_flow(&pcode);
+            auto_eligible = auto_mlil_eligible(binary, &pcode);
+
+            if let Ok(selection) = select_preview_output_with_facts(
+                &mut decomp,
+                binary,
+                &fact_store,
+                func.address,
+                &func.name,
+                PreviewEngineMode::MlilPreview,
+                cli.timeout_ms,
+            ) {
+                preview_direct_success = selection.preview_code.is_some()
+                    && !selection.fell_back
+                    && selection.engine_used == PreviewEngineMode::MlilPreview;
+                preview_fallback_kind = selection.fallback_kind.map(str::to_string);
+                preview_surface_kind = selection.preview_surface;
+                preview_hint_stats = selection.hint_stats;
+                preview_code = selection.preview_code;
+            }
+        }
+
+        let (quality_potential_score, reason_tags) = build_quality_tags_and_score(
+            dwarf_param_count,
+            dwarf_local_count,
+            has_dwarf_return_type,
+            loader_type_count,
+            preview_direct_success,
+            preview_surface_kind,
+            pcode_block_count,
+            pcode_op_count,
+            has_indirect,
+            preview_code.as_deref(),
+            preview_hint_stats,
+        );
+
+        candidates.push(PreviewCandidateEntry {
+            binary: binary_name.clone(),
+            address: format!("0x{:x}", func.address),
+            name: func.name.clone(),
+            has_dwarf_function,
+            dwarf_param_count,
+            dwarf_local_count,
+            has_dwarf_return_type,
+            loader_type_count,
+            fact_density_score,
+            preview_direct_success,
+            preview_fallback_kind,
+            pcode_block_count,
+            pcode_op_count,
+            has_indirect_control_flow: has_indirect,
+            auto_eligible,
+            preview_surface_kind: preview_surface_kind_str(preview_surface_kind),
+            quality_potential_score,
+            reason_tags,
+            preview_hint_stats,
+        });
+    }
+
+    let report = PreviewCandidateInventory {
+        binary: binary_name,
+        binary_path: cli.binary.display().to_string(),
+        format: binary.format.clone(),
+        arch_spec: binary.arch_spec.clone(),
+        candidate_count: candidates.len(),
+        candidates,
+    };
+    let json = serde_json::to_string_pretty(&report)
+        .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
+    write_output_bytes(cli, &json)
 }
 
 fn run_sequential_decompilation<'a>(

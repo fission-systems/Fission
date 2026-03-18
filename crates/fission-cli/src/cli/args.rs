@@ -121,4 +121,12 @@ pub struct OneShotArgs {
     /// Affects sleigh ID selection for architecture-specific analysis
     #[arg(long, value_name = "FORMAT")]
     pub format: Option<String>,
+
+    /// Emit preview candidate inventory JSON for quality-corpus curation
+    #[arg(long, hide = true)]
+    pub preview_candidate_inventory: bool,
+
+    /// Limit functions included in preview candidate inventory
+    #[arg(long, hide = true, value_name = "N")]
+    pub preview_candidate_limit: Option<usize>,
 }

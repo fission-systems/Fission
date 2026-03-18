@@ -10,66 +10,133 @@
       "0xa918d0"
     ]
   },
-  "quality_surface": {
-    "test_structs_classes_x64_O0": [
-      "0x140001450",
-      "0x140001474",
-      "0x14000148f",
-      "0x1400014ab",
-      "0x140001519",
-      "0x140001555",
-      "0x14000158a",
-      "0x1400015cc",
-      "0x140001609",
-      "0x140001671"
-    ],
-    "test_string_memory_x64_O0": [
-      "0x140001450",
-      "0x1400014aa",
-      "0x1400014dc",
-      "0x140001518",
-      "0x140001578",
-      "0x1400015d0",
-      "0x1400016f2",
-      "0x14000175b",
-      "0x140001829",
-      "0x14000198b"
-    ],
-    "test_calling_conventions_x64_O0": [
-      "0x140001450",
-      "0x14000145f",
-      "0x140001473",
-      "0x140001490",
-      "0x1400014b6",
-      "0x1400014e6",
-      "0x140001520",
-      "0x140001564",
-      "0x14000159f",
-      "0x14000170a"
-    ],
-    "test_real_world_algorithms_x64_O0": [
-      "0x140001450",
-      "0x14000151a",
-      "0x1400016c5",
-      "0x140001765",
-      "0x1400017af",
-      "0x1400017d9",
-      "0x140001915",
-      "0x1400019eb",
-      "0x140001b6d",
-      "0x140002178"
-    ],
-    "test_control_flow_x64_O0": [
-      "0x140001450",
-      "0x1400014e9",
-      "0x14000157e",
-      "0x1400015da",
-      "0x140001612",
-      "0x14000166d",
-      "0x1400016b3",
-      "0x1400017a8",
-      "0x140001845",
-      "0x14000191d"
-    ]
-  }
+  "quality_surface": [
+    {
+      "binary": "test_structs_classes_x64_O0",
+      "address": "0x140001c80",
+      "name": "d_make_name",
+      "fact_density_score": 0,
+      "quality_potential_score": 3,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success",
+        "slot_alias_candidate",
+        "unstructured_heavy"
+      ]
+    },
+    {
+      "binary": "test_structs_classes_x64_O0",
+      "address": "0x140001000",
+      "name": "__mingw_invalidParameterHandler",
+      "fact_density_score": 0,
+      "quality_potential_score": 2,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success"
+      ]
+    },
+    {
+      "binary": "test_string_memory_x64_O0",
+      "address": "0x140001000",
+      "name": "__mingw_invalidParameterHandler",
+      "fact_density_score": 0,
+      "quality_potential_score": 2,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success"
+      ]
+    },
+    {
+      "binary": "test_string_memory_x64_O0",
+      "address": "0x140001440",
+      "name": "__gcc_deregister_frame",
+      "fact_density_score": 0,
+      "quality_potential_score": 2,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success"
+      ]
+    },
+    {
+      "binary": "test_calling_conventions_x64_O0",
+      "address": "0x140001000",
+      "name": "__mingw_invalidParameterHandler",
+      "fact_density_score": 0,
+      "quality_potential_score": 2,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success"
+      ]
+    },
+    {
+      "binary": "test_calling_conventions_x64_O0",
+      "address": "0x140001440",
+      "name": "__gcc_deregister_frame",
+      "fact_density_score": 0,
+      "quality_potential_score": 2,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success"
+      ]
+    },
+    {
+      "binary": "test_real_world_algorithms_x64_O0",
+      "address": "0x140001aca",
+      "name": "rb_pop(RingBuffer*, unsigned char*)",
+      "fact_density_score": 0,
+      "quality_potential_score": 4,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success",
+        "slot_alias_candidate"
+      ]
+    },
+    {
+      "binary": "test_real_world_algorithms_x64_O0",
+      "address": "0x140001450",
+      "name": "insertion_sort(int*, int)",
+      "fact_density_score": 0,
+      "quality_potential_score": 4,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success",
+        "slot_alias_candidate"
+      ]
+    },
+    {
+      "binary": "test_control_flow_x64_O0",
+      "address": "0x140001000",
+      "name": "__mingw_invalidParameterHandler",
+      "fact_density_score": 0,
+      "quality_potential_score": 2,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success"
+      ]
+    },
+    {
+      "binary": "test_control_flow_x64_O0",
+      "address": "0x140001440",
+      "name": "__gcc_deregister_frame",
+      "fact_density_score": 0,
+      "quality_potential_score": 2,
+      "reason_tags": [
+        "low_cfg_risk",
+        "preview_direct_success"
+      ]
+    },
+    {
+      "binary": "putty",
+      "address": "0x140006260",
+      "name": "FUN_0x140006260",
+      "fact_density_score": 1,
+      "quality_potential_score": 3,
+      "reason_tags": [
+        "heuristic_local_surface",
+        "heuristic_pointer_alias",
+        "loader_types",
+        "preview_direct_success"
+      ]
+    }
+  ]
 }

@@ -133,18 +133,43 @@ def load_summary_addresses(summary_path: Path, binary_name: str, top_offenders: 
     return selected
 
 
-def load_corpus_addresses(corpus_path: Path, corpus_kind: str, binary_name: str) -> list[str]:
+def load_corpus_entries(corpus_path: Path, corpus_kind: str, binary_name: str) -> list[dict[str, Any]]:
     if not corpus_path.exists():
         return []
     data = json.loads(corpus_path.read_text())
     corpus = data.get(corpus_kind, {})
-    addresses = corpus.get(binary_name, [])
-    return [normalize_address(addr) for addr in addresses]
+    if isinstance(corpus, dict):
+        addresses = corpus.get(binary_name, [])
+        return [
+            {
+                "binary": binary_name,
+                "address": f"0x{normalize_address(addr)}",
+                "name": "",
+                "reason_tags": [],
+            }
+            for addr in addresses
+        ]
+    if isinstance(corpus, list):
+        entries: list[dict[str, Any]] = []
+        for entry in corpus:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("binary") != binary_name:
+                continue
+            if not entry.get("address"):
+                continue
+            normalized = normalize_address(str(entry["address"]))
+            item = dict(entry)
+            item["address"] = f"0x{normalized}"
+            entries.append(item)
+        return entries
+    return []
 
 
-def resolve_addresses(args: argparse.Namespace, binary_name: str) -> list[str]:
+def resolve_addresses(args: argparse.Namespace, binary_name: str) -> tuple[list[str], dict[str, dict[str, Any]]]:
     addresses = [normalize_address(addr) for addr in args.addresses]
-    addresses.extend(load_corpus_addresses(args.corpus_file, args.corpus_kind, binary_name))
+    corpus_entries = load_corpus_entries(args.corpus_file, args.corpus_kind, binary_name)
+    addresses.extend(normalize_address(entry["address"]) for entry in corpus_entries)
     if args.from_summary:
         addresses.extend(normalize_address(addr) for addr in load_summary_addresses(args.from_summary, binary_name, args.top_offenders))
     deduped: list[str] = []
@@ -153,7 +178,10 @@ def resolve_addresses(args: argparse.Namespace, binary_name: str) -> list[str]:
         if addr not in seen:
             deduped.append(addr)
             seen.add(addr)
-    return deduped
+    corpus_metadata = {
+        normalize_address(str(entry["address"])): entry for entry in corpus_entries if entry.get("address")
+    }
+    return deduped, corpus_metadata
 
 
 def resolve_names(binary_path: Path, fission_bin: Path, addresses: list[str], list_timeout: int) -> dict[str, str]:
@@ -375,6 +403,7 @@ def compare_function(
     repeat: int,
     with_ghidra: bool,
     ghidra_dir: Path,
+    corpus_seed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     legacy = run_engine_repeated(
         binary_path,
@@ -415,6 +444,7 @@ def compare_function(
     return {
         "address": f"0x{address}",
         "name": name,
+        "corpus_seed": corpus_seed,
         "pyghidra": ghidra_entry,
         "legacy": legacy,
         "preview": preview,
@@ -859,6 +889,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
                 f"- Preview quality metrics: {item['preview'].get('quality_metrics')}",
                 f"- pyghidra quality metrics: {(item.get('pyghidra') or {}).get('quality_metrics')}",
                 f"- Preview hint stats: {item.get('preview_hint_stats')}",
+                f"- Corpus seed: {item.get('corpus_seed')}",
                 f"- Pair deltas: {item['three_way_delta']}",
                 f"- Promotion stats: candidates={item.get('promotion_candidate_count', 0)}, promoted={item.get('promoted_region_count', 0)}, rejected_shape={item.get('promotion_rejected_by_shape_count', 0)}, rejected_gate={item.get('promotion_rejected_by_gate_count', 0)}, seen_guarded_tail_like={item.get('discovery_seen_guarded_tail_like_shape_count', 0)}, rejected_noncanonical={item.get('discovery_rejected_noncanonical_layout_count', 0)}, canonicalized={item.get('canonicalized_guarded_tail_shape_count', 0)}, canonicalized_interleaved={item.get('canonicalized_interleaved_join_use_count', 0)}, canonicalized_local_nonfallthrough={item.get('canonicalized_local_nonfallthrough_alias_count', 0)}, failed_multi_payload={item.get('canonicalization_failed_multiple_payload_entries', 0)}, failed_interleaved_join={item.get('canonicalization_failed_interleaved_join_uses', 0)}, failed_alias_not_fallthrough={item.get('canonicalization_failed_alias_not_fallthrough_count', 0)}, failed_alias_multi_pred={item.get('canonicalization_failed_alias_has_multiple_internal_predecessors_count', 0)}, failed_alias_nonlocal_ref={item.get('canonicalization_failed_alias_has_nonlocal_ref_count', 0)}, failed_alias_body_not_trivial={item.get('canonicalization_failed_alias_body_not_trivial_count', 0)}, failed_join_has_external_ref={item.get('canonicalization_failed_join_has_external_ref_count', 0)}, failed_payload_crosses_join={item.get('canonicalization_failed_payload_crosses_join_count', 0)}, failed_nonterminal_join={item.get('canonicalization_failed_nonterminal_join_label', 0)}, failed_nested_escape={item.get('canonicalization_failed_nested_tail_escape', 0)}, must_emit={item.get('rejected_must_emit_label', 0)}, not_single_pred_succ={item.get('rejected_not_single_pred_succ', 0)}, external_entry={item.get('rejected_external_entry', 0)}, loop_or_switch={item.get('rejected_loop_or_switch_target', 0)}",
                 "",
@@ -893,7 +924,7 @@ def main() -> int:
     if args.repeat <= 0:
         raise SystemExit("--repeat must be >= 1")
 
-    addresses = resolve_addresses(args, binary_name)
+    addresses, corpus_metadata = resolve_addresses(args, binary_name)
     if not addresses:
         raise SystemExit("No function addresses selected; use --addresses or --from-summary/--top-offenders")
     struct_ptr_aliases = load_struct_pointer_aliases(BASE_TYPES_JSON)
@@ -914,6 +945,7 @@ def main() -> int:
             args.repeat,
             args.with_ghidra,
             args.ghidra_dir,
+            corpus_metadata.get(normalized),
         )
         results.append(result)
 

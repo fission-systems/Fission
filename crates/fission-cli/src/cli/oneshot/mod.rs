@@ -13,7 +13,7 @@ mod strings;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
 #[cfg(feature = "native_decomp")]
-use decompile::run_decompilation;
+use decompile::{emit_preview_candidate_inventory, run_decompilation};
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use strings::print_strings;
@@ -98,6 +98,19 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
     if cli.list {
         return print_function_list(&binary, cli.json);
+    }
+
+    if cli.preview_candidate_inventory {
+        #[cfg(feature = "native_decomp")]
+        {
+            return emit_preview_candidate_inventory(cli, &binary, &binary_data);
+        }
+
+        #[cfg(not(feature = "native_decomp"))]
+        {
+            eprintln!("Error: preview candidate inventory requires native_decomp feature");
+            std::process::exit(1);
+        }
     }
 
     if let Some(min_len) = cli.strings {
