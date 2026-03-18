@@ -11,7 +11,8 @@
       "explicit_fact_total": 2,
       "fact_density_score": 6,
       "preview_direct_success": false,
-      "block_reason": "preview_direct_failure",
+      "block_reason": "preview_non_success_unknown",
+      "raw_preview_fallback_kind": "preview_unsupported",
       "preview_surface_kind": null,
       "pcode_op_count": 21,
       "has_indirect_control_flow": false,
@@ -28,7 +29,8 @@
       "explicit_fact_total": 2,
       "fact_density_score": 6,
       "preview_direct_success": false,
-      "block_reason": "preview_direct_failure",
+      "block_reason": "preview_non_success_unknown",
+      "raw_preview_fallback_kind": "preview_unsupported",
       "preview_surface_kind": null,
       "pcode_op_count": 41,
       "has_indirect_control_flow": false,
@@ -44,6 +46,7 @@
     "notes": [
       "Current explicit-facts bottleneck is sample scarcity, not corpus split logic.",
       "LLVM test PE binaries produced a small number of explicit candidates, but none satisfied direct-preview success.",
+      "Observed blocked candidates currently normalize to preview_non_success_unknown because the raw fallback kind is only preview_unsupported and does not yet identify a narrower engine stage.",
       "Current heuristic corpus remains valid and separated; explicit corpus needs additional PE sources rather than provisional blocked-seed promotion."
     ]
   }
