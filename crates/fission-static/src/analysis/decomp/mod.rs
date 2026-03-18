@@ -49,7 +49,8 @@ pub use preview_engine::{
     PreviewEngineMode, PreviewRoutingDecision, PreviewRoutingResolver, PreviewSelection,
     PreviewSource, PreviewSurfaceKind, PreviewWorkerRequest, PreviewWorkerResponse,
     classify_native_failure_kind, execute_preview_worker, fallback_reason_with_kind,
-    native_failure_routing_decision, rescue_preview_output, select_preview_output,
+    native_failure_routing_decision, rescue_preview_output, rescue_preview_output_with_facts,
+    select_preview_output, select_preview_output_with_facts,
 };
 
 #[cfg(feature = "native_decomp")]
@@ -146,6 +147,10 @@ impl CachingDecompiler {
 
     pub fn fact_store(&self) -> &FactStore {
         &self.fact_store
+    }
+
+    pub fn fact_store_mut(&mut self) -> &mut FactStore {
+        &mut self.fact_store
     }
 
     /// Set Rust post-processing options

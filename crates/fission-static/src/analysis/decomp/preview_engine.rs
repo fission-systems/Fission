@@ -257,11 +257,6 @@ fn sanitize_preview_symbol_name(name: &str) -> String {
     sanitized
 }
 
-fn build_preview_type_context(binary: &LoadedBinary) -> PreviewTypeContext {
-    let fact_store = FactStore::from_binary(binary);
-    build_preview_type_context_from_facts(binary, &fact_store)
-}
-
 fn build_preview_type_context_from_facts(
     binary: &LoadedBinary,
     fact_store: &FactStore,
@@ -579,25 +574,6 @@ pub fn execute_preview_worker(request: &PreviewWorkerRequest) -> PreviewWorkerRe
     }
 }
 
-fn render_preview_from_json(
-    pcode_json: &str,
-    binary: &LoadedBinary,
-    address: u64,
-    name: &str,
-    enforce_auto_gate: bool,
-    timeout_ms: Option<u64>,
-) -> Result<Option<(String, Option<PreviewBuildStats>)>, String> {
-    render_preview_from_json_with_type_context(
-        pcode_json,
-        binary,
-        address,
-        name,
-        enforce_auto_gate,
-        timeout_ms,
-        build_preview_type_context(binary),
-    )
-}
-
 fn render_preview_from_json_with_type_context(
     pcode_json: &str,
     binary: &LoadedBinary,
@@ -683,6 +659,19 @@ pub fn select_preview_output<S: PreviewSource>(
     mode: PreviewEngineMode,
     timeout_ms: Option<u64>,
 ) -> Result<PreviewSelection, String> {
+    let fact_store = FactStore::from_binary(binary);
+    select_preview_output_with_facts(source, binary, &fact_store, address, name, mode, timeout_ms)
+}
+
+pub fn select_preview_output_with_facts<S: PreviewSource>(
+    source: &mut S,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    mode: PreviewEngineMode,
+    timeout_ms: Option<u64>,
+) -> Result<PreviewSelection, String> {
     let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
     match mode {
         PreviewEngineMode::Legacy => Ok(PreviewRoutingResolver::legacy_mode()),
@@ -698,7 +687,16 @@ pub fn select_preview_output<S: PreviewSource>(
                     pcode_start.elapsed().as_secs_f64() * 1000.0
                 );
             }
-            match render_preview_from_json(&pcode_json, binary, address, name, false, timeout_ms) {
+            let type_context = build_preview_type_context_from_facts(binary, fact_store);
+            match render_preview_from_json_with_type_context(
+                &pcode_json,
+                binary,
+                address,
+                name,
+                false,
+                timeout_ms,
+                type_context,
+            ) {
                 Ok(Some((code, build_stats))) => Ok(PreviewRoutingResolver::preview_success(
                     code,
                     build_stats,
@@ -723,7 +721,16 @@ pub fn select_preview_output<S: PreviewSource>(
                     pcode_start.elapsed().as_secs_f64() * 1000.0
                 );
             }
-            match render_preview_from_json(&pcode_json, binary, address, name, true, timeout_ms) {
+            let type_context = build_preview_type_context_from_facts(binary, fact_store);
+            match render_preview_from_json_with_type_context(
+                &pcode_json,
+                binary,
+                address,
+                name,
+                true,
+                timeout_ms,
+                type_context,
+            ) {
                 Ok(Some((code, build_stats))) => Ok(PreviewRoutingResolver::preview_success(
                     code,
                     build_stats,
@@ -747,6 +754,27 @@ pub fn rescue_preview_output<S: PreviewSource>(
     error: &str,
     timeout_ms: Option<u64>,
 ) -> Result<Option<PreviewSelection>, String> {
+    let fact_store = FactStore::from_binary(binary);
+    rescue_preview_output_with_facts(
+        source,
+        binary,
+        &fact_store,
+        address,
+        name,
+        error,
+        timeout_ms,
+    )
+}
+
+pub fn rescue_preview_output_with_facts<S: PreviewSource>(
+    source: &mut S,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    error: &str,
+    timeout_ms: Option<u64>,
+) -> Result<Option<PreviewSelection>, String> {
     if !is_type_failure_for_preview_rescue(error) {
         return Ok(None);
     }
@@ -763,7 +791,16 @@ pub fn rescue_preview_output<S: PreviewSource>(
             pcode_start.elapsed().as_secs_f64() * 1000.0
         );
     }
-    match render_preview_from_json(&pcode_json, binary, address, name, false, timeout_ms) {
+    let type_context = build_preview_type_context_from_facts(binary, fact_store);
+    match render_preview_from_json_with_type_context(
+        &pcode_json,
+        binary,
+        address,
+        name,
+        false,
+        timeout_ms,
+        type_context,
+    ) {
         Ok(Some((code, build_stats))) => Ok(Some(PreviewRoutingResolver::preview_success(
             code,
             build_stats,
@@ -784,6 +821,14 @@ mod tests {
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
     use fission_pcode::PreviewCallParamRule;
     use std::collections::HashMap;
+
+    struct MockPreviewSource;
+
+    impl PreviewSource for MockPreviewSource {
+        fn get_pcode_json(&mut self, _address: u64) -> fission_core::Result<String> {
+            Ok("{\"blocks\":[]}".to_string())
+        }
+    }
 
     #[test]
     fn preview_worker_request_roundtrip() {
@@ -919,7 +964,8 @@ mod tests {
             .is_64bit(true)
             .build()
             .expect("build test binary");
-        let context = build_preview_type_context(&binary);
+        let facts = FactStore::from_binary(&binary);
+        let context = build_preview_type_context_from_facts(&binary, &facts);
 
         assert!(context.call_param_rules.iter().any(|rule| {
             rule.callee_name == "GetWindowRect"
@@ -966,5 +1012,53 @@ mod tests {
             "MessageBoxW"
         );
         assert_eq!(sanitize_preview_symbol_name("foo [import]"), "foo");
+    }
+
+    #[test]
+    fn select_preview_output_wrapper_keeps_legacy_mode_behavior() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        let mut source = MockPreviewSource;
+
+        let selection = select_preview_output(
+            &mut source,
+            &binary,
+            0x401000,
+            "sub_401000",
+            PreviewEngineMode::Legacy,
+            None,
+        )
+        .expect("legacy preview selection");
+
+        assert_eq!(selection.engine_used, PreviewEngineMode::Legacy);
+        assert!(!selection.fell_back);
+        assert!(selection.preview_code.is_none());
+    }
+
+    #[test]
+    fn rescue_preview_output_with_facts_ignores_non_type_failures() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        let facts = FactStore::from_binary(&binary);
+        let mut source = MockPreviewSource;
+
+        let selection = rescue_preview_output_with_facts(
+            &mut source,
+            &binary,
+            &facts,
+            0x401000,
+            "sub_401000",
+            "some unrelated error",
+            None,
+        )
+        .expect("rescue helper");
+
+        assert!(selection.is_none());
     }
 }

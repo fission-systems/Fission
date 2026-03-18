@@ -12,8 +12,8 @@ use fission_pcode::PreviewBuildStats;
 use fission_static::analysis::decomp::postprocess::PostProcessor;
 use fission_static::analysis::decomp::{
     FactStore, PrepareOptions, PrepareTimings, PreviewEngineMode, classify_native_failure_kind,
-    log_type_diag, prepare_native_decompiler_for_binary, rescue_preview_output,
-    select_preview_output, serialize_win_api_signatures_json,
+    log_type_diag, prepare_native_decompiler_for_binary, rescue_preview_output_with_facts,
+    select_preview_output_with_facts, serialize_win_api_signatures_json,
 };
 use std::fs;
 use std::io::{self, Write};
@@ -133,10 +133,10 @@ struct RenderedCode {
 fn render_legacy_code(
     address: u64,
     binary: &LoadedBinary,
+    fact_store: &mut FactStore,
     result: fission_ffi::DecompilationResult,
 ) -> (String, f64) {
     let function_types = result.inferred_types;
-    let mut fact_store = FactStore::from_binary(binary);
     fact_store.ingest_native_function_types(address, function_types.clone());
     let merged_types = fact_store.merged_inferred_types(address);
     log_type_diag(
@@ -158,9 +158,10 @@ fn render_legacy_code(
 fn legacy_rendered_code(
     address: u64,
     binary: &LoadedBinary,
+    fact_store: &mut FactStore,
     result: fission_ffi::DecompilationResult,
 ) -> RenderedCode {
-    let (code, postprocess_sec) = render_legacy_code(address, binary, result);
+    let (code, postprocess_sec) = render_legacy_code(address, binary, fact_store, result);
     RenderedCode {
         code,
         postprocess_sec,
@@ -181,13 +182,22 @@ fn decompile_code_with_profile(
     timeout_ms: Option<u64>,
     _verbose: bool,
 ) -> Result<RenderedCode, FissionError> {
+    let mut fact_store = FactStore::from_binary(binary);
     let preview_mode = match engine_mode {
         EngineMode::Legacy => PreviewEngineMode::Legacy,
         EngineMode::MlilPreview => PreviewEngineMode::MlilPreview,
         EngineMode::Auto => PreviewEngineMode::Auto,
     };
-    let preview = select_preview_output(decomp, binary, address, name, preview_mode, timeout_ms)
-        .map_err(FissionError::decompiler)?;
+    let preview = select_preview_output_with_facts(
+        decomp,
+        binary,
+        &fact_store,
+        address,
+        name,
+        preview_mode,
+        timeout_ms,
+    )
+    .map_err(FissionError::decompiler)?;
 
     if let Some(code) = preview.preview_code {
         return Ok(RenderedCode {
@@ -218,9 +228,16 @@ fn decompile_code_with_profile(
         Err(e) => {
             let error_text = e.to_string();
             if !matches!(engine_mode, EngineMode::Legacy) {
-                if let Some(selection) =
-                    rescue_preview_output(decomp, binary, address, name, &error_text, timeout_ms)
-                        .map_err(FissionError::decompiler)?
+                if let Some(selection) = rescue_preview_output_with_facts(
+                    decomp,
+                    binary,
+                    &fact_store,
+                    address,
+                    name,
+                    &error_text,
+                    timeout_ms,
+                )
+                .map_err(FissionError::decompiler)?
                 {
                     if let Some(code) = selection.preview_code {
                         return Ok(RenderedCode {
@@ -237,7 +254,7 @@ fn decompile_code_with_profile(
             return Err(e);
         }
     };
-    let mut rendered = legacy_rendered_code(address, binary, result);
+    let mut rendered = legacy_rendered_code(address, binary, &mut fact_store, result);
     rendered.fell_back = preview.fell_back;
     rendered.fallback_reason = preview.fallback_reason;
     Ok(rendered)
