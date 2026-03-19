@@ -161,4 +161,8 @@ pub struct OneShotArgs {
     /// Suppress noisy per-address panic/log output during batch preview candidate scans
     #[arg(long, hide = true)]
     pub quiet_batch_errors: bool,
+
+    /// Emit whole-binary function facts inventory as JSONL plus summary JSON
+    #[arg(long, hide = true)]
+    pub emit_function_facts_inventory: bool,
 }

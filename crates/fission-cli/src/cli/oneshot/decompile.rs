@@ -142,73 +142,73 @@ struct RenderedCode {
 }
 
 #[derive(Debug, Serialize)]
-struct PreviewCandidateInventory {
-    binary: String,
-    binary_path: String,
-    format: String,
-    arch_spec: String,
-    candidate_count: usize,
-    candidates: Vec<PreviewCandidateEntry>,
+pub(super) struct PreviewCandidateInventory {
+    pub(super) binary: String,
+    pub(super) binary_path: String,
+    pub(super) format: String,
+    pub(super) arch_spec: String,
+    pub(super) candidate_count: usize,
+    pub(super) candidates: Vec<PreviewCandidateEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PreviewCandidateEntry {
-    binary: String,
-    address: String,
-    name: String,
-    row_status: String,
-    row_error_kind: Option<String>,
-    row_error_message: Option<String>,
-    row_error_verbose: Option<String>,
-    has_dwarf_function: bool,
-    dwarf_param_count: usize,
-    dwarf_local_count: usize,
-    has_dwarf_return_type: bool,
-    loader_type_count: usize,
-    fact_density_score: i32,
-    preview_direct_success: bool,
-    preview_fallback_kind: Option<String>,
-    preview_fallback_kind_refined: Option<String>,
-    preview_fallback_reason: Option<String>,
-    pcode_block_count: usize,
-    pcode_op_count: usize,
-    has_indirect_control_flow: bool,
-    auto_eligible: bool,
-    preview_surface_kind: Option<String>,
-    quality_potential_score: i32,
-    reason_tags: Vec<String>,
-    preview_hint_stats: Option<PreviewHintStats>,
+pub(super) struct PreviewCandidateEntry {
+    pub(super) binary: String,
+    pub(super) address: String,
+    pub(super) name: String,
+    pub(super) row_status: String,
+    pub(super) row_error_kind: Option<String>,
+    pub(super) row_error_message: Option<String>,
+    pub(super) row_error_verbose: Option<String>,
+    pub(super) has_dwarf_function: bool,
+    pub(super) dwarf_param_count: usize,
+    pub(super) dwarf_local_count: usize,
+    pub(super) has_dwarf_return_type: bool,
+    pub(super) loader_type_count: usize,
+    pub(super) fact_density_score: i32,
+    pub(super) preview_direct_success: bool,
+    pub(super) preview_fallback_kind: Option<String>,
+    pub(super) preview_fallback_kind_refined: Option<String>,
+    pub(super) preview_fallback_reason: Option<String>,
+    pub(super) pcode_block_count: usize,
+    pub(super) pcode_op_count: usize,
+    pub(super) has_indirect_control_flow: bool,
+    pub(super) auto_eligible: bool,
+    pub(super) preview_surface_kind: Option<String>,
+    pub(super) quality_potential_score: i32,
+    pub(super) reason_tags: Vec<String>,
+    pub(super) preview_hint_stats: Option<PreviewHintStats>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct PreviewCandidateScanSummary {
-    binary: String,
-    binary_path: String,
-    format: String,
-    arch_spec: String,
-    functions_total: usize,
-    addresses_scanned: usize,
-    chunks_completed: usize,
-    chunk_size: usize,
-    timeout_count: usize,
-    preview_failure_count: usize,
-    panic_recovered_count: usize,
-    internal_error_count: usize,
-    nonzero_explicit_candidates: usize,
-    strict_explicit_candidates: usize,
-    failure_kind_counts: BTreeMap<String, usize>,
-    row_error_kind_counts: BTreeMap<String, usize>,
-    suppressed_stderr_count: usize,
-    resume_loaded_rows: usize,
+pub(super) struct PreviewCandidateScanSummary {
+    pub(super) binary: String,
+    pub(super) binary_path: String,
+    pub(super) format: String,
+    pub(super) arch_spec: String,
+    pub(super) functions_total: usize,
+    pub(super) addresses_scanned: usize,
+    pub(super) chunks_completed: usize,
+    pub(super) chunk_size: usize,
+    pub(super) timeout_count: usize,
+    pub(super) preview_failure_count: usize,
+    pub(super) panic_recovered_count: usize,
+    pub(super) internal_error_count: usize,
+    pub(super) nonzero_explicit_candidates: usize,
+    pub(super) strict_explicit_candidates: usize,
+    pub(super) failure_kind_counts: BTreeMap<String, usize>,
+    pub(super) row_error_kind_counts: BTreeMap<String, usize>,
+    pub(super) suppressed_stderr_count: usize,
+    pub(super) resume_loaded_rows: usize,
 }
 
-struct ScopedQuietPanicHook {
+pub(super) struct ScopedQuietPanicHook {
     previous: Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>>,
     suppressed: Arc<AtomicUsize>,
 }
 
 impl ScopedQuietPanicHook {
-    fn install(enabled: bool) -> Option<Self> {
+    pub(super) fn install(enabled: bool) -> Option<Self> {
         if !enabled {
             return None;
         }
@@ -224,7 +224,7 @@ impl ScopedQuietPanicHook {
         })
     }
 
-    fn suppressed_count(&self) -> usize {
+    pub(super) fn suppressed_count(&self) -> usize {
         self.suppressed.load(Ordering::Relaxed)
     }
 }
@@ -360,14 +360,14 @@ fn build_quality_tags_and_score(
     (score, tags)
 }
 
-fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
+pub(super) fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
     (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type)) >= 2
         && entry.preview_direct_success
         && !entry.has_indirect_control_flow
         && entry.pcode_op_count <= 800
 }
 
-fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {
+pub(super) fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {
     if entry.row_status == "ok" {
         return "direct_success";
     }
@@ -380,7 +380,10 @@ fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {
         .unwrap_or("preview_non_success_unknown")
 }
 
-fn update_scan_summary(summary: &mut PreviewCandidateScanSummary, entry: &PreviewCandidateEntry) {
+pub(super) fn update_scan_summary(
+    summary: &mut PreviewCandidateScanSummary,
+    entry: &PreviewCandidateEntry,
+) {
     summary.addresses_scanned += 1;
     if (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type)) > 0 {
         summary.nonzero_explicit_candidates += 1;
@@ -406,13 +409,18 @@ fn update_scan_summary(summary: &mut PreviewCandidateScanSummary, entry: &Previe
     }
 }
 
-fn write_scan_summary(path: &std::path::Path, summary: &PreviewCandidateScanSummary) -> io::Result<()> {
+pub(super) fn write_scan_summary(
+    path: &std::path::Path,
+    summary: &PreviewCandidateScanSummary,
+) -> io::Result<()> {
     let body = serde_json::to_string_pretty(summary)
         .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
     fs::write(path, body)
 }
 
-fn load_resume_rows(path: &std::path::Path) -> io::Result<(HashSet<u64>, PreviewCandidateScanSummary)> {
+pub(super) fn load_resume_rows(
+    path: &std::path::Path,
+) -> io::Result<(HashSet<u64>, PreviewCandidateScanSummary)> {
     if !path.exists() {
         return Ok((HashSet::new(), PreviewCandidateScanSummary::default()));
     }
@@ -443,7 +451,7 @@ fn load_resume_rows(path: &std::path::Path) -> io::Result<(HashSet<u64>, Preview
     Ok((seen, summary))
 }
 
-fn select_candidate_functions<'a>(
+pub(super) fn select_candidate_functions<'a>(
     cli: &OneShotArgs,
     binary: &'a LoadedBinary,
 ) -> io::Result<Vec<&'a FunctionInfo>> {
@@ -670,7 +678,7 @@ fn build_preview_candidate_fallback_entry(
     }
 }
 
-fn preview_candidate_entry_with_recovery(
+pub(super) fn preview_candidate_entry_with_recovery(
     decomp: &mut DecompilerNative,
     binary: &LoadedBinary,
     fact_store: &FactStore,
