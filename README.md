@@ -35,6 +35,24 @@ Preview currently supports real PE x64 work, bootstrap-level PE x86 coverage on 
 
 License: AGPL-3.0-or-later. Contributions are accepted under the Contributor License Agreement in [`CLA.md`](./CLA.md).
 
+## Why Fission Exists
+
+Fission started from a very personal reverse-engineering problem. Years ago, I was obsessed with a Nexon MMORPG called Everplanet. After the service shut down, I started looking for ways to bring it back. That search led me into reverse engineering long before I had any serious programming background.
+
+I failed repeatedly. The game was protected, the engine was unfamiliar, and every approach I tried, from unpacking and static analysis to later AI-assisted workflows, eventually hit a wall. Fission grew out of that frustration: not from the idea of building just another decompiler frontend, but from the desire to build a tool that helps recover how a program behaves, what it is trying to do, and how its pieces fit together again.
+
+That is what "project restoration" means here. Fission is not trying to reconstruct the exact original source code bit-for-bit. It is trying to recover a usable equivalent: the structure, behavior, intent, and workflow of the original software, even when the final reconstructed project is not textually identical to what was first written.
+
+## Screenshots
+
+Main desktop workspace:
+
+![Fission main screen](./image/main_screen.jpeg)
+
+Decompiler view:
+
+![Fission decompile view](./image/decompile.jpeg)
+
 ## What Works Today
 
 If you are evaluating Fission today, the most accurate short version is:
@@ -112,16 +130,6 @@ If you are new to the repository, start here:
 
 - Discord: [Fission community server](https://discord.gg/dgzqGwBpcE)
 - LinkedIn: [Sung Joo Kim](https://www.linkedin.com/in/sung-joo-kim-718a93303/)
-
-## Screenshots
-
-Main desktop workspace:
-
-![Fission main screen](./image/main_screen.jpeg)
-
-Decompiler view:
-
-![Fission decompile view](./image/decompile.jpeg)
 
 ## Project Vision
 
