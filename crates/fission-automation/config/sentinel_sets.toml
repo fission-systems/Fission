@@ -1,0 +1,102 @@
+[lane.pdb]
+include_source_inventory_aligned_high = false
+
+[[lane.pdb.binaries]]
+binary = "has_pdb.exe"
+path = "vendor/llvm-project-main/llvm/test/tools/llvm-readobj/COFF/Inputs/has_pdb.exe"
+role = "pdb_source_present_without_surface_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[[lane.pdb.binaries]]
+binary = "test-pdb.exe"
+path = "samples/windows/x64/llvm_explicit_facts/test-pdb.exe"
+role = "small_pdb_positive_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[[lane.pdb.binaries]]
+binary = "fauxware.exe"
+path = "samples/other/binaries-master/tests/x86_64/windows/fauxware.exe"
+role = "strong_pdb_positive_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[lane.preview]
+include_source_inventory_aligned_high = false
+
+[[lane.preview.binaries]]
+binary = "GetProcAddress.exe"
+path = "samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe"
+role = "preview_stage_block_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[[lane.preview.binaries]]
+binary = "putty.exe"
+path = "samples/windows/x64/putty.exe"
+role = "preview_regression_control"
+default_functions_limit = 10
+default_timeout_ms = 1500
+
+[lane.regression]
+include_source_inventory_aligned_high = false
+
+[[lane.regression.binaries]]
+binary = "putty.exe"
+path = "samples/windows/x64/putty.exe"
+role = "broad_regression_control"
+default_functions_limit = 10
+default_timeout_ms = 1500
+
+[[lane.regression.binaries]]
+binary = "test-pdb.exe"
+path = "samples/windows/x64/llvm_explicit_facts/test-pdb.exe"
+role = "pdb_regression_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[[lane.regression.binaries]]
+binary = "has_pdb.exe"
+path = "vendor/llvm-project-main/llvm/test/tools/llvm-readobj/COFF/Inputs/has_pdb.exe"
+role = "pdb_source_presence_regression_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[lane.full]
+include_source_inventory_aligned_high = true
+
+[[lane.full.binaries]]
+binary = "has_pdb.exe"
+path = "vendor/llvm-project-main/llvm/test/tools/llvm-readobj/COFF/Inputs/has_pdb.exe"
+role = "pdb_source_present_without_surface_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[[lane.full.binaries]]
+binary = "test-pdb.exe"
+path = "samples/windows/x64/llvm_explicit_facts/test-pdb.exe"
+role = "small_pdb_positive_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[[lane.full.binaries]]
+binary = "fauxware.exe"
+path = "samples/other/binaries-master/tests/x86_64/windows/fauxware.exe"
+role = "strong_pdb_positive_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[[lane.full.binaries]]
+binary = "GetProcAddress.exe"
+path = "samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe"
+role = "preview_stage_block_control"
+default_functions_limit = 20
+default_timeout_ms = 1500
+
+[[lane.full.binaries]]
+binary = "putty.exe"
+path = "samples/windows/x64/putty.exe"
+role = "preview_regression_control"
+default_functions_limit = 10
+default_timeout_ms = 1500

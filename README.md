@@ -274,10 +274,10 @@ Important top-level directories:
 
 - [`ghidra_decompiler`](./ghidra_decompiler)
   - native decompiler sources and build tree
+- [`crates/fission-automation`](./crates/fission-automation)
+  - canonical Fission NIR quality runner and report generator
 - [`docs`](./docs)
   - architecture, build, benchmark, changelog, and analysis notes
-- [`scripts/test/batch_benchmark`](./scripts/test/batch_benchmark)
-  - benchmark and comparison scripts
 - [`vendor`](./vendor)
   - reference codebases and third-party trees used for study and comparison
 
@@ -484,34 +484,31 @@ The older GUI guide at [`docs/gui/GUI_GUIDE.md`](./docs/gui/GUI_GUIDE.md) docume
 
 Fission uses two benchmark styles:
 
-### 1. Global regression benchmark
+### 1. Canonical lane-based quality run
 
 Driver:
 
-- [`scripts/test/batch_benchmark/grand_finale.py`](./scripts/test/batch_benchmark/grand_finale.py)
+- [`crates/fission-automation`](./crates/fission-automation)
 
 Purpose:
 
-- broad Fission vs Ghidra regression tracking
-- engine adoption statistics
-- fallback/goto/temp-surface metrics
+- sentinel-based Fission NIR quality tracking
+- inventory / diagnosis / corpus refinement in one run
+- local Markdown/JSON report generation under `artifacts/fission-automation/`
 
-### 2. Function-by-function legacy vs preview comparison
+Typical entrypoints:
 
-Driver:
-
-- [`scripts/test/batch_benchmark/compare_legacy_preview.py`](./scripts/test/batch_benchmark/compare_legacy_preview.py)
-
-Purpose:
-
-- compare code quality on the same function
-- compare speed
-- inspect residue, cast chains, and diffs
+- `cargo run -p fission-automation -- nir-check --lane pdb`
+- `cargo run -p fission-automation -- nir-check --lane preview`
+- `cargo run -p fission-automation -- nir-check --lane regression`
+- `cargo run -p fission-automation -- nir-check --lane full`
 
 This split matters:
 
-- `grand_finale.py` tells you whether the product regressed globally
-- `compare_legacy_preview.py` tells you whether a specific function became more readable
+- `pdb` tells you whether PDB detection and ingestion are actually surfacing rows
+- `preview` tells you whether preview-stage block signatures are shrinking
+- `regression` gives a compact mixed-sample stability pass
+- `full` combines the sentinel set with aligned/high-priority sources when local artifacts exist
 
 Repository benchmark docs:
 
@@ -610,19 +607,19 @@ The repository has been moving toward clearer ownership boundaries.
 Recent structural changes worth knowing before editing:
 
 - `nir` is now split by subsystem rather than kept in single giant files
-- the benchmark workflow distinguishes global regressions from function-level quality comparisons
+- the benchmark workflow now uses `fission-automation` lanes as the canonical local runner
 - current development typically proceeds by:
   - synthetic tests first
   - representative real-world function checks next
-  - global benchmark closure last
+  - lane-based automation closure last
 
 If you are adding work in the preview path:
 
 - prefer IR/HIR transforms over string rewrites
 - prefer conservative correctness over aggressive prettification
 - use synthetic tests for exact idiom recovery
-- use `compare_legacy_preview.py` for function-level quality checks
-- use `grand_finale.py` for broader regression closure
+- use `cargo run -p fission-automation -- nir-check --lane preview` for preview-side quality checks
+- use `cargo run -p fission-automation -- nir-check --lane regression` for broader regression closure
 
 ## Key Documentation
 

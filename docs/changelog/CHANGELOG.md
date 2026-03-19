@@ -9,6 +9,68 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-20
 
+### P6 - `fission-automation` Canonical Quality Runner
+
+This round replaced the old ad hoc benchmark-script loop with a tracked Rust automation crate that acts as the canonical local quality runner for Fission NIR.
+
+Instead of manually chaining hidden CLI modes, Python corpus scripts, and one-off shell commands, the repository now has a single Rust entrypoint for lane-based quality runs:
+
+- `cargo run -p fission-automation -- nir-check --lane pdb`
+- `cargo run -p fission-automation -- nir-check --lane preview`
+- `cargo run -p fission-automation -- nir-check --lane regression`
+- `cargo run -p fission-automation -- nir-check --lane full`
+
+#### Added
+
+- new tracked workspace crate:
+  - `crates/fission-automation`
+- tracked automation config:
+  - `crates/fission-automation/config/sentinel_sets.toml`
+  - `crates/fission-automation/config/timeout_rescue.json`
+- Rust-first local quality pipeline support for:
+  - sentinel lane loading
+  - inventory emit orchestration through `fission_cli --emit-function-facts-inventory`
+  - diagnosis aggregation
+  - corpus refinement
+  - baseline diffing
+  - Markdown / JSON summaries under `artifacts/fission-automation/`
+
+#### Changed
+
+- repository benchmark ownership
+  - `fission-automation` is now the canonical local runner for Fission NIR quality loops
+  - benchmark/config state previously kept under `scripts/test/batch_benchmark` has moved into the automation crate or local `artifacts/`
+- documentation
+  - README and benchmark/debug docs now point at `fission-automation` lane runs instead of the retired Python benchmark scripts
+
+#### Removed
+
+- retired tracked Python batch-benchmark drivers and tracked corpus outputs from:
+  - `scripts/test/batch_benchmark/`
+- the old Python diagnosis / corpus-refinement path is no longer the default execution path
+
+#### Validation
+
+- `cargo build -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli`
+- `cargo run -p fission-automation -- nir-check --lane pdb --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli`
+
+#### Observed Effect
+
+- `preview` lane smoke:
+  - `direct_success = 27`
+  - `preview_failure = 3`
+  - `explicit_nonzero = 11`
+  - `strict_explicit = 1`
+- `pdb` lane smoke:
+  - `direct_success = 43`
+  - `preview_failure = 3`
+  - `explicit_nonzero = 30`
+  - `strict_explicit = 12`
+  - `pdb_nonzero_rows = 21`
+
+This means the local quality loop is no longer tied to a scattered script folder. The canonical path now lives in a tracked Rust crate, while reports remain local-only under `artifacts/`.
+
 ### P5G - Focused PDB Function-Facts Ingestion
 
 This round moved PDB handling from “source presence is visible” into real function-level fact ingestion for the Fission NIR pipeline.

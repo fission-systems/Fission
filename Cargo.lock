@@ -1328,6 +1328,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-automation"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "serde_json",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "fission-cli"
 version = "0.1.0"
 dependencies = [

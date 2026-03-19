@@ -4,6 +4,7 @@ resolver = "2"
 # so Cargo and rust-analyzer can still load the rest of the workspace.
 # See docs/build/BUILD.md, "Rust workspace / rust-analyzer".
 members = [
+    "crates/fission-automation",
     "crates/fission-core",
     "crates/fission-disasm",
     "crates/fission-loader",

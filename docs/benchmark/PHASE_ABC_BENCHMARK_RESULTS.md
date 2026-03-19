@@ -111,9 +111,8 @@ export DYLD_LIBRARY_PATH="$(pwd)/target/release:$DYLD_LIBRARY_PATH"
   --decomp-all --benchmark --ghidra-compat --profile balanced \
   --decomp-limit 100 -o artifacts/local/fission.json
 
-# Fission vs Ghidra comparison (requires pyghidra)
-python3 scripts/test/batch_benchmark/full_decomp_benchmark.py \
-  samples/windows/x64/putty.exe --limit 100
+# Fission NIR lane regression pass
+cargo run -p fission-automation -- nir-check --lane regression --functions-limit 20
 ```
 
 ---

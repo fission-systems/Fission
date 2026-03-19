@@ -6,20 +6,17 @@ If `--decomp-limit 20` hits a 900-second timeout, the issue is likely not ordina
 
 ## Step 1: Identify the Function Causing the Timeout
 
-### Automated Script (Recommended)
+### Automated Lane Run (Recommended)
 
 ```bash
-# Test the first 20 functions with a 120-second per-function timeout
-python scripts/test/batch_benchmark/find_timeout_culprit.py samples/windows/x64/putty.exe --limit 20 --timeout 120
-
-# Print detailed timing for each function
-python scripts/test/batch_benchmark/find_timeout_culprit.py putty.exe --limit 20 --timeout 120 --verbose
+# Run the preview sentinel lane and inspect the generated summary/diagnosis
+cargo run -p fission-automation -- nir-check --lane preview --functions-limit 20
 ```
 
 **How to read the results:**
-- An address marked `[TIMEOUT]`: did not finish within 120 seconds → **primary suspect**
-- `[OK]` but slower than 60 seconds: likely an extreme bottleneck
-- If all functions finish: the problem may come from **parallel execution interactions** (race/lock behavior) or **initialization overhead**. Try the “disable parallelism” step below.
+- `preview_failure_count` > 0 or repeated `preview_timeout` / `preview_frontend_reject` rows identify the suspect lane members
+- `diagnosis.md` and per-binary inventory summaries under `artifacts/fission-automation/latest/preview/` tell you which binary is failing and which signature dominates
+- If the lane passes but `--decomp-all` still hangs, the problem may come from **parallel execution interactions** or a code path outside the sentinel set. Try the manual single-function run below.
 
 ### Manual Run (Single Function)
 
@@ -39,9 +36,9 @@ timeout 120 ./target/release/fission_cli samples/windows/x64/putty.exe \
 If a single function finishes but `--decomp-all --decomp-limit 20` times out, the issue may be parallel execution rather than one specific function.
 
 ```bash
-# Run single-threaded (sequential)
-RAYON_NUM_THREADS=1 python scripts/test/batch_benchmark/full_decomp_benchmark.py \
-  samples/windows/x64/putty.exe --limit 20 --timeout 600
+# Run single-threaded (sequential) against a bounded function set
+RAYON_NUM_THREADS=1 ./target/release/fission_cli samples/windows/x64/putty.exe \
+  --decomp-all --decomp-limit 20 --benchmark --ghidra-compat -o artifacts/local/fission-timeout.json
 ```
 
 - If it finishes with `RAYON_NUM_THREADS=1`: suspect a parallelism or locking issue
