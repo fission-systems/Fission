@@ -18,6 +18,7 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 DEFAULT_CORPUS_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_quality_corpus.json"
 DEFAULT_CANDIDATES_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_quality_candidates.json"
+DEFAULT_SOURCE_INVENTORY_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_explicit_source_inventory.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fission-bin", type=Path, default=DEFAULT_FISSION_BIN)
     parser.add_argument("--corpus-file", type=Path, default=DEFAULT_CORPUS_FILE)
     parser.add_argument("--candidates-file", type=Path, default=DEFAULT_CANDIDATES_FILE)
+    parser.add_argument("--source-inventory-file", type=Path, default=DEFAULT_SOURCE_INVENTORY_FILE)
     parser.add_argument("--timeout-ms", type=int, default=10000)
     parser.add_argument("--candidate-limit", type=int)
     parser.add_argument("--per-binary-limit", type=int, default=4)
@@ -64,6 +66,26 @@ def load_timeout_rescue(corpus_path: Path) -> dict:
     return timeout_rescue if isinstance(timeout_rescue, dict) else {}
 
 
+def load_source_inventory(source_inventory_path: Path) -> dict[str, dict]:
+    if not source_inventory_path.exists():
+        return {}
+    try:
+        data = json.loads(source_inventory_path.read_text())
+    except Exception:
+        return {}
+
+    inventory: dict[str, dict] = {}
+    for source in data.get("sources", []) or []:
+        path = source.get("path")
+        binary = source.get("binary")
+        if path:
+            inventory[str(Path(path).resolve())] = source
+        if binary:
+            inventory[binary] = source
+            inventory[Path(binary).stem] = source
+    return inventory
+
+
 def parse_manual_seed(seed: str) -> tuple[str, str]:
     binary, _, address = seed.partition("@")
     if not binary or not address:
@@ -79,6 +101,7 @@ def main() -> int:
     all_candidates: list[dict] = []
     curated_explicit_entries: list[dict] = []
     curated_heuristic_entries: list[dict] = []
+    source_inventory = load_source_inventory(args.source_inventory_file)
 
     binary_paths = [Path(item).resolve() for item in args.binaries]
     for binary_path in binary_paths:
@@ -91,8 +114,13 @@ def main() -> int:
         )
         candidates = report.get("candidates", [])
         all_candidates.extend(candidates)
+        source_meta = source_inventory.get(str(binary_path)) or source_inventory.get(binary_path.name) or source_inventory.get(binary_path.stem)
         explicit_primary = sorted(
-            [entry for entry in candidates if candidate_passes_explicit_quality_prefilter(entry)],
+            [
+                entry
+                for entry in candidates
+                if candidate_passes_explicit_quality_prefilter(entry, source_meta)
+            ],
             key=candidate_sort_key,
             reverse=True,
         )
@@ -120,7 +148,12 @@ def main() -> int:
         )
         candidates = report.get("candidates", [])
         all_candidates.extend(candidates)
-        curated_explicit_entries.extend(curated_quality_entry(entry) for entry in candidates)
+        source_meta = source_inventory.get(str(binary_path)) or source_inventory.get(binary_path.name) or source_inventory.get(binary_path.stem)
+        curated_explicit_entries.extend(
+            curated_quality_entry(entry)
+            for entry in candidates
+            if candidate_passes_explicit_quality_prefilter(entry, source_meta)
+        )
 
     for seed in args.manual_heuristic_seed:
         binary_str, address = parse_manual_seed(seed)

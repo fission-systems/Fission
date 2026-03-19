@@ -654,6 +654,17 @@ fn classify_preview_failure_refined(reason: &str) -> &'static str {
     if lower.contains("preview_timeout") || lower.contains("worker timed out") {
         return "preview_timeout";
     }
+    if lower.contains("unsupported architecture") || lower.contains("currently supports pe x64 only")
+    {
+        return "preview_architecture_unsupported";
+    }
+    if lower.contains("unsupported format")
+        || lower.contains("format mismatch")
+        || lower.contains("pe-only mismatch")
+        || lower.contains("only supports pe")
+    {
+        return "preview_format_unsupported";
+    }
     if lower.contains("worker spawn failed")
         || lower.contains("stdin unavailable")
         || lower.contains("stdin write failed")
@@ -1017,7 +1028,13 @@ mod tests {
             classify_preview_failure_refined(
                 "mlil-preview unavailable: unsupported architecture in mlil-preview"
             ),
-            "preview_parse_or_lowering_failure"
+            "preview_architecture_unsupported"
+        );
+        assert_eq!(
+            classify_preview_failure_refined(
+                "mlil-preview unavailable: unsupported format in mlil-preview"
+            ),
+            "preview_format_unsupported"
         );
         assert_eq!(
             classify_preview_failure_refined("mlil-preview worker response parse failed: bad json"),

@@ -53,8 +53,24 @@ def preview_hint_total(entry: dict[str, Any]) -> int:
     return sum(int(value or 0) for value in stats.values())
 
 
-def candidate_passes_explicit_quality_prefilter(entry: dict[str, Any]) -> bool:
+def source_is_preview_aligned(source_meta: dict[str, Any] | None) -> bool:
+    if not source_meta:
+        return True
+    if not bool(source_meta.get("expected_preview_supported", True)):
+        return False
+    failure_kind = source_meta.get("observed_preview_failure_kind")
+    if failure_kind in {"preview_architecture_unsupported", "preview_format_unsupported"}:
+        return False
+    return True
+
+
+def candidate_passes_explicit_quality_prefilter(
+    entry: dict[str, Any],
+    source_meta: dict[str, Any] | None = None,
+) -> bool:
     return (
+        source_is_preview_aligned(source_meta)
+        and
         explicit_fact_total(entry) >= 2
         and bool(entry.get("preview_direct_success"))
         and not bool(entry.get("has_indirect_control_flow"))

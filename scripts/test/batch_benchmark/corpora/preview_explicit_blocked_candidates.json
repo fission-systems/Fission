@@ -11,7 +11,7 @@
       "explicit_fact_total": 2,
       "fact_density_score": 6,
       "preview_direct_success": false,
-      "block_reason": "preview_parse_or_lowering_failure",
+      "block_reason": "preview_architecture_unsupported",
       "raw_preview_fallback_kind": "preview_unsupported",
       "raw_preview_fallback_reason": "preview_unsupported: mlil-preview unavailable: unsupported architecture in mlil-preview",
       "preview_surface_kind": null,
@@ -30,7 +30,7 @@
       "explicit_fact_total": 2,
       "fact_density_score": 6,
       "preview_direct_success": false,
-      "block_reason": "preview_parse_or_lowering_failure",
+      "block_reason": "preview_architecture_unsupported",
       "raw_preview_fallback_kind": "preview_unsupported",
       "raw_preview_fallback_reason": "preview_unsupported: mlil-preview unavailable: unsupported architecture in mlil-preview",
       "preview_surface_kind": null,
@@ -46,7 +46,7 @@
     "strict_explicit_corpus_population_succeeded": false,
     "quality_explicit_facts_still_empty": true,
     "block_reason_counts": {
-      "preview_parse_or_lowering_failure": 2
+      "preview_architecture_unsupported": 2
     },
     "source_expansion_summary": {
       "new_zero_explicit_sources": [
@@ -75,11 +75,11 @@
       ]
     },
     "notes": [
-      "Current explicit-facts bottleneck is sample scarcity, not corpus split logic.",
-      "LLVM test PE binaries produced a small number of explicit candidates, but none satisfied direct-preview success.",
-      "Refined preview failure taxonomy now shows that the current blocked candidates fail in the parse/lowering bucket because preview reports unsupported architecture.",
-      "Current heuristic corpus remains valid and separated; explicit corpus needs additional PE sources rather than provisional blocked-seed promotion.",
-      "Recent source expansion across samples/other and additional LLVM PDB-backed test inputs widened the search pool, but did not yet produce a strict explicit direct-preview seed."
+      "Current explicit-facts bottleneck is sample scarcity plus preview admission alignment, not corpus split logic.",
+      "LLVM test PE binaries produced a small number of explicit candidates, but the current blocked candidates are rejected before direct preview due to unsupported architecture.",
+      "Admission-mismatch sources should remain outside the strict explicit candidate pool even when they carry explicit facts.",
+      "Current heuristic corpus remains valid and separated; explicit corpus needs preview-aligned PE sources rather than provisional blocked-seed promotion.",
+      "Recent source expansion widened the search pool, but did not yet produce a strict explicit direct-preview seed."
     ]
   }
 }

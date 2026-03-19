@@ -10,7 +10,11 @@
       "has_debug_info_like_data": false,
       "has_loader_types": false,
       "priority": "low",
-      "notes": "Current regression corpus binary. Useful for heuristic/structuring checks, not explicit-facts bootstrap."
+      "notes": "Current regression corpus binary. Useful for heuristic/structuring checks, not explicit-facts bootstrap.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": true,
+      "observed_preview_failure_kind": null,
+      "observed_preview_failure_reason": null
     },
     {
       "binary": "test_real_world_algorithms_x64_O0.exe",
@@ -20,7 +24,11 @@
       "has_debug_info_like_data": false,
       "has_loader_types": false,
       "priority": "low",
-      "notes": "Current heuristic-quality seed source. Slot-alias candidates exist, but explicit DWARF facts were not observed."
+      "notes": "Current heuristic-quality seed source. Slot-alias candidates exist, but explicit DWARF facts were not observed.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": true,
+      "observed_preview_failure_kind": null,
+      "observed_preview_failure_reason": null
     },
     {
       "binary": "putty.exe",
@@ -30,7 +38,11 @@
       "has_debug_info_like_data": false,
       "has_loader_types": true,
       "priority": "medium",
-      "notes": "Heuristic quality corpus source. Produces non-zero heuristic hint stats but not explicit function-scoped facts."
+      "notes": "Heuristic quality corpus source. Produces non-zero heuristic hint stats but not explicit function-scoped facts.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": true,
+      "observed_preview_failure_kind": null,
+      "observed_preview_failure_reason": null
     },
     {
       "binary": "main-debug.exe",
@@ -40,7 +52,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "high",
-      "notes": "Observed DWARF-like function facts on main(); refined preview scan now classifies the blocked candidate as preview_parse_or_lowering_failure because preview reports unsupported architecture."
+      "notes": "Observed DWARF-like function facts on main(); refined preview scan now classifies the blocked candidate as preview_parse_or_lowering_failure because preview reports unsupported architecture.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_architecture_unsupported",
+      "observed_preview_failure_reason": "preview_unsupported: mlil-preview unavailable: unsupported architecture in mlil-preview"
     },
     {
       "binary": "addr.exe",
@@ -50,7 +66,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "high",
-      "notes": "Observed DWARF-like function facts on main(); refined preview scan now classifies the blocked candidate as preview_parse_or_lowering_failure because preview reports unsupported architecture."
+      "notes": "Observed DWARF-like function facts on main(); refined preview scan now classifies the blocked candidate as preview_parse_or_lowering_failure because preview reports unsupported architecture.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_architecture_unsupported",
+      "observed_preview_failure_reason": "preview_unsupported: mlil-preview unavailable: unsupported architecture in mlil-preview"
     },
     {
       "binary": "coff-dwarf.exe",
@@ -60,7 +80,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "high",
-      "notes": "Likely DWARF-bearing COFF test binary, but limited inventory scans did not yield explicit candidates."
+      "notes": "Likely DWARF-bearing COFF test binary, but limited inventory scans did not yield explicit candidates.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "No strict explicit direct-preview candidate observed yet."
     },
     {
       "binary": "test.exe",
@@ -70,7 +94,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "PDB-backed LLVM symbolizer sample. Included for explicit-facts scanning, but current inventory runs time out before yielding direct-preview explicit seeds."
+      "notes": "PDB-backed LLVM symbolizer sample. Included for explicit-facts scanning, but current inventory runs time out before yielding direct-preview explicit seeds.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "PDB-backed sample did not yield a strict explicit direct-preview candidate."
     },
     {
       "binary": "test-pdb.exe",
@@ -80,7 +108,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "PDB-backed LLDB sample. Current inventory does not surface explicit function-scoped facts, but it remains part of the expanded PE source pool."
+      "notes": "PDB-backed LLDB sample. Current inventory does not surface explicit function-scoped facts, but it remains part of the expanded PE source pool.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "PDB-backed sample did not yield a strict explicit direct-preview candidate."
     },
     {
       "binary": "WinHelloCPP.exe",
@@ -90,7 +122,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "Ghidra teaching sample PE. Promising as a small Windows executable, but current spot checks have not yet produced explicit function-scoped facts."
+      "notes": "Ghidra teaching sample PE. Promising as a small Windows executable, but current spot checks have not yet produced explicit function-scoped facts.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "Small PE sample, but no strict explicit direct-preview candidate observed."
     },
     {
       "binary": "WallaceSrc.exe",
@@ -100,7 +136,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "low",
-      "notes": "Ghidra version-tracking sample. Useful for source expansion, but initial scans produced no explicit-facts candidates."
+      "notes": "Ghidra version-tracking sample. Useful for source expansion, but initial scans produced no explicit-facts candidates.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "No strict explicit direct-preview candidate observed."
     },
     {
       "binary": "WallaceVersion2.exe",
@@ -110,7 +150,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "low",
-      "notes": "Paired version-tracking sample. Initial scans produced no explicit-facts candidates."
+      "notes": "Paired version-tracking sample. Initial scans produced no explicit-facts candidates.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "No strict explicit direct-preview candidate observed."
     },
     {
       "binary": "ksi.dll",
@@ -120,7 +164,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "PDB sidecar exists, but current FactStore/inventory path did not surface explicit function-scoped facts."
+      "notes": "PDB sidecar exists, but current FactStore/inventory path did not surface explicit function-scoped facts.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "PDB sidecar exists, but no strict explicit direct-preview candidate observed."
     },
     {
       "binary": "fauxware.exe",
@@ -130,7 +178,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "Has a local fauxware.pdb sidecar, but current preview candidate inventory found zero explicit-facts functions under the strict scan."
+      "notes": "Has a local fauxware.pdb sidecar, but current preview candidate inventory found zero explicit-facts functions under the strict scan.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "PDB sidecar present, but current scan found zero strict explicit candidates."
     },
     {
       "binary": "fauxware-wide.exe",
@@ -140,7 +192,11 @@
       "has_debug_info_like_data": false,
       "has_loader_types": false,
       "priority": "low",
-      "notes": "Expanded x64 source-pool candidate from samples/other. Strict inventory scan produced zero explicit-facts functions."
+      "notes": "Expanded x64 source-pool candidate from samples/other. Strict inventory scan produced zero explicit-facts functions.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "Current scan found zero strict explicit candidates."
     },
     {
       "binary": "msvc_cfg_0_debug.exe",
@@ -150,7 +206,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "Debug-flavored x64 PE from samples/other. Current explicit scan still yielded zero strict explicit candidates."
+      "notes": "Debug-flavored x64 PE from samples/other. Current explicit scan still yielded zero strict explicit candidates.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "Current scan found zero strict explicit candidates."
     },
     {
       "binary": "GetProcAddress.exe",
@@ -160,7 +220,11 @@
       "has_debug_info_like_data": false,
       "has_loader_types": true,
       "priority": "medium",
-      "notes": "Inventory scan timed out before producing candidate data. Keep as a medium-priority rescan target rather than promoting it into explicit corpus logic."
+      "notes": "Inventory scan timed out before producing candidate data. Keep as a medium-priority rescan target rather than promoting it into explicit corpus logic.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_timeout",
+      "observed_preview_failure_reason": "Preview candidate inventory timed out before producing candidate data."
     },
     {
       "binary": "BitBlaster.exe",
@@ -170,7 +234,11 @@
       "has_debug_info_like_data": false,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "Preview candidate inventory timed out. This is a rescan candidate, not evidence of explicit-facts success."
+      "notes": "Preview candidate inventory timed out. This is a rescan candidate, not evidence of explicit-facts success.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_timeout",
+      "observed_preview_failure_reason": "Preview candidate inventory timed out before producing candidate data."
     },
     {
       "binary": "vcruntime_test.exe",
@@ -180,7 +248,11 @@
       "has_debug_info_like_data": false,
       "has_loader_types": false,
       "priority": "low",
-      "notes": "Decompiler fixture from samples/other. Strict inventory scan found zero explicit-facts candidates."
+      "notes": "Decompiler fixture from samples/other. Strict inventory scan found zero explicit-facts candidates.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "Current scan found zero strict explicit candidates."
     },
     {
       "binary": "SimpleTest.exe",
@@ -190,7 +262,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "Adjacent to SimpleTest.pdb and worth scanning, but current strict inventory still found zero explicit-facts candidates."
+      "notes": "Adjacent to SimpleTest.pdb and worth scanning, but current strict inventory still found zero explicit-facts candidates.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "PDB-backed sample produced zero strict explicit candidates."
     },
     {
       "binary": "test-columns.exe",
@@ -200,7 +276,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "PDB-backed LLVM symbolizer input. Current scan produced zero explicit-facts candidates under strict filtering."
+      "notes": "PDB-backed LLVM symbolizer input. Current scan produced zero explicit-facts candidates under strict filtering.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "PDB-backed sample produced zero strict explicit candidates."
     },
     {
       "binary": "test-pdb-types.exe",
@@ -210,7 +290,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "PDB/type-focused LLDB input. Current strict scan produced zero explicit-facts candidates."
+      "notes": "PDB/type-focused LLDB input. Current strict scan produced zero explicit-facts candidates.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_non_success_unknown",
+      "observed_preview_failure_reason": "PDB-backed sample produced zero strict explicit candidates."
     },
     {
       "binary": "has_pdb.exe",
@@ -220,7 +304,11 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "medium",
-      "notes": "COFF/PDB test input. Candidate inventory timed out, so it remains a source-expansion lead rather than an explicit seed."
+      "notes": "COFF/PDB test input. Candidate inventory timed out, so it remains a source-expansion lead rather than an explicit seed.",
+      "expected_preview_supported": true,
+      "observed_preview_supported": false,
+      "observed_preview_failure_kind": "preview_timeout",
+      "observed_preview_failure_reason": "Preview candidate inventory timed out before producing candidate data."
     }
   ]
 }
