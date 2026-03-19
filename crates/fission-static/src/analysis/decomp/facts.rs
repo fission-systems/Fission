@@ -39,6 +39,17 @@ pub struct FunctionFacts {
 }
 
 impl FunctionFacts {
+    pub fn dwarf_type_fact_count(&self) -> usize {
+        let Some(info) = self.dwarf_info.as_ref() else {
+            return 0;
+        };
+        info.params.len() + info.local_vars.len() + usize::from(info.return_type.is_some())
+    }
+
+    pub fn pdb_type_fact_count(&self) -> usize {
+        0
+    }
+
     pub fn native_type_fact_count(&self) -> usize {
         self.type_facts
             .iter()
@@ -325,6 +336,7 @@ mod tests {
     use super::*;
     use fission_core::common::types::FunctionInfo;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+    use fission_loader::loader::types::{DwarfLocalVar, DwarfLocation, DwarfParamInfo};
 
     fn inferred_type(
         name: &str,
@@ -415,6 +427,33 @@ mod tests {
         let snapshot = store.function_facts_snapshot(0x401000);
         assert_eq!(snapshot.native_type_fact_count(), 1);
         assert_eq!(snapshot.loader_type_fact_count(), 1);
+    }
+
+    #[test]
+    fn snapshot_counts_dwarf_type_facts_from_function_info() {
+        let mut store = FactStore::default();
+        store.dwarf_functions.insert(
+            0x401000,
+            DwarfFunctionInfo {
+                address: 0x401000,
+                name: "main".into(),
+                return_type: Some("int".into()),
+                params: vec![DwarfParamInfo {
+                    name: "argc".into(),
+                    type_name: "int".into(),
+                    location: DwarfLocation::Unknown,
+                }],
+                local_vars: vec![DwarfLocalVar {
+                    name: "tmp".into(),
+                    type_name: "int".into(),
+                    location: DwarfLocation::Unknown,
+                }],
+            },
+        );
+
+        let snapshot = store.function_facts_snapshot(0x401000);
+        assert_eq!(snapshot.dwarf_type_fact_count(), 3);
+        assert_eq!(snapshot.pdb_type_fact_count(), 0);
     }
 
     #[test]

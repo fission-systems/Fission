@@ -138,6 +138,8 @@ def classify_diagnosis(
     explicit_nonzero_rows: int,
     inventory_surface_gap_count: int,
     blocked_stage_counts: dict[str, int],
+    source_presence_counts: dict[str, int],
+    provenance_surface_totals: dict[str, int],
 ) -> tuple[str, str, str]:
     rows = max(rows_emitted, 1)
     source_presence_ratio = source_present_rows / rows
@@ -146,6 +148,16 @@ def classify_diagnosis(
     preview_stage_blocks = blocked_stage_counts.get("preview", 0) + blocked_stage_counts.get(
         "admission", 0
     )
+    pdb_sources = int(source_presence_counts.get("pdb", 0) or 0)
+    pdb_surface_rows = int(provenance_surface_totals.get("pdb_nonzero_rows", 0) or 0)
+    native_surface_rows = int(provenance_surface_totals.get("native_nonzero_rows", 0) or 0)
+
+    if pdb_sources > 0 and pdb_surface_rows == 0 and native_surface_rows > 0:
+        return (
+            "mixed_or_inconclusive",
+            "factstore_inventory_patch",
+            "PDB source presence is visible, but surfaced explicit rows are still being supplied by native inferred facts instead of PDB-derived facts",
+        )
 
     if explicit_nonzero_rows > 0 and preview_stage_blocks > 0:
         return (
@@ -214,12 +226,16 @@ def diagnosis_entry(
     aligned_with_zero_explicit_count = int(summary.get("aligned_with_zero_explicit_count", 0) or 0)
     source_present_rows = count_rows_with_any_source(rows)
     blocked_admission_stage_counts = stage_counts(blocked_candidates)
+    source_presence_counts = dict(summary.get("source_presence_counts") or {})
+    provenance_surface_totals = dict(summary.get("provenance_surface_totals") or {})
     diagnosis_bucket, next_action, rationale = classify_diagnosis(
         rows_emitted=rows_emitted,
         source_present_rows=source_present_rows,
         explicit_nonzero_rows=explicit_nonzero_rows,
         inventory_surface_gap_count=inventory_surface_gap_count,
         blocked_stage_counts=blocked_admission_stage_counts,
+        source_presence_counts=source_presence_counts,
+        provenance_surface_totals=provenance_surface_totals,
     )
 
     return {
@@ -247,6 +263,12 @@ def diagnosis_entry(
             "aligned_candidate_count": len(aligned_candidates),
             "blocked_candidate_count": len(blocked_candidates),
             "blocked_admission_stage_counts": blocked_admission_stage_counts,
+            "source_presence_counts": source_presence_counts,
+            "provenance_surface_totals": provenance_surface_totals,
+            "pdb_source_without_pdb_surface": bool(
+                int(source_presence_counts.get("pdb", 0) or 0) > 0
+                and int(provenance_surface_totals.get("pdb_nonzero_rows", 0) or 0) == 0
+            ),
         },
         "diagnosis_bucket": diagnosis_bucket,
         "next_action": next_action,
@@ -314,6 +336,9 @@ def markdown_summary(report: dict[str, Any]) -> str:
         lines.append(f"- Rationale: {entry['diagnosis_rationale']}")
         lines.append(
             f"- Source-present rows: `{metrics.get('source_present_rows')}`, explicit-nonzero rows: `{metrics.get('explicit_nonzero_rows')}`, surface-gap rows: `{metrics.get('inventory_surface_gap_count')}`"
+        )
+        lines.append(
+            f"- Source presence counts: `{metrics.get('source_presence_counts', {})}`, provenance surface totals: `{metrics.get('provenance_surface_totals', {})}`"
         )
         lines.append(
             f"- Blocked admission stages: `{metrics.get('blocked_admission_stage_counts', {})}`"

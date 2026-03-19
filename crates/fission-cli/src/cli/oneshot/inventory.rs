@@ -33,6 +33,14 @@ struct ExplicitFactBreakdown {
 }
 
 #[derive(Debug, Serialize)]
+struct ProvenanceFactBreakdown {
+    dwarf_type_count: usize,
+    pdb_type_count: usize,
+    native_type_count: usize,
+    loader_type_count: usize,
+}
+
+#[derive(Debug, Serialize)]
 struct FunctionFactsInventoryRow {
     binary: String,
     binary_path: String,
@@ -47,6 +55,7 @@ struct FunctionFactsInventoryRow {
     fact_density_score: i32,
     fact_sources_present: FactSourcesPresent,
     explicit_fact_breakdown: ExplicitFactBreakdown,
+    provenance_fact_breakdown: ProvenanceFactBreakdown,
     admission_block_stage: String,
     inventory_surface_gap: bool,
     preview_direct_success: bool,
@@ -83,6 +92,14 @@ struct ExplicitBreakdownTotals {
 }
 
 #[derive(Debug, Default, Serialize)]
+struct ProvenanceSurfaceTotals {
+    dwarf_nonzero_rows: usize,
+    pdb_nonzero_rows: usize,
+    native_nonzero_rows: usize,
+    loader_nonzero_rows: usize,
+}
+
+#[derive(Debug, Default, Serialize)]
 struct FunctionFactsInventorySummary {
     binary: String,
     binary_path: String,
@@ -99,6 +116,7 @@ struct FunctionFactsInventorySummary {
     explicit_fact_nonzero_count: usize,
     source_presence_counts: SourcePresenceCounts,
     explicit_breakdown_totals: ExplicitBreakdownTotals,
+    provenance_surface_totals: ProvenanceSurfaceTotals,
     inventory_surface_gap_count: usize,
     aligned_with_zero_explicit_count: usize,
     strict_explicit_candidate_count: usize,
@@ -153,13 +171,31 @@ fn heuristic_surface_candidate(entry: &PreviewCandidateEntry) -> bool {
         && (heuristic_hits || has_reason_tag)
 }
 
+fn detect_pdb_source_present(binary_path: &std::path::Path, binary_data: &[u8]) -> bool {
+    let lowercase = binary_path.with_extension("pdb");
+    if lowercase.exists() {
+        return true;
+    }
+    let uppercase = binary_path.with_extension("PDB");
+    if uppercase.exists() {
+        return true;
+    }
+
+    let file_bytes = fs::read(binary_path).ok();
+    let haystack = file_bytes.as_deref().unwrap_or(binary_data);
+
+    haystack.windows(4).any(|window| window == b"RSDS")
+        || haystack.windows(4).any(|window| window.eq_ignore_ascii_case(b".pdb"))
+}
+
 fn fact_sources_present(
     snapshot: &fission_static::analysis::decomp::FunctionFacts,
     entry: &PreviewCandidateEntry,
+    pdb_source_present: bool,
 ) -> FactSourcesPresent {
     FactSourcesPresent {
         dwarf: entry.has_dwarf_function,
-        pdb: false,
+        pdb: pdb_source_present,
         loader: snapshot.loader_type_fact_count() > 0 || entry.loader_type_count > 0,
         native_inferred: snapshot.native_type_fact_count() > 0,
     }
@@ -179,6 +215,17 @@ fn explicit_fact_breakdown(
 
 fn explicit_fact_total(breakdown: &ExplicitFactBreakdown) -> usize {
     breakdown.param_count + breakdown.local_count + breakdown.return_count + breakdown.native_type_count
+}
+
+fn provenance_fact_breakdown(
+    snapshot: &fission_static::analysis::decomp::FunctionFacts,
+) -> ProvenanceFactBreakdown {
+    ProvenanceFactBreakdown {
+        dwarf_type_count: snapshot.dwarf_type_fact_count(),
+        pdb_type_count: snapshot.pdb_type_fact_count(),
+        native_type_count: snapshot.native_type_fact_count(),
+        loader_type_count: snapshot.loader_type_fact_count(),
+    }
 }
 
 fn inventory_surface_gap(sources: &FactSourcesPresent, explicit_fact_total: usize) -> bool {
@@ -230,6 +277,7 @@ fn admission_block_stage(entry: &PreviewCandidateEntry, inventory_surface_gap: b
 
 fn to_inventory_row(
     binary_path: &std::path::Path,
+    pdb_source_present: bool,
     fact_store: &FactStore,
     entry: PreviewCandidateEntry,
 ) -> FunctionFactsInventoryRow {
@@ -240,7 +288,8 @@ fn to_inventory_row(
     let explicit_fact_total = explicit_fact_total(&explicit_fact_breakdown);
     let strict_explicit = strict_explicit_candidate_row(&entry, explicit_fact_total);
     let heuristic_surface = heuristic_surface_candidate(&entry);
-    let fact_sources_present = fact_sources_present(&snapshot, &entry);
+    let fact_sources_present = fact_sources_present(&snapshot, &entry, pdb_source_present);
+    let provenance_fact_breakdown = provenance_fact_breakdown(&snapshot);
     let inventory_surface_gap = inventory_surface_gap(&fact_sources_present, explicit_fact_total);
     let admission_block_stage = admission_block_stage(&entry, inventory_surface_gap);
     let loader_type_count = snapshot.loader_type_fact_count();
@@ -258,6 +307,7 @@ fn to_inventory_row(
         fact_density_score: entry.fact_density_score,
         fact_sources_present,
         explicit_fact_breakdown,
+        provenance_fact_breakdown,
         admission_block_stage,
         inventory_surface_gap,
         preview_direct_success: entry.preview_direct_success,
@@ -307,6 +357,18 @@ fn update_inventory_summary(
     summary.explicit_breakdown_totals.return_count += row.explicit_fact_breakdown.return_count;
     summary.explicit_breakdown_totals.native_type_count +=
         row.explicit_fact_breakdown.native_type_count;
+    if row.provenance_fact_breakdown.dwarf_type_count > 0 {
+        summary.provenance_surface_totals.dwarf_nonzero_rows += 1;
+    }
+    if row.provenance_fact_breakdown.pdb_type_count > 0 {
+        summary.provenance_surface_totals.pdb_nonzero_rows += 1;
+    }
+    if row.provenance_fact_breakdown.native_type_count > 0 {
+        summary.provenance_surface_totals.native_nonzero_rows += 1;
+    }
+    if row.provenance_fact_breakdown.loader_type_count > 0 {
+        summary.provenance_surface_totals.loader_nonzero_rows += 1;
+    }
     if row.inventory_surface_gap {
         summary.inventory_surface_gap_count += 1;
     }
@@ -387,6 +449,7 @@ pub(super) fn emit_function_facts_inventory(
 
     let mut decomp = prepare_inventory_decompiler(cli, binary, binary_data)?;
     let mut fact_store = FactStore::from_binary(binary);
+    let pdb_source_present = detect_pdb_source_present(&cli.binary, binary_data);
     let binary_name = cli
         .binary
         .file_stem()
@@ -427,7 +490,7 @@ pub(super) fn emit_function_facts_inventory(
                 cli.timeout_ms,
             );
             try_ingest_native_inventory_facts(&mut decomp, &mut fact_store, func.address);
-            let row = to_inventory_row(&cli.binary, &fact_store, candidate);
+            let row = to_inventory_row(&cli.binary, pdb_source_present, &fact_store, candidate);
             serde_json::to_writer(&mut writer, &row)
                 .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
             writer.write_all(b"\n")?;

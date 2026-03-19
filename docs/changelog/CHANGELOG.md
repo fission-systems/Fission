@@ -9,6 +9,66 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-19
 
+### P5F1 - Provenance Completeness For Function Facts Inventory
+
+This round refined the inventory from “provenance-aware” toward “provenance-complete enough to guide the next core patch.”
+
+The main improvement is that inventory output can now distinguish between:
+
+- sources that carry PDB-style debug provenance,
+- function rows that actually surface explicit facts,
+- and cases where surfaced explicit rows are still being supplied by native inferred facts rather than by PDB-derived facts.
+
+#### Added
+
+- provenance fact breakdown in function inventory rows
+  - rows now include `provenance_fact_breakdown` with:
+    - `dwarf_type_count`
+    - `pdb_type_count`
+    - `native_type_count`
+    - `loader_type_count`
+- provenance surface totals in inventory summaries
+  - summaries now report:
+    - `dwarf_nonzero_rows`
+    - `pdb_nonzero_rows`
+    - `native_nonzero_rows`
+    - `loader_nonzero_rows`
+- function snapshot provenance helpers
+  - `FunctionFacts` now exposes:
+    - `dwarf_type_fact_count()`
+    - `pdb_type_fact_count()`
+    - `native_type_fact_count()`
+    - `loader_type_fact_count()`
+
+#### Changed
+
+- PDB source presence detection
+  - `fact_sources_present.pdb` is no longer a placeholder
+  - inventory now treats `.pdb` sidecars and embedded PE `RSDS` / `.pdb` markers as real PDB source presence signals
+- diagnosis interpretation
+  - inventory-guided diagnosis can now distinguish:
+    - `pdb source present but no pdb-surfaced explicit rows`
+    - `native inferred facts are currently covering the explicit surface gap`
+
+#### Validation
+
+- `cargo test -p fission-static snapshot_counts_dwarf_type_facts_from_function_info -- --nocapture`
+- `cargo test -p fission-static snapshot_counts_native_and_loader_type_facts_separately -- --nocapture`
+- `cargo build -p fission-cli --features native_decomp`
+- smoke inventory / diagnosis reruns:
+  - `has_pdb.exe`
+  - `putty.exe`
+
+#### Observed Effect
+
+- `has_pdb.exe`
+  - `source_presence_counts.pdb = 10`
+  - `provenance_surface_totals.pdb_nonzero_rows = 0`
+  - `provenance_surface_totals.native_nonzero_rows = 5`
+  - diagnosis now shows that PDB provenance is present, but surfaced explicit rows are still coming from native inferred facts
+
+This means the next preview-side or facts-side patch can target real remaining gaps without provenance confusion.
+
 ### P5D / P5E - Inventory-Guided Diagnosis And Function-Level Facts Surfacing
 
 This round stopped treating explicit-facts scarcity as a vague benchmark problem and turned it into a concrete inventory diagnosis plus a core data-path patch.
