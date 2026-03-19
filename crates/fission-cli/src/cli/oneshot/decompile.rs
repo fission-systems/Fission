@@ -1,4 +1,4 @@
-use crate::cli::args::OneShotArgs;
+use crate::cli::args::{OneShotArgs, parse_hex_address};
 use crate::cli::oneshot::common::{
     EngineMode, apply_profile, fallback_reason_with_kind, init_decompiler, resolve_compiler_id,
     resolve_engine_mode, resolve_profile,
@@ -17,9 +17,11 @@ use fission_static::analysis::decomp::{
     rescue_preview_output_with_facts, select_preview_output_with_facts,
     serialize_win_api_signatures_json,
 };
-use serde::Serialize;
-use std::fs;
-use std::io::{self, Write};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::{self, BufRead, BufReader, Write};
+use std::panic::{AssertUnwindSafe, catch_unwind, set_hook, take_hook};
 use tracing::warn;
 
 #[cfg(feature = "native_decomp")]
@@ -144,7 +146,7 @@ struct PreviewCandidateInventory {
     candidates: Vec<PreviewCandidateEntry>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PreviewCandidateEntry {
     binary: String,
     address: String,
@@ -167,6 +169,23 @@ struct PreviewCandidateEntry {
     quality_potential_score: i32,
     reason_tags: Vec<String>,
     preview_hint_stats: Option<PreviewHintStats>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct PreviewCandidateScanSummary {
+    binary: String,
+    binary_path: String,
+    format: String,
+    arch_spec: String,
+    functions_total: usize,
+    addresses_scanned: usize,
+    chunks_completed: usize,
+    chunk_size: usize,
+    timeout_count: usize,
+    nonzero_explicit_candidates: usize,
+    strict_explicit_candidates: usize,
+    failure_kind_counts: BTreeMap<String, usize>,
+    resume_loaded_rows: usize,
 }
 
 fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
@@ -290,6 +309,299 @@ fn build_quality_tags_and_score(
     tags.sort();
     tags.dedup();
     (score, tags)
+}
+
+fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
+    (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type)) >= 2
+        && entry.preview_direct_success
+        && !entry.has_indirect_control_flow
+        && entry.pcode_op_count <= 800
+}
+
+fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {
+    if entry.preview_direct_success {
+        return "direct_success";
+    }
+    entry.preview_fallback_kind_refined
+        .as_deref()
+        .or(entry.preview_fallback_kind.as_deref())
+        .unwrap_or("preview_non_success_unknown")
+}
+
+fn update_scan_summary(summary: &mut PreviewCandidateScanSummary, entry: &PreviewCandidateEntry) {
+    summary.addresses_scanned += 1;
+    if (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type)) > 0 {
+        summary.nonzero_explicit_candidates += 1;
+    }
+    if strict_explicit_candidate(entry) {
+        summary.strict_explicit_candidates += 1;
+    }
+    if !entry.preview_direct_success {
+        let failure_kind = effective_failure_kind(entry).to_string();
+        if failure_kind == "preview_timeout" {
+            summary.timeout_count += 1;
+        }
+        *summary.failure_kind_counts.entry(failure_kind).or_insert(0) += 1;
+    }
+}
+
+fn write_scan_summary(path: &std::path::Path, summary: &PreviewCandidateScanSummary) -> io::Result<()> {
+    let body = serde_json::to_string_pretty(summary)
+        .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
+    fs::write(path, body)
+}
+
+fn load_resume_rows(path: &std::path::Path) -> io::Result<(HashSet<u64>, PreviewCandidateScanSummary)> {
+    if !path.exists() {
+        return Ok((HashSet::new(), PreviewCandidateScanSummary::default()));
+    }
+
+    let file = fs::File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut seen = HashSet::new();
+    let mut summary = PreviewCandidateScanSummary::default();
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<PreviewCandidateEntry>(&line) else {
+            continue;
+        };
+        let Ok(address) = parse_hex_address(&entry.address) else {
+            continue;
+        };
+        if !seen.insert(address) {
+            continue;
+        }
+        summary.resume_loaded_rows += 1;
+        update_scan_summary(&mut summary, &entry);
+    }
+
+    Ok((seen, summary))
+}
+
+fn select_candidate_functions<'a>(
+    cli: &OneShotArgs,
+    binary: &'a LoadedBinary,
+) -> io::Result<Vec<&'a FunctionInfo>> {
+    let mut functions = binary.functions.iter().collect::<Vec<_>>();
+    functions.sort_by_key(|func| func.address);
+
+    if let Some(address_file) = &cli.addresses_file {
+        let contents = fs::read_to_string(address_file)?;
+        let mut selected = Vec::new();
+        for line in contents.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let address = parse_hex_address(trimmed)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+            if let Some(func) = functions.iter().copied().find(|func| func.address == address) {
+                selected.push(func);
+            }
+        }
+        return Ok(selected);
+    }
+
+    if let Some(address) = cli.address {
+        functions.retain(|func| func.address == address);
+    } else if let Some(limit) = cli.functions_limit {
+        functions.truncate(limit);
+    }
+
+    Ok(functions)
+}
+
+fn build_preview_candidate_entry(
+    decomp: &mut DecompilerNative,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    binary_name: &str,
+    func: &FunctionInfo,
+    timeout_ms: Option<u64>,
+) -> PreviewCandidateEntry {
+    let dwarf = fact_store.dwarf_function(func.address);
+    let has_dwarf_function = dwarf.is_some();
+    let dwarf_param_count = dwarf.map(|info| info.params.len()).unwrap_or(0);
+    let dwarf_local_count = dwarf.map(|info| info.local_vars.len()).unwrap_or(0);
+    let has_dwarf_return_type = dwarf
+        .and_then(|info| info.return_type.as_deref())
+        .is_some_and(|name| !name.trim().is_empty());
+    let loader_type_count = fact_store.merged_inferred_types(func.address).len();
+    let fact_density_score = fact_density_score(
+        has_dwarf_function,
+        dwarf_param_count,
+        dwarf_local_count,
+        has_dwarf_return_type,
+        loader_type_count,
+    );
+
+    let mut pcode_block_count = 0usize;
+    let mut pcode_op_count = 0usize;
+    let mut has_indirect = false;
+    let mut auto_eligible = false;
+    let mut preview_direct_success = false;
+    let mut preview_fallback_kind = None;
+    let mut preview_fallback_kind_refined = None;
+    let mut preview_fallback_reason = None;
+    let mut preview_surface_kind = None;
+    let mut preview_hint_stats = None;
+    let mut preview_code = None;
+
+    if let Ok(pcode_json) = decomp.get_pcode(func.address)
+        && let Ok(pcode) = PcodeFunction::from_json(&pcode_json)
+    {
+        pcode_block_count = pcode.blocks.len();
+        pcode_op_count = pcode_total_ops(&pcode);
+        has_indirect = contains_indirect_control_flow(&pcode);
+        auto_eligible = auto_mlil_eligible(binary, &pcode);
+
+        if let Ok(selection) = select_preview_output_with_facts(
+            decomp,
+            binary,
+            fact_store,
+            func.address,
+            &func.name,
+            PreviewEngineMode::MlilPreview,
+            timeout_ms,
+        ) {
+            preview_direct_success = selection.preview_code.is_some()
+                && !selection.fell_back
+                && selection.engine_used == PreviewEngineMode::MlilPreview;
+            preview_fallback_kind = selection.fallback_kind.map(str::to_string);
+            preview_fallback_kind_refined = selection.fallback_kind_refined.map(str::to_string);
+            preview_fallback_reason = selection.fallback_reason.clone();
+            preview_surface_kind = selection.preview_surface;
+            preview_hint_stats = selection.hint_stats;
+            preview_code = selection.preview_code;
+        }
+    }
+
+    let (quality_potential_score, reason_tags) = build_quality_tags_and_score(
+        dwarf_param_count,
+        dwarf_local_count,
+        has_dwarf_return_type,
+        loader_type_count,
+        preview_direct_success,
+        preview_surface_kind,
+        pcode_block_count,
+        pcode_op_count,
+        has_indirect,
+        preview_code.as_deref(),
+        preview_hint_stats,
+    );
+
+    PreviewCandidateEntry {
+        binary: binary_name.to_string(),
+        address: format!("0x{:x}", func.address),
+        name: func.name.clone(),
+        has_dwarf_function,
+        dwarf_param_count,
+        dwarf_local_count,
+        has_dwarf_return_type,
+        loader_type_count,
+        fact_density_score,
+        preview_direct_success,
+        preview_fallback_kind,
+        preview_fallback_kind_refined,
+        preview_fallback_reason,
+        pcode_block_count,
+        pcode_op_count,
+        has_indirect_control_flow: has_indirect,
+        auto_eligible,
+        preview_surface_kind: preview_surface_kind_str(preview_surface_kind),
+        quality_potential_score,
+        reason_tags,
+        preview_hint_stats,
+    }
+}
+
+fn build_preview_candidate_fallback_entry(
+    fact_store: &FactStore,
+    binary_name: &str,
+    func: &FunctionInfo,
+    reason: String,
+) -> PreviewCandidateEntry {
+    let dwarf = fact_store.dwarf_function(func.address);
+    let has_dwarf_function = dwarf.is_some();
+    let dwarf_param_count = dwarf.map(|info| info.params.len()).unwrap_or(0);
+    let dwarf_local_count = dwarf.map(|info| info.local_vars.len()).unwrap_or(0);
+    let has_dwarf_return_type = dwarf
+        .and_then(|info| info.return_type.as_deref())
+        .is_some_and(|name| !name.trim().is_empty());
+    let loader_type_count = fact_store.merged_inferred_types(func.address).len();
+    let fact_density_score = fact_density_score(
+        has_dwarf_function,
+        dwarf_param_count,
+        dwarf_local_count,
+        has_dwarf_return_type,
+        loader_type_count,
+    );
+    let (quality_potential_score, reason_tags) = build_quality_tags_and_score(
+        dwarf_param_count,
+        dwarf_local_count,
+        has_dwarf_return_type,
+        loader_type_count,
+        false,
+        None,
+        0,
+        0,
+        false,
+        None,
+        None,
+    );
+
+    PreviewCandidateEntry {
+        binary: binary_name.to_string(),
+        address: format!("0x{:x}", func.address),
+        name: func.name.clone(),
+        has_dwarf_function,
+        dwarf_param_count,
+        dwarf_local_count,
+        has_dwarf_return_type,
+        loader_type_count,
+        fact_density_score,
+        preview_direct_success: false,
+        preview_fallback_kind: Some("preview_unsupported".to_string()),
+        preview_fallback_kind_refined: Some("preview_non_success_unknown".to_string()),
+        preview_fallback_reason: Some(reason),
+        pcode_block_count: 0,
+        pcode_op_count: 0,
+        has_indirect_control_flow: false,
+        auto_eligible: false,
+        preview_surface_kind: None,
+        quality_potential_score,
+        reason_tags,
+        preview_hint_stats: None,
+    }
+}
+
+fn preview_candidate_entry_with_recovery(
+    decomp: &mut DecompilerNative,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    binary_name: &str,
+    func: &FunctionInfo,
+    timeout_ms: Option<u64>,
+) -> PreviewCandidateEntry {
+    let previous_hook = take_hook();
+    set_hook(Box::new(|_| {}));
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        build_preview_candidate_entry(decomp, binary, fact_store, binary_name, func, timeout_ms)
+    }));
+    set_hook(previous_hook);
+    match result {
+        Ok(entry) => entry,
+        Err(_) => build_preview_candidate_fallback_entry(
+            fact_store,
+            binary_name,
+            func,
+            "preview candidate scan panicked".to_string(),
+        ),
+    }
 }
 
 fn write_output_bytes(cli: &OneShotArgs, body: &str) -> io::Result<()> {
@@ -482,101 +794,14 @@ pub(super) fn emit_preview_candidate_inventory(
 
     let mut candidates = Vec::with_capacity(functions.len());
     for func in &functions {
-        let dwarf = fact_store.dwarf_function(func.address);
-        let has_dwarf_function = dwarf.is_some();
-        let dwarf_param_count = dwarf.map(|info| info.params.len()).unwrap_or(0);
-        let dwarf_local_count = dwarf.map(|info| info.local_vars.len()).unwrap_or(0);
-        let has_dwarf_return_type = dwarf
-            .and_then(|info| info.return_type.as_deref())
-            .is_some_and(|name| !name.trim().is_empty());
-        let loader_type_count = fact_store.merged_inferred_types(func.address).len();
-        let fact_density_score = fact_density_score(
-            has_dwarf_function,
-            dwarf_param_count,
-            dwarf_local_count,
-            has_dwarf_return_type,
-            loader_type_count,
-        );
-
-        let mut pcode_block_count = 0usize;
-        let mut pcode_op_count = 0usize;
-        let mut has_indirect = false;
-        let mut auto_eligible = false;
-        let mut preview_direct_success = false;
-        let mut preview_fallback_kind = None;
-        let mut preview_fallback_kind_refined = None;
-        let mut preview_fallback_reason = None;
-        let mut preview_surface_kind = None;
-        let mut preview_hint_stats = None;
-        let mut preview_code = None;
-
-        if let Ok(pcode_json) = decomp.get_pcode(func.address)
-            && let Ok(pcode) = PcodeFunction::from_json(&pcode_json)
-        {
-            pcode_block_count = pcode.blocks.len();
-            pcode_op_count = pcode_total_ops(&pcode);
-            has_indirect = contains_indirect_control_flow(&pcode);
-            auto_eligible = auto_mlil_eligible(binary, &pcode);
-
-            if let Ok(selection) = select_preview_output_with_facts(
-                &mut decomp,
-                binary,
-                &fact_store,
-                func.address,
-                &func.name,
-                PreviewEngineMode::MlilPreview,
-                cli.timeout_ms,
-            ) {
-                preview_direct_success = selection.preview_code.is_some()
-                    && !selection.fell_back
-                    && selection.engine_used == PreviewEngineMode::MlilPreview;
-                preview_fallback_kind = selection.fallback_kind.map(str::to_string);
-                preview_fallback_kind_refined =
-                    selection.fallback_kind_refined.map(str::to_string);
-                preview_fallback_reason = selection.fallback_reason.clone();
-                preview_surface_kind = selection.preview_surface;
-                preview_hint_stats = selection.hint_stats;
-                preview_code = selection.preview_code;
-            }
-        }
-
-        let (quality_potential_score, reason_tags) = build_quality_tags_and_score(
-            dwarf_param_count,
-            dwarf_local_count,
-            has_dwarf_return_type,
-            loader_type_count,
-            preview_direct_success,
-            preview_surface_kind,
-            pcode_block_count,
-            pcode_op_count,
-            has_indirect,
-            preview_code.as_deref(),
-            preview_hint_stats,
-        );
-
-        candidates.push(PreviewCandidateEntry {
-            binary: binary_name.clone(),
-            address: format!("0x{:x}", func.address),
-            name: func.name.clone(),
-            has_dwarf_function,
-            dwarf_param_count,
-            dwarf_local_count,
-            has_dwarf_return_type,
-            loader_type_count,
-            fact_density_score,
-            preview_direct_success,
-            preview_fallback_kind,
-            preview_fallback_kind_refined,
-            preview_fallback_reason,
-            pcode_block_count,
-            pcode_op_count,
-            has_indirect_control_flow: has_indirect,
-            auto_eligible,
-            preview_surface_kind: preview_surface_kind_str(preview_surface_kind),
-            quality_potential_score,
-            reason_tags,
-            preview_hint_stats,
-        });
+        candidates.push(preview_candidate_entry_with_recovery(
+            &mut decomp,
+            binary,
+            &fact_store,
+            &binary_name,
+            func,
+            cli.timeout_ms,
+        ));
     }
 
     let report = PreviewCandidateInventory {
@@ -590,6 +815,114 @@ pub(super) fn emit_preview_candidate_inventory(
     let json = serde_json::to_string_pretty(&report)
         .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
     write_output_bytes(cli, &json)
+}
+
+pub(super) fn emit_preview_candidate_scan_batch(
+    cli: &OneShotArgs,
+    binary: &LoadedBinary,
+    binary_data: &[u8],
+) -> io::Result<()> {
+    let output_jsonl = cli.output_jsonl.as_ref().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "--output-jsonl is required for --preview-candidate-scan-batch",
+        )
+    })?;
+    let summary_json = cli.summary_json.as_ref().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "--summary-json is required for --preview-candidate-scan-batch",
+        )
+    })?;
+    let chunk_size = cli.chunk_size.unwrap_or(50).max(1);
+
+    let mut decomp = init_decompiler(cli.verbose);
+    let (selected_profile, _) = resolve_profile(cli.profile.as_deref());
+    apply_profile(&mut decomp, selected_profile);
+    let (compiler_id, _) = resolve_compiler_id(binary, cli.compiler_id.as_deref());
+    let gdt_path_owned = fission_core::PATHS
+        .get_gdt_path(binary.is_64bit)
+        .and_then(|p| p.to_str().map(String::from));
+    let signatures_json = serialize_win_api_signatures_json();
+    let mut prepare_timings = PrepareTimings::default();
+    let mut prepare_options = PrepareOptions {
+        compiler_id: compiler_id.as_deref(),
+        verbose: cli.verbose,
+        timings: Some(&mut prepare_timings),
+        gdt_path: gdt_path_owned.as_deref(),
+        signatures_json: signatures_json.as_deref(),
+        timeout_ms: cli.timeout_ms,
+    };
+    prepare_native_decompiler_for_binary(&mut decomp, binary, binary_data, &mut prepare_options)
+        .map_err(|e| io::Error::other(format!("prepare decompiler failed: {e}")))?;
+
+    let fact_store = FactStore::from_binary(binary);
+    let binary_name = cli
+        .binary
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let selected_functions = select_candidate_functions(cli, binary)?;
+    let mut summary = PreviewCandidateScanSummary {
+        binary: binary_name.clone(),
+        binary_path: cli.binary.display().to_string(),
+        format: binary.format.clone(),
+        arch_spec: binary.arch_spec.clone(),
+        functions_total: selected_functions.len(),
+        chunk_size,
+        ..Default::default()
+    };
+
+    let resume_path = cli.resume_from.as_ref().unwrap_or(output_jsonl);
+    let (processed_addresses, resume_summary) = load_resume_rows(resume_path)?;
+    summary.addresses_scanned = resume_summary.addresses_scanned;
+    summary.timeout_count = resume_summary.timeout_count;
+    summary.nonzero_explicit_candidates = resume_summary.nonzero_explicit_candidates;
+    summary.strict_explicit_candidates = resume_summary.strict_explicit_candidates;
+    summary.failure_kind_counts = resume_summary.failure_kind_counts;
+    summary.resume_loaded_rows = resume_summary.resume_loaded_rows;
+
+    if let Some(parent) = output_jsonl.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Some(parent) = summary_json.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut writer = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(output_jsonl)?;
+
+    let pending_functions = selected_functions
+        .into_iter()
+        .filter(|func| !processed_addresses.contains(&func.address))
+        .collect::<Vec<_>>();
+
+    for chunk in pending_functions.chunks(chunk_size) {
+        for func in chunk {
+            let entry = preview_candidate_entry_with_recovery(
+                &mut decomp,
+                binary,
+                &fact_store,
+                &binary_name,
+                func,
+                cli.timeout_ms,
+            );
+            serde_json::to_writer(&mut writer, &entry)
+                .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
+            writer.write_all(b"\n")?;
+            update_scan_summary(&mut summary, &entry);
+        }
+        writer.flush()?;
+        summary.chunks_completed += 1;
+        write_scan_summary(summary_json, &summary)?;
+    }
+
+    write_scan_summary(summary_json, &summary)?;
+    Ok(())
 }
 
 fn run_sequential_decompilation<'a>(

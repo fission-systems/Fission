@@ -129,4 +129,32 @@ pub struct OneShotArgs {
     /// Limit functions included in preview candidate inventory
     #[arg(long, hide = true, value_name = "N")]
     pub preview_candidate_limit: Option<usize>,
+
+    /// Run preview candidate scan in batch mode inside one process
+    #[arg(long, hide = true)]
+    pub preview_candidate_scan_batch: bool,
+
+    /// File containing one hex function address per line for batch preview scan
+    #[arg(long, hide = true, value_name = "FILE")]
+    pub addresses_file: Option<PathBuf>,
+
+    /// Limit number of functions selected for batch preview scan
+    #[arg(long, hide = true, value_name = "N")]
+    pub functions_limit: Option<usize>,
+
+    /// Batch chunk size for preview candidate scan
+    #[arg(long, hide = true, value_name = "N")]
+    pub chunk_size: Option<usize>,
+
+    /// Output JSONL path for batch preview candidate rows
+    #[arg(long, hide = true, value_name = "FILE")]
+    pub output_jsonl: Option<PathBuf>,
+
+    /// Output summary JSON path for batch preview candidate scan
+    #[arg(long, hide = true, value_name = "FILE")]
+    pub summary_json: Option<PathBuf>,
+
+    /// Resume batch preview candidate scan from an existing JSONL file
+    #[arg(long, hide = true, value_name = "FILE")]
+    pub resume_from: Option<PathBuf>,
 }

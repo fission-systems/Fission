@@ -13,7 +13,7 @@ mod strings;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
 #[cfg(feature = "native_decomp")]
-use decompile::{emit_preview_candidate_inventory, run_decompilation};
+use decompile::{emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation};
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 use strings::print_strings;
@@ -109,6 +109,19 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
         #[cfg(not(feature = "native_decomp"))]
         {
             eprintln!("Error: preview candidate inventory requires native_decomp feature");
+            std::process::exit(1);
+        }
+    }
+
+    if cli.preview_candidate_scan_batch {
+        #[cfg(feature = "native_decomp")]
+        {
+            return emit_preview_candidate_scan_batch(cli, &binary, &binary_data);
+        }
+
+        #[cfg(not(feature = "native_decomp"))]
+        {
+            eprintln!("Error: preview candidate scan batch requires native_decomp feature");
             std::process::exit(1);
         }
     }
