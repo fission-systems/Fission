@@ -170,6 +170,8 @@ pub(super) struct PreviewCandidateEntry {
     pub(super) preview_fallback_kind: Option<String>,
     pub(super) preview_fallback_kind_refined: Option<String>,
     pub(super) preview_fallback_reason: Option<String>,
+    pub(super) preview_block_signature: Option<String>,
+    pub(super) preview_block_detail: Option<String>,
     pub(super) pcode_block_count: usize,
     pub(super) pcode_op_count: usize,
     pub(super) has_indirect_control_flow: bool,
@@ -380,6 +382,78 @@ pub(super) fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {
         .unwrap_or("preview_non_success_unknown")
 }
 
+fn preview_block_signature(
+    row_error_kind: Option<&str>,
+    row_error_message: Option<&str>,
+    has_indirect_control_flow: bool,
+    pcode_block_count: usize,
+    pcode_op_count: usize,
+) -> Option<String> {
+    let kind = row_error_kind?;
+    let message = row_error_message.unwrap_or_default().to_ascii_lowercase();
+    let signature = match kind {
+        "preview_frontend_reject" => {
+            if message.contains("failed to load pcode") || message.contains("could not find op at target address") {
+                "frontend_missing_pcode_op"
+            } else {
+                "frontend_reject"
+            }
+        }
+        "preview_architecture_unsupported" => "unsupported_architecture",
+        "preview_format_unsupported" => "unsupported_format",
+        "preview_timeout" => "preview_timeout",
+        "preview_worker_failure" => "worker_internal_error",
+        "preview_structuring_failure" => "structuring_failure",
+        "preview_parse_or_lowering_failure" => {
+            if message.contains("unsupported op") {
+                "lowering_unsupported_op"
+            } else if message.contains("unsupported address materialization") {
+                "lowering_address_materialization"
+            } else {
+                "lowering_failure"
+            }
+        }
+        "preview_unsupported_cfg" => {
+            if message.contains("unsupported branch target") {
+                if has_indirect_control_flow {
+                    "unsupported_indirect_branch_target"
+                } else {
+                    "unsupported_branch_target"
+                }
+            } else if message.contains("unsupported indirect call region") {
+                "unsupported_indirect_call_region"
+            } else if message.contains("unsupported phi join") {
+                "unsupported_phi_join"
+            } else if message.contains("unsupported region shape") {
+                "unsupported_region_shape"
+            } else if has_indirect_control_flow {
+                "unsupported_indirect_control_flow"
+            } else {
+                "unsupported_cfg"
+            }
+        }
+        "preview_non_success_unknown" => {
+            if pcode_block_count == 0 && pcode_op_count == 0 {
+                "preview_no_pcode"
+            } else {
+                "preview_no_result"
+            }
+        }
+        _ => return Some(kind.to_string()),
+    };
+    Some(signature.to_string())
+}
+
+fn preview_block_detail(
+    row_error_message: Option<&str>,
+    preview_fallback_reason: Option<&str>,
+) -> Option<String> {
+    row_error_message
+        .or(preview_fallback_reason)
+        .map(|detail| detail.trim().to_string())
+        .filter(|detail| !detail.is_empty())
+}
+
 pub(super) fn update_scan_summary(
     summary: &mut PreviewCandidateScanSummary,
     entry: &PreviewCandidateEntry,
@@ -520,32 +594,40 @@ fn build_preview_candidate_entry(
     let mut preview_hint_stats = None;
     let mut preview_code = None;
 
-    if let Ok(pcode_json) = decomp.get_pcode(func.address)
-        && let Ok(pcode) = PcodeFunction::from_json(&pcode_json)
-    {
-        pcode_block_count = pcode.blocks.len();
-        pcode_op_count = pcode_total_ops(&pcode);
-        has_indirect = contains_indirect_control_flow(&pcode);
-        auto_eligible = auto_mlil_eligible(binary, &pcode);
+    match decomp.get_pcode(func.address) {
+        Ok(pcode_json) => {
+            if let Ok(pcode) = PcodeFunction::from_json(&pcode_json) {
+                pcode_block_count = pcode.blocks.len();
+                pcode_op_count = pcode_total_ops(&pcode);
+                has_indirect = contains_indirect_control_flow(&pcode);
+                auto_eligible = auto_mlil_eligible(binary, &pcode);
+            }
 
-        if let Ok(selection) = select_preview_output_with_facts(
-            decomp,
-            binary,
-            fact_store,
-            func.address,
-            &func.name,
-            PreviewEngineMode::MlilPreview,
-            timeout_ms,
-        ) {
-            preview_direct_success = selection.preview_code.is_some()
-                && !selection.fell_back
-                && selection.engine_used == PreviewEngineMode::MlilPreview;
-            preview_fallback_kind = selection.fallback_kind.map(str::to_string);
-            preview_fallback_kind_refined = selection.fallback_kind_refined.map(str::to_string);
-            preview_fallback_reason = selection.fallback_reason.clone();
-            preview_surface_kind = selection.preview_surface;
-            preview_hint_stats = selection.hint_stats;
-            preview_code = selection.preview_code;
+            if let Ok(selection) = select_preview_output_with_facts(
+                decomp,
+                binary,
+                fact_store,
+                func.address,
+                &func.name,
+                PreviewEngineMode::MlilPreview,
+                timeout_ms,
+            ) {
+                preview_direct_success = selection.preview_code.is_some()
+                    && !selection.fell_back
+                    && selection.engine_used == PreviewEngineMode::MlilPreview;
+                preview_fallback_kind = selection.fallback_kind.map(str::to_string);
+                preview_fallback_kind_refined = selection.fallback_kind_refined.map(str::to_string);
+                preview_fallback_reason = selection.fallback_reason.clone();
+                preview_surface_kind = selection.preview_surface;
+                preview_hint_stats = selection.hint_stats;
+                preview_code = selection.preview_code;
+            }
+        }
+        Err(err) => {
+            preview_fallback_kind = Some("preview_unsupported".to_string());
+            preview_fallback_kind_refined = Some("preview_frontend_reject".to_string());
+            preview_fallback_reason =
+                Some(format!("mlil-preview frontend unavailable: failed to load pcode: {err}"));
         }
     }
 
@@ -582,6 +664,16 @@ fn build_preview_candidate_entry(
             )
         };
 
+    let preview_block_signature = preview_block_signature(
+        row_error_kind.as_deref(),
+        row_error_message.as_deref(),
+        has_indirect,
+        pcode_block_count,
+        pcode_op_count,
+    );
+    let preview_block_detail =
+        preview_block_detail(row_error_message.as_deref(), preview_fallback_reason.as_deref());
+
     PreviewCandidateEntry {
         binary: binary_name.to_string(),
         address: format!("0x{:x}", func.address),
@@ -600,6 +692,8 @@ fn build_preview_candidate_entry(
         preview_fallback_kind,
         preview_fallback_kind_refined,
         preview_fallback_reason,
+        preview_block_signature,
+        preview_block_detail,
         pcode_block_count,
         pcode_op_count,
         has_indirect_control_flow: has_indirect,
@@ -666,7 +760,15 @@ fn build_preview_candidate_fallback_entry(
         preview_direct_success: false,
         preview_fallback_kind: Some("internal_error".to_string()),
         preview_fallback_kind_refined: Some(row_error_kind.to_string()),
-        preview_fallback_reason: Some(reason),
+        preview_fallback_reason: Some(reason.clone()),
+        preview_block_signature: preview_block_signature(
+            Some(row_error_kind),
+            Some(reason.as_str()),
+            false,
+            0,
+            0,
+        ),
+        preview_block_detail: Some(reason.clone()),
         pcode_block_count: 0,
         pcode_op_count: 0,
         has_indirect_control_flow: false,

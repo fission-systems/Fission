@@ -131,6 +131,15 @@ def stage_counts(entries: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def block_signature_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        signature = row.get("preview_block_signature")
+        if signature:
+            counts[str(signature)] += 1
+    return dict(sorted(counts.items()))
+
+
 def classify_diagnosis(
     *,
     rows_emitted: int,
@@ -226,6 +235,8 @@ def diagnosis_entry(
     aligned_with_zero_explicit_count = int(summary.get("aligned_with_zero_explicit_count", 0) or 0)
     source_present_rows = count_rows_with_any_source(rows)
     blocked_admission_stage_counts = stage_counts(blocked_candidates)
+    blocked_preview_rows = [row for row in rows if row.get("admission_block_stage") == "preview"]
+    blocked_preview_block_signature_counts = block_signature_counts(blocked_preview_rows)
     source_presence_counts = dict(summary.get("source_presence_counts") or {})
     provenance_surface_totals = dict(summary.get("provenance_surface_totals") or {})
     diagnosis_bucket, next_action, rationale = classify_diagnosis(
@@ -263,6 +274,7 @@ def diagnosis_entry(
             "aligned_candidate_count": len(aligned_candidates),
             "blocked_candidate_count": len(blocked_candidates),
             "blocked_admission_stage_counts": blocked_admission_stage_counts,
+            "blocked_preview_block_signature_counts": blocked_preview_block_signature_counts,
             "source_presence_counts": source_presence_counts,
             "provenance_surface_totals": provenance_surface_totals,
             "pdb_source_without_pdb_surface": bool(
@@ -297,9 +309,13 @@ def diagnosis_entry(
 def aggregate_diagnosis(entries: list[dict[str, Any]]) -> dict[str, Any]:
     bucket_counts: Counter[str] = Counter()
     next_action_counts: Counter[str] = Counter()
+    preview_block_signature_counts: Counter[str] = Counter()
     for entry in entries:
         bucket_counts[entry["diagnosis_bucket"]] += 1
         next_action_counts[entry["next_action"]] += 1
+        preview_block_signature_counts.update(
+            entry.get("derived_metrics", {}).get("blocked_preview_block_signature_counts", {})
+        )
 
     dominant_bucket = None
     dominant_next_action = None
@@ -311,6 +327,7 @@ def aggregate_diagnosis(entries: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "diagnosis_bucket_counts": dict(sorted(bucket_counts.items())),
         "next_action_counts": dict(sorted(next_action_counts.items())),
+        "preview_block_signature_counts": dict(sorted(preview_block_signature_counts.items())),
         "dominant_diagnosis": dominant_bucket,
         "recommended_next_patch": dominant_next_action,
     }
@@ -324,6 +341,7 @@ def markdown_summary(report: dict[str, Any]) -> str:
     lines.append(f"- Dominant diagnosis: `{aggregate.get('dominant_diagnosis')}`")
     lines.append(f"- Recommended next patch: `{aggregate.get('recommended_next_patch')}`")
     lines.append(f"- Diagnosis bucket counts: `{aggregate.get('diagnosis_bucket_counts', {})}`")
+    lines.append(f"- Preview block signatures: `{aggregate.get('preview_block_signature_counts', {})}`")
     lines.append("")
     lines.append("## Binaries")
     lines.append("")
@@ -342,6 +360,9 @@ def markdown_summary(report: dict[str, Any]) -> str:
         )
         lines.append(
             f"- Blocked admission stages: `{metrics.get('blocked_admission_stage_counts', {})}`"
+        )
+        lines.append(
+            f"- Preview block signatures: `{metrics.get('blocked_preview_block_signature_counts', {})}`"
         )
         lines.append("")
     return "\n".join(lines)

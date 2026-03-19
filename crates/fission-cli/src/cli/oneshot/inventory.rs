@@ -62,6 +62,8 @@ struct FunctionFactsInventoryRow {
     preview_fallback_kind: Option<String>,
     preview_fallback_kind_refined: Option<String>,
     preview_fallback_reason: Option<String>,
+    preview_block_signature: Option<String>,
+    preview_block_detail: Option<String>,
     preview_surface_kind: Option<String>,
     pcode_block_count: usize,
     pcode_op_count: usize,
@@ -267,7 +269,11 @@ fn admission_block_stage(entry: &PreviewCandidateEntry, inventory_surface_gap: b
         .as_deref()
         .or(entry.preview_fallback_kind_refined.as_deref())
     {
-        Some("preview_architecture_unsupported" | "preview_format_unsupported") => {
+        Some(
+            "preview_architecture_unsupported"
+            | "preview_format_unsupported"
+            | "preview_frontend_reject",
+        ) => {
             "admission".to_string()
         }
         Some(_) => "preview".to_string(),
@@ -314,6 +320,8 @@ fn to_inventory_row(
         preview_fallback_kind: entry.preview_fallback_kind,
         preview_fallback_kind_refined: entry.preview_fallback_kind_refined,
         preview_fallback_reason: entry.preview_fallback_reason,
+        preview_block_signature: entry.preview_block_signature,
+        preview_block_detail: entry.preview_block_detail,
         preview_surface_kind: entry.preview_surface_kind,
         pcode_block_count: entry.pcode_block_count,
         pcode_op_count: entry.pcode_op_count,
@@ -400,6 +408,8 @@ fn update_inventory_summary(
         preview_fallback_kind: row.preview_fallback_kind.clone(),
         preview_fallback_kind_refined: row.preview_fallback_kind_refined.clone(),
         preview_fallback_reason: row.preview_fallback_reason.clone(),
+        preview_block_signature: row.preview_block_signature.clone(),
+        preview_block_detail: row.preview_block_detail.clone(),
         pcode_block_count: row.pcode_block_count,
         pcode_op_count: row.pcode_op_count,
         has_indirect_control_flow: row.has_indirect_control_flow,
