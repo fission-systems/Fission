@@ -7,6 +7,58 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-03-19
+
+### P5A / P5B - Function Facts Inventory And Inventory-Backed Corpus Selection
+
+This round changed the benchmark/corpus workflow from probe-first scanning to inventory-first filtering.
+
+The key architectural shift is that benchmark scripts no longer need to treat address-targeted preview scans as the canonical source of truth. Instead, the CLI can now export whole-binary function facts as a structured inventory, and corpus generation can filter that inventory into strict explicit, heuristic, aligned, and blocked views.
+
+#### Added
+
+- whole-binary function facts inventory export
+  - added hidden CLI mode `--emit-function-facts-inventory`
+  - emits row-level JSONL plus summary JSON from a single binary load / decompiler preparation pass
+- inventory row metadata for corpus selection
+  - rows now carry function-level facts, preview admission results, pcode size, and structured row failure fields in one place
+- Python inventory reader helper
+  - added `scripts/test/batch_benchmark/grand_finale_support/inventory_reader.py`
+  - centralizes:
+    - running the Rust inventory export
+    - loading inventory JSONL rows
+    - loading summary JSON
+
+#### Changed
+
+- benchmark/corpus scripts now consume inventory rows
+  - `refine_preview_quality_corpus.py` now builds corpus outputs from function facts inventory rows instead of address-probe scan results
+  - `grand_finale_support/corpus_candidates.py` now treats the Rust inventory export as the default candidate source
+- corpus outputs derived from the same canonical source
+  - `preview_quality_corpus.json`
+  - `preview_explicit_blocked_candidates.json`
+  - `preview_explicit_aligned_candidate_report.json`
+  are now designed to be generated from the same inventory-backed function row source
+
+#### Validation
+
+- `cargo build -p fission-cli --features native_decomp`
+- function facts inventory smoke
+  - `putty.exe --emit-function-facts-inventory --functions-limit 3`
+  - verified row JSONL and summary JSON emission
+- inventory-backed corpus smoke
+  - `refine_preview_quality_corpus.py` against `GetProcAddress.exe`
+  - verified generation of:
+    - candidates JSON
+    - aligned candidate report
+    - blocked explicit report
+    - curated corpus JSON
+
+#### Current State
+
+- address-targeted scans remain useful, but they are now probe/debug tooling rather than the preferred canonical data source
+- strict explicit / heuristic / blocked / aligned analysis can now be driven from one whole-binary inventory export
+
 ## 2026-03-18
 
 ### P4.8 / P4.8.2 - Explicit-Facts PE Source Expansion

@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 
 from grand_finale_support.corpus_candidates import (
+    aligned_explicit_candidate_entry,
+    blocked_explicit_candidate_entry,
     candidate_passes_explicit_quality_prefilter,
     candidate_passes_heuristic_quality_prefilter,
+    candidate_sort_key,
     curated_quality_entry,
-    preview_hint_total,
+    explicit_fact_total,
     run_candidate_inventory,
 )
 
@@ -19,6 +22,8 @@ DEFAULT_FISSION_BIN = ROOT_DIR / "target" / "release" / "fission_cli"
 DEFAULT_CORPUS_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_quality_corpus.json"
 DEFAULT_CANDIDATES_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_quality_candidates.json"
 DEFAULT_SOURCE_INVENTORY_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_explicit_source_inventory.json"
+DEFAULT_BLOCKED_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_explicit_blocked_candidates.json"
+DEFAULT_ALIGNED_CANDIDATES_FILE = ROOT_DIR / "scripts" / "test" / "batch_benchmark" / "corpora" / "preview_explicit_aligned_candidate_report.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,6 +32,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fission-bin", type=Path, default=DEFAULT_FISSION_BIN)
     parser.add_argument("--corpus-file", type=Path, default=DEFAULT_CORPUS_FILE)
     parser.add_argument("--candidates-file", type=Path, default=DEFAULT_CANDIDATES_FILE)
+    parser.add_argument("--blocked-file", type=Path, default=DEFAULT_BLOCKED_FILE)
+    parser.add_argument("--aligned-candidates-file", type=Path, default=DEFAULT_ALIGNED_CANDIDATES_FILE)
     parser.add_argument("--source-inventory-file", type=Path, default=DEFAULT_SOURCE_INVENTORY_FILE)
     parser.add_argument("--timeout-ms", type=int, default=10000)
     parser.add_argument("--candidate-limit", type=int)
@@ -44,15 +51,6 @@ def parse_args() -> argparse.Namespace:
         help="Extra binary@0xaddr seeds to force-inventory into the heuristic-surface pool",
     )
     return parser.parse_args()
-
-
-def candidate_sort_key(entry: dict) -> tuple[int, int, int, int]:
-    return (
-        int(entry.get("quality_potential_score", 0) or 0),
-        int(entry.get("fact_density_score", 0) or 0),
-        preview_hint_total(entry),
-        -int(entry.get("pcode_op_count", 0) or 0),
-    )
 
 
 def load_timeout_rescue(corpus_path: Path) -> dict:
@@ -93,6 +91,18 @@ def parse_manual_seed(seed: str) -> tuple[str, str]:
     return binary, address
 
 
+def dedupe(entries: list[dict]) -> list[dict]:
+    deduped: list[dict] = []
+    seen = set()
+    for entry in entries:
+        key = (entry["binary"], entry["address"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+    return deduped
+
+
 def main() -> int:
     args = parse_args()
     if not args.fission_bin.exists():
@@ -101,6 +111,8 @@ def main() -> int:
     all_candidates: list[dict] = []
     curated_explicit_entries: list[dict] = []
     curated_heuristic_entries: list[dict] = []
+    blocked_explicit_entries: list[dict] = []
+    aligned_candidates: list[dict] = []
     source_inventory = load_source_inventory(args.source_inventory_file)
 
     binary_paths = [Path(item).resolve() for item in args.binaries]
@@ -115,12 +127,9 @@ def main() -> int:
         candidates = report.get("candidates", [])
         all_candidates.extend(candidates)
         source_meta = source_inventory.get(str(binary_path)) or source_inventory.get(binary_path.name) or source_inventory.get(binary_path.stem)
+
         explicit_primary = sorted(
-            [
-                entry
-                for entry in candidates
-                if candidate_passes_explicit_quality_prefilter(entry, source_meta)
-            ],
+            [entry for entry in candidates if candidate_passes_explicit_quality_prefilter(entry, source_meta)],
             key=candidate_sort_key,
             reverse=True,
         )
@@ -133,8 +142,21 @@ def main() -> int:
             key=candidate_sort_key,
             reverse=True,
         )
-        selected = heuristic_primary[: args.per_binary_limit]
-        curated_heuristic_entries.extend(curated_quality_entry(entry) for entry in selected)
+        curated_heuristic_entries.extend(
+            curated_quality_entry(entry) for entry in heuristic_primary[: args.per_binary_limit]
+        )
+
+        aligned_candidates.extend(
+            aligned_explicit_candidate_entry(entry, source_meta)
+            for entry in candidates
+            if source_meta and source_meta.get("admission_alignment") == "aligned"
+        )
+
+        blocked_explicit_entries.extend(
+            blocked_explicit_candidate_entry(entry, source_meta)
+            for entry in candidates
+            if explicit_fact_total(entry) > 0 and not candidate_passes_explicit_quality_prefilter(entry, source_meta)
+        )
 
     for seed in args.manual_explicit_seed:
         binary_str, address = parse_manual_seed(seed)
@@ -169,25 +191,33 @@ def main() -> int:
         all_candidates.extend(candidates)
         curated_heuristic_entries.extend(curated_quality_entry(entry) for entry in candidates)
 
-    def dedupe(entries: list[dict]) -> list[dict]:
-        deduped: list[dict] = []
-        seen = set()
-        for entry in entries:
-            key = (entry["binary"], entry["address"])
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(entry)
-        return deduped
-
     deduped_explicit = dedupe(curated_explicit_entries)
     explicit_keys = {(entry["binary"], entry["address"]) for entry in deduped_explicit}
     deduped_heuristic = [
         entry for entry in dedupe(curated_heuristic_entries) if (entry["binary"], entry["address"]) not in explicit_keys
     ]
+    deduped_blocked = dedupe(blocked_explicit_entries)
+    deduped_aligned = dedupe(aligned_candidates)
+
+    block_reason_counts: dict[str, int] = {}
+    for entry in deduped_blocked:
+        reason = entry.get("block_reason") or "strict_filter_reject"
+        block_reason_counts[reason] = block_reason_counts.get(reason, 0) + 1
 
     args.candidates_file.parent.mkdir(parents=True, exist_ok=True)
     args.candidates_file.write_text(json.dumps({"candidates": all_candidates}, indent=2))
+    args.aligned_candidates_file.write_text(
+        json.dumps({"aligned_candidates": sorted(deduped_aligned, key=candidate_sort_key, reverse=True)}, indent=2)
+    )
+    args.blocked_file.write_text(
+        json.dumps(
+            {
+                "blocked_candidates": sorted(deduped_blocked, key=candidate_sort_key, reverse=True),
+                "block_reason_counts": block_reason_counts,
+            },
+            indent=2,
+        )
+    )
 
     curated_corpus = {
         "timeout_rescue": load_timeout_rescue(args.corpus_file),
@@ -195,7 +225,9 @@ def main() -> int:
         "quality_heuristic_surface": deduped_heuristic,
     }
     args.corpus_file.write_text(json.dumps(curated_corpus, indent=2))
-    print(f"[+] Wrote candidates JSON to {args.candidates_file}")
+    print(f"[+] Wrote inventory-backed candidates JSON to {args.candidates_file}")
+    print(f"[+] Wrote aligned explicit candidate report to {args.aligned_candidates_file}")
+    print(f"[+] Wrote blocked explicit candidate report to {args.blocked_file}")
     print(f"[+] Wrote curated corpus JSON to {args.corpus_file}")
     return 0
 
