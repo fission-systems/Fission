@@ -15,6 +15,7 @@ from grand_finale_support.corpus_candidates import (
     explicit_fact_total,
     run_candidate_inventory,
 )
+from grand_finale_support.inventory_reader import load_source_inventory
 
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -62,26 +63,6 @@ def load_timeout_rescue(corpus_path: Path) -> dict:
         return {}
     timeout_rescue = data.get("timeout_rescue", {})
     return timeout_rescue if isinstance(timeout_rescue, dict) else {}
-
-
-def load_source_inventory(source_inventory_path: Path) -> dict[str, dict]:
-    if not source_inventory_path.exists():
-        return {}
-    try:
-        data = json.loads(source_inventory_path.read_text())
-    except Exception:
-        return {}
-
-    inventory: dict[str, dict] = {}
-    for source in data.get("sources", []) or []:
-        path = source.get("path")
-        binary = source.get("binary")
-        if path:
-            inventory[str(Path(path).resolve())] = source
-        if binary:
-            inventory[binary] = source
-            inventory[Path(binary).stem] = source
-    return inventory
 
 
 def parse_manual_seed(seed: str) -> tuple[str, str]:

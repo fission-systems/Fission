@@ -33,6 +33,29 @@ def load_inventory_summary(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
+def load_source_inventory(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return {}
+
+    inventory: dict[str, dict[str, Any]] = {}
+    for source in data.get("sources", []) or []:
+        binary = source.get("binary")
+        source_path = source.get("path")
+        if source_path:
+            resolved = str(Path(source_path).resolve())
+            inventory[resolved] = source
+            inventory[Path(source_path).name] = source
+            inventory[Path(source_path).stem] = source
+        if binary:
+            inventory[binary] = source
+            inventory[Path(binary).stem] = source
+    return inventory
+
+
 def run_function_facts_inventory(
     root_dir: Path,
     binary_path: Path,
@@ -74,4 +97,3 @@ def run_function_facts_inventory(
             check=True,
         )
         return load_inventory_rows(output_jsonl), load_inventory_summary(summary_json)
-
