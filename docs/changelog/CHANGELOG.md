@@ -9,6 +9,64 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-19
 
+### P5D / P5E - Inventory-Guided Diagnosis And Function-Level Facts Surfacing
+
+This round stopped treating explicit-facts scarcity as a vague benchmark problem and turned it into a concrete inventory diagnosis plus a core data-path patch.
+
+The key result is that aligned sources no longer have to stay stuck in a blanket `inventory_surface_gap` bucket. Inventory-backed diagnosis identified where provenance existed but explicit rows still stayed at zero, and the inventory export now promotes function-level native inferred facts into the explicit surface instead of leaving them hidden behind generic provenance flags.
+
+#### Added
+
+- inventory-guided diagnosis runner
+  - added `scripts/test/batch_benchmark/diagnose_function_inventory.py`
+  - classifies aligned binaries into:
+    - `source_facts_absent`
+    - `factstore_or_inventory_surface_gap`
+    - `preview_stage_block`
+    - `mixed_or_inconclusive`
+  - emits a per-binary diagnosis plus a recommended next patch direction
+- function snapshot helpers for type-fact provenance
+  - `FunctionFacts` now exposes separate counts for:
+    - native type facts
+    - loader type facts
+
+#### Changed
+
+- function inventory explicit surfacing
+  - inventory export now ingests function-level native inferred types during whole-binary row generation
+  - `explicit_fact_breakdown` now includes `native_type_count`
+  - `explicit_fact_total` now counts surfaced native function facts in addition to DWARF param/local/return facts
+- inventory surface-gap interpretation
+  - `inventory_surface_gap` is no longer triggered by image-wide loader metadata alone
+  - the gap signal now focuses on per-function/debug provenance that should realistically surface as explicit facts
+- strict explicit candidate detection in inventory
+  - strict candidate evaluation now uses the surfaced inventory explicit total rather than only the DWARF-only count
+
+#### Validation
+
+- `cargo test -p fission-static snapshot_counts_native_and_loader_type_facts_separately -- --nocapture`
+- `cargo build -p fission-cli --features native_decomp`
+- inventory smoke reruns:
+  - `has_pdb.exe`
+  - `putty.exe`
+- inventory-guided diagnosis rerun:
+  - `GetProcAddress.exe`
+  - `has_pdb.exe`
+  - `putty.exe`
+
+#### Observed Effect
+
+- `has_pdb.exe`
+  - `explicit_fact_nonzero_count`: `0 -> 5`
+  - `inventory_surface_gap_count`: `10 -> 0`
+  - `strict_explicit_candidate_count`: `0 -> 1`
+- `putty.exe`
+  - `explicit_fact_nonzero_count`: `0 -> 7`
+  - `inventory_surface_gap_count`: `10 -> 0`
+  - `strict_explicit_candidate_count`: `0 -> 1`
+
+This moves the project past “why are explicit facts missing?” into a narrower question: which remaining aligned binaries are still blocked by preview-stage issues, and which ones still need more supply-path surfacing.
+
 ### P5A / P5B / P5C - Function Facts Inventory, Inventory-Backed Corpus Selection, And Provenance-Aware Analysis
 
 This round changed the benchmark/corpus workflow from probe-first scanning to inventory-first filtering.

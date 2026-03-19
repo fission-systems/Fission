@@ -38,6 +38,22 @@ pub struct FunctionFacts {
     pub dwarf_info: Option<DwarfFunctionInfo>,
 }
 
+impl FunctionFacts {
+    pub fn native_type_fact_count(&self) -> usize {
+        self.type_facts
+            .iter()
+            .filter(|fact| fact.provenance == FactProvenance::NativeMetadata)
+            .count()
+    }
+
+    pub fn loader_type_fact_count(&self) -> usize {
+        self.type_facts
+            .iter()
+            .filter(|fact| fact.provenance == FactProvenance::LoaderMetadata)
+            .count()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct FactStore {
     name_facts: HashMap<u64, Vec<NameFact>>,
@@ -383,6 +399,22 @@ mod tests {
             Some("KnownName")
         );
         assert!(snapshot.dwarf_info.is_some());
+    }
+
+    #[test]
+    fn snapshot_counts_native_and_loader_type_facts_separately() {
+        let mut store = FactStore {
+            loader_type_facts: vec![inferred_type("LoaderType", 0, vec![])],
+            ..FactStore::default()
+        };
+        store.ingest_native_function_types(
+            0x401000,
+            vec![inferred_type("NativeType", 0x1234, vec![])],
+        );
+
+        let snapshot = store.function_facts_snapshot(0x401000);
+        assert_eq!(snapshot.native_type_fact_count(), 1);
+        assert_eq!(snapshot.loader_type_fact_count(), 1);
     }
 
     #[test]

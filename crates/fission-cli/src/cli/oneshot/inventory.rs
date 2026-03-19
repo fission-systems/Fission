@@ -2,15 +2,14 @@ use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::common::{apply_profile, init_decompiler, resolve_compiler_id, resolve_profile};
 use crate::cli::oneshot::decompile::{
     PreviewCandidateEntry, PreviewCandidateScanSummary, ScopedQuietPanicHook,
-    preview_candidate_entry_with_recovery, select_candidate_functions, strict_explicit_candidate,
-    update_scan_summary,
+    preview_candidate_entry_with_recovery, select_candidate_functions, update_scan_summary,
 };
 use crate::cli::output::OutputSilencer;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::{
-    FactProvenance, FactStore, PrepareOptions, PrepareTimings,
-    prepare_native_decompiler_for_binary, serialize_win_api_signatures_json,
+    FactStore, PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
+    serialize_win_api_signatures_json,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -30,6 +29,7 @@ struct ExplicitFactBreakdown {
     param_count: usize,
     local_count: usize,
     return_count: usize,
+    native_type_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,6 +79,7 @@ struct ExplicitBreakdownTotals {
     param_count: usize,
     local_count: usize,
     return_count: usize,
+    native_type_count: usize,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -134,18 +135,6 @@ fn prepare_inventory_decompiler(
     Ok(decomp)
 }
 
-fn explicit_fact_total(entry: &PreviewCandidateEntry) -> usize {
-    entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type)
-}
-
-fn explicit_fact_breakdown(entry: &PreviewCandidateEntry) -> ExplicitFactBreakdown {
-    ExplicitFactBreakdown {
-        param_count: entry.dwarf_param_count,
-        local_count: entry.dwarf_local_count,
-        return_count: usize::from(entry.has_dwarf_return_type),
-    }
-}
-
 fn heuristic_surface_candidate(entry: &PreviewCandidateEntry) -> bool {
     let hint_stats = entry.preview_hint_stats;
     let heuristic_hits = hint_stats.is_some_and(|stats| {
@@ -165,32 +154,58 @@ fn heuristic_surface_candidate(entry: &PreviewCandidateEntry) -> bool {
 }
 
 fn fact_sources_present(
-    fact_store: &FactStore,
-    address: u64,
+    snapshot: &fission_static::analysis::decomp::FunctionFacts,
     entry: &PreviewCandidateEntry,
 ) -> FactSourcesPresent {
-    let snapshot = fact_store.function_facts_snapshot(address);
-    let has_loader = snapshot
-        .type_facts
-        .iter()
-        .any(|fact| fact.provenance == FactProvenance::LoaderMetadata);
-    let has_native = snapshot
-        .type_facts
-        .iter()
-        .any(|fact| fact.provenance == FactProvenance::NativeMetadata);
     FactSourcesPresent {
         dwarf: entry.has_dwarf_function,
         pdb: false,
-        loader: has_loader || entry.loader_type_count > 0,
-        native_inferred: has_native,
+        loader: snapshot.loader_type_fact_count() > 0 || entry.loader_type_count > 0,
+        native_inferred: snapshot.native_type_fact_count() > 0,
     }
 }
 
-fn inventory_surface_gap(
-    sources: &FactSourcesPresent,
-    explicit_fact_total: usize,
-) -> bool {
-    explicit_fact_total == 0 && (sources.dwarf || sources.pdb || sources.loader || sources.native_inferred)
+fn explicit_fact_breakdown(
+    entry: &PreviewCandidateEntry,
+    snapshot: &fission_static::analysis::decomp::FunctionFacts,
+) -> ExplicitFactBreakdown {
+    ExplicitFactBreakdown {
+        param_count: entry.dwarf_param_count,
+        local_count: entry.dwarf_local_count,
+        return_count: usize::from(entry.has_dwarf_return_type),
+        native_type_count: snapshot.native_type_fact_count(),
+    }
+}
+
+fn explicit_fact_total(breakdown: &ExplicitFactBreakdown) -> usize {
+    breakdown.param_count + breakdown.local_count + breakdown.return_count + breakdown.native_type_count
+}
+
+fn inventory_surface_gap(sources: &FactSourcesPresent, explicit_fact_total: usize) -> bool {
+    // Global loader metadata can exist for the whole image without being function-scoped.
+    // Only treat per-function/debug sources as an explicit surface gap signal here.
+    explicit_fact_total == 0 && (sources.dwarf || sources.pdb || sources.native_inferred)
+}
+
+fn strict_explicit_candidate_row(entry: &PreviewCandidateEntry, explicit_fact_total: usize) -> bool {
+    explicit_fact_total >= 2
+        && entry.preview_direct_success
+        && !entry.has_indirect_control_flow
+        && entry.pcode_op_count <= 800
+}
+
+fn try_ingest_native_inventory_facts(
+    decomp: &mut DecompilerNative,
+    fact_store: &mut FactStore,
+    address: u64,
+) {
+    let Ok(result) = decomp.decompile_with_metadata(address) else {
+        return;
+    };
+    if result.inferred_types.is_empty() {
+        return;
+    }
+    fact_store.ingest_native_function_types(address, result.inferred_types);
 }
 
 fn admission_block_stage(entry: &PreviewCandidateEntry, inventory_surface_gap: bool) -> String {
@@ -218,15 +233,17 @@ fn to_inventory_row(
     fact_store: &FactStore,
     entry: PreviewCandidateEntry,
 ) -> FunctionFactsInventoryRow {
-    let explicit_fact_total = explicit_fact_total(&entry);
-    let explicit_fact_breakdown = explicit_fact_breakdown(&entry);
-    let strict_explicit = strict_explicit_candidate(&entry);
-    let heuristic_surface = heuristic_surface_candidate(&entry);
     let address =
         u64::from_str_radix(entry.address.trim_start_matches("0x"), 16).unwrap_or_default();
-    let fact_sources_present = fact_sources_present(fact_store, address, &entry);
+    let snapshot = fact_store.function_facts_snapshot(address);
+    let explicit_fact_breakdown = explicit_fact_breakdown(&entry, &snapshot);
+    let explicit_fact_total = explicit_fact_total(&explicit_fact_breakdown);
+    let strict_explicit = strict_explicit_candidate_row(&entry, explicit_fact_total);
+    let heuristic_surface = heuristic_surface_candidate(&entry);
+    let fact_sources_present = fact_sources_present(&snapshot, &entry);
     let inventory_surface_gap = inventory_surface_gap(&fact_sources_present, explicit_fact_total);
     let admission_block_stage = admission_block_stage(&entry, inventory_surface_gap);
+    let loader_type_count = snapshot.loader_type_fact_count();
     FunctionFactsInventoryRow {
         binary: entry.binary,
         binary_path: binary_path.display().to_string(),
@@ -236,7 +253,7 @@ fn to_inventory_row(
         dwarf_param_count: entry.dwarf_param_count,
         dwarf_local_count: entry.dwarf_local_count,
         has_dwarf_return_type: entry.has_dwarf_return_type,
-        loader_type_count: entry.loader_type_count,
+        loader_type_count,
         explicit_fact_total,
         fact_density_score: entry.fact_density_score,
         fact_sources_present,
@@ -288,6 +305,8 @@ fn update_inventory_summary(
     summary.explicit_breakdown_totals.param_count += row.explicit_fact_breakdown.param_count;
     summary.explicit_breakdown_totals.local_count += row.explicit_fact_breakdown.local_count;
     summary.explicit_breakdown_totals.return_count += row.explicit_fact_breakdown.return_count;
+    summary.explicit_breakdown_totals.native_type_count +=
+        row.explicit_fact_breakdown.native_type_count;
     if row.inventory_surface_gap {
         summary.inventory_surface_gap_count += 1;
     }
@@ -367,7 +386,7 @@ pub(super) fn emit_function_facts_inventory(
     let _silencer = OutputSilencer::new_if(quiet_batch_errors);
 
     let mut decomp = prepare_inventory_decompiler(cli, binary, binary_data)?;
-    let fact_store = FactStore::from_binary(binary);
+    let mut fact_store = FactStore::from_binary(binary);
     let binary_name = cli
         .binary
         .file_stem()
@@ -407,6 +426,7 @@ pub(super) fn emit_function_facts_inventory(
                 func,
                 cli.timeout_ms,
             );
+            try_ingest_native_inventory_facts(&mut decomp, &mut fact_store, func.address);
             let row = to_inventory_row(&cli.binary, &fact_store, candidate);
             serde_json::to_writer(&mut writer, &row)
                 .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
