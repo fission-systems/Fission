@@ -40,7 +40,7 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "high",
-      "notes": "Observed DWARF-like function facts on main(); current preview inventory shows preview_unsupported rather than direct preview success."
+      "notes": "Observed DWARF-like function facts on main(); refined preview scan now classifies the blocked candidate as preview_parse_or_lowering_failure because preview reports unsupported architecture."
     },
     {
       "binary": "addr.exe",
@@ -50,7 +50,7 @@
       "has_debug_info_like_data": true,
       "has_loader_types": false,
       "priority": "high",
-      "notes": "Observed DWARF-like function facts on main(); current preview inventory shows no direct preview success."
+      "notes": "Observed DWARF-like function facts on main(); refined preview scan now classifies the blocked candidate as preview_parse_or_lowering_failure because preview reports unsupported architecture."
     },
     {
       "binary": "coff-dwarf.exe",

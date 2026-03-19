@@ -37,6 +37,7 @@ pub struct PreviewSelection {
     pub fell_back: bool,
     pub fallback_reason: Option<String>,
     pub fallback_kind: Option<&'static str>,
+    pub fallback_kind_refined: Option<&'static str>,
     pub preview_surface: Option<PreviewSurfaceKind>,
 }
 
@@ -46,6 +47,7 @@ pub struct PreviewRoutingDecision {
     pub fell_back: bool,
     pub fallback_reason: Option<String>,
     pub fallback_kind: Option<&'static str>,
+    pub fallback_kind_refined: Option<&'static str>,
     pub preview_surface: Option<PreviewSurfaceKind>,
 }
 
@@ -64,6 +66,7 @@ impl PreviewRoutingResolver {
             fell_back: selection.fell_back,
             fallback_reason: selection.fallback_reason.clone(),
             fallback_kind: selection.fallback_kind,
+            fallback_kind_refined: selection.fallback_kind_refined,
             preview_surface: selection.preview_surface,
         }
     }
@@ -77,6 +80,7 @@ impl PreviewRoutingResolver {
             fell_back: false,
             fallback_reason: None,
             fallback_kind: None,
+            fallback_kind_refined: None,
             preview_surface: None,
         }
     }
@@ -96,6 +100,7 @@ impl PreviewRoutingResolver {
             engine_used: PreviewEngineMode::MlilPreview,
             fell_back,
             fallback_kind: extract_fallback_kind(fallback_reason.as_deref()),
+            fallback_kind_refined: extract_refined_fallback_kind(fallback_reason.as_deref()),
             fallback_reason,
         }
     }
@@ -109,6 +114,7 @@ impl PreviewRoutingResolver {
             engine_used: PreviewEngineMode::Legacy,
             fell_back: true,
             fallback_kind: extract_fallback_kind(Some(fallback_reason.as_str())),
+            fallback_kind_refined: extract_refined_fallback_kind(Some(fallback_reason.as_str())),
             fallback_reason: Some(fallback_reason),
             preview_surface: None,
         }
@@ -121,6 +127,7 @@ impl PreviewRoutingResolver {
             fell_back: true,
             fallback_reason: Some(fallback_reason_with_kind(kind, error)),
             fallback_kind: Some(kind),
+            fallback_kind_refined: None,
             preview_surface: None,
         }
     }
@@ -141,6 +148,16 @@ fn extract_fallback_kind(reason: Option<&str>) -> Option<&'static str> {
         "native_pcode_failure" => Some("native_pcode_failure"),
         "legacy_fallback" => Some("legacy_fallback"),
         "assembly_fallback" => Some("assembly_fallback"),
+        _ => None,
+    }
+}
+
+fn extract_refined_fallback_kind(reason: Option<&str>) -> Option<&'static str> {
+    let reason = reason?;
+    match extract_fallback_kind(Some(reason)) {
+        Some("preview_timeout") | Some("preview_unsupported") => {
+            Some(classify_preview_failure_refined(reason))
+        }
         _ => None,
     }
 }
@@ -632,12 +649,52 @@ fn render_preview_from_json_with_type_context(
     }
 }
 
-fn classify_preview_failure(reason: &str) -> &'static str {
+fn classify_preview_failure_refined(reason: &str) -> &'static str {
     let lower = reason.to_ascii_lowercase();
     if lower.contains("preview_timeout") || lower.contains("worker timed out") {
-        "preview_timeout"
-    } else {
-        "preview_unsupported"
+        return "preview_timeout";
+    }
+    if lower.contains("worker spawn failed")
+        || lower.contains("stdin unavailable")
+        || lower.contains("stdin write failed")
+        || lower.contains("stdout read failed")
+        || lower.contains("wait failed")
+        || lower.contains("without json response")
+        || lower.contains("response parse failed")
+    {
+        return "preview_worker_failure";
+    }
+    if lower.contains("unsupported control flow")
+        || lower.contains("unsupported branch target")
+        || lower.contains("unsupported region shape")
+        || lower.contains("unsupported phi join")
+        || lower.contains("unsupported indirect call region")
+    {
+        return "preview_unsupported_cfg";
+    }
+    if lower.contains("structuring") {
+        return "preview_structuring_failure";
+    }
+    if lower.contains("pcode parse failed")
+        || lower.contains("unsupported architecture")
+        || lower.contains("value lowering failed")
+        || lower.contains("unsupported expr")
+        || lower.contains("unsupported varnode")
+        || lower.contains("unsupported address materialization")
+        || lower.contains("piece/subpiece")
+        || lower.contains("unsupported ptr arithmetic")
+        || lower.contains("unsupported memory-backed varnode")
+        || lower.contains("unsupported pattern")
+    {
+        return "preview_parse_or_lowering_failure";
+    }
+    "preview_non_success_unknown"
+}
+
+fn classify_preview_failure(reason: &str) -> &'static str {
+    match classify_preview_failure_refined(reason) {
+        "preview_timeout" => "preview_timeout",
+        _ => "preview_unsupported",
     }
 }
 
@@ -923,20 +980,58 @@ mod tests {
         let selection = PreviewSelection {
             preview_code: None,
             build_stats: None,
+            hint_stats: None,
             engine_used: PreviewEngineMode::Legacy,
             fell_back: true,
             fallback_reason: Some("preview_timeout: worker timed out".to_string()),
             fallback_kind: Some("preview_timeout"),
+            fallback_kind_refined: Some("preview_timeout"),
             preview_surface: None,
         };
         let decision = selection.routing_decision();
         assert_eq!(decision.engine_used, PreviewEngineMode::Legacy);
         assert!(decision.fell_back);
         assert_eq!(decision.fallback_kind, Some("preview_timeout"));
+        assert_eq!(decision.fallback_kind_refined, Some("preview_timeout"));
         assert_eq!(
             decision.fallback_reason.as_deref(),
             Some("preview_timeout: worker timed out")
         );
+    }
+
+    #[test]
+    fn preview_failure_classifier_distinguishes_cfg_and_lowering_failures() {
+        assert_eq!(
+            classify_preview_failure_refined(
+                "mlil-preview unavailable: unsupported branch target in mlil-preview"
+            ),
+            "preview_unsupported_cfg"
+        );
+        assert_eq!(
+            classify_preview_failure_refined(
+                "mlil-preview unavailable: value lowering failed on varnode: unsupported address materialization"
+            ),
+            "preview_parse_or_lowering_failure"
+        );
+        assert_eq!(
+            classify_preview_failure_refined(
+                "mlil-preview unavailable: unsupported architecture in mlil-preview"
+            ),
+            "preview_parse_or_lowering_failure"
+        );
+        assert_eq!(
+            classify_preview_failure_refined("mlil-preview worker response parse failed: bad json"),
+            "preview_worker_failure"
+        );
+    }
+
+    #[test]
+    fn preview_fallback_exposes_refined_kind() {
+        let selection = PreviewRoutingResolver::preview_fallback(
+            "mlil-preview unavailable: unsupported phi join in mlil-preview",
+        );
+        assert_eq!(selection.fallback_kind, Some("preview_unsupported"));
+        assert_eq!(selection.fallback_kind_refined, Some("preview_unsupported_cfg"));
     }
 
     #[test]

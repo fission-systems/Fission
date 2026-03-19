@@ -157,6 +157,8 @@ struct PreviewCandidateEntry {
     fact_density_score: i32,
     preview_direct_success: bool,
     preview_fallback_kind: Option<String>,
+    preview_fallback_kind_refined: Option<String>,
+    preview_fallback_reason: Option<String>,
     pcode_block_count: usize,
     pcode_op_count: usize,
     has_indirect_control_flow: bool,
@@ -502,6 +504,8 @@ pub(super) fn emit_preview_candidate_inventory(
         let mut auto_eligible = false;
         let mut preview_direct_success = false;
         let mut preview_fallback_kind = None;
+        let mut preview_fallback_kind_refined = None;
+        let mut preview_fallback_reason = None;
         let mut preview_surface_kind = None;
         let mut preview_hint_stats = None;
         let mut preview_code = None;
@@ -527,6 +531,9 @@ pub(super) fn emit_preview_candidate_inventory(
                     && !selection.fell_back
                     && selection.engine_used == PreviewEngineMode::MlilPreview;
                 preview_fallback_kind = selection.fallback_kind.map(str::to_string);
+                preview_fallback_kind_refined =
+                    selection.fallback_kind_refined.map(str::to_string);
+                preview_fallback_reason = selection.fallback_reason.clone();
                 preview_surface_kind = selection.preview_surface;
                 preview_hint_stats = selection.hint_stats;
                 preview_code = selection.preview_code;
@@ -559,6 +566,8 @@ pub(super) fn emit_preview_candidate_inventory(
             fact_density_score,
             preview_direct_success,
             preview_fallback_kind,
+            preview_fallback_kind_refined,
+            preview_fallback_reason,
             pcode_block_count,
             pcode_op_count,
             has_indirect_control_flow: has_indirect,
