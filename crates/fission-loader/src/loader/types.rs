@@ -223,6 +223,19 @@ pub struct DwarfFunctionInfo {
     pub local_vars: Vec<DwarfLocalVar>,
 }
 
+pub type PdbParamInfo = DwarfParamInfo;
+pub type PdbLocalVar = DwarfLocalVar;
+pub type PdbFunctionInfo = DwarfFunctionInfo;
+
+#[derive(Debug, Clone, Archive, Deserialize, Serialize)]
+#[archive(check_bytes)]
+pub struct PdbDebugInfo {
+    pub path_hint: Option<String>,
+    pub guid_hex: Option<String>,
+    pub age: Option<u32>,
+    pub has_codeview: bool,
+}
+
 /// Inner data structure containing all binary information.
 /// This is wrapped in Arc for O(1) cloning with COW semantics.
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
@@ -263,6 +276,8 @@ pub struct LoadedBinaryInner {
     pub inferred_types: Vec<InferredTypeInfo>,
     /// String literals from .rdata/.rodata (address → content) for decompiler inlining
     pub string_map: std::collections::HashMap<u64, String>,
+    /// PE CodeView / RSDS-backed PDB source metadata when present.
+    pub pdb_debug_info: Option<PdbDebugInfo>,
 }
 
 /// Parsed binary information with O(1) clone via Arc.
@@ -278,6 +293,10 @@ pub struct LoadedBinary {
     /// Keyed by function address for O(1) lookup during post-processing.
     /// Not serialized — rebuilt on each load from debug sections.
     pub dwarf_functions: std::collections::HashMap<u64, DwarfFunctionInfo>,
+    /// Focused PDB function-level facts (name, return type, params/locals).
+    /// Keyed by function address for O(1) lookup during post-processing.
+    /// Not serialized — rebuilt on each load from the PDB sidecar when available.
+    pub pdb_functions: std::collections::HashMap<u64, PdbFunctionInfo>,
 }
 
 impl LoadedBinary {
@@ -286,6 +305,7 @@ impl LoadedBinary {
         Self {
             inner: Arc::new(inner),
             dwarf_functions: std::collections::HashMap::new(),
+            pdb_functions: std::collections::HashMap::new(),
         }
     }
 
@@ -361,4 +381,5 @@ pub struct LoadedBinaryBuilder {
     format: String,
     iat_symbols: std::collections::HashMap<u64, String>,
     global_symbols: std::collections::HashMap<u64, String>,
+    pdb_debug_info: Option<PdbDebugInfo>,
 }

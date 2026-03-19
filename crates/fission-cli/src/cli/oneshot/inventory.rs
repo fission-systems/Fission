@@ -29,6 +29,7 @@ struct ExplicitFactBreakdown {
     param_count: usize,
     local_count: usize,
     return_count: usize,
+    pdb_type_count: usize,
     native_type_count: usize,
 }
 
@@ -90,6 +91,7 @@ struct ExplicitBreakdownTotals {
     param_count: usize,
     local_count: usize,
     return_count: usize,
+    pdb_type_count: usize,
     native_type_count: usize,
 }
 
@@ -173,21 +175,12 @@ fn heuristic_surface_candidate(entry: &PreviewCandidateEntry) -> bool {
         && (heuristic_hits || has_reason_tag)
 }
 
-fn detect_pdb_source_present(binary_path: &std::path::Path, binary_data: &[u8]) -> bool {
-    let lowercase = binary_path.with_extension("pdb");
-    if lowercase.exists() {
-        return true;
-    }
-    let uppercase = binary_path.with_extension("PDB");
-    if uppercase.exists() {
-        return true;
-    }
-
-    let file_bytes = fs::read(binary_path).ok();
-    let haystack = file_bytes.as_deref().unwrap_or(binary_data);
-
-    haystack.windows(4).any(|window| window == b"RSDS")
-        || haystack.windows(4).any(|window| window.eq_ignore_ascii_case(b".pdb"))
+fn detect_pdb_source_present(binary: &LoadedBinary) -> bool {
+    binary
+        .inner()
+        .pdb_debug_info
+        .as_ref()
+        .is_some_and(|info| info.has_codeview)
 }
 
 fn fact_sources_present(
@@ -211,12 +204,17 @@ fn explicit_fact_breakdown(
         param_count: entry.dwarf_param_count,
         local_count: entry.dwarf_local_count,
         return_count: usize::from(entry.has_dwarf_return_type),
+        pdb_type_count: snapshot.pdb_type_fact_count(),
         native_type_count: snapshot.native_type_fact_count(),
     }
 }
 
 fn explicit_fact_total(breakdown: &ExplicitFactBreakdown) -> usize {
-    breakdown.param_count + breakdown.local_count + breakdown.return_count + breakdown.native_type_count
+    breakdown.param_count
+        + breakdown.local_count
+        + breakdown.return_count
+        + breakdown.pdb_type_count
+        + breakdown.native_type_count
 }
 
 fn provenance_fact_breakdown(
@@ -299,11 +297,17 @@ fn to_inventory_row(
     let inventory_surface_gap = inventory_surface_gap(&fact_sources_present, explicit_fact_total);
     let admission_block_stage = admission_block_stage(&entry, inventory_surface_gap);
     let loader_type_count = snapshot.loader_type_fact_count();
+    let resolved_name = snapshot
+        .chosen_name
+        .as_ref()
+        .map(|fact| fact.name.clone())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| entry.name.clone());
     FunctionFactsInventoryRow {
         binary: entry.binary,
         binary_path: binary_path.display().to_string(),
         address: entry.address,
-        name: entry.name,
+        name: resolved_name,
         has_dwarf_function: entry.has_dwarf_function,
         dwarf_param_count: entry.dwarf_param_count,
         dwarf_local_count: entry.dwarf_local_count,
@@ -363,6 +367,8 @@ fn update_inventory_summary(
     summary.explicit_breakdown_totals.param_count += row.explicit_fact_breakdown.param_count;
     summary.explicit_breakdown_totals.local_count += row.explicit_fact_breakdown.local_count;
     summary.explicit_breakdown_totals.return_count += row.explicit_fact_breakdown.return_count;
+    summary.explicit_breakdown_totals.pdb_type_count +=
+        row.explicit_fact_breakdown.pdb_type_count;
     summary.explicit_breakdown_totals.native_type_count +=
         row.explicit_fact_breakdown.native_type_count;
     if row.provenance_fact_breakdown.dwarf_type_count > 0 {
@@ -459,7 +465,7 @@ pub(super) fn emit_function_facts_inventory(
 
     let mut decomp = prepare_inventory_decompiler(cli, binary, binary_data)?;
     let mut fact_store = FactStore::from_binary(binary);
-    let pdb_source_present = detect_pdb_source_present(&cli.binary, binary_data);
+    let pdb_source_present = detect_pdb_source_present(binary);
     let binary_name = cli
         .binary
         .file_stem()

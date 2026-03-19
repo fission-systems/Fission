@@ -1,4 +1,6 @@
-use super::{FunctionInfo, LoadedBinary, LoadedBinaryBuilder, LoadedBinaryInner, SectionInfo};
+use super::{
+    FunctionInfo, LoadedBinary, LoadedBinaryBuilder, LoadedBinaryInner, PdbDebugInfo, SectionInfo,
+};
 use crate::loader::strings::scan_ascii_strings_from_sections;
 use crate::prelude::*;
 use std::sync::Arc;
@@ -19,6 +21,7 @@ impl LoadedBinaryBuilder {
             format: "unknown".to_string(),
             iat_symbols: std::collections::HashMap::new(),
             global_symbols: std::collections::HashMap::new(),
+            pdb_debug_info: None,
         }
     }
 
@@ -87,6 +90,11 @@ impl LoadedBinaryBuilder {
         self
     }
 
+    pub fn pdb_debug_info(mut self, pdb_debug_info: Option<PdbDebugInfo>) -> Self {
+        self.pdb_debug_info = pdb_debug_info;
+        self
+    }
+
     pub fn build(self) -> Result<LoadedBinary> {
         let mut functions = self.functions;
         functions.sort_by_key(|f| f.address);
@@ -136,6 +144,7 @@ impl LoadedBinaryBuilder {
             functions_sorted: true,
             inferred_types: Vec::new(),
             string_map,
+            pdb_debug_info: self.pdb_debug_info,
         };
 
         Ok(LoadedBinary::from_inner(inner))

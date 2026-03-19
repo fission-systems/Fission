@@ -122,7 +122,7 @@ impl CachingDecompiler {
         );
 
         // 4. Post-process with merged inferred types, DWARF debug info, and string map
-        let dwarf_info = self.fact_store.dwarf_function(address).cloned();
+        let dwarf_info = self.fact_store.preferred_debug_function(address).cloned();
         let processor = self::postprocess::PostProcessor::new()
             .with_options(self.rust_postprocess_options.clone())
             .with_inferred_types(merged_types)

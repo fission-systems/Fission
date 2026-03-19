@@ -13,6 +13,7 @@ pub mod elf;
 pub mod golang;
 pub mod macho;
 pub mod pe;
+pub mod pdb_sidecar;
 pub mod rust;
 pub mod strings;
 pub mod types;
@@ -88,6 +89,12 @@ impl LoadedBinary {
             "Mach-O" => macho::MachoLoader::parse(data, path)?,
             _ => return Err(FissionError::loader("Unknown binary format")),
         };
+
+        if format == "PE" && binary.inner().pdb_debug_info.is_some() {
+            if let Err(err) = pdb_sidecar::ingest_pdb_function_facts(&mut binary) {
+                tracing::debug!("[Loader] focused PDB function ingestion skipped: {err}");
+            }
+        }
 
         // Go Language Analysis
         let detection = crate::detector::detect(&binary);

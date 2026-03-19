@@ -7,6 +7,75 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-03-20
+
+### P5G - Focused PDB Function-Facts Ingestion
+
+This round moved PDB handling from “source presence is visible” into real function-level fact ingestion for the Fission NIR pipeline.
+
+Instead of building a full PDB parser, the loader now performs a narrow sidecar-driven ingest for function-scoped facts that directly affect decompilation quality:
+
+- function names
+- return types
+- parameter names
+- parameter types
+
+These facts now flow into the existing Rust facts pipeline rather than staying trapped as loader metadata.
+
+#### Added
+
+- focused PDB sidecar ingestion in the loader
+  - PE CodeView / RSDS / NB10 metadata is now used to locate and open matching `.pdb` sidecars
+  - module symbol streams are scanned narrowly for function-scoped facts instead of attempting broad PDB database coverage
+- function-level PDB facts in `FactStore`
+  - `FactProvenance::PdbMetadata`
+  - `FunctionFacts.pdb_info`
+  - `FactStore::preferred_debug_function(...)` now falls back from DWARF to PDB-backed function info
+- inventory explicit surfacing for PDB-derived facts
+  - `explicit_fact_breakdown.pdb_type_count`
+  - `explicit_breakdown_totals.pdb_type_count`
+  - inventory row names now prefer the chosen resolved fact name when available
+
+#### Changed
+
+- preview / postprocess debug fact consumption
+  - preview function hints can now use PDB-backed function info when DWARF is absent
+  - Rust-side postprocess also consumes preferred debug function info instead of assuming DWARF-only availability
+- diagnosis quality after PDB source detection
+  - the pipeline can now distinguish:
+    - `PDB source present and actually surfaced`
+    - `PDB source present but still not surfaced`
+    - `native inferred facts are still filling the gap`
+
+#### Validation
+
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo test -p fission-loader loads_focused_pdb_function_facts_from_repo_sample -- --nocapture`
+- inventory / diagnosis reruns:
+  - `has_pdb.exe`
+  - `test-pdb.exe`
+  - `fauxware.exe`
+
+#### Observed Effect
+
+- `test-pdb.exe`
+  - `source_presence_counts.pdb = 6`
+  - `provenance_surface_totals.pdb_nonzero_rows = 5`
+  - `strict_explicit_candidate_count = 4`
+- `fauxware.exe`
+  - `source_presence_counts.pdb = 20`
+  - `provenance_surface_totals.pdb_nonzero_rows = 16`
+  - `strict_explicit_candidate_count = 6`
+- `has_pdb.exe`
+  - `source_presence_counts.pdb = 20`
+  - `provenance_surface_totals.pdb_nonzero_rows = 0`
+  - `provenance_surface_totals.native_nonzero_rows = 7`
+
+This means the repository now has both sides of the diagnostic split:
+
+- samples where PDB-derived function facts genuinely surface into inventory rows,
+- and samples where PDB source presence is truthful but surfaced explicit rows are still being supplied by native inferred facts.
+
 ## 2026-03-19
 
 ### P5F2 - Preview-Stage Block Split And First Narrow Unblock

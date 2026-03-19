@@ -1,5 +1,5 @@
 use crate::loader::types::{
-    DataBuffer, LoadedBinary, LoadedBinaryBuilder, SectionInfo, extract_cstring,
+    DataBuffer, LoadedBinary, LoadedBinaryBuilder, PdbDebugInfo, SectionInfo, extract_cstring,
 };
 use crate::prelude::*;
 use binrw::BinRead;
@@ -13,6 +13,8 @@ pub mod schema;
 use schema::*;
 
 pub struct PeLoader;
+
+const IMAGE_DEBUG_TYPE_CODEVIEW: u32 = 2;
 
 impl PeLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
@@ -198,6 +200,17 @@ impl PeLoader {
             }
         }
 
+        let pdb_debug_info = match &pe_file.nt_headers.optional_header {
+            OptionalHeader::Pe32(opt) => opt
+                .data_directories
+                .get(6)
+                .and_then(|dir| loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)),
+            OptionalHeader::Pe32Plus(opt) => opt
+                .data_directories
+                .get(6)
+                .and_then(|dir| loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)),
+        };
+
         // Linear sweep: if we only found the entry point (stripped binary with no
         // COFF symbols, no PDATA, no exports), scan executable sections for function
         // prologues so the decompiler has something to work with.
@@ -231,6 +244,7 @@ impl PeLoader {
             .entry_point(entry_point)
             .image_base(image_base)
             .is_64bit(is_64bit)
+            .pdb_debug_info(pdb_debug_info)
             .add_sections(sections_info)
             .add_functions(functions_info)
             .add_iat_symbols(iat_symbols)
@@ -527,6 +541,74 @@ impl<'a> PeLoaderImpl<'a> {
     ) -> Result<std::collections::HashMap<u64, String>> {
         coff::parse_coff_data_symbols(self, symbol_table_offset, symbol_count, _image_base)
     }
+
+    fn parse_pdb_debug_info(
+        &self,
+        dir_rva: u32,
+        dir_size: u32,
+        image_base: u64,
+    ) -> Option<PdbDebugInfo> {
+        if dir_rva == 0 || dir_size < 28 {
+            return None;
+        }
+        let dir_offset = self.rva_to_file_offset(dir_rva, image_base)?;
+        let entry_count = (dir_size as usize) / std::mem::size_of::<ImageDebugDirectory>();
+        for idx in 0..entry_count {
+            let entry: ImageDebugDirectory = self
+                .read_at(dir_offset + (idx * std::mem::size_of::<ImageDebugDirectory>()) as u64)
+                .ok()?;
+            if entry.debug_type != IMAGE_DEBUG_TYPE_CODEVIEW || entry.size_of_data < 4 {
+                continue;
+            }
+
+            let data_offset = if entry.pointer_to_raw_data != 0 {
+                u64::from(entry.pointer_to_raw_data)
+            } else {
+                self.rva_to_file_offset(entry.address_of_raw_data, image_base)?
+            };
+            let data_end = data_offset.checked_add(u64::from(entry.size_of_data))? as usize;
+            let data_offset = data_offset as usize;
+            if data_end > self.data.len() || data_offset >= data_end {
+                continue;
+            }
+            let data = &self.data[data_offset..data_end];
+            let signature = data.get(0..4)?;
+            match signature {
+                b"RSDS" => {
+                    if data.len() < 24 {
+                        continue;
+                    }
+                    let guid_hex = data[4..20]
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>();
+                    let age = u32::from_le_bytes(data[20..24].try_into().ok()?);
+                    let path_hint = Some(extract_cstring(data, 24)).filter(|s| !s.is_empty());
+                    return Some(PdbDebugInfo {
+                        path_hint,
+                        guid_hex: Some(guid_hex),
+                        age: Some(age),
+                        has_codeview: true,
+                    });
+                }
+                b"NB10" => {
+                    if data.len() < 16 {
+                        continue;
+                    }
+                    let age = u32::from_le_bytes(data[12..16].try_into().ok()?);
+                    let path_hint = Some(extract_cstring(data, 16)).filter(|s| !s.is_empty());
+                    return Some(PdbDebugInfo {
+                        path_hint,
+                        guid_hex: None,
+                        age: Some(age),
+                        has_codeview: true,
+                    });
+                }
+                _ => {}
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -630,5 +712,77 @@ mod tests {
         let bin = result.expect("arm64 pe should parse");
         assert_eq!(bin.arch_spec, "AARCH64:LE:64:v8A");
         assert!(bin.is_64bit);
+    }
+
+    #[test]
+    fn test_parse_synthetic_pe_rsds_sets_pdb_debug_info() {
+        let mut data = vec![0u8; 2048];
+
+        data[0] = 0x4D;
+        data[1] = 0x5A;
+        data[0x3C] = 0x40;
+
+        data[0x40] = 0x50;
+        data[0x41] = 0x45;
+
+        data[0x44] = 0x4C;
+        data[0x45] = 0x01; // x86
+        data[0x46] = 0x01; // NumberOfSections = 1
+        data[0x54] = 0xE0;
+        data[0x55] = 0x00;
+
+        data[0x58] = 0x0B;
+        data[0x59] = 0x01; // PE32
+        data[0x74] = 0x00;
+        data[0x75] = 0x00;
+        data[0x76] = 0x40; // ImageBase = 0x400000
+        data[0x58 + 92] = 16; // NumberOfRvaAndSizes
+
+        let debug_dir_offset = 0x58 + 96 + (6 * 8);
+        data[debug_dir_offset..debug_dir_offset + 4].copy_from_slice(&0x200u32.to_le_bytes());
+        data[debug_dir_offset + 4..debug_dir_offset + 8].copy_from_slice(&28u32.to_le_bytes());
+
+        let section_offset = 0x138;
+        data[section_offset] = b'.';
+        data[section_offset + 1] = b'r';
+        data[section_offset + 2] = b'd';
+        data[section_offset + 3] = b'a';
+        data[section_offset + 4] = b't';
+        data[section_offset + 5] = b'a';
+        data[section_offset + 8..section_offset + 12].copy_from_slice(&0x200u32.to_le_bytes());
+        data[section_offset + 12..section_offset + 16].copy_from_slice(&0x200u32.to_le_bytes());
+        data[section_offset + 16..section_offset + 20].copy_from_slice(&0x200u32.to_le_bytes());
+        data[section_offset + 20..section_offset + 24].copy_from_slice(&0x200u32.to_le_bytes());
+        data[section_offset + 36] = 0x40;
+        data[section_offset + 39] = 0x40; // readable data
+
+        let debug_dir_file = 0x200usize;
+        data[debug_dir_file + 12..debug_dir_file + 16]
+            .copy_from_slice(&IMAGE_DEBUG_TYPE_CODEVIEW.to_le_bytes());
+        let rsds_path = b"C:\\symbols\\has_pdb.pdb\0";
+        let rsds_size = 24u32 + rsds_path.len() as u32;
+        data[debug_dir_file + 16..debug_dir_file + 20].copy_from_slice(&rsds_size.to_le_bytes());
+        data[debug_dir_file + 20..debug_dir_file + 24].copy_from_slice(&0x220u32.to_le_bytes());
+        data[debug_dir_file + 24..debug_dir_file + 28].copy_from_slice(&0x220u32.to_le_bytes());
+
+        let rsds_offset = 0x220usize;
+        data[rsds_offset..rsds_offset + 4].copy_from_slice(b"RSDS");
+        for (idx, byte) in data[rsds_offset + 4..rsds_offset + 20].iter_mut().enumerate() {
+            *byte = (idx as u8) + 1;
+        }
+        data[rsds_offset + 20..rsds_offset + 24].copy_from_slice(&1u32.to_le_bytes());
+        data[rsds_offset + 24..rsds_offset + 24 + rsds_path.len()].copy_from_slice(rsds_path);
+
+        let result = PeLoader::parse(DataBuffer::Heap(data), "has_pdb.exe".to_string());
+        assert!(result.is_ok());
+        let bin = result.expect("rsds pe should parse");
+        let pdb = bin.inner().pdb_debug_info.as_ref().expect("pdb debug info");
+        assert!(pdb.has_codeview);
+        assert_eq!(pdb.age, Some(1));
+        assert!(
+            pdb.path_hint
+                .as_deref()
+                .is_some_and(|path| path.ends_with("has_pdb.pdb"))
+        );
     }
 }

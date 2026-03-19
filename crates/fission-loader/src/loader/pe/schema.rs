@@ -180,6 +180,18 @@ pub struct ImportDescriptor {
     pub first_thunk: u32, // RVA to IAT (Import Address Table)
 }
 
+#[derive(BinRead, Debug, Clone)]
+pub struct ImageDebugDirectory {
+    pub characteristics: u32,
+    pub time_date_stamp: u32,
+    pub major_version: u16,
+    pub minor_version: u16,
+    pub debug_type: u32,
+    pub size_of_data: u32,
+    pub address_of_raw_data: u32,
+    pub pointer_to_raw_data: u32,
+}
+
 // COFF Symbol Table Structures
 #[derive(BinRead, Debug, Clone)]
 pub struct CoffSymbol {

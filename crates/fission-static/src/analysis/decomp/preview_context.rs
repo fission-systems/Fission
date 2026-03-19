@@ -58,13 +58,13 @@ fn build_preview_function_hints(
     fact_store: &FactStore,
     address: u64,
 ) -> Option<PreviewFunctionHints> {
-    let dwarf = fact_store.dwarf_function(address)?;
-    let param_names = dwarf
+    let debug = fact_store.preferred_debug_function(address)?;
+    let param_names = debug
         .params
         .iter()
         .map(|param| param.name.trim().to_string())
         .collect::<Vec<_>>();
-    let param_type_names = dwarf
+    let param_type_names = debug
         .params
         .iter()
         .enumerate()
@@ -73,7 +73,7 @@ fn build_preview_function_hints(
             (!type_name.is_empty()).then(|| (index, type_name.to_string()))
         })
         .collect::<HashMap<_, _>>();
-    let stack_local_names = dwarf
+    let stack_local_names = debug
         .local_vars
         .iter()
         .filter_map(|local| match local.location {
@@ -83,7 +83,7 @@ fn build_preview_function_hints(
             _ => None,
         })
         .collect::<HashMap<_, _>>();
-    let stack_local_type_names = dwarf
+    let stack_local_type_names = debug
         .local_vars
         .iter()
         .filter_map(|local| match local.location {
@@ -94,7 +94,7 @@ fn build_preview_function_hints(
             _ => None,
         })
         .collect::<HashMap<_, _>>();
-    let return_type_name = dwarf
+    let return_type_name = debug
         .return_type
         .as_deref()
         .map(str::trim)
