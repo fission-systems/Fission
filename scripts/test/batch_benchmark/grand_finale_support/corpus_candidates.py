@@ -80,6 +80,10 @@ def heuristic_surface_candidate(entry: dict[str, Any]) -> bool:
     )
 
 
+def inventory_surface_gap(entry: dict[str, Any]) -> bool:
+    return bool(entry.get("inventory_surface_gap"))
+
+
 def candidate_passes_explicit_quality_prefilter(
     entry: dict[str, Any],
     source_meta: dict[str, Any] | None = None,
@@ -112,6 +116,10 @@ def aligned_explicit_candidate_entry(
         "preview_fallback_kind_refined": entry.get("preview_fallback_kind_refined"),
         "pcode_op_count": int(entry.get("pcode_op_count", 0) or 0),
         "preview_surface_kind": entry.get("preview_surface_kind"),
+        "fact_sources_present": dict(entry.get("fact_sources_present") or {}),
+        "explicit_fact_breakdown": dict(entry.get("explicit_fact_breakdown") or {}),
+        "admission_block_stage": entry.get("admission_block_stage"),
+        "inventory_surface_gap": inventory_surface_gap(entry),
         "reason_tags": list(entry.get("reason_tags") or []),
         "source_binary": source_meta.get("binary") if source_meta else entry.get("binary"),
         "source_admission_alignment": source_meta.get("admission_alignment") if source_meta else None,
@@ -135,6 +143,10 @@ def blocked_explicit_candidate_entry(
         or "strict_filter_reject",
         "pcode_op_count": int(entry.get("pcode_op_count", 0) or 0),
         "has_indirect_control_flow": bool(entry.get("has_indirect_control_flow")),
+        "fact_sources_present": dict(entry.get("fact_sources_present") or {}),
+        "explicit_fact_breakdown": dict(entry.get("explicit_fact_breakdown") or {}),
+        "admission_block_stage": entry.get("admission_block_stage"),
+        "inventory_surface_gap": inventory_surface_gap(entry),
         "reason_tags": list(entry.get("reason_tags") or []),
         "source_admission_alignment": source_meta.get("admission_alignment") if source_meta else None,
     }

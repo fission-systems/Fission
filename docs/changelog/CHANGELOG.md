@@ -9,7 +9,7 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-19
 
-### P5A / P5B - Function Facts Inventory And Inventory-Backed Corpus Selection
+### P5A / P5B / P5C - Function Facts Inventory, Inventory-Backed Corpus Selection, And Provenance-Aware Analysis
 
 This round changed the benchmark/corpus workflow from probe-first scanning to inventory-first filtering.
 
@@ -28,12 +28,26 @@ The key architectural shift is that benchmark scripts no longer need to treat ad
     - running the Rust inventory export
     - loading inventory JSONL rows
     - loading summary JSON
+- provenance-aware inventory fields
+  - inventory rows now include:
+    - `fact_sources_present`
+    - `explicit_fact_breakdown`
+    - `admission_block_stage`
+    - `inventory_surface_gap`
+  - summary output now includes:
+    - `source_presence_counts`
+    - `explicit_breakdown_totals`
+    - `inventory_surface_gap_count`
+    - `aligned_with_zero_explicit_count`
 
 #### Changed
 
 - benchmark/corpus scripts now consume inventory rows
   - `refine_preview_quality_corpus.py` now builds corpus outputs from function facts inventory rows instead of address-probe scan results
   - `grand_finale_support/corpus_candidates.py` now treats the Rust inventory export as the default candidate source
+- provenance-aware blocked/aligned interpretation
+  - blocked and aligned candidate reports now carry provenance fields through from the inventory rows
+  - corpus refinement now emits aggregated inventory provenance counters alongside blocked explicit summaries
 - corpus outputs derived from the same canonical source
   - `preview_quality_corpus.json`
   - `preview_explicit_blocked_candidates.json`
@@ -53,11 +67,18 @@ The key architectural shift is that benchmark scripts no longer need to treat ad
     - aligned candidate report
     - blocked explicit report
     - curated corpus JSON
+- provenance-aware inventory smoke
+  - `GetProcAddress.exe --emit-function-facts-inventory --functions-limit 5`
+  - verified:
+    - row-level provenance fields
+    - summary-level provenance counters
+    - blocked report inventory summary totals
 
 #### Current State
 
 - address-targeted scans remain useful, but they are now probe/debug tooling rather than the preferred canonical data source
 - strict explicit / heuristic / blocked / aligned analysis can now be driven from one whole-binary inventory export
+- inventory rows now expose whether explicit-fact scarcity appears to come from missing source facts, inventory surface gaps, or preview-stage rejection
 
 ## 2026-03-18
 

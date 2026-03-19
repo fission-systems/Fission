@@ -9,13 +9,28 @@ use crate::cli::output::OutputSilencer;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::{
-    FactStore, PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
-    serialize_win_api_signatures_json,
+    FactProvenance, FactStore, PrepareOptions, PrepareTimings,
+    prepare_native_decompiler_for_binary, serialize_win_api_signatures_json,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+
+#[derive(Debug, Serialize)]
+struct FactSourcesPresent {
+    dwarf: bool,
+    pdb: bool,
+    loader: bool,
+    native_inferred: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ExplicitFactBreakdown {
+    param_count: usize,
+    local_count: usize,
+    return_count: usize,
+}
 
 #[derive(Debug, Serialize)]
 struct FunctionFactsInventoryRow {
@@ -30,6 +45,10 @@ struct FunctionFactsInventoryRow {
     loader_type_count: usize,
     explicit_fact_total: usize,
     fact_density_score: i32,
+    fact_sources_present: FactSourcesPresent,
+    explicit_fact_breakdown: ExplicitFactBreakdown,
+    admission_block_stage: String,
+    inventory_surface_gap: bool,
     preview_direct_success: bool,
     preview_fallback_kind: Option<String>,
     preview_fallback_kind_refined: Option<String>,
@@ -48,6 +67,21 @@ struct FunctionFactsInventoryRow {
 }
 
 #[derive(Debug, Default, Serialize)]
+struct SourcePresenceCounts {
+    dwarf: usize,
+    pdb: usize,
+    loader: usize,
+    native_inferred: usize,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct ExplicitBreakdownTotals {
+    param_count: usize,
+    local_count: usize,
+    return_count: usize,
+}
+
+#[derive(Debug, Default, Serialize)]
 struct FunctionFactsInventorySummary {
     binary: String,
     binary_path: String,
@@ -62,6 +96,10 @@ struct FunctionFactsInventorySummary {
     panic_recovered_count: usize,
     internal_error_count: usize,
     explicit_fact_nonzero_count: usize,
+    source_presence_counts: SourcePresenceCounts,
+    explicit_breakdown_totals: ExplicitBreakdownTotals,
+    inventory_surface_gap_count: usize,
+    aligned_with_zero_explicit_count: usize,
     strict_explicit_candidate_count: usize,
     heuristic_surface_candidate_count: usize,
     failure_kind_counts: BTreeMap<String, usize>,
@@ -100,6 +138,14 @@ fn explicit_fact_total(entry: &PreviewCandidateEntry) -> usize {
     entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type)
 }
 
+fn explicit_fact_breakdown(entry: &PreviewCandidateEntry) -> ExplicitFactBreakdown {
+    ExplicitFactBreakdown {
+        param_count: entry.dwarf_param_count,
+        local_count: entry.dwarf_local_count,
+        return_count: usize::from(entry.has_dwarf_return_type),
+    }
+}
+
 fn heuristic_surface_candidate(entry: &PreviewCandidateEntry) -> bool {
     let hint_stats = entry.preview_hint_stats;
     let heuristic_hits = hint_stats.is_some_and(|stats| {
@@ -118,13 +164,69 @@ fn heuristic_surface_candidate(entry: &PreviewCandidateEntry) -> bool {
         && (heuristic_hits || has_reason_tag)
 }
 
+fn fact_sources_present(
+    fact_store: &FactStore,
+    address: u64,
+    entry: &PreviewCandidateEntry,
+) -> FactSourcesPresent {
+    let snapshot = fact_store.function_facts_snapshot(address);
+    let has_loader = snapshot
+        .type_facts
+        .iter()
+        .any(|fact| fact.provenance == FactProvenance::LoaderMetadata);
+    let has_native = snapshot
+        .type_facts
+        .iter()
+        .any(|fact| fact.provenance == FactProvenance::NativeMetadata);
+    FactSourcesPresent {
+        dwarf: entry.has_dwarf_function,
+        pdb: false,
+        loader: has_loader || entry.loader_type_count > 0,
+        native_inferred: has_native,
+    }
+}
+
+fn inventory_surface_gap(
+    sources: &FactSourcesPresent,
+    explicit_fact_total: usize,
+) -> bool {
+    explicit_fact_total == 0 && (sources.dwarf || sources.pdb || sources.loader || sources.native_inferred)
+}
+
+fn admission_block_stage(entry: &PreviewCandidateEntry, inventory_surface_gap: bool) -> String {
+    if entry.preview_direct_success {
+        return "none".to_string();
+    }
+    if inventory_surface_gap {
+        return "inventory_surface".to_string();
+    }
+    match entry
+        .row_error_kind
+        .as_deref()
+        .or(entry.preview_fallback_kind_refined.as_deref())
+    {
+        Some("preview_architecture_unsupported" | "preview_format_unsupported") => {
+            "admission".to_string()
+        }
+        Some(_) => "preview".to_string(),
+        None => "none".to_string(),
+    }
+}
+
 fn to_inventory_row(
     binary_path: &std::path::Path,
+    fact_store: &FactStore,
     entry: PreviewCandidateEntry,
 ) -> FunctionFactsInventoryRow {
     let explicit_fact_total = explicit_fact_total(&entry);
+    let explicit_fact_breakdown = explicit_fact_breakdown(&entry);
     let strict_explicit = strict_explicit_candidate(&entry);
     let heuristic_surface = heuristic_surface_candidate(&entry);
+    let address =
+        u64::from_str_radix(entry.address.trim_start_matches("0x"), 16).unwrap_or_default();
+    let fact_sources_present = fact_sources_present(fact_store, address, &entry);
+    let inventory_surface_gap = inventory_surface_gap(&fact_sources_present, explicit_fact_total);
+    let admission_block_stage = admission_block_stage(&entry, inventory_surface_gap);
     FunctionFactsInventoryRow {
         binary: entry.binary,
         binary_path: binary_path.display().to_string(),
@@ -137,6 +239,10 @@ fn to_inventory_row(
         loader_type_count: entry.loader_type_count,
         explicit_fact_total,
         fact_density_score: entry.fact_density_score,
+        fact_sources_present,
+        explicit_fact_breakdown,
+        admission_block_stage,
+        inventory_surface_gap,
         preview_direct_success: entry.preview_direct_success,
         preview_fallback_kind: entry.preview_fallback_kind,
         preview_fallback_kind_refined: entry.preview_fallback_kind_refined,
@@ -166,6 +272,27 @@ fn update_inventory_summary(
     }
     if row.explicit_fact_total > 0 {
         summary.explicit_fact_nonzero_count += 1;
+    }
+    if row.fact_sources_present.dwarf {
+        summary.source_presence_counts.dwarf += 1;
+    }
+    if row.fact_sources_present.pdb {
+        summary.source_presence_counts.pdb += 1;
+    }
+    if row.fact_sources_present.loader {
+        summary.source_presence_counts.loader += 1;
+    }
+    if row.fact_sources_present.native_inferred {
+        summary.source_presence_counts.native_inferred += 1;
+    }
+    summary.explicit_breakdown_totals.param_count += row.explicit_fact_breakdown.param_count;
+    summary.explicit_breakdown_totals.local_count += row.explicit_fact_breakdown.local_count;
+    summary.explicit_breakdown_totals.return_count += row.explicit_fact_breakdown.return_count;
+    if row.inventory_surface_gap {
+        summary.inventory_surface_gap_count += 1;
+    }
+    if row.preview_direct_success && row.explicit_fact_total == 0 {
+        summary.aligned_with_zero_explicit_count += 1;
     }
     if row.strict_explicit_candidate {
         summary.strict_explicit_candidate_count += 1;
@@ -280,7 +407,7 @@ pub(super) fn emit_function_facts_inventory(
                 func,
                 cli.timeout_ms,
             );
-            let row = to_inventory_row(&cli.binary, candidate);
+            let row = to_inventory_row(&cli.binary, &fact_store, candidate);
             serde_json::to_writer(&mut writer, &row)
                 .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
             writer.write_all(b"\n")?;

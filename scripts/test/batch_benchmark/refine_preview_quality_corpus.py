@@ -103,6 +103,13 @@ def dedupe(entries: list[dict]) -> list[dict]:
     return deduped
 
 
+def merge_counts(target: dict[str, int], source: dict[str, int] | None) -> None:
+    if not source:
+        return
+    for key, value in source.items():
+        target[key] = target.get(key, 0) + int(value or 0)
+
+
 def main() -> int:
     args = parse_args()
     if not args.fission_bin.exists():
@@ -113,6 +120,7 @@ def main() -> int:
     curated_heuristic_entries: list[dict] = []
     blocked_explicit_entries: list[dict] = []
     aligned_candidates: list[dict] = []
+    inventory_summaries: list[dict] = []
     source_inventory = load_source_inventory(args.source_inventory_file)
 
     binary_paths = [Path(item).resolve() for item in args.binaries]
@@ -124,6 +132,7 @@ def main() -> int:
             timeout_ms=args.timeout_ms,
             limit=args.candidate_limit,
         )
+        inventory_summaries.append(report.get("summary", {}))
         candidates = report.get("candidates", [])
         all_candidates.extend(candidates)
         source_meta = source_inventory.get(str(binary_path)) or source_inventory.get(binary_path.name) or source_inventory.get(binary_path.stem)
@@ -168,6 +177,7 @@ def main() -> int:
             timeout_ms=args.timeout_ms,
             address=address,
         )
+        inventory_summaries.append(report.get("summary", {}))
         candidates = report.get("candidates", [])
         all_candidates.extend(candidates)
         source_meta = source_inventory.get(str(binary_path)) or source_inventory.get(binary_path.name) or source_inventory.get(binary_path.stem)
@@ -187,6 +197,7 @@ def main() -> int:
             timeout_ms=args.timeout_ms,
             address=address,
         )
+        inventory_summaries.append(report.get("summary", {}))
         candidates = report.get("candidates", [])
         all_candidates.extend(candidates)
         curated_heuristic_entries.extend(curated_quality_entry(entry) for entry in candidates)
@@ -204,6 +215,38 @@ def main() -> int:
         reason = entry.get("block_reason") or "strict_filter_reject"
         block_reason_counts[reason] = block_reason_counts.get(reason, 0) + 1
 
+    inventory_summary_totals = {
+        "functions_total": 0,
+        "rows_emitted": 0,
+        "direct_success_count": 0,
+        "preview_failure_count": 0,
+        "panic_recovered_count": 0,
+        "explicit_fact_nonzero_count": 0,
+        "strict_explicit_candidate_count": 0,
+        "heuristic_surface_candidate_count": 0,
+        "inventory_surface_gap_count": 0,
+        "aligned_with_zero_explicit_count": 0,
+        "source_presence_counts": {},
+        "explicit_breakdown_totals": {},
+        "failure_kind_counts": {},
+        "row_error_kind_counts": {},
+    }
+    for summary in inventory_summaries:
+        inventory_summary_totals["functions_total"] += int(summary.get("functions_total", 0) or 0)
+        inventory_summary_totals["rows_emitted"] += int(summary.get("rows_emitted", 0) or 0)
+        inventory_summary_totals["direct_success_count"] += int(summary.get("direct_success_count", 0) or 0)
+        inventory_summary_totals["preview_failure_count"] += int(summary.get("preview_failure_count", 0) or 0)
+        inventory_summary_totals["panic_recovered_count"] += int(summary.get("panic_recovered_count", 0) or 0)
+        inventory_summary_totals["explicit_fact_nonzero_count"] += int(summary.get("explicit_fact_nonzero_count", 0) or 0)
+        inventory_summary_totals["strict_explicit_candidate_count"] += int(summary.get("strict_explicit_candidate_count", 0) or 0)
+        inventory_summary_totals["heuristic_surface_candidate_count"] += int(summary.get("heuristic_surface_candidate_count", 0) or 0)
+        inventory_summary_totals["inventory_surface_gap_count"] += int(summary.get("inventory_surface_gap_count", 0) or 0)
+        inventory_summary_totals["aligned_with_zero_explicit_count"] += int(summary.get("aligned_with_zero_explicit_count", 0) or 0)
+        merge_counts(inventory_summary_totals["source_presence_counts"], summary.get("source_presence_counts"))
+        merge_counts(inventory_summary_totals["explicit_breakdown_totals"], summary.get("explicit_breakdown_totals"))
+        merge_counts(inventory_summary_totals["failure_kind_counts"], summary.get("failure_kind_counts"))
+        merge_counts(inventory_summary_totals["row_error_kind_counts"], summary.get("row_error_kind_counts"))
+
     args.candidates_file.parent.mkdir(parents=True, exist_ok=True)
     args.candidates_file.write_text(json.dumps({"candidates": all_candidates}, indent=2))
     args.aligned_candidates_file.write_text(
@@ -214,6 +257,7 @@ def main() -> int:
             {
                 "blocked_candidates": sorted(deduped_blocked, key=candidate_sort_key, reverse=True),
                 "block_reason_counts": block_reason_counts,
+                "inventory_summary_totals": inventory_summary_totals,
             },
             indent=2,
         )
