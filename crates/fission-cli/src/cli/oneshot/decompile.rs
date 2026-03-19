@@ -18,10 +18,15 @@ use fission_static::analysis::decomp::{
     serialize_win_api_signatures_json,
 };
 use serde::{Deserialize, Serialize};
+use std::any::Any;
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind, set_hook, take_hook};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use tracing::warn;
 
 #[cfg(feature = "native_decomp")]
@@ -151,6 +156,10 @@ struct PreviewCandidateEntry {
     binary: String,
     address: String,
     name: String,
+    row_status: String,
+    row_error_kind: Option<String>,
+    row_error_message: Option<String>,
+    row_error_verbose: Option<String>,
     has_dwarf_function: bool,
     dwarf_param_count: usize,
     dwarf_local_count: usize,
@@ -182,10 +191,50 @@ struct PreviewCandidateScanSummary {
     chunks_completed: usize,
     chunk_size: usize,
     timeout_count: usize,
+    preview_failure_count: usize,
+    panic_recovered_count: usize,
+    internal_error_count: usize,
     nonzero_explicit_candidates: usize,
     strict_explicit_candidates: usize,
     failure_kind_counts: BTreeMap<String, usize>,
+    row_error_kind_counts: BTreeMap<String, usize>,
+    suppressed_stderr_count: usize,
     resume_loaded_rows: usize,
+}
+
+struct ScopedQuietPanicHook {
+    previous: Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>>,
+    suppressed: Arc<AtomicUsize>,
+}
+
+impl ScopedQuietPanicHook {
+    fn install(enabled: bool) -> Option<Self> {
+        if !enabled {
+            return None;
+        }
+        let suppressed = Arc::new(AtomicUsize::new(0));
+        let suppressed_for_hook = Arc::clone(&suppressed);
+        let previous = take_hook();
+        set_hook(Box::new(move |_| {
+            suppressed_for_hook.fetch_add(1, Ordering::Relaxed);
+        }));
+        Some(Self {
+            previous: Some(previous),
+            suppressed,
+        })
+    }
+
+    fn suppressed_count(&self) -> usize {
+        self.suppressed.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for ScopedQuietPanicHook {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            set_hook(previous);
+        }
+    }
 }
 
 fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
@@ -319,8 +368,11 @@ fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
 }
 
 fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {
-    if entry.preview_direct_success {
+    if entry.row_status == "ok" {
         return "direct_success";
+    }
+    if let Some(kind) = entry.row_error_kind.as_deref() {
+        return kind;
     }
     entry.preview_fallback_kind_refined
         .as_deref()
@@ -336,12 +388,21 @@ fn update_scan_summary(summary: &mut PreviewCandidateScanSummary, entry: &Previe
     if strict_explicit_candidate(entry) {
         summary.strict_explicit_candidates += 1;
     }
-    if !entry.preview_direct_success {
+    match entry.row_status.as_str() {
+        "preview_failure" => summary.preview_failure_count += 1,
+        "panic_recovered" => summary.panic_recovered_count += 1,
+        "internal_error" => summary.internal_error_count += 1,
+        _ => {}
+    }
+    if entry.row_status != "ok" {
         let failure_kind = effective_failure_kind(entry).to_string();
         if failure_kind == "preview_timeout" {
             summary.timeout_count += 1;
         }
         *summary.failure_kind_counts.entry(failure_kind).or_insert(0) += 1;
+    }
+    if let Some(kind) = entry.row_error_kind.as_deref() {
+        *summary.row_error_kind_counts.entry(kind.to_string()).or_insert(0) += 1;
     }
 }
 
@@ -494,10 +555,33 @@ fn build_preview_candidate_entry(
         preview_hint_stats,
     );
 
+    let (row_status, row_error_kind, row_error_message, row_error_verbose) =
+        if preview_direct_success {
+            ("ok".to_string(), None, None, None)
+        } else {
+            let error_kind = preview_fallback_kind_refined
+                .clone()
+                .or(preview_fallback_kind.clone())
+                .or_else(|| Some("preview_non_success_unknown".to_string()));
+            let error_message = preview_fallback_reason
+                .clone()
+                .or_else(|| Some("preview candidate did not produce direct preview".to_string()));
+            (
+                "preview_failure".to_string(),
+                error_kind,
+                error_message,
+                preview_fallback_reason.clone(),
+            )
+        };
+
     PreviewCandidateEntry {
         binary: binary_name.to_string(),
         address: format!("0x{:x}", func.address),
         name: func.name.clone(),
+        row_status,
+        row_error_kind,
+        row_error_message,
+        row_error_verbose,
         has_dwarf_function,
         dwarf_param_count,
         dwarf_local_count,
@@ -523,7 +607,10 @@ fn build_preview_candidate_fallback_entry(
     fact_store: &FactStore,
     binary_name: &str,
     func: &FunctionInfo,
+    row_status: &str,
+    row_error_kind: &str,
     reason: String,
+    verbose_reason: Option<String>,
 ) -> PreviewCandidateEntry {
     let dwarf = fact_store.dwarf_function(func.address);
     let has_dwarf_function = dwarf.is_some();
@@ -558,6 +645,10 @@ fn build_preview_candidate_fallback_entry(
         binary: binary_name.to_string(),
         address: format!("0x{:x}", func.address),
         name: func.name.clone(),
+        row_status: row_status.to_string(),
+        row_error_kind: Some(row_error_kind.to_string()),
+        row_error_message: Some(reason.clone()),
+        row_error_verbose: verbose_reason,
         has_dwarf_function,
         dwarf_param_count,
         dwarf_local_count,
@@ -565,8 +656,8 @@ fn build_preview_candidate_fallback_entry(
         loader_type_count,
         fact_density_score,
         preview_direct_success: false,
-        preview_fallback_kind: Some("preview_unsupported".to_string()),
-        preview_fallback_kind_refined: Some("preview_non_success_unknown".to_string()),
+        preview_fallback_kind: Some("internal_error".to_string()),
+        preview_fallback_kind_refined: Some(row_error_kind.to_string()),
         preview_fallback_reason: Some(reason),
         pcode_block_count: 0,
         pcode_op_count: 0,
@@ -587,21 +678,37 @@ fn preview_candidate_entry_with_recovery(
     func: &FunctionInfo,
     timeout_ms: Option<u64>,
 ) -> PreviewCandidateEntry {
-    let previous_hook = take_hook();
-    set_hook(Box::new(|_| {}));
     let result = catch_unwind(AssertUnwindSafe(|| {
         build_preview_candidate_entry(decomp, binary, fact_store, binary_name, func, timeout_ms)
     }));
-    set_hook(previous_hook);
     match result {
         Ok(entry) => entry,
-        Err(_) => build_preview_candidate_fallback_entry(
+        Err(payload) => {
+            let verbose = panic_payload_to_string(payload.as_ref());
+            let message = verbose
+                .as_deref()
+                .map(|msg| format!("preview candidate scan panicked: {msg}"))
+                .unwrap_or_else(|| "preview candidate scan panicked".to_string());
+            build_preview_candidate_fallback_entry(
             fact_store,
             binary_name,
             func,
-            "preview candidate scan panicked".to_string(),
-        ),
+            "panic_recovered",
+            "panic",
+            message,
+            verbose,
+        )
+        }
     }
+}
+
+fn panic_payload_to_string(payload: &(dyn Any + Send)) -> Option<String> {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return Some(message.clone());
+    }
+    payload
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_string())
 }
 
 fn write_output_bytes(cli: &OneShotArgs, body: &str) -> io::Result<()> {
@@ -835,6 +942,8 @@ pub(super) fn emit_preview_candidate_scan_batch(
         )
     })?;
     let chunk_size = cli.chunk_size.unwrap_or(50).max(1);
+    let quiet_batch_errors = cli.quiet_batch_errors || !cli.verbose;
+    let _silencer = OutputSilencer::new_if(quiet_batch_errors);
 
     let mut decomp = init_decompiler(cli.verbose);
     let (selected_profile, _) = resolve_profile(cli.profile.as_deref());
@@ -865,6 +974,7 @@ pub(super) fn emit_preview_candidate_scan_batch(
         .to_string();
 
     let selected_functions = select_candidate_functions(cli, binary)?;
+    let quiet_panic_hook = ScopedQuietPanicHook::install(quiet_batch_errors);
     let mut summary = PreviewCandidateScanSummary {
         binary: binary_name.clone(),
         binary_path: cli.binary.display().to_string(),
@@ -918,9 +1028,15 @@ pub(super) fn emit_preview_candidate_scan_batch(
         }
         writer.flush()?;
         summary.chunks_completed += 1;
+        if let Some(hook) = quiet_panic_hook.as_ref() {
+            summary.suppressed_stderr_count = hook.suppressed_count();
+        }
         write_scan_summary(summary_json, &summary)?;
     }
 
+    if let Some(hook) = quiet_panic_hook.as_ref() {
+        summary.suppressed_stderr_count = hook.suppressed_count();
+    }
     write_scan_summary(summary_json, &summary)?;
     Ok(())
 }

@@ -157,4 +157,8 @@ pub struct OneShotArgs {
     /// Resume batch preview candidate scan from an existing JSONL file
     #[arg(long, hide = true, value_name = "FILE")]
     pub resume_from: Option<PathBuf>,
+
+    /// Suppress noisy per-address panic/log output during batch preview candidate scans
+    #[arg(long, hide = true)]
+    pub quiet_batch_errors: bool,
 }
