@@ -24,7 +24,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(next_idx) = self.fallthrough_index(idx) else {
             return Ok(None);
         };
-        let next_addr = self.pcode.blocks[next_idx].start_address;
+        let next_addr = self.block_target_key(next_idx);
 
         let (cond, then_idx, else_idx) = if true_target == next_addr {
             let Some(else_idx) = self.forward_join_idx_from_address(idx, false_target) else {

@@ -84,7 +84,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(next_idx) = self.fallthrough_index(current_idx) else {
                 return Ok(None);
             };
-            let next_addr = self.pcode.blocks[next_idx].start_address;
+            let next_addr = self.block_target_key(next_idx);
             let (case_target, case_on_true) = if false_target == Some(next_addr) {
                 (true_target, true)
             } else if true_target == next_addr {

@@ -48,6 +48,12 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let address_to_index = build_address_to_index_map(pcode);
+        let block_target_keys = build_block_target_keys(pcode);
+        let target_key_to_index = block_target_keys
+            .iter()
+            .enumerate()
+            .map(|(idx, key)| (*key, idx))
+            .collect();
         let layout_fallthrough = build_layout_fallthrough_map(pcode);
         let successors = build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
         let predecessors = build_predecessor_index_map(&successors);
@@ -69,6 +75,8 @@ impl<'a> PreviewBuilder<'a> {
             type_context,
             defs,
             address_to_index,
+            block_target_keys,
+            target_key_to_index,
             layout_fallthrough,
             successors,
             predecessors,
@@ -261,13 +269,11 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn next_block_address(&self, idx: usize) -> Option<u64> {
-        self.layout_fallthrough[idx].map(|next_idx| self.pcode.blocks[next_idx].start_address)
+        self.layout_fallthrough[idx].map(|next_idx| self.block_target_key(next_idx))
     }
 
-    pub(super) fn canonical_target_address(&self, address: u64) -> Option<u64> {
-        let target_idx =
-            canonical_block_index_for_address(self.pcode, &self.address_to_index, address)?;
-        Some(self.pcode.blocks[target_idx].start_address)
+    pub(super) fn block_target_key(&self, idx: usize) -> u64 {
+        self.block_target_keys[idx]
     }
 
     pub(super) fn ensure_temp_binding_for_output(

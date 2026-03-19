@@ -82,6 +82,8 @@ struct PreviewBuilder<'a> {
     type_context: Option<&'a PreviewTypeContext>,
     defs: HashMap<VarnodeKey, DefSite<'a>>,
     address_to_index: HashMap<u64, usize>,
+    block_target_keys: Vec<u64>,
+    target_key_to_index: HashMap<u64, usize>,
     layout_fallthrough: Vec<Option<usize>>,
     successors: Vec<Vec<usize>>,
     predecessors: Vec<Vec<usize>>,

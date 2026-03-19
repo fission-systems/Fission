@@ -56,7 +56,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(body_idx) = self.fallthrough_index(idx) else {
                 return Ok(None);
             };
-            let body_addr = self.pcode.blocks[body_idx].start_address;
+            let body_addr = self.block_target_key(body_idx);
 
             let (cond, exit_idx) = if false_target == Some(body_addr) {
                 let exit_idx = self
@@ -149,7 +149,7 @@ impl<'a> PreviewBuilder<'a> {
                     if self.region_has_external_entry(&visited, start_idx) {
                         return Ok(None);
                     }
-                    let start_addr = self.pcode.blocks[start_idx].start_address;
+                    let start_addr = self.block_target_key(start_idx);
                     if true_target == start_addr {
                         let Some(exit_addr) = false_target else {
                             return Ok(None);

@@ -25,21 +25,30 @@ impl<'a> PreviewBuilder<'a> {
                     Ok(LoweredTerminator::Return(expr))
                 }
                 PcodeOpcode::Branch if op.inputs.len() == 1 => {
-                    let Some(target) = op.inputs.first().and_then(branch_target_address) else {
+                    let Some(target_idx) = op.inputs.first().and_then(|input| {
+                        resolve_branch_target_index(
+                            this.pcode,
+                            &this.address_to_index,
+                            idx,
+                            op,
+                            input,
+                        )
+                    }) else {
                         return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                     };
-                    let Some(target) = this.canonical_target_address(target) else {
-                        return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
-                    };
-                    Ok(LoweredTerminator::Goto(target))
+                    Ok(LoweredTerminator::Goto(this.block_target_key(target_idx)))
                 }
                 PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
-                    let Some(true_target) = branch_target_address(&op.inputs[0]) else {
+                    let Some(true_target_idx) = resolve_branch_target_index(
+                        this.pcode,
+                        &this.address_to_index,
+                        idx,
+                        op,
+                        &op.inputs[0],
+                    ) else {
                         return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                     };
-                    let Some(true_target) = this.canonical_target_address(true_target) else {
-                        return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
-                    };
+                    let true_target = this.block_target_key(true_target_idx);
                     let cond = this
                         .try_recover_x86_branch_condition(&op.inputs[1])?
                         .map(Ok)

@@ -9,6 +9,66 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-19
 
+### P5F2 - Preview-Stage Block Split And First Narrow Unblock
+
+This round moved preview-side diagnosis from “generic unknown failure cleanup” into the first real unblock patch for the Fission NIR path.
+
+The work happened in two steps:
+
+- first, preview-stage failures were split so that pcode/frontend acquisition failures stopped polluting the real preview block bucket,
+- then a single recoverable `unsupported_indirect_branch_target` shape was patched without broadening indirect control-flow support.
+
+#### Added
+
+- preview block signature reporting in inventory-backed rows
+  - rows now carry:
+    - `preview_block_signature`
+    - `preview_block_detail`
+- finer preview-stage diagnosis buckets
+  - `preview_frontend_reject` is now separated from genuine preview CFG failures
+  - diagnosis summaries can aggregate preview block signatures directly
+- narrow instruction-local relative branch target support in the Fission NIR pcode path
+  - recoverable constant-space pcode branch targets are now resolved by exact target block index
+  - duplicate-start blocks can now be distinguished through synthetic target keys / labels instead of collapsing into one canonical start address
+
+#### Changed
+
+- preview inventory / diagnosis interpretation
+  - `native_pcode_failure`-like cases that previously looked like preview unknowns are now surfaced as frontend rejection rather than preview-stage block
+- preview control-flow lowering
+  - branch and cbranch lowering now use resolved target block indices for the supported instruction-local relative-target shape
+- structuring path label/target handling
+  - duplicate-start block targets are preserved narrowly enough to support the recovered branch shape without enabling broad indirect branch handling
+
+#### Validation
+
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo test -p fission-pcode preview_supports_instruction_local_conditional_branch_targets -- --nocapture`
+- `cargo test -p fission-pcode preview_supports_instruction_local_unconditional_branch_targets -- --nocapture`
+- inventory smoke reruns:
+  - `GetProcAddress.exe --functions-limit 20`
+  - `putty.exe --functions-limit 10`
+
+#### Observed Effect
+
+- `GetProcAddress.exe`
+  - before:
+    - `direct_success_count = 16`
+    - `preview_frontend_reject = 3`
+    - `preview_unsupported_cfg = 1`
+    - dominant preview-side signature: `unsupported_indirect_branch_target`
+  - after:
+    - `direct_success_count = 17`
+    - `preview_failure_count = 3`
+    - remaining failures are all `preview_frontend_reject`
+    - the representative blocked row at `0x140001190` now becomes `preview_direct_success = true`
+- `putty.exe`
+  - 10-function smoke rerun stayed stable with:
+    - `direct_success_count = 10`
+    - `preview_failure_count = 0`
+
+This means the first real preview-side unblock is now in place: one recoverable `unsupported_indirect_branch_target` class has moved onto the success path without widening support to general indirect branch control flow.
+
 ### P5F1 - Provenance Completeness For Function Facts Inventory
 
 This round refined the inventory from “provenance-aware” toward “provenance-complete enough to guide the next core patch.”

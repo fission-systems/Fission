@@ -5,6 +5,7 @@ mod bootstrap_x86;
 mod normalize_arith;
 mod normalize_bitstream;
 mod normalize_slots;
+mod relative_branch_targets;
 mod structuring_conditionals;
 mod structuring_linear;
 mod structuring_loops;

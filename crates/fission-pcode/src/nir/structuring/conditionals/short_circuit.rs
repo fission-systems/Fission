@@ -38,7 +38,7 @@ impl<'a> PreviewBuilder<'a> {
             else {
                 return Ok(None);
             };
-            if false_target != Some(self.pcode.blocks[next_idx].start_address) {
+            if false_target != Some(self.block_target_key(next_idx)) {
                 return Ok(None);
             }
             let current_join_idx = self
@@ -107,7 +107,7 @@ impl<'a> PreviewBuilder<'a> {
             else {
                 return Ok(None);
             };
-            if false_target != Some(self.pcode.blocks[next_idx].start_address) {
+            if false_target != Some(self.block_target_key(next_idx)) {
                 return Ok(None);
             }
             let current_else_idx = self
@@ -183,7 +183,7 @@ impl<'a> PreviewBuilder<'a> {
         let Some(mut next_idx) = self.fallthrough_index(idx) else {
             return Ok(None);
         };
-        if false_target != Some(self.pcode.blocks[next_idx].start_address) {
+        if false_target != Some(self.block_target_key(next_idx)) {
             return Ok(None);
         }
         let body_idx = self
@@ -267,7 +267,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(chain_next_idx) = self.fallthrough_index(next_idx) else {
                 return Ok(None);
             };
-            if false_target != Some(self.pcode.blocks[chain_next_idx].start_address) {
+            if false_target != Some(self.block_target_key(chain_next_idx)) {
                 return Ok(None);
             }
             next_idx = chain_next_idx;

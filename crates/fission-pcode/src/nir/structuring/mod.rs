@@ -733,7 +733,7 @@ impl<'a> PreviewBuilder<'a> {
         if skip_to <= start_idx + 1 {
             return false;
         }
-        (start_idx + 1..skip_to).any(|idx| targeted.contains(&self.pcode.blocks[idx].start_address))
+        (start_idx + 1..skip_to).any(|idx| targeted.contains(&self.block_target_key(idx)))
     }
 
     fn targeted_internal_entries(
@@ -746,7 +746,7 @@ impl<'a> PreviewBuilder<'a> {
             return Vec::new();
         }
         (start_idx + 1..skip_to)
-            .filter(|idx| targeted.contains(&self.pcode.blocks[*idx].start_address))
+            .filter(|idx| targeted.contains(&self.block_target_key(*idx)))
             .collect()
     }
 
@@ -935,10 +935,10 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             let block = &self.pcode.blocks[idx];
-            if (idx == 0 || targeted.contains(&block.start_address))
-                && emitted_labels.insert(block.start_address)
+            let block_key = self.block_target_key(idx);
+            if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key)
             {
-                body.push(HirStmt::Label(block_label(block.start_address)));
+                body.push(HirStmt::Label(block_label(block_key)));
             }
             if diag {
                 eprintln!(

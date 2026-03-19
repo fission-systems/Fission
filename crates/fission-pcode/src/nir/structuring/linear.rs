@@ -16,10 +16,11 @@ impl<'a> PreviewBuilder<'a> {
         let mut emitted_labels = HashSet::new();
         for idx in 0..self.pcode.blocks.len() {
             let block = &self.pcode.blocks[idx];
-            if (idx == 0 || targeted.contains(&block.start_address))
-                && emitted_labels.insert(block.start_address)
+            let block_key = self.block_target_key(idx);
+            if (idx == 0 || targeted.contains(&block_key))
+                && emitted_labels.insert(block_key)
             {
-                body.push(HirStmt::Label(block_label(block.start_address)));
+                body.push(HirStmt::Label(block_label(block_key)));
             }
             body.extend(self.lower_block_stmts(block)?);
             match self.lower_block_terminator(idx)? {
@@ -536,7 +537,9 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn find_block_index_by_address(&self, address: u64) -> Option<usize> {
-        canonical_block_index_for_address(self.pcode, &self.address_to_index, address)
+        self.target_key_to_index.get(&address).copied().or_else(|| {
+            canonical_block_index_for_address(self.pcode, &self.address_to_index, address)
+        })
     }
 
     pub(super) fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {
@@ -546,7 +549,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut targets = HashSet::new();
         for idx in 0..self.pcode.blocks.len() {
             for succ in &self.successors[idx] {
-                targets.insert(self.pcode.blocks[*succ].start_address);
+                targets.insert(self.block_target_key(*succ));
             }
         }
         self.jump_targets_cache = Some(targets.clone());

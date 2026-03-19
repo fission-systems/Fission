@@ -41,7 +41,7 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
-        let next_addr = self.pcode.blocks[next_idx].start_address;
+        let next_addr = self.block_target_key(next_idx);
         let (cond, body_idx, exit) = if true_target == next_addr {
             let exit = if let Some(join_addr) = false_target {
                 let Some(join_idx) = self.forward_join_idx_from_address(idx, join_addr) else {

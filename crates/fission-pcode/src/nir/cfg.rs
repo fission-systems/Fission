@@ -8,6 +8,31 @@ pub(super) fn build_address_to_index_map(pcode: &PcodeFunction) -> HashMap<u64, 
     address_to_index
 }
 
+const DUPLICATE_BLOCK_KEY_TAG: u64 = 0x8000_0000_0000_0000;
+
+pub(super) fn build_block_target_keys(pcode: &PcodeFunction) -> Vec<u64> {
+    let mut seen = HashMap::<u64, u32>::new();
+    pcode
+        .blocks
+        .iter()
+        .map(|block| {
+            let ordinal = seen.entry(block.start_address).or_insert(0);
+            let key = if *ordinal == 0 {
+                block.start_address
+            } else {
+                encode_duplicate_block_key(block.start_address, *ordinal)
+            };
+            *ordinal += 1;
+            key
+        })
+        .collect()
+}
+
+fn encode_duplicate_block_key(start_address: u64, ordinal: u32) -> u64 {
+    debug_assert!(ordinal > 0);
+    DUPLICATE_BLOCK_KEY_TAG | ((u64::from(ordinal) & 0x7fff) << 48) | (start_address & 0x0000_ffff_ffff_ffff)
+}
+
 pub(super) fn canonical_block_start_for_address(
     pcode: &PcodeFunction,
     address: u64,
@@ -54,24 +79,24 @@ pub(super) fn build_successor_index_map(
             match block_terminator_op(block) {
                 Some(op) if op.opcode == PcodeOpcode::Return => {}
                 Some(op) if op.opcode == PcodeOpcode::Branch && op.inputs.len() == 1 => {
-                    if let Some(target) = op.inputs.first().and_then(branch_target_address) {
-                        if let Some(target_idx) =
-                            canonical_block_index_for_address(pcode, address_to_index, target)
-                        {
-                            succs.push(target_idx);
-                        }
+                    if let Some(target_idx) = op
+                        .inputs
+                        .first()
+                        .and_then(|input| resolve_branch_target_index(pcode, address_to_index, idx, op, input))
+                    {
+                        succs.push(target_idx);
                     }
                 }
                 Some(op)
                     if op.opcode == PcodeOpcode::CBranch
                         || (op.opcode == PcodeOpcode::Branch && op.inputs.len() >= 2) =>
                 {
-                    if let Some(target) = op.inputs.first().and_then(branch_target_address) {
-                        if let Some(target_idx) =
-                            canonical_block_index_for_address(pcode, address_to_index, target)
-                        {
-                            succs.push(target_idx);
-                        }
+                    if let Some(target_idx) = op
+                        .inputs
+                        .first()
+                        .and_then(|input| resolve_branch_target_index(pcode, address_to_index, idx, op, input))
+                    {
+                        succs.push(target_idx);
                     }
                     if let Some(next_idx) = layout_fallthrough[idx] {
                         succs.push(next_idx);
@@ -102,28 +127,8 @@ pub(super) fn build_predecessor_index_map(successors: &[Vec<usize>]) -> Vec<Vec<
 }
 
 pub(super) fn build_layout_fallthrough_map(pcode: &PcodeFunction) -> Vec<Option<usize>> {
-    let address_to_index = build_address_to_index_map(pcode);
-    let mut starts = pcode
-        .blocks
-        .iter()
-        .map(|block| block.start_address)
-        .collect::<Vec<_>>();
-    starts.sort_unstable();
-    starts.dedup();
-
-    let mut next_distinct = HashMap::new();
-    for pair in starts.windows(2) {
-        let current = pair[0];
-        let next = pair[1];
-        if let Some(next_idx) = address_to_index.get(&next) {
-            next_distinct.insert(current, *next_idx);
-        }
-    }
-
-    pcode
-        .blocks
-        .iter()
-        .map(|block| next_distinct.get(&block.start_address).copied())
+    (0..pcode.blocks.len())
+        .map(|idx| (idx + 1 < pcode.blocks.len()).then_some(idx + 1))
         .collect()
 }
 
@@ -164,8 +169,56 @@ pub(super) fn branch_target_address(vn: &Varnode) -> Option<u64> {
     }
 }
 
+pub(super) fn resolve_branch_target_index(
+    pcode: &PcodeFunction,
+    address_to_index: &HashMap<u64, usize>,
+    block_idx: usize,
+    op: &PcodeOp,
+    vn: &Varnode,
+) -> Option<usize> {
+    resolve_instruction_local_branch_target_index(pcode, block_idx, op, vn).or_else(|| {
+        let target = branch_target_address(vn)?;
+        canonical_block_index_for_address(pcode, address_to_index, target)
+    })
+}
+
+fn resolve_instruction_local_branch_target_index(
+    pcode: &PcodeFunction,
+    block_idx: usize,
+    op: &PcodeOp,
+    vn: &Varnode,
+) -> Option<usize> {
+    if vn.space_id != 0 || !vn.is_constant {
+        return None;
+    }
+    let delta = u32::try_from(vn.constant_val).ok()?;
+    if delta == 0 || delta > 8 {
+        return None;
+    }
+    let target_seq = op.seq_num.checked_add(delta)?;
+    let _ = pcode.blocks.get(block_idx)?;
+    pcode
+        .blocks
+        .iter()
+        .enumerate()
+        .skip(block_idx)
+        .find(|(_, block)| {
+            block
+                .ops
+                .first()
+                .is_some_and(|first| first.address == op.address && first.seq_num == target_seq)
+        })
+        .map(|(idx, _)| idx)
+}
+
 pub(super) fn block_label(address: u64) -> String {
-    format!("block_{:x}", address)
+    if address & DUPLICATE_BLOCK_KEY_TAG != 0 {
+        let ordinal = (address >> 48) & 0x7fff;
+        let raw = address & 0x0000_ffff_ffff_ffff;
+        format!("block_{raw:x}_dup{ordinal}")
+    } else {
+        format!("block_{:x}", address)
+    }
 }
 
 pub(super) fn fold_logical_chain(mut exprs: Vec<HirExpr>, op: HirBinaryOp) -> HirExpr {
