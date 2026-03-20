@@ -1016,6 +1016,9 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn should_force_linear_structuring(&self) -> bool {
+        if self.options.force_linear_structuring {
+            return true;
+        }
         let total_ops: usize = self.pcode.blocks.iter().map(|block| block.ops.len()).sum();
         if self.pcode.blocks.len() > 80 {
             return true;
@@ -1070,6 +1073,7 @@ pub(super) fn promote_single_entry_guarded_tail_regions_for_test(
         format: "PE".to_string(),
         image_base: 0,
         sections: Vec::new(),
+        force_linear_structuring: false,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     while builder.promote_single_entry_guarded_tail_regions(body) {}
@@ -1090,6 +1094,7 @@ pub(super) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
         format: "PE".to_string(),
         image_base: 0,
         sections: Vec::new(),
+        force_linear_structuring: false,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     builder.discover_guarded_tail_candidates(body);

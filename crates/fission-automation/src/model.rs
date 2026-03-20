@@ -131,6 +131,12 @@ pub struct InventoryRow {
     #[serde(default)]
     pub preview_block_detail: Option<String>,
     #[serde(default)]
+    pub recovery_strategy_attempted: Option<String>,
+    #[serde(default)]
+    pub recovery_strategy_applied: Option<String>,
+    #[serde(default)]
+    pub recovery_outcome: Option<String>,
+    #[serde(default)]
     pub preview_surface_kind: Option<String>,
     #[serde(default)]
     pub pcode_block_count: usize,
@@ -194,6 +200,12 @@ pub struct InventorySummary {
     pub failure_kind_counts: BTreeMap<String, usize>,
     #[serde(default)]
     pub row_error_kind_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_strategy_attempted_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_strategy_applied_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_outcome_counts: BTreeMap<String, usize>,
     #[serde(default)]
     pub suppressed_stderr_count: usize,
 }

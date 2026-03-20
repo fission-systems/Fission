@@ -49,6 +49,7 @@ fn preview_options() -> MlilPreviewOptions {
         format: "PE".to_string(),
         image_base: 0x1400_0000,
         sections: vec![(0x1400_1000, 0x1400_2000)],
+        force_linear_structuring: false,
     }
 }
 
@@ -60,5 +61,6 @@ fn preview_options_x86() -> MlilPreviewOptions {
         format: "PE".to_string(),
         image_base: 0x400000,
         sections: vec![(0x401000, 0x402000)],
+        force_linear_structuring: false,
     }
 }

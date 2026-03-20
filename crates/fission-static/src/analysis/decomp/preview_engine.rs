@@ -39,6 +39,9 @@ pub struct PreviewSelection {
     pub fallback_kind: Option<&'static str>,
     pub fallback_kind_refined: Option<&'static str>,
     pub preview_surface: Option<PreviewSurfaceKind>,
+    pub recovery_strategy_attempted: Option<&'static str>,
+    pub recovery_strategy_applied: Option<&'static str>,
+    pub recovery_outcome: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +52,9 @@ pub struct PreviewRoutingDecision {
     pub fallback_kind: Option<&'static str>,
     pub fallback_kind_refined: Option<&'static str>,
     pub preview_surface: Option<PreviewSurfaceKind>,
+    pub recovery_strategy_attempted: Option<&'static str>,
+    pub recovery_strategy_applied: Option<&'static str>,
+    pub recovery_outcome: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +74,9 @@ impl PreviewRoutingResolver {
             fallback_kind: selection.fallback_kind,
             fallback_kind_refined: selection.fallback_kind_refined,
             preview_surface: selection.preview_surface,
+            recovery_strategy_attempted: selection.recovery_strategy_attempted,
+            recovery_strategy_applied: selection.recovery_strategy_applied,
+            recovery_outcome: selection.recovery_outcome,
         }
     }
 
@@ -82,6 +91,9 @@ impl PreviewRoutingResolver {
             fallback_kind: None,
             fallback_kind_refined: None,
             preview_surface: None,
+            recovery_strategy_attempted: None,
+            recovery_strategy_applied: None,
+            recovery_outcome: None,
         }
     }
 
@@ -102,6 +114,33 @@ impl PreviewRoutingResolver {
             fallback_kind: extract_fallback_kind(fallback_reason.as_deref()),
             fallback_kind_refined: extract_refined_fallback_kind(fallback_reason.as_deref()),
             fallback_reason,
+            recovery_strategy_attempted: None,
+            recovery_strategy_applied: None,
+            recovery_outcome: None,
+        }
+    }
+
+    pub fn preview_success_with_recovery(
+        code: String,
+        build_stats: Option<PreviewBuildStats>,
+        hint_stats: Option<PreviewHintStats>,
+        attempted: &'static str,
+        applied: &'static str,
+        outcome: &'static str,
+    ) -> PreviewSelection {
+        PreviewSelection {
+            preview_surface: Some(classify_preview_surface(&code)),
+            preview_code: Some(code),
+            build_stats,
+            hint_stats,
+            engine_used: PreviewEngineMode::MlilPreview,
+            fell_back: false,
+            fallback_reason: None,
+            fallback_kind: None,
+            fallback_kind_refined: None,
+            recovery_strategy_attempted: Some(attempted),
+            recovery_strategy_applied: Some(applied),
+            recovery_outcome: Some(outcome),
         }
     }
 
@@ -117,6 +156,32 @@ impl PreviewRoutingResolver {
             fallback_kind_refined: extract_refined_fallback_kind(Some(fallback_reason.as_str())),
             fallback_reason: Some(fallback_reason),
             preview_surface: None,
+            recovery_strategy_attempted: None,
+            recovery_strategy_applied: None,
+            recovery_outcome: None,
+        }
+    }
+
+    pub fn preview_fallback_with_recovery(
+        reason: impl AsRef<str>,
+        attempted: &'static str,
+        applied: Option<&'static str>,
+        outcome: &'static str,
+    ) -> PreviewSelection {
+        let fallback_reason = classified_preview_error(reason.as_ref());
+        PreviewSelection {
+            preview_code: None,
+            build_stats: None,
+            hint_stats: None,
+            engine_used: PreviewEngineMode::Legacy,
+            fell_back: true,
+            fallback_kind: extract_fallback_kind(Some(fallback_reason.as_str())),
+            fallback_kind_refined: extract_refined_fallback_kind(Some(fallback_reason.as_str())),
+            fallback_reason: Some(fallback_reason),
+            preview_surface: None,
+            recovery_strategy_attempted: Some(attempted),
+            recovery_strategy_applied: applied,
+            recovery_outcome: Some(outcome),
         }
     }
 
@@ -129,6 +194,9 @@ impl PreviewRoutingResolver {
             fallback_kind: Some(kind),
             fallback_kind_refined: None,
             preview_surface: None,
+            recovery_strategy_attempted: None,
+            recovery_strategy_applied: None,
+            recovery_outcome: None,
         }
     }
 }
@@ -197,6 +265,7 @@ const PREVIEW_WORKER_BIN_NAME: &str = "fission_preview_worker";
 const PREVIEW_WORKER_TIMEOUT_CAP_MS: u64 = 10_000;
 const PREVIEW_WORKER_TIMEOUT_MARGIN_MS: u64 = 1_000;
 const PREVIEW_WORKER_MIN_TIMEOUT_MS: u64 = 1_000;
+const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";
 
 fn is_type_failure_for_preview_rescue(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
@@ -292,18 +361,27 @@ fn build_preview_type_context_from_facts(
 
 fn make_preview_request(
     pcode_json: &str,
-    binary: &LoadedBinary,
     address: u64,
     name: &str,
+    options: MlilPreviewOptions,
     type_context: PreviewTypeContext,
 ) -> PreviewWorkerRequest {
     PreviewWorkerRequest {
         pcode_json: pcode_json.to_string(),
         address,
         name: name.to_string(),
-        options: MlilPreviewOptions::from_loaded_binary(binary),
+        options,
         type_context,
     }
+}
+
+fn preview_options_with_recovery(
+    binary: &LoadedBinary,
+    force_linear_structuring: bool,
+) -> MlilPreviewOptions {
+    let mut options = MlilPreviewOptions::from_loaded_binary(binary);
+    options.force_linear_structuring = force_linear_structuring;
+    options
 }
 
 fn preview_worker_timeout_ms(timeout_ms: Option<u64>) -> u64 {
@@ -614,6 +692,7 @@ fn render_preview_from_json_with_type_context(
     enforce_auto_gate: bool,
     timeout_ms: Option<u64>,
     type_context: PreviewTypeContext,
+    force_linear_structuring: bool,
 ) -> Result<Option<(String, Option<PreviewBuildStats>, Option<PreviewHintStats>)>, String> {
     let parse_start = Instant::now();
     let pcode = PcodeFunction::from_json(pcode_json)
@@ -623,7 +702,8 @@ fn render_preview_from_json_with_type_context(
         return Ok(None);
     }
 
-    let request = make_preview_request(pcode_json, binary, address, name, type_context);
+    let options = preview_options_with_recovery(binary, force_linear_structuring);
+    let request = make_preview_request(pcode_json, address, name, options, type_context);
 
     if should_use_preview_worker(binary, &pcode, enforce_auto_gate) {
         let worker_timeout_ms = preview_worker_timeout_ms(timeout_ms);
@@ -646,6 +726,54 @@ fn render_preview_from_json_with_type_context(
     match render_preview_request(&request) {
         Ok(result) => Ok(Some(result)),
         Err(err) => Err(err),
+    }
+}
+
+fn try_structuring_recovery(
+    pcode_json: &str,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    timeout_ms: Option<u64>,
+    type_context: PreviewTypeContext,
+    error: &str,
+) -> Result<Option<PreviewSelection>, String> {
+    if classify_preview_failure_refined(error) != "preview_structuring_failure" {
+        return Ok(None);
+    }
+
+    match render_preview_from_json_with_type_context(
+        pcode_json,
+        binary,
+        address,
+        name,
+        false,
+        timeout_ms,
+        type_context,
+        true,
+    ) {
+        Ok(Some((code, build_stats, hint_stats))) => Ok(Some(
+            PreviewRoutingResolver::preview_success_with_recovery(
+                code,
+                build_stats,
+                hint_stats,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                "recovered",
+            ),
+        )),
+        Ok(None) => Ok(Some(PreviewRoutingResolver::preview_fallback_with_recovery(
+            error,
+            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+            None,
+            "retry_skipped",
+        ))),
+        Err(retry_err) => Ok(Some(PreviewRoutingResolver::preview_fallback_with_recovery(
+            format!("{error}; recovery failed: {retry_err}"),
+            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+            None,
+            "retry_failed",
+        ))),
     }
 }
 
@@ -779,6 +907,7 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                 false,
                 timeout_ms,
                 type_context,
+                false,
             ) {
                 Ok(Some((code, build_stats, hint_stats))) => {
                     Ok(PreviewRoutingResolver::preview_success(
@@ -792,7 +921,21 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                 Ok(None) => Ok(PreviewRoutingResolver::preview_fallback(
                     "mlil-preview skipped: function not supported by preview builder",
                 )),
-                Err(err) => Ok(PreviewRoutingResolver::preview_fallback(&err)),
+                Err(err) => {
+                    if let Some(selection) = try_structuring_recovery(
+                        &pcode_json,
+                        binary,
+                        address,
+                        name,
+                        timeout_ms,
+                        build_preview_type_context_from_facts(binary, fact_store, address),
+                        &err,
+                    )? {
+                        Ok(selection)
+                    } else {
+                        Ok(PreviewRoutingResolver::preview_fallback(&err))
+                    }
+                }
             }
         }
         PreviewEngineMode::Auto => {
@@ -816,6 +959,7 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                 true,
                 timeout_ms,
                 type_context,
+                false,
             ) {
                 Ok(Some((code, build_stats, hint_stats))) => {
                     Ok(PreviewRoutingResolver::preview_success(
@@ -829,7 +973,21 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                 Ok(None) => Ok(PreviewRoutingResolver::preview_fallback(
                     "mlil-preview skipped: function not supported by preview builder",
                 )),
-                Err(err) => Ok(PreviewRoutingResolver::preview_fallback(&err)),
+                Err(err) => {
+                    if let Some(selection) = try_structuring_recovery(
+                        &pcode_json,
+                        binary,
+                        address,
+                        name,
+                        timeout_ms,
+                        build_preview_type_context_from_facts(binary, fact_store, address),
+                        &err,
+                    )? {
+                        Ok(selection)
+                    } else {
+                        Ok(PreviewRoutingResolver::preview_fallback(&err))
+                    }
+                }
             }
         }
     }
@@ -889,6 +1047,7 @@ pub fn rescue_preview_output_with_facts<S: PreviewSource>(
         false,
         timeout_ms,
         type_context,
+        false,
     ) {
         Ok(Some((code, build_stats, hint_stats))) => {
             Ok(Some(PreviewRoutingResolver::preview_success(
@@ -938,6 +1097,7 @@ mod tests {
                 format: "PE".to_string(),
                 image_base: 0x140000000,
                 sections: vec![(0x140001000, 0x140002000)],
+                force_linear_structuring: false,
             },
             type_context: PreviewTypeContext {
                 call_targets: HashMap::from([(0x140001234, "MessageBoxW".to_string())]),
@@ -998,6 +1158,9 @@ mod tests {
             fallback_kind: Some("preview_timeout"),
             fallback_kind_refined: Some("preview_timeout"),
             preview_surface: None,
+            recovery_strategy_attempted: None,
+            recovery_strategy_applied: None,
+            recovery_outcome: None,
         };
         let decision = selection.routing_decision();
         assert_eq!(decision.engine_used, PreviewEngineMode::Legacy);

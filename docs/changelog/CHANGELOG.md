@@ -9,6 +9,45 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-20
 
+### P5H1 - Failure-Driven Recovery Scaffold
+
+This round introduced the first real recovery layer for Fission NIR preview failures.
+
+Until now, preview-side failures were mainly classified and reported. After this patch, selected failure signatures can carry an explicit recovery strategy attempt, and the result of that attempt is exported through the same inventory/report path.
+
+#### Added
+
+- recovery metadata on preview routing decisions and selections:
+  - `recovery_strategy_attempted`
+  - `recovery_strategy_applied`
+  - `recovery_outcome`
+- first whitelist recovery strategy:
+  - `linearized_structuring_retry`
+- inventory / summary recovery accounting:
+  - `recovery_strategy_attempted_counts`
+  - `recovery_strategy_applied_counts`
+  - `recovery_outcome_counts`
+
+#### Changed
+
+- `MlilPreviewOptions` now supports a narrow `force_linear_structuring` mode
+- `preview_structuring_failure` can now trigger a single linear-structuring retry instead of falling directly to a plain failure record
+- CLI inventory rows and automation summaries now preserve recovery metadata alongside existing preview block signature/detail fields
+
+#### Validation
+
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli`
+
+#### Current Outcome
+
+- the failure-driven recovery scaffold is now present in code and data models
+- the first whitelist strategy exists and is wired into preview routing
+- current `preview` sentinel lane still has no `preview_structuring_failure` sample, so:
+  - recovery counters remain empty in the lane smoke
+  - the next step is to secure a real structuring-failure seed and validate whether `linearized_structuring_retry` recovers it, preserves the same failure, or narrows it into a better signature
+
 ### P6 - `fission-automation` Canonical Quality Runner
 
 This round replaced the old ad hoc benchmark-script loop with a tracked Rust automation crate that acts as the canonical local quality runner for Fission NIR.

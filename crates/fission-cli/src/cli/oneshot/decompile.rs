@@ -172,6 +172,9 @@ pub(super) struct PreviewCandidateEntry {
     pub(super) preview_fallback_reason: Option<String>,
     pub(super) preview_block_signature: Option<String>,
     pub(super) preview_block_detail: Option<String>,
+    pub(super) recovery_strategy_attempted: Option<String>,
+    pub(super) recovery_strategy_applied: Option<String>,
+    pub(super) recovery_outcome: Option<String>,
     pub(super) pcode_block_count: usize,
     pub(super) pcode_op_count: usize,
     pub(super) has_indirect_control_flow: bool,
@@ -593,6 +596,9 @@ fn build_preview_candidate_entry(
     let mut preview_surface_kind = None;
     let mut preview_hint_stats = None;
     let mut preview_code = None;
+    let mut recovery_strategy_attempted = None;
+    let mut recovery_strategy_applied = None;
+    let mut recovery_outcome = None;
 
     match decomp.get_pcode(func.address) {
         Ok(pcode_json) => {
@@ -621,6 +627,11 @@ fn build_preview_candidate_entry(
                 preview_surface_kind = selection.preview_surface;
                 preview_hint_stats = selection.hint_stats;
                 preview_code = selection.preview_code;
+                recovery_strategy_attempted =
+                    selection.recovery_strategy_attempted.map(str::to_string);
+                recovery_strategy_applied =
+                    selection.recovery_strategy_applied.map(str::to_string);
+                recovery_outcome = selection.recovery_outcome.map(str::to_string);
             }
         }
         Err(err) => {
@@ -691,10 +702,13 @@ fn build_preview_candidate_entry(
         preview_direct_success,
         preview_fallback_kind,
         preview_fallback_kind_refined,
-        preview_fallback_reason,
-        preview_block_signature,
-        preview_block_detail,
-        pcode_block_count,
+            preview_fallback_reason,
+            preview_block_signature,
+            preview_block_detail,
+            recovery_strategy_attempted,
+            recovery_strategy_applied,
+            recovery_outcome,
+            pcode_block_count,
         pcode_op_count,
         has_indirect_control_flow: has_indirect,
         auto_eligible,
@@ -769,6 +783,9 @@ fn build_preview_candidate_fallback_entry(
             0,
         ),
         preview_block_detail: Some(reason.clone()),
+        recovery_strategy_attempted: None,
+        recovery_strategy_applied: None,
+        recovery_outcome: None,
         pcode_block_count: 0,
         pcode_op_count: 0,
         has_indirect_control_flow: false,

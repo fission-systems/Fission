@@ -65,6 +65,9 @@ struct FunctionFactsInventoryRow {
     preview_fallback_reason: Option<String>,
     preview_block_signature: Option<String>,
     preview_block_detail: Option<String>,
+    recovery_strategy_attempted: Option<String>,
+    recovery_strategy_applied: Option<String>,
+    recovery_outcome: Option<String>,
     preview_surface_kind: Option<String>,
     pcode_block_count: usize,
     pcode_op_count: usize,
@@ -127,6 +130,9 @@ struct FunctionFactsInventorySummary {
     heuristic_surface_candidate_count: usize,
     failure_kind_counts: BTreeMap<String, usize>,
     row_error_kind_counts: BTreeMap<String, usize>,
+    recovery_strategy_attempted_counts: BTreeMap<String, usize>,
+    recovery_strategy_applied_counts: BTreeMap<String, usize>,
+    recovery_outcome_counts: BTreeMap<String, usize>,
     suppressed_stderr_count: usize,
 }
 
@@ -326,6 +332,9 @@ fn to_inventory_row(
         preview_fallback_reason: entry.preview_fallback_reason,
         preview_block_signature: entry.preview_block_signature,
         preview_block_detail: entry.preview_block_detail,
+        recovery_strategy_attempted: entry.recovery_strategy_attempted,
+        recovery_strategy_applied: entry.recovery_strategy_applied,
+        recovery_outcome: entry.recovery_outcome,
         preview_surface_kind: entry.preview_surface_kind,
         pcode_block_count: entry.pcode_block_count,
         pcode_op_count: entry.pcode_op_count,
@@ -395,6 +404,24 @@ fn update_inventory_summary(
     if row.heuristic_surface_candidate {
         summary.heuristic_surface_candidate_count += 1;
     }
+    if let Some(strategy) = row.recovery_strategy_attempted.as_ref() {
+        *summary
+            .recovery_strategy_attempted_counts
+            .entry(strategy.clone())
+            .or_insert(0) += 1;
+    }
+    if let Some(strategy) = row.recovery_strategy_applied.as_ref() {
+        *summary
+            .recovery_strategy_applied_counts
+            .entry(strategy.clone())
+            .or_insert(0) += 1;
+    }
+    if let Some(outcome) = row.recovery_outcome.as_ref() {
+        *summary
+            .recovery_outcome_counts
+            .entry(outcome.clone())
+            .or_insert(0) += 1;
+    }
 
     let candidate_entry = PreviewCandidateEntry {
         binary: row.binary.clone(),
@@ -416,6 +443,9 @@ fn update_inventory_summary(
         preview_fallback_reason: row.preview_fallback_reason.clone(),
         preview_block_signature: row.preview_block_signature.clone(),
         preview_block_detail: row.preview_block_detail.clone(),
+        recovery_strategy_attempted: row.recovery_strategy_attempted.clone(),
+        recovery_strategy_applied: row.recovery_strategy_applied.clone(),
+        recovery_outcome: row.recovery_outcome.clone(),
         pcode_block_count: row.pcode_block_count,
         pcode_op_count: row.pcode_op_count,
         has_indirect_control_flow: row.has_indirect_control_flow,

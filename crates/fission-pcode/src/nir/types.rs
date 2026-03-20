@@ -234,6 +234,7 @@ pub struct MlilPreviewOptions {
     pub format: String,
     pub image_base: u64,
     pub sections: Vec<(u64, u64)>,
+    pub force_linear_structuring: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -294,6 +295,7 @@ impl MlilPreviewOptions {
             format: binary.format.clone(),
             image_base: binary.inner().image_base,
             sections,
+            force_linear_structuring: false,
         }
     }
 
