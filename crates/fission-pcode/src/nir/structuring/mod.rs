@@ -807,6 +807,35 @@ impl<'a> PreviewBuilder<'a> {
         accepted
     }
 
+    fn try_recover_region_linearized_body(
+        &mut self,
+        start_idx: usize,
+        err: &MlilPreviewError,
+        targeted: &HashSet<u64>,
+        emitted_labels: &mut HashSet<u64>,
+    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+        if !self.options.region_linearize_structuring || err.structuring_failure_kind().is_none() {
+            return Ok(None);
+        }
+
+        let Some(exit) = self.linear_exit(start_idx)? else {
+            return Ok(None);
+        };
+        let Some((mut body, skip_to)) = self.lower_linear_body(start_idx, exit)? else {
+            return Ok(None);
+        };
+        if skip_to <= start_idx {
+            return Ok(None);
+        }
+
+        let block_key = self.block_target_key(start_idx);
+        if (start_idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
+            body.insert(0, HirStmt::Label(block_label(block_key)));
+        }
+
+        Ok(Some((cleanup_redundant_labels(body), skip_to)))
+    }
+
     pub(super) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
         let total_start = Instant::now();
@@ -851,9 +880,10 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) =
-                Self::capture_structuring_failure(self.try_lower_switch(idx), &mut last_structuring_failure)?
-                && self.accept_structured_region(idx, skip_to, &targeted)
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_lower_switch(idx),
+                &mut last_structuring_failure,
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
                 idx = skip_to;
@@ -870,8 +900,7 @@ impl<'a> PreviewBuilder<'a> {
             if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
                 self.try_lower_dowhile(idx),
                 &mut last_structuring_failure,
-            )?
-                && self.accept_structured_region(idx, skip_to, &targeted)
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
                 idx = skip_to;
@@ -888,8 +917,7 @@ impl<'a> PreviewBuilder<'a> {
             if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
                 self.try_lower_while(idx),
                 &mut last_structuring_failure,
-            )?
-                && self.accept_structured_region(idx, skip_to, &targeted)
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
                 idx = skip_to;
@@ -906,8 +934,7 @@ impl<'a> PreviewBuilder<'a> {
             if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
                 self.try_lower_short_circuit_if(idx),
                 &mut last_structuring_failure,
-            )?
-                && self.accept_structured_region(idx, skip_to, &targeted)
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
                 idx = skip_to;
@@ -924,8 +951,7 @@ impl<'a> PreviewBuilder<'a> {
             if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
                 self.try_lower_if_else(idx),
                 &mut last_structuring_failure,
-            )?
-                && self.accept_structured_region(idx, skip_to, &targeted)
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
                 idx = skip_to;
@@ -942,21 +968,29 @@ impl<'a> PreviewBuilder<'a> {
             if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
                 self.try_lower_if(idx),
                 &mut last_structuring_failure,
-            )?
-                && self.accept_structured_region(idx, skip_to, &targeted)
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
             }
             if let Some(err) = last_structuring_failure.take() {
+                if let Some((recovered_body, skip_to)) = self.try_recover_region_linearized_body(
+                    idx,
+                    &err,
+                    &targeted,
+                    &mut emitted_labels,
+                )? {
+                    body.extend(recovered_body);
+                    idx = skip_to;
+                    continue;
+                }
                 return Err(err);
             }
 
             let block = &self.pcode.blocks[idx];
             let block_key = self.block_target_key(idx);
-            if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key)
-            {
+            if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
                 body.push(HirStmt::Label(block_label(block_key)));
             }
             if diag {
@@ -1094,6 +1128,7 @@ pub(super) fn promote_single_entry_guarded_tail_regions_for_test(
         format: "PE".to_string(),
         image_base: 0,
         sections: Vec::new(),
+        region_linearize_structuring: false,
         force_linear_structuring: false,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
@@ -1115,6 +1150,7 @@ pub(super) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
         format: "PE".to_string(),
         image_base: 0,
         sections: Vec::new(),
+        region_linearize_structuring: false,
         force_linear_structuring: false,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);

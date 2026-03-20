@@ -17,6 +17,16 @@ pub struct BinarySnapshot {
     pub inventory_surface_gap_count: usize,
     pub source_presence_counts: SourcePresenceCounts,
     pub provenance_surface_totals: ProvenanceSurfaceTotals,
+    #[serde(default)]
+    pub recovery_strategy_attempted_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_strategy_applied_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_outcome_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_quality_flag_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_structuring_mode_counts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +41,16 @@ pub struct AggregateSnapshot {
     pub diagnosis_bucket_counts: BTreeMap<String, usize>,
     pub preview_block_signature_counts: BTreeMap<String, usize>,
     pub recommended_next_patch: Option<String>,
+    #[serde(default)]
+    pub recovery_strategy_attempted_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_strategy_applied_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_outcome_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_quality_flag_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_structuring_mode_counts: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,8 +80,33 @@ pub fn build_summary(
     totals: &InventorySummaryTotals,
     diagnosis: &DiagnosisAggregate,
 ) -> AutomationSummary {
+    let mut aggregate_recovery_strategy_attempted_counts = BTreeMap::new();
+    let mut aggregate_recovery_strategy_applied_counts = BTreeMap::new();
+    let mut aggregate_recovery_outcome_counts = BTreeMap::new();
+    let mut aggregate_recovery_quality_flag_counts = BTreeMap::new();
+    let mut aggregate_recovery_structuring_mode_counts = BTreeMap::new();
     let mut binaries = Vec::new();
     for summary in inventory_summaries {
+        merge_counts(
+            &mut aggregate_recovery_strategy_attempted_counts,
+            &summary.recovery_strategy_attempted_counts,
+        );
+        merge_counts(
+            &mut aggregate_recovery_strategy_applied_counts,
+            &summary.recovery_strategy_applied_counts,
+        );
+        merge_counts(
+            &mut aggregate_recovery_outcome_counts,
+            &summary.recovery_outcome_counts,
+        );
+        merge_counts(
+            &mut aggregate_recovery_quality_flag_counts,
+            &summary.recovery_quality_flag_counts,
+        );
+        merge_counts(
+            &mut aggregate_recovery_structuring_mode_counts,
+            &summary.recovery_structuring_mode_counts,
+        );
         binaries.push(BinarySnapshot {
             binary: summary.binary.clone(),
             direct_success_count: summary.direct_success_count,
@@ -71,6 +116,11 @@ pub fn build_summary(
             inventory_surface_gap_count: summary.inventory_surface_gap_count,
             source_presence_counts: summary.source_presence_counts.clone(),
             provenance_surface_totals: summary.provenance_surface_totals.clone(),
+            recovery_strategy_attempted_counts: summary.recovery_strategy_attempted_counts.clone(),
+            recovery_strategy_applied_counts: summary.recovery_strategy_applied_counts.clone(),
+            recovery_outcome_counts: summary.recovery_outcome_counts.clone(),
+            recovery_quality_flag_counts: summary.recovery_quality_flag_counts.clone(),
+            recovery_structuring_mode_counts: summary.recovery_structuring_mode_counts.clone(),
         });
     }
     AutomationSummary {
@@ -94,7 +144,18 @@ pub fn build_summary(
             diagnosis_bucket_counts: diagnosis.diagnosis_bucket_counts.clone(),
             preview_block_signature_counts: diagnosis.preview_block_signature_counts.clone(),
             recommended_next_patch: diagnosis.recommended_next_patch.clone(),
+            recovery_strategy_attempted_counts: aggregate_recovery_strategy_attempted_counts,
+            recovery_strategy_applied_counts: aggregate_recovery_strategy_applied_counts,
+            recovery_outcome_counts: aggregate_recovery_outcome_counts,
+            recovery_quality_flag_counts: aggregate_recovery_quality_flag_counts,
+            recovery_structuring_mode_counts: aggregate_recovery_structuring_mode_counts,
         },
+    }
+}
+
+fn merge_counts(target: &mut BTreeMap<String, usize>, source: &BTreeMap<String, usize>) {
+    for (key, value) in source {
+        *target.entry(key.clone()).or_default() += *value;
     }
 }
 
@@ -107,10 +168,22 @@ pub fn enrich_summary_with_provenance(
     let mut native_nonzero_rows = 0usize;
     let mut loader_nonzero_rows = 0usize;
     for entry in &diagnosis_report.binaries {
-        dwarf_nonzero_rows += entry.derived_metrics.provenance_surface_totals.dwarf_nonzero_rows;
-        pdb_nonzero_rows += entry.derived_metrics.provenance_surface_totals.pdb_nonzero_rows;
-        native_nonzero_rows += entry.derived_metrics.provenance_surface_totals.native_nonzero_rows;
-        loader_nonzero_rows += entry.derived_metrics.provenance_surface_totals.loader_nonzero_rows;
+        dwarf_nonzero_rows += entry
+            .derived_metrics
+            .provenance_surface_totals
+            .dwarf_nonzero_rows;
+        pdb_nonzero_rows += entry
+            .derived_metrics
+            .provenance_surface_totals
+            .pdb_nonzero_rows;
+        native_nonzero_rows += entry
+            .derived_metrics
+            .provenance_surface_totals
+            .native_nonzero_rows;
+        loader_nonzero_rows += entry
+            .derived_metrics
+            .provenance_surface_totals
+            .loader_nonzero_rows;
     }
     summary.aggregate.provenance_surface_totals = ProvenanceSurfaceTotals {
         dwarf_nonzero_rows,
@@ -124,13 +197,17 @@ pub fn load_baseline(path: &Path) -> Result<Option<AutomationSummary>> {
     if !path.exists() {
         return Ok(None);
     }
-    let data = fs::read_to_string(path).with_context(|| format!("read baseline {}", path.display()))?;
+    let data =
+        fs::read_to_string(path).with_context(|| format!("read baseline {}", path.display()))?;
     let summary = serde_json::from_str(&data)
         .with_context(|| format!("parse baseline {}", path.display()))?;
     Ok(Some(summary))
 }
 
-pub fn compute_delta(current: &AutomationSummary, baseline: Option<&AutomationSummary>) -> Option<SummaryDelta> {
+pub fn compute_delta(
+    current: &AutomationSummary,
+    baseline: Option<&AutomationSummary>,
+) -> Option<SummaryDelta> {
     let baseline = baseline?;
     Some(SummaryDelta {
         direct_success_count: current.aggregate.direct_success_count as isize
@@ -144,7 +221,10 @@ pub fn compute_delta(current: &AutomationSummary, baseline: Option<&AutomationSu
         inventory_surface_gap_count: current.aggregate.inventory_surface_gap_count as isize
             - baseline.aggregate.inventory_surface_gap_count as isize,
         pdb_nonzero_rows: current.aggregate.provenance_surface_totals.pdb_nonzero_rows as isize
-            - baseline.aggregate.provenance_surface_totals.pdb_nonzero_rows as isize,
+            - baseline
+                .aggregate
+                .provenance_surface_totals
+                .pdb_nonzero_rows as isize,
     })
 }
 
@@ -161,7 +241,11 @@ pub fn render_markdown(
     out.push_str(&format!("- Generated at: `{}`\n", summary.generated_at));
     out.push_str(&format!(
         "- Recommended next patch: `{}`\n\n",
-        summary.aggregate.recommended_next_patch.as_deref().unwrap_or("none")
+        summary
+            .aggregate
+            .recommended_next_patch
+            .as_deref()
+            .unwrap_or("none")
     ));
 
     out.push_str("## Aggregate Counts\n\n");
@@ -175,13 +259,16 @@ pub fn render_markdown(
     ));
     out.push_str(&format!(
         "- source_presence_counts: `{:?}`\n- provenance_surface_totals: `{:?}`\n",
-        summary.aggregate.source_presence_counts,
-        summary.aggregate.provenance_surface_totals
+        summary.aggregate.source_presence_counts, summary.aggregate.provenance_surface_totals
     ));
     out.push_str(&format!(
-        "- diagnosis_bucket_counts: `{:?}`\n- preview_block_signature_counts: `{:?}`\n\n",
+        "- diagnosis_bucket_counts: `{:?}`\n- preview_block_signature_counts: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n\n",
         summary.aggregate.diagnosis_bucket_counts,
-        summary.aggregate.preview_block_signature_counts
+        summary.aggregate.preview_block_signature_counts,
+        summary.aggregate.recovery_strategy_attempted_counts,
+        summary.aggregate.recovery_outcome_counts,
+        summary.aggregate.recovery_quality_flag_counts,
+        summary.aggregate.recovery_structuring_mode_counts,
     ));
 
     if let Some(delta) = delta {
@@ -201,12 +288,16 @@ pub fn render_markdown(
     for entry in &diagnosis.binaries {
         out.push_str(&format!("### {}\n\n", entry.binary));
         out.push_str(&format!(
-            "- diagnosis: `{}`\n- next_action: `{}`\n- explicit_nonzero_rows: `{}`\n- strict_explicit_candidate_count: `{}`\n- preview_block_signatures: `{:?}`\n\n",
+            "- diagnosis: `{}`\n- next_action: `{}`\n- explicit_nonzero_rows: `{}`\n- strict_explicit_candidate_count: `{}`\n- preview_block_signatures: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n\n",
             entry.diagnosis_bucket,
             entry.next_action,
             entry.derived_metrics.explicit_nonzero_rows,
             entry.inventory_summary.strict_explicit_candidate_count,
-            entry.derived_metrics.blocked_preview_block_signature_counts
+            entry.derived_metrics.blocked_preview_block_signature_counts,
+            entry.inventory_summary.recovery_strategy_attempted_counts,
+            entry.inventory_summary.recovery_outcome_counts,
+            entry.inventory_summary.recovery_structuring_mode_counts,
+            entry.inventory_summary.recovery_quality_flag_counts,
         ));
     }
 
@@ -223,8 +314,7 @@ pub fn render_markdown(
     ));
     out.push_str(&format!(
         "- dominant diagnosis is `{:?}` and the current recommended next patch is `{:?}`.\n",
-        diagnosis.aggregate.dominant_diagnosis,
-        diagnosis.aggregate.recommended_next_patch
+        diagnosis.aggregate.dominant_diagnosis, diagnosis.aggregate.recommended_next_patch
     ));
     out.push_str(&format!(
         "- corpus outputs now include `{}` explicit seeds, `{}` heuristic seeds, and `{}` blocked explicit candidates.\n",
@@ -251,12 +341,17 @@ pub fn print_terminal_summary(summary: &AutomationSummary, diagnosis: &Diagnosis
     );
     println!(
         "  dominant_diagnosis={:?} next_patch={:?}",
-        diagnosis.aggregate.dominant_diagnosis,
-        diagnosis.aggregate.recommended_next_patch
+        diagnosis.aggregate.dominant_diagnosis, diagnosis.aggregate.recommended_next_patch
     );
     println!(
         "  preview_block_signatures={:?}",
         diagnosis.aggregate.preview_block_signature_counts
+    );
+    println!(
+        "  recovery_attempted={:?} recovery_outcome={:?} recovery_quality_flags={:?}",
+        summary.aggregate.recovery_strategy_attempted_counts,
+        summary.aggregate.recovery_outcome_counts,
+        summary.aggregate.recovery_quality_flag_counts
     );
 }
 
@@ -278,7 +373,8 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
         if ty.is_dir() {
             copy_dir_all(&from, &to)?;
         } else {
-            fs::copy(&from, &to).with_context(|| format!("copy {} to {}", from.display(), to.display()))?;
+            fs::copy(&from, &to)
+                .with_context(|| format!("copy {} to {}", from.display(), to.display()))?;
         }
     }
     Ok(())

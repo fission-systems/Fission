@@ -175,6 +175,13 @@ pub(super) struct PreviewCandidateEntry {
     pub(super) recovery_strategy_attempted: Option<String>,
     pub(super) recovery_strategy_applied: Option<String>,
     pub(super) recovery_outcome: Option<String>,
+    pub(super) recovery_source_signature: Option<String>,
+    pub(super) recovery_structuring_mode: Option<String>,
+    pub(super) recovery_goto_count_before: Option<usize>,
+    pub(super) recovery_goto_count_after: Option<usize>,
+    pub(super) recovery_hint_surface_before: Option<usize>,
+    pub(super) recovery_hint_surface_after: Option<usize>,
+    pub(super) recovery_quality_flags: Vec<String>,
     pub(super) pcode_block_count: usize,
     pub(super) pcode_op_count: usize,
     pub(super) has_indirect_control_flow: bool,
@@ -203,6 +210,8 @@ pub(super) struct PreviewCandidateScanSummary {
     pub(super) strict_explicit_candidates: usize,
     pub(super) failure_kind_counts: BTreeMap<String, usize>,
     pub(super) row_error_kind_counts: BTreeMap<String, usize>,
+    pub(super) recovery_quality_flag_counts: BTreeMap<String, usize>,
+    pub(super) recovery_structuring_mode_counts: BTreeMap<String, usize>,
     pub(super) suppressed_stderr_count: usize,
     pub(super) resume_loaded_rows: usize,
 }
@@ -256,6 +265,20 @@ fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
 
 fn slot_alias_candidate(code: &str) -> bool {
     code.contains("slot_")
+}
+
+fn preview_goto_count(code: &str) -> usize {
+    code.matches("goto ").count()
+}
+
+fn explicit_hint_surface_count(stats: Option<PreviewHintStats>) -> usize {
+    stats.map_or(0, |stats| {
+        stats.explicit_param_name_hits
+            + stats.explicit_local_name_hits
+            + stats.explicit_param_type_hits
+            + stats.explicit_local_type_hits
+            + stats.explicit_return_type_hit
+    })
 }
 
 fn preview_surface_kind_str(kind: Option<PreviewSurfaceKind>) -> Option<String> {
@@ -366,7 +389,8 @@ fn build_quality_tags_and_score(
 }
 
 pub(super) fn strict_explicit_candidate(entry: &PreviewCandidateEntry) -> bool {
-    (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type)) >= 2
+    (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type))
+        >= 2
         && entry.preview_direct_success
         && !entry.has_indirect_control_flow
         && entry.pcode_op_count <= 800
@@ -379,7 +403,8 @@ pub(super) fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {
     if let Some(kind) = entry.row_error_kind.as_deref() {
         return kind;
     }
-    entry.preview_fallback_kind_refined
+    entry
+        .preview_fallback_kind_refined
         .as_deref()
         .or(entry.preview_fallback_kind.as_deref())
         .unwrap_or("preview_non_success_unknown")
@@ -396,7 +421,9 @@ fn preview_block_signature(
     let message = row_error_message.unwrap_or_default().to_ascii_lowercase();
     let signature = match kind {
         "preview_frontend_reject" => {
-            if message.contains("failed to load pcode") || message.contains("could not find op at target address") {
+            if message.contains("failed to load pcode")
+                || message.contains("could not find op at target address")
+            {
                 "frontend_missing_pcode_op"
             } else {
                 "frontend_reject"
@@ -407,9 +434,13 @@ fn preview_block_signature(
         "preview_timeout" => "preview_timeout",
         "preview_worker_failure" => "worker_internal_error",
         "preview_structuring_failure" => {
-            if message.contains("unsupported_cfg_region_shape") || message.contains("unsupported region shape") {
+            if message.contains("unsupported_cfg_region_shape")
+                || message.contains("unsupported region shape")
+            {
                 "unsupported_cfg_region_shape"
-            } else if message.contains("unsupported_cfg_phi_join") || message.contains("unsupported phi join") {
+            } else if message.contains("unsupported_cfg_phi_join")
+                || message.contains("unsupported phi join")
+            {
                 "unsupported_cfg_phi_join"
             } else if message.contains("unsupported_cfg_indirect_call_region")
                 || message.contains("unsupported indirect call region")
@@ -474,7 +505,11 @@ pub(super) fn update_scan_summary(
     entry: &PreviewCandidateEntry,
 ) {
     summary.addresses_scanned += 1;
-    if (entry.dwarf_param_count + entry.dwarf_local_count + usize::from(entry.has_dwarf_return_type)) > 0 {
+    if (entry.dwarf_param_count
+        + entry.dwarf_local_count
+        + usize::from(entry.has_dwarf_return_type))
+        > 0
+    {
         summary.nonzero_explicit_candidates += 1;
     }
     if strict_explicit_candidate(entry) {
@@ -494,7 +529,24 @@ pub(super) fn update_scan_summary(
         *summary.failure_kind_counts.entry(failure_kind).or_insert(0) += 1;
     }
     if let Some(kind) = entry.row_error_kind.as_deref() {
-        *summary.row_error_kind_counts.entry(kind.to_string()).or_insert(0) += 1;
+        *summary
+            .row_error_kind_counts
+            .entry(kind.to_string())
+            .or_insert(0) += 1;
+    }
+    if entry.recovery_strategy_attempted.is_some()
+        && let Some(mode) = entry.recovery_structuring_mode.as_deref()
+    {
+        *summary
+            .recovery_structuring_mode_counts
+            .entry(mode.to_string())
+            .or_insert(0) += 1;
+    }
+    for flag in &entry.recovery_quality_flags {
+        *summary
+            .recovery_quality_flag_counts
+            .entry(flag.clone())
+            .or_insert(0) += 1;
     }
 }
 
@@ -557,7 +609,11 @@ pub(super) fn select_candidate_functions<'a>(
             }
             let address = parse_hex_address(trimmed)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-            if let Some(func) = functions.iter().copied().find(|func| func.address == address) {
+            if let Some(func) = functions
+                .iter()
+                .copied()
+                .find(|func| func.address == address)
+            {
                 selected.push(func);
             }
         }
@@ -611,6 +667,12 @@ fn build_preview_candidate_entry(
     let mut recovery_strategy_attempted = None;
     let mut recovery_strategy_applied = None;
     let mut recovery_outcome = None;
+    let mut recovery_source_signature = None;
+    let mut recovery_structuring_mode = Some("normal".to_string());
+    let recovery_goto_count_before = None;
+    let mut recovery_goto_count_after = None;
+    let mut recovery_hint_surface_before = None;
+    let mut recovery_hint_surface_after = None;
 
     match decomp.get_pcode(func.address) {
         Ok(pcode_json) => {
@@ -641,16 +703,27 @@ fn build_preview_candidate_entry(
                 preview_code = selection.preview_code;
                 recovery_strategy_attempted =
                     selection.recovery_strategy_attempted.map(str::to_string);
-                recovery_strategy_applied =
-                    selection.recovery_strategy_applied.map(str::to_string);
+                recovery_strategy_applied = selection.recovery_strategy_applied.map(str::to_string);
                 recovery_outcome = selection.recovery_outcome.map(str::to_string);
+                recovery_source_signature = selection.recovery_source_signature.clone();
+                recovery_structuring_mode = selection
+                    .recovery_structuring_mode
+                    .map(str::to_string)
+                    .or(recovery_structuring_mode);
+                if selection.recovery_strategy_attempted.is_some() {
+                    recovery_goto_count_after = preview_code.as_deref().map(preview_goto_count);
+                    recovery_hint_surface_before = Some(0);
+                    recovery_hint_surface_after =
+                        Some(explicit_hint_surface_count(preview_hint_stats));
+                }
             }
         }
         Err(err) => {
             preview_fallback_kind = Some("preview_unsupported".to_string());
             preview_fallback_kind_refined = Some("preview_frontend_reject".to_string());
-            preview_fallback_reason =
-                Some(format!("mlil-preview frontend unavailable: failed to load pcode: {err}"));
+            preview_fallback_reason = Some(format!(
+                "mlil-preview frontend unavailable: failed to load pcode: {err}"
+            ));
         }
     }
 
@@ -694,8 +767,41 @@ fn build_preview_candidate_entry(
         pcode_block_count,
         pcode_op_count,
     );
-    let preview_block_detail =
-        preview_block_detail(row_error_message.as_deref(), preview_fallback_reason.as_deref());
+    let preview_block_detail = preview_block_detail(
+        row_error_message.as_deref(),
+        preview_fallback_reason.as_deref(),
+    );
+    let mut recovery_quality_flags = Vec::new();
+    if recovery_strategy_attempted.is_some() {
+        if let Some(after) = recovery_goto_count_after {
+            if recovery_goto_count_before.is_some_and(|before| after > before) {
+                recovery_quality_flags.push("goto_increased".to_string());
+            }
+            if after > 0 && after.saturating_mul(2) >= pcode_block_count.max(1) {
+                recovery_quality_flags.push("high_goto_density".to_string());
+            }
+        }
+        if recovery_structuring_mode.as_deref() == Some("forced_linear")
+            && preview_surface_kind == Some(PreviewSurfaceKind::Unstructured)
+        {
+            recovery_quality_flags.push("shape_linearized".to_string());
+        }
+        if recovery_structuring_mode.as_deref() == Some("region_linearized") {
+            recovery_quality_flags.push("localized_linearization".to_string());
+            if preview_surface_kind == Some(PreviewSurfaceKind::Unstructured) {
+                recovery_quality_flags.push("shape_partially_linearized".to_string());
+            }
+        }
+        if recovery_hint_surface_before
+            .zip(recovery_hint_surface_after)
+            .is_some_and(|(before, after)| after < before)
+        {
+            recovery_quality_flags.push("surface_regressed".to_string());
+        }
+        if recovery_hint_surface_after.unwrap_or(0) > 0 {
+            recovery_quality_flags.push("explicit_hints_preserved".to_string());
+        }
+    }
 
     PreviewCandidateEntry {
         binary: binary_name.to_string(),
@@ -714,13 +820,20 @@ fn build_preview_candidate_entry(
         preview_direct_success,
         preview_fallback_kind,
         preview_fallback_kind_refined,
-            preview_fallback_reason,
-            preview_block_signature,
-            preview_block_detail,
-            recovery_strategy_attempted,
-            recovery_strategy_applied,
-            recovery_outcome,
-            pcode_block_count,
+        preview_fallback_reason,
+        preview_block_signature,
+        preview_block_detail,
+        recovery_strategy_attempted,
+        recovery_strategy_applied,
+        recovery_outcome,
+        recovery_source_signature,
+        recovery_structuring_mode,
+        recovery_goto_count_before,
+        recovery_goto_count_after,
+        recovery_hint_surface_before,
+        recovery_hint_surface_after,
+        recovery_quality_flags,
+        pcode_block_count,
         pcode_op_count,
         has_indirect_control_flow: has_indirect,
         auto_eligible,
@@ -798,6 +911,13 @@ fn build_preview_candidate_fallback_entry(
         recovery_strategy_attempted: None,
         recovery_strategy_applied: None,
         recovery_outcome: None,
+        recovery_source_signature: None,
+        recovery_structuring_mode: None,
+        recovery_goto_count_before: None,
+        recovery_goto_count_after: None,
+        recovery_hint_surface_before: None,
+        recovery_hint_surface_after: None,
+        recovery_quality_flags: Vec::new(),
         pcode_block_count: 0,
         pcode_op_count: 0,
         has_indirect_control_flow: false,
@@ -829,14 +949,14 @@ pub(super) fn preview_candidate_entry_with_recovery(
                 .map(|msg| format!("preview candidate scan panicked: {msg}"))
                 .unwrap_or_else(|| "preview candidate scan panicked".to_string());
             build_preview_candidate_fallback_entry(
-            fact_store,
-            binary_name,
-            func,
-            "panic_recovered",
-            "panic",
-            message,
-            verbose,
-        )
+                fact_store,
+                binary_name,
+                func,
+                "panic_recovered",
+                "panic",
+                message,
+                verbose,
+            )
         }
     }
 }

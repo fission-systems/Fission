@@ -42,6 +42,8 @@ pub struct PreviewSelection {
     pub recovery_strategy_attempted: Option<&'static str>,
     pub recovery_strategy_applied: Option<&'static str>,
     pub recovery_outcome: Option<&'static str>,
+    pub recovery_source_signature: Option<String>,
+    pub recovery_structuring_mode: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +57,8 @@ pub struct PreviewRoutingDecision {
     pub recovery_strategy_attempted: Option<&'static str>,
     pub recovery_strategy_applied: Option<&'static str>,
     pub recovery_outcome: Option<&'static str>,
+    pub recovery_source_signature: Option<String>,
+    pub recovery_structuring_mode: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +81,8 @@ impl PreviewRoutingResolver {
             recovery_strategy_attempted: selection.recovery_strategy_attempted,
             recovery_strategy_applied: selection.recovery_strategy_applied,
             recovery_outcome: selection.recovery_outcome,
+            recovery_source_signature: selection.recovery_source_signature.clone(),
+            recovery_structuring_mode: selection.recovery_structuring_mode,
         }
     }
 
@@ -94,6 +100,8 @@ impl PreviewRoutingResolver {
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
+            recovery_source_signature: None,
+            recovery_structuring_mode: None,
         }
     }
 
@@ -117,6 +125,8 @@ impl PreviewRoutingResolver {
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
+            recovery_source_signature: None,
+            recovery_structuring_mode: None,
         }
     }
 
@@ -127,6 +137,8 @@ impl PreviewRoutingResolver {
         attempted: &'static str,
         applied: &'static str,
         outcome: &'static str,
+        source_signature: Option<String>,
+        structuring_mode: &'static str,
     ) -> PreviewSelection {
         PreviewSelection {
             preview_surface: Some(classify_preview_surface(&code)),
@@ -141,6 +153,8 @@ impl PreviewRoutingResolver {
             recovery_strategy_attempted: Some(attempted),
             recovery_strategy_applied: Some(applied),
             recovery_outcome: Some(outcome),
+            recovery_source_signature: source_signature,
+            recovery_structuring_mode: Some(structuring_mode),
         }
     }
 
@@ -159,6 +173,8 @@ impl PreviewRoutingResolver {
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
+            recovery_source_signature: None,
+            recovery_structuring_mode: None,
         }
     }
 
@@ -167,6 +183,8 @@ impl PreviewRoutingResolver {
         attempted: &'static str,
         applied: Option<&'static str>,
         outcome: &'static str,
+        source_signature: Option<String>,
+        structuring_mode: Option<&'static str>,
     ) -> PreviewSelection {
         let fallback_reason = classified_preview_error(reason.as_ref());
         PreviewSelection {
@@ -182,6 +200,8 @@ impl PreviewRoutingResolver {
             recovery_strategy_attempted: Some(attempted),
             recovery_strategy_applied: applied,
             recovery_outcome: Some(outcome),
+            recovery_source_signature: source_signature,
+            recovery_structuring_mode: structuring_mode,
         }
     }
 
@@ -197,6 +217,8 @@ impl PreviewRoutingResolver {
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
+            recovery_source_signature: None,
+            recovery_structuring_mode: None,
         }
     }
 }
@@ -269,7 +291,8 @@ const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring
 
 fn structuring_failure_signature(reason: &str) -> Option<&'static str> {
     let lower = reason.to_ascii_lowercase();
-    if lower.contains("unsupported_cfg_region_shape") || lower.contains("unsupported region shape") {
+    if lower.contains("unsupported_cfg_region_shape") || lower.contains("unsupported region shape")
+    {
         return Some(StructuringFailureKind::RegionShape.preview_block_signature());
     }
     if lower.contains("unsupported_cfg_phi_join") || lower.contains("unsupported phi join") {
@@ -393,9 +416,11 @@ fn make_preview_request(
 
 fn preview_options_with_recovery(
     binary: &LoadedBinary,
+    region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> MlilPreviewOptions {
     let mut options = MlilPreviewOptions::from_loaded_binary(binary);
+    options.region_linearize_structuring = region_linearize_structuring;
     options.force_linear_structuring = force_linear_structuring;
     options
 }
@@ -718,6 +743,7 @@ fn render_preview_from_json_with_type_context(
     enforce_auto_gate: bool,
     timeout_ms: Option<u64>,
     type_context: PreviewTypeContext,
+    region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> Result<Option<(String, Option<PreviewBuildStats>, Option<PreviewHintStats>)>, String> {
     let parse_start = Instant::now();
@@ -728,7 +754,11 @@ fn render_preview_from_json_with_type_context(
         return Ok(None);
     }
 
-    let options = preview_options_with_recovery(binary, force_linear_structuring);
+    let options = preview_options_with_recovery(
+        binary,
+        region_linearize_structuring,
+        force_linear_structuring,
+    );
     let request = make_preview_request(pcode_json, address, name, options, type_context);
 
     if should_use_preview_worker(binary, &pcode, enforce_auto_gate) {
@@ -779,6 +809,33 @@ fn try_structuring_recovery(
         return Ok(None);
     }
 
+    let region_retry = render_preview_from_json_with_type_context(
+        pcode_json,
+        binary,
+        address,
+        name,
+        false,
+        timeout_ms,
+        type_context.clone(),
+        true,
+        false,
+    );
+    match region_retry {
+        Ok(Some((code, build_stats, hint_stats))) => {
+            return Ok(Some(PreviewRoutingResolver::preview_success_with_recovery(
+                code,
+                build_stats,
+                hint_stats,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                "recovered",
+                Some(signature.to_string()),
+                "region_linearized",
+            )));
+        }
+        Ok(None) | Err(_) => {}
+    }
+
     match render_preview_from_json_with_type_context(
         pcode_json,
         binary,
@@ -787,30 +844,41 @@ fn try_structuring_recovery(
         false,
         timeout_ms,
         type_context,
+        false,
         true,
     ) {
-        Ok(Some((code, build_stats, hint_stats))) => Ok(Some(
-            PreviewRoutingResolver::preview_success_with_recovery(
+        Ok(Some((code, build_stats, hint_stats))) => {
+            Ok(Some(PreviewRoutingResolver::preview_success_with_recovery(
                 code,
                 build_stats,
                 hint_stats,
                 RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
                 RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
                 "recovered",
+                Some(signature.to_string()),
+                "forced_linear",
+            )))
+        }
+        Ok(None) => Ok(Some(
+            PreviewRoutingResolver::preview_fallback_with_recovery(
+                error,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                None,
+                "retry_skipped",
+                Some(signature.to_string()),
+                Some("forced_linear"),
             ),
         )),
-        Ok(None) => Ok(Some(PreviewRoutingResolver::preview_fallback_with_recovery(
-            error,
-            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
-            None,
-            "retry_skipped",
-        ))),
-        Err(retry_err) => Ok(Some(PreviewRoutingResolver::preview_fallback_with_recovery(
-            format!("{error}; recovery failed: {retry_err}"),
-            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
-            None,
-            "retry_failed",
-        ))),
+        Err(retry_err) => Ok(Some(
+            PreviewRoutingResolver::preview_fallback_with_recovery(
+                format!("{error}; recovery failed: {retry_err}"),
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                None,
+                "retry_failed",
+                Some(signature.to_string()),
+                Some("forced_linear"),
+            ),
+        )),
     }
 }
 
@@ -819,7 +887,8 @@ fn classify_preview_failure_refined(reason: &str) -> &'static str {
     if lower.contains("preview_timeout") || lower.contains("worker timed out") {
         return "preview_timeout";
     }
-    if lower.contains("unsupported architecture") || lower.contains("currently supports pe x64 only")
+    if lower.contains("unsupported architecture")
+        || lower.contains("currently supports pe x64 only")
     {
         return "preview_architecture_unsupported";
     }
@@ -843,9 +912,7 @@ fn classify_preview_failure_refined(reason: &str) -> &'static str {
     if structuring_failure_signature(reason).is_some() {
         return "preview_structuring_failure";
     }
-    if lower.contains("unsupported control flow")
-        || lower.contains("unsupported branch target")
-    {
+    if lower.contains("unsupported control flow") || lower.contains("unsupported branch target") {
         return "preview_unsupported_cfg";
     }
     if lower.contains("structuring") {
@@ -945,6 +1012,7 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                 timeout_ms,
                 type_context,
                 false,
+                false,
             ) {
                 Ok(Some((code, build_stats, hint_stats))) => {
                     Ok(PreviewRoutingResolver::preview_success(
@@ -996,6 +1064,7 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                 true,
                 timeout_ms,
                 type_context,
+                false,
                 false,
             ) {
                 Ok(Some((code, build_stats, hint_stats))) => {
@@ -1085,6 +1154,7 @@ pub fn rescue_preview_output_with_facts<S: PreviewSource>(
         timeout_ms,
         type_context,
         false,
+        false,
     ) {
         Ok(Some((code, build_stats, hint_stats))) => {
             Ok(Some(PreviewRoutingResolver::preview_success(
@@ -1134,6 +1204,7 @@ mod tests {
                 format: "PE".to_string(),
                 image_base: 0x140000000,
                 sections: vec![(0x140001000, 0x140002000)],
+                region_linearize_structuring: false,
                 force_linear_structuring: false,
             },
             type_context: PreviewTypeContext {
@@ -1198,6 +1269,8 @@ mod tests {
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
+            recovery_source_signature: None,
+            recovery_structuring_mode: None,
         };
         let decision = selection.routing_decision();
         assert_eq!(decision.engine_used, PreviewEngineMode::Legacy);
@@ -1254,7 +1327,10 @@ mod tests {
             "preview_structuring_failure[unsupported_cfg_phi_join]: unsupported phi join in mlil-preview",
         );
         assert_eq!(selection.fallback_kind, Some("preview_unsupported"));
-        assert_eq!(selection.fallback_kind_refined, Some("preview_structuring_failure"));
+        assert_eq!(
+            selection.fallback_kind_refined,
+            Some("preview_structuring_failure")
+        );
     }
 
     #[test]

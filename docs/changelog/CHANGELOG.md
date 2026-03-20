@@ -9,6 +9,73 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-20
 
+### P5H2B / P5H3A - Recovery Quality Metrics and Localized Structuring Fallback
+
+This round moved structuring recovery from a binary “recovered or not” signal into a quality-aware lane, and introduced the first localized alternative to whole-function forced linearization.
+
+Previously, `linearized_structuring_retry` could recover many structuring-origin failures, but the recovery path only measured success counts. In practice, most recovered outputs were still whole-function `forced_linear` renders with high goto density, which made the strategy useful as a backstop but too expensive to promote as a first-class whitelist recovery mode.
+
+This patch added row/summary quality metrics for recovered outputs and inserted a new recovery mode between `normal` and `forced_linear`:
+
+- `normal`
+- `region_linearized`
+- `forced_linear`
+
+The new `region_linearized` path reuses linear structuring only for the failed CFG slice when a recovery-eligible structuring failure surfaces, then resumes the normal structured path for the remainder of the function.
+
+#### Added
+
+- recovery quality metadata on preview rows and inventory rows:
+  - `recovery_source_signature`
+  - `recovery_structuring_mode`
+  - `recovery_goto_count_before`
+  - `recovery_goto_count_after`
+  - `recovery_hint_surface_before`
+  - `recovery_hint_surface_after`
+  - `recovery_quality_flags`
+- quality summary aggregation:
+  - `recovery_quality_flag_counts`
+  - `recovery_structuring_mode_counts`
+- localized recovery quality flags:
+  - `localized_linearization`
+  - `shape_partially_linearized`
+
+#### Changed
+
+- recovery quality accounting now distinguishes:
+  - whole-function `forced_linear`
+  - localized `region_linearized`
+- `linearized_structuring_retry` now tries:
+  1. localized region linearization
+  2. whole-function forced linearization
+  3. fallback failure
+- NIR structuring now attempts region-scoped linear recovery for recovery-eligible structuring-origin failures before surfacing the error back out
+- recovery mode counts now track recovery-attempted rows only instead of mixing in non-recovery `normal` rows
+
+#### Validation
+
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40`
+
+#### Current Outcome
+
+- aggregate recovery stayed stable:
+  - `recovery_attempted {'linearized_structuring_retry': 19}`
+  - `recovery_outcome {'recovered': 19}`
+- recovery mode split improved from:
+  - previous: `{'forced_linear': 19}`
+  - current: `{'forced_linear': 18, 'region_linearized': 1}`
+- quality proxy improved slightly:
+  - `high_goto_density: 15 -> 14`
+  - `shape_linearized: 19 -> 18`
+  - `shape_partially_linearized: 1`
+  - `localized_linearization: 1`
+- current verdict remains:
+  - `linearized_structuring_retry` is still valuable for recovery
+  - but it remains closer to `fallback-only` than `whitelist-worthy`
+  - the next quality step should reduce dependence on whole-function `forced_linear` by broadening localized / semi-structured fallback coverage
+
 ### P5H2A - Structuring-Origin Failure Surfacing for Recovery
 
 This round fixed the taxonomy gap that prevented the recovery layer from seeing real structuring-origin failures.

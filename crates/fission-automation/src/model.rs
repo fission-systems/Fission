@@ -137,6 +137,20 @@ pub struct InventoryRow {
     #[serde(default)]
     pub recovery_outcome: Option<String>,
     #[serde(default)]
+    pub recovery_source_signature: Option<String>,
+    #[serde(default)]
+    pub recovery_structuring_mode: Option<String>,
+    #[serde(default)]
+    pub recovery_goto_count_before: Option<usize>,
+    #[serde(default)]
+    pub recovery_goto_count_after: Option<usize>,
+    #[serde(default)]
+    pub recovery_hint_surface_before: Option<usize>,
+    #[serde(default)]
+    pub recovery_hint_surface_after: Option<usize>,
+    #[serde(default)]
+    pub recovery_quality_flags: Vec<String>,
+    #[serde(default)]
     pub preview_surface_kind: Option<String>,
     #[serde(default)]
     pub pcode_block_count: usize,
@@ -206,6 +220,10 @@ pub struct InventorySummary {
     pub recovery_strategy_applied_counts: BTreeMap<String, usize>,
     #[serde(default)]
     pub recovery_outcome_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_quality_flag_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub recovery_structuring_mode_counts: BTreeMap<String, usize>,
     #[serde(default)]
     pub suppressed_stderr_count: usize,
 }

@@ -1,5 +1,7 @@
 use crate::cli::args::OneShotArgs;
-use crate::cli::oneshot::common::{apply_profile, init_decompiler, resolve_compiler_id, resolve_profile};
+use crate::cli::oneshot::common::{
+    apply_profile, init_decompiler, resolve_compiler_id, resolve_profile,
+};
 use crate::cli::oneshot::decompile::{
     PreviewCandidateEntry, PreviewCandidateScanSummary, ScopedQuietPanicHook,
     preview_candidate_entry_with_recovery, select_candidate_functions, update_scan_summary,
@@ -68,6 +70,13 @@ struct FunctionFactsInventoryRow {
     recovery_strategy_attempted: Option<String>,
     recovery_strategy_applied: Option<String>,
     recovery_outcome: Option<String>,
+    recovery_source_signature: Option<String>,
+    recovery_structuring_mode: Option<String>,
+    recovery_goto_count_before: Option<usize>,
+    recovery_goto_count_after: Option<usize>,
+    recovery_hint_surface_before: Option<usize>,
+    recovery_hint_surface_after: Option<usize>,
+    recovery_quality_flags: Vec<String>,
     preview_surface_kind: Option<String>,
     pcode_block_count: usize,
     pcode_op_count: usize,
@@ -133,6 +142,8 @@ struct FunctionFactsInventorySummary {
     recovery_strategy_attempted_counts: BTreeMap<String, usize>,
     recovery_strategy_applied_counts: BTreeMap<String, usize>,
     recovery_outcome_counts: BTreeMap<String, usize>,
+    recovery_quality_flag_counts: BTreeMap<String, usize>,
+    recovery_structuring_mode_counts: BTreeMap<String, usize>,
     suppressed_stderr_count: usize,
 }
 
@@ -240,7 +251,10 @@ fn inventory_surface_gap(sources: &FactSourcesPresent, explicit_fact_total: usiz
     explicit_fact_total == 0 && (sources.dwarf || sources.pdb || sources.native_inferred)
 }
 
-fn strict_explicit_candidate_row(entry: &PreviewCandidateEntry, explicit_fact_total: usize) -> bool {
+fn strict_explicit_candidate_row(
+    entry: &PreviewCandidateEntry,
+    explicit_fact_total: usize,
+) -> bool {
     explicit_fact_total >= 2
         && entry.preview_direct_success
         && !entry.has_indirect_control_flow
@@ -277,9 +291,7 @@ fn admission_block_stage(entry: &PreviewCandidateEntry, inventory_surface_gap: b
             "preview_architecture_unsupported"
             | "preview_format_unsupported"
             | "preview_frontend_reject",
-        ) => {
-            "admission".to_string()
-        }
+        ) => "admission".to_string(),
         Some(_) => "preview".to_string(),
         None => "none".to_string(),
     }
@@ -335,6 +347,13 @@ fn to_inventory_row(
         recovery_strategy_attempted: entry.recovery_strategy_attempted,
         recovery_strategy_applied: entry.recovery_strategy_applied,
         recovery_outcome: entry.recovery_outcome,
+        recovery_source_signature: entry.recovery_source_signature,
+        recovery_structuring_mode: entry.recovery_structuring_mode,
+        recovery_goto_count_before: entry.recovery_goto_count_before,
+        recovery_goto_count_after: entry.recovery_goto_count_after,
+        recovery_hint_surface_before: entry.recovery_hint_surface_before,
+        recovery_hint_surface_after: entry.recovery_hint_surface_after,
+        recovery_quality_flags: entry.recovery_quality_flags,
         preview_surface_kind: entry.preview_surface_kind,
         pcode_block_count: entry.pcode_block_count,
         pcode_op_count: entry.pcode_op_count,
@@ -376,8 +395,7 @@ fn update_inventory_summary(
     summary.explicit_breakdown_totals.param_count += row.explicit_fact_breakdown.param_count;
     summary.explicit_breakdown_totals.local_count += row.explicit_fact_breakdown.local_count;
     summary.explicit_breakdown_totals.return_count += row.explicit_fact_breakdown.return_count;
-    summary.explicit_breakdown_totals.pdb_type_count +=
-        row.explicit_fact_breakdown.pdb_type_count;
+    summary.explicit_breakdown_totals.pdb_type_count += row.explicit_fact_breakdown.pdb_type_count;
     summary.explicit_breakdown_totals.native_type_count +=
         row.explicit_fact_breakdown.native_type_count;
     if row.provenance_fact_breakdown.dwarf_type_count > 0 {
@@ -422,6 +440,20 @@ fn update_inventory_summary(
             .entry(outcome.clone())
             .or_insert(0) += 1;
     }
+    if row.recovery_strategy_attempted.is_some()
+        && let Some(mode) = row.recovery_structuring_mode.as_ref()
+    {
+        *summary
+            .recovery_structuring_mode_counts
+            .entry(mode.clone())
+            .or_insert(0) += 1;
+    }
+    for flag in &row.recovery_quality_flags {
+        *summary
+            .recovery_quality_flag_counts
+            .entry(flag.clone())
+            .or_insert(0) += 1;
+    }
 
     let candidate_entry = PreviewCandidateEntry {
         binary: row.binary.clone(),
@@ -446,6 +478,13 @@ fn update_inventory_summary(
         recovery_strategy_attempted: row.recovery_strategy_attempted.clone(),
         recovery_strategy_applied: row.recovery_strategy_applied.clone(),
         recovery_outcome: row.recovery_outcome.clone(),
+        recovery_source_signature: row.recovery_source_signature.clone(),
+        recovery_structuring_mode: row.recovery_structuring_mode.clone(),
+        recovery_goto_count_before: row.recovery_goto_count_before,
+        recovery_goto_count_after: row.recovery_goto_count_after,
+        recovery_hint_surface_before: row.recovery_hint_surface_before,
+        recovery_hint_surface_after: row.recovery_hint_surface_after,
+        recovery_quality_flags: row.recovery_quality_flags.clone(),
         pcode_block_count: row.pcode_block_count,
         pcode_op_count: row.pcode_op_count,
         has_indirect_control_flow: row.has_indirect_control_flow,

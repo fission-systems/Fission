@@ -234,6 +234,7 @@ pub struct MlilPreviewOptions {
     pub format: String,
     pub image_base: u64,
     pub sections: Vec<(u64, u64)>,
+    pub region_linearize_structuring: bool,
     pub force_linear_structuring: bool,
 }
 
@@ -295,6 +296,7 @@ impl MlilPreviewOptions {
             format: binary.format.clone(),
             image_base: binary.inner().image_base,
             sections,
+            region_linearize_structuring: false,
             force_linear_structuring: false,
         }
     }
@@ -366,7 +368,9 @@ pub enum MlilPreviewError {
 impl MlilPreviewError {
     pub const fn structuring_failure_kind(self) -> Option<StructuringFailureKind> {
         match self {
-            MlilPreviewError::UnsupportedCfgRegionShape => Some(StructuringFailureKind::RegionShape),
+            MlilPreviewError::UnsupportedCfgRegionShape => {
+                Some(StructuringFailureKind::RegionShape)
+            }
             MlilPreviewError::UnsupportedCfgPhiJoin => Some(StructuringFailureKind::PhiJoin),
             MlilPreviewError::UnsupportedCfgIndirectCallRegion => {
                 Some(StructuringFailureKind::IndirectCallRegion)
