@@ -1,6 +1,110 @@
-pub use super::nir_engine::{
-    NirRoutingDecision, NirSelection, PreviewRoutingDecision, PreviewSelection,
-    rescue_nir_output, rescue_nir_output_with_facts, rescue_preview_output,
-    rescue_preview_output_with_facts,
-};
+use super::nir_render::render_nir_from_json_with_type_context;
+use super::nir_taxonomy::{classify_nir_failure_refined, structuring_failure_signature};
+use super::nir_types::{NirRoutingResolver, NirSelection};
+use fission_loader::loader::LoadedBinary;
+use fission_pcode::NirTypeContext;
 
+const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";
+
+pub(crate) fn is_type_failure_for_nir_rescue(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("duplicate variablepiece")
+        || lower.contains("ptrsub")
+        || lower.contains("non structured pointer type")
+        || lower.contains("struct")
+}
+
+pub(crate) fn try_structuring_recovery(
+    pcode_json: &str,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    timeout_ms: Option<u64>,
+    type_context: NirTypeContext,
+    error: &str,
+) -> Result<Option<NirSelection>, String> {
+    if classify_nir_failure_refined(error) != "nir_structuring_failure" {
+        return Ok(None);
+    }
+    let Some(signature) = structuring_failure_signature(error) else {
+        return Ok(None);
+    };
+    if !matches!(
+        signature,
+        "unsupported_cfg_region_shape"
+            | "unsupported_cfg_phi_join"
+            | "unsupported_cfg_indirect_call_region"
+    ) {
+        return Ok(None);
+    }
+
+    let region_retry = render_nir_from_json_with_type_context(
+        pcode_json,
+        binary,
+        address,
+        name,
+        false,
+        timeout_ms,
+        type_context.clone(),
+        true,
+        false,
+    );
+    match region_retry {
+        Ok(Some((code, build_stats, hint_stats))) => {
+            return Ok(Some(NirRoutingResolver::nir_success_with_recovery(
+                code,
+                build_stats,
+                hint_stats,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                "recovered",
+                Some(signature.to_string()),
+                "region_linearized",
+            )));
+        }
+        Ok(None) | Err(_) => {}
+    }
+
+    match render_nir_from_json_with_type_context(
+        pcode_json,
+        binary,
+        address,
+        name,
+        false,
+        timeout_ms,
+        type_context,
+        false,
+        true,
+    ) {
+        Ok(Some((code, build_stats, hint_stats))) => {
+            Ok(Some(NirRoutingResolver::nir_success_with_recovery(
+                code,
+                build_stats,
+                hint_stats,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                "recovered",
+                Some(signature.to_string()),
+                "forced_linear",
+            )))
+        }
+        Ok(None) => Ok(Some(NirRoutingResolver::nir_fallback_with_recovery(
+            error,
+            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+            None,
+            "retry_skipped",
+            Some(signature.to_string()),
+            Some("forced_linear"),
+        ))),
+        Err(retry_err) => Ok(Some(NirRoutingResolver::nir_fallback_with_recovery(
+            format!("{error}; recovery failed: {retry_err}"),
+            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+            None,
+            "retry_failed",
+            Some(signature.to_string()),
+            Some("forced_linear"),
+        ))),
+    }
+}
+
+pub use super::nir_types::{PreviewRoutingDecision, PreviewSelection};

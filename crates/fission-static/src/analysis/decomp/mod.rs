@@ -37,7 +37,13 @@ pub mod nir_engine;
 #[cfg(feature = "native_decomp")]
 pub mod nir_recovery;
 #[cfg(feature = "native_decomp")]
+pub(crate) mod nir_render;
+#[cfg(feature = "native_decomp")]
+pub(crate) mod nir_routing;
+#[cfg(feature = "native_decomp")]
 pub mod nir_taxonomy;
+#[cfg(feature = "native_decomp")]
+pub(crate) mod nir_types;
 #[cfg(feature = "native_decomp")]
 pub mod nir_worker;
 pub mod postprocess;
@@ -45,26 +51,28 @@ pub mod postprocess;
 pub mod prepare;
 
 pub use facts::{FactProvenance, FactStore, FunctionFacts, NameFact, TypeFact, log_type_diag};
+#[cfg(feature = "native_decomp")]
+pub use nir_engine::{
+    NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource, NirSurfaceKind,
+    auto_nir_eligible, classify_native_failure_kind, native_failure_routing_decision,
+    nir_fallback_reason_with_kind, rescue_nir_output, rescue_nir_output_with_facts,
+    select_nir_output, select_nir_output_with_facts,
+};
+#[cfg(feature = "native_decomp")]
+pub use nir_taxonomy::{
+    classified_nir_error, classify_nir_failure, classify_nir_failure_refined,
+    fallback_reason_with_kind,
+};
+#[cfg(feature = "native_decomp")]
+pub use nir_types::{NirWorkerRequest, NirWorkerResponse};
+#[cfg(feature = "native_decomp")]
+pub use nir_worker::execute_nir_worker;
 pub use postprocess::RustPostProcessOptions;
 #[cfg(feature = "native_decomp")]
 pub use prepare::{
     PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,
     serialize_win_api_signatures_json,
 };
-#[cfg(feature = "native_decomp")]
-pub use nir_engine::{
-    NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
-    NirSurfaceKind, auto_nir_eligible, classify_native_failure_kind,
-    native_failure_routing_decision, nir_fallback_reason_with_kind, rescue_nir_output,
-    rescue_nir_output_with_facts, select_nir_output, select_nir_output_with_facts,
-};
-#[cfg(feature = "native_decomp")]
-pub use nir_taxonomy::{
-    classify_nir_failure, classify_nir_failure_refined, classified_nir_error,
-    fallback_reason_with_kind,
-};
-#[cfg(feature = "native_decomp")]
-pub use nir_worker::{NirWorkerRequest, NirWorkerResponse, execute_nir_worker};
 
 #[cfg(feature = "native_decomp")]
 use self::cache::DecompilerCache;

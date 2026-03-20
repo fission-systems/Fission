@@ -2,7 +2,9 @@ use crate::corpus::{
     aligned_explicit_candidate_entry, blocked_explicit_candidate_entry,
     candidate_passes_explicit_quality_prefilter, explicit_fact_total,
 };
-use crate::model::{AlignedExplicitCandidate, BlockedExplicitCandidate, InventoryRow, InventorySummary, SourceMeta};
+use crate::model::{
+    AlignedExplicitCandidate, BlockedExplicitCandidate, InventoryRow, InventorySummary, SourceMeta,
+};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -108,9 +110,8 @@ fn classify_diagnosis(
     let source_presence_ratio = source_present_rows as f64 / rows as f64;
     let explicit_nonzero_ratio = explicit_nonzero_rows as f64 / rows as f64;
     let surface_gap_ratio = inventory_surface_gap_count as f64 / rows as f64;
-    let preview_stage_blocks =
-        blocked_stage_counts.get("preview").copied().unwrap_or(0)
-            + blocked_stage_counts.get("admission").copied().unwrap_or(0);
+    let preview_stage_blocks = blocked_stage_counts.get("preview").copied().unwrap_or(0)
+        + blocked_stage_counts.get("admission").copied().unwrap_or(0);
     let pdb_sources = source_presence_counts.pdb;
     let pdb_surface_rows = provenance_surface_totals.pdb_nonzero_rows;
     let native_surface_rows = provenance_surface_totals.native_nonzero_rows;
@@ -126,7 +127,8 @@ fn classify_diagnosis(
         return (
             "preview_stage_block".to_string(),
             "preview_side_patch".to_string(),
-            "explicit facts exist, but blocked candidates concentrate in preview/admission stages".to_string(),
+            "explicit facts exist, but blocked candidates concentrate in preview/admission stages"
+                .to_string(),
         );
     }
     if source_present_rows > 0 && explicit_nonzero_rows == 0 && inventory_surface_gap_count > 0 {
@@ -184,28 +186,51 @@ pub fn diagnosis_entry(
     let mut aligned_candidates = Vec::new();
     let mut blocked_candidates = Vec::new();
     for row in rows {
-        if source_meta
-            .and_then(|meta| meta.admission_alignment.as_deref())
-            == Some("aligned")
-        {
+        if source_meta.and_then(|meta| meta.admission_alignment.as_deref()) == Some("aligned") {
             aligned_candidates.push(aligned_explicit_candidate_entry(row, source_meta));
         }
-        if explicit_fact_total(row) > 0 && !candidate_passes_explicit_quality_prefilter(row, source_meta) {
+        if explicit_fact_total(row) > 0
+            && !candidate_passes_explicit_quality_prefilter(row, source_meta)
+        {
             blocked_candidates.push(blocked_explicit_candidate_entry(row, source_meta));
         }
     }
-    dedupe_candidate_vec(&mut aligned_candidates, |v| (v.binary.clone(), v.address.clone()));
-    dedupe_candidate_vec(&mut blocked_candidates, |v| (v.binary.clone(), v.address.clone()));
+    dedupe_candidate_vec(&mut aligned_candidates, |v| {
+        (v.binary.clone(), v.address.clone())
+    });
+    dedupe_candidate_vec(&mut blocked_candidates, |v| {
+        (v.binary.clone(), v.address.clone())
+    });
     aligned_candidates.sort_by(|a, b| {
-        (b.explicit_fact_total, b.fact_density_score, -(b.pcode_op_count as i64))
-            .cmp(&(a.explicit_fact_total, a.fact_density_score, -(a.pcode_op_count as i64)))
+        (
+            b.explicit_fact_total,
+            b.fact_density_score,
+            -(b.pcode_op_count as i64),
+        )
+            .cmp(&(
+                a.explicit_fact_total,
+                a.fact_density_score,
+                -(a.pcode_op_count as i64),
+            ))
     });
     blocked_candidates.sort_by(|a, b| {
-        (b.explicit_fact_total, b.fact_density_score, -(b.pcode_op_count as i64))
-            .cmp(&(a.explicit_fact_total, a.fact_density_score, -(a.pcode_op_count as i64)))
+        (
+            b.explicit_fact_total,
+            b.fact_density_score,
+            -(b.pcode_op_count as i64),
+        )
+            .cmp(&(
+                a.explicit_fact_total,
+                a.fact_density_score,
+                -(a.pcode_op_count as i64),
+            ))
     });
 
-    let rows_emitted = if summary.rows_emitted == 0 { rows.len() } else { summary.rows_emitted };
+    let rows_emitted = if summary.rows_emitted == 0 {
+        rows.len()
+    } else {
+        summary.rows_emitted
+    };
     let source_present_rows = count_rows_with_any_source(rows);
     let blocked_admission_stage_counts = stage_counts(&blocked_candidates);
     let blocked_preview_rows: Vec<InventoryRow> = rows
@@ -236,7 +261,8 @@ pub fn diagnosis_entry(
             rescan_priority: source_meta.and_then(|meta| meta.rescan_priority.clone()),
             expected_nir_supported: source_meta.and_then(|meta| meta.expected_nir_supported),
             observed_nir_supported: source_meta.and_then(|meta| meta.observed_nir_supported),
-            observed_nir_failure_kind: source_meta.and_then(|meta| meta.observed_nir_failure_kind.clone()),
+            observed_nir_failure_kind: source_meta
+                .and_then(|meta| meta.observed_nir_failure_kind.clone()),
         },
         inventory_summary: summary.clone(),
         derived_metrics: DiagnosisDerivedMetrics {
@@ -266,10 +292,16 @@ pub fn aggregate_diagnosis(entries: &[DiagnosisBinaryEntry]) -> DiagnosisAggrega
     let mut next_action_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut nir_block_signature_counts: BTreeMap<String, usize> = BTreeMap::new();
     for entry in entries {
-        *bucket_counts.entry(entry.diagnosis_bucket.clone()).or_default() += 1;
-        *next_action_counts.entry(entry.next_action.clone()).or_default() += 1;
+        *bucket_counts
+            .entry(entry.diagnosis_bucket.clone())
+            .or_default() += 1;
+        *next_action_counts
+            .entry(entry.next_action.clone())
+            .or_default() += 1;
         for (signature, count) in &entry.derived_metrics.blocked_nir_block_signature_counts {
-            *nir_block_signature_counts.entry(signature.clone()).or_default() += *count;
+            *nir_block_signature_counts
+                .entry(signature.clone())
+                .or_default() += *count;
         }
     }
     let dominant_diagnosis = bucket_counts

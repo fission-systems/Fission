@@ -9,7 +9,8 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 pub fn ingest_pdb_function_facts(binary: &mut LoadedBinary) -> Result<usize> {
-    let Some(pdb_path) = resolve_pdb_sidecar_path(binary.inner(), Path::new(&binary.inner().path)) else {
+    let Some(pdb_path) = resolve_pdb_sidecar_path(binary.inner(), Path::new(&binary.inner().path))
+    else {
         return Ok(0);
     };
 
@@ -24,7 +25,9 @@ pub fn ingest_pdb_function_facts(binary: &mut LoadedBinary) -> Result<usize> {
     }
 
     let address_map = pdb.address_map().context("build PDB address map")?;
-    let type_information = pdb.type_information().context("read PDB type information")?;
+    let type_information = pdb
+        .type_information()
+        .context("read PDB type information")?;
     let mut type_finder = type_information.finder();
     {
         let mut iter = type_information.iter();
@@ -45,7 +48,9 @@ pub fn ingest_pdb_function_facts(binary: &mut LoadedBinary) -> Result<usize> {
         None => None,
     };
 
-    let dbi = pdb.debug_information().context("read PDB debug information")?;
+    let dbi = pdb
+        .debug_information()
+        .context("read PDB debug information")?;
     let mut modules = dbi.modules().context("read PDB module list")?;
     let mut functions = HashMap::<u64, PdbFunctionInfo>::new();
 
@@ -230,12 +235,16 @@ fn score_function_info(info: &PdbFunctionInfo) -> usize {
             .params
             .iter()
             .map(|param| {
-                usize::from(!param.name.trim().is_empty()) + usize::from(!param.type_name.trim().is_empty())
+                usize::from(!param.name.trim().is_empty())
+                    + usize::from(!param.type_name.trim().is_empty())
             })
             .sum::<usize>()
 }
 
-fn resolve_pdb_sidecar_path(info: &crate::loader::types::LoadedBinaryInner, binary_path: &Path) -> Option<PathBuf> {
+fn resolve_pdb_sidecar_path(
+    info: &crate::loader::types::LoadedBinaryInner,
+    binary_path: &Path,
+) -> Option<PathBuf> {
     let debug = info.pdb_debug_info.as_ref()?;
     let mut candidates = Vec::new();
 
@@ -335,8 +344,9 @@ fn resolve_signature_from_type_index(
     let item = type_finder.find(type_index).ok()?;
     match item.parse().ok()? {
         TypeData::Procedure(proc) => Some((
-            proc.return_type
-                .and_then(|index| resolve_symbol_type_name(index, type_information, type_finder, None, None)),
+            proc.return_type.and_then(|index| {
+                resolve_symbol_type_name(index, type_information, type_finder, None, None)
+            }),
             resolve_argument_list(proc.argument_list, type_information, type_finder),
         )),
         TypeData::MemberFunction(proc) => Some((
@@ -349,9 +359,11 @@ fn resolve_signature_from_type_index(
             )?),
             resolve_argument_list(proc.argument_list, type_information, type_finder),
         )),
-        TypeData::Modifier(modifier) => {
-            resolve_signature_from_type_index(modifier.underlying_type, type_information, type_finder)
-        }
+        TypeData::Modifier(modifier) => resolve_signature_from_type_index(
+            modifier.underlying_type,
+            type_information,
+            type_finder,
+        ),
         _ => None,
     }
 }
@@ -370,7 +382,9 @@ fn resolve_argument_list(
     arguments
         .arguments
         .iter()
-        .filter_map(|index| resolve_symbol_type_name(*index, type_information, type_finder, None, None))
+        .filter_map(|index| {
+            resolve_symbol_type_name(*index, type_information, type_finder, None, None)
+        })
         .collect()
 }
 
@@ -397,16 +411,32 @@ fn resolve_type_data_name(
         TypeData::Enumeration(enumeration) => Some(enumeration.name.to_string().into_owned()),
         TypeData::Union(union) => Some(union.name.to_string().into_owned()),
         TypeData::Pointer(pointer) => {
-            let base = resolve_symbol_type_name(pointer.underlying_type, type_information, type_finder, None, None)
-                .unwrap_or_else(|| "void".to_string());
+            let base = resolve_symbol_type_name(
+                pointer.underlying_type,
+                type_information,
+                type_finder,
+                None,
+                None,
+            )
+            .unwrap_or_else(|| "void".to_string());
             Some(format!("{base}*"))
         }
-        TypeData::Modifier(modifier) => {
-            resolve_symbol_type_name(modifier.underlying_type, type_information, type_finder, None, None)
-        }
+        TypeData::Modifier(modifier) => resolve_symbol_type_name(
+            modifier.underlying_type,
+            type_information,
+            type_finder,
+            None,
+            None,
+        ),
         TypeData::Array(array) => {
-            let base = resolve_symbol_type_name(array.element_type, type_information, type_finder, None, None)
-                .unwrap_or_else(|| "void".to_string());
+            let base = resolve_symbol_type_name(
+                array.element_type,
+                type_information,
+                type_finder,
+                None,
+                None,
+            )
+            .unwrap_or_else(|| "void".to_string());
             Some(format!("{base}[]"))
         }
         TypeData::Procedure(_) | TypeData::MemberFunction(_) => Some("fn".to_string()),

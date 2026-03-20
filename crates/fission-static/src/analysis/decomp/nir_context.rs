@@ -54,10 +54,7 @@ pub(crate) fn build_nir_type_context(
     }
 }
 
-fn build_nir_function_hints(
-    fact_store: &FactStore,
-    address: u64,
-) -> Option<NirFunctionHints> {
+fn build_nir_function_hints(fact_store: &FactStore, address: u64) -> Option<NirFunctionHints> {
     let debug = fact_store.preferred_debug_function(address)?;
     let param_names = debug
         .params
@@ -140,8 +137,7 @@ fn build_nir_call_param_rules() -> Vec<NirCallParamRule> {
     let mut call_param_rules = Vec::new();
     for sig in WIN_API_DB.iter() {
         for (arg_index, param) in sig.params.iter().enumerate() {
-            let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures)
-            else {
+            let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures) else {
                 continue;
             };
             let Some(struct_def) = structures.get(&struct_name) else {

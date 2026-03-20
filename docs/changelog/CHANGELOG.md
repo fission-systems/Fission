@@ -9,6 +9,83 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-20
 
+### P6R2 - Real Module Split After Fission NIR Rename
+
+This round turned the earlier Fission NIR rename into a real responsibility split. The goal was boundary cleanup, not behavior change: `nir_engine.rs`, `decompile.rs`, and `structuring/mod.rs` were reduced to thin orchestration facades while the actual implementation moved into focused ownership modules.
+
+The refactor kept current recovery policy, fallback semantics, dual-written JSON compatibility fields, and local automation behavior intact. Deprecated aliases such as `mlil-preview` and the `preview` automation lane still work, but the canonical code paths are now physically organized around `nir` ownership boundaries.
+
+#### Added
+
+- `fission-static` Fission NIR ownership modules:
+  - `nir_types.rs`
+  - `nir_taxonomy.rs`
+  - `nir_worker.rs`
+  - `nir_render.rs`
+  - `nir_recovery.rs`
+  - `nir_routing.rs`
+- CLI oneshot decompilation submodules:
+  - `decompile/decompile_exec.rs`
+  - `decompile/decompile_render.rs`
+  - `decompile/decompile_targets.rs`
+  - `decompile/nir_candidates.rs`
+- NIR structuring ownership submodules:
+  - `structuring/cleanup.rs`
+  - `structuring/guards.rs`
+  - `structuring/surfacing.rs`
+  - `structuring/recovery.rs`
+  - `structuring/driver.rs`
+
+#### Changed
+
+- `crates/fission-static/src/analysis/decomp/nir_engine.rs` is now a thin façade that re-exports:
+  - canonical Fission NIR types
+  - taxonomy helpers
+  - worker entrypoints
+  - routing/recovery entrypoints
+  - deprecated preview compatibility wrappers
+- `crates/fission-cli/src/cli/oneshot/decompile.rs` is now a thin façade:
+  - actual execution moved to `decompile_exec.rs`
+  - candidate/report logic moved to `nir_candidates.rs`
+  - render/output helpers moved to `decompile_render.rs`
+  - target selection moved to `decompile_targets.rs`
+- internal CLI candidate types were renamed to `NirCandidate*`, while compatibility aliases for `PreviewCandidate*` remain in place for existing consumers
+- `crates/fission-pcode/src/nir/structuring/mod.rs` is now a thin driver/re-export surface:
+  - cleanup helpers moved to `cleanup.rs`
+  - guarded-tail and promotion logic moved to `guards.rs`
+  - typed structuring failure surfacing moved to `surfacing.rs`
+  - localized/forced-linear recovery moved to `recovery.rs`
+  - top-level structuring orchestration moved to `driver.rs`
+- automation lane normalization still maps deprecated `preview` to canonical `nir`, and both lanes continue to deserialize dual-written `nir_*` / `preview_*` fields without drift
+
+#### Validation
+
+- `cargo fmt`
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+- `cargo check -p fission-analysis`
+- `cargo check -p fission-tauri`
+- `./target/debug/fission_cli samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe --decomp-all --decomp-limit 1 --engine nir --json`
+- `./target/debug/fission_cli samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe --decomp-all --decomp-limit 1 --engine mlil-preview --json --verbose`
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+
+#### Current Outcome
+
+- the three main refactor targets are now physically split:
+  - `nir_engine.rs`: `1620 -> 444` lines
+  - `decompile.rs`: `2171 -> 45` lines
+  - `structuring/mod.rs`: `1159 -> 20` lines
+- canonical `nir` and deprecated `preview` automation lanes still produce the same current smoke result:
+  - `direct_success=10`
+  - `nir_failure=0`
+  - `explicit_nonzero=4`
+  - `recovery_attempted={'linearized_structuring_retry': 2}`
+  - `recovery_outcome={'recovered': 2}`
+- canonical CLI output and deprecated `mlil-preview` alias still converge on the same engine result for the smoke sample:
+  - `engine_used = nir`
+  - `fell_back = false`
+
 ### P6R1 - Fission NIR Rename and Preview/Recovery Refactor
 
 This round renamed the public Rust-owned decompiler lane from `preview` / `mlil-preview` to **Fission NIR**, while keeping compatibility aliases so existing CLI usage, local automation baselines, and worker invocations continue to function during the transition.

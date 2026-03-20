@@ -77,7 +77,10 @@ pub fn load_source_inventory(path: &Path) -> Result<BTreeMap<String, SourceMeta>
         }
         if !source.binary.is_empty() {
             inventory.insert(source.binary.clone(), source.clone());
-            if let Some(stem) = Path::new(&source.binary).file_stem().and_then(|v| v.to_str()) {
+            if let Some(stem) = Path::new(&source.binary)
+                .file_stem()
+                .and_then(|v| v.to_str())
+            {
                 inventory.insert(stem.to_string(), source.clone());
             }
         }
@@ -96,8 +99,18 @@ pub fn resolve_source_meta<'a>(
         .to_string();
     inventory
         .get(&resolved)
-        .or_else(|| binary_path.file_name().and_then(|v| v.to_str()).and_then(|name| inventory.get(name)))
-        .or_else(|| binary_path.file_stem().and_then(|v| v.to_str()).and_then(|stem| inventory.get(stem)))
+        .or_else(|| {
+            binary_path
+                .file_name()
+                .and_then(|v| v.to_str())
+                .and_then(|name| inventory.get(name))
+        })
+        .or_else(|| {
+            binary_path
+                .file_stem()
+                .and_then(|v| v.to_str())
+                .and_then(|stem| inventory.get(stem))
+        })
 }
 
 fn is_high_aligned(source: &SourceMeta) -> bool {

@@ -17,9 +17,7 @@ impl<'a> PreviewBuilder<'a> {
         for idx in 0..self.pcode.blocks.len() {
             let block = &self.pcode.blocks[idx];
             let block_key = self.block_target_key(idx);
-            if (idx == 0 || targeted.contains(&block_key))
-                && emitted_labels.insert(block_key)
-            {
+            if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
                 body.push(HirStmt::Label(block_label(block_key)));
             }
             body.extend(self.lower_block_stmts(block)?);

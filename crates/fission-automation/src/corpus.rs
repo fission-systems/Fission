@@ -82,7 +82,12 @@ pub fn source_is_nir_aligned(source_meta: Option<&SourceMeta>) -> bool {
     }
     !matches!(
         source_meta.observed_nir_failure_kind.as_deref(),
-        Some("nir_architecture_unsupported" | "nir_format_unsupported" | "preview_architecture_unsupported" | "preview_format_unsupported")
+        Some(
+            "nir_architecture_unsupported"
+                | "nir_format_unsupported"
+                | "preview_architecture_unsupported"
+                | "preview_format_unsupported"
+        )
     )
 }
 
@@ -214,11 +219,18 @@ fn update_totals(totals: &mut InventorySummaryTotals, summary: &InventorySummary
     totals.explicit_breakdown_totals.param_count += summary.explicit_breakdown_totals.param_count;
     totals.explicit_breakdown_totals.local_count += summary.explicit_breakdown_totals.local_count;
     totals.explicit_breakdown_totals.return_count += summary.explicit_breakdown_totals.return_count;
-    totals.explicit_breakdown_totals.pdb_type_count += summary.explicit_breakdown_totals.pdb_type_count;
+    totals.explicit_breakdown_totals.pdb_type_count +=
+        summary.explicit_breakdown_totals.pdb_type_count;
     totals.explicit_breakdown_totals.native_type_count +=
         summary.explicit_breakdown_totals.native_type_count;
-    merge_counts(&mut totals.failure_kind_counts, &summary.failure_kind_counts);
-    merge_counts(&mut totals.row_error_kind_counts, &summary.row_error_kind_counts);
+    merge_counts(
+        &mut totals.failure_kind_counts,
+        &summary.failure_kind_counts,
+    );
+    merge_counts(
+        &mut totals.row_error_kind_counts,
+        &summary.row_error_kind_counts,
+    );
 }
 
 pub fn load_timeout_rescue(root: &Path) -> BTreeMap<String, Vec<String>> {
@@ -276,8 +288,11 @@ pub fn build_corpus_artifacts(
         (entry.binary.clone(), entry.address.clone())
     });
     explicit_entries.sort_by(|a, b| {
-        (b.fact_density_score, b.quality_potential_score, &a.address)
-            .cmp(&(a.fact_density_score, a.quality_potential_score, &b.address))
+        (b.fact_density_score, b.quality_potential_score, &a.address).cmp(&(
+            a.fact_density_score,
+            a.quality_potential_score,
+            &b.address,
+        ))
     });
     let explicit_keys: BTreeSet<(String, String)> = explicit_entries
         .iter()
@@ -287,31 +302,53 @@ pub fn build_corpus_artifacts(
     let mut heuristic_entries = dedupe_by_key(heuristic_entries, |entry| {
         (entry.binary.clone(), entry.address.clone())
     });
-    heuristic_entries.retain(|entry| !explicit_keys.contains(&(entry.binary.clone(), entry.address.clone())));
+    heuristic_entries
+        .retain(|entry| !explicit_keys.contains(&(entry.binary.clone(), entry.address.clone())));
     heuristic_entries.sort_by(|a, b| {
-        (b.fact_density_score, b.quality_potential_score, &a.address)
-            .cmp(&(a.fact_density_score, a.quality_potential_score, &b.address))
+        (b.fact_density_score, b.quality_potential_score, &a.address).cmp(&(
+            a.fact_density_score,
+            a.quality_potential_score,
+            &b.address,
+        ))
     });
 
     let mut blocked_entries = dedupe_by_key(blocked_entries, |entry| {
         (entry.binary.clone(), entry.address.clone())
     });
     blocked_entries.sort_by(|a, b| {
-        candidate_sort_tuple(b.explicit_fact_total, b.fact_density_score, b.pcode_op_count)
-            .cmp(&candidate_sort_tuple(a.explicit_fact_total, a.fact_density_score, a.pcode_op_count))
+        candidate_sort_tuple(
+            b.explicit_fact_total,
+            b.fact_density_score,
+            b.pcode_op_count,
+        )
+        .cmp(&candidate_sort_tuple(
+            a.explicit_fact_total,
+            a.fact_density_score,
+            a.pcode_op_count,
+        ))
     });
 
     let mut aligned_entries = dedupe_by_key(aligned_entries, |entry| {
         (entry.binary.clone(), entry.address.clone())
     });
     aligned_entries.sort_by(|a, b| {
-        candidate_sort_tuple(b.explicit_fact_total, b.fact_density_score, b.pcode_op_count)
-            .cmp(&candidate_sort_tuple(a.explicit_fact_total, a.fact_density_score, a.pcode_op_count))
+        candidate_sort_tuple(
+            b.explicit_fact_total,
+            b.fact_density_score,
+            b.pcode_op_count,
+        )
+        .cmp(&candidate_sort_tuple(
+            a.explicit_fact_total,
+            a.fact_density_score,
+            a.pcode_op_count,
+        ))
     });
 
     let mut block_reason_counts = BTreeMap::new();
     for entry in &blocked_entries {
-        *block_reason_counts.entry(entry.block_reason.clone()).or_default() += 1;
+        *block_reason_counts
+            .entry(entry.block_reason.clone())
+            .or_default() += 1;
     }
 
     CorpusArtifacts {
@@ -326,6 +363,14 @@ pub fn build_corpus_artifacts(
     }
 }
 
-fn candidate_sort_tuple(explicit_fact_total: usize, fact_density_score: i32, pcode_op_count: usize) -> (usize, i32, i64) {
-    (explicit_fact_total, fact_density_score, -(pcode_op_count as i64))
+fn candidate_sort_tuple(
+    explicit_fact_total: usize,
+    fact_density_score: i32,
+    pcode_op_count: usize,
+) -> (usize, i32, i64) {
+    (
+        explicit_fact_total,
+        fact_density_score,
+        -(pcode_op_count as i64),
+    )
 }

@@ -201,14 +201,12 @@ impl PeLoader {
         }
 
         let pdb_debug_info = match &pe_file.nt_headers.optional_header {
-            OptionalHeader::Pe32(opt) => opt
-                .data_directories
-                .get(6)
-                .and_then(|dir| loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)),
-            OptionalHeader::Pe32Plus(opt) => opt
-                .data_directories
-                .get(6)
-                .and_then(|dir| loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)),
+            OptionalHeader::Pe32(opt) => opt.data_directories.get(6).and_then(|dir| {
+                loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)
+            }),
+            OptionalHeader::Pe32Plus(opt) => opt.data_directories.get(6).and_then(|dir| {
+                loader.parse_pdb_debug_info(dir.virtual_address, dir.size, image_base)
+            }),
         };
 
         // Linear sweep: if we only found the entry point (stripped binary with no
@@ -767,7 +765,10 @@ mod tests {
 
         let rsds_offset = 0x220usize;
         data[rsds_offset..rsds_offset + 4].copy_from_slice(b"RSDS");
-        for (idx, byte) in data[rsds_offset + 4..rsds_offset + 20].iter_mut().enumerate() {
+        for (idx, byte) in data[rsds_offset + 4..rsds_offset + 20]
+            .iter_mut()
+            .enumerate()
+        {
             *byte = (idx as u8) + 1;
         }
         data[rsds_offset + 20..rsds_offset + 24].copy_from_slice(&1u32.to_le_bytes());

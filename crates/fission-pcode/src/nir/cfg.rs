@@ -30,7 +30,9 @@ pub(super) fn build_block_target_keys(pcode: &PcodeFunction) -> Vec<u64> {
 
 fn encode_duplicate_block_key(start_address: u64, ordinal: u32) -> u64 {
     debug_assert!(ordinal > 0);
-    DUPLICATE_BLOCK_KEY_TAG | ((u64::from(ordinal) & 0x7fff) << 48) | (start_address & 0x0000_ffff_ffff_ffff)
+    DUPLICATE_BLOCK_KEY_TAG
+        | ((u64::from(ordinal) & 0x7fff) << 48)
+        | (start_address & 0x0000_ffff_ffff_ffff)
 }
 
 pub(super) fn canonical_block_start_for_address(
@@ -79,11 +81,9 @@ pub(super) fn build_successor_index_map(
             match block_terminator_op(block) {
                 Some(op) if op.opcode == PcodeOpcode::Return => {}
                 Some(op) if op.opcode == PcodeOpcode::Branch && op.inputs.len() == 1 => {
-                    if let Some(target_idx) = op
-                        .inputs
-                        .first()
-                        .and_then(|input| resolve_branch_target_index(pcode, address_to_index, idx, op, input))
-                    {
+                    if let Some(target_idx) = op.inputs.first().and_then(|input| {
+                        resolve_branch_target_index(pcode, address_to_index, idx, op, input)
+                    }) {
                         succs.push(target_idx);
                     }
                 }
@@ -91,11 +91,9 @@ pub(super) fn build_successor_index_map(
                     if op.opcode == PcodeOpcode::CBranch
                         || (op.opcode == PcodeOpcode::Branch && op.inputs.len() >= 2) =>
                 {
-                    if let Some(target_idx) = op
-                        .inputs
-                        .first()
-                        .and_then(|input| resolve_branch_target_index(pcode, address_to_index, idx, op, input))
-                    {
+                    if let Some(target_idx) = op.inputs.first().and_then(|input| {
+                        resolve_branch_target_index(pcode, address_to_index, idx, op, input)
+                    }) {
                         succs.push(target_idx);
                     }
                     if let Some(next_idx) = layout_fallthrough[idx] {

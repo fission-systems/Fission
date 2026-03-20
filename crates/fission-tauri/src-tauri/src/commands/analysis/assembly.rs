@@ -7,8 +7,8 @@ use crate::state::AppState;
 use fission_loader::loader::LoadedBinary;
 #[cfg(feature = "native_decomp")]
 use fission_static::analysis::decomp::{
-    NirEngineMode, NirSelection, native_failure_routing_decision, rescue_nir_output,
-    select_nir_output,
+    native_failure_routing_decision, rescue_nir_output, select_nir_output, NirEngineMode,
+    NirSelection,
 };
 use tauri::State;
 

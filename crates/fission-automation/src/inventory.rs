@@ -83,24 +83,17 @@ pub fn run_inventory_emit(
     if let Some(limit) = functions_limit {
         cmd.arg("--functions-limit").arg(limit.to_string());
     }
-    let mut child = cmd.spawn().with_context(|| {
-        format!(
-            "run function facts inventory for {}",
-            binary_path.display()
-        )
-    })?;
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("run function facts inventory for {}", binary_path.display()))?;
     let expected_functions = functions_limit.unwrap_or(100).max(1) as u64;
     let hard_timeout_ms = timeout_ms
         .saturating_mul(expected_functions)
         .saturating_mul(2)
         .clamp(30_000, 600_000);
     let hard_timeout = Duration::from_millis(hard_timeout_ms);
-    let status = wait_with_timeout(&mut child, hard_timeout).with_context(|| {
-        format!(
-            "run function facts inventory for {}",
-            binary_path.display()
-        )
-    })?;
+    let status = wait_with_timeout(&mut child, hard_timeout)
+        .with_context(|| format!("run function facts inventory for {}", binary_path.display()))?;
     if !status.success() {
         bail!(
             "function facts inventory failed for {}",

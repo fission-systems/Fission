@@ -8,11 +8,17 @@ mod report;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use corpus::build_corpus_artifacts;
-use diagnosis::{aggregate_diagnosis, diagnosis_entry, DiagnosisReport};
+use diagnosis::{DiagnosisReport, aggregate_diagnosis, diagnosis_entry};
 use inventory::{ensure_fission_cli, run_inventory_emit};
-use lanes::{default_manifest_path, default_source_inventory_path, load_source_inventory, normalize_lane_name, resolve_lane_targets, resolve_source_meta};
+use lanes::{
+    default_manifest_path, default_source_inventory_path, load_source_inventory,
+    normalize_lane_name, resolve_lane_targets, resolve_source_meta,
+};
 use model::{InventoryRow, InventorySummary, SourceMeta};
-use report::{build_summary, compute_delta, enrich_summary_with_provenance, load_baseline, print_terminal_summary, render_markdown, update_latest, AutomationSummary};
+use report::{
+    AutomationSummary, build_summary, compute_delta, enrich_summary_with_provenance, load_baseline,
+    print_terminal_summary, render_markdown, update_latest,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -74,7 +80,9 @@ fn repo_root() -> PathBuf {
 fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     let root = repo_root();
     let (canonical_lane, deprecated_preview_lane) = normalize_lane_name(&args.lane);
-    let manifest_path = args.manifest.unwrap_or_else(|| default_manifest_path(&root));
+    let manifest_path = args
+        .manifest
+        .unwrap_or_else(|| default_manifest_path(&root));
     let source_inventory_path = default_source_inventory_path(&root);
     let source_inventory = match source_inventory_path.as_ref() {
         Some(path) => load_source_inventory(path)
@@ -91,11 +99,18 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         anyhow::bail!("lane `{}` resolved no targets", args.lane);
     }
 
-    let fission_bin = ensure_fission_cli(&root, args.release, args.no_build, args.fission_bin.as_deref())?;
+    let fission_bin = ensure_fission_cli(
+        &root,
+        args.release,
+        args.no_build,
+        args.fission_bin.as_deref(),
+    )?;
     let run_id = unix_run_id();
-    let base_output_dir = args
-        .output_dir
-        .unwrap_or_else(|| root.join("artifacts").join("fission-automation").join(&run_id));
+    let base_output_dir = args.output_dir.unwrap_or_else(|| {
+        root.join("artifacts")
+            .join("fission-automation")
+            .join(&run_id)
+    });
     let per_binary_dir = base_output_dir.join("per_binary");
     fs::create_dir_all(&per_binary_dir)
         .with_context(|| format!("create {}", per_binary_dir.display()))?;
@@ -109,7 +124,10 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         let rows_path = per_binary_dir.join(format!("{file_slug}.inventory.rows.jsonl"));
         let summary_path = per_binary_dir.join(format!("{file_slug}.inventory.summary.json"));
         let functions_limit = args.functions_limit.or(target.default_functions_limit);
-        let timeout_ms = args.timeout_ms.or(target.default_timeout_ms).unwrap_or(10_000);
+        let timeout_ms = args
+            .timeout_ms
+            .or(target.default_timeout_ms)
+            .unwrap_or(10_000);
         let inventory_result = run_inventory_emit(
             &root,
             &fission_bin,
@@ -146,7 +164,9 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     let diagnosis_entries = datasets
         .iter()
         .zip(targets.iter())
-        .map(|((summary, rows, source_meta), target)| diagnosis_entry(&target.path, rows, summary, source_meta.as_ref()))
+        .map(|((summary, rows, source_meta), target)| {
+            diagnosis_entry(&target.path, rows, summary, source_meta.as_ref())
+        })
         .collect::<Vec<_>>();
     let diagnosis_report = DiagnosisReport {
         generated_at: isoish_now(),
@@ -217,11 +237,14 @@ fn write_outputs(
 
     write_json_pretty(base_output_dir.join("summary.json"), summary)?;
     write_json_pretty(base_output_dir.join("diagnosis.json"), diagnosis)?;
-    write_json_pretty(base_output_dir.join("corpus.json"), &serde_json::json!({
-        "timeout_rescue": corpus.timeout_rescue,
-        "quality_explicit_facts": corpus.quality_explicit_facts,
-        "quality_heuristic_surface": corpus.quality_heuristic_surface,
-    }))?;
+    write_json_pretty(
+        base_output_dir.join("corpus.json"),
+        &serde_json::json!({
+            "timeout_rescue": corpus.timeout_rescue,
+            "quality_explicit_facts": corpus.quality_explicit_facts,
+            "quality_heuristic_surface": corpus.quality_heuristic_surface,
+        }),
+    )?;
     write_json_pretty(
         base_output_dir.join("nir_quality_candidates.json"),
         &serde_json::json!({ "candidates": corpus.candidates }),
@@ -339,7 +362,8 @@ fn isoish_now() -> String {
 }
 
 fn sanitize_file_stem(value: &str) -> String {
-    value.chars()
+    value
+        .chars()
         .map(|ch| match ch {
             'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
             _ => '_',

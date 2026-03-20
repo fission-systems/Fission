@@ -78,7 +78,8 @@ pub(super) fn resolve_engine_mode(
     if matches!(profile, Some(profile) if profile.eq_ignore_ascii_case("nir")) {
         return (EngineMode::Nir, None, false, false);
     }
-    if matches!(profile, Some(profile) if profile.eq_ignore_ascii_case("mlil-preview") || profile.eq_ignore_ascii_case("mlil_preview")) {
+    if matches!(profile, Some(profile) if profile.eq_ignore_ascii_case("mlil-preview") || profile.eq_ignore_ascii_case("mlil_preview"))
+    {
         return (EngineMode::Nir, None, false, true);
     }
 

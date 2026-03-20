@@ -7,19 +7,21 @@ mod binary_info;
 mod common;
 #[cfg(feature = "native_decomp")]
 mod decompile;
-#[cfg(feature = "native_decomp")]
-mod inventory;
 mod disasm;
 mod functions;
+#[cfg(feature = "native_decomp")]
+mod inventory;
 mod strings;
 
 use binary_info::{print_binary_info, print_exports, print_imports, print_sections};
 #[cfg(feature = "native_decomp")]
-use decompile::{emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation};
-#[cfg(feature = "native_decomp")]
-use inventory::emit_function_facts_inventory;
+use decompile::{
+    emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation,
+};
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
+#[cfg(feature = "native_decomp")]
+use inventory::emit_function_facts_inventory;
 use strings::print_strings;
 
 use crate::cli::args::OneShotArgs;
