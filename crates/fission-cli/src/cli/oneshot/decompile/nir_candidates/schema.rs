@@ -1,4 +1,5 @@
 use super::super::*;
+use fission_pcode::NirBuildStats;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct NirCandidateInventory {
@@ -51,6 +52,9 @@ pub(crate) struct NirCandidateEntry {
     pub(crate) pcode_op_count: usize,
     pub(crate) has_indirect_control_flow: bool,
     pub(crate) auto_eligible: bool,
+    pub(crate) nir_goto_count: Option<usize>,
+    pub(crate) nir_output_class: Option<String>,
+    pub(crate) nir_build_stats: Option<NirBuildStats>,
     pub(crate) nir_surface_kind: Option<String>,
     pub(crate) preview_surface_kind: Option<String>,
     pub(crate) quality_potential_score: i32,
@@ -79,6 +83,8 @@ pub(crate) struct NirCandidateScanSummary {
     pub(crate) row_error_kind_counts: BTreeMap<String, usize>,
     pub(crate) recovery_quality_flag_counts: BTreeMap<String, usize>,
     pub(crate) recovery_structuring_mode_counts: BTreeMap<String, usize>,
+    pub(crate) nir_output_class_counts: BTreeMap<String, usize>,
+    pub(crate) nir_build_stats_totals: NirBuildStats,
     pub(crate) suppressed_stderr_count: usize,
     pub(crate) resume_loaded_rows: usize,
 }

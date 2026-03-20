@@ -2,6 +2,7 @@ use crate::corpus::{CorpusArtifacts, InventorySummaryTotals};
 use crate::diagnosis::{DiagnosisAggregate, DiagnosisReport};
 use crate::model::{InventorySummary, ProvenanceSurfaceTotals, SourcePresenceCounts};
 use anyhow::{Context, Result};
+use fission_pcode::NirBuildStats;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -10,6 +11,8 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BinarySnapshot {
     pub binary: String,
+    #[serde(default)]
+    pub rows_emitted: usize,
     pub direct_success_count: usize,
     #[serde(alias = "preview_failure_count")]
     pub nir_failure_count: usize,
@@ -28,10 +31,16 @@ pub struct BinarySnapshot {
     pub recovery_quality_flag_counts: BTreeMap<String, usize>,
     #[serde(default)]
     pub recovery_structuring_mode_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub nir_output_class_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub nir_build_stats_totals: NirBuildStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateSnapshot {
+    #[serde(default)]
+    pub rows_emitted: usize,
     pub direct_success_count: usize,
     #[serde(alias = "preview_failure_count")]
     pub nir_failure_count: usize,
@@ -54,6 +63,10 @@ pub struct AggregateSnapshot {
     pub recovery_quality_flag_counts: BTreeMap<String, usize>,
     #[serde(default)]
     pub recovery_structuring_mode_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub nir_output_class_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub nir_build_stats_totals: NirBuildStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +88,18 @@ pub struct SummaryDelta {
     pub pdb_nonzero_rows: isize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityMeasurementSnapshot {
+    pub rows_emitted: usize,
+    pub direct_success_count: usize,
+    pub nir_output_class_counts: BTreeMap<String, usize>,
+    pub structured_ratio_all_rows: f64,
+    pub structured_ratio_success_rows: f64,
+    pub linear_fallback_ratio_all_rows: f64,
+    pub linear_fallback_ratio_success_rows: f64,
+    pub top_build_stats: Vec<(String, usize)>,
+}
+
 pub fn build_summary(
     generated_at: String,
     lane: &str,
@@ -88,6 +113,8 @@ pub fn build_summary(
     let mut aggregate_recovery_outcome_counts = BTreeMap::new();
     let mut aggregate_recovery_quality_flag_counts = BTreeMap::new();
     let mut aggregate_recovery_structuring_mode_counts = BTreeMap::new();
+    let mut aggregate_nir_output_class_counts = BTreeMap::new();
+    let mut aggregate_nir_build_stats_totals = NirBuildStats::default();
     let mut binaries = Vec::new();
     for summary in inventory_summaries {
         merge_counts(
@@ -110,8 +137,14 @@ pub fn build_summary(
             &mut aggregate_recovery_structuring_mode_counts,
             &summary.recovery_structuring_mode_counts,
         );
+        merge_counts(
+            &mut aggregate_nir_output_class_counts,
+            &summary.nir_output_class_counts,
+        );
+        aggregate_nir_build_stats_totals.merge_assign(&summary.nir_build_stats_totals);
         binaries.push(BinarySnapshot {
             binary: summary.binary.clone(),
+            rows_emitted: summary.rows_emitted,
             direct_success_count: summary.direct_success_count,
             nir_failure_count: summary.nir_failure_count,
             explicit_fact_nonzero_count: summary.explicit_fact_nonzero_count,
@@ -124,6 +157,8 @@ pub fn build_summary(
             recovery_outcome_counts: summary.recovery_outcome_counts.clone(),
             recovery_quality_flag_counts: summary.recovery_quality_flag_counts.clone(),
             recovery_structuring_mode_counts: summary.recovery_structuring_mode_counts.clone(),
+            nir_output_class_counts: summary.nir_output_class_counts.clone(),
+            nir_build_stats_totals: summary.nir_build_stats_totals,
         });
     }
     AutomationSummary {
@@ -132,6 +167,7 @@ pub fn build_summary(
         run_id: run_id.to_string(),
         binaries,
         aggregate: AggregateSnapshot {
+            rows_emitted: totals.rows_emitted,
             direct_success_count: totals.direct_success_count,
             nir_failure_count: totals.nir_failure_count,
             explicit_fact_nonzero_count: totals.explicit_fact_nonzero_count,
@@ -152,6 +188,8 @@ pub fn build_summary(
             recovery_outcome_counts: aggregate_recovery_outcome_counts,
             recovery_quality_flag_counts: aggregate_recovery_quality_flag_counts,
             recovery_structuring_mode_counts: aggregate_recovery_structuring_mode_counts,
+            nir_output_class_counts: aggregate_nir_output_class_counts,
+            nir_build_stats_totals: aggregate_nir_build_stats_totals,
         },
     }
 }
@@ -159,6 +197,157 @@ pub fn build_summary(
 fn merge_counts(target: &mut BTreeMap<String, usize>, source: &BTreeMap<String, usize>) {
     for (key, value) in source {
         *target.entry(key.clone()).or_default() += *value;
+    }
+}
+
+fn ratio(count: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        count as f64 / total as f64
+    }
+}
+
+fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
+    vec![
+        (
+            "forced_linear_structuring_count",
+            stats.forced_linear_structuring_count,
+        ),
+        (
+            "region_linearize_structuring_count",
+            stats.region_linearize_structuring_count,
+        ),
+        (
+            "region_linearize_heuristic_exit_count",
+            stats.region_linearize_heuristic_exit_count,
+        ),
+        (
+            "region_linearize_rejected_non_structuring_failure_count",
+            stats.region_linearize_rejected_non_structuring_failure_count,
+        ),
+        (
+            "region_linearize_rejected_no_exit_count",
+            stats.region_linearize_rejected_no_exit_count,
+        ),
+        (
+            "region_linearize_rejected_body_lowering_failed_count",
+            stats.region_linearize_rejected_body_lowering_failed_count,
+        ),
+        (
+            "region_linearize_rejected_non_advancing_count",
+            stats.region_linearize_rejected_non_advancing_count,
+        ),
+        ("promotion_candidate_count", stats.promotion_candidate_count),
+        ("promoted_region_count", stats.promoted_region_count),
+        (
+            "promotion_rejected_by_shape_count",
+            stats.promotion_rejected_by_shape_count,
+        ),
+        (
+            "promotion_rejected_by_gate_count",
+            stats.promotion_rejected_by_gate_count,
+        ),
+        (
+            "discovery_seen_guarded_tail_like_shape_count",
+            stats.discovery_seen_guarded_tail_like_shape_count,
+        ),
+        (
+            "discovery_rejected_noncanonical_layout_count",
+            stats.discovery_rejected_noncanonical_layout_count,
+        ),
+        (
+            "canonicalized_guarded_tail_shape_count",
+            stats.canonicalized_guarded_tail_shape_count,
+        ),
+        (
+            "canonicalization_failed_multiple_payload_entries",
+            stats.canonicalization_failed_multiple_payload_entries,
+        ),
+        (
+            "canonicalization_failed_interleaved_join_uses",
+            stats.canonicalization_failed_interleaved_join_uses,
+        ),
+        (
+            "canonicalization_failed_nonterminal_join_label",
+            stats.canonicalization_failed_nonterminal_join_label,
+        ),
+        (
+            "canonicalization_failed_nested_tail_escape",
+            stats.canonicalization_failed_nested_tail_escape,
+        ),
+        (
+            "canonicalized_interleaved_join_use_count",
+            stats.canonicalized_interleaved_join_use_count,
+        ),
+        (
+            "canonicalized_local_nonfallthrough_alias_count",
+            stats.canonicalized_local_nonfallthrough_alias_count,
+        ),
+        (
+            "canonicalization_failed_alias_not_fallthrough_count",
+            stats.canonicalization_failed_alias_not_fallthrough_count,
+        ),
+        (
+            "canonicalization_failed_alias_has_multiple_internal_predecessors_count",
+            stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count,
+        ),
+        (
+            "canonicalization_failed_alias_has_nonlocal_ref_count",
+            stats.canonicalization_failed_alias_has_nonlocal_ref_count,
+        ),
+        (
+            "canonicalization_failed_alias_body_not_trivial_count",
+            stats.canonicalization_failed_alias_body_not_trivial_count,
+        ),
+        (
+            "canonicalization_failed_join_has_external_ref_count",
+            stats.canonicalization_failed_join_has_external_ref_count,
+        ),
+        (
+            "canonicalization_failed_payload_crosses_join_count",
+            stats.canonicalization_failed_payload_crosses_join_count,
+        ),
+        ("rejected_must_emit_label", stats.rejected_must_emit_label),
+        (
+            "rejected_not_single_pred_succ",
+            stats.rejected_not_single_pred_succ,
+        ),
+        ("rejected_external_entry", stats.rejected_external_entry),
+        (
+            "rejected_loop_or_switch_target",
+            stats.rejected_loop_or_switch_target,
+        ),
+    ]
+}
+
+fn top_build_stats(stats: &NirBuildStats, limit: usize) -> Vec<(String, usize)> {
+    let mut pairs = build_stats_pairs(stats)
+        .into_iter()
+        .filter(|(_, value)| *value > 0)
+        .map(|(name, value)| (name.to_string(), value))
+        .collect::<Vec<_>>();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    pairs.truncate(limit);
+    pairs
+}
+
+pub fn build_quality_measurement(summary: &AutomationSummary) -> QualityMeasurementSnapshot {
+    let output_counts = &summary.aggregate.nir_output_class_counts;
+    let structured = output_counts.get("structured").copied().unwrap_or(0);
+    let linear_fallback = output_counts.get("linear_fallback").copied().unwrap_or(0);
+    QualityMeasurementSnapshot {
+        rows_emitted: summary.aggregate.rows_emitted,
+        direct_success_count: summary.aggregate.direct_success_count,
+        nir_output_class_counts: output_counts.clone(),
+        structured_ratio_all_rows: ratio(structured, summary.aggregate.rows_emitted),
+        structured_ratio_success_rows: ratio(structured, summary.aggregate.direct_success_count),
+        linear_fallback_ratio_all_rows: ratio(linear_fallback, summary.aggregate.rows_emitted),
+        linear_fallback_ratio_success_rows: ratio(
+            linear_fallback,
+            summary.aggregate.direct_success_count,
+        ),
+        top_build_stats: top_build_stats(&summary.aggregate.nir_build_stats_totals, 8),
     }
 }
 
@@ -273,6 +462,17 @@ pub fn render_markdown(
         summary.aggregate.recovery_quality_flag_counts,
         summary.aggregate.recovery_structuring_mode_counts,
     ));
+    let quality = build_quality_measurement(summary);
+    out.push_str("## Output Quality\n\n");
+    out.push_str(&format!(
+        "- nir_output_class_counts: `{:?}`\n- structured_ratio_all_rows: `{:.2}%`\n- structured_ratio_success_rows: `{:.2}%`\n- linear_fallback_ratio_all_rows: `{:.2}%`\n- linear_fallback_ratio_success_rows: `{:.2}%`\n- top_build_stats: `{:?}`\n\n",
+        quality.nir_output_class_counts,
+        quality.structured_ratio_all_rows * 100.0,
+        quality.structured_ratio_success_rows * 100.0,
+        quality.linear_fallback_ratio_all_rows * 100.0,
+        quality.linear_fallback_ratio_success_rows * 100.0,
+        quality.top_build_stats,
+    ));
 
     if let Some(delta) = delta {
         out.push_str("## Baseline Delta\n\n");
@@ -291,12 +491,14 @@ pub fn render_markdown(
     for entry in &diagnosis.binaries {
         out.push_str(&format!("### {}\n\n", entry.binary));
         out.push_str(&format!(
-            "- diagnosis: `{}`\n- next_action: `{}`\n- explicit_nonzero_rows: `{}`\n- strict_explicit_candidate_count: `{}`\n- nir_block_signatures: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n\n",
+            "- diagnosis: `{}`\n- next_action: `{}`\n- explicit_nonzero_rows: `{}`\n- strict_explicit_candidate_count: `{}`\n- nir_block_signatures: `{:?}`\n- nir_output_class_counts: `{:?}`\n- top_build_stats: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n\n",
             entry.diagnosis_bucket,
             entry.next_action,
             entry.derived_metrics.explicit_nonzero_rows,
             entry.inventory_summary.strict_explicit_candidate_count,
             entry.derived_metrics.blocked_nir_block_signature_counts,
+            entry.inventory_summary.nir_output_class_counts,
+            top_build_stats(&entry.inventory_summary.nir_build_stats_totals, 6),
             entry.inventory_summary.recovery_strategy_attempted_counts,
             entry.inventory_summary.recovery_outcome_counts,
             entry.inventory_summary.recovery_structuring_mode_counts,
@@ -329,6 +531,7 @@ pub fn render_markdown(
 }
 
 pub fn print_terminal_summary(summary: &AutomationSummary, diagnosis: &DiagnosisReport) {
+    let quality = build_quality_measurement(summary);
     println!("[fission-automation] lane={}", summary.lane);
     println!(
         "  direct_success={} nir_failure={} explicit_nonzero={} strict_explicit={}",
@@ -341,6 +544,12 @@ pub fn print_terminal_summary(summary: &AutomationSummary, diagnosis: &Diagnosis
         "  inventory_surface_gap={} pdb_nonzero_rows={}",
         summary.aggregate.inventory_surface_gap_count,
         summary.aggregate.provenance_surface_totals.pdb_nonzero_rows
+    );
+    println!(
+        "  structured_ratio={:.1}% linear_fallback_ratio={:.1}% output_classes={:?}",
+        quality.structured_ratio_all_rows * 100.0,
+        quality.linear_fallback_ratio_all_rows * 100.0,
+        quality.nir_output_class_counts
     );
     println!(
         "  dominant_diagnosis={:?} next_patch={:?}",
@@ -356,6 +565,7 @@ pub fn print_terminal_summary(summary: &AutomationSummary, diagnosis: &Diagnosis
         summary.aggregate.recovery_outcome_counts,
         summary.aggregate.recovery_quality_flag_counts
     );
+    println!("  top_build_stats={:?}", quality.top_build_stats);
 }
 
 pub fn update_latest(run_dir: &Path, latest_dir: &Path) -> Result<()> {

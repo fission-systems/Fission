@@ -9,6 +9,70 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-21
 
+### quality-measurement-pipeline / P5H3B - Output Quality Metrics and Localized Recovery Instrumentation
+
+This round added the first canonical output-quality measurement pipeline on top of the existing Fission NIR inventory and automation flow. The goal was not to change routing or recovery policy yet, but to make structured output ratios, linear fallback rates, and top structuring/build counters measurable on real corpus runs.
+
+It also extended the localized structuring recovery path with reject-reason instrumentation so the current blocker is no longer opaque. The immediate outcome is that quality is now quantifiable, and the `region_linearized` bottleneck has been narrowed from a vague “localized fallback rarely triggers” problem down to a concrete `lower_linear_body` failure class.
+
+#### Added
+
+- row-level Fission NIR quality fields in CLI candidate/inventory output:
+  - `nir_goto_count`
+  - `nir_output_class`
+  - `nir_build_stats`
+- aggregate quality metrics in inventory summaries:
+  - `nir_output_class_counts`
+  - `nir_build_stats_totals`
+- canonical automation quality artifact:
+  - `artifacts/fission-automation/.../quality_measurement.json`
+- new `NirBuildStats` counters for localized recovery diagnosis:
+  - `forced_linear_structuring_count`
+  - `region_linearize_structuring_count`
+  - `region_linearize_heuristic_exit_count`
+  - `region_linearize_rejected_non_structuring_failure_count`
+  - `region_linearize_rejected_no_exit_count`
+  - `region_linearize_rejected_body_lowering_failed_count`
+  - `region_linearize_rejected_non_advancing_count`
+
+#### Changed
+
+- `fission-automation` terminal and Markdown reports now show:
+  - structured ratio
+  - linear fallback ratio
+  - `nir_output_class_counts`
+  - top `NirBuildStats` counters
+- Fission NIR build stats are now preserved even when `build_hir` exits through a structuring error path
+- failed `region_linearized` attempts now surface partial build stats into the later forced-linear recovery result, so localized recovery rejection is visible in corpus summaries
+- localized recovery now tries a narrow nearby-join exit heuristic instead of relying only on a single `linear_exit(start_idx)` result
+
+#### Validation
+
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40`
+
+#### Current Outcome
+
+- quality is now measurable from canonical artifacts instead of inferred from ad hoc logs:
+  - `nir` smoke:
+    - `structured_ratio=50.0%`
+    - `linear_fallback_ratio=40.0%`
+  - 40-function corpus run:
+    - `structured_ratio=33.8%`
+    - `linear_fallback_ratio=32.5%`
+- the current `region_linearized` blocker is now explicit:
+  - `region_linearize_rejected_body_lowering_failed_count = 5`
+  - `region_linearize_rejected_no_exit_count = 0`
+- recovery distribution is unchanged for now:
+  - `recovery_attempted = 19`
+  - `recovered = 19`
+  - `forced_linear = 18`
+  - `region_linearized = 1`
+  - `high_goto_density = 14`
+- this narrows the next patch target to localized body lowering rather than exit discovery
+
 ### P6R3 / P6R4 / P6R5 / P6R6 - Follow-up Fission NIR and CLI Module Extraction
 
 This follow-up refactor round continued the post-rename cleanup without changing current decompilation semantics. The focus was to remove the next batch of oversized coordination files, move the Fission NIR implementation under a dedicated `decomp/nir/` subtree, and split CLI inventory/candidate execution code into clearer ownership modules.

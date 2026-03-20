@@ -181,6 +181,9 @@ pub(super) fn to_inventory_row(
         pcode_op_count: entry.pcode_op_count,
         has_indirect_control_flow: entry.has_indirect_control_flow,
         auto_eligible: entry.auto_eligible,
+        nir_goto_count: entry.nir_goto_count,
+        nir_output_class: entry.nir_output_class.clone(),
+        nir_build_stats: entry.nir_build_stats,
         strict_explicit_candidate: strict_explicit,
         heuristic_surface_candidate: heuristic_surface,
         reason_tags: entry.reason_tags,
@@ -231,6 +234,15 @@ pub(super) fn update_inventory_summary(
     }
     if row.provenance_fact_breakdown.loader_type_count > 0 {
         summary.provenance_surface_totals.loader_nonzero_rows += 1;
+    }
+    if let Some(output_class) = row.nir_output_class.as_ref() {
+        *summary
+            .nir_output_class_counts
+            .entry(output_class.clone())
+            .or_insert(0) += 1;
+    }
+    if let Some(build_stats) = row.nir_build_stats {
+        summary.nir_build_stats_totals.merge_assign(&build_stats);
     }
     if row.inventory_surface_gap {
         summary.inventory_surface_gap_count += 1;
@@ -317,6 +329,9 @@ pub(super) fn update_inventory_summary(
         pcode_op_count: row.pcode_op_count,
         has_indirect_control_flow: row.has_indirect_control_flow,
         auto_eligible: row.auto_eligible,
+        nir_goto_count: row.nir_goto_count,
+        nir_output_class: row.nir_output_class.clone(),
+        nir_build_stats: row.nir_build_stats,
         nir_surface_kind: row.nir_surface_kind.clone(),
         preview_surface_kind: row.preview_surface_kind.clone(),
         quality_potential_score: 0,

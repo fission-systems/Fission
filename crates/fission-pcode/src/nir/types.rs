@@ -75,29 +75,119 @@ pub struct HirFunction {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NirBuildStats {
+    #[serde(default)]
+    pub forced_linear_structuring_count: usize,
+    #[serde(default)]
+    pub region_linearize_structuring_count: usize,
+    #[serde(default)]
+    pub region_linearize_heuristic_exit_count: usize,
+    #[serde(default)]
+    pub region_linearize_rejected_non_structuring_failure_count: usize,
+    #[serde(default)]
+    pub region_linearize_rejected_no_exit_count: usize,
+    #[serde(default)]
+    pub region_linearize_rejected_body_lowering_failed_count: usize,
+    #[serde(default)]
+    pub region_linearize_rejected_non_advancing_count: usize,
+    #[serde(default)]
     pub promotion_candidate_count: usize,
+    #[serde(default)]
     pub promoted_region_count: usize,
+    #[serde(default)]
     pub promotion_rejected_by_shape_count: usize,
+    #[serde(default)]
     pub promotion_rejected_by_gate_count: usize,
+    #[serde(default)]
     pub discovery_seen_guarded_tail_like_shape_count: usize,
+    #[serde(default)]
     pub discovery_rejected_noncanonical_layout_count: usize,
+    #[serde(default)]
     pub canonicalized_guarded_tail_shape_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_multiple_payload_entries: usize,
+    #[serde(default)]
     pub canonicalization_failed_interleaved_join_uses: usize,
+    #[serde(default)]
     pub canonicalization_failed_nonterminal_join_label: usize,
+    #[serde(default)]
     pub canonicalization_failed_nested_tail_escape: usize,
+    #[serde(default)]
     pub canonicalized_interleaved_join_use_count: usize,
+    #[serde(default)]
     pub canonicalized_local_nonfallthrough_alias_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_alias_not_fallthrough_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_alias_has_multiple_internal_predecessors_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_alias_has_nonlocal_ref_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_alias_body_not_trivial_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_join_has_external_ref_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_payload_crosses_join_count: usize,
+    #[serde(default)]
     pub rejected_must_emit_label: usize,
+    #[serde(default)]
     pub rejected_not_single_pred_succ: usize,
+    #[serde(default)]
     pub rejected_external_entry: usize,
+    #[serde(default)]
     pub rejected_loop_or_switch_target: usize,
+}
+
+impl NirBuildStats {
+    pub fn merge_assign(&mut self, other: &Self) {
+        self.forced_linear_structuring_count += other.forced_linear_structuring_count;
+        self.region_linearize_structuring_count += other.region_linearize_structuring_count;
+        self.region_linearize_heuristic_exit_count += other.region_linearize_heuristic_exit_count;
+        self.region_linearize_rejected_non_structuring_failure_count +=
+            other.region_linearize_rejected_non_structuring_failure_count;
+        self.region_linearize_rejected_no_exit_count +=
+            other.region_linearize_rejected_no_exit_count;
+        self.region_linearize_rejected_body_lowering_failed_count +=
+            other.region_linearize_rejected_body_lowering_failed_count;
+        self.region_linearize_rejected_non_advancing_count +=
+            other.region_linearize_rejected_non_advancing_count;
+        self.promotion_candidate_count += other.promotion_candidate_count;
+        self.promoted_region_count += other.promoted_region_count;
+        self.promotion_rejected_by_shape_count += other.promotion_rejected_by_shape_count;
+        self.promotion_rejected_by_gate_count += other.promotion_rejected_by_gate_count;
+        self.discovery_seen_guarded_tail_like_shape_count +=
+            other.discovery_seen_guarded_tail_like_shape_count;
+        self.discovery_rejected_noncanonical_layout_count +=
+            other.discovery_rejected_noncanonical_layout_count;
+        self.canonicalized_guarded_tail_shape_count += other.canonicalized_guarded_tail_shape_count;
+        self.canonicalization_failed_multiple_payload_entries +=
+            other.canonicalization_failed_multiple_payload_entries;
+        self.canonicalization_failed_interleaved_join_uses +=
+            other.canonicalization_failed_interleaved_join_uses;
+        self.canonicalization_failed_nonterminal_join_label +=
+            other.canonicalization_failed_nonterminal_join_label;
+        self.canonicalization_failed_nested_tail_escape +=
+            other.canonicalization_failed_nested_tail_escape;
+        self.canonicalized_interleaved_join_use_count +=
+            other.canonicalized_interleaved_join_use_count;
+        self.canonicalized_local_nonfallthrough_alias_count +=
+            other.canonicalized_local_nonfallthrough_alias_count;
+        self.canonicalization_failed_alias_not_fallthrough_count +=
+            other.canonicalization_failed_alias_not_fallthrough_count;
+        self.canonicalization_failed_alias_has_multiple_internal_predecessors_count +=
+            other.canonicalization_failed_alias_has_multiple_internal_predecessors_count;
+        self.canonicalization_failed_alias_has_nonlocal_ref_count +=
+            other.canonicalization_failed_alias_has_nonlocal_ref_count;
+        self.canonicalization_failed_alias_body_not_trivial_count +=
+            other.canonicalization_failed_alias_body_not_trivial_count;
+        self.canonicalization_failed_join_has_external_ref_count +=
+            other.canonicalization_failed_join_has_external_ref_count;
+        self.canonicalization_failed_payload_crosses_join_count +=
+            other.canonicalization_failed_payload_crosses_join_count;
+        self.rejected_must_emit_label += other.rejected_must_emit_label;
+        self.rejected_not_single_pred_succ += other.rejected_not_single_pred_succ;
+        self.rejected_external_entry += other.rejected_external_entry;
+        self.rejected_loop_or_switch_target += other.rejected_loop_or_switch_target;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

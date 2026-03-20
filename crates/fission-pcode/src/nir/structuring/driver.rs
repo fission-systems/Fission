@@ -5,15 +5,17 @@ impl<'a> PreviewBuilder<'a> {
     pub(crate) fn build_multiblock_body(&mut self) -> Result<Vec<HirStmt>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
         let total_start = Instant::now();
+        let force_linear = self.should_force_linear_structuring();
         if diag {
             eprintln!(
                 "[DIAG] structuring start: blocks={} edges={} force_linear={}",
                 self.pcode.blocks.len(),
                 self.successors.iter().map(Vec::len).sum::<usize>(),
-                self.should_force_linear_structuring()
+                force_linear
             );
         }
-        if self.should_force_linear_structuring() {
+        if force_linear {
+            self.forced_linear_structuring_count += 1;
             let result = self.build_linear_multiblock_body();
             if diag {
                 eprintln!(

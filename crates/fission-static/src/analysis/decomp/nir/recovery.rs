@@ -2,9 +2,23 @@ use super::nir_render::render_nir_from_json_with_type_context;
 use super::nir_taxonomy::{classify_nir_failure_refined, structuring_failure_signature};
 use super::nir_types::{NirRoutingResolver, NirSelection};
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::NirTypeContext;
+use fission_pcode::{NirBuildStats, NirTypeContext, take_last_nir_build_stats};
 
 const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";
+
+fn merge_optional_build_stats(
+    primary: Option<NirBuildStats>,
+    secondary: Option<NirBuildStats>,
+) -> Option<NirBuildStats> {
+    match (primary, secondary) {
+        (Some(mut primary), Some(secondary)) => {
+            primary.merge_assign(&secondary);
+            Some(primary)
+        }
+        (None, Some(secondary)) => Some(secondary),
+        (primary, None) => primary,
+    }
+}
 
 pub(crate) fn is_type_failure_for_nir_rescue(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
@@ -49,7 +63,7 @@ pub(crate) fn try_structuring_recovery(
         true,
         false,
     );
-    match region_retry {
+    let region_retry_build_stats = match region_retry {
         Ok(Some((code, build_stats, hint_stats))) => {
             return Ok(Some(NirRoutingResolver::nir_success_with_recovery(
                 code,
@@ -62,8 +76,8 @@ pub(crate) fn try_structuring_recovery(
                 "region_linearized",
             )));
         }
-        Ok(None) | Err(_) => {}
-    }
+        Ok(None) | Err(_) => take_last_nir_build_stats(),
+    };
 
     match render_nir_from_json_with_type_context(
         pcode_json,
@@ -77,9 +91,11 @@ pub(crate) fn try_structuring_recovery(
         true,
     ) {
         Ok(Some((code, build_stats, hint_stats))) => {
+            let merged_build_stats =
+                merge_optional_build_stats(build_stats, region_retry_build_stats);
             Ok(Some(NirRoutingResolver::nir_success_with_recovery(
                 code,
-                build_stats,
+                merged_build_stats,
                 hint_stats,
                 RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
                 RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,

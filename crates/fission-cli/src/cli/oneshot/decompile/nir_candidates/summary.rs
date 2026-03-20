@@ -1,5 +1,6 @@
 use super::super::*;
 use super::schema::{PreviewCandidateEntry, PreviewCandidateScanSummary};
+use fission_pcode::NirBuildStats;
 
 fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|block| block.ops.len()).sum()
@@ -19,6 +20,26 @@ fn slot_alias_candidate(code: &str) -> bool {
 
 pub(super) fn preview_goto_count(code: &str) -> usize {
     code.matches("goto ").count()
+}
+
+pub(super) fn classify_nir_output_class(
+    direct_success: bool,
+    surface_kind: Option<NirSurfaceKind>,
+    goto_count: Option<usize>,
+    build_stats: Option<NirBuildStats>,
+) -> Option<String> {
+    if !direct_success {
+        return None;
+    }
+    let goto_count = goto_count.unwrap_or(0);
+    let build_stats = build_stats.unwrap_or_default();
+    if build_stats.forced_linear_structuring_count > 0 {
+        return Some("linear_fallback".to_string());
+    }
+    if surface_kind == Some(NirSurfaceKind::Structured) && goto_count == 0 {
+        return Some("structured".to_string());
+    }
+    Some("partially_structured".to_string())
 }
 
 pub(super) fn explicit_hint_surface_count(stats: Option<NirHintStats>) -> usize {
@@ -318,6 +339,15 @@ pub(crate) fn update_scan_summary(
             .recovery_quality_flag_counts
             .entry(flag.clone())
             .or_insert(0) += 1;
+    }
+    if let Some(output_class) = entry.nir_output_class.as_ref() {
+        *summary
+            .nir_output_class_counts
+            .entry(output_class.clone())
+            .or_insert(0) += 1;
+    }
+    if let Some(build_stats) = entry.nir_build_stats {
+        summary.nir_build_stats_totals.merge_assign(&build_stats);
     }
 }
 

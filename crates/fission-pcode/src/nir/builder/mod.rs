@@ -98,6 +98,13 @@ impl<'a> PreviewBuilder<'a> {
             last_trace_id: None,
             next_trace_id: 1,
             lowering_site_depth: 0,
+            forced_linear_structuring_count: 0,
+            region_linearize_structuring_count: 0,
+            region_linearize_heuristic_exit_count: 0,
+            region_linearize_rejected_non_structuring_failure_count: 0,
+            region_linearize_rejected_no_exit_count: 0,
+            region_linearize_rejected_body_lowering_failed_count: 0,
+            region_linearize_rejected_non_advancing_count: 0,
             promotion_candidate_count: 0,
             promoted_region_count: 0,
             promotion_rejected_by_shape_count: 0,
@@ -221,6 +228,16 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn preview_build_stats(&self) -> PreviewBuildStats {
         PreviewBuildStats {
+            forced_linear_structuring_count: self.forced_linear_structuring_count,
+            region_linearize_structuring_count: self.region_linearize_structuring_count,
+            region_linearize_heuristic_exit_count: self.region_linearize_heuristic_exit_count,
+            region_linearize_rejected_non_structuring_failure_count: self
+                .region_linearize_rejected_non_structuring_failure_count,
+            region_linearize_rejected_no_exit_count: self.region_linearize_rejected_no_exit_count,
+            region_linearize_rejected_body_lowering_failed_count: self
+                .region_linearize_rejected_body_lowering_failed_count,
+            region_linearize_rejected_non_advancing_count: self
+                .region_linearize_rejected_non_advancing_count,
             promotion_candidate_count: self.promotion_candidate_count,
             promoted_region_count: self.promoted_region_count,
             promotion_rejected_by_shape_count: self.promotion_rejected_by_shape_count,

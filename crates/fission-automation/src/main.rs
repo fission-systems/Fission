@@ -16,8 +16,9 @@ use lanes::{
 };
 use model::{InventoryRow, InventorySummary, SourceMeta};
 use report::{
-    AutomationSummary, build_summary, compute_delta, enrich_summary_with_provenance, load_baseline,
-    print_terminal_summary, render_markdown, update_latest,
+    AutomationSummary, build_quality_measurement, build_summary, compute_delta,
+    enrich_summary_with_provenance, load_baseline, print_terminal_summary, render_markdown,
+    update_latest,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -236,6 +237,10 @@ fn write_outputs(
         .with_context(|| format!("create {}", base_output_dir.display()))?;
 
     write_json_pretty(base_output_dir.join("summary.json"), summary)?;
+    write_json_pretty(
+        base_output_dir.join("quality_measurement.json"),
+        &build_quality_measurement(summary),
+    )?;
     write_json_pretty(base_output_dir.join("diagnosis.json"), diagnosis)?;
     write_json_pretty(
         base_output_dir.join("corpus.json"),

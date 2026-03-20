@@ -1,3 +1,4 @@
+use fission_pcode::NirBuildStats;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -175,6 +176,12 @@ pub struct InventoryRow {
     #[serde(default)]
     pub auto_eligible: bool,
     #[serde(default)]
+    pub nir_goto_count: Option<usize>,
+    #[serde(default)]
+    pub nir_output_class: Option<String>,
+    #[serde(default)]
+    pub nir_build_stats: Option<NirBuildStats>,
+    #[serde(default)]
     pub strict_explicit_candidate: bool,
     #[serde(default)]
     pub heuristic_surface_candidate: bool,
@@ -240,6 +247,10 @@ pub struct InventorySummary {
     pub recovery_quality_flag_counts: BTreeMap<String, usize>,
     #[serde(default)]
     pub recovery_structuring_mode_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub nir_output_class_counts: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub nir_build_stats_totals: NirBuildStats,
     #[serde(default)]
     pub suppressed_stderr_count: usize,
 }

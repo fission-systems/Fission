@@ -1,3 +1,4 @@
+use fission_pcode::NirBuildStats;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -74,6 +75,9 @@ pub(super) struct FunctionFactsInventoryRow {
     pub(super) pcode_op_count: usize,
     pub(super) has_indirect_control_flow: bool,
     pub(super) auto_eligible: bool,
+    pub(super) nir_goto_count: Option<usize>,
+    pub(super) nir_output_class: Option<String>,
+    pub(super) nir_build_stats: Option<NirBuildStats>,
     pub(super) strict_explicit_candidate: bool,
     pub(super) heuristic_surface_candidate: bool,
     pub(super) reason_tags: Vec<String>,
@@ -137,6 +141,8 @@ pub(super) struct FunctionFactsInventorySummary {
     pub(super) recovery_outcome_counts: BTreeMap<String, usize>,
     pub(super) recovery_quality_flag_counts: BTreeMap<String, usize>,
     pub(super) recovery_structuring_mode_counts: BTreeMap<String, usize>,
+    pub(super) nir_output_class_counts: BTreeMap<String, usize>,
+    pub(super) nir_build_stats_totals: NirBuildStats,
     pub(super) suppressed_stderr_count: usize,
 }
 

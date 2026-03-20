@@ -1,9 +1,9 @@
 use super::super::*;
 use super::schema::PreviewCandidateEntry;
 use super::summary::{
-    build_quality_tags_and_score, canonicalize_nir_failure_kind, explicit_hint_surface_count,
-    fact_density, pcode_metrics, preview_block_detail, preview_block_signature, preview_goto_count,
-    preview_surface_kind_str,
+    build_quality_tags_and_score, canonicalize_nir_failure_kind, classify_nir_output_class,
+    explicit_hint_surface_count, fact_density, pcode_metrics, preview_block_detail,
+    preview_block_signature, preview_goto_count, preview_surface_kind_str,
 };
 
 fn build_preview_candidate_entry(
@@ -40,6 +40,7 @@ fn build_preview_candidate_entry(
     let mut preview_fallback_reason = None;
     let mut preview_surface_kind = None;
     let mut preview_hint_stats = None;
+    let mut nir_build_stats = None;
     let mut preview_code = None;
     let mut recovery_strategy_attempted = None;
     let mut recovery_strategy_applied = None;
@@ -78,6 +79,7 @@ fn build_preview_candidate_entry(
                 preview_fallback_reason = selection.fallback_reason.clone();
                 preview_surface_kind = selection.nir_surface;
                 preview_hint_stats = selection.hint_stats;
+                nir_build_stats = selection.build_stats;
                 preview_code = selection.nir_code;
                 recovery_strategy_attempted =
                     selection.recovery_strategy_attempted.map(str::to_string);
@@ -148,6 +150,13 @@ fn build_preview_candidate_entry(
     let preview_block_detail = preview_block_detail(
         row_error_message.as_deref(),
         preview_fallback_reason.as_deref(),
+    );
+    let nir_goto_count = preview_code.as_deref().map(preview_goto_count);
+    let nir_output_class = classify_nir_output_class(
+        preview_direct_success,
+        preview_surface_kind,
+        nir_goto_count,
+        nir_build_stats,
     );
     let mut recovery_quality_flags = Vec::new();
     if recovery_strategy_attempted.is_some() {
@@ -223,6 +232,9 @@ fn build_preview_candidate_entry(
         pcode_op_count,
         has_indirect_control_flow: has_indirect,
         auto_eligible,
+        nir_goto_count,
+        nir_output_class,
+        nir_build_stats,
         nir_surface_kind: preview_surface_kind_str(preview_surface_kind),
         preview_surface_kind: preview_surface_kind_str(preview_surface_kind),
         quality_potential_score,
@@ -322,6 +334,9 @@ fn build_preview_candidate_fallback_entry(
         pcode_op_count: 0,
         has_indirect_control_flow: false,
         auto_eligible: false,
+        nir_goto_count: None,
+        nir_output_class: None,
+        nir_build_stats: None,
         nir_surface_kind: None,
         preview_surface_kind: None,
         quality_potential_score,

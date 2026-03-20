@@ -105,6 +105,13 @@ struct PreviewBuilder<'a> {
     last_trace_id: Option<u64>,
     next_trace_id: u64,
     lowering_site_depth: usize,
+    forced_linear_structuring_count: usize,
+    region_linearize_structuring_count: usize,
+    region_linearize_heuristic_exit_count: usize,
+    region_linearize_rejected_non_structuring_failure_count: usize,
+    region_linearize_rejected_no_exit_count: usize,
+    region_linearize_rejected_body_lowering_failed_count: usize,
+    region_linearize_rejected_non_advancing_count: usize,
     promotion_candidate_count: usize,
     promoted_region_count: usize,
     promotion_rejected_by_shape_count: usize,
@@ -259,6 +266,9 @@ pub fn render_mlil_preview_with_context(
     debug_log("build_hir_start");
     let mut builder = PreviewBuilder::new(pcode, options, type_context);
     let mut hir = builder.build_hir(name, address).map_err(|err| {
+        LAST_PREVIEW_BUILD_STATS.with(|slot| {
+            *slot.borrow_mut() = Some(builder.preview_build_stats());
+        });
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
             eprintln!("[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}");
         }
