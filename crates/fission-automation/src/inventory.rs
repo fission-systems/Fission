@@ -123,7 +123,8 @@ fn load_rows(path: &Path) -> Result<Vec<InventoryRow>> {
         }
         rows.push(
             serde_json::from_str::<InventoryRow>(&line)
-                .with_context(|| format!("parse inventory row from {}", path.display()))?,
+                .with_context(|| format!("parse inventory row from {}", path.display()))?
+                .normalize(),
         );
     }
     Ok(rows)
@@ -131,7 +132,9 @@ fn load_rows(path: &Path) -> Result<Vec<InventoryRow>> {
 
 fn load_summary(path: &Path) -> Result<InventorySummary> {
     let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    serde_json::from_str(&data).with_context(|| format!("parse inventory summary {}", path.display()))
+    serde_json::from_str::<InventorySummary>(&data)
+        .with_context(|| format!("parse inventory summary {}", path.display()))
+        .map(InventorySummary::normalize)
 }
 
 fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<ExitStatus> {

@@ -22,16 +22,16 @@ The repository currently includes:
 
 - a native Ghidra-backed decompiler bridge in [`ghidra_decompiler`](./ghidra_decompiler) and [`crates/fission-ffi`](./crates/fission-ffi)
 - a Rust analysis/decompilation stack in [`crates`](./crates)
-- a Rust-owned preview decompiler core under [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir)
+- a Rust-owned Fission NIR decompiler core under [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir)
 - a buildable CLI in [`crates/fission-cli`](./crates/fission-cli)
 - a Tauri desktop frontend in [`crates/fission-tauri`](./crates/fission-tauri)
 
 Current engine status:
 
 - `legacy`: native Ghidra decompilation + Rust postprocess, still the stable path
-- `mlil-preview`: Ghidra p-code -> Rust NIR/HIR -> structuring -> printer, the forward architecture path
+- `Fission NIR`: Ghidra p-code -> Rust NIR/HIR -> structuring -> printer, the forward architecture path
 
-Preview currently supports real PE x64 work, bootstrap-level PE x86 coverage on selected seeds, stack-slot recovery, multi-block control flow reconstruction, short-circuit folding, and Rust-owned pseudocode printing. It is still experimental, and the repository should still be treated as an evolving engineering codebase rather than a mature end-user product.
+Fission NIR currently supports real PE x64 work, bootstrap-level PE x86 coverage on selected seeds, stack-slot recovery, multi-block control flow reconstruction, short-circuit folding, and Rust-owned pseudocode printing. It is still experimental, and the repository should still be treated as an evolving engineering codebase rather than a mature end-user product.
 
 License: AGPL-3.0-or-later. Contributions are accepted under the Contributor License Agreement in [`CLA.md`](./CLA.md).
 
@@ -61,9 +61,9 @@ If you are evaluating Fission today, the most accurate short version is:
 - the CLI and analysis crates are the most mature parts of the workspace
 - the Tauri desktop app is real and wired into the same engine stack
 - `legacy` is still the stable default path for serious use
-- `mlil-preview` is the forward architecture path and already useful on covered functions
-- PE x64 currently has the strongest preview coverage
-- PE x86 preview exists, but coverage is still limited and seed-driven
+- `Fission NIR` is the forward architecture path and already useful on covered functions
+- PE x64 currently has the strongest Fission NIR coverage
+- PE x86 Fission NIR coverage exists, but it is still limited and seed-driven
 - broader dynamic-analysis, network-analysis, and AI workflow layers are part of the long-term direction, not the fully realized present-day state
 
 ## Quick Start
@@ -103,12 +103,12 @@ For CLI examples, see [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_
 | Engine | Role today | Notes |
 |---|---|---|
 | `legacy` | Stable default | Native Ghidra decompilation with Rust-side cleanup and enrichment |
-| `mlil-preview` | Forward architecture path | Ghidra p-code lift into Rust-owned NIR/HIR, structuring, normalization, and printing |
+| `nir` | Forward architecture path | Fission NIR: Ghidra p-code lift into Rust-owned NIR/HIR, structuring, normalization, and printing |
 
 In practical terms:
 
 - use `legacy` when you want the safest current path
-- use `mlil-preview` when evaluating the future Rust-owned decompiler direction
+- use `nir` when evaluating the future Rust-owned decompiler direction
 - expect the two paths to differ in type surfacing, readability, and large-function coverage
 
 ## Where To Look First
@@ -157,7 +157,7 @@ The current architecture is converging on:
 In practical terms:
 
 - the `legacy` engine is still the stable default path
-- the `mlil-preview` engine is the forward architecture path
+- the `Fission NIR` engine is the forward architecture path
 - the `nir` code under [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir) is not a string post-processor; it is the start of a separate decompiler core
 
 ## Current Snapshot
@@ -173,7 +173,7 @@ This is the mature path:
 - broadest type surface coverage today
 - current regression guard and stable default
 
-### 2. `mlil-preview`
+### 2. `Fission NIR`
 
 This is the Fission-owned experimental path:
 
@@ -186,8 +186,8 @@ This is the Fission-owned experimental path:
 
 This path now supports:
 
-- PE x64 direct preview
-- bootstrap-level PE x86 direct preview on selected seed functions
+- PE x64 direct Fission NIR output
+- bootstrap-level PE x86 direct Fission NIR output on selected seed functions
 - stack-slot recovery
 - straight-line lowering
 - multi-block `if`, `if/else`, `while`, and `do-while`
@@ -196,7 +196,7 @@ This path now supports:
 - `PIECE` / `SUBPIECE` recombination
 - slot/table surfacing
 - slot-family recovery groundwork
-- preview-only pseudo intrinsics such as `WRITE_BITS`, `FLUSH_BITS`, and `EMIT_CODE`
+- Fission NIR-only pseudo intrinsics such as `WRITE_BITS`, `FLUSH_BITS`, and `EMIT_CODE`
 
 It still remains experimental. The important difference is that it is now a real product path exposed in both CLI and desktop UI, not an isolated demo path.
 
@@ -205,18 +205,18 @@ It still remains experimental. The important difference is that it is now a real
 The repository has moved through several recent internal milestones. The detailed historical record lives in [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md). The short version is:
 
 - v14 restored legacy-path benchmark stability and removed the last known benchmark `type` failures in that round
-- v15 widened preview adoption and kept preview fallback/goto/temp-surface metrics at zero on the covered set
-- v16 improved preview type surfacing and made [`samples/windows/x64/putty.exe`](./samples/windows/x64/putty.exe) `0x140006260` preview output directly surface:
+- v15 widened Fission NIR adoption and kept NIR fallback/goto/temp-surface metrics at zero on the covered set
+- v16 improved Fission NIR type surfacing and made [`samples/windows/x64/putty.exe`](./samples/windows/x64/putty.exe) `0x140006260` output directly surface:
   - `LPRECT param_2`
   - `RECT local_3c`
   - `*param_2 = local_3c;`
-- v24 recovered direct preview on representative x64 targets again and bootstrapped direct preview on at least one x86 seed
+- v24 recovered direct Fission NIR output on representative x64 targets again and bootstrapped direct Fission NIR output on at least one x86 seed
 - v25 refactored the `nir` implementation into a real module tree for maintainability
 
 Important current nuance:
 
-- preview coverage is now high enough to be a meaningful engineering target
-- preview output quality is no longer blocked only by control-flow structuring
+- Fission NIR coverage is now high enough to be a meaningful engineering target
+- Fission NIR output quality is no longer blocked only by control-flow structuring
 - the next major frontier is data abstraction and large-function body readability
 
 ## Current Practical Status
@@ -226,20 +226,20 @@ If you are trying to use Fission today, the most accurate status is:
 - the CLI and analysis crates are the most mature part of the repository
 - the Tauri frontend is real, buildable, and connected to the same engine stack
 - `legacy` is still the stable default for serious use
-- `mlil-preview` is the architecture path under active investment
+- `Fission NIR` is the architecture path under active investment
 - `nir` is already large enough that it should be thought of as a decompiler subsystem, not a convenience helper
 
-Current `mlil-preview` strengths:
+Current `Fission NIR` strengths:
 
 - structured multi-block output on many real functions
 - aggressive removal of surface temporaries
 - reduced goto usage on covered functions
 - improving control over printer output because the Rust path owns the final render
 
-Current `mlil-preview` weaknesses:
+Current `Fission NIR` weaknesses:
 
 - broader real-world type surfacing still trails `legacy`
-- large-function direct-preview coverage is not complete
+- large-function direct Fission NIR coverage is not complete
 - data abstraction for memory slots, array/table access, and state-machine style code is still in progress
 - output can still be mechanically correct but visually lower-level than desired on large functions
 
@@ -254,7 +254,7 @@ Workspace members are declared in [`Cargo.toml`](./Cargo.toml). The important cr
 - [`crates/fission-disasm`](./crates/fission-disasm)
   - disassembly support
 - [`crates/fission-pcode`](./crates/fission-pcode)
-  - p-code model, transforms, NIR/HIR preview core
+  - p-code model, transforms, Fission NIR core
 - [`crates/fission-signatures`](./crates/fission-signatures)
   - WinAPI/type/signature data
 - [`crates/fission-static`](./crates/fission-static)
@@ -284,13 +284,13 @@ Important top-level directories:
 Practical ownership guidance:
 
 - new static/decompile work belongs in [`crates/fission-static`](./crates/fission-static)
-- new preview IR/lowering/normalization/printer work belongs in [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir)
+- new Fission NIR IR/lowering/normalization/printer work belongs in [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir)
 - new runtime/debug/plugin work belongs in [`crates/fission-dynamic`](./crates/fission-dynamic)
 - `fission-analysis` should be treated as a compatibility layer, not the default home for new features
 
 ## The `nir` Module Tree
 
-The preview decompiler core now has a real directory layout:
+The Fission NIR decompiler core now has a real directory layout:
 
 - [`crates/fission-pcode/src/nir/mod.rs`](./crates/fission-pcode/src/nir/mod.rs)
   - public entrypoints and module wiring
@@ -305,7 +305,7 @@ The preview decompiler core now has a real directory layout:
 - [`crates/fission-pcode/src/nir/piece.rs`](./crates/fission-pcode/src/nir/piece.rs)
   - piece/subpiece reconstruction support
 - [`crates/fission-pcode/src/nir/printer.rs`](./crates/fission-pcode/src/nir/printer.rs)
-  - preview pseudocode printer
+  - Fission NIR pseudocode printer
 - [`crates/fission-pcode/src/nir/types.rs`](./crates/fission-pcode/src/nir/types.rs)
   - IR types and errors
 - [`crates/fission-pcode/src/nir/tests`](./crates/fission-pcode/src/nir/tests)
@@ -341,22 +341,22 @@ The `legacy` path is roughly:
 
 This path is still the strongest for broad type recovery and default stability.
 
-### `mlil-preview` path
+### `Fission NIR` path
 
-The preview path is roughly:
+The Fission NIR path is roughly:
 
 1. native p-code extraction
 2. build HIR through [`crates/fission-pcode/src/nir/builder`](./crates/fission-pcode/src/nir/builder)
 3. normalize through [`crates/fission-pcode/src/nir/normalize`](./crates/fission-pcode/src/nir/normalize)
 4. structure through [`crates/fission-pcode/src/nir/structuring`](./crates/fission-pcode/src/nir/structuring)
-5. apply preview type hints
+5. apply Fission NIR type hints
 6. render through the Rust printer
 
 Important design rule:
 
-- preview is not a legacy string-rewrite layer
-- preview does not reuse legacy post-processing wholesale
-- preview owns its own IR, normalization, and printer behavior
+- Fission NIR is not a legacy string-rewrite layer
+- Fission NIR does not reuse legacy post-processing wholesale
+- Fission NIR owns its own IR, normalization, and printer behavior
 
 ## Build Prerequisites
 
@@ -439,7 +439,7 @@ Common commands:
 Useful decompilation flags:
 
 - `--profile balanced|quality|speed`
-- `--engine legacy|mlil-preview|auto`
+- `--engine legacy|nir|auto`
 - `--compiler-id auto|windows|gcc|clang|default`
 - `--timeout-ms <ms>`
 - `--ghidra-compat`
@@ -451,10 +451,10 @@ Examples:
 # stable path
 ./target/release/fission_cli <binary> --decomp 0x140001160 --engine legacy
 
-# force preview
-./target/release/fission_cli <binary> --decomp 0x140001160 --engine mlil-preview
+# force Fission NIR
+./target/release/fission_cli <binary> --decomp 0x140001160 --engine nir
 
-# try preview first, then fall back
+# try Fission NIR first, then fall back
 ./target/release/fission_cli <binary> --decomp 0x140001160 --engine auto
 ```
 
@@ -475,8 +475,8 @@ What exists today:
 Important policy:
 
 - `legacy` is the stable default
-- `mlil-preview` is the experimental Fission-owned path
-- `auto` exists to try preview first and fall back safely
+- `Fission NIR` is the experimental Fission-owned path
+- `auto` exists to try Fission NIR first and fall back safely
 
 The older GUI guide at [`docs/gui/GUI_GUIDE.md`](./docs/gui/GUI_GUIDE.md) documents an earlier egui-based UI and is not the source of truth for the current Tauri frontend.
 
@@ -499,14 +499,14 @@ Purpose:
 Typical entrypoints:
 
 - `cargo run -p fission-automation -- nir-check --lane pdb`
-- `cargo run -p fission-automation -- nir-check --lane preview`
+- `cargo run -p fission-automation -- nir-check --lane nir`
 - `cargo run -p fission-automation -- nir-check --lane regression`
 - `cargo run -p fission-automation -- nir-check --lane full`
 
 This split matters:
 
 - `pdb` tells you whether PDB detection and ingestion are actually surfacing rows
-- `preview` tells you whether preview-stage block signatures are shrinking
+- `nir` tells you whether Fission NIR block signatures are shrinking
 - `regression` gives a compact mixed-sample stability pass
 - `full` combines the sentinel set with aligned/high-priority sources when local artifacts exist
 
@@ -528,7 +528,7 @@ The project frequently validates changes against a mixed set of synthetic and re
 - [`samples/windows/x64/notepad++.exe`](./samples/windows/x64/notepad++.exe)
   - large real-world GUI application, different style from PuTTY
 - [`vendor/x64dbg-development/cmake/cmkr.exe`](./vendor/x64dbg-development/cmake/cmkr.exe)
-  - CLI/medium-function fallback and preview stability guard
+  - CLI/medium-function fallback and Fission NIR stability guard
 
 ### Real-world x86
 
@@ -560,7 +560,7 @@ Current policy:
 - prefer pointer aliases like `LPRECT` for parameters
 - prefer aggregate aliases like `RECT` for locals when the whole-object pattern is reliable
 
-Representative direct-preview acceptance case:
+Representative direct Fission NIR acceptance case:
 
 - [`samples/windows/x64/putty.exe`](./samples/windows/x64/putty.exe) `0x140006260`
   - `LPRECT param_2`
@@ -569,13 +569,13 @@ Representative direct-preview acceptance case:
 
 ## Current Engineering Priorities
 
-The current preview work is no longer blocked on basic enablement. The practical roadmap now looks like:
+The current Fission NIR work is no longer blocked on basic enablement. The practical roadmap now looks like:
 
-1. recover direct preview on more large functions
+1. recover direct Fission NIR output on more large functions
 2. improve data abstraction
 3. improve large-function body readability
 4. widen x86 coverage beyond bootstrap level
-5. keep `legacy` stable while preview matures
+5. keep `legacy` stable while Fission NIR matures
 
 In concrete terms, the most important active areas are:
 
@@ -583,17 +583,17 @@ In concrete terms, the most important active areas are:
 - memory-slot and array/table surfacing
 - bitstream/state-machine idiom recognition
 - loop-body compaction
-- broader preview type quality
+- broader Fission NIR type quality
 
 ## Known Limitations
 
 The most important limitations today are:
 
 - `legacy` is still the only engine that should be treated as the stable default
-- `mlil-preview` still has incomplete large-function coverage
-- x86 preview exists, but it is bootstrap-level support, not parity with x64
-- preview body readability still lags the desired end state on large state-machine/table-driven code
-- preview type surfacing is still narrower than legacy outside the current hint set
+- `Fission NIR` still has incomplete large-function coverage
+- x86 Fission NIR support exists, but it is bootstrap-level, not parity with x64
+- Fission NIR body readability still lags the desired end state on large state-machine/table-driven code
+- Fission NIR type surfacing is still narrower than legacy outside the current hint set
 
 Also note:
 
@@ -613,12 +613,12 @@ Recent structural changes worth knowing before editing:
   - representative real-world function checks next
   - lane-based automation closure last
 
-If you are adding work in the preview path:
+If you are adding work in the Fission NIR path:
 
 - prefer IR/HIR transforms over string rewrites
 - prefer conservative correctness over aggressive prettification
 - use synthetic tests for exact idiom recovery
-- use `cargo run -p fission-automation -- nir-check --lane preview` for preview-side quality checks
+- use `cargo run -p fission-automation -- nir-check --lane nir` for Fission NIR quality checks
 - use `cargo run -p fission-automation -- nir-check --lane regression` for broader regression closure
 
 ## Key Documentation
@@ -647,6 +647,6 @@ Fission is under active development.
 The clearest way to summarize the current status is:
 
 - `legacy` is stable and useful
-- `mlil-preview` is real and increasingly capable
+- `Fission NIR` is real and increasingly capable
 - `nir` is now an organized subsystem rather than an experimental blob
 - the project direction is clear: Fission should own more of the high-level decompiler stack over time

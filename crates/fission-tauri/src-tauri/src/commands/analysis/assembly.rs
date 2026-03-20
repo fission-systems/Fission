@@ -7,8 +7,8 @@ use crate::state::AppState;
 use fission_loader::loader::LoadedBinary;
 #[cfg(feature = "native_decomp")]
 use fission_static::analysis::decomp::{
-    native_failure_routing_decision, rescue_preview_output, select_preview_output,
-    PreviewEngineMode, PreviewSelection,
+    NirEngineMode, NirSelection, native_failure_routing_decision, rescue_nir_output,
+    select_nir_output,
 };
 use tauri::State;
 
@@ -40,17 +40,17 @@ fn decompile_with_engine(
     name: &str,
     engine_mode: DecompilerEngineMode,
 ) -> Result<DecompileOutcome, CmdError> {
-    let preview_mode = match normalize_gui_engine_mode(engine_mode) {
-        DecompilerEngineMode::Legacy => PreviewEngineMode::Legacy,
-        DecompilerEngineMode::MlilPreview => PreviewEngineMode::MlilPreview,
-        DecompilerEngineMode::Auto => PreviewEngineMode::Auto,
+    let nir_mode = match normalize_gui_engine_mode(engine_mode) {
+        DecompilerEngineMode::Legacy => NirEngineMode::Legacy,
+        DecompilerEngineMode::Nir => NirEngineMode::Nir,
+        DecompilerEngineMode::Auto => NirEngineMode::Auto,
     };
-    let preview = select_preview_output(decomp, binary, address, name, preview_mode, None)
+    let preview = select_nir_output(decomp, binary, address, name, nir_mode, None)
         .map_err(CmdError::other)?;
-    if let Some(code) = preview.preview_code {
+    if let Some(code) = preview.nir_code {
         return Ok(DecompileOutcome {
             code,
-            engine_used: DecompilerEngineMode::MlilPreview,
+            engine_used: DecompilerEngineMode::Nir,
             fell_back: false,
             fallback_reason: None,
         });
@@ -64,13 +64,13 @@ fn decompile_with_engine(
                 DecompilerEngineMode::Legacy
             ) {
                 if let Some(selection) =
-                    rescue_preview_output(decomp, binary, address, name, &error_text, None)
+                    rescue_nir_output(decomp, binary, address, name, &error_text, None)
                         .map_err(CmdError::other)?
                 {
-                    if let Some(code) = selection.preview_code {
+                    if let Some(code) = selection.nir_code {
                         return Ok(DecompileOutcome {
                             code,
-                            engine_used: DecompilerEngineMode::MlilPreview,
+                            engine_used: DecompilerEngineMode::Nir,
                             fell_back: true,
                             fallback_reason: selection.fallback_reason,
                         });
@@ -83,12 +83,12 @@ fn decompile_with_engine(
 }
 
 #[cfg(feature = "native_decomp")]
-fn outcome_from_preview_selection(code: String, selection: PreviewSelection) -> DecompileOutcome {
+fn outcome_from_preview_selection(code: String, selection: NirSelection) -> DecompileOutcome {
     let routing = selection.routing_decision();
     let engine_used = match routing.engine_used {
-        PreviewEngineMode::Legacy => DecompilerEngineMode::Legacy,
-        PreviewEngineMode::MlilPreview => DecompilerEngineMode::MlilPreview,
-        PreviewEngineMode::Auto => DecompilerEngineMode::Auto,
+        NirEngineMode::Legacy => DecompilerEngineMode::Legacy,
+        NirEngineMode::Nir => DecompilerEngineMode::Nir,
+        NirEngineMode::Auto => DecompilerEngineMode::Auto,
     };
     DecompileOutcome {
         code,
@@ -163,9 +163,9 @@ pub async fn decompile_function(
                     function_name: func_name,
                     address: format!("0x{:x}", address),
                     engine_used: match routing.engine_used {
-                        PreviewEngineMode::Legacy => DecompilerEngineMode::Legacy,
-                        PreviewEngineMode::MlilPreview => DecompilerEngineMode::MlilPreview,
-                        PreviewEngineMode::Auto => DecompilerEngineMode::Auto,
+                        NirEngineMode::Legacy => DecompilerEngineMode::Legacy,
+                        NirEngineMode::Nir => DecompilerEngineMode::Nir,
+                        NirEngineMode::Auto => DecompilerEngineMode::Auto,
                     },
                     fell_back: routing.fell_back,
                     fallback_reason: routing.fallback_reason,

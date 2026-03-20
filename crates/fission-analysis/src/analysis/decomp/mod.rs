@@ -39,11 +39,10 @@ pub use fission_static::analysis::decomp::facts::{
     FactProvenance, FactStore, FunctionFacts, NameFact, TypeFact, log_type_diag,
 };
 #[cfg(feature = "native_decomp")]
-pub use fission_static::analysis::decomp::preview_engine::{
-    PreviewEngineMode, PreviewRoutingDecision, PreviewRoutingResolver, PreviewSelection,
-    PreviewSource, PreviewSurfaceKind, classify_native_failure_kind,
-    fallback_reason_with_kind, native_failure_routing_decision, rescue_preview_output,
-    select_preview_output,
+pub use fission_static::analysis::decomp::{
+    NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
+    NirSurfaceKind, classify_native_failure_kind, fallback_reason_with_kind,
+    native_failure_routing_decision, rescue_nir_output, select_nir_output,
 };
 #[cfg(feature = "native_decomp")]
 pub use prepare::{

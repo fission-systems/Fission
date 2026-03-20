@@ -31,12 +31,18 @@
 
 pub mod cache;
 pub mod facts;
+pub(crate) mod nir_context;
+#[cfg(feature = "native_decomp")]
+pub mod nir_engine;
+#[cfg(feature = "native_decomp")]
+pub mod nir_recovery;
+#[cfg(feature = "native_decomp")]
+pub mod nir_taxonomy;
+#[cfg(feature = "native_decomp")]
+pub mod nir_worker;
 pub mod postprocess;
 #[cfg(feature = "native_decomp")]
 pub mod prepare;
-pub(crate) mod preview_context;
-#[cfg(feature = "native_decomp")]
-pub mod preview_engine;
 
 pub use facts::{FactProvenance, FactStore, FunctionFacts, NameFact, TypeFact, log_type_diag};
 pub use postprocess::RustPostProcessOptions;
@@ -46,13 +52,19 @@ pub use prepare::{
     serialize_win_api_signatures_json,
 };
 #[cfg(feature = "native_decomp")]
-pub use preview_engine::{
-    PreviewEngineMode, PreviewRoutingDecision, PreviewRoutingResolver, PreviewSelection,
-    PreviewSource, PreviewSurfaceKind, PreviewWorkerRequest, PreviewWorkerResponse,
-    classify_native_failure_kind, execute_preview_worker, fallback_reason_with_kind,
-    native_failure_routing_decision, rescue_preview_output, rescue_preview_output_with_facts,
-    select_preview_output, select_preview_output_with_facts,
+pub use nir_engine::{
+    NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
+    NirSurfaceKind, auto_nir_eligible, classify_native_failure_kind,
+    native_failure_routing_decision, nir_fallback_reason_with_kind, rescue_nir_output,
+    rescue_nir_output_with_facts, select_nir_output, select_nir_output_with_facts,
 };
+#[cfg(feature = "native_decomp")]
+pub use nir_taxonomy::{
+    classify_nir_failure, classify_nir_failure_refined, classified_nir_error,
+    fallback_reason_with_kind,
+};
+#[cfg(feature = "native_decomp")]
+pub use nir_worker::{NirWorkerRequest, NirWorkerResponse, execute_nir_worker};
 
 #[cfg(feature = "native_decomp")]
 use self::cache::DecompilerCache;

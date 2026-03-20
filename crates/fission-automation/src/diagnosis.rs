@@ -11,9 +11,9 @@ use std::path::Path;
 pub struct SourceMetaView {
     pub admission_alignment: Option<String>,
     pub rescan_priority: Option<String>,
-    pub expected_preview_supported: Option<bool>,
-    pub observed_preview_supported: Option<bool>,
-    pub observed_preview_failure_kind: Option<String>,
+    pub expected_nir_supported: Option<bool>,
+    pub observed_nir_supported: Option<bool>,
+    pub observed_nir_failure_kind: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,7 +25,7 @@ pub struct DiagnosisDerivedMetrics {
     pub aligned_candidate_count: usize,
     pub blocked_candidate_count: usize,
     pub blocked_admission_stage_counts: BTreeMap<String, usize>,
-    pub blocked_preview_block_signature_counts: BTreeMap<String, usize>,
+    pub blocked_nir_block_signature_counts: BTreeMap<String, usize>,
     pub source_presence_counts: crate::model::SourcePresenceCounts,
     pub provenance_surface_totals: crate::model::ProvenanceSurfaceTotals,
     pub pdb_source_without_pdb_surface: bool,
@@ -49,7 +49,7 @@ pub struct DiagnosisBinaryEntry {
 pub struct DiagnosisAggregate {
     pub diagnosis_bucket_counts: BTreeMap<String, usize>,
     pub next_action_counts: BTreeMap<String, usize>,
-    pub preview_block_signature_counts: BTreeMap<String, usize>,
+    pub nir_block_signature_counts: BTreeMap<String, usize>,
     pub dominant_diagnosis: Option<String>,
     pub recommended_next_patch: Option<String>,
 }
@@ -85,10 +85,10 @@ fn stage_counts(entries: &[BlockedExplicitCandidate]) -> BTreeMap<String, usize>
     counts
 }
 
-fn preview_block_signature_counts(rows: &[InventoryRow]) -> BTreeMap<String, usize> {
+fn nir_block_signature_counts(rows: &[InventoryRow]) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     for row in rows {
-        if let Some(signature) = row.preview_block_signature.as_ref() {
+        if let Some(signature) = row.nir_block_signature.as_ref() {
             *counts.entry(signature.clone()).or_default() += 1;
         }
     }
@@ -210,10 +210,10 @@ pub fn diagnosis_entry(
     let blocked_admission_stage_counts = stage_counts(&blocked_candidates);
     let blocked_preview_rows: Vec<InventoryRow> = rows
         .iter()
-        .filter(|row| row.admission_block_stage == "preview")
+        .filter(|row| row.admission_block_stage == "preview" || row.admission_block_stage == "nir")
         .cloned()
         .collect();
-    let blocked_preview_block_signature_counts = preview_block_signature_counts(&blocked_preview_rows);
+    let blocked_nir_block_signature_counts = nir_block_signature_counts(&blocked_preview_rows);
     let (diagnosis_bucket, next_action, rationale) = classify_diagnosis(
         rows_emitted,
         source_present_rows,
@@ -234,9 +234,9 @@ pub fn diagnosis_entry(
         source_meta: SourceMetaView {
             admission_alignment: source_meta.and_then(|meta| meta.admission_alignment.clone()),
             rescan_priority: source_meta.and_then(|meta| meta.rescan_priority.clone()),
-            expected_preview_supported: source_meta.and_then(|meta| meta.expected_preview_supported),
-            observed_preview_supported: source_meta.and_then(|meta| meta.observed_preview_supported),
-            observed_preview_failure_kind: source_meta.and_then(|meta| meta.observed_preview_failure_kind.clone()),
+            expected_nir_supported: source_meta.and_then(|meta| meta.expected_nir_supported),
+            observed_nir_supported: source_meta.and_then(|meta| meta.observed_nir_supported),
+            observed_nir_failure_kind: source_meta.and_then(|meta| meta.observed_nir_failure_kind.clone()),
         },
         inventory_summary: summary.clone(),
         derived_metrics: DiagnosisDerivedMetrics {
@@ -247,7 +247,7 @@ pub fn diagnosis_entry(
             aligned_candidate_count: aligned_candidates.len(),
             blocked_candidate_count: blocked_candidates.len(),
             blocked_admission_stage_counts,
-            blocked_preview_block_signature_counts,
+            blocked_nir_block_signature_counts,
             source_presence_counts: summary.source_presence_counts.clone(),
             provenance_surface_totals: summary.provenance_surface_totals.clone(),
             pdb_source_without_pdb_surface: summary.source_presence_counts.pdb > 0
@@ -264,12 +264,12 @@ pub fn diagnosis_entry(
 pub fn aggregate_diagnosis(entries: &[DiagnosisBinaryEntry]) -> DiagnosisAggregate {
     let mut bucket_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut next_action_counts: BTreeMap<String, usize> = BTreeMap::new();
-    let mut preview_block_signature_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut nir_block_signature_counts: BTreeMap<String, usize> = BTreeMap::new();
     for entry in entries {
         *bucket_counts.entry(entry.diagnosis_bucket.clone()).or_default() += 1;
         *next_action_counts.entry(entry.next_action.clone()).or_default() += 1;
-        for (signature, count) in &entry.derived_metrics.blocked_preview_block_signature_counts {
-            *preview_block_signature_counts.entry(signature.clone()).or_default() += *count;
+        for (signature, count) in &entry.derived_metrics.blocked_nir_block_signature_counts {
+            *nir_block_signature_counts.entry(signature.clone()).or_default() += *count;
         }
     }
     let dominant_diagnosis = bucket_counts
@@ -284,7 +284,7 @@ pub fn aggregate_diagnosis(entries: &[DiagnosisBinaryEntry]) -> DiagnosisAggrega
     DiagnosisAggregate {
         diagnosis_bucket_counts: bucket_counts,
         next_action_counts,
-        preview_block_signature_counts,
+        nir_block_signature_counts,
         dominant_diagnosis,
         recommended_next_patch,
     }

@@ -22,17 +22,17 @@ role = "strong_pdb_positive_control"
 default_functions_limit = 20
 default_timeout_ms = 1500
 
-[lane.preview]
+[lane.nir]
 include_source_inventory_aligned_high = false
 
-[[lane.preview.binaries]]
+[[lane.nir.binaries]]
 binary = "GetProcAddress.exe"
 path = "samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe"
 role = "preview_stage_block_control"
 default_functions_limit = 20
 default_timeout_ms = 1500
 
-[[lane.preview.binaries]]
+[[lane.nir.binaries]]
 binary = "putty.exe"
 path = "samples/windows/x64/putty.exe"
 role = "preview_regression_control"

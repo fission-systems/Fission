@@ -8,13 +8,12 @@ use crate::cli::output::OutputSilencer;
 use fission_core::FissionError;
 use fission_ffi::DecompilerNative;
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
-use fission_pcode::{PcodeFunction, PcodeOpcode, PreviewBuildStats, PreviewHintStats};
+use fission_pcode::{NirBuildStats, NirHintStats, PcodeFunction, PcodeOpcode};
 use fission_static::analysis::decomp::postprocess::PostProcessor;
-use fission_static::analysis::decomp::preview_engine::auto_mlil_eligible;
 use fission_static::analysis::decomp::{
-    FactStore, PrepareOptions, PrepareTimings, PreviewEngineMode, PreviewSurfaceKind,
+    FactStore, NirEngineMode, NirSurfaceKind, PrepareOptions, PrepareTimings, auto_nir_eligible,
     classify_native_failure_kind, log_type_diag, prepare_native_decompiler_for_binary,
-    rescue_preview_output_with_facts, select_preview_output_with_facts,
+    rescue_nir_output_with_facts, select_nir_output_with_facts,
     serialize_win_api_signatures_json,
 };
 use serde::{Deserialize, Serialize};
@@ -137,8 +136,8 @@ struct RenderedCode {
     engine_used: &'static str,
     fell_back: bool,
     fallback_reason: Option<String>,
-    preview_build_stats: Option<PreviewBuildStats>,
-    preview_hint_stats: Option<PreviewHintStats>,
+    preview_build_stats: Option<NirBuildStats>,
+    preview_hint_stats: Option<NirHintStats>,
 }
 
 #[derive(Debug, Serialize)]
@@ -166,6 +165,12 @@ pub(super) struct PreviewCandidateEntry {
     pub(super) has_dwarf_return_type: bool,
     pub(super) loader_type_count: usize,
     pub(super) fact_density_score: i32,
+    pub(super) nir_direct_success: bool,
+    pub(super) nir_fallback_kind: Option<String>,
+    pub(super) nir_fallback_kind_refined: Option<String>,
+    pub(super) nir_fallback_reason: Option<String>,
+    pub(super) nir_block_signature: Option<String>,
+    pub(super) nir_block_detail: Option<String>,
     pub(super) preview_direct_success: bool,
     pub(super) preview_fallback_kind: Option<String>,
     pub(super) preview_fallback_kind_refined: Option<String>,
@@ -186,10 +191,11 @@ pub(super) struct PreviewCandidateEntry {
     pub(super) pcode_op_count: usize,
     pub(super) has_indirect_control_flow: bool,
     pub(super) auto_eligible: bool,
+    pub(super) nir_surface_kind: Option<String>,
     pub(super) preview_surface_kind: Option<String>,
     pub(super) quality_potential_score: i32,
     pub(super) reason_tags: Vec<String>,
-    pub(super) preview_hint_stats: Option<PreviewHintStats>,
+    pub(super) preview_hint_stats: Option<NirHintStats>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -203,6 +209,7 @@ pub(super) struct PreviewCandidateScanSummary {
     pub(super) chunks_completed: usize,
     pub(super) chunk_size: usize,
     pub(super) timeout_count: usize,
+    pub(super) nir_failure_count: usize,
     pub(super) preview_failure_count: usize,
     pub(super) panic_recovered_count: usize,
     pub(super) internal_error_count: usize,
@@ -271,7 +278,7 @@ fn preview_goto_count(code: &str) -> usize {
     code.matches("goto ").count()
 }
 
-fn explicit_hint_surface_count(stats: Option<PreviewHintStats>) -> usize {
+fn explicit_hint_surface_count(stats: Option<NirHintStats>) -> usize {
     stats.map_or(0, |stats| {
         stats.explicit_param_name_hits
             + stats.explicit_local_name_hits
@@ -281,10 +288,10 @@ fn explicit_hint_surface_count(stats: Option<PreviewHintStats>) -> usize {
     })
 }
 
-fn preview_surface_kind_str(kind: Option<PreviewSurfaceKind>) -> Option<String> {
+fn preview_surface_kind_str(kind: Option<NirSurfaceKind>) -> Option<String> {
     match kind {
-        Some(PreviewSurfaceKind::Structured) => Some("structured".to_string()),
-        Some(PreviewSurfaceKind::Unstructured) => Some("unstructured".to_string()),
+        Some(NirSurfaceKind::Structured) => Some("structured".to_string()),
+        Some(NirSurfaceKind::Unstructured) => Some("unstructured".to_string()),
         None => None,
     }
 }
@@ -317,12 +324,12 @@ fn build_quality_tags_and_score(
     has_dwarf_return_type: bool,
     loader_type_count: usize,
     preview_direct_success: bool,
-    preview_surface_kind: Option<PreviewSurfaceKind>,
+    preview_surface_kind: Option<NirSurfaceKind>,
     pcode_block_count: usize,
     pcode_op_count: usize,
     has_indirect_control_flow: bool,
     preview_code: Option<&str>,
-    preview_hint_stats: Option<PreviewHintStats>,
+    preview_hint_stats: Option<NirHintStats>,
 ) -> (i32, Vec<String>) {
     let mut score = 0;
     let mut tags = Vec::new();
@@ -354,7 +361,7 @@ fn build_quality_tags_and_score(
         score += 2;
         tags.push("slot_alias_candidate".to_string());
     }
-    if preview_surface_kind == Some(PreviewSurfaceKind::Unstructured) {
+    if preview_surface_kind == Some(NirSurfaceKind::Unstructured) {
         score -= 1;
         tags.push("unstructured_heavy".to_string());
     }
@@ -408,6 +415,24 @@ pub(super) fn effective_failure_kind(entry: &PreviewCandidateEntry) -> &str {
         .as_deref()
         .or(entry.preview_fallback_kind.as_deref())
         .unwrap_or("preview_non_success_unknown")
+}
+
+fn canonicalize_nir_failure_kind(kind: Option<&str>) -> Option<String> {
+    let kind = kind?;
+    let canonical = match kind {
+        "preview_timeout" => "nir_timeout",
+        "preview_unsupported" => "nir_unsupported",
+        "preview_frontend_reject" => "nir_frontend_reject",
+        "preview_worker_failure" => "nir_worker_failure",
+        "preview_structuring_failure" => "nir_structuring_failure",
+        "preview_parse_or_lowering_failure" => "nir_parse_or_lowering_failure",
+        "preview_unsupported_cfg" => "nir_unsupported_cfg",
+        "preview_architecture_unsupported" => "nir_architecture_unsupported",
+        "preview_format_unsupported" => "nir_format_unsupported",
+        "preview_non_success_unknown" => "nir_non_success_unknown",
+        other => other,
+    };
+    Some(canonical.to_string())
 }
 
 fn preview_block_signature(
@@ -516,7 +541,10 @@ pub(super) fn update_scan_summary(
         summary.strict_explicit_candidates += 1;
     }
     match entry.row_status.as_str() {
-        "preview_failure" => summary.preview_failure_count += 1,
+        "preview_failure" => {
+            summary.nir_failure_count += 1;
+            summary.preview_failure_count += 1;
+        }
         "panic_recovered" => summary.panic_recovered_count += 1,
         "internal_error" => summary.internal_error_count += 1,
         _ => {}
@@ -680,27 +708,27 @@ fn build_preview_candidate_entry(
                 pcode_block_count = pcode.blocks.len();
                 pcode_op_count = pcode_total_ops(&pcode);
                 has_indirect = contains_indirect_control_flow(&pcode);
-                auto_eligible = auto_mlil_eligible(binary, &pcode);
+                auto_eligible = auto_nir_eligible(binary, &pcode);
             }
 
-            if let Ok(selection) = select_preview_output_with_facts(
+            if let Ok(selection) = select_nir_output_with_facts(
                 decomp,
                 binary,
                 fact_store,
                 func.address,
                 &func.name,
-                PreviewEngineMode::MlilPreview,
+                NirEngineMode::Nir,
                 timeout_ms,
             ) {
-                preview_direct_success = selection.preview_code.is_some()
+                preview_direct_success = selection.nir_code.is_some()
                     && !selection.fell_back
-                    && selection.engine_used == PreviewEngineMode::MlilPreview;
+                    && selection.engine_used == NirEngineMode::Nir;
                 preview_fallback_kind = selection.fallback_kind.map(str::to_string);
                 preview_fallback_kind_refined = selection.fallback_kind_refined.map(str::to_string);
                 preview_fallback_reason = selection.fallback_reason.clone();
-                preview_surface_kind = selection.preview_surface;
+                preview_surface_kind = selection.nir_surface;
                 preview_hint_stats = selection.hint_stats;
-                preview_code = selection.preview_code;
+                preview_code = selection.nir_code;
                 recovery_strategy_attempted =
                     selection.recovery_strategy_attempted.map(str::to_string);
                 recovery_strategy_applied = selection.recovery_strategy_applied.map(str::to_string);
@@ -782,13 +810,13 @@ fn build_preview_candidate_entry(
             }
         }
         if recovery_structuring_mode.as_deref() == Some("forced_linear")
-            && preview_surface_kind == Some(PreviewSurfaceKind::Unstructured)
+            && preview_surface_kind == Some(NirSurfaceKind::Unstructured)
         {
             recovery_quality_flags.push("shape_linearized".to_string());
         }
         if recovery_structuring_mode.as_deref() == Some("region_linearized") {
             recovery_quality_flags.push("localized_linearization".to_string());
-            if preview_surface_kind == Some(PreviewSurfaceKind::Unstructured) {
+            if preview_surface_kind == Some(NirSurfaceKind::Unstructured) {
                 recovery_quality_flags.push("shape_partially_linearized".to_string());
             }
         }
@@ -817,6 +845,14 @@ fn build_preview_candidate_entry(
         has_dwarf_return_type,
         loader_type_count,
         fact_density_score,
+        nir_direct_success: preview_direct_success,
+        nir_fallback_kind: canonicalize_nir_failure_kind(preview_fallback_kind.as_deref()),
+        nir_fallback_kind_refined: canonicalize_nir_failure_kind(
+            preview_fallback_kind_refined.as_deref(),
+        ),
+        nir_fallback_reason: preview_fallback_reason.clone(),
+        nir_block_signature: preview_block_signature.clone(),
+        nir_block_detail: preview_block_detail.clone(),
         preview_direct_success,
         preview_fallback_kind,
         preview_fallback_kind_refined,
@@ -837,6 +873,7 @@ fn build_preview_candidate_entry(
         pcode_op_count,
         has_indirect_control_flow: has_indirect,
         auto_eligible,
+        nir_surface_kind: preview_surface_kind_str(preview_surface_kind),
         preview_surface_kind: preview_surface_kind_str(preview_surface_kind),
         quality_potential_score,
         reason_tags,
@@ -896,6 +933,19 @@ fn build_preview_candidate_fallback_entry(
         has_dwarf_return_type,
         loader_type_count,
         fact_density_score,
+        nir_direct_success: false,
+        nir_fallback_kind: Some("internal_error".to_string()),
+        nir_fallback_kind_refined: canonicalize_nir_failure_kind(Some(row_error_kind))
+            .or_else(|| Some(row_error_kind.to_string())),
+        nir_fallback_reason: Some(reason.clone()),
+        nir_block_signature: preview_block_signature(
+            Some(row_error_kind),
+            Some(reason.as_str()),
+            false,
+            0,
+            0,
+        ),
+        nir_block_detail: Some(reason.clone()),
         preview_direct_success: false,
         preview_fallback_kind: Some("internal_error".to_string()),
         preview_fallback_kind_refined: Some(row_error_kind.to_string()),
@@ -922,6 +972,7 @@ fn build_preview_candidate_fallback_entry(
         pcode_op_count: 0,
         has_indirect_control_flow: false,
         auto_eligible: false,
+        nir_surface_kind: None,
         preview_surface_kind: None,
         quality_potential_score,
         reason_tags,
@@ -1018,7 +1069,7 @@ fn legacy_rendered_code(
     RenderedCode {
         code,
         postprocess_sec,
-        engine_used: PreviewEngineMode::Legacy.as_str(),
+        engine_used: NirEngineMode::Legacy.as_str(),
         fell_back: false,
         fallback_reason: None,
         preview_build_stats: None,
@@ -1038,11 +1089,11 @@ fn decompile_code_with_profile(
 ) -> Result<RenderedCode, FissionError> {
     let mut fact_store = FactStore::from_binary(binary);
     let preview_mode = match engine_mode {
-        EngineMode::Legacy => PreviewEngineMode::Legacy,
-        EngineMode::MlilPreview => PreviewEngineMode::MlilPreview,
-        EngineMode::Auto => PreviewEngineMode::Auto,
+        EngineMode::Legacy => NirEngineMode::Legacy,
+        EngineMode::Nir => NirEngineMode::Nir,
+        EngineMode::Auto => NirEngineMode::Auto,
     };
-    let preview = select_preview_output_with_facts(
+    let preview = select_nir_output_with_facts(
         decomp,
         binary,
         &fact_store,
@@ -1053,11 +1104,11 @@ fn decompile_code_with_profile(
     )
     .map_err(FissionError::decompiler)?;
 
-    if let Some(code) = preview.preview_code {
+    if let Some(code) = preview.nir_code {
         return Ok(RenderedCode {
             code,
             postprocess_sec: 0.0,
-            engine_used: PreviewEngineMode::MlilPreview.as_str(),
+            engine_used: NirEngineMode::Nir.as_str(),
             fell_back: false,
             fallback_reason: None,
             preview_build_stats: preview.build_stats,
@@ -1083,7 +1134,7 @@ fn decompile_code_with_profile(
         Err(e) => {
             let error_text = e.to_string();
             if !matches!(engine_mode, EngineMode::Legacy) {
-                if let Some(selection) = rescue_preview_output_with_facts(
+                if let Some(selection) = rescue_nir_output_with_facts(
                     decomp,
                     binary,
                     &fact_store,
@@ -1094,11 +1145,11 @@ fn decompile_code_with_profile(
                 )
                 .map_err(FissionError::decompiler)?
                 {
-                    if let Some(code) = selection.preview_code {
+                    if let Some(code) = selection.nir_code {
                         return Ok(RenderedCode {
                             code,
                             postprocess_sec: 0.0,
-                            engine_used: PreviewEngineMode::MlilPreview.as_str(),
+                            engine_used: NirEngineMode::Nir.as_str(),
                             fell_back: true,
                             fallback_reason: selection.fallback_reason,
                             preview_build_stats: selection.build_stats,
@@ -1396,7 +1447,7 @@ fn run_sequential_decompilation<'a>(
                             "address": format!("0x{:x}", func.address),
                             "name": func.name,
                             "code": fallback,
-                            "engine_used": PreviewEngineMode::Legacy.as_str(),
+                            "engine_used": NirEngineMode::Legacy.as_str(),
                             "fell_back": true,
                             "fallback": "assembly",
                             "fallback_reason": fallback_reason_with_kind("assembly_fallback", &error_text),
@@ -1432,9 +1483,9 @@ fn run_sequential_decompilation<'a>(
                         "address": format!("0x{:x}", func.address),
                         "name": func.name,
                         "engine_used": match routing.engine_used {
-                            PreviewEngineMode::Legacy => PreviewEngineMode::Legacy.as_str(),
-                            PreviewEngineMode::MlilPreview => PreviewEngineMode::MlilPreview.as_str(),
-                            PreviewEngineMode::Auto => PreviewEngineMode::Auto.as_str(),
+                            NirEngineMode::Legacy => NirEngineMode::Legacy.as_str(),
+                            NirEngineMode::Nir => NirEngineMode::Nir.as_str(),
+                            NirEngineMode::Auto => NirEngineMode::Auto.as_str(),
                         },
                         "fell_back": routing.fell_back,
                         "fallback_reason": routing.fallback_reason,
@@ -1527,7 +1578,7 @@ fn run_parallel_decompilation<'a>(
                             Ok(RenderedCode {
                                 code: fallback,
                                 postprocess_sec: 0.0,
-                                engine_used: PreviewEngineMode::Legacy.as_str(),
+                                engine_used: NirEngineMode::Legacy.as_str(),
                                 fell_back: true,
                                 fallback_reason: Some(fallback_reason_with_kind(
                                     "assembly_fallback",
@@ -1621,7 +1672,7 @@ fn run_parallel_decompilation<'a>(
                                 Ok(RenderedCode {
                                     code: fallback,
                                     postprocess_sec: 0.0,
-                                    engine_used: PreviewEngineMode::Legacy.as_str(),
+                                    engine_used: NirEngineMode::Legacy.as_str(),
                                     fell_back: true,
                                     fallback_reason: Some(fallback_reason_with_kind(
                                         "assembly_fallback",
@@ -1728,7 +1779,7 @@ fn run_parallel_decompilation<'a>(
                     let mut json_entry = serde_json::json!({
                         "address": format!("0x{:x}", entry.address),
                         "name": entry.name,
-                        "engine_used": PreviewEngineMode::Legacy.as_str(),
+                        "engine_used": NirEngineMode::Legacy.as_str(),
                         "fell_back": true,
                         "fallback_reason": fallback_reason_with_kind(classify_native_failure_kind(&e.to_string()), e.to_string()),
                         "error": e.to_string()
@@ -1809,11 +1860,11 @@ pub(super) fn run_decompilation(
 
     // Apply one-shot profile before binary load/decompilation.
     let (selected_profile, unknown_profile) = resolve_profile(cli.profile.as_deref());
-    let (engine_mode, unknown_engine, deprecated_preview_alias) =
+    let (engine_mode, unknown_engine, deprecated_engine_alias, deprecated_profile_alias) =
         resolve_engine_mode(cli.engine.as_deref(), cli.profile.as_deref());
     if let Some(other) = unknown_profile {
         eprintln!(
-            "[!] Unknown --profile '{}', using balanced (quality|speed|balanced|mlil-preview)",
+            "[!] Unknown --profile '{}', using balanced (quality|speed|balanced|nir)",
             other
         );
         warn!(
@@ -1823,7 +1874,7 @@ pub(super) fn run_decompilation(
     }
     if let Some(other) = unknown_engine {
         eprintln!(
-            "[!] Unknown --engine '{}', using auto (mlil-preview|auto)",
+            "[!] Unknown --engine '{}', using auto (nir|auto)",
             other
         );
         warn!(engine = other, "unknown decompilation engine, using auto");
@@ -1833,9 +1884,14 @@ pub(super) fn run_decompilation(
             "[*] '--engine legacy' is a hidden compatibility mode; preview-first remains the product default"
         );
     }
-    if deprecated_preview_alias && cli.verbose {
+    if deprecated_engine_alias && cli.verbose {
         eprintln!(
-            "[*] '--profile mlil-preview' is deprecated; use '--engine mlil-preview --profile quality'"
+            "[*] '--engine mlil-preview' is deprecated; use '--engine nir'"
+        );
+    }
+    if deprecated_profile_alias && cli.verbose {
+        eprintln!(
+            "[*] '--profile mlil-preview' is deprecated; use '--engine nir --profile quality'"
         );
     }
     apply_profile(&mut decomp, selected_profile);

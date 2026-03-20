@@ -1,23 +1,23 @@
 use crate::analysis::decomp::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::DwarfLocation;
-use fission_pcode::{PreviewCallParamRule, PreviewFunctionHints, PreviewTypeContext};
+use fission_pcode::{NirCallParamRule, NirFunctionHints, NirTypeContext};
 use fission_signatures::WIN_API_DB;
 use fission_signatures::win_types::WindowsStructures;
 use std::collections::HashMap;
 
-pub(crate) fn build_preview_type_context(
+pub(crate) fn build_nir_type_context(
     binary: &LoadedBinary,
     fact_store: &FactStore,
     address: u64,
-) -> PreviewTypeContext {
+) -> NirTypeContext {
     let mut call_targets = HashMap::new();
 
     for (resolved_address, fact) in fact_store.iter_resolved_name_facts() {
         if resolved_address == 0 || fact.name.is_empty() {
             continue;
         }
-        call_targets.insert(resolved_address, sanitize_preview_symbol_name(&fact.name));
+        call_targets.insert(resolved_address, sanitize_nir_symbol_name(&fact.name));
     }
 
     for func in &binary.functions {
@@ -26,7 +26,7 @@ pub(crate) fn build_preview_type_context(
         }
         call_targets
             .entry(func.address)
-            .or_insert_with(|| sanitize_preview_symbol_name(&func.name));
+            .or_insert_with(|| sanitize_nir_symbol_name(&func.name));
     }
 
     for (resolved_address, name) in &binary.inner().iat_symbols {
@@ -35,7 +35,7 @@ pub(crate) fn build_preview_type_context(
         }
         call_targets
             .entry(*resolved_address)
-            .or_insert_with(|| sanitize_preview_symbol_name(name));
+            .or_insert_with(|| sanitize_nir_symbol_name(name));
     }
 
     for (resolved_address, name) in &binary.inner().global_symbols {
@@ -44,20 +44,20 @@ pub(crate) fn build_preview_type_context(
         }
         call_targets
             .entry(*resolved_address)
-            .or_insert_with(|| sanitize_preview_symbol_name(name));
+            .or_insert_with(|| sanitize_nir_symbol_name(name));
     }
 
-    PreviewTypeContext {
+    NirTypeContext {
         call_targets,
-        call_param_rules: build_preview_call_param_rules(),
-        function_hints: build_preview_function_hints(fact_store, address),
+        call_param_rules: build_nir_call_param_rules(),
+        function_hints: build_nir_function_hints(fact_store, address),
     }
 }
 
-fn build_preview_function_hints(
+fn build_nir_function_hints(
     fact_store: &FactStore,
     address: u64,
-) -> Option<PreviewFunctionHints> {
+) -> Option<NirFunctionHints> {
     let debug = fact_store.preferred_debug_function(address)?;
     let param_names = debug
         .params
@@ -109,7 +109,7 @@ fn build_preview_function_hints(
     {
         None
     } else {
-        Some(PreviewFunctionHints {
+        Some(NirFunctionHints {
             param_names,
             param_type_names,
             stack_local_names,
@@ -119,7 +119,7 @@ fn build_preview_function_hints(
     }
 }
 
-fn sanitize_preview_symbol_name(name: &str) -> String {
+fn sanitize_nir_symbol_name(name: &str) -> String {
     let mut sanitized = name.trim().to_string();
     if let Some((_, tail)) = sanitized.rsplit_once('!') {
         sanitized = tail.trim().to_string();
@@ -135,12 +135,12 @@ fn sanitize_preview_symbol_name(name: &str) -> String {
     sanitized
 }
 
-fn build_preview_call_param_rules() -> Vec<PreviewCallParamRule> {
+fn build_nir_call_param_rules() -> Vec<NirCallParamRule> {
     let structures = WindowsStructures::new();
     let mut call_param_rules = Vec::new();
     for sig in WIN_API_DB.iter() {
         for (arg_index, param) in sig.params.iter().enumerate() {
-            let Some(struct_name) = resolve_preview_struct_name(&param.type_name, &structures)
+            let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures)
             else {
                 continue;
             };
@@ -150,7 +150,7 @@ fn build_preview_call_param_rules() -> Vec<PreviewCallParamRule> {
             if struct_def.size_64 == 0 {
                 continue;
             }
-            call_param_rules.push(PreviewCallParamRule {
+            call_param_rules.push(NirCallParamRule {
                 callee_name: sig.name.clone(),
                 arg_index,
                 pointer_alias: param.type_name.clone(),
@@ -163,7 +163,7 @@ fn build_preview_call_param_rules() -> Vec<PreviewCallParamRule> {
     call_param_rules
 }
 
-fn resolve_preview_struct_name(type_name: &str, structures: &WindowsStructures) -> Option<String> {
+fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> Option<String> {
     if type_name.contains('*') {
         return None;
     }

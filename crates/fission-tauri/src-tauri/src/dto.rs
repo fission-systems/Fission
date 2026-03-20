@@ -209,7 +209,8 @@ pub struct DecompilerOptions {
 #[serde(rename_all = "snake_case")]
 pub enum DecompilerEngineMode {
     Legacy,
-    MlilPreview,
+    #[serde(alias = "mlil_preview")]
+    Nir,
     #[default]
     Auto,
 }

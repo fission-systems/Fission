@@ -208,6 +208,15 @@ pub fn render_mlil_preview(
     render_mlil_preview_with_context(pcode, name, address, options, None)
 }
 
+pub fn render_nir(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &NirRenderOptions,
+) -> Result<String, MlilPreviewError> {
+    render_mlil_preview(pcode, name, address, options)
+}
+
 pub fn render_mlil_preview_with_context(
     pcode: &PcodeFunction,
     name: &str,
@@ -376,12 +385,30 @@ pub fn render_mlil_preview_with_context(
     Ok(rendered)
 }
 
+pub fn render_nir_with_context(
+    pcode: &PcodeFunction,
+    name: &str,
+    address: u64,
+    options: &NirRenderOptions,
+    type_context: Option<&NirTypeContext>,
+) -> Result<String, MlilPreviewError> {
+    render_mlil_preview_with_context(pcode, name, address, options, type_context)
+}
+
 pub fn take_last_preview_build_stats() -> Option<PreviewBuildStats> {
     LAST_PREVIEW_BUILD_STATS.with(|slot| slot.borrow_mut().take())
 }
 
 pub fn take_last_preview_hint_stats() -> Option<PreviewHintStats> {
     LAST_PREVIEW_HINT_STATS.with(|slot| slot.borrow_mut().take())
+}
+
+pub fn take_last_nir_build_stats() -> Option<NirBuildStats> {
+    take_last_preview_build_stats()
+}
+
+pub fn take_last_nir_hint_stats() -> Option<NirHintStats> {
+    take_last_preview_hint_stats()
 }
 
 fn is_comparison(opcode: PcodeOpcode) -> bool {

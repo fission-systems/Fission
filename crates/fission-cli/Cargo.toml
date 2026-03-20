@@ -49,3 +49,9 @@ name = "fission_preview_worker"
 path = "src/bin/fission_preview_worker.rs"
 test = false
 required-features = ["native_decomp"]
+
+[[bin]]
+name = "fission_nir_worker"
+path = "src/bin/fission_nir_worker.rs"
+test = false
+required-features = ["native_decomp"]

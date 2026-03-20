@@ -1,20 +1,18 @@
-use fission_static::analysis::decomp::nir_worker::{
-    PreviewWorkerRequest, PreviewWorkerResponse, execute_preview_worker,
-};
+use fission_static::analysis::decomp::{NirWorkerRequest, NirWorkerResponse, execute_nir_worker};
 use std::io::{self, Read, Write};
 
 fn main() -> io::Result<()> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
 
-    let response = match serde_json::from_str::<PreviewWorkerRequest>(&input) {
-        Ok(request) => execute_preview_worker(&request),
-        Err(err) => PreviewWorkerResponse {
+    let response = match serde_json::from_str::<NirWorkerRequest>(&input) {
+        Ok(request) => execute_nir_worker(&request),
+        Err(err) => NirWorkerResponse {
             success: false,
             code: None,
             build_stats: None,
             hint_stats: None,
-            error: Some(format!("preview worker request parse failed: {err}")),
+            error: Some(format!("Fission NIR worker request parse failed: {err}")),
         },
     };
 

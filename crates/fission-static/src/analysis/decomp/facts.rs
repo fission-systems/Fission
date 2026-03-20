@@ -2,7 +2,7 @@ use fission_loader::loader::LoadedBinary;
 use fission_loader::loader::types::{
     DwarfFunctionInfo, InferredFieldInfo, InferredTypeInfo, PdbFunctionInfo,
 };
-use fission_pcode::PreviewTypeContext;
+use fission_pcode::NirTypeContext;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -230,8 +230,12 @@ impl FactStore {
         }
     }
 
-    pub fn build_preview_type_context(&self, binary: &LoadedBinary) -> PreviewTypeContext {
-        crate::analysis::decomp::preview_context::build_preview_type_context(binary, self, 0)
+    pub fn build_nir_type_context(&self, binary: &LoadedBinary) -> NirTypeContext {
+        crate::analysis::decomp::nir_context::build_nir_type_context(binary, self, 0)
+    }
+
+    pub fn build_preview_type_context(&self, binary: &LoadedBinary) -> NirTypeContext {
+        self.build_nir_type_context(binary)
     }
 }
 

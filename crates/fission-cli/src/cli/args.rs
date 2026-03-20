@@ -66,11 +66,11 @@ pub struct OneShotArgs {
     #[arg(long, value_name = "ID")]
     pub compiler_id: Option<String>,
 
-    /// Decompilation profile (balanced|quality|speed|mlil-preview)
+    /// Decompilation profile (balanced|quality|speed|nir; mlil-preview is a deprecated alias)
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
 
-    /// Decompilation engine (auto|mlil-preview; legacy is accepted as a hidden compat mode)
+    /// Decompilation engine (auto|nir; mlil-preview is a deprecated alias, legacy is a hidden compat mode)
     #[arg(long, value_name = "ENGINE")]
     pub engine: Option<String>,
 

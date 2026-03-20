@@ -25,7 +25,7 @@ Key capabilities:
 - temp inlining
 - stack / piece access normalization
 
-### `mlil-preview`
+### `Fission NIR`
 
 The forward path that takes Ghidra p-code and emits pseudocode through Fission-owned NIR/HIR plus a Rust printer.
 
@@ -41,7 +41,7 @@ Current support:
 - multi-block `do-while`
 - cast canonicalization
 - `PIECE` / `SUBPIECE` recombination
-- preview-owned label/goto fallback
+- Fission NIR-owned label/goto fallback
 
 Current limits:
 
@@ -63,7 +63,7 @@ Supported architectures in the broader workspace:
 - x86-64
 - ARM64 / AArch64
 
-Current first-class `mlil-preview` scope remains focused on **PE x64**, with limited bootstrap-level x86 preview coverage on selected cases.
+Current first-class `Fission NIR` scope remains focused on **PE x64**, with limited bootstrap-level x86 Fission NIR coverage on selected cases.
 
 ## Analysis / Recovery Capabilities
 
@@ -108,7 +108,7 @@ The CLI currently provides:
 Key options:
 
 - `--profile balanced|quality|speed`
-- `--engine legacy|mlil-preview|auto`
+- `--engine legacy|nir|auto`
 - `--timeout-ms`
 - `--benchmark`
 - `--ghidra-compat`
@@ -121,7 +121,7 @@ The current Tauri GUI exposes:
 - assembly tabs
 - decompile tabs
 - decompiler options dialog
-- engine selector (`legacy`, `mlil_preview`, `auto`)
+- engine selector (`legacy`, `nir`, `auto`)
 - engine-used / fallback badges
 - strings / imports / exports / search / CFG-adjacent panels
 
@@ -138,14 +138,14 @@ Checked-in benchmark summary:
 Current observed direction:
 
 - `legacy` remains the stable baseline
-- `mlil-preview` coverage and structuring quality are improving quickly
-- preview benchmark work has been steadily reducing goto and temporary-surface residue on covered functions
+- `Fission NIR` coverage and structuring quality are improving quickly
+- Fission NIR benchmark work has been steadily reducing goto and temporary-surface residue on covered functions
 
 ## Known Limits
 
 Important current limits:
 
-- `mlil-preview` is not yet a full replacement for `legacy`
+- `Fission NIR` is not yet a full replacement for `legacy`
 - some `type`-heavy functions remain hard cases even on the legacy path
 - semantic renaming, advanced field naming, and broad high-level idiom recovery are still in progress
 

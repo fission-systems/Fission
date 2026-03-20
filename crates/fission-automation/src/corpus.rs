@@ -12,7 +12,7 @@ pub struct InventorySummaryTotals {
     pub functions_total: usize,
     pub rows_emitted: usize,
     pub direct_success_count: usize,
-    pub preview_failure_count: usize,
+    pub nir_failure_count: usize,
     pub panic_recovered_count: usize,
     pub explicit_fact_nonzero_count: usize,
     pub strict_explicit_candidate_count: usize,
@@ -31,7 +31,7 @@ impl Default for InventorySummaryTotals {
             functions_total: 0,
             rows_emitted: 0,
             direct_success_count: 0,
-            preview_failure_count: 0,
+            nir_failure_count: 0,
             panic_recovered_count: 0,
             explicit_fact_nonzero_count: 0,
             strict_explicit_candidate_count: 0,
@@ -70,19 +70,19 @@ fn normalize_address(value: &str) -> String {
     text
 }
 
-pub fn source_is_preview_aligned(source_meta: Option<&SourceMeta>) -> bool {
+pub fn source_is_nir_aligned(source_meta: Option<&SourceMeta>) -> bool {
     let Some(source_meta) = source_meta else {
         return true;
     };
     if let Some(alignment) = source_meta.admission_alignment.as_deref() {
         return alignment == "aligned";
     }
-    if matches!(source_meta.expected_preview_supported, Some(false)) {
+    if matches!(source_meta.expected_nir_supported, Some(false)) {
         return false;
     }
     !matches!(
-        source_meta.observed_preview_failure_kind.as_deref(),
-        Some("preview_architecture_unsupported" | "preview_format_unsupported")
+        source_meta.observed_nir_failure_kind.as_deref(),
+        Some("nir_architecture_unsupported" | "nir_format_unsupported" | "preview_architecture_unsupported" | "preview_format_unsupported")
     )
 }
 
@@ -90,9 +90,9 @@ pub fn candidate_passes_explicit_quality_prefilter(
     entry: &InventoryRow,
     source_meta: Option<&SourceMeta>,
 ) -> bool {
-    source_is_preview_aligned(source_meta)
+    source_is_nir_aligned(source_meta)
         && explicit_fact_total(entry) >= 2
-        && entry.preview_direct_success
+        && entry.nir_direct_success
         && !entry.has_indirect_control_flow
         && entry.pcode_op_count <= 800
 }
@@ -112,10 +112,10 @@ pub fn aligned_explicit_candidate_entry(
         name: entry.name.clone(),
         explicit_fact_total: explicit_fact_total(entry),
         fact_density_score: entry.fact_density_score,
-        preview_direct_success: entry.preview_direct_success,
-        preview_fallback_kind_refined: entry.preview_fallback_kind_refined.clone(),
+        nir_direct_success: entry.nir_direct_success,
+        nir_fallback_kind_refined: entry.nir_fallback_kind_refined.clone(),
         pcode_op_count: entry.pcode_op_count,
-        preview_surface_kind: entry.preview_surface_kind.clone(),
+        nir_surface_kind: entry.nir_surface_kind.clone(),
         fact_sources_present: FactSourcesPresent {
             dwarf: entry.fact_sources_present.dwarf,
             pdb: entry.fact_sources_present.pdb,
@@ -146,11 +146,11 @@ pub fn blocked_explicit_candidate_entry(
         name: entry.name.clone(),
         explicit_fact_total: explicit_fact_total(entry),
         fact_density_score: entry.fact_density_score,
-        preview_direct_success: entry.preview_direct_success,
+        nir_direct_success: entry.nir_direct_success,
         block_reason: entry
             .row_error_kind
             .clone()
-            .or_else(|| entry.preview_fallback_kind_refined.clone())
+            .or_else(|| entry.nir_fallback_kind_refined.clone())
             .unwrap_or_else(|| "strict_filter_reject".to_string()),
         pcode_op_count: entry.pcode_op_count,
         has_indirect_control_flow: entry.has_indirect_control_flow,
@@ -200,7 +200,7 @@ fn update_totals(totals: &mut InventorySummaryTotals, summary: &InventorySummary
     totals.functions_total += summary.functions_total;
     totals.rows_emitted += summary.rows_emitted;
     totals.direct_success_count += summary.direct_success_count;
-    totals.preview_failure_count += summary.preview_failure_count;
+    totals.nir_failure_count += summary.nir_failure_count;
     totals.panic_recovered_count += summary.panic_recovered_count;
     totals.explicit_fact_nonzero_count += summary.explicit_fact_nonzero_count;
     totals.strict_explicit_candidate_count += summary.strict_explicit_candidate_count;

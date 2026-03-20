@@ -11,7 +11,8 @@ use std::path::Path;
 pub struct BinarySnapshot {
     pub binary: String,
     pub direct_success_count: usize,
-    pub preview_failure_count: usize,
+    #[serde(alias = "preview_failure_count")]
+    pub nir_failure_count: usize,
     pub explicit_fact_nonzero_count: usize,
     pub strict_explicit_candidate_count: usize,
     pub inventory_surface_gap_count: usize,
@@ -32,14 +33,16 @@ pub struct BinarySnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateSnapshot {
     pub direct_success_count: usize,
-    pub preview_failure_count: usize,
+    #[serde(alias = "preview_failure_count")]
+    pub nir_failure_count: usize,
     pub explicit_fact_nonzero_count: usize,
     pub strict_explicit_candidate_count: usize,
     pub inventory_surface_gap_count: usize,
     pub source_presence_counts: SourcePresenceCounts,
     pub provenance_surface_totals: ProvenanceSurfaceTotals,
     pub diagnosis_bucket_counts: BTreeMap<String, usize>,
-    pub preview_block_signature_counts: BTreeMap<String, usize>,
+    #[serde(alias = "preview_block_signature_counts")]
+    pub nir_block_signature_counts: BTreeMap<String, usize>,
     pub recommended_next_patch: Option<String>,
     #[serde(default)]
     pub recovery_strategy_attempted_counts: BTreeMap<String, usize>,
@@ -65,7 +68,7 @@ pub struct AutomationSummary {
 #[derive(Debug, Serialize)]
 pub struct SummaryDelta {
     pub direct_success_count: isize,
-    pub preview_failure_count: isize,
+    pub nir_failure_count: isize,
     pub explicit_fact_nonzero_count: isize,
     pub strict_explicit_candidate_count: isize,
     pub inventory_surface_gap_count: isize,
@@ -110,7 +113,7 @@ pub fn build_summary(
         binaries.push(BinarySnapshot {
             binary: summary.binary.clone(),
             direct_success_count: summary.direct_success_count,
-            preview_failure_count: summary.preview_failure_count,
+            nir_failure_count: summary.nir_failure_count,
             explicit_fact_nonzero_count: summary.explicit_fact_nonzero_count,
             strict_explicit_candidate_count: summary.strict_explicit_candidate_count,
             inventory_surface_gap_count: summary.inventory_surface_gap_count,
@@ -130,7 +133,7 @@ pub fn build_summary(
         binaries,
         aggregate: AggregateSnapshot {
             direct_success_count: totals.direct_success_count,
-            preview_failure_count: totals.preview_failure_count,
+            nir_failure_count: totals.nir_failure_count,
             explicit_fact_nonzero_count: totals.explicit_fact_nonzero_count,
             strict_explicit_candidate_count: totals.strict_explicit_candidate_count,
             inventory_surface_gap_count: totals.inventory_surface_gap_count,
@@ -142,7 +145,7 @@ pub fn build_summary(
                 loader_nonzero_rows: 0,
             },
             diagnosis_bucket_counts: diagnosis.diagnosis_bucket_counts.clone(),
-            preview_block_signature_counts: diagnosis.preview_block_signature_counts.clone(),
+            nir_block_signature_counts: diagnosis.nir_block_signature_counts.clone(),
             recommended_next_patch: diagnosis.recommended_next_patch.clone(),
             recovery_strategy_attempted_counts: aggregate_recovery_strategy_attempted_counts,
             recovery_strategy_applied_counts: aggregate_recovery_strategy_applied_counts,
@@ -212,8 +215,8 @@ pub fn compute_delta(
     Some(SummaryDelta {
         direct_success_count: current.aggregate.direct_success_count as isize
             - baseline.aggregate.direct_success_count as isize,
-        preview_failure_count: current.aggregate.preview_failure_count as isize
-            - baseline.aggregate.preview_failure_count as isize,
+        nir_failure_count: current.aggregate.nir_failure_count as isize
+            - baseline.aggregate.nir_failure_count as isize,
         explicit_fact_nonzero_count: current.aggregate.explicit_fact_nonzero_count as isize
             - baseline.aggregate.explicit_fact_nonzero_count as isize,
         strict_explicit_candidate_count: current.aggregate.strict_explicit_candidate_count as isize
@@ -235,7 +238,7 @@ pub fn render_markdown(
     delta: Option<&SummaryDelta>,
 ) -> String {
     let mut out = String::new();
-    out.push_str("# Fission Automation Summary\n\n");
+    out.push_str("# Fission NIR Automation Summary\n\n");
     out.push_str(&format!("- Lane: `{}`\n", summary.lane));
     out.push_str(&format!("- Run: `{}`\n", summary.run_id));
     out.push_str(&format!("- Generated at: `{}`\n", summary.generated_at));
@@ -250,9 +253,9 @@ pub fn render_markdown(
 
     out.push_str("## Aggregate Counts\n\n");
     out.push_str(&format!(
-        "- direct_success_count: `{}`\n- preview_failure_count: `{}`\n- explicit_fact_nonzero_count: `{}`\n- strict_explicit_candidate_count: `{}`\n- inventory_surface_gap_count: `{}`\n",
+        "- direct_success_count: `{}`\n- nir_failure_count: `{}`\n- explicit_fact_nonzero_count: `{}`\n- strict_explicit_candidate_count: `{}`\n- inventory_surface_gap_count: `{}`\n",
         summary.aggregate.direct_success_count,
-        summary.aggregate.preview_failure_count,
+        summary.aggregate.nir_failure_count,
         summary.aggregate.explicit_fact_nonzero_count,
         summary.aggregate.strict_explicit_candidate_count,
         summary.aggregate.inventory_surface_gap_count,
@@ -262,9 +265,9 @@ pub fn render_markdown(
         summary.aggregate.source_presence_counts, summary.aggregate.provenance_surface_totals
     ));
     out.push_str(&format!(
-        "- diagnosis_bucket_counts: `{:?}`\n- preview_block_signature_counts: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n\n",
+        "- diagnosis_bucket_counts: `{:?}`\n- nir_block_signature_counts: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n\n",
         summary.aggregate.diagnosis_bucket_counts,
-        summary.aggregate.preview_block_signature_counts,
+        summary.aggregate.nir_block_signature_counts,
         summary.aggregate.recovery_strategy_attempted_counts,
         summary.aggregate.recovery_outcome_counts,
         summary.aggregate.recovery_quality_flag_counts,
@@ -274,9 +277,9 @@ pub fn render_markdown(
     if let Some(delta) = delta {
         out.push_str("## Baseline Delta\n\n");
         out.push_str(&format!(
-            "- direct_success_count: `{:+}`\n- preview_failure_count: `{:+}`\n- explicit_fact_nonzero_count: `{:+}`\n- strict_explicit_candidate_count: `{:+}`\n- inventory_surface_gap_count: `{:+}`\n- pdb_nonzero_rows: `{:+}`\n\n",
+            "- direct_success_count: `{:+}`\n- nir_failure_count: `{:+}`\n- explicit_fact_nonzero_count: `{:+}`\n- strict_explicit_candidate_count: `{:+}`\n- inventory_surface_gap_count: `{:+}`\n- pdb_nonzero_rows: `{:+}`\n\n",
             delta.direct_success_count,
-            delta.preview_failure_count,
+            delta.nir_failure_count,
             delta.explicit_fact_nonzero_count,
             delta.strict_explicit_candidate_count,
             delta.inventory_surface_gap_count,
@@ -288,12 +291,12 @@ pub fn render_markdown(
     for entry in &diagnosis.binaries {
         out.push_str(&format!("### {}\n\n", entry.binary));
         out.push_str(&format!(
-            "- diagnosis: `{}`\n- next_action: `{}`\n- explicit_nonzero_rows: `{}`\n- strict_explicit_candidate_count: `{}`\n- preview_block_signatures: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n\n",
+            "- diagnosis: `{}`\n- next_action: `{}`\n- explicit_nonzero_rows: `{}`\n- strict_explicit_candidate_count: `{}`\n- nir_block_signatures: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n\n",
             entry.diagnosis_bucket,
             entry.next_action,
             entry.derived_metrics.explicit_nonzero_rows,
             entry.inventory_summary.strict_explicit_candidate_count,
-            entry.derived_metrics.blocked_preview_block_signature_counts,
+            entry.derived_metrics.blocked_nir_block_signature_counts,
             entry.inventory_summary.recovery_strategy_attempted_counts,
             entry.inventory_summary.recovery_outcome_counts,
             entry.inventory_summary.recovery_structuring_mode_counts,
@@ -328,9 +331,9 @@ pub fn render_markdown(
 pub fn print_terminal_summary(summary: &AutomationSummary, diagnosis: &DiagnosisReport) {
     println!("[fission-automation] lane={}", summary.lane);
     println!(
-        "  direct_success={} preview_failure={} explicit_nonzero={} strict_explicit={}",
+        "  direct_success={} nir_failure={} explicit_nonzero={} strict_explicit={}",
         summary.aggregate.direct_success_count,
-        summary.aggregate.preview_failure_count,
+        summary.aggregate.nir_failure_count,
         summary.aggregate.explicit_fact_nonzero_count,
         summary.aggregate.strict_explicit_candidate_count
     );
@@ -344,8 +347,8 @@ pub fn print_terminal_summary(summary: &AutomationSummary, diagnosis: &Diagnosis
         diagnosis.aggregate.dominant_diagnosis, diagnosis.aggregate.recommended_next_patch
     );
     println!(
-        "  preview_block_signatures={:?}",
-        diagnosis.aggregate.preview_block_signature_counts
+        "  nir_block_signatures={:?}",
+        diagnosis.aggregate.nir_block_signature_counts
     );
     println!(
         "  recovery_attempted={:?} recovery_outcome={:?} recovery_quality_flags={:?}",

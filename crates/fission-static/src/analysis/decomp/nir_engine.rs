@@ -1,9 +1,9 @@
 use crate::analysis::decomp::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
-    MlilPreviewOptions, PcodeFunction, PcodeOpcode, PcodeOptimizer, PcodeOptimizerConfig,
-    PreviewBuildStats, PreviewHintStats, PreviewTypeContext, StructuringFailureKind,
-    render_mlil_preview_with_context, take_last_preview_build_stats, take_last_preview_hint_stats,
+    NirRenderOptions, PcodeFunction, PcodeOpcode, PcodeOptimizer, PcodeOptimizerConfig,
+    NirBuildStats, NirHintStats, NirTypeContext, StructuringFailureKind,
+    render_nir_with_context, take_last_nir_build_stats, take_last_nir_hint_stats,
 };
 use std::io::{Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -12,33 +12,33 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreviewEngineMode {
+pub enum NirEngineMode {
     Legacy,
-    MlilPreview,
+    Nir,
     Auto,
 }
 
-impl PreviewEngineMode {
+impl NirEngineMode {
     pub const fn as_str(self) -> &'static str {
         match self {
-            PreviewEngineMode::Legacy => "legacy",
-            PreviewEngineMode::MlilPreview => "mlil_preview",
-            PreviewEngineMode::Auto => "auto",
+            NirEngineMode::Legacy => "legacy",
+            NirEngineMode::Nir => "nir",
+            NirEngineMode::Auto => "auto",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreviewSelection {
-    pub preview_code: Option<String>,
-    pub build_stats: Option<PreviewBuildStats>,
-    pub hint_stats: Option<PreviewHintStats>,
-    pub engine_used: PreviewEngineMode,
+pub struct NirSelection {
+    pub nir_code: Option<String>,
+    pub build_stats: Option<NirBuildStats>,
+    pub hint_stats: Option<NirHintStats>,
+    pub engine_used: NirEngineMode,
     pub fell_back: bool,
     pub fallback_reason: Option<String>,
     pub fallback_kind: Option<&'static str>,
     pub fallback_kind_refined: Option<&'static str>,
-    pub preview_surface: Option<PreviewSurfaceKind>,
+    pub nir_surface: Option<NirSurfaceKind>,
     pub recovery_strategy_attempted: Option<&'static str>,
     pub recovery_strategy_applied: Option<&'static str>,
     pub recovery_outcome: Option<&'static str>,
@@ -47,13 +47,13 @@ pub struct PreviewSelection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreviewRoutingDecision {
-    pub engine_used: PreviewEngineMode,
+pub struct NirRoutingDecision {
+    pub engine_used: NirEngineMode,
     pub fell_back: bool,
     pub fallback_reason: Option<String>,
     pub fallback_kind: Option<&'static str>,
     pub fallback_kind_refined: Option<&'static str>,
-    pub preview_surface: Option<PreviewSurfaceKind>,
+    pub nir_surface: Option<NirSurfaceKind>,
     pub recovery_strategy_attempted: Option<&'static str>,
     pub recovery_strategy_applied: Option<&'static str>,
     pub recovery_outcome: Option<&'static str>,
@@ -62,22 +62,22 @@ pub struct PreviewRoutingDecision {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreviewSurfaceKind {
+pub enum NirSurfaceKind {
     Structured,
     Unstructured,
 }
 
-pub struct PreviewRoutingResolver;
+pub struct NirRoutingResolver;
 
-impl PreviewRoutingResolver {
-    pub fn from_selection(selection: &PreviewSelection) -> PreviewRoutingDecision {
-        PreviewRoutingDecision {
+impl NirRoutingResolver {
+    pub fn from_selection(selection: &NirSelection) -> NirRoutingDecision {
+        NirRoutingDecision {
             engine_used: selection.engine_used,
             fell_back: selection.fell_back,
             fallback_reason: selection.fallback_reason.clone(),
             fallback_kind: selection.fallback_kind,
             fallback_kind_refined: selection.fallback_kind_refined,
-            preview_surface: selection.preview_surface,
+            nir_surface: selection.nir_surface,
             recovery_strategy_attempted: selection.recovery_strategy_attempted,
             recovery_strategy_applied: selection.recovery_strategy_applied,
             recovery_outcome: selection.recovery_outcome,
@@ -86,17 +86,17 @@ impl PreviewRoutingResolver {
         }
     }
 
-    pub fn legacy_mode() -> PreviewSelection {
-        PreviewSelection {
-            preview_code: None,
+    pub fn legacy_mode() -> NirSelection {
+        NirSelection {
+            nir_code: None,
             build_stats: None,
             hint_stats: None,
-            engine_used: PreviewEngineMode::Legacy,
+            engine_used: NirEngineMode::Legacy,
             fell_back: false,
             fallback_reason: None,
             fallback_kind: None,
             fallback_kind_refined: None,
-            preview_surface: None,
+            nir_surface: None,
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
@@ -105,19 +105,19 @@ impl PreviewRoutingResolver {
         }
     }
 
-    pub fn preview_success(
+    pub fn nir_success(
         code: String,
-        build_stats: Option<PreviewBuildStats>,
-        hint_stats: Option<PreviewHintStats>,
+        build_stats: Option<NirBuildStats>,
+        hint_stats: Option<NirHintStats>,
         fell_back: bool,
         fallback_reason: Option<String>,
-    ) -> PreviewSelection {
-        PreviewSelection {
-            preview_surface: Some(classify_preview_surface(&code)),
-            preview_code: Some(code),
+    ) -> NirSelection {
+        NirSelection {
+            nir_surface: Some(classify_nir_surface(&code)),
+            nir_code: Some(code),
             build_stats,
             hint_stats,
-            engine_used: PreviewEngineMode::MlilPreview,
+            engine_used: NirEngineMode::Nir,
             fell_back,
             fallback_kind: extract_fallback_kind(fallback_reason.as_deref()),
             fallback_kind_refined: extract_refined_fallback_kind(fallback_reason.as_deref()),
@@ -130,22 +130,22 @@ impl PreviewRoutingResolver {
         }
     }
 
-    pub fn preview_success_with_recovery(
+    pub fn nir_success_with_recovery(
         code: String,
-        build_stats: Option<PreviewBuildStats>,
-        hint_stats: Option<PreviewHintStats>,
+        build_stats: Option<NirBuildStats>,
+        hint_stats: Option<NirHintStats>,
         attempted: &'static str,
         applied: &'static str,
         outcome: &'static str,
         source_signature: Option<String>,
         structuring_mode: &'static str,
-    ) -> PreviewSelection {
-        PreviewSelection {
-            preview_surface: Some(classify_preview_surface(&code)),
-            preview_code: Some(code),
+    ) -> NirSelection {
+        NirSelection {
+            nir_surface: Some(classify_nir_surface(&code)),
+            nir_code: Some(code),
             build_stats,
             hint_stats,
-            engine_used: PreviewEngineMode::MlilPreview,
+            engine_used: NirEngineMode::Nir,
             fell_back: false,
             fallback_reason: None,
             fallback_kind: None,
@@ -158,18 +158,18 @@ impl PreviewRoutingResolver {
         }
     }
 
-    pub fn preview_fallback(reason: impl AsRef<str>) -> PreviewSelection {
-        let fallback_reason = classified_preview_error(reason.as_ref());
-        PreviewSelection {
-            preview_code: None,
+    pub fn nir_fallback(reason: impl AsRef<str>) -> NirSelection {
+        let fallback_reason = classified_nir_error(reason.as_ref());
+        NirSelection {
+            nir_code: None,
             build_stats: None,
             hint_stats: None,
-            engine_used: PreviewEngineMode::Legacy,
+            engine_used: NirEngineMode::Legacy,
             fell_back: true,
             fallback_kind: extract_fallback_kind(Some(fallback_reason.as_str())),
             fallback_kind_refined: extract_refined_fallback_kind(Some(fallback_reason.as_str())),
             fallback_reason: Some(fallback_reason),
-            preview_surface: None,
+            nir_surface: None,
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
@@ -178,25 +178,25 @@ impl PreviewRoutingResolver {
         }
     }
 
-    pub fn preview_fallback_with_recovery(
+    pub fn nir_fallback_with_recovery(
         reason: impl AsRef<str>,
         attempted: &'static str,
         applied: Option<&'static str>,
         outcome: &'static str,
         source_signature: Option<String>,
         structuring_mode: Option<&'static str>,
-    ) -> PreviewSelection {
-        let fallback_reason = classified_preview_error(reason.as_ref());
-        PreviewSelection {
-            preview_code: None,
+    ) -> NirSelection {
+        let fallback_reason = classified_nir_error(reason.as_ref());
+        NirSelection {
+            nir_code: None,
             build_stats: None,
             hint_stats: None,
-            engine_used: PreviewEngineMode::Legacy,
+            engine_used: NirEngineMode::Legacy,
             fell_back: true,
             fallback_kind: extract_fallback_kind(Some(fallback_reason.as_str())),
             fallback_kind_refined: extract_refined_fallback_kind(Some(fallback_reason.as_str())),
             fallback_reason: Some(fallback_reason),
-            preview_surface: None,
+            nir_surface: None,
             recovery_strategy_attempted: Some(attempted),
             recovery_strategy_applied: applied,
             recovery_outcome: Some(outcome),
@@ -205,15 +205,15 @@ impl PreviewRoutingResolver {
         }
     }
 
-    pub fn native_failure(error: &str) -> PreviewRoutingDecision {
+    pub fn native_failure(error: &str) -> NirRoutingDecision {
         let kind = classify_native_failure_kind(error);
-        PreviewRoutingDecision {
-            engine_used: PreviewEngineMode::Legacy,
+        NirRoutingDecision {
+            engine_used: NirEngineMode::Legacy,
             fell_back: true,
             fallback_reason: Some(fallback_reason_with_kind(kind, error)),
             fallback_kind: Some(kind),
             fallback_kind_refined: None,
-            preview_surface: None,
+            nir_surface: None,
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
@@ -223,9 +223,9 @@ impl PreviewRoutingResolver {
     }
 }
 
-impl PreviewSelection {
-    pub fn routing_decision(&self) -> PreviewRoutingDecision {
-        PreviewRoutingResolver::from_selection(self)
+impl NirSelection {
+    pub fn routing_decision(&self) -> NirRoutingDecision {
+        NirRoutingResolver::from_selection(self)
     }
 }
 
@@ -233,8 +233,8 @@ fn extract_fallback_kind(reason: Option<&str>) -> Option<&'static str> {
     let reason = reason?;
     let prefix = reason.split(':').next()?.trim().to_ascii_lowercase();
     match prefix.as_str() {
-        "preview_timeout" => Some("preview_timeout"),
-        "preview_unsupported" => Some("preview_unsupported"),
+        "nir_timeout" | "preview_timeout" => Some("nir_timeout"),
+        "nir_unsupported" | "preview_unsupported" => Some("nir_unsupported"),
         "native_pcode_failure" => Some("native_pcode_failure"),
         "legacy_fallback" => Some("legacy_fallback"),
         "assembly_fallback" => Some("assembly_fallback"),
@@ -245,48 +245,49 @@ fn extract_fallback_kind(reason: Option<&str>) -> Option<&'static str> {
 fn extract_refined_fallback_kind(reason: Option<&str>) -> Option<&'static str> {
     let reason = reason?;
     match extract_fallback_kind(Some(reason)) {
-        Some("preview_timeout") | Some("preview_unsupported") => {
-            Some(classify_preview_failure_refined(reason))
+        Some("nir_timeout") | Some("nir_unsupported") => {
+            Some(classify_nir_failure_refined(reason))
         }
         _ => None,
     }
 }
 
-fn classify_preview_surface(code: &str) -> PreviewSurfaceKind {
+fn classify_nir_surface(code: &str) -> NirSurfaceKind {
     let has_goto = code.contains("goto ");
     let has_label = code.lines().any(|line| {
         let trimmed = line.trim();
         trimmed.ends_with(':') && !trimmed.starts_with("case ") && !trimmed.starts_with("default:")
     });
     if has_goto || has_label {
-        PreviewSurfaceKind::Unstructured
+        NirSurfaceKind::Unstructured
     } else {
-        PreviewSurfaceKind::Structured
+        NirSurfaceKind::Structured
     }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PreviewWorkerRequest {
+pub struct NirWorkerRequest {
     pub pcode_json: String,
     pub address: u64,
     pub name: String,
-    pub options: MlilPreviewOptions,
-    pub type_context: PreviewTypeContext,
+    pub options: NirRenderOptions,
+    pub type_context: NirTypeContext,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PreviewWorkerResponse {
+pub struct NirWorkerResponse {
     pub success: bool,
     pub code: Option<String>,
-    pub build_stats: Option<PreviewBuildStats>,
-    pub hint_stats: Option<PreviewHintStats>,
+    pub build_stats: Option<NirBuildStats>,
+    pub hint_stats: Option<NirHintStats>,
     pub error: Option<String>,
 }
 
-const PREVIEW_WORKER_BIN_NAME: &str = "fission_preview_worker";
-const PREVIEW_WORKER_TIMEOUT_CAP_MS: u64 = 10_000;
-const PREVIEW_WORKER_TIMEOUT_MARGIN_MS: u64 = 1_000;
-const PREVIEW_WORKER_MIN_TIMEOUT_MS: u64 = 1_000;
+const NIR_WORKER_BIN_NAME: &str = "fission_nir_worker";
+const LEGACY_PREVIEW_WORKER_BIN_NAME: &str = "fission_preview_worker";
+const NIR_WORKER_TIMEOUT_CAP_MS: u64 = 10_000;
+const NIR_WORKER_TIMEOUT_MARGIN_MS: u64 = 1_000;
+const NIR_WORKER_MIN_TIMEOUT_MS: u64 = 1_000;
 const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";
 
 fn structuring_failure_signature(reason: &str) -> Option<&'static str> {
@@ -306,7 +307,7 @@ fn structuring_failure_signature(reason: &str) -> Option<&'static str> {
     None
 }
 
-fn is_type_failure_for_preview_rescue(error: &str) -> bool {
+fn is_type_failure_for_nir_rescue(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("duplicate variablepiece")
         || lower.contains("ptrsub")
@@ -314,17 +315,17 @@ fn is_type_failure_for_preview_rescue(error: &str) -> bool {
         || lower.contains("struct")
 }
 
-pub trait PreviewSource {
+pub trait NirSource {
     fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String>;
 }
 
-impl PreviewSource for fission_ffi::DecompilerNative {
+impl NirSource for fission_ffi::DecompilerNative {
     fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String> {
         self.get_pcode(address)
     }
 }
 
-impl PreviewSource for crate::analysis::decomp::CachingDecompiler {
+impl NirSource for crate::analysis::decomp::CachingDecompiler {
     fn get_pcode_json(&mut self, address: u64) -> fission_core::Result<String> {
         self.inner_mut().get_pcode(address)
     }
@@ -353,7 +354,7 @@ fn contains_indirect_control_flow(pcode: &PcodeFunction) -> bool {
         .any(|op| matches!(op.opcode, PcodeOpcode::CallInd | PcodeOpcode::BranchInd))
 }
 
-fn preview_diag_stage(address: u64, stage: &str, start: Instant) {
+fn nir_diag_stage(address: u64, stage: &str, start: Instant) {
     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
         eprintln!(
             "[PREVIEW-DIAG] fn=0x{address:x} stage={stage} elapsed_ms={:.1}",
@@ -362,7 +363,7 @@ fn preview_diag_stage(address: u64, stage: &str, start: Instant) {
     }
 }
 
-pub fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
+pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
     binary.is_64bit
         && binary.format.to_ascii_uppercase().starts_with("PE")
         && pcode.blocks.len() <= 12
@@ -388,24 +389,22 @@ fn sanitize_preview_symbol_name(name: &str) -> String {
     sanitized
 }
 
-fn build_preview_type_context_from_facts(
+fn build_nir_type_context_from_facts(
     binary: &LoadedBinary,
     fact_store: &FactStore,
     address: u64,
-) -> PreviewTypeContext {
-    crate::analysis::decomp::preview_context::build_preview_type_context(
-        binary, fact_store, address,
-    )
+) -> NirTypeContext {
+    crate::analysis::decomp::nir_context::build_nir_type_context(binary, fact_store, address)
 }
 
-fn make_preview_request(
+fn make_nir_request(
     pcode_json: &str,
     address: u64,
     name: &str,
-    options: MlilPreviewOptions,
-    type_context: PreviewTypeContext,
-) -> PreviewWorkerRequest {
-    PreviewWorkerRequest {
+    options: NirRenderOptions,
+    type_context: NirTypeContext,
+) -> NirWorkerRequest {
+    NirWorkerRequest {
         pcode_json: pcode_json.to_string(),
         address,
         name: name.to_string(),
@@ -414,29 +413,29 @@ fn make_preview_request(
     }
 }
 
-fn preview_options_with_recovery(
+fn nir_options_with_recovery(
     binary: &LoadedBinary,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
-) -> MlilPreviewOptions {
-    let mut options = MlilPreviewOptions::from_loaded_binary(binary);
+) -> NirRenderOptions {
+    let mut options = NirRenderOptions::from_loaded_binary(binary);
     options.region_linearize_structuring = region_linearize_structuring;
     options.force_linear_structuring = force_linear_structuring;
     options
 }
 
-fn preview_worker_timeout_ms(timeout_ms: Option<u64>) -> u64 {
+fn nir_worker_timeout_ms(timeout_ms: Option<u64>) -> u64 {
     let configured = timeout_ms.unwrap_or_else(|| {
         fission_core::config::Config::default()
             .decompiler
             .timeout_ms
     });
     configured
-        .saturating_sub(PREVIEW_WORKER_TIMEOUT_MARGIN_MS)
-        .clamp(PREVIEW_WORKER_MIN_TIMEOUT_MS, PREVIEW_WORKER_TIMEOUT_CAP_MS)
+        .saturating_sub(NIR_WORKER_TIMEOUT_MARGIN_MS)
+        .clamp(NIR_WORKER_MIN_TIMEOUT_MS, NIR_WORKER_TIMEOUT_CAP_MS)
 }
 
-fn should_use_preview_worker(
+fn should_use_nir_worker(
     binary: &LoadedBinary,
     pcode: &PcodeFunction,
     enforce_auto_gate: bool,
@@ -446,10 +445,16 @@ fn should_use_preview_worker(
     }
     binary.is_64bit
         && binary.format.to_ascii_uppercase().starts_with("PE")
-        && !auto_mlil_eligible(binary, pcode)
+        && !auto_nir_eligible(binary, pcode)
 }
 
-fn resolve_preview_worker_path() -> Option<std::path::PathBuf> {
+fn resolve_nir_worker_path() -> Option<std::path::PathBuf> {
+    if let Ok(path) = std::env::var("FISSION_NIR_WORKER") {
+        let path = std::path::PathBuf::from(path);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
     if let Ok(path) = std::env::var("FISSION_PREVIEW_WORKER") {
         let path = std::path::PathBuf::from(path);
         if path.is_file() {
@@ -459,14 +464,21 @@ fn resolve_preview_worker_path() -> Option<std::path::PathBuf> {
 
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    let candidate = dir.join(format!(
-        "{PREVIEW_WORKER_BIN_NAME}{}",
+    let nir_candidate = dir.join(format!(
+        "{NIR_WORKER_BIN_NAME}{}",
         std::env::consts::EXE_SUFFIX
     ));
-    candidate.is_file().then_some(candidate)
+    if nir_candidate.is_file() {
+        return Some(nir_candidate);
+    }
+    let compat_candidate = dir.join(format!(
+        "{LEGACY_PREVIEW_WORKER_BIN_NAME}{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    compat_candidate.is_file().then_some(compat_candidate)
 }
 
-fn preview_diag_event(address: u64, stage: &str, detail: impl AsRef<str>) {
+fn nir_diag_event(address: u64, stage: &str, detail: impl AsRef<str>) {
     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
         eprintln!(
             "[PREVIEW-DIAG] fn=0x{address:x} stage={stage} {}",
@@ -475,15 +487,15 @@ fn preview_diag_event(address: u64, stage: &str, detail: impl AsRef<str>) {
     }
 }
 
-fn execute_preview_worker_request(
-    request: &PreviewWorkerRequest,
+fn execute_nir_worker_request(
+    request: &NirWorkerRequest,
     timeout_ms: u64,
-) -> Result<(String, Option<PreviewBuildStats>, Option<PreviewHintStats>), String> {
-    let Some(worker_path) = resolve_preview_worker_path() else {
-        return Err("preview worker unavailable".to_string());
+) -> Result<(String, Option<NirBuildStats>, Option<NirHintStats>), String> {
+    let Some(worker_path) = resolve_nir_worker_path() else {
+        return Err("nir worker unavailable".to_string());
     };
 
-    preview_diag_event(
+    nir_diag_event(
         request.address,
         "worker_spawn",
         format!("path={}", worker_path.display()),
@@ -494,27 +506,27 @@ fn execute_preview_worker_request(
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .map_err(|e| format!("mlil-preview worker spawn failed: {e}"))?;
+        .map_err(|e| format!("Fission NIR worker spawn failed: {e}"))?;
 
     let request_json = serde_json::to_vec(request)
-        .map_err(|e| format!("mlil-preview worker request serialization failed: {e}"))?;
+        .map_err(|e| format!("Fission NIR worker request serialization failed: {e}"))?;
 
     let mut stdin = child
         .stdin
         .take()
-        .ok_or_else(|| "mlil-preview worker stdin unavailable".to_string())?;
+        .ok_or_else(|| "Fission NIR worker stdin unavailable".to_string())?;
     stdin
         .write_all(&request_json)
-        .map_err(|e| format!("mlil-preview worker stdin write failed: {e}"))?;
+        .map_err(|e| format!("Fission NIR worker stdin write failed: {e}"))?;
     drop(stdin);
 
     let start = Instant::now();
     let exit_status = loop {
         if let Some(status) = child
             .try_wait()
-            .map_err(|e| format!("mlil-preview worker wait failed: {e}"))?
+            .map_err(|e| format!("Fission NIR worker wait failed: {e}"))?
         {
-            preview_diag_event(
+            nir_diag_event(
                 request.address,
                 "worker_exit",
                 format!(
@@ -525,7 +537,7 @@ fn execute_preview_worker_request(
             break status;
         }
         if start.elapsed() >= Duration::from_millis(timeout_ms) {
-            preview_diag_event(
+            nir_diag_event(
                 request.address,
                 "worker_timeout",
                 format!("budget_ms={timeout_ms}"),
@@ -533,7 +545,7 @@ fn execute_preview_worker_request(
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
-                "preview_timeout: mlil-preview worker timed out after {timeout_ms}ms"
+                "nir_timeout: Fission NIR worker timed out after {timeout_ms}ms"
             ));
         }
         thread::sleep(Duration::from_millis(10));
@@ -542,37 +554,37 @@ fn execute_preview_worker_request(
     let mut stdout = String::new();
     if let Some(mut pipe) = child.stdout.take() {
         pipe.read_to_string(&mut stdout)
-            .map_err(|e| format!("mlil-preview worker stdout read failed: {e}"))?;
+            .map_err(|e| format!("Fission NIR worker stdout read failed: {e}"))?;
     }
 
     if stdout.trim().is_empty() {
         return Err(format!(
-            "mlil-preview worker exited with status {exit_status} without JSON response"
+            "Fission NIR worker exited with status {exit_status} without JSON response"
         ));
     }
 
-    let response: PreviewWorkerResponse = serde_json::from_str(&stdout)
-        .map_err(|e| format!("mlil-preview worker response parse failed: {e}"))?;
+    let response: NirWorkerResponse = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Fission NIR worker response parse failed: {e}"))?;
 
     if response.success {
-        let PreviewWorkerResponse {
+        let NirWorkerResponse {
             code,
             build_stats,
             hint_stats,
             ..
         } = response;
         code.map(|code| (code, build_stats, hint_stats))
-            .ok_or_else(|| "mlil-preview worker returned success without code".to_string())
+            .ok_or_else(|| "Fission NIR worker returned success without code".to_string())
     } else {
         Err(response
             .error
-            .unwrap_or_else(|| "mlil-preview worker failed without error".to_string()))
+            .unwrap_or_else(|| "Fission NIR worker failed without error".to_string()))
     }
 }
 
-fn render_preview_request(
-    request: &PreviewWorkerRequest,
-) -> Result<(String, Option<PreviewBuildStats>, Option<PreviewHintStats>), String> {
+fn render_nir_request(
+    request: &NirWorkerRequest,
+) -> Result<(String, Option<NirBuildStats>, Option<NirHintStats>), String> {
     let parse_start = Instant::now();
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let _ = std::fs::write(
@@ -582,7 +594,7 @@ fn render_preview_request(
     }
     let mut pcode = PcodeFunction::from_json(&request.pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
-    preview_diag_stage(request.address, "parse_pcode_done", parse_start);
+    nir_diag_stage(request.address, "parse_pcode_done", parse_start);
     if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let mut debug_dump = String::new();
         debug_dump.push_str(&format!(
@@ -633,7 +645,7 @@ fn render_preview_request(
     let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
     let optimize_start = Instant::now();
     let optimize_result = catch_unwind(AssertUnwindSafe(|| optimizer.optimize(&mut pcode)));
-    preview_diag_stage(request.address, "optimize_pcode_done", optimize_start);
+    nir_diag_stage(request.address, "optimize_pcode_done", optimize_start);
     if optimize_result.is_err() && std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let _ = std::fs::OpenOptions::new()
             .create(true)
@@ -665,7 +677,7 @@ fn render_preview_request(
             });
     }
     let render_start = Instant::now();
-    match render_mlil_preview_with_context(
+    match render_nir_with_context(
         &pcode,
         &request.name,
         request.address,
@@ -673,9 +685,9 @@ fn render_preview_request(
         Some(&request.type_context),
     ) {
         Ok(code) => {
-            let build_stats = take_last_preview_build_stats();
-            let hint_stats = take_last_preview_hint_stats();
-            preview_diag_stage(request.address, "render_preview_done", render_start);
+            let build_stats = take_last_nir_build_stats();
+            let hint_stats = take_last_nir_hint_stats();
+            nir_diag_stage(request.address, "render_preview_done", render_start);
             if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
                 let _ = std::fs::OpenOptions::new()
                     .create(true)
@@ -692,12 +704,12 @@ fn render_preview_request(
                 .structuring_failure_kind()
                 .map(|kind| {
                     format!(
-                        "preview_structuring_failure[{}]: {err}",
+                        "nir_structuring_failure[{}]: {err}",
                         kind.preview_block_signature()
                     )
                 })
-                .unwrap_or_else(|| format!("mlil-preview unavailable: {err}"));
-            preview_diag_stage(request.address, "render_preview_error", render_start);
+                .unwrap_or_else(|| format!("Fission NIR unavailable: {err}"));
+            nir_diag_stage(request.address, "render_preview_error", render_start);
             if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
                 let _ = std::fs::OpenOptions::new()
                     .create(true)
@@ -716,16 +728,16 @@ fn render_preview_request(
     }
 }
 
-pub fn execute_preview_worker(request: &PreviewWorkerRequest) -> PreviewWorkerResponse {
-    match render_preview_request(request) {
-        Ok((code, build_stats, hint_stats)) => PreviewWorkerResponse {
+pub fn execute_nir_worker(request: &NirWorkerRequest) -> NirWorkerResponse {
+    match render_nir_request(request) {
+        Ok((code, build_stats, hint_stats)) => NirWorkerResponse {
             success: true,
             code: Some(code),
             build_stats,
             hint_stats,
             error: None,
         },
-        Err(error) => PreviewWorkerResponse {
+        Err(error) => NirWorkerResponse {
             success: false,
             code: None,
             build_stats: None,
@@ -735,51 +747,51 @@ pub fn execute_preview_worker(request: &PreviewWorkerRequest) -> PreviewWorkerRe
     }
 }
 
-fn render_preview_from_json_with_type_context(
+fn render_nir_from_json_with_type_context(
     pcode_json: &str,
     binary: &LoadedBinary,
     address: u64,
     name: &str,
     enforce_auto_gate: bool,
     timeout_ms: Option<u64>,
-    type_context: PreviewTypeContext,
+    type_context: NirTypeContext,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
-) -> Result<Option<(String, Option<PreviewBuildStats>, Option<PreviewHintStats>)>, String> {
+) -> Result<Option<(String, Option<NirBuildStats>, Option<NirHintStats>)>, String> {
     let parse_start = Instant::now();
     let pcode = PcodeFunction::from_json(pcode_json)
         .map_err(|e| format!("mlil-preview pcode parse failed: {e}"))?;
-    preview_diag_stage(address, "parse_pcode_done", parse_start);
-    if enforce_auto_gate && !auto_mlil_eligible(binary, &pcode) {
+    nir_diag_stage(address, "parse_pcode_done", parse_start);
+    if enforce_auto_gate && !auto_nir_eligible(binary, &pcode) {
         return Ok(None);
     }
 
-    let options = preview_options_with_recovery(
+    let options = nir_options_with_recovery(
         binary,
         region_linearize_structuring,
         force_linear_structuring,
     );
-    let request = make_preview_request(pcode_json, address, name, options, type_context);
+    let request = make_nir_request(pcode_json, address, name, options, type_context);
 
-    if should_use_preview_worker(binary, &pcode, enforce_auto_gate) {
-        let worker_timeout_ms = preview_worker_timeout_ms(timeout_ms);
-        match execute_preview_worker_request(&request, worker_timeout_ms) {
+    if should_use_nir_worker(binary, &pcode, enforce_auto_gate) {
+        let worker_timeout_ms = nir_worker_timeout_ms(timeout_ms);
+        match execute_nir_worker_request(&request, worker_timeout_ms) {
             Ok((code, build_stats, hint_stats)) => {
-                preview_diag_event(
+                nir_diag_event(
                     address,
                     "worker_render_done",
                     format!("budget_ms={worker_timeout_ms}"),
                 );
                 return Ok(Some((code, build_stats, hint_stats)));
             }
-            Err(err) if err == "preview worker unavailable" => {
-                preview_diag_event(address, "worker_unavailable", "falling back to in-process");
+            Err(err) if err == "nir worker unavailable" => {
+                nir_diag_event(address, "worker_unavailable", "falling back to in-process");
             }
             Err(err) => return Err(err),
         }
     }
 
-    match render_preview_request(&request) {
+    match render_nir_request(&request) {
         Ok(result) => Ok(Some(result)),
         Err(err) => Err(err),
     }
@@ -791,10 +803,10 @@ fn try_structuring_recovery(
     address: u64,
     name: &str,
     timeout_ms: Option<u64>,
-    type_context: PreviewTypeContext,
+    type_context: NirTypeContext,
     error: &str,
-) -> Result<Option<PreviewSelection>, String> {
-    if classify_preview_failure_refined(error) != "preview_structuring_failure" {
+) -> Result<Option<NirSelection>, String> {
+    if classify_nir_failure_refined(error) != "nir_structuring_failure" {
         return Ok(None);
     }
     let Some(signature) = structuring_failure_signature(error) else {
@@ -809,7 +821,7 @@ fn try_structuring_recovery(
         return Ok(None);
     }
 
-    let region_retry = render_preview_from_json_with_type_context(
+    let region_retry = render_nir_from_json_with_type_context(
         pcode_json,
         binary,
         address,
@@ -822,7 +834,7 @@ fn try_structuring_recovery(
     );
     match region_retry {
         Ok(Some((code, build_stats, hint_stats))) => {
-            return Ok(Some(PreviewRoutingResolver::preview_success_with_recovery(
+            return Ok(Some(NirRoutingResolver::nir_success_with_recovery(
                 code,
                 build_stats,
                 hint_stats,
@@ -836,7 +848,7 @@ fn try_structuring_recovery(
         Ok(None) | Err(_) => {}
     }
 
-    match render_preview_from_json_with_type_context(
+    match render_nir_from_json_with_type_context(
         pcode_json,
         binary,
         address,
@@ -848,7 +860,7 @@ fn try_structuring_recovery(
         true,
     ) {
         Ok(Some((code, build_stats, hint_stats))) => {
-            Ok(Some(PreviewRoutingResolver::preview_success_with_recovery(
+            Ok(Some(NirRoutingResolver::nir_success_with_recovery(
                 code,
                 build_stats,
                 hint_stats,
@@ -860,7 +872,7 @@ fn try_structuring_recovery(
             )))
         }
         Ok(None) => Ok(Some(
-            PreviewRoutingResolver::preview_fallback_with_recovery(
+            NirRoutingResolver::nir_fallback_with_recovery(
                 error,
                 RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
                 None,
@@ -870,7 +882,7 @@ fn try_structuring_recovery(
             ),
         )),
         Err(retry_err) => Ok(Some(
-            PreviewRoutingResolver::preview_fallback_with_recovery(
+            NirRoutingResolver::nir_fallback_with_recovery(
                 format!("{error}; recovery failed: {retry_err}"),
                 RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
                 None,
@@ -882,22 +894,25 @@ fn try_structuring_recovery(
     }
 }
 
-fn classify_preview_failure_refined(reason: &str) -> &'static str {
+pub fn classify_nir_failure_refined(reason: &str) -> &'static str {
     let lower = reason.to_ascii_lowercase();
-    if lower.contains("preview_timeout") || lower.contains("worker timed out") {
-        return "preview_timeout";
+    if lower.contains("nir_timeout")
+        || lower.contains("preview_timeout")
+        || lower.contains("worker timed out")
+    {
+        return "nir_timeout";
     }
     if lower.contains("unsupported architecture")
         || lower.contains("currently supports pe x64 only")
     {
-        return "preview_architecture_unsupported";
+        return "nir_architecture_unsupported";
     }
     if lower.contains("unsupported format")
         || lower.contains("format mismatch")
         || lower.contains("pe-only mismatch")
         || lower.contains("only supports pe")
     {
-        return "preview_format_unsupported";
+        return "nir_format_unsupported";
     }
     if lower.contains("worker spawn failed")
         || lower.contains("stdin unavailable")
@@ -907,16 +922,16 @@ fn classify_preview_failure_refined(reason: &str) -> &'static str {
         || lower.contains("without json response")
         || lower.contains("response parse failed")
     {
-        return "preview_worker_failure";
+        return "nir_worker_failure";
     }
     if structuring_failure_signature(reason).is_some() {
-        return "preview_structuring_failure";
+        return "nir_structuring_failure";
     }
     if lower.contains("unsupported control flow") || lower.contains("unsupported branch target") {
-        return "preview_unsupported_cfg";
+        return "nir_unsupported_cfg";
     }
     if lower.contains("structuring") {
-        return "preview_structuring_failure";
+        return "nir_structuring_failure";
     }
     if lower.contains("pcode parse failed")
         || lower.contains("unsupported architecture")
@@ -929,20 +944,20 @@ fn classify_preview_failure_refined(reason: &str) -> &'static str {
         || lower.contains("unsupported memory-backed varnode")
         || lower.contains("unsupported pattern")
     {
-        return "preview_parse_or_lowering_failure";
+        return "nir_parse_or_lowering_failure";
     }
-    "preview_non_success_unknown"
+    "nir_non_success_unknown"
 }
 
-fn classify_preview_failure(reason: &str) -> &'static str {
-    match classify_preview_failure_refined(reason) {
-        "preview_timeout" => "preview_timeout",
-        _ => "preview_unsupported",
+pub fn classify_nir_failure(reason: &str) -> &'static str {
+    match classify_nir_failure_refined(reason) {
+        "nir_timeout" => "nir_timeout",
+        _ => "nir_unsupported",
     }
 }
 
-fn classified_preview_error(reason: &str) -> String {
-    fallback_reason_with_kind(classify_preview_failure(reason), reason)
+pub fn classified_nir_error(reason: &str) -> String {
+    fallback_reason_with_kind(classify_nir_failure(reason), reason)
 }
 
 pub fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
@@ -951,8 +966,8 @@ pub fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String 
 
 pub fn classify_native_failure_kind(error: &str) -> &'static str {
     let lower = error.to_ascii_lowercase();
-    if lower.contains("preview_timeout") {
-        "preview_timeout"
+    if lower.contains("nir_timeout") || lower.contains("preview_timeout") {
+        "nir_timeout"
     } else if lower.contains("could not find op at target address")
         || lower.contains("ghidra lowlevelerror")
     {
@@ -962,48 +977,48 @@ pub fn classify_native_failure_kind(error: &str) -> &'static str {
     }
 }
 
-pub fn native_failure_routing_decision(error: &str) -> PreviewRoutingDecision {
-    PreviewRoutingResolver::native_failure(error)
+pub fn native_failure_routing_decision(error: &str) -> NirRoutingDecision {
+    NirRoutingResolver::native_failure(error)
 }
 
-pub fn select_preview_output<S: PreviewSource>(
+pub fn select_nir_output<S: NirSource>(
     source: &mut S,
     binary: &LoadedBinary,
     address: u64,
     name: &str,
-    mode: PreviewEngineMode,
+    mode: NirEngineMode,
     timeout_ms: Option<u64>,
-) -> Result<PreviewSelection, String> {
+) -> Result<NirSelection, String> {
     let fact_store = FactStore::from_binary(binary);
-    select_preview_output_with_facts(source, binary, &fact_store, address, name, mode, timeout_ms)
+    select_nir_output_with_facts(source, binary, &fact_store, address, name, mode, timeout_ms)
 }
 
-pub fn select_preview_output_with_facts<S: PreviewSource>(
+pub fn select_nir_output_with_facts<S: NirSource>(
     source: &mut S,
     binary: &LoadedBinary,
     fact_store: &FactStore,
     address: u64,
     name: &str,
-    mode: PreviewEngineMode,
+    mode: NirEngineMode,
     timeout_ms: Option<u64>,
-) -> Result<PreviewSelection, String> {
+) -> Result<NirSelection, String> {
     let diag = std::env::var_os("FISSION_PREVIEW_DIAG").is_some();
     match mode {
-        PreviewEngineMode::Legacy => Ok(PreviewRoutingResolver::legacy_mode()),
-        PreviewEngineMode::MlilPreview => {
+        NirEngineMode::Legacy => Ok(NirRoutingResolver::legacy_mode()),
+        NirEngineMode::Nir => {
             let pcode_start = Instant::now();
             if diag {
-                eprintln!("[PREVIEW-DIAG] get_pcode start: fn=0x{address:x} mode=mlil_preview");
+                eprintln!("[NIR-DIAG] get_pcode start: fn=0x{address:x} mode=nir");
             }
             let pcode_json = source.get_pcode_json(address).map_err(|e| e.to_string())?;
             if diag {
                 eprintln!(
-                    "[PREVIEW-DIAG] get_pcode done: fn=0x{address:x} mode=mlil_preview elapsed_ms={:.1}",
+                    "[NIR-DIAG] get_pcode done: fn=0x{address:x} mode=nir elapsed_ms={:.1}",
                     pcode_start.elapsed().as_secs_f64() * 1000.0
                 );
             }
-            let type_context = build_preview_type_context_from_facts(binary, fact_store, address);
-            match render_preview_from_json_with_type_context(
+            let type_context = build_nir_type_context_from_facts(binary, fact_store, address);
+            match render_nir_from_json_with_type_context(
                 &pcode_json,
                 binary,
                 address,
@@ -1015,7 +1030,7 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                 false,
             ) {
                 Ok(Some((code, build_stats, hint_stats))) => {
-                    Ok(PreviewRoutingResolver::preview_success(
+                    Ok(NirRoutingResolver::nir_success(
                         code,
                         build_stats,
                         hint_stats,
@@ -1023,8 +1038,8 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                         None,
                     ))
                 }
-                Ok(None) => Ok(PreviewRoutingResolver::preview_fallback(
-                    "mlil-preview skipped: function not supported by preview builder",
+                Ok(None) => Ok(NirRoutingResolver::nir_fallback(
+                    "nir skipped: function not supported by Fission NIR builder",
                 )),
                 Err(err) => {
                     if let Some(selection) = try_structuring_recovery(
@@ -1033,17 +1048,17 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                         address,
                         name,
                         timeout_ms,
-                        build_preview_type_context_from_facts(binary, fact_store, address),
+                        build_nir_type_context_from_facts(binary, fact_store, address),
                         &err,
                     )? {
                         Ok(selection)
                     } else {
-                        Ok(PreviewRoutingResolver::preview_fallback(&err))
+                        Ok(NirRoutingResolver::nir_fallback(&err))
                     }
                 }
             }
         }
-        PreviewEngineMode::Auto => {
+        NirEngineMode::Auto => {
             let pcode_start = Instant::now();
             if diag {
                 eprintln!("[PREVIEW-DIAG] get_pcode start: fn=0x{address:x} mode=auto");
@@ -1055,8 +1070,8 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                     pcode_start.elapsed().as_secs_f64() * 1000.0
                 );
             }
-            let type_context = build_preview_type_context_from_facts(binary, fact_store, address);
-            match render_preview_from_json_with_type_context(
+            let type_context = build_nir_type_context_from_facts(binary, fact_store, address);
+            match render_nir_from_json_with_type_context(
                 &pcode_json,
                 binary,
                 address,
@@ -1068,7 +1083,7 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                 false,
             ) {
                 Ok(Some((code, build_stats, hint_stats))) => {
-                    Ok(PreviewRoutingResolver::preview_success(
+                    Ok(NirRoutingResolver::nir_success(
                         code,
                         build_stats,
                         hint_stats,
@@ -1076,8 +1091,8 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                         None,
                     ))
                 }
-                Ok(None) => Ok(PreviewRoutingResolver::preview_fallback(
-                    "mlil-preview skipped: function not supported by preview builder",
+                Ok(None) => Ok(NirRoutingResolver::nir_fallback(
+                    "nir skipped: function not supported by Fission NIR builder",
                 )),
                 Err(err) => {
                     if let Some(selection) = try_structuring_recovery(
@@ -1086,12 +1101,12 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
                         address,
                         name,
                         timeout_ms,
-                        build_preview_type_context_from_facts(binary, fact_store, address),
+                        build_nir_type_context_from_facts(binary, fact_store, address),
                         &err,
                     )? {
                         Ok(selection)
                     } else {
-                        Ok(PreviewRoutingResolver::preview_fallback(&err))
+                        Ok(NirRoutingResolver::nir_fallback(&err))
                     }
                 }
             }
@@ -1099,16 +1114,16 @@ pub fn select_preview_output_with_facts<S: PreviewSource>(
     }
 }
 
-pub fn rescue_preview_output<S: PreviewSource>(
+pub fn rescue_nir_output<S: NirSource>(
     source: &mut S,
     binary: &LoadedBinary,
     address: u64,
     name: &str,
     error: &str,
     timeout_ms: Option<u64>,
-) -> Result<Option<PreviewSelection>, String> {
+) -> Result<Option<NirSelection>, String> {
     let fact_store = FactStore::from_binary(binary);
-    rescue_preview_output_with_facts(
+    rescue_nir_output_with_facts(
         source,
         binary,
         &fact_store,
@@ -1119,7 +1134,7 @@ pub fn rescue_preview_output<S: PreviewSource>(
     )
 }
 
-pub fn rescue_preview_output_with_facts<S: PreviewSource>(
+pub fn rescue_nir_output_with_facts<S: NirSource>(
     source: &mut S,
     binary: &LoadedBinary,
     fact_store: &FactStore,
@@ -1127,8 +1142,8 @@ pub fn rescue_preview_output_with_facts<S: PreviewSource>(
     name: &str,
     error: &str,
     timeout_ms: Option<u64>,
-) -> Result<Option<PreviewSelection>, String> {
-    if !is_type_failure_for_preview_rescue(error) {
+) -> Result<Option<NirSelection>, String> {
+    if !is_type_failure_for_nir_rescue(error) {
         return Ok(None);
     }
 
@@ -1144,8 +1159,8 @@ pub fn rescue_preview_output_with_facts<S: PreviewSource>(
             pcode_start.elapsed().as_secs_f64() * 1000.0
         );
     }
-    let type_context = build_preview_type_context_from_facts(binary, fact_store, address);
-    match render_preview_from_json_with_type_context(
+    let type_context = build_nir_type_context_from_facts(binary, fact_store, address);
+    match render_nir_from_json_with_type_context(
         &pcode_json,
         binary,
         address,
@@ -1157,7 +1172,7 @@ pub fn rescue_preview_output_with_facts<S: PreviewSource>(
         false,
     ) {
         Ok(Some((code, build_stats, hint_stats))) => {
-            Ok(Some(PreviewRoutingResolver::preview_success(
+            Ok(Some(NirRoutingResolver::nir_success(
                 code,
                 build_stats,
                 hint_stats,
@@ -1172,6 +1187,73 @@ pub fn rescue_preview_output_with_facts<S: PreviewSource>(
     }
 }
 
+pub fn nir_fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
+    fallback_reason_with_kind(kind, detail)
+}
+
+pub type PreviewEngineMode = NirEngineMode;
+pub type PreviewSelection = NirSelection;
+pub type PreviewRoutingDecision = NirRoutingDecision;
+pub type PreviewRoutingResolver = NirRoutingResolver;
+pub type PreviewSurfaceKind = NirSurfaceKind;
+pub type PreviewWorkerRequest = NirWorkerRequest;
+pub type PreviewWorkerResponse = NirWorkerResponse;
+pub use NirSource as PreviewSource;
+
+pub fn auto_mlil_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
+    auto_nir_eligible(binary, pcode)
+}
+
+pub fn execute_preview_worker(request: &NirWorkerRequest) -> NirWorkerResponse {
+    execute_nir_worker(request)
+}
+
+pub fn select_preview_output<S: NirSource>(
+    source: &mut S,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+) -> Result<NirSelection, String> {
+    select_nir_output(source, binary, address, name, mode, timeout_ms)
+}
+
+pub fn select_preview_output_with_facts<S: NirSource>(
+    source: &mut S,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+) -> Result<NirSelection, String> {
+    select_nir_output_with_facts(source, binary, fact_store, address, name, mode, timeout_ms)
+}
+
+pub fn rescue_preview_output<S: NirSource>(
+    source: &mut S,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    error: &str,
+    timeout_ms: Option<u64>,
+) -> Result<Option<NirSelection>, String> {
+    rescue_nir_output(source, binary, address, name, error, timeout_ms)
+}
+
+pub fn rescue_preview_output_with_facts<S: NirSource>(
+    source: &mut S,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    error: &str,
+    timeout_ms: Option<u64>,
+) -> Result<Option<NirSelection>, String> {
+    rescue_nir_output_with_facts(source, binary, fact_store, address, name, error, timeout_ms)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1183,9 +1265,9 @@ mod tests {
     use fission_pcode::PreviewCallParamRule;
     use std::collections::HashMap;
 
-    struct MockPreviewSource;
+    struct MockNirSource;
 
-    impl PreviewSource for MockPreviewSource {
+    impl NirSource for MockNirSource {
         fn get_pcode_json(&mut self, _address: u64) -> fission_core::Result<String> {
             Ok("{\"blocks\":[]}".to_string())
         }
@@ -1193,11 +1275,11 @@ mod tests {
 
     #[test]
     fn preview_worker_request_roundtrip() {
-        let request = PreviewWorkerRequest {
+        let request = NirWorkerRequest {
             pcode_json: "{\"blocks\":[]}".to_string(),
             address: 0x1234,
             name: "sub_1234".to_string(),
-            options: MlilPreviewOptions {
+            options: NirRenderOptions {
                 pe_x64_only: true,
                 is_64bit: true,
                 pointer_size: 8,
@@ -1207,7 +1289,7 @@ mod tests {
                 region_linearize_structuring: false,
                 force_linear_structuring: false,
             },
-            type_context: PreviewTypeContext {
+            type_context: NirTypeContext {
                 call_targets: HashMap::from([(0x140001234, "MessageBoxW".to_string())]),
                 call_param_rules: vec![PreviewCallParamRule {
                     callee_name: "MessageBoxW".to_string(),
@@ -1222,7 +1304,7 @@ mod tests {
         };
 
         let encoded = serde_json::to_string(&request).expect("serialize worker request");
-        let decoded: PreviewWorkerRequest =
+        let decoded: NirWorkerRequest =
             serde_json::from_str(&encoded).expect("deserialize worker request");
 
         assert_eq!(decoded.address, request.address);
@@ -1234,11 +1316,11 @@ mod tests {
     #[test]
     fn preview_worker_timeout_clamps() {
         assert_eq!(
-            preview_worker_timeout_ms(Some(500)),
+            nir_worker_timeout_ms(Some(500)),
             PREVIEW_WORKER_MIN_TIMEOUT_MS
         );
         assert_eq!(
-            preview_worker_timeout_ms(Some(30_000)),
+            nir_worker_timeout_ms(Some(30_000)),
             PREVIEW_WORKER_TIMEOUT_CAP_MS
         );
     }
@@ -1246,7 +1328,7 @@ mod tests {
     #[test]
     fn native_failure_routing_uses_taxonomy() {
         let decision = native_failure_routing_decision("Could not find op at target address");
-        assert_eq!(decision.engine_used, PreviewEngineMode::Legacy);
+        assert_eq!(decision.engine_used, NirEngineMode::Legacy);
         assert!(decision.fell_back);
         assert_eq!(
             decision.fallback_reason.as_deref(),
@@ -1256,16 +1338,16 @@ mod tests {
 
     #[test]
     fn preview_selection_exposes_routing_decision() {
-        let selection = PreviewSelection {
-            preview_code: None,
+        let selection = NirSelection {
+            nir_code: None,
             build_stats: None,
             hint_stats: None,
-            engine_used: PreviewEngineMode::Legacy,
+            engine_used: NirEngineMode::Legacy,
             fell_back: true,
             fallback_reason: Some("preview_timeout: worker timed out".to_string()),
             fallback_kind: Some("preview_timeout"),
             fallback_kind_refined: Some("preview_timeout"),
-            preview_surface: None,
+            nir_surface: None,
             recovery_strategy_attempted: None,
             recovery_strategy_applied: None,
             recovery_outcome: None,
@@ -1273,7 +1355,7 @@ mod tests {
             recovery_structuring_mode: None,
         };
         let decision = selection.routing_decision();
-        assert_eq!(decision.engine_used, PreviewEngineMode::Legacy);
+        assert_eq!(decision.engine_used, NirEngineMode::Legacy);
         assert!(decision.fell_back);
         assert_eq!(decision.fallback_kind, Some("preview_timeout"));
         assert_eq!(decision.fallback_kind_refined, Some("preview_timeout"));
@@ -1286,44 +1368,44 @@ mod tests {
     #[test]
     fn preview_failure_classifier_distinguishes_cfg_and_lowering_failures() {
         assert_eq!(
-            classify_preview_failure_refined(
+            classify_nir_failure_refined(
                 "mlil-preview unavailable: unsupported branch target in mlil-preview"
             ),
             "preview_unsupported_cfg"
         );
         assert_eq!(
-            classify_preview_failure_refined(
+            classify_nir_failure_refined(
                 "preview_structuring_failure[unsupported_cfg_region_shape]: unsupported region shape in mlil-preview"
             ),
             "preview_structuring_failure"
         );
         assert_eq!(
-            classify_preview_failure_refined(
+            classify_nir_failure_refined(
                 "mlil-preview unavailable: value lowering failed on varnode: unsupported address materialization"
             ),
             "preview_parse_or_lowering_failure"
         );
         assert_eq!(
-            classify_preview_failure_refined(
+            classify_nir_failure_refined(
                 "mlil-preview unavailable: unsupported architecture in mlil-preview"
             ),
             "preview_architecture_unsupported"
         );
         assert_eq!(
-            classify_preview_failure_refined(
+            classify_nir_failure_refined(
                 "mlil-preview unavailable: unsupported format in mlil-preview"
             ),
             "preview_format_unsupported"
         );
         assert_eq!(
-            classify_preview_failure_refined("mlil-preview worker response parse failed: bad json"),
+            classify_nir_failure_refined("mlil-preview worker response parse failed: bad json"),
             "preview_worker_failure"
         );
     }
 
     #[test]
-    fn preview_fallback_exposes_refined_kind() {
-        let selection = PreviewRoutingResolver::preview_fallback(
+    fn nir_fallback_exposes_refined_kind() {
+        let selection = NirRoutingResolver::nir_fallback(
             "preview_structuring_failure[unsupported_cfg_phi_join]: unsupported phi join in mlil-preview",
         );
         assert_eq!(selection.fallback_kind, Some("preview_unsupported"));
@@ -1334,8 +1416,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_success_classifies_unstructured_surface() {
-        let selection = PreviewRoutingResolver::preview_success(
+    fn nir_success_classifies_unstructured_surface() {
+        let selection = NirRoutingResolver::nir_success(
             "label_1:\n  goto label_1;".to_string(),
             None,
             None,
@@ -1343,12 +1425,12 @@ mod tests {
             None,
         );
         assert_eq!(
-            selection.preview_surface,
-            Some(PreviewSurfaceKind::Unstructured)
+            selection.nir_surface,
+            Some(NirSurfaceKind::Unstructured)
         );
         assert_eq!(
-            selection.routing_decision().preview_surface,
-            Some(PreviewSurfaceKind::Unstructured)
+            selection.routing_decision().nir_surface,
+            Some(NirSurfaceKind::Unstructured)
         );
     }
 
@@ -1373,7 +1455,7 @@ mod tests {
             crate::analysis::decomp::FactProvenance::StrongFid,
         );
 
-        let context = build_preview_type_context_from_facts(&binary, &facts, 0x401000);
+        let context = build_nir_type_context_from_facts(&binary, &facts, 0x401000);
         assert_eq!(
             context.call_targets.get(&0x401000).map(String::as_str),
             Some("RenamedTarget")
@@ -1388,7 +1470,7 @@ mod tests {
             .build()
             .expect("build test binary");
         let facts = FactStore::from_binary(&binary);
-        let context = build_preview_type_context_from_facts(&binary, &facts, 0);
+        let context = build_nir_type_context_from_facts(&binary, &facts, 0);
 
         assert!(context.call_param_rules.iter().any(|rule| {
             rule.callee_name == "GetWindowRect"
@@ -1399,13 +1481,13 @@ mod tests {
     }
 
     #[test]
-    fn make_preview_request_reuses_external_type_context() {
+    fn make_nir_request_reuses_external_type_context() {
         let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
             .format("PE")
             .is_64bit(true)
             .build()
             .expect("build test binary");
-        let type_context = PreviewTypeContext {
+        let type_context = NirTypeContext {
             call_targets: HashMap::from([(0x401000, "KnownName".to_string())]),
             call_param_rules: vec![PreviewCallParamRule {
                 callee_name: "MessageBoxW".to_string(),
@@ -1418,7 +1500,7 @@ mod tests {
             function_hints: None,
         };
 
-        let request = make_preview_request("{}", &binary, 0x401000, "sub_401000", type_context);
+        let request = make_nir_request("{}", &binary, 0x401000, "sub_401000", type_context);
         assert_eq!(
             request
                 .type_context
@@ -1439,40 +1521,40 @@ mod tests {
     }
 
     #[test]
-    fn select_preview_output_wrapper_keeps_legacy_mode_behavior() {
+    fn select_nir_output_wrapper_keeps_legacy_mode_behavior() {
         let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
             .format("PE")
             .is_64bit(true)
             .build()
             .expect("build test binary");
-        let mut source = MockPreviewSource;
+        let mut source = MockNirSource;
 
-        let selection = select_preview_output(
+        let selection = select_nir_output(
             &mut source,
             &binary,
             0x401000,
             "sub_401000",
-            PreviewEngineMode::Legacy,
+            NirEngineMode::Legacy,
             None,
         )
         .expect("legacy preview selection");
 
-        assert_eq!(selection.engine_used, PreviewEngineMode::Legacy);
+        assert_eq!(selection.engine_used, NirEngineMode::Legacy);
         assert!(!selection.fell_back);
-        assert!(selection.preview_code.is_none());
+        assert!(selection.nir_code.is_none());
     }
 
     #[test]
-    fn rescue_preview_output_with_facts_ignores_non_type_failures() {
+    fn rescue_nir_output_with_facts_ignores_non_type_failures() {
         let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
             .format("PE")
             .is_64bit(true)
             .build()
             .expect("build test binary");
         let facts = FactStore::from_binary(&binary);
-        let mut source = MockPreviewSource;
+        let mut source = MockNirSource;
 
-        let selection = rescue_preview_output_with_facts(
+        let selection = rescue_nir_output_with_facts(
             &mut source,
             &binary,
             &facts,
@@ -1520,8 +1602,8 @@ mod tests {
             },
         );
         let facts = FactStore::from_binary(&binary);
-        let type_context = build_preview_type_context_from_facts(&binary, &facts, 0x401000);
-        let request = make_preview_request("{}", &binary, 0x401000, "sub_401000", type_context);
+        let type_context = build_nir_type_context_from_facts(&binary, &facts, 0x401000);
+        let request = make_nir_request("{}", &binary, 0x401000, "sub_401000", type_context);
 
         let hints = request
             .type_context

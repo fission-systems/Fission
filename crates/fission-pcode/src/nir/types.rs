@@ -74,7 +74,7 @@ pub struct HirFunction {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PreviewBuildStats {
+pub struct NirBuildStats {
     pub promotion_candidate_count: usize,
     pub promoted_region_count: usize,
     pub promotion_rejected_by_shape_count: usize,
@@ -227,7 +227,7 @@ pub enum HirBinaryOp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct MlilPreviewOptions {
+pub struct NirRenderOptions {
     pub pe_x64_only: bool,
     pub is_64bit: bool,
     pub pointer_size: u32,
@@ -239,14 +239,14 @@ pub struct MlilPreviewOptions {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PreviewTypeContext {
+pub struct NirTypeContext {
     pub call_targets: HashMap<u64, String>,
-    pub call_param_rules: Vec<PreviewCallParamRule>,
-    pub function_hints: Option<PreviewFunctionHints>,
+    pub call_param_rules: Vec<NirCallParamRule>,
+    pub function_hints: Option<NirFunctionHints>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PreviewHintStats {
+pub struct NirHintStats {
     pub explicit_param_name_hits: usize,
     pub explicit_local_name_hits: usize,
     pub explicit_param_type_hits: usize,
@@ -258,7 +258,7 @@ pub struct PreviewHintStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PreviewCallParamRule {
+pub struct NirCallParamRule {
     pub callee_name: String,
     pub arg_index: usize,
     pub pointer_alias: String,
@@ -268,7 +268,7 @@ pub struct PreviewCallParamRule {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PreviewFunctionHints {
+pub struct NirFunctionHints {
     pub param_names: Vec<String>,
     pub param_type_names: HashMap<usize, String>,
     pub stack_local_names: HashMap<i64, String>,
@@ -276,7 +276,7 @@ pub struct PreviewFunctionHints {
     pub return_type_name: Option<String>,
 }
 
-impl MlilPreviewOptions {
+impl NirRenderOptions {
     pub fn from_loaded_binary(binary: &LoadedBinary) -> Self {
         let sections = binary
             .inner()
@@ -311,6 +311,13 @@ impl MlilPreviewOptions {
             .any(|(start, end)| address >= *start && address < *end)
     }
 }
+
+pub type PreviewBuildStats = NirBuildStats;
+pub type MlilPreviewOptions = NirRenderOptions;
+pub type PreviewTypeContext = NirTypeContext;
+pub type PreviewHintStats = NirHintStats;
+pub type PreviewCallParamRule = NirCallParamRule;
+pub type PreviewFunctionHints = NirFunctionHints;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuringFailureKind {

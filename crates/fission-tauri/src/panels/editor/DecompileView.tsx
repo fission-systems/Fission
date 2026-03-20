@@ -26,25 +26,25 @@ function isUnstructuredPreviewCode(code: string | undefined): boolean {
 function decompileStatusLabel(result: DecompileResult): string {
     const reason = result.fallback_reason ?? "";
     if (reason.startsWith("assembly_fallback:")) {
-        return "MLIL Preview -> Assembly fallback";
+        return "Fission NIR -> Assembly fallback";
     }
-    if (reason.startsWith("preview_timeout:")) {
-        return "MLIL Preview -> Preview timeout";
+    if (reason.startsWith("preview_timeout:") || reason.startsWith("nir_timeout:")) {
+        return "Fission NIR -> Timeout";
     }
-    if (reason.startsWith("preview_unsupported:")) {
-        return "MLIL Preview -> Preview unsupported";
+    if (reason.startsWith("preview_unsupported:") || reason.startsWith("nir_unsupported:")) {
+        return "Fission NIR -> Unsupported";
     }
     if (reason.startsWith("legacy_fallback:")) {
-        return "MLIL Preview -> Native fallback";
+        return "Fission NIR -> Native fallback";
     }
     if (reason.startsWith("native_pcode_failure:")) {
-        return "MLIL Preview -> Native p-code failure";
+        return "Fission NIR -> Native p-code failure";
     }
-    if (result.engine_used === "mlil_preview") {
+    if (result.engine_used === "nir" || result.engine_used === "mlil_preview") {
         if (!result.fell_back && isUnstructuredPreviewCode(result.code)) {
-            return "MLIL Preview (unstructured)";
+            return "Fission NIR (unstructured)";
         }
-        return result.fell_back ? "MLIL Preview rescue" : "MLIL Preview";
+        return result.fell_back ? "Fission NIR rescue" : "Fission NIR";
     }
     return "Native decompiler";
 }

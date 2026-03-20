@@ -173,7 +173,7 @@ export interface DecompilerOptions {
     performance: PerformanceOptions;
 }
 
-export type DecompilerEngineMode = "legacy" | "mlil_preview" | "auto";
+export type DecompilerEngineMode = "legacy" | "nir" | "mlil_preview" | "auto";
 
 /** Ghidra engine analysis options (controlled via FFI set_feature). */
 export interface AnalysisOptions {

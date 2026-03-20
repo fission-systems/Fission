@@ -11,29 +11,29 @@ The current direction of Fission is:
 1. **Keep the legacy path stable**
    - native Ghidra decompilation plus Fission postprocess
    - retained as the fallback / compatibility baseline
-2. **Expand the `mlil-preview` path**
+2. **Expand the `Fission NIR` path**
    - Ghidra p-code input with Fission-owned NIR/HIR and a Rust printer
    - move this toward the default product path over time
 3. **Establish the Session Fact Store**
    - converge rename / FID / cross-image / inferred type / debug facts into one aggregation layer
    - make decompile paths and UI consume the same fact source
 4. **Clean up docs / benchmarks / metrics**
-   - measure preview / native / assembly fallback separately
+   - measure Fission NIR / native / assembly fallback separately
    - track quality improvement and legacy retirement criteria numerically
 
 ## Near-Term Priorities
 
-### 1. Legacy Deprecation Inventory + Preview-First Routing
+### 1. Legacy Deprecation Inventory + NIR-First Routing
 
-The current goal is not to delete `legacy`, but to make preview-first the default product policy and keep `legacy` only as an explicit fallback / compatibility mode.
+The current goal is not to delete `legacy`, but to make NIR-first the default product policy and keep `legacy` only as an explicit fallback / compatibility mode.
 
 Key items:
 
 - stop presenting `legacy` as a normal GUI workflow choice
 - keep CLI `--engine legacy` only as a hidden compatibility mode
 - fix fallback taxonomy around:
-  - `preview_timeout`
-  - `preview_unsupported`
+  - `nir_timeout`
+  - `nir_unsupported`
   - `native_pcode_failure`
   - `legacy_fallback`
   - `assembly_fallback`
@@ -41,14 +41,14 @@ Key items:
 
 Current legacy intervention points:
 
-- preview skip/error -> native decompile fallback in `fission-static select_preview_output()`
-- explicit legacy compatibility mode and preview rescue / assembly fallback paths in CLI oneshot decompile
-- preview failure -> native decompile or explicit assembly/native failure surface in Tauri
+- NIR skip/error -> native decompile fallback in `fission-static select_nir_output()`
+- explicit legacy compatibility mode and NIR rescue / assembly fallback paths in CLI oneshot decompile
+- NIR failure -> native decompile or explicit assembly/native failure surface in Tauri
 - benchmark/compare scripts that collect both legacy baselines and fallback taxonomy
 
 Conditions before legacy can shrink further:
 
-- fixed-seed corpora reproducible with preview direct or explicit native/assembly fallback only
+- fixed-seed corpora reproducible with direct Fission NIR or explicit native/assembly fallback only
 - `putty`, `everything`, `WinMerge`, `EverPlanet`, and `ida76sp1` watchlist functions terminate without hangs
 - the set of functions that still need a legacy baseline remains explicitly tracked in benchmark artifacts
 
@@ -66,11 +66,11 @@ Next-round goals:
 
 - reduce legacy type failures
 - preserve fallback quality
-- improve type recovery without destabilizing the preview path
+- improve type recovery without destabilizing the Fission NIR path
 
-### 3. `mlil-preview` Coverage Expansion
+### 3. `Fission NIR` Coverage Expansion
 
-Preview has become meaningful, but it is not yet a full replacement.
+Fission NIR has become meaningful, but it is not yet a full replacement.
 
 Priority areas:
 
@@ -79,9 +79,9 @@ Priority areas:
 - lower label/goto fallback ratios
 - wider `switch` and complex-CFG coverage
 
-### 4. Preview Quality Improvement
+### 4. Fission NIR Quality Improvement
 
-Areas where preview already performs well:
+Areas where Fission NIR already performs well:
 
 - short-circuit folding
 - loop lowering
@@ -92,7 +92,7 @@ Next improvement areas:
 
 - type-aware expression quality
 - better aggregate handling
-- broader preview-owned idiom recognition
+- broader Fission NIR-owned idiom recognition
 - better large-function readability
 
 ## Medium-Term Direction
@@ -113,8 +113,8 @@ The goal is not “a better postprocessor for Ghidra output,” but a **Fission-
 
 Medium-term goals:
 
-- higher preview adoption
-- more stable preview output quality
+- higher Fission NIR adoption
+- more stable Fission NIR output quality
 - keep `legacy` only as explicit fallback / compatibility
 
 ### 3. Reorganize Rewrite Ownership
@@ -125,7 +125,7 @@ New rules should live in one of three ownership tiers only:
 - idiom recovery
 - polish
 
-That means new work should move toward NIR/HIR or structured-preview ownership rather than continuing to accumulate string-level postprocess rules.
+That means new work should move toward NIR/HIR or Fission NIR ownership rather than continuing to accumulate string-level postprocess rules.
 
 ## GUI / Product
 
@@ -135,7 +135,7 @@ The current GUI source of truth is Tauri.
 
 Remaining priorities:
 
-- keep preview-first decompile UX stable
+- keep NIR-first decompile UX stable
 - keep native / assembly fallback surfaces explicit and understandable
 - continue dynamic debug / timeline work on a separate track
 
@@ -159,7 +159,7 @@ Top-level public documents:
 
 Principles to retain:
 
-- separate preview / native / assembly fallback metrics
+- separate Fission NIR / native / assembly fallback metrics
 - keep raw JSON as artifacts and summaries as checked-in docs
 - preserve regression sets around `everything`, `putty`, and `cmkr`
 

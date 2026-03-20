@@ -199,11 +199,12 @@ export default function DecompilerOptionsDialog({
                             <div className="decomp-opts__section-title">Ghidra Engine Analysis</div>
                             <SelectRow
                                 label="Decompiler Engine"
-                                description="Choose MLIL preview directly or keep preview-first auto routing"
+                                description="Choose Fission NIR directly or keep NIR-first auto routing"
                                 value={options.engine_mode}
                                 options={[
-                                    { value: "auto", label: "Auto (Preview when safe)" },
-                                    { value: "mlil_preview", label: "MLIL Preview" },
+                                    { value: "auto", label: "Auto (Fission NIR when safe)" },
+                                    { value: "nir", label: "Fission NIR" },
+                                    { value: "mlil_preview", label: "MLIL Preview (Deprecated)" },
                                 ]}
                                 onChange={(v) => {
                                     setOptions((prev) => ({

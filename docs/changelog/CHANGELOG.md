@@ -9,6 +9,63 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-20
 
+### P6R1 - Fission NIR Rename and Preview/Recovery Refactor
+
+This round renamed the public Rust-owned decompiler lane from `preview` / `mlil-preview` to **Fission NIR**, while keeping compatibility aliases so existing CLI usage, local automation baselines, and worker invocations continue to function during the transition.
+
+The goal was not to change recovery policy. The goal was to make the naming and code boundaries match the actual architecture: `legacy` remains the compatibility lane, while `nir` is now the canonical token for the Rust-owned decompiler path.
+
+Historical changelog entries may still mention `mlil-preview` when describing earlier behavior. From this point forward, the canonical name is **Fission NIR** and the canonical machine-facing token is `nir`.
+
+#### Added
+
+- canonical `fission_nir_worker` binary alongside the deprecated compatibility `fission_preview_worker`
+- canonical `nir` automation lane with deprecated `preview` lane alias support
+- canonical `nir_*` inventory/report fields with continued compatibility for `preview_*` consumers during the transition
+- `nir_context`, `nir_engine`, `nir_taxonomy`, `nir_recovery`, and `nir_worker` module boundaries under `fission-static`
+
+#### Changed
+
+- `preview_engine.rs` and `preview_context.rs` were renamed to:
+  - `nir_engine.rs`
+  - `nir_context.rs`
+- canonical engine/token naming now prefers:
+  - CLI engine: `nir`
+  - automation lane: `nir`
+  - user-facing product name: `Fission NIR`
+- deprecated aliases remain accepted:
+  - `--engine mlil-preview`
+  - `--profile mlil-preview`
+  - `--lane preview`
+  - `FISSION_PREVIEW_WORKER`
+  - `fission_preview_worker`
+- `fission-automation` now dual-reads canonical `nir_*` fields and deprecated `preview_*` fields without failing when both are present in the same JSON row/summary
+- Tauri decompiler engine settings and labels now prefer `nir` / `Fission NIR`, while still accepting stored `mlil_preview` values
+- public docs were updated to describe the Rust-owned lane as **Fission NIR** instead of `mlil-preview`
+
+#### Validation
+
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+- `cargo check -p fission-tauri`
+- `cargo check -p fission-analysis`
+- `./target/debug/fission_cli samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe --decomp 0x140001190 --engine nir --timeout-ms 1500`
+- `./target/debug/fission_cli samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe --decomp 0x140001190 --engine mlil-preview --timeout-ms 1500 --verbose`
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+
+#### Current Outcome
+
+- canonical Fission NIR naming is now the default across CLI, automation, Tauri, and top-level docs
+- deprecated `mlil-preview` and `preview` aliases still work and now emit deprecation warnings on the CLI/automation path
+- `fission-automation` successfully reads dual-written inventory rows and summaries again after the compatibility deserialization fix
+- `nir` and deprecated `preview` lanes both complete with the same current smoke result:
+  - `direct_success=10`
+  - `nir_failure=0`
+  - `explicit_nonzero=4`
+  - `recovery_attempted={'linearized_structuring_retry': 2}`
+  - `recovery_outcome={'recovered': 2}`
+
 ### P5H2B / P5H3A - Recovery Quality Metrics and Localized Structuring Fallback
 
 This round moved structuring recovery from a binary “recovered or not” signal into a quality-aware lane, and introduced the first localized alternative to whole-function forced linearization.

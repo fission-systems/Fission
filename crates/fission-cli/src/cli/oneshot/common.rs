@@ -7,7 +7,7 @@ use fission_loader::loader::LoadedBinary;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EngineMode {
     Legacy,
-    MlilPreview,
+    Nir,
     Auto,
 }
 
@@ -47,7 +47,8 @@ pub(super) fn resolve_profile(profile: Option<&str>) -> (&'static str, Option<St
         "quality" => ("quality", None),
         "speed" => ("speed", None),
         "balanced" => ("balanced", None),
-        "mlil-preview" => ("quality", None),
+        "nir" => ("quality", None),
+        "mlil-preview" | "mlil_preview" => ("quality", None),
         _ => ("balanced", Some(selected)),
     }
 }
@@ -55,32 +56,38 @@ pub(super) fn resolve_profile(profile: Option<&str>) -> (&'static str, Option<St
 pub(super) fn resolve_engine_mode(
     engine: Option<&str>,
     profile: Option<&str>,
-) -> (EngineMode, Option<String>, bool) {
+) -> (EngineMode, Option<String>, bool, bool) {
     if let Some(engine) = engine {
         let normalized = engine.to_ascii_lowercase();
         let mode = match normalized.as_str() {
             "legacy" => EngineMode::Legacy,
-            "mlil-preview" | "mlil_preview" => EngineMode::MlilPreview,
+            "nir" => EngineMode::Nir,
+            "mlil-preview" | "mlil_preview" => EngineMode::Nir,
             "auto" => EngineMode::Auto,
             _ => EngineMode::Auto,
         };
         let unknown = match normalized.as_str() {
-            "legacy" | "mlil-preview" | "mlil_preview" | "auto" => None,
+            "legacy" | "nir" | "mlil-preview" | "mlil_preview" | "auto" => None,
             _ => Some(engine.to_string()),
         };
-        return (mode, unknown, false);
+        let deprecated_engine_alias =
+            matches!(normalized.as_str(), "mlil-preview" | "mlil_preview");
+        return (mode, unknown, deprecated_engine_alias, false);
     }
 
-    if matches!(profile, Some(profile) if profile.eq_ignore_ascii_case("mlil-preview")) {
-        return (EngineMode::MlilPreview, None, true);
+    if matches!(profile, Some(profile) if profile.eq_ignore_ascii_case("nir")) {
+        return (EngineMode::Nir, None, false, false);
+    }
+    if matches!(profile, Some(profile) if profile.eq_ignore_ascii_case("mlil-preview") || profile.eq_ignore_ascii_case("mlil_preview")) {
+        return (EngineMode::Nir, None, false, true);
     }
 
-    (EngineMode::Auto, None, false)
+    (EngineMode::Auto, None, false, false)
 }
 
 pub(super) fn apply_profile(decomp: &mut DecompilerNative, profile: &str) {
     match profile {
-        "quality" | "mlil-preview" => {
+        "quality" | "nir" | "mlil-preview" | "mlil_preview" => {
             decomp.set_feature("infer_pointers", true);
             decomp.set_feature("analyze_loops", true);
             decomp.set_feature("readonly_propagate", true);

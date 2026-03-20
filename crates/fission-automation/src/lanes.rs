@@ -40,6 +40,13 @@ pub fn default_manifest_path(root: &Path) -> PathBuf {
         .join("sentinel_sets.toml")
 }
 
+pub fn normalize_lane_name(lane_name: &str) -> (&str, bool) {
+    match lane_name {
+        "preview" => ("nir", true),
+        other => (other, false),
+    }
+}
+
 pub fn default_source_inventory_path(root: &Path) -> Option<PathBuf> {
     let candidate = root
         .join("artifacts")
@@ -108,9 +115,10 @@ pub fn resolve_lane_targets(
         .with_context(|| format!("read sentinel manifest {}", manifest_path.display()))?;
     let manifest: Manifest = toml::from_str(&data)
         .with_context(|| format!("parse sentinel manifest {}", manifest_path.display()))?;
+    let (normalized_lane_name, _) = normalize_lane_name(lane_name);
     let lane = manifest
         .lane
-        .get(lane_name)
+        .get(normalized_lane_name)
         .with_context(|| format!("unknown lane `{lane_name}` in {}", manifest_path.display()))?;
 
     let mut seen = BTreeSet::new();

@@ -12,7 +12,7 @@ The public repository is still an **early prototype** and some documents are sti
    - quick build and run paths
 2. [`docs/architecture/ARCHITECTURE.md`](./architecture/ARCHITECTURE.md)
    - current architecture
-   - `legacy` vs `mlil-preview`
+   - `legacy` vs `Fission NIR`
    - crate/layer ownership
 3. [`docs/changelog/CHANGELOG.md`](./changelog/CHANGELOG.md)
    - current public change history

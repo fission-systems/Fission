@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use corpus::build_corpus_artifacts;
 use diagnosis::{aggregate_diagnosis, diagnosis_entry, DiagnosisReport};
 use inventory::{ensure_fission_cli, run_inventory_emit};
-use lanes::{default_manifest_path, default_source_inventory_path, load_source_inventory, resolve_lane_targets, resolve_source_meta};
+use lanes::{default_manifest_path, default_source_inventory_path, load_source_inventory, normalize_lane_name, resolve_lane_targets, resolve_source_meta};
 use model::{InventoryRow, InventorySummary, SourceMeta};
 use report::{build_summary, compute_delta, enrich_summary_with_provenance, load_baseline, print_terminal_summary, render_markdown, update_latest, AutomationSummary};
 use std::fs;
@@ -73,6 +73,7 @@ fn repo_root() -> PathBuf {
 
 fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     let root = repo_root();
+    let (canonical_lane, deprecated_preview_lane) = normalize_lane_name(&args.lane);
     let manifest_path = args.manifest.unwrap_or_else(|| default_manifest_path(&root));
     let source_inventory_path = default_source_inventory_path(&root);
     let source_inventory = match source_inventory_path.as_ref() {
@@ -83,7 +84,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     let targets = resolve_lane_targets(
         &root,
         &manifest_path,
-        &args.lane,
+        canonical_lane,
         source_inventory_path.as_ref().map(|_| &source_inventory),
     )?;
     if targets.is_empty() {
@@ -136,7 +137,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     if datasets.is_empty() {
         anyhow::bail!(
             "lane `{}` produced no successful inventory runs (failed: {})",
-            args.lane,
+            canonical_lane,
             failed_targets.join(", ")
         );
     }
@@ -158,7 +159,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
 
     let mut automation_summary = build_summary(
         isoish_now(),
-        &args.lane,
+        canonical_lane,
         &run_id,
         &inventory_summaries,
         &corpus_artifacts.inventory_summary_totals,
@@ -170,7 +171,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         .join("artifacts")
         .join("fission-automation")
         .join("latest")
-        .join(&args.lane);
+        .join(canonical_lane);
     let baseline_path = args
         .baseline
         .unwrap_or_else(|| latest_dir.join("summary.json"));
@@ -188,6 +189,9 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         update_latest(&base_output_dir, &latest_dir)?;
     }
     print_terminal_summary(&automation_summary, &diagnosis_report);
+    if deprecated_preview_lane {
+        eprintln!("[fission-automation] '--lane preview' is deprecated; use '--lane nir'");
+    }
     if !failed_targets.is_empty() {
         eprintln!(
             "[fission-automation] skipped failed targets: {}",
@@ -218,6 +222,22 @@ fn write_outputs(
         "quality_explicit_facts": corpus.quality_explicit_facts,
         "quality_heuristic_surface": corpus.quality_heuristic_surface,
     }))?;
+    write_json_pretty(
+        base_output_dir.join("nir_quality_candidates.json"),
+        &serde_json::json!({ "candidates": corpus.candidates }),
+    )?;
+    write_json_pretty(
+        base_output_dir.join("nir_explicit_blocked_candidates.json"),
+        &serde_json::json!({
+            "blocked_candidates": corpus.blocked_explicit_candidates,
+            "block_reason_counts": corpus.block_reason_counts,
+            "inventory_summary_totals": corpus.inventory_summary_totals,
+        }),
+    )?;
+    write_json_pretty(
+        base_output_dir.join("nir_explicit_aligned_candidate_report.json"),
+        &serde_json::json!({ "aligned_candidates": corpus.aligned_explicit_candidates }),
+    )?;
     write_json_pretty(
         base_output_dir.join("preview_quality_candidates.json"),
         &serde_json::json!({ "candidates": corpus.candidates }),
@@ -265,8 +285,8 @@ fn render_diagnosis_markdown(diagnosis: &DiagnosisReport) -> String {
         diagnosis.aggregate.diagnosis_bucket_counts
     ));
     lines.push(format!(
-        "- Preview block signatures: `{:?}`",
-        diagnosis.aggregate.preview_block_signature_counts
+        "- Fission NIR block signatures: `{:?}`",
+        diagnosis.aggregate.nir_block_signature_counts
     ));
     lines.push(String::new());
     lines.push("## Binaries".to_string());
@@ -293,8 +313,8 @@ fn render_diagnosis_markdown(diagnosis: &DiagnosisReport) -> String {
             entry.derived_metrics.blocked_admission_stage_counts
         ));
         lines.push(format!(
-            "- Preview block signatures: `{:?}`",
-            entry.derived_metrics.blocked_preview_block_signature_counts
+            "- Fission NIR block signatures: `{:?}`",
+            entry.derived_metrics.blocked_nir_block_signature_counts
         ));
         lines.push(String::new());
     }

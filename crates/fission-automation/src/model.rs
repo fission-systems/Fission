@@ -119,17 +119,29 @@ pub struct InventoryRow {
     #[serde(default)]
     pub inventory_surface_gap: bool,
     #[serde(default)]
-    pub preview_direct_success: bool,
+    pub nir_direct_success: bool,
     #[serde(default)]
-    pub preview_fallback_kind: Option<String>,
+    pub nir_fallback_kind: Option<String>,
     #[serde(default)]
-    pub preview_fallback_kind_refined: Option<String>,
+    pub nir_fallback_kind_refined: Option<String>,
     #[serde(default)]
-    pub preview_fallback_reason: Option<String>,
+    pub nir_fallback_reason: Option<String>,
     #[serde(default)]
-    pub preview_block_signature: Option<String>,
+    pub nir_block_signature: Option<String>,
     #[serde(default)]
-    pub preview_block_detail: Option<String>,
+    pub nir_block_detail: Option<String>,
+    #[serde(default, rename = "preview_direct_success")]
+    pub preview_direct_success_compat: Option<bool>,
+    #[serde(default, rename = "preview_fallback_kind")]
+    pub preview_fallback_kind_compat: Option<String>,
+    #[serde(default, rename = "preview_fallback_kind_refined")]
+    pub preview_fallback_kind_refined_compat: Option<String>,
+    #[serde(default, rename = "preview_fallback_reason")]
+    pub preview_fallback_reason_compat: Option<String>,
+    #[serde(default, rename = "preview_block_signature")]
+    pub preview_block_signature_compat: Option<String>,
+    #[serde(default, rename = "preview_block_detail")]
+    pub preview_block_detail_compat: Option<String>,
     #[serde(default)]
     pub recovery_strategy_attempted: Option<String>,
     #[serde(default)]
@@ -151,7 +163,9 @@ pub struct InventoryRow {
     #[serde(default)]
     pub recovery_quality_flags: Vec<String>,
     #[serde(default)]
-    pub preview_surface_kind: Option<String>,
+    pub nir_surface_kind: Option<String>,
+    #[serde(default, rename = "preview_surface_kind")]
+    pub preview_surface_kind_compat: Option<String>,
     #[serde(default)]
     pub pcode_block_count: usize,
     #[serde(default)]
@@ -189,7 +203,9 @@ pub struct InventorySummary {
     #[serde(default)]
     pub direct_success_count: usize,
     #[serde(default)]
-    pub preview_failure_count: usize,
+    pub nir_failure_count: usize,
+    #[serde(default, rename = "preview_failure_count")]
+    pub preview_failure_count_compat: Option<usize>,
     #[serde(default)]
     pub panic_recovered_count: usize,
     #[serde(default)]
@@ -236,14 +252,14 @@ pub struct SourceMeta {
     pub path: String,
     #[serde(default)]
     pub priority: Option<String>,
-    #[serde(default)]
-    pub expected_preview_supported: Option<bool>,
-    #[serde(default)]
-    pub observed_preview_supported: Option<bool>,
-    #[serde(default)]
-    pub observed_preview_failure_kind: Option<String>,
-    #[serde(default)]
-    pub observed_preview_failure_reason: Option<String>,
+    #[serde(default, alias = "expected_preview_supported")]
+    pub expected_nir_supported: Option<bool>,
+    #[serde(default, alias = "observed_preview_supported")]
+    pub observed_nir_supported: Option<bool>,
+    #[serde(default, alias = "observed_preview_failure_kind")]
+    pub observed_nir_failure_kind: Option<String>,
+    #[serde(default, alias = "observed_preview_failure_reason")]
+    pub observed_nir_failure_reason: Option<String>,
     #[serde(default)]
     pub admission_alignment: Option<String>,
     #[serde(default)]
@@ -267,10 +283,10 @@ pub struct AlignedExplicitCandidate {
     pub name: String,
     pub explicit_fact_total: usize,
     pub fact_density_score: i32,
-    pub preview_direct_success: bool,
-    pub preview_fallback_kind_refined: Option<String>,
+    pub nir_direct_success: bool,
+    pub nir_fallback_kind_refined: Option<String>,
     pub pcode_op_count: usize,
-    pub preview_surface_kind: Option<String>,
+    pub nir_surface_kind: Option<String>,
     pub fact_sources_present: FactSourcesPresent,
     pub explicit_fact_breakdown: ExplicitFactBreakdown,
     pub provenance_fact_breakdown: ProvenanceFactBreakdown,
@@ -289,7 +305,7 @@ pub struct BlockedExplicitCandidate {
     pub name: String,
     pub explicit_fact_total: usize,
     pub fact_density_score: i32,
-    pub preview_direct_success: bool,
+    pub nir_direct_success: bool,
     pub block_reason: String,
     pub pcode_op_count: usize,
     pub has_indirect_control_flow: bool,
@@ -310,4 +326,40 @@ pub struct CuratedQualityEntry {
     pub fact_density_score: i32,
     pub quality_potential_score: i32,
     pub reason_tags: Vec<String>,
+}
+
+impl InventoryRow {
+    pub fn normalize(mut self) -> Self {
+        if !self.nir_direct_success {
+            self.nir_direct_success = self.preview_direct_success_compat.unwrap_or(false);
+        }
+        if self.nir_fallback_kind.is_none() {
+            self.nir_fallback_kind = self.preview_fallback_kind_compat.clone();
+        }
+        if self.nir_fallback_kind_refined.is_none() {
+            self.nir_fallback_kind_refined = self.preview_fallback_kind_refined_compat.clone();
+        }
+        if self.nir_fallback_reason.is_none() {
+            self.nir_fallback_reason = self.preview_fallback_reason_compat.clone();
+        }
+        if self.nir_block_signature.is_none() {
+            self.nir_block_signature = self.preview_block_signature_compat.clone();
+        }
+        if self.nir_block_detail.is_none() {
+            self.nir_block_detail = self.preview_block_detail_compat.clone();
+        }
+        if self.nir_surface_kind.is_none() {
+            self.nir_surface_kind = self.preview_surface_kind_compat.clone();
+        }
+        self
+    }
+}
+
+impl InventorySummary {
+    pub fn normalize(mut self) -> Self {
+        if self.nir_failure_count == 0 {
+            self.nir_failure_count = self.preview_failure_count_compat.unwrap_or(0);
+        }
+        self
+    }
 }
