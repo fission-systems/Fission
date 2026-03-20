@@ -101,6 +101,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
 
     let mut datasets: Vec<(InventorySummary, Vec<InventoryRow>, Option<SourceMeta>)> = Vec::new();
     let mut inventory_summaries = Vec::new();
+    let mut failed_targets = Vec::new();
 
     for target in &targets {
         let file_slug = sanitize_file_stem(&target.binary);
@@ -108,7 +109,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         let summary_path = per_binary_dir.join(format!("{file_slug}.inventory.summary.json"));
         let functions_limit = args.functions_limit.or(target.default_functions_limit);
         let timeout_ms = args.timeout_ms.or(target.default_timeout_ms).unwrap_or(10_000);
-        let (rows, summary) = run_inventory_emit(
+        let inventory_result = run_inventory_emit(
             &root,
             &fission_bin,
             &target.path,
@@ -116,10 +117,28 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
             &summary_path,
             functions_limit,
             timeout_ms,
-        )?;
+        );
+        let (rows, summary) = match inventory_result {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!(
+                    "[fission-automation] inventory failed for {}: {error:#}",
+                    target.path.display()
+                );
+                failed_targets.push(target.binary.clone());
+                continue;
+            }
+        };
         let source_meta = resolve_source_meta(&source_inventory, &target.path).cloned();
         inventory_summaries.push(summary.clone());
         datasets.push((summary, rows, source_meta));
+    }
+    if datasets.is_empty() {
+        anyhow::bail!(
+            "lane `{}` produced no successful inventory runs (failed: {})",
+            args.lane,
+            failed_targets.join(", ")
+        );
     }
 
     let corpus_artifacts = build_corpus_artifacts(&root, &datasets);
@@ -169,6 +188,12 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         update_latest(&base_output_dir, &latest_dir)?;
     }
     print_terminal_summary(&automation_summary, &diagnosis_report);
+    if !failed_targets.is_empty() {
+        eprintln!(
+            "[fission-automation] skipped failed targets: {}",
+            failed_targets.join(", ")
+        );
+    }
     println!(
         "[fission-automation] wrote outputs to {}",
         base_output_dir.display()

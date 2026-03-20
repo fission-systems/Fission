@@ -541,6 +541,13 @@ pub(super) fn emit_function_facts_inventory(
                 .map_err(|e| io::Error::other(format!("JSON serialization failed: {e}")))?;
             writer.write_all(b"\n")?;
             update_inventory_summary(&mut summary, &mut candidate_summary, &row);
+            if summary.rows_emitted % 10 == 0 {
+                writer.flush()?;
+                if let Some(hook) = quiet_panic_hook.as_ref() {
+                    summary.suppressed_stderr_count = hook.suppressed_count();
+                }
+                write_inventory_summary(summary_json, &summary)?;
+            }
         }
         writer.flush()?;
         summary.chunks_completed += 1;

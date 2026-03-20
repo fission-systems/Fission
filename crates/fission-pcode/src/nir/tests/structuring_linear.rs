@@ -1,5 +1,114 @@
 use super::*;
 #[test]
+fn lower_linear_body_breaks_recursive_conditional_cycle() {
+    let cond_a = uniq(0x480, 1);
+    let cond_b = uniq(0x481, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x4800,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x4800,
+                    output: None,
+                    inputs: vec![cst(0x4810, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x4810,
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x4810,
+                        output: Some(cond_a.clone()),
+                        inputs: vec![reg(0x08, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x4811,
+                        output: None,
+                        inputs: vec![cst(0x4820, 8), cond_a],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x4820,
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x4820,
+                        output: Some(cond_b.clone()),
+                        inputs: vec![reg(0x09, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x4821,
+                        output: None,
+                        inputs: vec![cst(0x4840, 8), cond_b],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x4830,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x4830,
+                    output: None,
+                    inputs: vec![cst(0x4840, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x4840,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x4840,
+                    output: None,
+                    inputs: vec![cst(0x4810, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0x4850,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x4850,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    let lowered = builder
+        .lower_linear_body(1, LinearExit::Join(5))
+        .expect("recursive cycle should not error");
+    assert!(lowered.is_none());
+}
+
+#[test]
 fn lower_linear_body_caches_repeated_requests() {
     let ptr = uniq(0x470, 4);
     let func = PcodeFunction {

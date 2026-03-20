@@ -73,13 +73,18 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(cached) = self.linear_body_cache.get(&key) {
             return Ok(cached.clone());
         }
+        if !self.active_linear_body_keys.insert(key) {
+            return Ok(None);
+        }
         if let Some(budget) = budget.as_deref_mut()
             && budget.checkpoint("lower_linear_body_start")
         {
+            self.active_linear_body_keys.remove(&key);
             return Ok(None);
         }
         let result =
             self.lower_linear_body_with_depth(start_idx, exit, 0, budget.as_deref_mut())?;
+        self.active_linear_body_keys.remove(&key);
         let should_cache = budget.as_deref().is_none_or(|budget| !budget.tripped);
         if should_cache {
             self.linear_body_cache.insert(key, result.clone());
@@ -454,54 +459,77 @@ impl<'a> PreviewBuilder<'a> {
         let Some(false_idx) = self.find_block_index_by_address(false_target) else {
             return Ok(None);
         };
+        let key = ConditionalTailKey {
+            true_idx,
+            false_idx,
+            exit,
+        };
+        if !self.active_conditional_tail_keys.insert(key) {
+            return Ok(None);
+        }
 
-        if exit == LinearExit::Join(true_idx) {
-            if let Some((false_body, skip_to)) = self.lower_linear_body_with_depth(
+        let result = (|| {
+            if exit == LinearExit::Join(true_idx) {
+                if let Some((false_body, skip_to)) = self.lower_linear_body_with_depth(
+                    false_idx,
+                    exit,
+                    depth + 1,
+                    budget.as_deref_mut(),
+                )? {
+                    return Ok(Some((
+                        HirStmt::If {
+                            cond: negate_expr(cond.clone()),
+                            then_body: false_body,
+                            else_body: Vec::new(),
+                        },
+                        skip_to,
+                    )));
+                }
+            }
+            if exit == LinearExit::Join(false_idx) {
+                if let Some((true_body, skip_to)) = self.lower_linear_body_with_depth(
+                    true_idx,
+                    exit,
+                    depth + 1,
+                    budget.as_deref_mut(),
+                )? {
+                    return Ok(Some((
+                        HirStmt::If {
+                            cond: cond.clone(),
+                            then_body: true_body,
+                            else_body: Vec::new(),
+                        },
+                        skip_to,
+                    )));
+                }
+            }
+
+            let true_branch = self.lower_linear_body_with_depth(
+                true_idx,
+                exit,
+                depth + 1,
+                budget.as_deref_mut(),
+            )?;
+            let false_branch = self.lower_linear_body_with_depth(
                 false_idx,
                 exit,
                 depth + 1,
                 budget.as_deref_mut(),
-            )? {
-                return Ok(Some((
-                    HirStmt::If {
-                        cond: negate_expr(cond),
-                        then_body: false_body,
-                        else_body: Vec::new(),
-                    },
-                    skip_to,
-                )));
-            }
-        }
-        if exit == LinearExit::Join(false_idx) {
-            if let Some((true_body, skip_to)) =
-                self.lower_linear_body_with_depth(true_idx, exit, depth + 1, budget.as_deref_mut())?
-            {
-                return Ok(Some((
+            )?;
+            match (true_branch, false_branch) {
+                (Some((then_body, then_skip)), Some((else_body, else_skip))) => Ok(Some((
                     HirStmt::If {
                         cond,
-                        then_body: true_body,
-                        else_body: Vec::new(),
+                        then_body,
+                        else_body,
                     },
-                    skip_to,
-                )));
+                    then_skip.max(else_skip),
+                ))),
+                _ => Ok(None),
             }
-        }
-
-        let true_branch =
-            self.lower_linear_body_with_depth(true_idx, exit, depth + 1, budget.as_deref_mut())?;
-        let false_branch =
-            self.lower_linear_body_with_depth(false_idx, exit, depth + 1, budget.as_deref_mut())?;
-        match (true_branch, false_branch) {
-            (Some((then_body, then_skip)), Some((else_body, else_skip))) => Ok(Some((
-                HirStmt::If {
-                    cond,
-                    then_body,
-                    else_body,
-                },
-                then_skip.max(else_skip),
-            ))),
-            _ => Ok(None),
-        }
+        })();
+        self.active_conditional_tail_keys.remove(&key);
+        result
     }
 
     pub(super) fn is_trivial_structuring_stmt(stmt: &HirStmt) -> bool {

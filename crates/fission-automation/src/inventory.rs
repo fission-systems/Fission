@@ -3,7 +3,9 @@ use anyhow::{Context, Result, bail};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, ExitStatus};
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub fn ensure_fission_cli(
     root: &Path,
@@ -81,7 +83,19 @@ pub fn run_inventory_emit(
     if let Some(limit) = functions_limit {
         cmd.arg("--functions-limit").arg(limit.to_string());
     }
-    let status = cmd.status().with_context(|| {
+    let mut child = cmd.spawn().with_context(|| {
+        format!(
+            "run function facts inventory for {}",
+            binary_path.display()
+        )
+    })?;
+    let expected_functions = functions_limit.unwrap_or(100).max(1) as u64;
+    let hard_timeout_ms = timeout_ms
+        .saturating_mul(expected_functions)
+        .saturating_mul(2)
+        .clamp(30_000, 600_000);
+    let hard_timeout = Duration::from_millis(hard_timeout_ms);
+    let status = wait_with_timeout(&mut child, hard_timeout).with_context(|| {
         format!(
             "run function facts inventory for {}",
             binary_path.display()
@@ -118,4 +132,24 @@ fn load_rows(path: &Path) -> Result<Vec<InventoryRow>> {
 fn load_summary(path: &Path) -> Result<InventorySummary> {
     let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     serde_json::from_str(&data).with_context(|| format!("parse inventory summary {}", path.display()))
+}
+
+fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<ExitStatus> {
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().context("poll inventory process")? {
+            return Ok(status);
+        }
+        if started.elapsed() >= timeout {
+            let pid = child.id();
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!(
+                "inventory process timed out after {:.1}s (pid {})",
+                timeout.as_secs_f64(),
+                pid
+            );
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 }

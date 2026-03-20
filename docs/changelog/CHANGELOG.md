@@ -9,6 +9,47 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-20
 
+### P5H2A - NIR Structuring Recursion Fix and Automation Watchdog
+
+This round fixed a real Fission NIR preview hang instead of just treating it as heavy CPU work.
+
+`GetProcAddress.exe` contained addresses that drove the NIR linear-structuring path into recursive conditional-tail cycling. Those same functions completed on the legacy lane, which confirmed the issue was a preview/NIR bug rather than expected analysis cost.
+
+At the same time, the automation runner could wait forever on a stuck `fission_cli` child, which meant a single pathological function could wedge an entire lane.
+
+#### Added
+
+- active-cycle guards for:
+  - in-progress `LinearBodyCacheKey` lowering
+  - in-progress conditional-tail lowering signatures
+- a new regression test that exercises the recursive conditional-tail cycle and verifies it fails closed instead of spinning
+- a hard inventory child-process watchdog in `fission-automation`
+- periodic mid-run inventory summary flushes so partial progress survives long runs or failures
+
+#### Changed
+
+- Fission NIR linear structuring now returns `None` when it re-enters the same linear-body or conditional-tail request instead of recursing indefinitely
+- `fission-automation` now kills and reaps inventory children that exceed a hard per-binary timeout budget
+- `nir-check` skips failed binaries instead of hanging an entire lane forever, and only fails the lane if every target fails
+- CLI inventory summary files now update during row emission rather than only at chunk completion
+
+#### Validation
+
+- `cargo test -p fission-pcode lower_linear_body_breaks_recursive_conditional_cycle -- --nocapture`
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+- `target/debug/fission_cli samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe --decomp 0x140002220 --engine mlil-preview --timeout-ms 1500`
+- `target/debug/fission_cli samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe --decomp 0x140002320 --engine mlil-preview --timeout-ms 1500`
+- `target/debug/fission_cli samples/other/binaries-master/tests/x86_64/windows/GetProcAddress.exe --emit-function-facts-inventory --functions-limit 40 --timeout-ms 1500 --output-jsonl /tmp/getproc_after_fix.rows.jsonl --summary-json /tmp/getproc_after_fix.summary.json --quiet-batch-errors`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40`
+
+#### Current Outcome
+
+- the reproduced `mlil-preview` hangs at `0x140002220` and `0x140002320` now complete in under a second instead of timing out externally
+- `GetProcAddress.exe` 40-function inventory now finishes cleanly and writes both rows and summary output
+- the `preview` lane completes successfully again instead of sticking on a single runaway `fission_cli` process
+- remaining preview failures on the sentinel lane are now meaningful failure classes, not infinite-CPU recursion artifacts
+
 ### P5H1 - Failure-Driven Recovery Scaffold
 
 This round introduced the first real recovery layer for Fission NIR preview failures.

@@ -98,6 +98,8 @@ struct PreviewBuilder<'a> {
     stack_frame_size: i64,
     linear_exit_cache: HashMap<usize, Option<LinearExit>>,
     linear_body_cache: HashMap<LinearBodyCacheKey, Option<(Vec<HirStmt>, usize)>>,
+    active_linear_body_keys: HashSet<LinearBodyCacheKey>,
+    active_conditional_tail_keys: HashSet<ConditionalTailKey>,
     jump_targets_cache: Option<HashSet<u64>>,
     active_trace_id: Option<u64>,
     last_trace_id: Option<u64>,
@@ -164,6 +166,13 @@ enum LinearExit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct LinearBodyCacheKey {
     start_idx: usize,
+    exit: LinearExit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ConditionalTailKey {
+    true_idx: usize,
+    false_idx: usize,
     exit: LinearExit,
 }
 

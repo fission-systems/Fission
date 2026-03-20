@@ -91,6 +91,8 @@ impl<'a> PreviewBuilder<'a> {
             stack_frame_size,
             linear_exit_cache: HashMap::new(),
             linear_body_cache: HashMap::new(),
+            active_linear_body_keys: HashSet::new(),
+            active_conditional_tail_keys: HashSet::new(),
             jump_targets_cache: None,
             active_trace_id: None,
             last_trace_id: None,
