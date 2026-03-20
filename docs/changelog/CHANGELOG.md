@@ -7,6 +7,81 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-03-21
+
+### P6R3 / P6R4 / P6R5 / P6R6 - Follow-up Fission NIR and CLI Module Extraction
+
+This follow-up refactor round continued the post-rename cleanup without changing current decompilation semantics. The focus was to remove the next batch of oversized coordination files, move the Fission NIR implementation under a dedicated `decomp/nir/` subtree, and split CLI inventory/candidate execution code into clearer ownership modules.
+
+The goal was still boundary cleanup, not policy change: legacy/NIR routing, recovery behavior, JSON compatibility, and automation baselines stayed intact. The result is that several formerly mixed-responsibility files are now thin façades, while the implementation sits in smaller modules with narrower ownership.
+
+#### Added
+
+- `fission-static` follow-up decompiler ownership files:
+  - `caching_decompiler.rs`
+  - `decomp/nir/context.rs`
+  - `decomp/nir/engine.rs`
+  - `decomp/nir/recovery.rs`
+  - `decomp/nir/render.rs`
+  - `decomp/nir/routing.rs`
+  - `decomp/nir/taxonomy.rs`
+  - `decomp/nir/types.rs`
+  - `decomp/nir/worker.rs`
+- CLI inventory ownership modules:
+  - `cli/oneshot/inventory/schema.rs`
+  - `cli/oneshot/inventory/provenance.rs`
+  - `cli/oneshot/inventory/emit.rs`
+- CLI execution ownership modules:
+  - `cli/oneshot/decompile/decompile_exec/batch.rs`
+  - `cli/oneshot/decompile/decompile_exec/output.rs`
+  - `cli/oneshot/decompile/decompile_exec/run.rs`
+- CLI NIR candidate ownership modules:
+  - `cli/oneshot/decompile/nir_candidates/schema.rs`
+  - `cli/oneshot/decompile/nir_candidates/summary.rs`
+  - `cli/oneshot/decompile/nir_candidates/build.rs`
+
+#### Changed
+
+- Fission NIR source files now live physically under `crates/fission-static/src/analysis/decomp/nir/`, while `decomp/mod.rs` keeps the existing public module surface through `#[path = "nir/..."]` wiring
+- `crates/fission-static/src/analysis/decomp/mod.rs` no longer owns the native cached decompiler implementation directly:
+  - `DecompilerNative`
+  - `CachingDecompiler`
+  - `RecommendedDecompiler`
+  moved into `caching_decompiler.rs`, and `mod.rs` now mainly acts as a re-export surface
+- `crates/fission-cli/src/cli/oneshot/inventory.rs` is now a thin façade:
+  - schema types moved to `inventory/schema.rs`
+  - provenance/fact aggregation moved to `inventory/provenance.rs`
+  - decompiler prep and emit loop moved to `inventory/emit.rs`
+- `crates/fission-cli/src/cli/oneshot/decompile/decompile_exec.rs` is now a thin façade:
+  - batch inventory/candidate emit moved to `decompile_exec/batch.rs`
+  - single-function output path moved to `decompile_exec/output.rs`
+  - sequential/parallel run orchestration moved to `decompile_exec/run.rs`
+- `crates/fission-cli/src/cli/oneshot/decompile/nir_candidates.rs` is now a thin façade:
+  - row/inventory schema moved to `nir_candidates/schema.rs`
+  - summary/failure/signature logic moved to `nir_candidates/summary.rs`
+  - candidate row construction and panic recovery moved to `nir_candidates/build.rs`
+
+#### Validation
+
+- `cargo fmt`
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+
+#### Current Outcome
+
+- the next batch of coordination files is now physically reduced:
+  - `decomp/mod.rs`: `199 -> 88` lines
+  - `inventory.rs`: `627 -> 5` lines
+  - `decompile/decompile_exec.rs`: `951 -> 6` lines
+  - `decompile/nir_candidates.rs`: `849 -> 10` lines
+- canonical `nir` automation smoke remains stable after the refactor:
+  - `direct_success=10`
+  - `nir_failure=0`
+  - `explicit_nonzero=4`
+  - `recovery_attempted={'linearized_structuring_retry': 2}`
+  - `recovery_outcome={'recovered': 2}`
+
 ## 2026-03-20
 
 ### P6R2 - Real Module Split After Fission NIR Rename
