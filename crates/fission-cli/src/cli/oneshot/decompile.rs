@@ -406,7 +406,19 @@ fn preview_block_signature(
         "preview_format_unsupported" => "unsupported_format",
         "preview_timeout" => "preview_timeout",
         "preview_worker_failure" => "worker_internal_error",
-        "preview_structuring_failure" => "structuring_failure",
+        "preview_structuring_failure" => {
+            if message.contains("unsupported_cfg_region_shape") || message.contains("unsupported region shape") {
+                "unsupported_cfg_region_shape"
+            } else if message.contains("unsupported_cfg_phi_join") || message.contains("unsupported phi join") {
+                "unsupported_cfg_phi_join"
+            } else if message.contains("unsupported_cfg_indirect_call_region")
+                || message.contains("unsupported indirect call region")
+            {
+                "unsupported_cfg_indirect_call_region"
+            } else {
+                "structuring_failure"
+            }
+        }
         "preview_parse_or_lowering_failure" => {
             if message.contains("unsupported op") {
                 "lowering_unsupported_op"

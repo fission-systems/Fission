@@ -9,7 +9,54 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-20
 
-### P5H2A - NIR Structuring Recursion Fix and Automation Watchdog
+### P5H2A - Structuring-Origin Failure Surfacing for Recovery
+
+This round fixed the taxonomy gap that prevented the recovery layer from seeing real structuring-origin failures.
+
+Previously, recovery scaffolding existed, but a large part of the relevant `UnsupportedCfg*` family was either absorbed as `Ok(None)` inside NIR structuring or surfaced back out as a broad unsupported-CFG failure. That meant `linearized_structuring_retry` often had no explicit recovery seed to act on.
+
+This patch promoted the recovery-eligible structuring failures into typed preview failures and preserved their exact signature through the inventory/export path.
+
+#### Added
+
+- typed structuring failure classification:
+  - `StructuringFailureKind::RegionShape`
+  - `StructuringFailureKind::PhiJoin`
+  - `StructuringFailureKind::IndirectCallRegion`
+- exact preview block signatures for recovery-eligible structuring failures:
+  - `unsupported_cfg_region_shape`
+  - `unsupported_cfg_phi_join`
+  - `unsupported_cfg_indirect_call_region`
+
+#### Changed
+
+- NIR structuring no longer fully buries recovery-eligible `UnsupportedCfg*` failures behind plain `Ok(None)` paths
+- preview routing now surfaces those failures as:
+  - coarse kind: `preview_structuring_failure`
+  - exact signature: typed structuring-origin signature
+- `UnsupportedCfgBranchTarget` remains on the separate branch-target / unsupported-CFG line and is not mixed into the structuring-recovery lane
+- `linearized_structuring_retry` is now fed from explicit structuring-origin surfacing rather than heuristic string matching alone
+
+#### Validation
+
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40`
+
+#### Current Outcome
+
+- `preview` lane runs now show real recovery activity instead of an empty recovery scaffold
+- `GetProcAddress.exe` inventory summary recorded:
+  - `recovery_attempted {'linearized_structuring_retry': 13}`
+  - `recovery_applied {'linearized_structuring_retry': 13}`
+  - `recovery_outcome {'recovered': 13}`
+- `putty.exe` inventory summary recorded:
+  - `recovery_attempted {'linearized_structuring_retry': 6}`
+  - `recovery_applied {'linearized_structuring_retry': 6}`
+  - `recovery_outcome {'recovered': 6}`
+- the recovery layer is now being driven by surfaced structuring-origin failures rather than sitting idle without visible seeds
+
+### Operational Stability - NIR Structuring Recursion Fix and Automation Watchdog
 
 This round fixed a real Fission NIR preview hang instead of just treating it as heavy CPU work.
 

@@ -833,6 +833,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut body = Vec::new();
         let targeted = self.collect_jump_targets()?;
         let mut emitted_labels = HashSet::new();
+        let mut last_structuring_failure = None;
         let mut idx = 0usize;
         while idx < self.pcode.blocks.len() {
             if diag && idx > 0 && idx % 32 == 0 {
@@ -850,7 +851,8 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_switch(idx))?
+            if let Some((stmt, skip_to)) =
+                Self::capture_structuring_failure(self.try_lower_switch(idx), &mut last_structuring_failure)?
                 && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
@@ -865,7 +867,10 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_dowhile(idx))?
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_lower_dowhile(idx),
+                &mut last_structuring_failure,
+            )?
                 && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
@@ -880,7 +885,10 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_while(idx))?
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_lower_while(idx),
+                &mut last_structuring_failure,
+            )?
                 && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
@@ -895,8 +903,10 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) =
-                Self::ignore_unsupported(self.try_lower_short_circuit_if(idx))?
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_lower_short_circuit_if(idx),
+                &mut last_structuring_failure,
+            )?
                 && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
@@ -911,7 +921,10 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_if_else(idx))?
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_lower_if_else(idx),
+                &mut last_structuring_failure,
+            )?
                 && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
@@ -926,12 +939,18 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            if let Some((stmt, skip_to)) = Self::ignore_unsupported(self.try_lower_if(idx))?
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_lower_if(idx),
+                &mut last_structuring_failure,
+            )?
                 && self.accept_structured_region(idx, skip_to, &targeted)
             {
                 body.push(stmt);
                 idx = skip_to;
                 continue;
+            }
+            if let Some(err) = last_structuring_failure.take() {
+                return Err(err);
             }
 
             let block = &self.pcode.blocks[idx];
@@ -1042,15 +1061,17 @@ impl<'a> PreviewBuilder<'a> {
                 || max_predecessors >= 4)
     }
 
-    fn ignore_unsupported<T>(
+    fn capture_structuring_failure<T>(
         result: Result<Option<T>, MlilPreviewError>,
+        last_structuring_failure: &mut Option<MlilPreviewError>,
     ) -> Result<Option<T>, MlilPreviewError> {
         match result {
             Ok(result) => Ok(result),
+            Err(err) if err.structuring_failure_kind().is_some() => {
+                *last_structuring_failure = Some(err);
+                Ok(None)
+            }
             Err(MlilPreviewError::UnsupportedControlFlow)
-            | Err(MlilPreviewError::UnsupportedCfgRegionShape)
-            | Err(MlilPreviewError::UnsupportedCfgPhiJoin)
-            | Err(MlilPreviewError::UnsupportedCfgIndirectCallRegion)
             | Err(MlilPreviewError::UnsupportedCfgBranchTarget) => Ok(None),
             Err(err) => Err(err),
         }

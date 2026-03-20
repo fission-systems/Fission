@@ -310,7 +310,24 @@ impl MlilPreviewOptions {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuringFailureKind {
+    RegionShape,
+    PhiJoin,
+    IndirectCallRegion,
+}
+
+impl StructuringFailureKind {
+    pub const fn preview_block_signature(self) -> &'static str {
+        match self {
+            StructuringFailureKind::RegionShape => "unsupported_cfg_region_shape",
+            StructuringFailureKind::PhiJoin => "unsupported_cfg_phi_join",
+            StructuringFailureKind::IndirectCallRegion => "unsupported_cfg_indirect_call_region",
+        }
+    }
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum MlilPreviewError {
     #[error("mlil-preview currently supports PE x64 only")]
     UnsupportedArchitecture,
@@ -344,4 +361,17 @@ pub enum MlilPreviewError {
     UnsupportedExprPtrArithmetic,
     #[error("value lowering failed on varnode: unsupported memory-backed varnode")]
     UnsupportedExprMemoryBackedVarnode,
+}
+
+impl MlilPreviewError {
+    pub const fn structuring_failure_kind(self) -> Option<StructuringFailureKind> {
+        match self {
+            MlilPreviewError::UnsupportedCfgRegionShape => Some(StructuringFailureKind::RegionShape),
+            MlilPreviewError::UnsupportedCfgPhiJoin => Some(StructuringFailureKind::PhiJoin),
+            MlilPreviewError::UnsupportedCfgIndirectCallRegion => {
+                Some(StructuringFailureKind::IndirectCallRegion)
+            }
+            _ => None,
+        }
+    }
 }

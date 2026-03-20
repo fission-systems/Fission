@@ -2,8 +2,8 @@ use crate::analysis::decomp::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
     MlilPreviewOptions, PcodeFunction, PcodeOpcode, PcodeOptimizer, PcodeOptimizerConfig,
-    PreviewBuildStats, PreviewHintStats, PreviewTypeContext, render_mlil_preview_with_context,
-    take_last_preview_build_stats, take_last_preview_hint_stats,
+    PreviewBuildStats, PreviewHintStats, PreviewTypeContext, StructuringFailureKind,
+    render_mlil_preview_with_context, take_last_preview_build_stats, take_last_preview_hint_stats,
 };
 use std::io::{Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -266,6 +266,22 @@ const PREVIEW_WORKER_TIMEOUT_CAP_MS: u64 = 10_000;
 const PREVIEW_WORKER_TIMEOUT_MARGIN_MS: u64 = 1_000;
 const PREVIEW_WORKER_MIN_TIMEOUT_MS: u64 = 1_000;
 const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";
+
+fn structuring_failure_signature(reason: &str) -> Option<&'static str> {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("unsupported_cfg_region_shape") || lower.contains("unsupported region shape") {
+        return Some(StructuringFailureKind::RegionShape.preview_block_signature());
+    }
+    if lower.contains("unsupported_cfg_phi_join") || lower.contains("unsupported phi join") {
+        return Some(StructuringFailureKind::PhiJoin.preview_block_signature());
+    }
+    if lower.contains("unsupported_cfg_indirect_call_region")
+        || lower.contains("unsupported indirect call region")
+    {
+        return Some(StructuringFailureKind::IndirectCallRegion.preview_block_signature());
+    }
+    None
+}
 
 fn is_type_failure_for_preview_rescue(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
@@ -647,6 +663,15 @@ fn render_preview_request(
             Ok((code, build_stats, hint_stats))
         }
         Err(err) => {
+            let surfaced_error = err
+                .structuring_failure_kind()
+                .map(|kind| {
+                    format!(
+                        "preview_structuring_failure[{}]: {err}",
+                        kind.preview_block_signature()
+                    )
+                })
+                .unwrap_or_else(|| format!("mlil-preview unavailable: {err}"));
             preview_diag_stage(request.address, "render_preview_error", render_start);
             if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
                 let _ = std::fs::OpenOptions::new()
@@ -656,11 +681,12 @@ fn render_preview_request(
                     .and_then(|mut f| {
                         std::io::Write::write_all(
                             &mut f,
-                            format!("[mlil-preview] stage=render_error err={err}\n").as_bytes(),
+                            format!("[mlil-preview] stage=render_error err={surfaced_error}\n")
+                                .as_bytes(),
                         )
                     });
             }
-            Err(format!("mlil-preview unavailable: {err}"))
+            Err(surfaced_error)
         }
     }
 }
@@ -741,6 +767,17 @@ fn try_structuring_recovery(
     if classify_preview_failure_refined(error) != "preview_structuring_failure" {
         return Ok(None);
     }
+    let Some(signature) = structuring_failure_signature(error) else {
+        return Ok(None);
+    };
+    if !matches!(
+        signature,
+        "unsupported_cfg_region_shape"
+            | "unsupported_cfg_phi_join"
+            | "unsupported_cfg_indirect_call_region"
+    ) {
+        return Ok(None);
+    }
 
     match render_preview_from_json_with_type_context(
         pcode_json,
@@ -803,11 +840,11 @@ fn classify_preview_failure_refined(reason: &str) -> &'static str {
     {
         return "preview_worker_failure";
     }
+    if structuring_failure_signature(reason).is_some() {
+        return "preview_structuring_failure";
+    }
     if lower.contains("unsupported control flow")
         || lower.contains("unsupported branch target")
-        || lower.contains("unsupported region shape")
-        || lower.contains("unsupported phi join")
-        || lower.contains("unsupported indirect call region")
     {
         return "preview_unsupported_cfg";
     }
@@ -1183,6 +1220,12 @@ mod tests {
         );
         assert_eq!(
             classify_preview_failure_refined(
+                "preview_structuring_failure[unsupported_cfg_region_shape]: unsupported region shape in mlil-preview"
+            ),
+            "preview_structuring_failure"
+        );
+        assert_eq!(
+            classify_preview_failure_refined(
                 "mlil-preview unavailable: value lowering failed on varnode: unsupported address materialization"
             ),
             "preview_parse_or_lowering_failure"
@@ -1208,10 +1251,10 @@ mod tests {
     #[test]
     fn preview_fallback_exposes_refined_kind() {
         let selection = PreviewRoutingResolver::preview_fallback(
-            "mlil-preview unavailable: unsupported phi join in mlil-preview",
+            "preview_structuring_failure[unsupported_cfg_phi_join]: unsupported phi join in mlil-preview",
         );
         assert_eq!(selection.fallback_kind, Some("preview_unsupported"));
-        assert_eq!(selection.fallback_kind_refined, Some("preview_unsupported_cfg"));
+        assert_eq!(selection.fallback_kind_refined, Some("preview_structuring_failure"));
     }
 
     #[test]
