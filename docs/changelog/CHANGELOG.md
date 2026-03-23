@@ -27,6 +27,7 @@ The change expands localized trampoline canonicalization for nearby joins and fi
   - increased nearby-join trampoline distance allowance
 - fixed conditional-tail localized lowering arm selection:
   - when canonicalization resolves directly to the join, branch lowering now starts from the original branch target arm instead of the join block
+- updated linear structuring regression expectations for one-arm forwarding/trampoline-tail shapes that now lower successfully
 - test helper visibility under `structuring` test wiring was aligned so test-only re-exports compile cleanly in the current layout
 - removed an unused linear-body detailed wrapper to keep the structuring module warning-clean
 

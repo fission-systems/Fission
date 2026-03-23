@@ -322,7 +322,7 @@ fn multi_block_preview_absorbs_shared_trivial_forwarding_return_tail() {
 }
 
 #[test]
-fn lower_linear_body_locks_one_arm_forwarding_join_failure_shape() {
+fn lower_linear_body_lowers_one_arm_forwarding_join_shape() {
     let cond = uniq(0x4a0, 1);
     let side = uniq(0x4a1, 4);
     let func = PcodeFunction {
@@ -437,11 +437,11 @@ fn lower_linear_body_locks_one_arm_forwarding_join_failure_shape() {
     let lowered = builder
         .lower_linear_body(0, LinearExit::Join(4))
         .expect("detailed lowering should not error");
-    assert!(lowered.is_none());
+    assert!(lowered.is_some());
 }
 
 #[test]
-fn lower_linear_body_locks_trampoline_tail_failure_shape() {
+fn lower_linear_body_lowers_trampoline_tail_shape() {
     let cond = uniq(0x4b0, 1);
     let func = PcodeFunction {
         blocks: vec![
@@ -523,5 +523,5 @@ fn lower_linear_body_locks_trampoline_tail_failure_shape() {
     let lowered = builder
         .lower_linear_body(0, LinearExit::Join(4))
         .expect("detailed lowering should not error");
-    assert!(lowered.is_none());
+    assert!(lowered.is_some());
 }
