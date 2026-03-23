@@ -2035,3 +2035,177 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
     assert_eq!(subtype, None);
     assert_eq!(shared, vec![6, 5]);
 }
+
+#[test]
+fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x6300,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x6300,
+                    output: None,
+                    inputs: vec![cst(0x6330, 8), reg(0x08, 1)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x6310,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6310,
+                    output: None,
+                    inputs: vec![cst(0x6340, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x6320,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6320,
+                    output: None,
+                    inputs: vec![cst(0x6350, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x6330,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6330,
+                    output: None,
+                    inputs: vec![cst(0x6310, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x6340,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6340,
+                    output: None,
+                    inputs: vec![cst(0x6360, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0x6350,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6350,
+                    output: None,
+                    inputs: vec![cst(0x6360, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 6,
+                start_address: 0x6360,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x6360,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let mut options = preview_options_x86();
+    options.region_linearize_structuring = true;
+    let builder = PreviewBuilder::new(&func, &options, None);
+    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 3, 1, 6);
+    assert_eq!(subtype, None);
+    assert_eq!(shared.first().copied(), Some(4));
+}
+
+#[test]
+fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x6400,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x6400,
+                    output: None,
+                    inputs: vec![cst(0x6420, 8), reg(0x08, 1)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x6410,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6410,
+                    output: None,
+                    inputs: vec![cst(0x6430, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x6420,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6420,
+                    output: None,
+                    inputs: vec![cst(0x6430, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x6430,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6430,
+                    output: None,
+                    inputs: vec![cst(0x6420, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x6440,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x6440,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let mut options = preview_options_x86();
+    options.region_linearize_structuring = true;
+    let builder = PreviewBuilder::new(&func, &options, None);
+    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 4);
+    assert!(shared.is_empty());
+    assert_eq!(subtype, Some("ComplexArmShape"));
+}

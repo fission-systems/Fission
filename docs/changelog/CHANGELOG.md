@@ -9,6 +9,39 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### P5H3J - Index-Order Independent Follow Discovery (Anti-Overfit)
+
+This patch removes block-index monotonicity assumptions from localized follow discovery so conditional-tail recovery relies on graph properties (cycle/region guards) rather than binary layout order.
+
+#### Changed
+
+- replaced index-order rejection in local recovery window traversal with explicit window-cycle detection
+- updated trivial forwarding chain canonicalization to use visited-set loop safety instead of index-increasing assumptions
+- updated region target canonicalization to use visited-set termination instead of index monotonicity checks
+- preserved existing conservative guards (`side_entry_or_exit`, bounded window, bounded steps)
+
+#### Added
+
+- regression test: `region_follow_discovery_accepts_non_monotonic_acyclic_window`
+- regression test: `region_follow_discovery_rejects_local_cycle_without_index_heuristic`
+
+#### Validation
+
+- `cargo test -p fission-pcode region_follow_discovery_accepts_non_monotonic_acyclic_window -- --nocapture` (pass)
+- `cargo test -p fission-pcode region_follow_discovery_rejects_local_cycle_without_index_heuristic -- --nocapture` (pass)
+- `cargo test -p fission-pcode region_follow_discovery_orders_multiple_candidates_closest_to_join_first -- --nocapture` (pass)
+- `cargo test -p fission-pcode bootstrap_x86 -- --nocapture` (pass)
+- `cargo test -p fission-automation` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo build -p fission-automation` (pass)
+- focused fast benchmark output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774250794-485014000`
+- mid 40-function benchmark output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774250794-476962000`
+
+#### Outcome
+
+- follow discovery is now less sensitive to binary-specific block index ordering
+- headline corpus movement remains unchanged in current lane (`changed_rows=0`, gate `stop_hold_p5h3f`), but algorithmic generality and anti-overfit guarantees improved
+
 ### P5H3I - Algorithmic Arm-Body Failure Decomposition and Signal Cleanup
 
 This patch focused on removing opaque/generic arm-body failure reporting from conditional-tail mismatch analysis and keeping recovery retry behavior deterministic.

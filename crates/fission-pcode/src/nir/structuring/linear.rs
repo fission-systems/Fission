@@ -1107,15 +1107,55 @@ impl<'a> PreviewBuilder<'a> {
                         reached_beyond = true;
                         continue;
                     }
-                    if *succ <= idx {
-                        return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
-                    }
                     stack.push((*succ, depth + 1));
                 }
             }
         }
         nodes.insert(join_idx);
+        if self.window_contains_cycle(&nodes) {
+            return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
+        }
         Ok((nodes, reached_beyond))
+    }
+
+    fn window_contains_cycle(&self, window: &HashSet<usize>) -> bool {
+        fn dfs(
+            builder: &PreviewBuilder<'_>,
+            node: usize,
+            window: &HashSet<usize>,
+            visiting: &mut HashSet<usize>,
+            visited: &mut HashSet<usize>,
+        ) -> bool {
+            if visiting.contains(&node) {
+                return true;
+            }
+            if visited.contains(&node) {
+                return false;
+            }
+            visiting.insert(node);
+            for succ in &builder.successors[node] {
+                if !window.contains(succ) {
+                    continue;
+                }
+                if dfs(builder, *succ, window, visiting, visited) {
+                    return true;
+                }
+            }
+            visiting.remove(&node);
+            visited.insert(node);
+            false
+        }
+
+        let mut visiting = HashSet::new();
+        let mut visited = HashSet::new();
+        for node in window {
+            if !visited.contains(node)
+                && dfs(self, *node, window, &mut visiting, &mut visited)
+            {
+                return true;
+            }
+        }
+        false
     }
 
     fn compute_local_postdom_sets(
@@ -1253,13 +1293,14 @@ impl<'a> PreviewBuilder<'a> {
         let mut chain = vec![start_idx];
         let mut current = start_idx;
         let mut steps = 0usize;
+        let mut seen = HashSet::from([start_idx]);
         while current != join_idx && steps < MAX_REGION_SHARED_TAIL_STEPS {
             if self.successors[current].len() != 1 {
                 break;
             }
             let next_idx = self.successors[current][0];
-            if next_idx <= current
-                || next_idx > join_idx
+            if next_idx > join_idx
+                || !seen.insert(next_idx)
                 || !self.is_trivial_forwarding_block(current, next_idx)
             {
                 break;
@@ -1297,6 +1338,7 @@ impl<'a> PreviewBuilder<'a> {
         }
         let mut current = target_idx;
         let mut steps = 0usize;
+        let mut visited = HashSet::from([target_idx]);
         loop {
             if let LinearExit::Join(join_idx) = exit {
                 if current == join_idx {
@@ -1317,7 +1359,9 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 break;
             };
-            if next_idx <= current || !self.is_trivial_forwarding_block(current, next_idx) {
+            if !visited.insert(next_idx)
+                || !self.is_trivial_forwarding_block(current, next_idx)
+            {
                 break;
             }
             current = next_idx;
