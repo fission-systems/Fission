@@ -88,6 +88,14 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub region_linearize_rejected_body_lowering_failed_count: usize,
     #[serde(default)]
+    pub region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: usize,
+    #[serde(default)]
+    pub region_linearize_rejected_body_lowering_successor_inline_rejected_count: usize,
+    #[serde(default)]
+    pub region_linearize_rejected_body_lowering_revisit_cycle_count: usize,
+    #[serde(default)]
+    pub region_linearize_rejected_body_lowering_unsupported_terminator_count: usize,
+    #[serde(default)]
     pub region_linearize_rejected_non_advancing_count: usize,
     #[serde(default)]
     pub promotion_candidate_count: usize,
@@ -148,6 +156,14 @@ impl NirBuildStats {
             other.region_linearize_rejected_no_exit_count;
         self.region_linearize_rejected_body_lowering_failed_count +=
             other.region_linearize_rejected_body_lowering_failed_count;
+        self.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count +=
+            other.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count;
+        self.region_linearize_rejected_body_lowering_successor_inline_rejected_count +=
+            other.region_linearize_rejected_body_lowering_successor_inline_rejected_count;
+        self.region_linearize_rejected_body_lowering_revisit_cycle_count +=
+            other.region_linearize_rejected_body_lowering_revisit_cycle_count;
+        self.region_linearize_rejected_body_lowering_unsupported_terminator_count +=
+            other.region_linearize_rejected_body_lowering_unsupported_terminator_count;
         self.region_linearize_rejected_non_advancing_count +=
             other.region_linearize_rejected_non_advancing_count;
         self.promotion_candidate_count += other.promotion_candidate_count;

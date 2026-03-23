@@ -1,7 +1,31 @@
 use super::cleanup::cleanup_redundant_labels;
+use super::linear::{LinearBodyLoweringOutcome, LinearBodyRejectReason};
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
+    fn record_region_body_lowering_reject_reason(&mut self, reason: LinearBodyRejectReason) {
+        match reason {
+            LinearBodyRejectReason::ConditionalTailExitMismatch => {
+                self.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count +=
+                    1;
+            }
+            LinearBodyRejectReason::SuccessorInlineRejected => {
+                self.region_linearize_rejected_body_lowering_successor_inline_rejected_count += 1;
+            }
+            LinearBodyRejectReason::RevisitCycle => {
+                self.region_linearize_rejected_body_lowering_revisit_cycle_count += 1;
+            }
+            LinearBodyRejectReason::UnsupportedTerminator => {
+                self.region_linearize_rejected_body_lowering_unsupported_terminator_count += 1;
+            }
+            LinearBodyRejectReason::TargetIndexMissing
+            | LinearBodyRejectReason::ExitMismatch
+            | LinearBodyRejectReason::BudgetTripped => {
+                self.region_linearize_rejected_body_lowering_unsupported_terminator_count += 1;
+            }
+        }
+    }
+
     fn region_linearized_exit_candidates(
         &self,
         start_idx: usize,
@@ -59,9 +83,14 @@ impl<'a> PreviewBuilder<'a> {
 
         let mut lowered = None;
         for exit in exits {
-            if let Some(result) = self.lower_linear_body(start_idx, exit)? {
-                lowered = Some(result);
-                break;
+            match self.lower_linear_body_for_region_recovery_detailed(start_idx, exit, None)? {
+                LinearBodyLoweringOutcome::Lowered(result) => {
+                    lowered = Some(result);
+                    break;
+                }
+                LinearBodyLoweringOutcome::Rejected(reason) => {
+                    self.record_region_body_lowering_reject_reason(reason);
+                }
             }
         }
         let Some((mut body, skip_to)) = lowered else {

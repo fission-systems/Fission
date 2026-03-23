@@ -111,6 +111,10 @@ struct PreviewBuilder<'a> {
     region_linearize_rejected_non_structuring_failure_count: usize,
     region_linearize_rejected_no_exit_count: usize,
     region_linearize_rejected_body_lowering_failed_count: usize,
+    region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: usize,
+    region_linearize_rejected_body_lowering_successor_inline_rejected_count: usize,
+    region_linearize_rejected_body_lowering_revisit_cycle_count: usize,
+    region_linearize_rejected_body_lowering_unsupported_terminator_count: usize,
     region_linearize_rejected_non_advancing_count: usize,
     promotion_candidate_count: usize,
     promoted_region_count: usize,
@@ -174,6 +178,7 @@ enum LinearExit {
 struct LinearBodyCacheKey {
     start_idx: usize,
     exit: LinearExit,
+    region_recovery: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -181,6 +186,7 @@ struct ConditionalTailKey {
     true_idx: usize,
     false_idx: usize,
     exit: LinearExit,
+    region_recovery: bool,
 }
 
 #[derive(Debug)]

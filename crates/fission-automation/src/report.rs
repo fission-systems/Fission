@@ -235,6 +235,22 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.region_linearize_rejected_body_lowering_failed_count,
         ),
         (
+            "region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count",
+            stats.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count,
+        ),
+        (
+            "region_linearize_rejected_body_lowering_successor_inline_rejected_count",
+            stats.region_linearize_rejected_body_lowering_successor_inline_rejected_count,
+        ),
+        (
+            "region_linearize_rejected_body_lowering_revisit_cycle_count",
+            stats.region_linearize_rejected_body_lowering_revisit_cycle_count,
+        ),
+        (
+            "region_linearize_rejected_body_lowering_unsupported_terminator_count",
+            stats.region_linearize_rejected_body_lowering_unsupported_terminator_count,
+        ),
+        (
             "region_linearize_rejected_non_advancing_count",
             stats.region_linearize_rejected_non_advancing_count,
         ),

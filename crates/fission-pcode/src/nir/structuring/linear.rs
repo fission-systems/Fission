@@ -2,10 +2,31 @@ use super::*;
 
 const MAX_LINEAR_STRUCTURING_DEPTH: usize = 256;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LinearBodyRejectReason {
+    ConditionalTailExitMismatch,
+    SuccessorInlineRejected,
+    RevisitCycle,
+    UnsupportedTerminator,
+    TargetIndexMissing,
+    ExitMismatch,
+    BudgetTripped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum LinearBodyLoweringOutcome {
+    Lowered((Vec<HirStmt>, usize)),
+    Rejected(LinearBodyRejectReason),
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn has_linear_body_cache(&self, start_idx: usize, exit: LinearExit) -> bool {
         self.linear_body_cache
-            .contains_key(&LinearBodyCacheKey { start_idx, exit })
+            .contains_key(&LinearBodyCacheKey {
+                start_idx,
+                exit,
+                region_recovery: false,
+            })
     }
 
     pub(super) fn build_linear_multiblock_body(
@@ -67,7 +88,11 @@ impl<'a> PreviewBuilder<'a> {
         exit: LinearExit,
         mut budget: Option<&mut IfLoweringBudget>,
     ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
-        let key = LinearBodyCacheKey { start_idx, exit };
+        let key = LinearBodyCacheKey {
+            start_idx,
+            exit,
+            region_recovery: false,
+        };
         if let Some(cached) = self.linear_body_cache.get(&key) {
             return Ok(cached.clone());
         }
@@ -80,8 +105,17 @@ impl<'a> PreviewBuilder<'a> {
             self.active_linear_body_keys.remove(&key);
             return Ok(None);
         }
-        let result =
-            self.lower_linear_body_with_depth(start_idx, exit, 0, budget.as_deref_mut())?;
+        let detailed = self.lower_linear_body_with_depth_detailed(
+            start_idx,
+            exit,
+            0,
+            budget.as_deref_mut(),
+            false,
+        )?;
+        let result = match detailed {
+            LinearBodyLoweringOutcome::Lowered(lowered) => Some(lowered),
+            LinearBodyLoweringOutcome::Rejected(_) => None,
+        };
         self.active_linear_body_keys.remove(&key);
         let should_cache = budget.as_deref().is_none_or(|budget| !budget.tripped);
         if should_cache {
@@ -90,20 +124,95 @@ impl<'a> PreviewBuilder<'a> {
         Ok(result)
     }
 
-    fn lower_linear_body_with_depth(
+    pub(super) fn lower_linear_body_detailed(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        mut budget: Option<&mut IfLoweringBudget>,
+    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
+        self.lower_linear_body_detailed_with_mode(start_idx, exit, budget.as_deref_mut(), false)
+    }
+
+    pub(super) fn lower_linear_body_for_region_recovery_detailed(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        mut budget: Option<&mut IfLoweringBudget>,
+    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
+        self.lower_linear_body_detailed_with_mode(start_idx, exit, budget.as_deref_mut(), true)
+    }
+
+    fn lower_linear_body_detailed_with_mode(
+        &mut self,
+        start_idx: usize,
+        exit: LinearExit,
+        mut budget: Option<&mut IfLoweringBudget>,
+        region_recovery: bool,
+    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
+        let key = LinearBodyCacheKey {
+            start_idx,
+            exit,
+            region_recovery,
+        };
+        if let Some(cached) = self.linear_body_cache.get(&key) {
+            return Ok(match cached {
+                Some(lowered) => LinearBodyLoweringOutcome::Lowered(lowered.clone()),
+                None => LinearBodyLoweringOutcome::Rejected(
+                    LinearBodyRejectReason::UnsupportedTerminator,
+                ),
+            });
+        }
+        if !self.active_linear_body_keys.insert(key) {
+            return Ok(LinearBodyLoweringOutcome::Rejected(
+                LinearBodyRejectReason::RevisitCycle,
+            ));
+        }
+        if let Some(budget) = budget.as_deref_mut()
+            && budget.checkpoint("lower_linear_body_start")
+        {
+            self.active_linear_body_keys.remove(&key);
+            return Ok(LinearBodyLoweringOutcome::Rejected(
+                LinearBodyRejectReason::BudgetTripped,
+            ));
+        }
+        let result = self.lower_linear_body_with_depth_detailed(
+            start_idx,
+            exit,
+            0,
+            budget.as_deref_mut(),
+            region_recovery,
+        )?;
+        self.active_linear_body_keys.remove(&key);
+        let should_cache = budget.as_deref().is_none_or(|budget| !budget.tripped);
+        if should_cache {
+            let cached = match &result {
+                LinearBodyLoweringOutcome::Lowered(lowered) => Some(lowered.clone()),
+                LinearBodyLoweringOutcome::Rejected(_) => None,
+            };
+            self.linear_body_cache.insert(key, cached);
+        }
+        Ok(result)
+    }
+
+    fn lower_linear_body_with_depth_detailed(
         &mut self,
         start_idx: usize,
         exit: LinearExit,
         depth: usize,
         mut budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<Option<(Vec<HirStmt>, usize)>, MlilPreviewError> {
+        region_recovery: bool,
+    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
         if depth > MAX_LINEAR_STRUCTURING_DEPTH {
-            return Ok(None);
+            return Ok(LinearBodyLoweringOutcome::Rejected(
+                LinearBodyRejectReason::BudgetTripped,
+            ));
         }
         if let Some(budget) = budget.as_deref_mut()
             && budget.checkpoint("lower_linear_body_depth")
         {
-            return Ok(None);
+            return Ok(LinearBodyLoweringOutcome::Rejected(
+                LinearBodyRejectReason::BudgetTripped,
+            ));
         }
 
         let mut idx = start_idx;
@@ -114,10 +223,14 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(budget) = budget.as_deref_mut()
                 && budget.checkpoint("lower_linear_body_loop")
             {
-                return Ok(None);
+                return Ok(LinearBodyLoweringOutcome::Rejected(
+                    LinearBodyRejectReason::BudgetTripped,
+                ));
             }
             if !visited.insert(idx) {
-                return Ok(None);
+                return Ok(LinearBodyLoweringOutcome::Rejected(
+                    LinearBodyRejectReason::RevisitCycle,
+                ));
             }
 
             let block = &self.pcode.blocks[idx];
@@ -125,36 +238,57 @@ impl<'a> PreviewBuilder<'a> {
             match self.lower_block_terminator(idx)? {
                 LoweredTerminator::Return(expr) => {
                     if exit != LinearExit::Return {
-                        return Ok(None);
+                        return Ok(LinearBodyLoweringOutcome::Rejected(
+                            LinearBodyRejectReason::ExitMismatch,
+                        ));
                     }
                     body.push(HirStmt::Return(expr));
-                    return Ok(Some((body, idx + 1)));
+                    return Ok(LinearBodyLoweringOutcome::Lowered((body, idx + 1)));
                 }
                 LoweredTerminator::Fallthrough(Some(target)) | LoweredTerminator::Goto(target) => {
                     let Some(next_idx) = self.find_block_index_by_address(target) else {
-                        return Ok(None);
+                        return Ok(LinearBodyLoweringOutcome::Rejected(
+                            LinearBodyRejectReason::TargetIndexMissing,
+                        ));
                     };
                     if exit == LinearExit::Join(next_idx) {
-                        return Ok(Some((body, next_idx)));
+                        return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
                     }
                     if body.is_empty()
                         && self.is_trivial_forwarding_block(idx, next_idx)
                         && self.linear_exit_with_budget(next_idx, budget.as_deref_mut())?
                             == Some(exit)
                     {
-                        return Ok(Some((body, next_idx)));
+                        return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
                     }
-                    if self.can_inline_linear_successor(idx, next_idx, &visited) {
+                    let can_inline = if region_recovery {
+                        self.can_inline_linear_successor_for_region(
+                            idx,
+                            next_idx,
+                            &visited,
+                            exit,
+                        )
+                    } else {
+                        self.can_inline_linear_successor(idx, next_idx, &visited)
+                    };
+                    if can_inline {
                         idx = next_idx;
                         continue;
                     }
-                    return Ok(None);
+                    return Ok(LinearBodyLoweringOutcome::Rejected(
+                        LinearBodyRejectReason::SuccessorInlineRejected,
+                    ));
                 }
                 LoweredTerminator::Fallthrough(None) => {
                     if exit != LinearExit::End {
-                        return Ok(None);
+                        return Ok(LinearBodyLoweringOutcome::Rejected(
+                            LinearBodyRejectReason::ExitMismatch,
+                        ));
                     }
-                    return Ok(Some((body, self.pcode.blocks.len())));
+                    return Ok(LinearBodyLoweringOutcome::Lowered((
+                        body,
+                        self.pcode.blocks.len(),
+                    )));
                 }
                 LoweredTerminator::Cond {
                     cond,
@@ -168,14 +302,21 @@ impl<'a> PreviewBuilder<'a> {
                         exit,
                         depth + 1,
                         budget.as_deref_mut(),
+                        region_recovery,
                     )?
                     else {
-                        return Ok(None);
+                        return Ok(LinearBodyLoweringOutcome::Rejected(
+                            LinearBodyRejectReason::ConditionalTailExitMismatch,
+                        ));
                     };
                     body.push(tail_stmt);
-                    return Ok(Some((body, skip_to)));
+                    return Ok(LinearBodyLoweringOutcome::Lowered((body, skip_to)));
                 }
-                _ => return Ok(None),
+                _ => {
+                    return Ok(LinearBodyLoweringOutcome::Rejected(
+                        LinearBodyRejectReason::UnsupportedTerminator,
+                    ));
+                }
             }
         }
     }
@@ -330,6 +471,29 @@ impl<'a> PreviewBuilder<'a> {
         self.is_trivial_linear_tail(next_idx)
     }
 
+    fn can_inline_linear_successor_for_region(
+        &self,
+        idx: usize,
+        next_idx: usize,
+        visited: &HashSet<usize>,
+        exit: LinearExit,
+    ) -> bool {
+        if next_idx <= idx {
+            return false;
+        }
+        if self.can_inline_linear_successor(idx, next_idx, visited) {
+            return true;
+        }
+        let LinearExit::Join(join_idx) = exit else {
+            return false;
+        };
+        if next_idx >= join_idx {
+            return false;
+        }
+        self.canonicalize_region_target_for_exit(idx, next_idx, exit)
+            .is_some_and(|normalized| normalized == join_idx)
+    }
+
     pub(super) fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
         if idx >= next_idx {
             return false;
@@ -439,6 +603,7 @@ impl<'a> PreviewBuilder<'a> {
         exit: LinearExit,
         depth: usize,
         mut budget: Option<&mut IfLoweringBudget>,
+        region_recovery: bool,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         if depth > MAX_LINEAR_STRUCTURING_DEPTH {
             return Ok(None);
@@ -457,65 +622,90 @@ impl<'a> PreviewBuilder<'a> {
         let Some(false_idx) = self.find_block_index_by_address(false_target) else {
             return Ok(None);
         };
+
+        let canonical_true_idx = if region_recovery {
+            self.canonicalize_region_target_for_exit(0, true_idx, exit)
+                .unwrap_or(true_idx)
+        } else {
+            true_idx
+        };
+        let canonical_false_idx = if region_recovery {
+            self.canonicalize_region_target_for_exit(0, false_idx, exit)
+                .unwrap_or(false_idx)
+        } else {
+            false_idx
+        };
+
         let key = ConditionalTailKey {
-            true_idx,
-            false_idx,
+            true_idx: canonical_true_idx,
+            false_idx: canonical_false_idx,
             exit,
+            region_recovery,
         };
         if !self.active_conditional_tail_keys.insert(key) {
             return Ok(None);
         }
 
         let result = (|| {
-            if exit == LinearExit::Join(true_idx) {
-                if let Some((false_body, skip_to)) = self.lower_linear_body_with_depth(
-                    false_idx,
-                    exit,
-                    depth + 1,
-                    budget.as_deref_mut(),
-                )? {
-                    return Ok(Some((
-                        HirStmt::If {
-                            cond: negate_expr(cond.clone()),
-                            then_body: false_body,
-                            else_body: Vec::new(),
-                        },
-                        skip_to,
-                    )));
-                }
-            }
-            if exit == LinearExit::Join(false_idx) {
-                if let Some((true_body, skip_to)) = self.lower_linear_body_with_depth(
-                    true_idx,
-                    exit,
-                    depth + 1,
-                    budget.as_deref_mut(),
-                )? {
-                    return Ok(Some((
-                        HirStmt::If {
-                            cond: cond.clone(),
-                            then_body: true_body,
-                            else_body: Vec::new(),
-                        },
-                        skip_to,
-                    )));
-                }
+            if exit == LinearExit::Join(canonical_true_idx)
+                && let LinearBodyLoweringOutcome::Lowered((false_body, skip_to)) =
+                    self.lower_linear_body_with_depth_detailed(
+                        canonical_false_idx,
+                        exit,
+                        depth + 1,
+                        budget.as_deref_mut(),
+                        region_recovery,
+                    )?
+            {
+                return Ok(Some((
+                    HirStmt::If {
+                        cond: negate_expr(cond.clone()),
+                        then_body: false_body,
+                        else_body: Vec::new(),
+                    },
+                    skip_to,
+                )));
             }
 
-            let true_branch = self.lower_linear_body_with_depth(
-                true_idx,
+            if exit == LinearExit::Join(canonical_false_idx)
+                && let LinearBodyLoweringOutcome::Lowered((true_body, skip_to)) =
+                    self.lower_linear_body_with_depth_detailed(
+                        canonical_true_idx,
+                        exit,
+                        depth + 1,
+                        budget.as_deref_mut(),
+                        region_recovery,
+                    )?
+            {
+                return Ok(Some((
+                    HirStmt::If {
+                        cond: cond.clone(),
+                        then_body: true_body,
+                        else_body: Vec::new(),
+                    },
+                    skip_to,
+                )));
+            }
+
+            let true_branch = self.lower_linear_body_with_depth_detailed(
+                canonical_true_idx,
                 exit,
                 depth + 1,
                 budget.as_deref_mut(),
+                region_recovery,
             )?;
-            let false_branch = self.lower_linear_body_with_depth(
-                false_idx,
+            let false_branch = self.lower_linear_body_with_depth_detailed(
+                canonical_false_idx,
                 exit,
                 depth + 1,
                 budget.as_deref_mut(),
+                region_recovery,
             )?;
             match (true_branch, false_branch) {
-                (Some((then_body, then_skip)), Some((else_body, else_skip))) => Ok(Some((
+                (
+                    LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
+                    LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
+                ) => Ok(Some((
                     HirStmt::If {
                         cond,
                         then_body,
@@ -528,6 +718,46 @@ impl<'a> PreviewBuilder<'a> {
         })();
         self.active_conditional_tail_keys.remove(&key);
         result
+    }
+
+    fn canonicalize_region_target_for_exit(
+        &self,
+        origin_idx: usize,
+        target_idx: usize,
+        exit: LinearExit,
+    ) -> Option<usize> {
+        if target_idx <= origin_idx {
+            return None;
+        }
+        let mut current = target_idx;
+        let mut steps = 0usize;
+        loop {
+            if let LinearExit::Join(join_idx) = exit {
+                if current == join_idx {
+                    return Some(current);
+                }
+                if current < join_idx
+                    && join_idx - current <= 2
+                    && self.is_trivial_forwarding_block(current, join_idx)
+                {
+                    return Some(join_idx);
+                }
+            }
+            if steps >= 2 {
+                break;
+            }
+            let next_idx = if self.successors[current].len() == 1 {
+                self.successors[current][0]
+            } else {
+                break;
+            };
+            if next_idx <= current || !self.is_trivial_forwarding_block(current, next_idx) {
+                break;
+            }
+            current = next_idx;
+            steps += 1;
+        }
+        Some(current)
     }
 
     pub(super) fn is_trivial_structuring_stmt(stmt: &HirStmt) -> bool {

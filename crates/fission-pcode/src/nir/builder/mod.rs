@@ -104,6 +104,10 @@ impl<'a> PreviewBuilder<'a> {
             region_linearize_rejected_non_structuring_failure_count: 0,
             region_linearize_rejected_no_exit_count: 0,
             region_linearize_rejected_body_lowering_failed_count: 0,
+            region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: 0,
+            region_linearize_rejected_body_lowering_successor_inline_rejected_count: 0,
+            region_linearize_rejected_body_lowering_revisit_cycle_count: 0,
+            region_linearize_rejected_body_lowering_unsupported_terminator_count: 0,
             region_linearize_rejected_non_advancing_count: 0,
             promotion_candidate_count: 0,
             promoted_region_count: 0,
@@ -236,6 +240,14 @@ impl<'a> PreviewBuilder<'a> {
             region_linearize_rejected_no_exit_count: self.region_linearize_rejected_no_exit_count,
             region_linearize_rejected_body_lowering_failed_count: self
                 .region_linearize_rejected_body_lowering_failed_count,
+            region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: self
+                .region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count,
+            region_linearize_rejected_body_lowering_successor_inline_rejected_count: self
+                .region_linearize_rejected_body_lowering_successor_inline_rejected_count,
+            region_linearize_rejected_body_lowering_revisit_cycle_count: self
+                .region_linearize_rejected_body_lowering_revisit_cycle_count,
+            region_linearize_rejected_body_lowering_unsupported_terminator_count: self
+                .region_linearize_rejected_body_lowering_unsupported_terminator_count,
             region_linearize_rejected_non_advancing_count: self
                 .region_linearize_rejected_non_advancing_count,
             promotion_candidate_count: self.promotion_candidate_count,
