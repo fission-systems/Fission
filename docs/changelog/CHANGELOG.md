@@ -7,6 +7,42 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-03-23
+
+### P5H3C - Localized Body-Lowering Recovery Coverage Expansion
+
+This patch targeted the next blocker called out in the previous quality round: reducing `region_linearized` rejection pressure from body-lowering failures without changing fallback policy.
+
+The change expands localized trampoline canonicalization for nearby joins and fixes a conditional-tail lowering edge case where both arms canonicalized to the same join and were incorrectly re-lowered from the join itself.
+
+#### Added
+
+- new regression test for localized recovery over multi-hop trampoline joins:
+  - `region_recovery_succeeds_on_multi_hop_trampoline_join`
+
+#### Changed
+
+- widened region target canonicalization window in localized recovery:
+  - increased canonicalization hop budget for trivial forwarding trampolines
+  - increased nearby-join trampoline distance allowance
+- fixed conditional-tail localized lowering arm selection:
+  - when canonicalization resolves directly to the join, branch lowering now starts from the original branch target arm instead of the join block
+- test helper visibility under `structuring` test wiring was aligned so test-only re-exports compile cleanly in the current layout
+- removed an unused linear-body detailed wrapper to keep the structuring module warning-clean
+
+#### Validation
+
+- `cargo test -p fission-pcode region_recovery_succeeds_on_ -- --nocapture`
+- `cargo check -p fission-pcode`
+- `cargo build -p fission-cli --features native_decomp`
+- `cargo build -p fission-automation`
+
+#### Current Outcome
+
+- localized region recovery now handles deeper trivial trampoline joins that were previously prone to body-lowering rejection
+- region-recovery regression coverage now includes the multi-hop join shape
+- targeted NIR structuring tests and dependent crate builds completed successfully after the patch
+
 ## 2026-03-21
 
 ### quality-measurement-pipeline / P5H3B - Output Quality Metrics and Localized Recovery Instrumentation
