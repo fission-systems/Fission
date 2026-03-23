@@ -74,6 +74,18 @@ pub struct AutomationSummary {
     pub generated_at: String,
     pub lane: String,
     pub run_id: String,
+    #[serde(default)]
+    pub run_profile: String,
+    #[serde(default)]
+    pub target_count: usize,
+    #[serde(default)]
+    pub inventory_elapsed_ms: u64,
+    #[serde(default)]
+    pub diagnosis_elapsed_ms: u64,
+    #[serde(default)]
+    pub write_outputs_elapsed_ms: u64,
+    #[serde(default)]
+    pub total_elapsed_ms: u64,
     pub binaries: Vec<BinarySnapshot>,
     pub aggregate: AggregateSnapshot,
 }
@@ -148,6 +160,8 @@ pub fn build_summary(
     generated_at: String,
     lane: &str,
     run_id: &str,
+    run_profile: &str,
+    target_count: usize,
     inventory_summaries: &[InventorySummary],
     totals: &InventorySummaryTotals,
     diagnosis: &DiagnosisAggregate,
@@ -209,6 +223,12 @@ pub fn build_summary(
         generated_at,
         lane: lane.to_string(),
         run_id: run_id.to_string(),
+        run_profile: run_profile.to_string(),
+        target_count,
+        inventory_elapsed_ms: 0,
+        diagnosis_elapsed_ms: 0,
+        write_outputs_elapsed_ms: 0,
+        total_elapsed_ms: 0,
         binaries,
         aggregate: AggregateSnapshot {
             rows_emitted: totals.rows_emitted,
@@ -578,8 +598,17 @@ pub fn render_markdown(
     let mut out = String::new();
     out.push_str("# Fission NIR Automation Summary\n\n");
     out.push_str(&format!("- Lane: `{}`\n", summary.lane));
+    out.push_str(&format!("- Run profile: `{}`\n", summary.run_profile));
+    out.push_str(&format!("- Target count: `{}`\n", summary.target_count));
     out.push_str(&format!("- Run: `{}`\n", summary.run_id));
     out.push_str(&format!("- Generated at: `{}`\n", summary.generated_at));
+    out.push_str(&format!(
+        "- Timings(ms): inventory=`{}`, diagnosis=`{}`, write_outputs=`{}`, total=`{}`\n",
+        summary.inventory_elapsed_ms,
+        summary.diagnosis_elapsed_ms,
+        summary.write_outputs_elapsed_ms,
+        summary.total_elapsed_ms,
+    ));
     out.push_str(&format!(
         "- Recommended next patch: `{}`\n\n",
         summary
@@ -770,6 +799,18 @@ fn mismatch_subtype_counts_from_stats(stats: &NirBuildStats) -> BTreeMap<String,
     counts.insert(
         "arm_body_lowering_failed".to_string(),
         stats.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count,
+    );
+    counts.insert(
+        "one_arm_body_lowering_failed".to_string(),
+        stats.region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count,
+    );
+    counts.insert(
+        "both_arms_body_lowering_failed".to_string(),
+        stats.region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count,
+    );
+    counts.insert(
+        "follow_tail_lowering_failed".to_string(),
+        stats.region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count,
     );
     counts.insert(
         "ambiguous_multiple_follows".to_string(),
@@ -1008,6 +1049,12 @@ mod tests {
             generated_at: "now".to_string(),
             lane: "nir".to_string(),
             run_id: "run".to_string(),
+            run_profile: "mid".to_string(),
+            target_count: 1,
+            inventory_elapsed_ms: 0,
+            diagnosis_elapsed_ms: 0,
+            write_outputs_elapsed_ms: 0,
+            total_elapsed_ms: 0,
             binaries: Vec::new(),
             aggregate: AggregateSnapshot {
                 rows_emitted: 1,

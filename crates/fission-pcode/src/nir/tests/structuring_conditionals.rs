@@ -1714,3 +1714,324 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
         .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
+
+#[test]
+fn region_follow_discovery_selects_immediate_common_postdom() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x6000,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x6000,
+                    output: None,
+                    inputs: vec![cst(0x6020, 8), reg(0x08, 1)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x6010,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6010,
+                    output: None,
+                    inputs: vec![cst(0x6030, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x6020,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6020,
+                    output: None,
+                    inputs: vec![cst(0x6040, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x6030,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6030,
+                    output: None,
+                    inputs: vec![cst(0x6050, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x6040,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6040,
+                    output: None,
+                    inputs: vec![cst(0x6050, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0x6050,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6050,
+                    output: None,
+                    inputs: vec![cst(0x6060, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 6,
+                start_address: 0x6060,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x6060,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let mut options = preview_options_x86();
+    options.region_linearize_structuring = true;
+    let builder = PreviewBuilder::new(&func, &options, None);
+    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 6);
+    assert_eq!(shared.first().copied(), Some(5));
+    assert_eq!(subtype, None);
+}
+
+#[test]
+fn region_follow_discovery_rejects_side_entry_common_follow() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x6100,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x6100,
+                    output: None,
+                    inputs: vec![cst(0x6120, 8), reg(0x08, 1)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x6110,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6110,
+                    output: None,
+                    inputs: vec![cst(0x6130, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x6120,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6120,
+                    output: None,
+                    inputs: vec![cst(0x6140, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x6130,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6130,
+                    output: None,
+                    inputs: vec![cst(0x6150, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x6140,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6140,
+                    output: None,
+                    inputs: vec![cst(0x6150, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0x6150,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6150,
+                    output: None,
+                    inputs: vec![cst(0x6160, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 6,
+                start_address: 0x6160,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x6160,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 7,
+                start_address: 0x6170,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6170,
+                    output: None,
+                    inputs: vec![cst(0x6150, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let mut options = preview_options_x86();
+    options.region_linearize_structuring = true;
+    let builder = PreviewBuilder::new(&func, &options, None);
+    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 6);
+    assert!(shared.is_empty());
+    assert_eq!(subtype, Some("SideEntryOrExit"));
+}
+
+#[test]
+fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x6200,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x6200,
+                    output: None,
+                    inputs: vec![cst(0x6220, 8), reg(0x08, 1)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x6210,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6210,
+                    output: None,
+                    inputs: vec![cst(0x6230, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x6220,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6220,
+                    output: None,
+                    inputs: vec![cst(0x6240, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x6230,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6230,
+                    output: None,
+                    inputs: vec![cst(0x6250, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x6240,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6240,
+                    output: None,
+                    inputs: vec![cst(0x6250, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0x6250,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6250,
+                    output: None,
+                    inputs: vec![cst(0x6260, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 6,
+                start_address: 0x6260,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x6260,
+                    output: None,
+                    inputs: vec![cst(0x6270, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 7,
+                start_address: 0x6270,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x6270,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let mut options = preview_options_x86();
+    options.region_linearize_structuring = true;
+    let builder = PreviewBuilder::new(&func, &options, None);
+    let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 7);
+    assert_eq!(subtype, None);
+    assert_eq!(shared, vec![6, 5]);
+}

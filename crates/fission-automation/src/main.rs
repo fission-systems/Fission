@@ -6,7 +6,7 @@ mod model;
 mod report;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use corpus::build_corpus_artifacts;
 use diagnosis::{aggregate_diagnosis, diagnosis_entry, DiagnosisReport};
 use inventory::{ensure_fission_cli, run_inventory_emit};
@@ -21,9 +21,10 @@ use report::{
     print_terminal_summary, render_markdown, update_latest, AutomationDecisionInsights,
     AutomationSummary,
 };
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Parser, Debug)]
 #[command(name = "fission-automation")]
@@ -62,6 +63,74 @@ struct NirCheckArgs {
     timeout_ms: Option<u64>,
     #[arg(long)]
     functions_limit: Option<usize>,
+    #[arg(long, value_enum, default_value_t = RunProfile::Mid)]
+    run_profile: RunProfile,
+    #[arg(long)]
+    focus_top_mismatch: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum RunProfile {
+    Fast,
+    Mid,
+    Full,
+}
+
+impl RunProfile {
+    fn as_str(self) -> &'static str {
+        match self {
+            RunProfile::Fast => "fast",
+            RunProfile::Mid => "mid",
+            RunProfile::Full => "full",
+        }
+    }
+
+    fn adjust_functions_limit(self, base: Option<usize>) -> Option<usize> {
+        match (self, base) {
+            (RunProfile::Fast, Some(v)) => Some(v.min(10).max(1)),
+            (RunProfile::Fast, None) => Some(10),
+            (RunProfile::Mid, v) => v,
+            (RunProfile::Full, Some(v)) => Some(v.max(40)),
+            (RunProfile::Full, None) => Some(40),
+        }
+    }
+
+    fn adjust_timeout_ms(self, base: u64) -> u64 {
+        match self {
+            RunProfile::Fast => base.min(1_500).max(500),
+            RunProfile::Mid => base,
+            RunProfile::Full => base.max(10_000),
+        }
+    }
+}
+
+fn normalize_binary_label(value: &str) -> String {
+    value.trim().trim_end_matches(".exe").to_ascii_lowercase()
+}
+
+fn pick_focus_binaries_from_baseline(rows: &[InventoryRow], top_n: usize) -> BTreeSet<String> {
+    let mut ranked = rows
+        .iter()
+        .filter_map(|row| {
+            let stats = row.nir_build_stats.as_ref()?;
+            let mismatch =
+                stats.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count;
+            if mismatch == 0 {
+                return None;
+            }
+            Some((
+                mismatch,
+                stats.region_linearize_rejected_body_lowering_failed_count,
+                row.binary.clone(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    ranked
+        .into_iter()
+        .take(top_n.max(1))
+        .map(|(_, _, binary)| normalize_binary_label(&binary))
+        .collect()
 }
 
 fn main() -> Result<()> {
@@ -80,6 +149,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn run_nir_check(args: NirCheckArgs) -> Result<()> {
+    let run_started = Instant::now();
     let root = repo_root();
     let (canonical_lane, deprecated_preview_lane) = normalize_lane_name(&args.lane);
     let manifest_path = args
@@ -91,7 +161,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
             .with_context(|| format!("load source inventory {}", path.display()))?,
         None => Default::default(),
     };
-    let targets = resolve_lane_targets(
+    let mut targets = resolve_lane_targets(
         &root,
         &manifest_path,
         canonical_lane,
@@ -117,6 +187,30 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
     fs::create_dir_all(&per_binary_dir)
         .with_context(|| format!("create {}", per_binary_dir.display()))?;
 
+    let latest_dir = root
+        .join("artifacts")
+        .join("fission-automation")
+        .join("latest")
+        .join(canonical_lane);
+    let baseline_path = args
+        .baseline
+        .unwrap_or_else(|| latest_dir.join("summary.json"));
+    let baseline = load_baseline(&baseline_path)?;
+    let baseline_candidates = load_baseline_candidates(&baseline_path)?;
+
+    if let Some(top_n) = args.focus_top_mismatch
+        && let Some(candidates) = baseline_candidates.as_deref()
+    {
+        let focus_binaries = pick_focus_binaries_from_baseline(candidates, top_n);
+        if !focus_binaries.is_empty() {
+            targets.retain(|target| focus_binaries.contains(&normalize_binary_label(&target.binary)));
+        }
+    }
+    if targets.is_empty() {
+        anyhow::bail!("run_profile/filter resolved no targets");
+    }
+
+    let inventory_started = Instant::now();
     let mut datasets: Vec<(InventorySummary, Vec<InventoryRow>, Option<SourceMeta>)> = Vec::new();
     let mut inventory_summaries = Vec::new();
     let mut failed_targets = Vec::new();
@@ -125,11 +219,13 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         let file_slug = sanitize_file_stem(&target.binary);
         let rows_path = per_binary_dir.join(format!("{file_slug}.inventory.rows.jsonl"));
         let summary_path = per_binary_dir.join(format!("{file_slug}.inventory.summary.json"));
-        let functions_limit = args.functions_limit.or(target.default_functions_limit);
+        let base_functions_limit = args.functions_limit.or(target.default_functions_limit);
+        let functions_limit = args.run_profile.adjust_functions_limit(base_functions_limit);
         let timeout_ms = args
             .timeout_ms
             .or(target.default_timeout_ms)
             .unwrap_or(10_000);
+        let timeout_ms = args.run_profile.adjust_timeout_ms(timeout_ms);
         let inventory_result = run_inventory_emit(
             &root,
             &fission_bin,
@@ -161,8 +257,10 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
             failed_targets.join(", ")
         );
     }
+    let inventory_elapsed_ms = inventory_started.elapsed().as_millis() as u64;
 
     let corpus_artifacts = build_corpus_artifacts(&root, &datasets);
+    let diagnosis_started = Instant::now();
     let diagnosis_entries = datasets
         .iter()
         .zip(targets.iter())
@@ -178,27 +276,19 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         aggregate: aggregate_diagnosis(&diagnosis_entries),
         binaries: diagnosis_entries,
     };
+    let diagnosis_elapsed_ms = diagnosis_started.elapsed().as_millis() as u64;
 
     let mut automation_summary = build_summary(
         isoish_now(),
         canonical_lane,
         &run_id,
+        args.run_profile.as_str(),
+        targets.len(),
         &inventory_summaries,
         &corpus_artifacts.inventory_summary_totals,
         &diagnosis_report.aggregate,
     );
     enrich_summary_with_provenance(&mut automation_summary, &diagnosis_report);
-
-    let latest_dir = root
-        .join("artifacts")
-        .join("fission-automation")
-        .join("latest")
-        .join(canonical_lane);
-    let baseline_path = args
-        .baseline
-        .unwrap_or_else(|| latest_dir.join("summary.json"));
-    let baseline = load_baseline(&baseline_path)?;
-    let baseline_candidates = load_baseline_candidates(&baseline_path)?;
     let delta = compute_delta(&automation_summary, baseline.as_ref());
     let decision_insights = build_decision_insights(
         &automation_summary,
@@ -207,6 +297,7 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         baseline_candidates.as_deref(),
     );
 
+    let write_started = Instant::now();
     write_outputs(
         &base_output_dir,
         &automation_summary,
@@ -215,13 +306,34 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         delta.as_ref(),
         &decision_insights,
     )?;
+    automation_summary.inventory_elapsed_ms = inventory_elapsed_ms;
+    automation_summary.diagnosis_elapsed_ms = diagnosis_elapsed_ms;
+    automation_summary.write_outputs_elapsed_ms = write_started.elapsed().as_millis() as u64;
+    automation_summary.total_elapsed_ms = run_started.elapsed().as_millis() as u64;
+    write_json_pretty(base_output_dir.join("summary.json"), &automation_summary)?;
+    let markdown = render_markdown(
+        &automation_summary,
+        &diagnosis_report,
+        &corpus_artifacts,
+        delta.as_ref(),
+        Some(&decision_insights),
+    );
+    fs::write(base_output_dir.join("summary.md"), markdown)
+        .with_context(|| format!("write {}", base_output_dir.join("summary.md").display()))?;
     if args.update_latest {
         update_latest(&base_output_dir, &latest_dir)?;
     }
     print_terminal_summary(&automation_summary, &diagnosis_report);
     println!(
-        "  go_stop_gate={} changed_rows={}",
-        decision_insights.go_stop_gate.decision, decision_insights.changed_row_count
+        "  profile={} targets={} timings(ms): inventory={} diagnosis={} write={} total={} go_stop_gate={} changed_rows={}",
+        automation_summary.run_profile,
+        automation_summary.target_count,
+        automation_summary.inventory_elapsed_ms,
+        automation_summary.diagnosis_elapsed_ms,
+        automation_summary.write_outputs_elapsed_ms,
+        automation_summary.total_elapsed_ms,
+        decision_insights.go_stop_gate.decision,
+        decision_insights.changed_row_count
     );
     if deprecated_preview_lane {
         eprintln!("[fission-automation] '--lane preview' is deprecated; use '--lane nir'");

@@ -102,6 +102,15 @@ pub struct NirBuildStats {
     pub region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count:
         usize,
     #[serde(default)]
+    pub region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count:
+        usize,
+    #[serde(default)]
+    pub region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count:
+        usize,
+    #[serde(default)]
+    pub region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count:
+        usize,
+    #[serde(default)]
     pub region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count:
         usize,
     #[serde(default)]
@@ -184,6 +193,12 @@ impl NirBuildStats {
             other.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count;
         self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += other
             .region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count;
+        self.region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count += other
+            .region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count;
+        self.region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count += other
+            .region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count;
+        self.region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count += other
+            .region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count;
         self.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count += other
             .region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count;
         self.region_linearize_rejected_body_lowering_successor_inline_rejected_count +=

@@ -1,0 +1,137 @@
+# fission-automation
+
+Canonical automation runner for Fission NIR quality pipelines.
+
+This crate is used to:
+
+- run repeatable `nir-check` lanes over sentinel binaries
+- emit machine-readable artifacts (`summary.json`, `decision_insights.json`, candidate lists)
+- compare current runs against a baseline
+- provide a **Go/Stop gate** for follow-up recovery work (for example P5H3G readiness)
+
+---
+
+## Quick start
+
+From repository root:
+
+```bash
+cargo run -p fission-automation -- nir-check --lane nir
+```
+
+By default, outputs are written under:
+
+- `artifacts/fission-automation/<run_id>/`
+
+and latest is mirrored to:
+
+- `artifacts/fission-automation/latest/<lane>/`
+
+---
+
+## Important options
+
+- `--lane <name>`
+  - canonical lane is `nir`
+  - `preview` is accepted but deprecated alias
+
+- `--run-profile {fast|mid|full}`
+  - `fast`: short feedback loop (smaller effective limits/timeouts)
+  - `mid`: default balanced mode
+  - `full`: broader validation window
+
+- `--focus-top-mismatch <N>`
+  - uses baseline candidates to focus run targets to binaries implicated by top `conditional_tail_exit_mismatch` rows
+  - ideal for rapid iteration on conditional-tail recovery patches
+
+- `--baseline <path/to/summary.json>`
+  - enables baseline delta + row-level mismatch diff + go/stop gating
+
+- `--functions-limit <N>` and `--timeout-ms <N>`
+  - explicit overrides (still profile-adjusted)
+
+- `--no-build` + `--fission-bin <path>`
+  - skip building `fission_cli` and use an existing binary
+
+---
+
+## Key outputs
+
+Main artifacts inside each run directory:
+
+- `summary.json`
+  - aggregate metrics + run metadata (`run_profile`, `target_count`, timing fields)
+- `summary.md`
+  - readable summary including baseline delta and decision insights
+- `decision_insights.json`
+  - mismatch subtype ranking
+  - top mismatch rows (with per-row subtype split)
+  - row-level baseline/current mismatch deltas
+  - `go_stop_gate` decision
+- `diagnosis.json`, `diagnosis.md`
+  - diagnosis buckets and recommended next patch
+- `nir_quality_candidates.json`
+  - per-row candidate data used for deep triage
+
+---
+
+## Recommended iteration workflow
+
+### 1) Fast loop (developer inner loop)
+
+```bash
+cargo run -p fission-automation -- nir-check \
+  --lane nir \
+  --run-profile fast \
+  --focus-top-mismatch 5 \
+  --no-build \
+  --fission-bin ./target/debug/fission_cli \
+  --baseline artifacts/fission-automation/latest/nir/summary.json
+```
+
+Use this to quickly validate whether the top mismatch rows move.
+
+### 2) Mid loop (PR-quality check)
+
+```bash
+cargo run -p fission-automation -- nir-check \
+  --lane nir \
+  --run-profile mid \
+  --no-build \
+  --fission-bin ./target/debug/fission_cli \
+  --baseline artifacts/fission-automation/latest/nir/summary.json
+```
+
+### 3) Full loop (periodic broader validation)
+
+```bash
+cargo run -p fission-automation -- nir-check --lane nir --run-profile full
+```
+
+---
+
+## Interpreting the go/stop gate
+
+`decision_insights.json` includes:
+
+- `go_p5h3g_candidate`
+  - mismatch improved under safe dominant subtype conditions
+- `stop_hold_p5h3f`
+  - no meaningful mismatch reduction or risk signal is insufficient
+- `stop_no_baseline`
+  - baseline comparison unavailable
+
+Treat this as an operational guardrail, not an absolute truth. Always inspect top mismatch rows and subtype distribution together.
+
+---
+
+## Development notes
+
+- Core modules:
+  - `main.rs`: orchestration, CLI, output writing
+  - `report.rs`: summary/delta/decision-insight construction and markdown rendering
+  - `diagnosis.rs`: diagnosis buckets and recommended patch classification
+  - `corpus.rs`: candidate aggregation and quality artifact assembly
+  - `inventory.rs`: `fission_cli` inventory execution and loading
+- Tests:
+  - `cargo test -p fission-automation`

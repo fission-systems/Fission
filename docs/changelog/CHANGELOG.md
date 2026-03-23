@@ -9,6 +9,81 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### P5H3H - Algorithmic Arm-Body Failure Refinement and Deterministic Follow Retry
+
+This patch continues the heuristic-to-algorithm transition by refining conditional-tail arm-body failure handling and making shared-follow retries deterministic over validated local postdom candidates.
+
+#### Changed
+
+- expanded recovery mismatch subtype model for arm-body failures:
+  - `OneArmBodyLoweringFailed`
+  - `BothArmsBodyLoweringFailed`
+  - `FollowTailLoweringFailed`
+- kept aggregate compatibility counter while adding subtype-specific counters for triage precision
+- upgraded shared-follow retry loop:
+  - retries now iterate over deterministic local postdom candidates (closest-to-join first)
+  - candidate attempts classify failure mode explicitly instead of collapsing into one bucket
+  - final fallback preserves candidate-stage subtype signal when available
+
+#### Added
+
+- algorithm-focused regression coverage:
+  - `region_follow_discovery_orders_multiple_candidates_closest_to_join_first`
+- test helper rename for multi-candidate follow verification:
+  - `find_shared_tail_entries_for_region_for_test`
+
+#### Validation
+
+- `cargo test -p fission-pcode region_follow_discovery_selects_immediate_common_postdom -- --nocapture` (pass)
+- `cargo test -p fission-pcode region_follow_discovery_rejects_side_entry_common_follow -- --nocapture` (pass)
+- `cargo test -p fission-pcode region_follow_discovery_orders_multiple_candidates_closest_to_join_first -- --nocapture` (pass)
+- `cargo test -p fission-pcode region_recovery_lowers_two_arm_nontrivial_shared_follow -- --nocapture` (pass)
+- `cargo test -p fission-pcode bootstrap_x86 -- --nocapture` (pass)
+- `cargo test -p fission-automation` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo build -p fission-automation` (pass)
+- focused benchmark:
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --focus-top-mismatch 5 --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --baseline /Users/sjkim1127/Fission/artifacts/fission-automation/1774247039-176890000/summary.json`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774248662-508776000`
+- mid benchmark:
+  - `cargo run -p fission-automation -- nir-check --lane preview --run-profile mid --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40 --baseline /Users/sjkim1127/Fission/artifacts/fission-automation/1774247039-176890000/summary.json`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774248700-402991000`
+
+#### Outcome
+
+- deterministic candidate-order retry behavior is now fixed and test-covered
+- subtype granularity for arm-body failures is now available in telemetry and automation insights
+- corpus headline metrics on the current 40-function lane remain unchanged (`changed_rows=0`, gate still `stop_hold_p5h3f`), but failure attribution quality improved for the next targeted algorithm step
+
+### Automation - Fast/Mid/Full Run Profiles and Focused Mismatch Reruns
+
+To reduce iteration latency for structuring work, nir-check now supports profile-based execution and baseline-driven target focusing.
+
+#### Added
+
+- `--run-profile {fast|mid|full}` for runtime-tuned execution:
+  - `fast`: aggressive limit/timeout reduction for tight loops
+  - `mid`: current default behavior
+  - `full`: expanded limits for broader validation
+- `--focus-top-mismatch N` to filter lane targets using baseline mismatch-heavy binaries
+  - reads baseline candidates and keeps only binaries implicated by top mismatch rows
+- run metadata in `summary.json`:
+  - `run_profile`, `target_count`, `inventory_elapsed_ms`, `diagnosis_elapsed_ms`, `write_outputs_elapsed_ms`, `total_elapsed_ms`
+- markdown summary now includes run profile/target count/timing line for quick bottleneck checks
+
+#### Changed
+
+- profile-aware tuning of effective per-target `functions-limit` and `timeout-ms` in automation runner
+- terminal summary now prints profile + timing stage breakdown + go/stop gate in one line
+
+#### Validation
+
+- `cargo test -p fission-automation` (pass)
+- `cargo build -p fission-automation` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --focus-top-mismatch 5 --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --baseline /Users/sjkim1127/Fission/artifacts/fission-automation/1774247039-176890000/summary.json`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774247430-463672000`
+  - run metadata emitted: `run_profile=fast`, `target_count=2`, timings populated
+
 ### Automation - Nir-Check Decision Reporting Upgrade (P5H3F Support)
 
 The automation pipeline now emits direct decision artifacts for conditional-tail recovery work, so patch iteration can be judged from row-level evidence instead of aggregate-only counters.

@@ -36,7 +36,9 @@ pub(super) enum ConditionalTailMismatchSubtype {
     SideEntryOrExit,
     ComplexArmShape,
     ArmBodyLoweringFailed,
-    AmbiguousMultipleFollows,
+    OneArmBodyLoweringFailed,
+    BothArmsBodyLoweringFailed,
+    FollowTailLoweringFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,8 +106,17 @@ impl<'a> PreviewBuilder<'a> {
             ConditionalTailMismatchSubtype::ArmBodyLoweringFailed => {
                 self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
             }
-            ConditionalTailMismatchSubtype::AmbiguousMultipleFollows => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count += 1;
+            ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed => {
+                self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
+                self.region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count += 1;
+            }
+            ConditionalTailMismatchSubtype::BothArmsBodyLoweringFailed => {
+                self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
+                self.region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count += 1;
+            }
+            ConditionalTailMismatchSubtype::FollowTailLoweringFailed => {
+                self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
+                self.region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count += 1;
             }
         }
     }
@@ -834,62 +845,81 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             let mut fallback_mismatch_subtype = ConditionalTailMismatchSubtype::NoCommonFollowInWindow;
-            if region_recovery
-                && let LinearExit::Join(join_idx) = exit
-                && let Some(shared_tail_entry_idx) = match self.find_shared_tail_entry_for_region(
+            if region_recovery && let LinearExit::Join(join_idx) = exit {
+                let shared_tail_entries = match self.find_shared_tail_entries_for_region(
                     origin_idx,
                     true_arm.effective_start_idx,
                     false_arm.effective_start_idx,
                     join_idx,
                 ) {
-                    Ok(candidate) => candidate,
+                    Ok(candidates) => candidates,
                     Err(subtype) => {
                         fallback_mismatch_subtype = subtype;
-                        None
+                        Vec::new()
+                    }
+                };
+                for shared_tail_entry_idx in shared_tail_entries {
+                    if shared_tail_entry_idx == join_idx {
+                        continue;
+                    }
+                    let shared_exit = LinearExit::Join(shared_tail_entry_idx);
+                    let true_branch = self.lower_linear_body_with_depth_detailed(
+                        true_arm.effective_start_idx,
+                        shared_exit,
+                        depth + 1,
+                        budget.as_deref_mut(),
+                        region_recovery,
+                    )?;
+                    let false_branch = self.lower_linear_body_with_depth_detailed(
+                        false_arm.effective_start_idx,
+                        shared_exit,
+                        depth + 1,
+                        budget.as_deref_mut(),
+                        region_recovery,
+                    )?;
+                    match (true_branch, false_branch) {
+                        (
+                            LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
+                            LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
+                        ) => {
+                            match self.lower_linear_body_with_depth_detailed(
+                                shared_tail_entry_idx,
+                                exit,
+                                depth + 1,
+                                budget.as_deref_mut(),
+                                region_recovery,
+                            )? {
+                                LinearBodyLoweringOutcome::Lowered((shared_tail_body, shared_skip)) => {
+                                    let mut block_stmts = vec![HirStmt::If {
+                                        cond: cond.clone(),
+                                        then_body,
+                                        else_body,
+                                    }];
+                                    block_stmts.extend(shared_tail_body);
+                                    return Ok(ConditionalTailLoweringResult::Lowered((
+                                        HirStmt::Block(block_stmts),
+                                        shared_skip.max(then_skip.max(else_skip)),
+                                    )));
+                                }
+                                LinearBodyLoweringOutcome::Rejected(_) => {
+                                    fallback_mismatch_subtype =
+                                        ConditionalTailMismatchSubtype::FollowTailLoweringFailed;
+                                }
+                            }
+                        }
+                        (
+                            LinearBodyLoweringOutcome::Rejected(_),
+                            LinearBodyLoweringOutcome::Rejected(_),
+                        ) => {
+                            fallback_mismatch_subtype =
+                                ConditionalTailMismatchSubtype::BothArmsBodyLoweringFailed;
+                        }
+                        _ => {
+                            fallback_mismatch_subtype =
+                                ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed;
+                        }
                     }
                 }
-                && shared_tail_entry_idx != join_idx
-            {
-                let shared_exit = LinearExit::Join(shared_tail_entry_idx);
-                let true_branch = self.lower_linear_body_with_depth_detailed(
-                    true_arm.effective_start_idx,
-                    shared_exit,
-                    depth + 1,
-                    budget.as_deref_mut(),
-                    region_recovery,
-                )?;
-                let false_branch = self.lower_linear_body_with_depth_detailed(
-                    false_arm.effective_start_idx,
-                    shared_exit,
-                    depth + 1,
-                    budget.as_deref_mut(),
-                    region_recovery,
-                )?;
-                if let (
-                    LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
-                    LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
-                ) = (true_branch, false_branch)
-                    && let LinearBodyLoweringOutcome::Lowered((shared_tail_body, shared_skip)) =
-                        self.lower_linear_body_with_depth_detailed(
-                            shared_tail_entry_idx,
-                            exit,
-                            depth + 1,
-                            budget.as_deref_mut(),
-                            region_recovery,
-                        )?
-                {
-                    let mut block_stmts = vec![HirStmt::If {
-                        cond: cond.clone(),
-                        then_body,
-                        else_body,
-                    }];
-                    block_stmts.extend(shared_tail_body);
-                    return Ok(ConditionalTailLoweringResult::Lowered((
-                        HirStmt::Block(block_stmts),
-                        shared_skip.max(then_skip.max(else_skip)),
-                    )));
-                }
-                fallback_mismatch_subtype = ConditionalTailMismatchSubtype::ArmBodyLoweringFailed;
             }
 
             let true_branch = self.lower_linear_body_with_depth_detailed(
@@ -922,9 +952,30 @@ impl<'a> PreviewBuilder<'a> {
                     LinearBodyLoweringOutcome::Rejected(_),
                     LinearBodyLoweringOutcome::Rejected(_),
                 ) => Ok(ConditionalTailLoweringResult::Mismatch(
-                    ConditionalTailMismatchSubtype::ArmBodyLoweringFailed,
+                    if fallback_mismatch_subtype
+                        == ConditionalTailMismatchSubtype::NoCommonFollowInWindow
+                    {
+                        ConditionalTailMismatchSubtype::BothArmsBodyLoweringFailed
+                    } else {
+                        fallback_mismatch_subtype
+                    },
                 )),
-                _ => Ok(ConditionalTailLoweringResult::Mismatch(fallback_mismatch_subtype)),
+                (
+                    LinearBodyLoweringOutcome::Rejected(_),
+                    LinearBodyLoweringOutcome::Lowered(_),
+                )
+                | (
+                    LinearBodyLoweringOutcome::Lowered(_),
+                    LinearBodyLoweringOutcome::Rejected(_),
+                ) => Ok(ConditionalTailLoweringResult::Mismatch(
+                    if fallback_mismatch_subtype
+                        == ConditionalTailMismatchSubtype::NoCommonFollowInWindow
+                    {
+                        ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed
+                    } else {
+                        fallback_mismatch_subtype
+                    },
+                )),
             }
         })();
         self.active_conditional_tail_keys.remove(&key);
@@ -961,113 +1012,233 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn find_shared_tail_entry_for_region(
+    fn find_shared_tail_entries_for_region(
         &self,
         origin_idx: usize,
         true_start_idx: usize,
         false_start_idx: usize,
         join_idx: usize,
-    ) -> Result<Option<usize>, ConditionalTailMismatchSubtype> {
-        let true_chain = self.collect_region_forward_chain_for_follow(origin_idx, true_start_idx, join_idx)?;
-        let false_chain = self.collect_region_forward_chain_for_follow(origin_idx, false_start_idx, join_idx)?;
-        let true_set: HashSet<usize> = true_chain.iter().copied().collect();
-        let false_set: HashSet<usize> = false_chain.iter().copied().collect();
-        let mut shared = true_set
-            .intersection(&false_set)
+    ) -> Result<Vec<usize>, ConditionalTailMismatchSubtype> {
+        let (window, reached_beyond_window) = self.collect_local_recovery_window_nodes(
+            origin_idx,
+            true_start_idx,
+            false_start_idx,
+            join_idx,
+        )?;
+        if !window.contains(&true_start_idx) || !window.contains(&false_start_idx) {
+            return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
+        }
+        let postdom = self.compute_local_postdom_sets(&window, join_idx)?;
+        let true_postdom = postdom
+            .get(&true_start_idx)
+            .ok_or(ConditionalTailMismatchSubtype::ComplexArmShape)?;
+        let false_postdom = postdom
+            .get(&false_start_idx)
+            .ok_or(ConditionalTailMismatchSubtype::ComplexArmShape)?;
+
+        let mut common_candidates = true_postdom
+            .intersection(false_postdom)
             .copied()
             .filter(|idx| *idx != join_idx)
             .collect::<Vec<_>>();
-        shared.sort_unstable();
-        shared.dedup();
-        if shared.len() > 1 {
-            return Err(ConditionalTailMismatchSubtype::AmbiguousMultipleFollows);
-        }
-        if let Some(candidate) = shared.first().copied() {
-            if self.shared_follow_candidate_has_side_edge(
-                origin_idx,
-                join_idx,
-                true_start_idx,
-                false_start_idx,
-                candidate,
-            ) {
-                return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
-            }
-            return Ok(Some(candidate));
-        }
-        if true_chain.last().copied() == Some(join_idx) && false_chain.last().copied() == Some(join_idx) {
-            return Ok(None);
-        }
-        if true_chain.last().copied().is_some_and(|last| last > join_idx)
-            || false_chain.last().copied().is_some_and(|last| last > join_idx)
-        {
-            return Err(ConditionalTailMismatchSubtype::FollowBeyondWindow);
-        }
-        Err(ConditionalTailMismatchSubtype::NoCommonFollowInWindow)
-    }
+        common_candidates.sort_unstable();
+        common_candidates.dedup();
 
-    fn collect_region_forward_chain_for_follow(
-        &self,
-        origin_idx: usize,
-        start_idx: usize,
-        join_idx: usize,
-    ) -> Result<Vec<usize>, ConditionalTailMismatchSubtype> {
-        if start_idx <= origin_idx {
-            return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
-        }
-        if start_idx > join_idx {
-            return Err(ConditionalTailMismatchSubtype::FollowBeyondWindow);
-        }
-        let mut chain = vec![start_idx];
-        let mut current = start_idx;
-        let mut steps = 0usize;
-        while current != join_idx && steps < MAX_REGION_FOLLOW_DISCOVERY_STEPS {
-            let succs = &self.successors[current];
-            if succs.len() != 1 {
-                return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
-            }
-            let next_idx = succs[0];
-            if next_idx <= current {
-                return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
-            }
-            if next_idx > join_idx {
+        if common_candidates.is_empty() {
+            if reached_beyond_window {
                 return Err(ConditionalTailMismatchSubtype::FollowBeyondWindow);
             }
-            chain.push(next_idx);
-            current = next_idx;
-            steps += 1;
+            return Err(ConditionalTailMismatchSubtype::NoCommonFollowInWindow);
         }
-        if current != join_idx && steps >= MAX_REGION_FOLLOW_DISCOVERY_STEPS {
-            return Err(ConditionalTailMismatchSubtype::FollowBeyondWindow);
+        let mut viable = common_candidates
+            .into_iter()
+            .filter(|candidate| {
+                !self.shared_follow_candidate_has_side_edge(origin_idx, &window, *candidate)
+            })
+            .collect::<Vec<_>>();
+        if viable.is_empty() {
+            return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
         }
-        Ok(chain)
+        viable.sort_unstable_by(|a, b| b.cmp(a));
+        viable.dedup();
+        Ok(viable)
+    }
+
+    fn collect_local_recovery_window_nodes(
+        &self,
+        origin_idx: usize,
+        true_start_idx: usize,
+        false_start_idx: usize,
+        join_idx: usize,
+    ) -> Result<(HashSet<usize>, bool), ConditionalTailMismatchSubtype> {
+        let mut nodes = HashSet::new();
+        let mut reached_beyond = false;
+        for start_idx in [true_start_idx, false_start_idx] {
+            if start_idx <= origin_idx {
+                return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
+            }
+            if start_idx > join_idx {
+                return Err(ConditionalTailMismatchSubtype::FollowBeyondWindow);
+            }
+            let mut stack = vec![(start_idx, 0usize)];
+            while let Some((idx, depth)) = stack.pop() {
+                if depth > MAX_REGION_FOLLOW_DISCOVERY_STEPS {
+                    reached_beyond = true;
+                    continue;
+                }
+                if idx <= origin_idx {
+                    return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
+                }
+                if idx > join_idx {
+                    reached_beyond = true;
+                    continue;
+                }
+                if !nodes.insert(idx) {
+                    continue;
+                }
+                if idx == join_idx {
+                    continue;
+                }
+                for succ in &self.successors[idx] {
+                    if *succ <= origin_idx {
+                        return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
+                    }
+                    if *succ > join_idx {
+                        reached_beyond = true;
+                        continue;
+                    }
+                    if *succ <= idx {
+                        return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
+                    }
+                    stack.push((*succ, depth + 1));
+                }
+            }
+        }
+        nodes.insert(join_idx);
+        Ok((nodes, reached_beyond))
+    }
+
+    fn compute_local_postdom_sets(
+        &self,
+        window: &HashSet<usize>,
+        join_idx: usize,
+    ) -> Result<HashMap<usize, HashSet<usize>>, ConditionalTailMismatchSubtype> {
+        if !window.contains(&join_idx) {
+            return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
+        }
+        let all_nodes = window.iter().copied().collect::<HashSet<_>>();
+        let mut postdom = HashMap::new();
+        for idx in window {
+            if *idx == join_idx {
+                postdom.insert(*idx, HashSet::from([join_idx]));
+            } else {
+                postdom.insert(*idx, all_nodes.clone());
+            }
+        }
+
+        let mut changed = true;
+        let mut iterations = 0usize;
+        let max_iterations = window.len().saturating_mul(window.len().max(1));
+        while changed && iterations < max_iterations {
+            changed = false;
+            iterations += 1;
+            for idx in window {
+                if *idx == join_idx {
+                    continue;
+                }
+                let succs = self.successors[*idx]
+                    .iter()
+                    .copied()
+                    .filter(|succ| window.contains(succ))
+                    .collect::<Vec<_>>();
+                if succs.is_empty() {
+                    return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
+                }
+                let mut intersection = postdom
+                    .get(&succs[0])
+                    .cloned()
+                    .ok_or(ConditionalTailMismatchSubtype::ComplexArmShape)?;
+                for succ in succs.iter().skip(1) {
+                    let succ_set = postdom
+                        .get(succ)
+                        .ok_or(ConditionalTailMismatchSubtype::ComplexArmShape)?;
+                    intersection = intersection
+                        .intersection(succ_set)
+                        .copied()
+                        .collect::<HashSet<_>>();
+                }
+                intersection.insert(*idx);
+                if postdom.get(idx).is_none_or(|current| *current != intersection) {
+                    postdom.insert(*idx, intersection);
+                    changed = true;
+                }
+            }
+        }
+        if iterations >= max_iterations {
+            return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
+        }
+        Ok(postdom)
     }
 
     fn shared_follow_candidate_has_side_edge(
         &self,
         origin_idx: usize,
-        join_idx: usize,
-        true_start_idx: usize,
-        false_start_idx: usize,
+        window: &HashSet<usize>,
         candidate_idx: usize,
     ) -> bool {
-        let mut allowed = HashSet::new();
-        for idx in true_start_idx..=join_idx {
-            allowed.insert(idx);
-        }
-        for idx in false_start_idx..=join_idx {
-            allowed.insert(idx);
-        }
         for pred in &self.predecessors[candidate_idx] {
-            if *pred <= origin_idx || !allowed.contains(pred) {
+            if *pred <= origin_idx || !window.contains(pred) {
                 return true;
             }
         }
         for succ in &self.successors[candidate_idx] {
-            if *succ > join_idx {
+            if !window.contains(succ) {
                 return true;
             }
         }
         false
+    }
+
+    #[cfg(test)]
+    pub(crate) fn find_shared_tail_entries_for_region_for_test(
+        &self,
+        origin_idx: usize,
+        true_start_idx: usize,
+        false_start_idx: usize,
+        join_idx: usize,
+    ) -> (Vec<usize>, Option<&'static str>) {
+        match self.find_shared_tail_entries_for_region(
+            origin_idx,
+            true_start_idx,
+            false_start_idx,
+            join_idx,
+        ) {
+            Ok(value) => (value, None),
+            Err(ConditionalTailMismatchSubtype::NoCommonFollowInWindow) => {
+                (Vec::new(), Some("NoCommonFollowInWindow"))
+            }
+            Err(ConditionalTailMismatchSubtype::FollowBeyondWindow) => {
+                (Vec::new(), Some("FollowBeyondWindow"))
+            }
+            Err(ConditionalTailMismatchSubtype::SideEntryOrExit) => {
+                (Vec::new(), Some("SideEntryOrExit"))
+            }
+            Err(ConditionalTailMismatchSubtype::ComplexArmShape) => {
+                (Vec::new(), Some("ComplexArmShape"))
+            }
+            Err(ConditionalTailMismatchSubtype::ArmBodyLoweringFailed) => {
+                (Vec::new(), Some("ArmBodyLoweringFailed"))
+            }
+            Err(ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed) => {
+                (Vec::new(), Some("OneArmBodyLoweringFailed"))
+            }
+            Err(ConditionalTailMismatchSubtype::BothArmsBodyLoweringFailed) => {
+                (Vec::new(), Some("BothArmsBodyLoweringFailed"))
+            }
+            Err(ConditionalTailMismatchSubtype::FollowTailLoweringFailed) => {
+                (Vec::new(), Some("FollowTailLoweringFailed"))
+            }
+        }
     }
 
     fn collect_region_trivial_forward_chain(
