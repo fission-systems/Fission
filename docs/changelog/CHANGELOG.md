@@ -9,6 +9,65 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### P5H3D - Region Recovery Semantics Tightening and Corpus Closure
+
+This patch tightened localized recovery semantics rather than broadening shape coverage. The focus was to preserve reject-reason fidelity across cache hits and make region target canonicalization origin-aware so conditional-tail normalization stays region-local and conservative.
+
+#### Added
+
+- regression coverage for semantics stability:
+  - `lower_linear_body_region_cache_preserves_reject_reason_across_retries`
+  - `region_canonicalization_respects_origin_guard`
+
+#### Changed
+
+- linear body cache now preserves reject reasons for localized (`region_recovery=true`) lowering cache entries instead of collapsing every cached reject into a generic class
+- non-localized (`region_recovery=false`) detailed cache behavior remains conservative/generic to avoid changing broader structuring policy
+- conditional-tail region canonicalization now uses the current conditional block index as origin instead of a fixed origin value
+- added a test-only canonicalization hook to assert origin-guard behavior directly in synthetic coverage
+
+#### Validation
+
+- `cargo test -p fission-pcode structuring_linear -- --nocapture`
+  - includes new cache-stability regression as passing
+  - includes one pre-existing failure on current `main`:
+    - `multi_block_preview_absorbs_shared_trivial_forwarding_return_tail`
+- `cargo test -p fission-pcode structuring_conditionals -- --nocapture`
+  - includes new origin-guard regression as passing
+  - includes pre-existing failures on current `main` (confirmed unchanged on baseline `origin/main`):
+    - `x86_pathological_try_lower_if_falls_back_without_hanging`
+    - `multi_block_preview_lowers_canonical_if_else`
+    - `multi_block_preview_lowers_if_else_with_multi_block_then_region`
+    - `multi_block_preview_prefers_short_circuit_or_over_nested_plain_if`
+    - `multi_block_preview_folds_short_circuit_and`
+    - `multi_block_preview_folds_short_circuit_or`
+- `cargo test -p fission-pcode bootstrap_x86 -- --nocapture` (pass)
+- `cargo build -p fission-cli --features native_decomp` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40`
+
+#### Corpus Outcome
+
+- 5-function `nir` lane aggregate:
+  - `recovery_structuring_mode_counts = {"forced_linear": 2}`
+  - `region_linearized = 0`
+  - body-lowering reject counters:
+    - `region_linearize_rejected_body_lowering_failed_count = 0`
+    - `conditional_tail_exit_mismatch = 0`
+    - `successor_inline_rejected = 0`
+    - `revisit_cycle = 0`
+    - `unsupported_terminator = 0`
+- 40-function (`preview` alias -> canonical `nir`) lane aggregate:
+  - `recovery_structuring_mode_counts = {"forced_linear": 18, "region_linearized": 1}`
+  - body-lowering reject counters:
+    - `region_linearize_rejected_body_lowering_failed_count = 5`
+    - `conditional_tail_exit_mismatch = 27`
+    - `successor_inline_rejected = 0`
+    - `revisit_cycle = 0`
+    - `unsupported_terminator = 0`
+
+This closes P5H3D as a semantics/measurement-hardening round. The next ranking signal remains conditional-tail mismatch pressure rather than unsupported-terminator inflation.
+
 ### P5H3C - Localized Body-Lowering Recovery Coverage Expansion
 
 This patch targeted the next blocker called out in the previous quality round: reducing `region_linearized` rejection pressure from body-lowering failures without changing fallback policy.

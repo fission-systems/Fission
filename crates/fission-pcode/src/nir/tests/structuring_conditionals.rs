@@ -1215,3 +1215,84 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
         .expect("region detailed lowering should not error");
     assert!(matches!(lowered, LinearBodyLoweringOutcome::Lowered(_)));
 }
+
+#[test]
+fn region_canonicalization_respects_origin_guard() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x5000,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x5000,
+                    output: None,
+                    inputs: vec![cst(0x5010, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x5010,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x5010,
+                    output: None,
+                    inputs: vec![cst(0x5040, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x5020,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x5020,
+                    output: None,
+                    inputs: vec![cst(0x5040, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x5030,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x5030,
+                    output: None,
+                    inputs: vec![cst(0x5040, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x5040,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5040,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let mut options = preview_options_x86();
+    options.region_linearize_structuring = true;
+    let builder = PreviewBuilder::new(&func, &options, None);
+
+    assert_eq!(
+        builder.canonicalize_region_target_for_exit_for_test(0, 1, LinearExit::Join(4)),
+        Some(4)
+    );
+    assert_eq!(
+        builder.canonicalize_region_target_for_exit_for_test(2, 1, LinearExit::Join(4)),
+        None
+    );
+}

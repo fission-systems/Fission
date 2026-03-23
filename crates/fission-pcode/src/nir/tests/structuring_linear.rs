@@ -177,6 +177,60 @@ fn lower_linear_body_caches_repeated_requests() {
 }
 
 #[test]
+fn lower_linear_body_region_cache_preserves_reject_reason_across_retries() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x4f80,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x4f80,
+                    output: None,
+                    inputs: vec![cst(0x4f80, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x4f90,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x4f90,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let mut options = preview_options_x86();
+    options.region_linearize_structuring = true;
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+
+    let first = builder
+        .lower_linear_body_for_region_recovery_detailed(0, LinearExit::Join(1), None)
+        .expect("first detailed lowering should not error");
+    let cache_len = builder.linear_body_cache.len();
+    let second = builder
+        .lower_linear_body_for_region_recovery_detailed(0, LinearExit::Join(1), None)
+        .expect("second detailed lowering should not error");
+
+    assert!(matches!(
+        first,
+        LinearBodyLoweringOutcome::Rejected(LinearBodyRejectReason::SuccessorInlineRejected)
+    ));
+    assert!(matches!(
+        second,
+        LinearBodyLoweringOutcome::Rejected(LinearBodyRejectReason::SuccessorInlineRejected)
+    ));
+    assert_eq!(builder.linear_body_cache.len(), cache_len);
+}
+
+#[test]
 
 fn multi_block_preview_absorbs_shared_trivial_forwarding_return_tail() {
     let cond = uniq(0x3a0, 1);

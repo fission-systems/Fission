@@ -97,7 +97,7 @@ struct PreviewBuilder<'a> {
     register_param_aliases: HashMap<u64, usize>,
     stack_frame_size: i64,
     linear_exit_cache: HashMap<usize, Option<LinearExit>>,
-    linear_body_cache: HashMap<LinearBodyCacheKey, Option<(Vec<HirStmt>, usize)>>,
+    linear_body_cache: HashMap<LinearBodyCacheKey, LinearBodyCachedOutcome>,
     active_linear_body_keys: HashSet<LinearBodyCacheKey>,
     active_conditional_tail_keys: HashSet<ConditionalTailKey>,
     jump_targets_cache: Option<HashSet<u64>>,

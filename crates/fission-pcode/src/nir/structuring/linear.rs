@@ -21,6 +21,12 @@ pub(crate) enum LinearBodyLoweringOutcome {
     Rejected(LinearBodyRejectReason),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LinearBodyCachedOutcome {
+    Lowered((Vec<HirStmt>, usize)),
+    Rejected(LinearBodyRejectReason),
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn has_linear_body_cache(&self, start_idx: usize, exit: LinearExit) -> bool {
         self.linear_body_cache
@@ -96,7 +102,10 @@ impl<'a> PreviewBuilder<'a> {
             region_recovery: false,
         };
         if let Some(cached) = self.linear_body_cache.get(&key) {
-            return Ok(cached.clone());
+            return Ok(match cached {
+                LinearBodyCachedOutcome::Lowered(lowered) => Some(lowered.clone()),
+                LinearBodyCachedOutcome::Rejected(_) => None,
+            });
         }
         if !self.active_linear_body_keys.insert(key) {
             return Ok(None);
@@ -114,14 +123,22 @@ impl<'a> PreviewBuilder<'a> {
             budget.as_deref_mut(),
             false,
         )?;
-        let result = match detailed {
-            LinearBodyLoweringOutcome::Lowered(lowered) => Some(lowered),
+        let result = match &detailed {
+            LinearBodyLoweringOutcome::Lowered(lowered) => Some(lowered.clone()),
             LinearBodyLoweringOutcome::Rejected(_) => None,
         };
         self.active_linear_body_keys.remove(&key);
         let should_cache = budget.as_deref().is_none_or(|budget| !budget.tripped);
         if should_cache {
-            self.linear_body_cache.insert(key, result.clone());
+            let cached = match &detailed {
+                LinearBodyLoweringOutcome::Lowered(lowered) => {
+                    LinearBodyCachedOutcome::Lowered(lowered.clone())
+                }
+                LinearBodyLoweringOutcome::Rejected(reason) => {
+                    LinearBodyCachedOutcome::Rejected(*reason)
+                }
+            };
+            self.linear_body_cache.insert(key, cached);
         }
         Ok(result)
     }
@@ -149,10 +166,18 @@ impl<'a> PreviewBuilder<'a> {
         };
         if let Some(cached) = self.linear_body_cache.get(&key) {
             return Ok(match cached {
-                Some(lowered) => LinearBodyLoweringOutcome::Lowered(lowered.clone()),
-                None => LinearBodyLoweringOutcome::Rejected(
-                    LinearBodyRejectReason::UnsupportedTerminator,
-                ),
+                LinearBodyCachedOutcome::Lowered(lowered) => {
+                    LinearBodyLoweringOutcome::Lowered(lowered.clone())
+                }
+                LinearBodyCachedOutcome::Rejected(reason) => {
+                    if region_recovery {
+                        LinearBodyLoweringOutcome::Rejected(*reason)
+                    } else {
+                        LinearBodyLoweringOutcome::Rejected(
+                            LinearBodyRejectReason::UnsupportedTerminator,
+                        )
+                    }
+                }
             });
         }
         if !self.active_linear_body_keys.insert(key) {
@@ -179,8 +204,18 @@ impl<'a> PreviewBuilder<'a> {
         let should_cache = budget.as_deref().is_none_or(|budget| !budget.tripped);
         if should_cache {
             let cached = match &result {
-                LinearBodyLoweringOutcome::Lowered(lowered) => Some(lowered.clone()),
-                LinearBodyLoweringOutcome::Rejected(_) => None,
+                LinearBodyLoweringOutcome::Lowered(lowered) => {
+                    LinearBodyCachedOutcome::Lowered(lowered.clone())
+                }
+                LinearBodyLoweringOutcome::Rejected(reason) => {
+                    if region_recovery {
+                        LinearBodyCachedOutcome::Rejected(*reason)
+                    } else {
+                        LinearBodyCachedOutcome::Rejected(
+                            LinearBodyRejectReason::UnsupportedTerminator,
+                        )
+                    }
+                }
             };
             self.linear_body_cache.insert(key, cached);
         }
@@ -289,6 +324,7 @@ impl<'a> PreviewBuilder<'a> {
                     false_target,
                 } => {
                     let Some((tail_stmt, skip_to)) = self.lower_conditional_tail(
+                        idx,
                         cond,
                         true_target,
                         false_target,
@@ -590,6 +626,7 @@ impl<'a> PreviewBuilder<'a> {
 
     pub(super) fn lower_conditional_tail(
         &mut self,
+        origin_idx: usize,
         cond: HirExpr,
         true_target: u64,
         false_target: Option<u64>,
@@ -617,13 +654,13 @@ impl<'a> PreviewBuilder<'a> {
         };
 
         let canonical_true_idx = if region_recovery {
-            self.canonicalize_region_target_for_exit(0, true_idx, exit)
+            self.canonicalize_region_target_for_exit(origin_idx, true_idx, exit)
                 .unwrap_or(true_idx)
         } else {
             true_idx
         };
         let canonical_false_idx = if region_recovery {
-            self.canonicalize_region_target_for_exit(0, false_idx, exit)
+            self.canonicalize_region_target_for_exit(origin_idx, false_idx, exit)
                 .unwrap_or(false_idx)
         } else {
             false_idx
@@ -767,6 +804,16 @@ impl<'a> PreviewBuilder<'a> {
             steps += 1;
         }
         Some(current)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn canonicalize_region_target_for_exit_for_test(
+        &self,
+        origin_idx: usize,
+        target_idx: usize,
+        exit: LinearExit,
+    ) -> Option<usize> {
+        self.canonicalize_region_target_for_exit(origin_idx, target_idx, exit)
     }
 
     pub(super) fn is_trivial_structuring_stmt(stmt: &HirStmt) -> bool {
