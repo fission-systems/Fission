@@ -9,6 +9,19 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### Docs - CONTRIBUTING CI/CD Workflow Refresh
+
+Contributor guidance was updated to match the current CI/CD architecture and remove stale local expectations.
+
+#### Changed
+
+- `CONTRIBUTING.md` now documents:
+  - fast PR gate vs heavy GitHub validation split
+  - Windows build/test participation in CI
+  - current local pre-PR command set aligned with fast gate
+  - direct CMake decompiler build invocation used in CI
+  - automation artifact interpretation expectations for decompilation-quality changes
+
 ### CI/CD - Major Reinforcement (Fast PR Gate + Heavy GitHub Validation)
 
 To reduce local monitoring burden, CI/CD now separates fast developer feedback from heavy long-running validation that can run entirely on GitHub.

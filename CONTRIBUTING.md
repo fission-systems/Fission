@@ -15,6 +15,7 @@ First off, thank you for considering contributing to Fission! It's people like y
 - [Commit Guidelines](#commit-guidelines)
 - [Pull Request Process](#pull-request-process)
 - [Testing](#testing)
+- [CI/CD Workflow](#cicd-workflow)
 - [Documentation](#documentation)
 - [Community](#community)
 
@@ -166,6 +167,9 @@ cd ..
 
 # Build Fission
 cargo build
+
+# Build fission-cli with native decompiler integration
+cargo build -p fission-cli --features native_decomp
 
 # Run tests
 cargo test
@@ -405,10 +409,10 @@ git commit -m "feat(cli): add --strings flag"
 4. **Write tests**
 5. **Run checks**
    ```bash
-   cargo fmt
-   cargo clippy
-   cargo test
-   cargo build --all-features
+   cargo fmt -- --check
+   cargo clippy --workspace --exclude fission-tauri -- -D warnings
+   cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
+   cargo build -p fission-cli --features native_decomp
    ```
 
 6. **Update documentation**
@@ -460,6 +464,59 @@ Add screenshots for GUI changes
 - Review within 3-7 days
 - Provide constructive feedback
 - Merge when approved
+
+---
+
+## CI/CD Workflow
+
+Fission uses a two-layer CI strategy to keep local development fast while preserving deep validation in GitHub.
+
+### 1) Fast PR Gate (`.github/workflows/ci.yml`)
+
+Runs on pull requests and pushes to `main`:
+
+- Linux fast gate
+  - `cargo deny` and Node security audit
+  - formatting/lint checks
+  - focused Rust test set
+  - decompiler smoke test
+- macOS build/test
+- Windows build/test
+
+This is the main merge gate and should fail quickly when regressions are introduced.
+
+### 2) Heavy Validation (`.github/workflows/ci-heavy.yml`)
+
+Runs on `main`, nightly schedule, and manual dispatch:
+
+- Linux full validation
+  - broader Rust test coverage
+  - Tauri frontend build (`npm run build`)
+  - decompiler smoke validation
+- Windows heavy build/test
+- automation nir-check lanes (`nir`, `regression`) with artifact upload
+
+Heavy checks may take longer and are intentionally offloaded to GitHub.
+
+### Decompiler build in CI
+
+CI uses direct CMake invocation (no build helper script path assumption):
+
+```bash
+cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
+cmake --build ghidra_decompiler/build --config Release
+```
+
+### Automation artifacts
+
+Heavy workflow uploads `artifacts/fission-automation/` so contributors can inspect:
+
+- `summary.json` / `summary.md`
+- `decision_insights.json`
+- `diagnosis.json`
+- per-binary candidate outputs
+
+If your PR impacts decompilation quality logic, review these artifacts before concluding regression status.
 
 ---
 
