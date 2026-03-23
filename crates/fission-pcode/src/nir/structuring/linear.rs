@@ -1,9 +1,11 @@
 use super::*;
 
 const MAX_LINEAR_STRUCTURING_DEPTH: usize = 256;
+const MAX_REGION_TARGET_CANONICALIZE_STEPS: usize = 4;
+const MAX_REGION_JOIN_TRAMPOLINE_DISTANCE: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LinearBodyRejectReason {
+pub(crate) enum LinearBodyRejectReason {
     ConditionalTailExitMismatch,
     SuccessorInlineRejected,
     RevisitCycle,
@@ -14,7 +16,7 @@ pub(super) enum LinearBodyRejectReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum LinearBodyLoweringOutcome {
+pub(crate) enum LinearBodyLoweringOutcome {
     Lowered((Vec<HirStmt>, usize)),
     Rejected(LinearBodyRejectReason),
 }
@@ -124,16 +126,7 @@ impl<'a> PreviewBuilder<'a> {
         Ok(result)
     }
 
-    pub(super) fn lower_linear_body_detailed(
-        &mut self,
-        start_idx: usize,
-        exit: LinearExit,
-        mut budget: Option<&mut IfLoweringBudget>,
-    ) -> Result<LinearBodyLoweringOutcome, MlilPreviewError> {
-        self.lower_linear_body_detailed_with_mode(start_idx, exit, budget.as_deref_mut(), false)
-    }
-
-    pub(super) fn lower_linear_body_for_region_recovery_detailed(
+    pub(crate) fn lower_linear_body_for_region_recovery_detailed(
         &mut self,
         start_idx: usize,
         exit: LinearExit,
@@ -635,10 +628,26 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             false_idx
         };
+        let (effective_true_idx, effective_false_idx) = if let LinearExit::Join(join_idx) = exit {
+            (
+                if canonical_true_idx == join_idx {
+                    true_idx
+                } else {
+                    canonical_true_idx
+                },
+                if canonical_false_idx == join_idx {
+                    false_idx
+                } else {
+                    canonical_false_idx
+                },
+            )
+        } else {
+            (canonical_true_idx, canonical_false_idx)
+        };
 
         let key = ConditionalTailKey {
-            true_idx: canonical_true_idx,
-            false_idx: canonical_false_idx,
+            true_idx: effective_true_idx,
+            false_idx: effective_false_idx,
             exit,
             region_recovery,
         };
@@ -650,7 +659,7 @@ impl<'a> PreviewBuilder<'a> {
             if exit == LinearExit::Join(canonical_true_idx)
                 && let LinearBodyLoweringOutcome::Lowered((false_body, skip_to)) =
                     self.lower_linear_body_with_depth_detailed(
-                        canonical_false_idx,
+                        effective_false_idx,
                         exit,
                         depth + 1,
                         budget.as_deref_mut(),
@@ -670,7 +679,7 @@ impl<'a> PreviewBuilder<'a> {
             if exit == LinearExit::Join(canonical_false_idx)
                 && let LinearBodyLoweringOutcome::Lowered((true_body, skip_to)) =
                     self.lower_linear_body_with_depth_detailed(
-                        canonical_true_idx,
+                        effective_true_idx,
                         exit,
                         depth + 1,
                         budget.as_deref_mut(),
@@ -688,14 +697,14 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             let true_branch = self.lower_linear_body_with_depth_detailed(
-                canonical_true_idx,
+                effective_true_idx,
                 exit,
                 depth + 1,
                 budget.as_deref_mut(),
                 region_recovery,
             )?;
             let false_branch = self.lower_linear_body_with_depth_detailed(
-                canonical_false_idx,
+                effective_false_idx,
                 exit,
                 depth + 1,
                 budget.as_deref_mut(),
@@ -737,13 +746,13 @@ impl<'a> PreviewBuilder<'a> {
                     return Some(current);
                 }
                 if current < join_idx
-                    && join_idx - current <= 2
+                    && join_idx - current <= MAX_REGION_JOIN_TRAMPOLINE_DISTANCE
                     && self.is_trivial_forwarding_block(current, join_idx)
                 {
                     return Some(join_idx);
                 }
             }
-            if steps >= 2 {
+            if steps >= MAX_REGION_TARGET_CANONICALIZE_STEPS {
                 break;
             }
             let next_idx = if self.successors[current].len() == 1 {

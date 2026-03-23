@@ -269,7 +269,7 @@ pub(crate) fn structuring_diag_enabled() -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn promote_single_entry_guarded_tail_regions_for_test(
+pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
     body: &mut Vec<HirStmt>,
 ) -> PreviewBuildStats {
     let dummy = PcodeFunction { blocks: Vec::new() };
@@ -289,7 +289,7 @@ pub(super) fn promote_single_entry_guarded_tail_regions_for_test(
 }
 
 #[cfg(test)]
-pub(super) fn discover_guarded_tail_candidates_for_test(body: &[HirStmt]) -> PreviewBuildStats {
+pub(crate) fn discover_guarded_tail_candidates_for_test(body: &[HirStmt]) -> PreviewBuildStats {
     discover_guarded_tail_candidates_for_stats(body)
 }
 

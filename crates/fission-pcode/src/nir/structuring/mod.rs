@@ -18,3 +18,5 @@ pub(crate) use driver::structuring_diag_enabled;
 pub(super) use driver::{
     discover_guarded_tail_candidates_for_test, promote_single_entry_guarded_tail_regions_for_test,
 };
+#[cfg(test)]
+pub(super) use linear::LinearBodyLoweringOutcome;
