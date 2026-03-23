@@ -9,6 +9,42 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### Automation - Nir-Check Decision Reporting Upgrade (P5H3F Support)
+
+The automation pipeline now emits direct decision artifacts for conditional-tail recovery work, so patch iteration can be judged from row-level evidence instead of aggregate-only counters.
+
+#### Added
+
+- `decision_insights.json` output in each nir-check run, including:
+  - mismatch subtype ranking
+  - top mismatch rows with per-row subtype split
+  - row-level baseline/current mismatch deltas
+  - deterministic go/stop gate recommendation for P5H3G readiness
+- markdown summary section `Conditional-Tail Decision Insights` with the same signal set
+
+#### Changed
+
+- baseline delta now includes recovery-shaping metrics:
+  - `region_linearized_count`
+  - `forced_linear_count`
+  - `conditional_tail_exit_mismatch_count`
+  - `body_lowering_failed_count`
+  - `successor_inline_rejected_count`
+  - `revisit_cycle_count`
+  - `unsupported_terminator_count`
+- nir-check now loads baseline candidate rows (when available) to compute row-address diff instead of aggregate-only comparison
+- terminal summary now prints go/stop gate and changed-row count for immediate run triage
+
+#### Validation
+
+- `cargo test -p fission-automation` (pass)
+- `cargo build -p fission-automation` (pass)
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40 --baseline /Users/sjkim1127/Fission/artifacts/fission-automation/1774245667-981676000/summary.json`
+  - generated output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774246248-772213000`
+  - go/stop gate emitted: `stop_hold_p5h3f`
+  - changed rows emitted: `0`
+  - subtype ranking surfaced from real rows: `arm_body_lowering_failed`, `complex_arm_shape`, `side_entry_or_exit`, `follow_beyond_window`
+
 ### P5H3F - Conditional-Tail Mismatch Subtype Harvesting + Bounded Follow Discovery
 
 This patch shifted the focus from widening shape support to separating `ConditionalTailExitMismatch` into actionable subtype signals and introducing a bounded local follow discovery path in region recovery.

@@ -8,7 +8,7 @@ mod report;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use corpus::build_corpus_artifacts;
-use diagnosis::{DiagnosisReport, aggregate_diagnosis, diagnosis_entry};
+use diagnosis::{aggregate_diagnosis, diagnosis_entry, DiagnosisReport};
 use inventory::{ensure_fission_cli, run_inventory_emit};
 use lanes::{
     default_manifest_path, default_source_inventory_path, load_source_inventory,
@@ -16,9 +16,10 @@ use lanes::{
 };
 use model::{InventoryRow, InventorySummary, SourceMeta};
 use report::{
-    AutomationSummary, build_quality_measurement, build_summary, compute_delta,
-    enrich_summary_with_provenance, load_baseline, print_terminal_summary, render_markdown,
-    update_latest,
+    build_decision_insights, build_quality_measurement, build_summary, compute_delta,
+    enrich_summary_with_provenance, load_baseline, load_baseline_candidates,
+    print_terminal_summary, render_markdown, update_latest, AutomationDecisionInsights,
+    AutomationSummary,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -197,7 +198,14 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         .baseline
         .unwrap_or_else(|| latest_dir.join("summary.json"));
     let baseline = load_baseline(&baseline_path)?;
+    let baseline_candidates = load_baseline_candidates(&baseline_path)?;
     let delta = compute_delta(&automation_summary, baseline.as_ref());
+    let decision_insights = build_decision_insights(
+        &automation_summary,
+        &corpus_artifacts.candidates,
+        baseline.as_ref(),
+        baseline_candidates.as_deref(),
+    );
 
     write_outputs(
         &base_output_dir,
@@ -205,11 +213,16 @@ fn run_nir_check(args: NirCheckArgs) -> Result<()> {
         &diagnosis_report,
         &corpus_artifacts,
         delta.as_ref(),
+        &decision_insights,
     )?;
     if args.update_latest {
         update_latest(&base_output_dir, &latest_dir)?;
     }
     print_terminal_summary(&automation_summary, &diagnosis_report);
+    println!(
+        "  go_stop_gate={} changed_rows={}",
+        decision_insights.go_stop_gate.decision, decision_insights.changed_row_count
+    );
     if deprecated_preview_lane {
         eprintln!("[fission-automation] '--lane preview' is deprecated; use '--lane nir'");
     }
@@ -232,6 +245,7 @@ fn write_outputs(
     diagnosis: &DiagnosisReport,
     corpus: &corpus::CorpusArtifacts,
     delta: Option<&report::SummaryDelta>,
+    insights: &AutomationDecisionInsights,
 ) -> Result<()> {
     fs::create_dir_all(base_output_dir)
         .with_context(|| format!("create {}", base_output_dir.display()))?;
@@ -242,6 +256,7 @@ fn write_outputs(
         &build_quality_measurement(summary),
     )?;
     write_json_pretty(base_output_dir.join("diagnosis.json"), diagnosis)?;
+    write_json_pretty(base_output_dir.join("decision_insights.json"), insights)?;
     write_json_pretty(
         base_output_dir.join("corpus.json"),
         &serde_json::json!({
@@ -283,7 +298,7 @@ fn write_outputs(
         &serde_json::json!({ "aligned_candidates": corpus.aligned_explicit_candidates }),
     )?;
 
-    let markdown = render_markdown(summary, diagnosis, corpus, delta);
+    let markdown = render_markdown(summary, diagnosis, corpus, delta, Some(insights));
     fs::write(base_output_dir.join("summary.md"), markdown)
         .with_context(|| format!("write {}", base_output_dir.join("summary.md").display()))?;
     fs::write(
