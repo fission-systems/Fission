@@ -9,6 +9,67 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### P5H3E - Conditional-Tail Normalization Widening (Localized Recovery)
+
+This patch focused on reducing `conditional_tail_exit_mismatch` inside localized recovery without broadening general CFG support.
+
+#### Changed
+
+- added region-only conditional-tail arm normalization stage:
+  - `normalize_conditional_tail_arm_for_region(...)`
+  - explicitly separates canonical target from effective lowering start
+- strengthened one-arm preference under region recovery:
+  - if one arm reaches join via bounded trivial forwarding chain, prioritize one-arm if lowering on the opposite arm
+- added conservative shared-tail reconciliation for two-arm region tails:
+  - detects bounded forward-only trivial common tail entry
+  - retries arm lowering to shared tail entry before lowering the shared tail to final join
+  - constrained to region-recovery path only (forward-only, bounded, trivial forwarding)
+
+#### Added
+
+- synthetic regression tests for conditional-tail normalization widening:
+  - `region_recovery_lowers_one_arm_join_adjacent_forwarding_chain`
+  - `region_recovery_lowers_two_arm_shared_tail_entry`
+
+#### Validation
+
+- `cargo test -p fission-pcode structuring_linear -- --nocapture`
+  - same pre-existing failure shape on current `main`:
+    - `multi_block_preview_absorbs_shared_trivial_forwarding_return_tail`
+- `cargo test -p fission-pcode structuring_conditionals -- --nocapture`
+  - both new synthetic P5H3E tests pass
+  - same pre-existing failures on current `main` remain:
+    - `x86_pathological_try_lower_if_falls_back_without_hanging`
+    - `multi_block_preview_lowers_canonical_if_else`
+    - `multi_block_preview_lowers_if_else_with_multi_block_then_region`
+    - `multi_block_preview_prefers_short_circuit_or_over_nested_plain_if`
+    - `multi_block_preview_folds_short_circuit_and`
+    - `multi_block_preview_folds_short_circuit_or`
+- `cargo test -p fission-pcode bootstrap_x86 -- --nocapture` (pass)
+- `cargo build -p fission-cli --features native_decomp` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774243155-357880000`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774243155-349905000`
+
+#### Corpus Delta vs P5H3D Baseline
+
+- baseline (P5H3D):
+  - 5-function lane: `/artifacts/fission-automation/1774242470-100755000`
+  - 40-function lane: `/artifacts/fission-automation/1774242496-398954000`
+- P5H3E result:
+  - 5-function lane: `region_linearized=0`, `forced_linear=2`, mismatch counters all `0` (unchanged)
+  - 40-function lane:
+    - `region_linearized=1` (unchanged)
+    - `forced_linear=18` (unchanged)
+    - `region_linearize_rejected_body_lowering_failed_count=5` (unchanged)
+    - `conditional_tail_exit_mismatch=27` (unchanged)
+    - `successor_inline_rejected=0` (unchanged)
+    - `revisit_cycle=0` (unchanged)
+    - `unsupported_terminator=0` (unchanged)
+
+This indicates the conservative widening is behavior-safe and regression-clean for targeted synthetic shapes, but does not yet shift aggregate mismatch pressure in current 40-function corpus.
+
 ### P5H3D - Region Recovery Semantics Tightening and Corpus Closure
 
 This patch tightened localized recovery semantics rather than broadening shape coverage. The focus was to preserve reject-reason fidelity across cache hits and make region target canonicalization origin-aware so conditional-tail normalization stays region-local and conservative.

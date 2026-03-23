@@ -3,6 +3,7 @@ use super::*;
 const MAX_LINEAR_STRUCTURING_DEPTH: usize = 256;
 const MAX_REGION_TARGET_CANONICALIZE_STEPS: usize = 4;
 const MAX_REGION_JOIN_TRAMPOLINE_DISTANCE: usize = 4;
+const MAX_REGION_SHARED_TAIL_STEPS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinearBodyRejectReason {
@@ -25,6 +26,13 @@ pub(crate) enum LinearBodyLoweringOutcome {
 pub(crate) enum LinearBodyCachedOutcome {
     Lowered((Vec<HirStmt>, usize)),
     Rejected(LinearBodyRejectReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NormalizedConditionalTailArm {
+    canonical_idx: usize,
+    effective_start_idx: usize,
+    reaches_join_trivially: bool,
 }
 
 impl<'a> PreviewBuilder<'a> {
@@ -653,38 +661,28 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         };
 
-        let canonical_true_idx = if region_recovery {
-            self.canonicalize_region_target_for_exit(origin_idx, true_idx, exit)
-                .unwrap_or(true_idx)
+        let true_arm = if region_recovery {
+            self.normalize_conditional_tail_arm_for_region(origin_idx, true_idx, exit)
         } else {
-            true_idx
+            NormalizedConditionalTailArm {
+                canonical_idx: true_idx,
+                effective_start_idx: true_idx,
+                reaches_join_trivially: false,
+            }
         };
-        let canonical_false_idx = if region_recovery {
-            self.canonicalize_region_target_for_exit(origin_idx, false_idx, exit)
-                .unwrap_or(false_idx)
+        let false_arm = if region_recovery {
+            self.normalize_conditional_tail_arm_for_region(origin_idx, false_idx, exit)
         } else {
-            false_idx
-        };
-        let (effective_true_idx, effective_false_idx) = if let LinearExit::Join(join_idx) = exit {
-            (
-                if canonical_true_idx == join_idx {
-                    true_idx
-                } else {
-                    canonical_true_idx
-                },
-                if canonical_false_idx == join_idx {
-                    false_idx
-                } else {
-                    canonical_false_idx
-                },
-            )
-        } else {
-            (canonical_true_idx, canonical_false_idx)
+            NormalizedConditionalTailArm {
+                canonical_idx: false_idx,
+                effective_start_idx: false_idx,
+                reaches_join_trivially: false,
+            }
         };
 
         let key = ConditionalTailKey {
-            true_idx: effective_true_idx,
-            false_idx: effective_false_idx,
+            true_idx: true_arm.effective_start_idx,
+            false_idx: false_arm.effective_start_idx,
             exit,
             region_recovery,
         };
@@ -693,10 +691,10 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let result = (|| {
-            if exit == LinearExit::Join(canonical_true_idx)
+            if true_arm.reaches_join_trivially
                 && let LinearBodyLoweringOutcome::Lowered((false_body, skip_to)) =
                     self.lower_linear_body_with_depth_detailed(
-                        effective_false_idx,
+                        false_arm.effective_start_idx,
                         exit,
                         depth + 1,
                         budget.as_deref_mut(),
@@ -713,10 +711,10 @@ impl<'a> PreviewBuilder<'a> {
                 )));
             }
 
-            if exit == LinearExit::Join(canonical_false_idx)
+            if false_arm.reaches_join_trivially
                 && let LinearBodyLoweringOutcome::Lowered((true_body, skip_to)) =
                     self.lower_linear_body_with_depth_detailed(
-                        effective_true_idx,
+                        true_arm.effective_start_idx,
                         exit,
                         depth + 1,
                         budget.as_deref_mut(),
@@ -733,15 +731,66 @@ impl<'a> PreviewBuilder<'a> {
                 )));
             }
 
+            if region_recovery
+                && let LinearExit::Join(join_idx) = exit
+                && let Some(shared_tail_entry_idx) = self.find_shared_tail_entry_for_region(
+                    origin_idx,
+                    true_arm.effective_start_idx,
+                    false_arm.effective_start_idx,
+                    join_idx,
+                )
+                && shared_tail_entry_idx != join_idx
+            {
+                let shared_exit = LinearExit::Join(shared_tail_entry_idx);
+                let true_branch = self.lower_linear_body_with_depth_detailed(
+                    true_arm.effective_start_idx,
+                    shared_exit,
+                    depth + 1,
+                    budget.as_deref_mut(),
+                    region_recovery,
+                )?;
+                let false_branch = self.lower_linear_body_with_depth_detailed(
+                    false_arm.effective_start_idx,
+                    shared_exit,
+                    depth + 1,
+                    budget.as_deref_mut(),
+                    region_recovery,
+                )?;
+                if let (
+                    LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
+                    LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
+                ) = (true_branch, false_branch)
+                    && let LinearBodyLoweringOutcome::Lowered((shared_tail_body, shared_skip)) =
+                        self.lower_linear_body_with_depth_detailed(
+                            shared_tail_entry_idx,
+                            exit,
+                            depth + 1,
+                            budget.as_deref_mut(),
+                            region_recovery,
+                        )?
+                {
+                    let mut block_stmts = vec![HirStmt::If {
+                        cond: cond.clone(),
+                        then_body,
+                        else_body,
+                    }];
+                    block_stmts.extend(shared_tail_body);
+                    return Ok(Some((
+                        HirStmt::Block(block_stmts),
+                        shared_skip.max(then_skip.max(else_skip)),
+                    )));
+                }
+            }
+
             let true_branch = self.lower_linear_body_with_depth_detailed(
-                effective_true_idx,
+                true_arm.effective_start_idx,
                 exit,
                 depth + 1,
                 budget.as_deref_mut(),
                 region_recovery,
             )?;
             let false_branch = self.lower_linear_body_with_depth_detailed(
-                effective_false_idx,
+                false_arm.effective_start_idx,
                 exit,
                 depth + 1,
                 budget.as_deref_mut(),
@@ -764,6 +813,96 @@ impl<'a> PreviewBuilder<'a> {
         })();
         self.active_conditional_tail_keys.remove(&key);
         result
+    }
+
+    fn normalize_conditional_tail_arm_for_region(
+        &self,
+        origin_idx: usize,
+        start_idx: usize,
+        exit: LinearExit,
+    ) -> NormalizedConditionalTailArm {
+        let canonical_idx = self
+            .canonicalize_region_target_for_exit(origin_idx, start_idx, exit)
+            .unwrap_or(start_idx);
+        if let LinearExit::Join(join_idx) = exit {
+            let reaches_join_trivially =
+                self.trivial_region_chain_reaches_join(origin_idx, start_idx, join_idx);
+            let effective_start_idx = if reaches_join_trivially {
+                start_idx
+            } else {
+                canonical_idx
+            };
+            return NormalizedConditionalTailArm {
+                canonical_idx,
+                effective_start_idx,
+                reaches_join_trivially,
+            };
+        }
+        NormalizedConditionalTailArm {
+            canonical_idx,
+            effective_start_idx: canonical_idx,
+            reaches_join_trivially: false,
+        }
+    }
+
+    fn find_shared_tail_entry_for_region(
+        &self,
+        origin_idx: usize,
+        true_start_idx: usize,
+        false_start_idx: usize,
+        join_idx: usize,
+    ) -> Option<usize> {
+        let true_chain = self.collect_region_trivial_forward_chain(origin_idx, true_start_idx, join_idx);
+        let false_chain = self.collect_region_trivial_forward_chain(origin_idx, false_start_idx, join_idx);
+        let false_chain_set: HashSet<usize> = false_chain.into_iter().collect();
+        true_chain
+            .into_iter()
+            .find(|idx| *idx != join_idx && false_chain_set.contains(idx))
+    }
+
+    fn collect_region_trivial_forward_chain(
+        &self,
+        origin_idx: usize,
+        start_idx: usize,
+        join_idx: usize,
+    ) -> Vec<usize> {
+        if start_idx <= origin_idx || start_idx > join_idx {
+            return Vec::new();
+        }
+        let mut chain = vec![start_idx];
+        let mut current = start_idx;
+        let mut steps = 0usize;
+        while current != join_idx && steps < MAX_REGION_SHARED_TAIL_STEPS {
+            if self.successors[current].len() != 1 {
+                break;
+            }
+            let next_idx = self.successors[current][0];
+            if next_idx <= current
+                || next_idx > join_idx
+                || !self.is_trivial_forwarding_block(current, next_idx)
+            {
+                break;
+            }
+            chain.push(next_idx);
+            current = next_idx;
+            steps += 1;
+        }
+        chain
+    }
+
+    fn trivial_region_chain_reaches_join(
+        &self,
+        origin_idx: usize,
+        start_idx: usize,
+        join_idx: usize,
+    ) -> bool {
+        if start_idx == join_idx {
+            return true;
+        }
+        self.collect_region_trivial_forward_chain(origin_idx, start_idx, join_idx)
+            .last()
+            .copied()
+            == Some(join_idx)
     }
 
     fn canonicalize_region_target_for_exit(
