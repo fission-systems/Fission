@@ -797,8 +797,8 @@ fn mismatch_subtype_counts_from_stats(stats: &NirBuildStats) -> BTreeMap<String,
         stats.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count,
     );
     counts.insert(
-        "arm_body_lowering_failed".to_string(),
-        stats.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count,
+        "depth_or_budget_exhausted".to_string(),
+        stats.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count,
     );
     counts.insert(
         "one_arm_body_lowering_failed".to_string(),

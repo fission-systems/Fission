@@ -9,6 +9,41 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### P5H3I - Algorithmic Arm-Body Failure Decomposition and Signal Cleanup
+
+This patch focused on removing opaque/generic arm-body failure reporting from conditional-tail mismatch analysis and keeping recovery retry behavior deterministic.
+
+#### Changed
+
+- conditional-tail mismatch subtyping now distinguishes algorithmic causes without relying on a generic arm-body bucket:
+  - `DepthOrBudgetExceeded`
+  - `OneArmBodyLoweringFailed`
+  - `BothArmsBodyLoweringFailed`
+  - `FollowTailLoweringFailed`
+- shared-follow retry failure handling now preserves candidate-stage subtype when propagating final mismatch
+- `arm_body_lowering_failed` aggregate counter remains for compatibility but is now sourced from explicit subtypes only
+- automation subtype ranking now reports specific subtype channels directly (rather than the aggregate arm-body total)
+
+#### Validation
+
+- `cargo test -p fission-pcode region_follow_discovery_orders_multiple_candidates_closest_to_join_first -- --nocapture` (pass)
+- `cargo test -p fission-pcode region_recovery_lowers_two_arm_nontrivial_shared_follow -- --nocapture` (pass)
+- `cargo test -p fission-pcode bootstrap_x86 -- --nocapture` (pass)
+- `cargo test -p fission-automation` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo build -p fission-automation` (pass)
+- focused fast benchmark:
+  - `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --focus-top-mismatch 5 --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --baseline /Users/sjkim1127/Fission/artifacts/fission-automation/1774247039-176890000/summary.json`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774249297-033281000`
+- mid benchmark:
+  - `cargo run -p fission-automation -- nir-check --lane preview --run-profile mid --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40 --baseline /Users/sjkim1127/Fission/artifacts/fission-automation/1774247039-176890000/summary.json`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774249297-026445000`
+
+#### Outcome
+
+- top-row movement is still not observed (`changed_rows=0`, gate remains `stop_hold_p5h3f`)
+- failure attribution quality improved by removing generic arm-body dominance from subtype ranking, allowing the next step to target specific residual channels (`complex_arm_shape`, `side_entry_or_exit`, `follow_beyond_window`)
+
 ### P5H3H - Algorithmic Arm-Body Failure Refinement and Deterministic Follow Retry
 
 This patch continues the heuristic-to-algorithm transition by refining conditional-tail arm-body failure handling and making shared-follow retries deterministic over validated local postdom candidates.

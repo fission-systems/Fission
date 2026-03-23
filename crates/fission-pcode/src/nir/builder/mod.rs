@@ -110,6 +110,8 @@ impl<'a> PreviewBuilder<'a> {
             region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count: 0,
             region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count: 0,
             region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count: 0,
+            region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count:
+                0,
             region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count:
                 0,
             region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count:
@@ -265,6 +267,8 @@ impl<'a> PreviewBuilder<'a> {
                 .region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count,
             region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count: self
                 .region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count,
+            region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count: self
+                .region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count,
             region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count: self
                 .region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count,
             region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count: self

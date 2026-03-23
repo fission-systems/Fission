@@ -35,7 +35,7 @@ pub(super) enum ConditionalTailMismatchSubtype {
     FollowBeyondWindow,
     SideEntryOrExit,
     ComplexArmShape,
-    ArmBodyLoweringFailed,
+    DepthOrBudgetExceeded,
     OneArmBodyLoweringFailed,
     BothArmsBodyLoweringFailed,
     FollowTailLoweringFailed,
@@ -103,8 +103,8 @@ impl<'a> PreviewBuilder<'a> {
             ConditionalTailMismatchSubtype::ComplexArmShape => {
                 self.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count += 1;
             }
-            ConditionalTailMismatchSubtype::ArmBodyLoweringFailed => {
-                self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
+            ConditionalTailMismatchSubtype::DepthOrBudgetExceeded => {
+                self.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count += 1;
             }
             ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed => {
                 self.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count += 1;
@@ -746,14 +746,14 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<ConditionalTailLoweringResult, MlilPreviewError> {
         if depth > MAX_LINEAR_STRUCTURING_DEPTH {
             return Ok(ConditionalTailLoweringResult::Mismatch(
-                ConditionalTailMismatchSubtype::ArmBodyLoweringFailed,
+                ConditionalTailMismatchSubtype::DepthOrBudgetExceeded,
             ));
         }
         if let Some(budget) = budget.as_deref_mut()
             && budget.checkpoint("lower_conditional_tail")
         {
             return Ok(ConditionalTailLoweringResult::Mismatch(
-                ConditionalTailMismatchSubtype::ArmBodyLoweringFailed,
+                ConditionalTailMismatchSubtype::DepthOrBudgetExceeded,
             ));
         }
         let Some(false_target) = false_target else {
@@ -1226,8 +1226,8 @@ impl<'a> PreviewBuilder<'a> {
             Err(ConditionalTailMismatchSubtype::ComplexArmShape) => {
                 (Vec::new(), Some("ComplexArmShape"))
             }
-            Err(ConditionalTailMismatchSubtype::ArmBodyLoweringFailed) => {
-                (Vec::new(), Some("ArmBodyLoweringFailed"))
+            Err(ConditionalTailMismatchSubtype::DepthOrBudgetExceeded) => {
+                (Vec::new(), Some("DepthOrBudgetExceeded"))
             }
             Err(ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed) => {
                 (Vec::new(), Some("OneArmBodyLoweringFailed"))

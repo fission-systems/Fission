@@ -117,6 +117,8 @@ struct PreviewBuilder<'a> {
     region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count: usize,
     region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count: usize,
     region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count: usize,
+    region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count:
+        usize,
     region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count:
         usize,
     region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count:
