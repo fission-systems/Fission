@@ -9,6 +9,40 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### CI/CD - Major Reinforcement (Fast PR Gate + Heavy GitHub Validation)
+
+To reduce local monitoring burden, CI/CD now separates fast developer feedback from heavy long-running validation that can run entirely on GitHub.
+
+#### Added
+
+- new heavy validation workflow: `.github/workflows/ci-heavy.yml`
+  - triggers: `push(main)`, nightly `schedule`, and `workflow_dispatch`
+  - jobs:
+    - Linux full validation (full Rust tests, tauri frontend build, decomp smoke)
+    - Windows heavy build/test (decompiler + core Rust tests)
+    - automation nir-check lanes with artifact upload
+- automation artifact upload in heavy workflow:
+  - uploads `artifacts/fission-automation/` for post-run diagnosis without local reruns
+
+#### Changed
+
+- fast CI workflow (`.github/workflows/ci.yml`) refactored into layered jobs:
+  - Linux fast gate
+  - macOS build/test
+  - Windows build/test
+- added Rust build caching (`Swatinem/rust-cache@v2`) to CI jobs
+- PR/main fast gate now keeps heavy checks off local loop while preserving cross-platform confidence
+- replaced missing decompiler build script invocation with direct CMake build commands in CI workflows:
+  - `cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release`
+  - `cmake --build ghidra_decompiler/build --config Release`
+
+#### Validation
+
+- workflow YAML parse check (local):
+  - `ruby -ryaml -e "YAML.load_file('.github/workflows/ci.yml')"`
+  - `ruby -ryaml -e "YAML.load_file('.github/workflows/ci-heavy.yml')"`
+- existing project checks unaffected by workflow changes (code path unchanged)
+
 ### P5H3J - Index-Order Independent Follow Discovery (Anti-Overfit)
 
 This patch removes block-index monotonicity assumptions from localized follow discovery so conditional-tail recovery relies on graph properties (cycle/region guards) rather than binary layout order.

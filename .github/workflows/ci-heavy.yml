@@ -1,21 +1,22 @@
-name: CI Fast Gate
+name: CI Heavy Validation
 
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["main"]
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
 
 concurrency:
-  group: ci-fast-${{ github.workflow }}-${{ github.ref }}
+  group: ci-heavy-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  linux-fast-gate:
-    name: Linux Fast Gate
+  linux-full-validation:
+    name: Linux Full Validation
     runs-on: ubuntu-latest
 
     steps:
@@ -38,18 +39,6 @@ jobs:
           cache: "npm"
           cache-dependency-path: crates/fission-tauri/package-lock.json
 
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
-
-      - name: Security advisory check (Rust — advisories, bans, licenses, sources)
-        run: cargo deny check all
-
-      - name: Security advisory check (Node)
-        run: |
-          cd crates/fission-tauri
-          npm ci --ignore-scripts
-          npm audit --audit-level=high
-
       - name: Install system dependencies (Linux/Tauri)
         run: |
           sudo apt-get update
@@ -66,22 +55,22 @@ jobs:
           cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
           cmake --build ghidra_decompiler/build --config Release
 
-      - name: Check Formatting
-        run: cargo fmt -- --check
+      - name: Full Rust test suite (excluding tauri crate)
+        run: cargo test --workspace --exclude fission-tauri --verbose
 
-      - name: Lint with Clippy
-        run: cargo clippy --workspace --exclude fission-tauri -- -D warnings
-
-      - name: Run Tests
-        run: cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
+      - name: Build Tauri frontend
+        run: |
+          cd crates/fission-tauri
+          npm ci
+          npm run build
 
       - name: Fission decompilation smoke test
         run: |
           chmod +x scripts/test/decomp_smoke_ci.sh
           ./scripts/test/decomp_smoke_ci.sh
 
-  windows-build-test:
-    name: Windows Build/Test
+  windows-heavy-build:
+    name: Windows Heavy Build/Test
     runs-on: windows-latest
 
     steps:
@@ -111,9 +100,9 @@ jobs:
       - name: Run Windows core tests
         run: cargo test -p fission-pcode -p fission-automation --release --verbose
 
-  macos-build-test:
-    name: Build and Test (macOS)
-    runs-on: macos-latest
+  automation-nir-check:
+    name: Automation Nir-Check + Artifacts
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -122,22 +111,51 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
 
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
+
+      - name: Install system dependencies (Linux/Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            build-essential \
+            file
 
       - name: Build Decompiler
         run: |
           cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
           cmake --build ghidra_decompiler/build --config Release
 
-      - name: Check Formatting
-        run: cargo fmt -- --check
+      - name: Build fission-cli (release)
+        run: cargo build -p fission-cli --features native_decomp --release
 
-      - name: Lint with Clippy
-        run: cargo clippy --workspace --exclude fission-tauri -- -D warnings
+      - name: Run nir-check lane=nir (mid)
+        run: |
+          cargo run -p fission-automation -- nir-check \
+            --lane nir \
+            --run-profile mid \
+            --no-build \
+            --fission-bin target/release/fission_cli \
+            --update-latest false
 
-      - name: Run Tests
-        run: cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
+      - name: Run nir-check lane=regression (full)
+        run: |
+          cargo run -p fission-automation -- nir-check \
+            --lane regression \
+            --run-profile full \
+            --no-build \
+            --fission-bin target/release/fission_cli \
+            --update-latest false
+
+      - name: Upload automation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: automation-nir-check-${{ github.sha }}
+          path: artifacts/fission-automation/
+          retention-days: 14
+          if-no-files-found: warn
