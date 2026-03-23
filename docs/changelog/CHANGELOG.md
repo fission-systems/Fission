@@ -9,6 +9,74 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-03-23
 
+### P5H3F - Conditional-Tail Mismatch Subtype Harvesting + Bounded Follow Discovery
+
+This patch shifted the focus from widening shape support to separating `ConditionalTailExitMismatch` into actionable subtype signals and introducing a bounded local follow discovery path in region recovery.
+
+#### Changed
+
+- added recovery-only conditional-tail mismatch subtype tracking in linear structuring:
+  - `NoCommonFollowInWindow`
+  - `FollowBeyondWindow`
+  - `SideEntryOrExit`
+  - `ComplexArmShape`
+  - `ArmBodyLoweringFailed`
+  - `AmbiguousMultipleFollows`
+- introduced bounded first-common-follow discovery for region conditional tails:
+  - forward-only, bounded steps, no-cycle progression
+  - side-entry / side-exit guard before accepting shared follow candidate
+- retained existing conservative behavior when guards fail:
+  - mismatch still reports through `ConditionalTailExitMismatch`
+  - no fallback broadening to global CFG/postdom passes
+- added optional per-mismatch sample logging (env-gated):
+  - `FISSION_RECOVERY_MISMATCH_TRACE=1`
+  - emits JSONL under `/tmp/fission_preview_<function>_conditional_mismatch.jsonl`
+
+#### Added
+
+- synthetic regression for non-trivial shared follow discovery:
+  - `region_recovery_lowers_two_arm_nontrivial_shared_follow`
+
+#### Validation
+
+- `cargo test -p fission-pcode region_recovery_lowers_two_arm_nontrivial_shared_follow -- --nocapture` (pass)
+- `cargo test -p fission-pcode structuring_linear -- --nocapture`
+  - same pre-existing failure on current `main`:
+    - `multi_block_preview_absorbs_shared_trivial_forwarding_return_tail`
+- `cargo test -p fission-pcode structuring_conditionals -- --nocapture`
+  - same pre-existing failures on current `main` remain:
+    - `x86_pathological_try_lower_if_falls_back_without_hanging`
+    - `multi_block_preview_lowers_canonical_if_else`
+    - `multi_block_preview_lowers_if_else_with_multi_block_then_region`
+    - `multi_block_preview_prefers_short_circuit_or_over_nested_plain_if`
+    - `multi_block_preview_folds_short_circuit_and`
+    - `multi_block_preview_folds_short_circuit_or`
+- `cargo test -p fission-pcode bootstrap_x86 -- --nocapture` (pass)
+- `cargo build -p fission-cli --features native_decomp` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo build -p fission-automation` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 5`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774245667-988203000`
+- `cargo run -p fission-automation -- nir-check --lane preview --no-build --fission-bin /Users/sjkim1127/Fission/target/debug/fission_cli --functions-limit 40`
+  - output: `/Users/sjkim1127/Fission/artifacts/fission-automation/1774245667-981676000`
+
+#### Corpus Outcome (vs P5H3E baseline)
+
+- aggregate headline metrics remained stable in 40-function lane:
+  - `region_linearized`: `1 -> 1`
+  - `forced_linear`: `18 -> 18`
+  - `region_linearize_rejected_body_lowering_failed_count`: `5 -> 5`
+  - `conditional_tail_exit_mismatch`: `27 -> 27`
+  - `successor_inline_rejected/revisit_cycle/unsupported_terminator`: still `0`
+- new subtype telemetry now resolves previously opaque mismatch pressure:
+  - `conditional_tail_follow_beyond_window`: `2`
+  - `conditional_tail_side_entry_or_exit`: `4`
+  - `conditional_tail_complex_arm_shape`: `19`
+  - `conditional_tail_arm_body_lowering_failed`: `54`
+  - `conditional_tail_no_common_follow_in_window`: `0`
+  - `conditional_tail_ambiguous_multiple_follows`: `0`
+- top mismatch rows remain the same addresses but now carry subtype split data for shape-targeted next patching.
+
 ### P5H3E - Conditional-Tail Normalization Widening (Localized Recovery)
 
 This patch focused on reducing `conditional_tail_exit_mismatch` inside localized recovery without broadening general CFG support.

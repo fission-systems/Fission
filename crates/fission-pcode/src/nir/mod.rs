@@ -112,6 +112,15 @@ struct PreviewBuilder<'a> {
     region_linearize_rejected_no_exit_count: usize,
     region_linearize_rejected_body_lowering_failed_count: usize,
     region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: usize,
+    region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count:
+        usize,
+    region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count: usize,
+    region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count: usize,
+    region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count: usize,
+    region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count:
+        usize,
+    region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count:
+        usize,
     region_linearize_rejected_body_lowering_successor_inline_rejected_count: usize,
     region_linearize_rejected_body_lowering_revisit_cycle_count: usize,
     region_linearize_rejected_body_lowering_unsupported_terminator_count: usize,
