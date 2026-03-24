@@ -60,6 +60,13 @@ impl<'a> PreviewBuilder<'a> {
         if !self.options.region_linearize_structuring {
             return Ok(None);
         }
+        if self.options.conservative_irreducible_fallback {
+            let scc = self.analyze_cfg_scc();
+            if scc.is_irreducible_node(start_idx) {
+                self.region_linearize_rejected_irreducible_cfg_count += 1;
+                return Ok(None);
+            }
+        }
         if err.structuring_failure_kind().is_none() {
             self.region_linearize_rejected_non_structuring_failure_count += 1;
             return Ok(None);

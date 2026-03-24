@@ -133,6 +133,7 @@ struct PreviewBuilder<'a> {
     region_linearize_rejected_body_lowering_revisit_cycle_count: usize,
     region_linearize_rejected_body_lowering_unsupported_terminator_count: usize,
     region_linearize_rejected_non_advancing_count: usize,
+    region_linearize_rejected_irreducible_cfg_count: usize,
     structuring_scc_component_count: usize,
     structuring_irreducible_scc_count: usize,
     structuring_irreducible_header_count: usize,

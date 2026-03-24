@@ -105,6 +105,7 @@ pub struct SummaryDelta {
     pub successor_inline_rejected_count: isize,
     pub revisit_cycle_count: isize,
     pub unsupported_terminator_count: isize,
+    pub rejected_irreducible_cfg_count: isize,
     pub structuring_scc_component_count: isize,
     pub structuring_irreducible_scc_count: isize,
     pub structuring_irreducible_header_count: isize,
@@ -344,6 +345,10 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
         (
             "region_linearize_rejected_non_advancing_count",
             stats.region_linearize_rejected_non_advancing_count,
+        ),
+        (
+            "region_linearize_rejected_irreducible_cfg_count",
+            stats.region_linearize_rejected_irreducible_cfg_count,
         ),
         (
             "structuring_scc_component_count",
@@ -600,6 +605,15 @@ pub fn compute_delta(
                 .nir_build_stats_totals
                 .region_linearize_rejected_body_lowering_unsupported_terminator_count
                 as isize,
+        rejected_irreducible_cfg_count: current
+            .aggregate
+            .nir_build_stats_totals
+            .region_linearize_rejected_irreducible_cfg_count
+            as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .region_linearize_rejected_irreducible_cfg_count as isize,
         structuring_scc_component_count: current
             .aggregate
             .nir_build_stats_totals
@@ -695,7 +709,7 @@ pub fn render_markdown(
     if let Some(delta) = delta {
         out.push_str("## Baseline Delta\n\n");
         out.push_str(&format!(
-            "- direct_success_count: `{:+}`\n- nir_failure_count: `{:+}`\n- explicit_fact_nonzero_count: `{:+}`\n- strict_explicit_candidate_count: `{:+}`\n- inventory_surface_gap_count: `{:+}`\n- pdb_nonzero_rows: `{:+}`\n- region_linearized_count: `{:+}`\n- forced_linear_count: `{:+}`\n- conditional_tail_exit_mismatch_count: `{:+}`\n- body_lowering_failed_count: `{:+}`\n- successor_inline_rejected_count: `{:+}`\n- revisit_cycle_count: `{:+}`\n- unsupported_terminator_count: `{:+}`\n- structuring_scc_component_count: `{:+}`\n- structuring_irreducible_scc_count: `{:+}`\n- structuring_irreducible_header_count: `{:+}`\n\n",
+            "- direct_success_count: `{:+}`\n- nir_failure_count: `{:+}`\n- explicit_fact_nonzero_count: `{:+}`\n- strict_explicit_candidate_count: `{:+}`\n- inventory_surface_gap_count: `{:+}`\n- pdb_nonzero_rows: `{:+}`\n- region_linearized_count: `{:+}`\n- forced_linear_count: `{:+}`\n- conditional_tail_exit_mismatch_count: `{:+}`\n- body_lowering_failed_count: `{:+}`\n- successor_inline_rejected_count: `{:+}`\n- revisit_cycle_count: `{:+}`\n- unsupported_terminator_count: `{:+}`\n- rejected_irreducible_cfg_count: `{:+}`\n- structuring_scc_component_count: `{:+}`\n- structuring_irreducible_scc_count: `{:+}`\n- structuring_irreducible_header_count: `{:+}`\n\n",
             delta.direct_success_count,
             delta.nir_failure_count,
             delta.explicit_fact_nonzero_count,
@@ -709,6 +723,7 @@ pub fn render_markdown(
             delta.successor_inline_rejected_count,
             delta.revisit_cycle_count,
             delta.unsupported_terminator_count,
+            delta.rejected_irreducible_cfg_count,
             delta.structuring_scc_component_count,
             delta.structuring_irreducible_scc_count,
             delta.structuring_irreducible_header_count,

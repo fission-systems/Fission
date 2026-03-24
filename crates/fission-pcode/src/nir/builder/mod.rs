@@ -126,6 +126,7 @@ impl<'a> PreviewBuilder<'a> {
             region_linearize_rejected_body_lowering_revisit_cycle_count: 0,
             region_linearize_rejected_body_lowering_unsupported_terminator_count: 0,
             region_linearize_rejected_non_advancing_count: 0,
+            region_linearize_rejected_irreducible_cfg_count: 0,
             structuring_scc_component_count: 0,
             structuring_irreducible_scc_count: 0,
             structuring_irreducible_header_count: 0,
@@ -290,6 +291,8 @@ impl<'a> PreviewBuilder<'a> {
                 .region_linearize_rejected_body_lowering_unsupported_terminator_count,
             region_linearize_rejected_non_advancing_count: self
                 .region_linearize_rejected_non_advancing_count,
+            region_linearize_rejected_irreducible_cfg_count: self
+                .region_linearize_rejected_irreducible_cfg_count,
             structuring_scc_component_count: self.structuring_scc_component_count,
             structuring_irreducible_scc_count: self.structuring_irreducible_scc_count,
             structuring_irreducible_header_count: self.structuring_irreducible_header_count,

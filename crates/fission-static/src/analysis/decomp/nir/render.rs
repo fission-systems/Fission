@@ -1,13 +1,13 @@
-use super::FactStore;
 use super::nir_types::NirWorkerRequest;
 use super::nir_worker::{execute_nir_worker_request, nir_worker_timeout_ms};
+use super::FactStore;
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{
-    NirBuildStats, NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode,
-    PcodeOptimizer, PcodeOptimizerConfig, render_nir_with_context, take_last_nir_build_stats,
-    take_last_nir_hint_stats,
+    render_nir_with_context, take_last_nir_build_stats, take_last_nir_hint_stats, NirBuildStats,
+    NirHintStats, NirRenderOptions, NirTypeContext, PcodeFunction, PcodeOpcode, PcodeOptimizer,
+    PcodeOptimizerConfig,
 };
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Instant;
 
 pub(crate) fn pcode_total_ops(pcode: &PcodeFunction) -> usize {
@@ -83,6 +83,8 @@ pub(crate) fn nir_options_with_recovery(
     let mut options = NirRenderOptions::from_loaded_binary(binary);
     options.region_linearize_structuring = region_linearize_structuring;
     options.force_linear_structuring = force_linear_structuring;
+    options.conservative_irreducible_fallback =
+        std::env::var_os("FISSION_NIR_CONSERVATIVE_IRREDUCIBLE_FALLBACK").is_some();
     options
 }
 

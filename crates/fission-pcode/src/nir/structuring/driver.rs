@@ -310,6 +310,7 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         sections: Vec::new(),
         region_linearize_structuring: false,
         force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     while builder.promote_single_entry_guarded_tail_regions(body) {}
@@ -332,6 +333,7 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[HirStmt]) -> Pr
         sections: Vec::new(),
         region_linearize_structuring: false,
         force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
     };
     let mut builder = PreviewBuilder::new(&dummy, &options, None);
     builder.discover_guarded_tail_candidates(body);

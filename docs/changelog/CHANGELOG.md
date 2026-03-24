@@ -57,6 +57,43 @@ Automation reporting now consumes irreducible-structure telemetry from `NirBuild
 - `cargo test -p fission-automation` (pass)
 - `cargo check -p fission-automation` (pass)
 
+### P5H4E - Conservative Irreducible Recovery Gate and NIR Completeness Reporting
+
+This patch adds an optional conservative gate for region linearization recovery on irreducible CFG nodes and extends telemetry/reporting so automation can measure the tradeoff explicitly.
+
+#### Changed
+
+- added `NirRenderOptions.conservative_irreducible_fallback` (default `false`) with backward-compatible serde default handling
+- added recovery rejection telemetry for irreducible CFG gating:
+  - `region_linearize_rejected_irreducible_cfg_count`
+- wired the new counter through:
+  - `PreviewBuilder` initialization/state
+  - `preview_build_stats()` snapshots
+  - `NirBuildStats::merge_assign()`
+- recovery path now optionally skips region linearization when conservative gate is enabled and the start node belongs to an irreducible SCC
+- `fission-static` recovery option wiring now supports env-based activation:
+  - `FISSION_NIR_CONSERVATIVE_IRREDUCIBLE_FALLBACK`
+- automation reporting updated to include irreducible-gate rejection metrics in:
+  - stats pairs
+  - baseline deltas
+  - markdown summary output
+
+#### Added
+
+- SCC helper API for gate decisions:
+  - `SccAnalysis::is_irreducible_node()`
+- regression test:
+  - `scc_analysis_reports_irreducible_membership_by_node`
+- NIR English completeness report document:
+  - `crates/fission-pcode/src/nir/NIR_DECOMPILER_COMPLETENESS_REPORT.md`
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo test -p fission-automation` (pass)
+- `cargo check -p fission-automation` (pass)
+- `cargo check -p fission-static --features native_decomp` (pass)
+
 ## 2026-03-23
 
 ### Docs - CONTRIBUTING CI/CD Workflow Refresh

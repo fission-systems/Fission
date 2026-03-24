@@ -301,6 +301,15 @@ impl SccAnalysis {
         self.irreducible.len()
     }
 
+    pub(crate) fn is_irreducible_node(&self, node: usize) -> bool {
+        let Some(component_idx) = self.component_of.get(node).copied() else {
+            return false;
+        };
+        self.irreducible
+            .iter()
+            .any(|entry| entry.component_index == component_idx)
+    }
+
     pub(crate) fn irreducible_header_total_count(&self) -> usize {
         self.irreducible.iter().map(|component| component.headers.len()).sum()
     }
@@ -661,5 +670,18 @@ mod tests {
         let scc = SccAnalysis::analyze(&successors, &predecessors);
 
         assert_eq!(scc.irreducible_count(), 0);
+    }
+
+    #[test]
+    fn scc_analysis_reports_irreducible_membership_by_node() {
+        let successors = vec![vec![1, 2], vec![3], vec![3], vec![1, 2], vec![]];
+        let predecessors = build_predecessor_index_map(&successors);
+        let scc = SccAnalysis::analyze(&successors, &predecessors);
+
+        assert!(scc.is_irreducible_node(1));
+        assert!(scc.is_irreducible_node(2));
+        assert!(scc.is_irreducible_node(3));
+        assert!(!scc.is_irreducible_node(0));
+        assert!(!scc.is_irreducible_node(4));
     }
 }

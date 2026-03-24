@@ -125,6 +125,8 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub region_linearize_rejected_non_advancing_count: usize,
     #[serde(default)]
+    pub region_linearize_rejected_irreducible_cfg_count: usize,
+    #[serde(default)]
     pub structuring_scc_component_count: usize,
     #[serde(default)]
     pub structuring_irreducible_scc_count: usize,
@@ -220,6 +222,8 @@ impl NirBuildStats {
             other.region_linearize_rejected_body_lowering_unsupported_terminator_count;
         self.region_linearize_rejected_non_advancing_count +=
             other.region_linearize_rejected_non_advancing_count;
+        self.region_linearize_rejected_irreducible_cfg_count +=
+            other.region_linearize_rejected_irreducible_cfg_count;
         self.structuring_scc_component_count += other.structuring_scc_component_count;
         self.structuring_irreducible_scc_count += other.structuring_irreducible_scc_count;
         self.structuring_irreducible_header_count += other.structuring_irreducible_header_count;
@@ -399,6 +403,8 @@ pub struct NirRenderOptions {
     pub sections: Vec<(u64, u64)>,
     pub region_linearize_structuring: bool,
     pub force_linear_structuring: bool,
+    #[serde(default)]
+    pub conservative_irreducible_fallback: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -461,6 +467,7 @@ impl NirRenderOptions {
             sections,
             region_linearize_structuring: false,
             force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
         }
     }
 

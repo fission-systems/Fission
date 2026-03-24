@@ -51,6 +51,7 @@ fn preview_options() -> MlilPreviewOptions {
         sections: vec![(0x1400_1000, 0x1400_2000)],
         region_linearize_structuring: false,
         force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
     }
 }
 
@@ -64,5 +65,6 @@ fn preview_options_x86() -> MlilPreviewOptions {
         sections: vec![(0x401000, 0x402000)],
         region_linearize_structuring: false,
         force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
     }
 }

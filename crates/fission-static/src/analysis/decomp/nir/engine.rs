@@ -109,6 +109,7 @@ mod tests {
                 sections: vec![(0x140001000, 0x140002000)],
                 region_linearize_structuring: false,
                 force_linear_structuring: false,
+                conservative_irreducible_fallback: false,
             },
             type_context: NirTypeContext {
                 call_targets: HashMap::from([(0x140001234, "MessageBoxW".to_string())]),
