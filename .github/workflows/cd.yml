@@ -47,8 +47,8 @@ jobs:
             - name: Build Decompiler (Unix)
               if: runner.os != 'Windows'
               run: |
-                  chmod +x scripts/build/build_decompiler.sh
-                  ./scripts/build/build_decompiler.sh
+                  cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
+                  cmake --build ghidra_decompiler/build --config Release --target decomp fission_decomp
 
             # [Windows] Build Decompiler with Vcpkg
             - name: Build Decompiler (Windows)

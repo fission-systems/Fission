@@ -52,6 +52,7 @@ To reduce local monitoring burden, CI/CD now separates fast developer feedback f
   - removed invalid boolean value usage for `nir-check --update-latest` (flag now omitted in heavy workflow)
   - constrained Windows CMake builds to required targets (`decomp`, `fission_decomp`) to avoid unrelated test-target dependency failures
   - adjusted Linux heavy Rust test sequence to run `fission-static` under `native_decomp` explicitly while keeping broad workspace coverage
+  - updated CD Unix decompiler step to direct CMake build (removed stale `scripts/build/build_decompiler.sh` dependency)
 
 #### Validation
 
