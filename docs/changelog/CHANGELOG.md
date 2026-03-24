@@ -48,6 +48,10 @@ To reduce local monitoring burden, CI/CD now separates fast developer feedback f
 - replaced missing decompiler build script invocation with direct CMake build commands in CI workflows:
   - `cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release`
   - `cmake --build ghidra_decompiler/build --config Release`
+- fixed follow-up CI failures after rollout:
+  - removed invalid boolean value usage for `nir-check --update-latest` (flag now omitted in heavy workflow)
+  - constrained Windows CMake builds to required targets (`decomp`, `fission_decomp`) to avoid unrelated test-target dependency failures
+  - adjusted Linux heavy Rust test sequence to run `fission-static` under `native_decomp` explicitly while keeping broad workspace coverage
 
 #### Validation
 

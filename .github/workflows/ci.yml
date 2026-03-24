@@ -103,7 +103,7 @@ jobs:
           if (!(Test-Path build)) { New-Item -ItemType Directory -Path build | Out-Null }
           cd build
           cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-          cmake --build . --config Release
+          cmake --build . --config Release --target decomp fission_decomp
 
       - name: Build fission-cli (release)
         run: cargo build -p fission-cli --features native_decomp --release

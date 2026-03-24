@@ -56,7 +56,9 @@ jobs:
           cmake --build ghidra_decompiler/build --config Release
 
       - name: Full Rust test suite (excluding tauri crate)
-        run: cargo test --workspace --exclude fission-tauri --verbose
+        run: |
+          cargo test --workspace --exclude fission-tauri --exclude fission-static --verbose
+          cargo test -p fission-static --features native_decomp --verbose
 
       - name: Build Tauri frontend
         run: |
@@ -92,7 +94,7 @@ jobs:
           if (!(Test-Path build)) { New-Item -ItemType Directory -Path build | Out-Null }
           cd build
           cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-          cmake --build . --config Release
+          cmake --build . --config Release --target decomp fission_decomp
 
       - name: Build fission-cli (release)
         run: cargo build -p fission-cli --features native_decomp --release
@@ -140,8 +142,7 @@ jobs:
             --lane nir \
             --run-profile mid \
             --no-build \
-            --fission-bin target/release/fission_cli \
-            --update-latest false
+            --fission-bin target/release/fission_cli
 
       - name: Run nir-check lane=regression (full)
         run: |
@@ -149,8 +150,7 @@ jobs:
             --lane regression \
             --run-profile full \
             --no-build \
-            --fission-bin target/release/fission_cli \
-            --update-latest false
+            --fission-bin target/release/fission_cli
 
       - name: Upload automation artifacts
         uses: actions/upload-artifact@v4
