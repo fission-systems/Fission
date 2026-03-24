@@ -105,6 +105,9 @@ pub struct SummaryDelta {
     pub successor_inline_rejected_count: isize,
     pub revisit_cycle_count: isize,
     pub unsupported_terminator_count: isize,
+    pub structuring_scc_component_count: isize,
+    pub structuring_irreducible_scc_count: isize,
+    pub structuring_irreducible_header_count: isize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,6 +344,18 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
         (
             "region_linearize_rejected_non_advancing_count",
             stats.region_linearize_rejected_non_advancing_count,
+        ),
+        (
+            "structuring_scc_component_count",
+            stats.structuring_scc_component_count,
+        ),
+        (
+            "structuring_irreducible_scc_count",
+            stats.structuring_irreducible_scc_count,
+        ),
+        (
+            "structuring_irreducible_header_count",
+            stats.structuring_irreducible_header_count,
         ),
         ("promotion_candidate_count", stats.promotion_candidate_count),
         ("promoted_region_count", stats.promoted_region_count),
@@ -585,6 +600,31 @@ pub fn compute_delta(
                 .nir_build_stats_totals
                 .region_linearize_rejected_body_lowering_unsupported_terminator_count
                 as isize,
+        structuring_scc_component_count: current
+            .aggregate
+            .nir_build_stats_totals
+            .structuring_scc_component_count as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .structuring_scc_component_count as isize,
+        structuring_irreducible_scc_count: current
+            .aggregate
+            .nir_build_stats_totals
+            .structuring_irreducible_scc_count as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .structuring_irreducible_scc_count as isize,
+        structuring_irreducible_header_count: current
+            .aggregate
+            .nir_build_stats_totals
+            .structuring_irreducible_header_count
+            as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .structuring_irreducible_header_count as isize,
     })
 }
 
@@ -655,7 +695,7 @@ pub fn render_markdown(
     if let Some(delta) = delta {
         out.push_str("## Baseline Delta\n\n");
         out.push_str(&format!(
-            "- direct_success_count: `{:+}`\n- nir_failure_count: `{:+}`\n- explicit_fact_nonzero_count: `{:+}`\n- strict_explicit_candidate_count: `{:+}`\n- inventory_surface_gap_count: `{:+}`\n- pdb_nonzero_rows: `{:+}`\n- region_linearized_count: `{:+}`\n- forced_linear_count: `{:+}`\n- conditional_tail_exit_mismatch_count: `{:+}`\n- body_lowering_failed_count: `{:+}`\n- successor_inline_rejected_count: `{:+}`\n- revisit_cycle_count: `{:+}`\n- unsupported_terminator_count: `{:+}`\n\n",
+            "- direct_success_count: `{:+}`\n- nir_failure_count: `{:+}`\n- explicit_fact_nonzero_count: `{:+}`\n- strict_explicit_candidate_count: `{:+}`\n- inventory_surface_gap_count: `{:+}`\n- pdb_nonzero_rows: `{:+}`\n- region_linearized_count: `{:+}`\n- forced_linear_count: `{:+}`\n- conditional_tail_exit_mismatch_count: `{:+}`\n- body_lowering_failed_count: `{:+}`\n- successor_inline_rejected_count: `{:+}`\n- revisit_cycle_count: `{:+}`\n- unsupported_terminator_count: `{:+}`\n- structuring_scc_component_count: `{:+}`\n- structuring_irreducible_scc_count: `{:+}`\n- structuring_irreducible_header_count: `{:+}`\n\n",
             delta.direct_success_count,
             delta.nir_failure_count,
             delta.explicit_fact_nonzero_count,
@@ -669,6 +709,9 @@ pub fn render_markdown(
             delta.successor_inline_rejected_count,
             delta.revisit_cycle_count,
             delta.unsupported_terminator_count,
+            delta.structuring_scc_component_count,
+            delta.structuring_irreducible_scc_count,
+            delta.structuring_irreducible_header_count,
         ));
     }
 
@@ -945,17 +988,38 @@ pub fn build_decision_insights(
                 | Some("side_entry_or_exit")
                 | Some("no_common_follow_in_window")
         );
-        if mismatch_delta < 0 && migration <= 0 && safe_dominant {
+        let irreducible_scc_delta = summary
+            .aggregate
+            .nir_build_stats_totals
+            .structuring_irreducible_scc_count as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .structuring_irreducible_scc_count as isize;
+        let irreducible_header_delta = summary
+            .aggregate
+            .nir_build_stats_totals
+            .structuring_irreducible_header_count as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .structuring_irreducible_header_count as isize;
+        if mismatch_delta < 0
+            && migration <= 0
+            && safe_dominant
+            && irreducible_scc_delta <= 0
+            && irreducible_header_delta <= 0
+        {
             GoStopDecisionGate {
                 decision: "go_p5h3g_candidate".to_string(),
                 rationale:
-                    "mismatch decreased and dominant subtype indicates safely-virtualizable local follow pressure"
+                    "mismatch decreased with safe dominant subtype and irreducible complexity did not regress"
                         .to_string(),
             }
         } else {
             GoStopDecisionGate {
                 decision: "stop_hold_p5h3f".to_string(),
-                rationale: "no mismatch reduction or counter-migration/safety signal is insufficient for P5H3G"
+                rationale: "no mismatch reduction or irreducible/complexity safety signal is insufficient for P5H3G"
                     .to_string(),
             }
         }

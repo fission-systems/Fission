@@ -125,6 +125,12 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub region_linearize_rejected_non_advancing_count: usize,
     #[serde(default)]
+    pub structuring_scc_component_count: usize,
+    #[serde(default)]
+    pub structuring_irreducible_scc_count: usize,
+    #[serde(default)]
+    pub structuring_irreducible_header_count: usize,
+    #[serde(default)]
     pub promotion_candidate_count: usize,
     #[serde(default)]
     pub promoted_region_count: usize,
@@ -214,6 +220,9 @@ impl NirBuildStats {
             other.region_linearize_rejected_body_lowering_unsupported_terminator_count;
         self.region_linearize_rejected_non_advancing_count +=
             other.region_linearize_rejected_non_advancing_count;
+        self.structuring_scc_component_count += other.structuring_scc_component_count;
+        self.structuring_irreducible_scc_count += other.structuring_irreducible_scc_count;
+        self.structuring_irreducible_header_count += other.structuring_irreducible_header_count;
         self.promotion_candidate_count += other.promotion_candidate_count;
         self.promoted_region_count += other.promoted_region_count;
         self.promotion_rejected_by_shape_count += other.promotion_rejected_by_shape_count;

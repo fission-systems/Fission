@@ -382,11 +382,23 @@ pub(super) fn cleanup_redundant_boundary_labels(stmts: &mut Vec<HirStmt>) -> boo
 pub(super) fn remove_unreferenced_leading_labels(stmts: &mut Vec<HirStmt>) -> bool {
     let referenced = collect_referenced_labels(stmts);
     let mut changed = false;
-    while matches!(stmts.first(), Some(HirStmt::Label(label)) if !referenced.contains(label)) {
+    while matches!(stmts.first(), Some(HirStmt::Label(label)) if !referenced.contains(label))
+        && !should_preserve_unreferenced_leading_labels(stmts)
+    {
         stmts.remove(0);
         changed = true;
     }
     changed
+}
+
+fn should_preserve_unreferenced_leading_labels(stmts: &[HirStmt]) -> bool {
+    let first_non_label = stmts
+        .iter()
+        .position(|stmt| !matches!(stmt, HirStmt::Label(_)));
+    match first_non_label {
+        None => true,
+        Some(idx) => matches!(stmts.get(idx..), Some([HirStmt::Return(_)])),
+    }
 }
 
 fn next_adjacent_label_name(stmts: &[HirStmt], start_idx: usize) -> Option<String> {

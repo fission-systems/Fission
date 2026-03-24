@@ -7,6 +7,56 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-03-24
+
+### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
+
+This step advances structuring from local heuristic-style approximations toward graph-theoretic analysis primitives, while preserving conservative fallback behavior.
+
+#### Changed
+
+- stabilized label handling used by region/join anchoring in normalization and cleanup paths
+- added CFG edge classification analysis (`Tree`, `Back`, `Forward`, `Cross`) for deterministic, order-robust graph facts
+- added formal dominator/post-dominator analysis APIs and integrated window-exit postdom computation into conditional-tail follow logic
+- added Tarjan SCC analysis and irreducible multi-header SCC detection (diagnostic-safe integration)
+- extended structuring diagnostics to include SCC and irreducible telemetry counters
+
+#### Added
+
+- new structuring analysis module:
+  - `crates/fission-pcode/src/nir/structuring/cfg_analysis.rs`
+- new CFG-analysis tests covering:
+  - diamond edge classification
+  - single-loop back-edge classification
+  - multi-header SCC irreducible detection
+  - nearest common dominator/postdominator behavior on canonical shapes
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo test -p fission-pcode structuring_conditionals` (pass)
+- `cargo test -p fission-pcode structuring_loops` (pass)
+- `cargo check -p fission-pcode` (pass)
+
+### Automation - Irreducible/SCC Telemetry Surfacing and Gate Safety Integration
+
+Automation reporting now consumes irreducible-structure telemetry from `NirBuildStats`, so quality runs can detect mismatch improvements that are accompanied by structural complexity regressions.
+
+#### Changed
+
+- extended `NirBuildStats` with:
+  - `structuring_scc_component_count`
+  - `structuring_irreducible_scc_count`
+  - `structuring_irreducible_header_count`
+- wired new counters through builder initialization, preview stats snapshots, and stats merge paths
+- updated automation summary/delta reporting to include SCC/irreducible counters
+- updated go/stop decision gate constraints to require non-regressing irreducible deltas in addition to mismatch/migration checks
+
+#### Validation
+
+- `cargo test -p fission-automation` (pass)
+- `cargo check -p fission-automation` (pass)
+
 ## 2026-03-23
 
 ### Docs - CONTRIBUTING CI/CD Workflow Refresh

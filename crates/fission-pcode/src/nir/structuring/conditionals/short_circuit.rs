@@ -41,10 +41,12 @@ impl<'a> PreviewBuilder<'a> {
             if false_target != Some(self.block_target_key(next_idx)) {
                 return Ok(None);
             }
-            let current_join_idx = self
+            let Some(current_join_idx) = self
                 .find_block_index_by_address(true_target)
                 .filter(|join_idx| *join_idx > current_idx)
-                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
+            else {
+                return Ok(None);
+            };
             if let Some(join_idx) = join_idx {
                 if join_idx != current_join_idx {
                     return Ok(None);
@@ -110,9 +112,9 @@ impl<'a> PreviewBuilder<'a> {
             if false_target != Some(self.block_target_key(next_idx)) {
                 return Ok(None);
             }
-            let current_else_idx = self
-                .find_block_index_by_address(true_target)
-                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
+            let Some(current_else_idx) = self.find_block_index_by_address(true_target) else {
+                return Ok(None);
+            };
             if current_else_idx <= current_idx {
                 return Ok(None);
             }
@@ -186,10 +188,12 @@ impl<'a> PreviewBuilder<'a> {
         if false_target != Some(self.block_target_key(next_idx)) {
             return Ok(None);
         }
-        let body_idx = self
+        let Some(body_idx) = self
             .find_block_index_by_address(true_target)
             .filter(|body_idx| *body_idx > idx)
-            .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
+        else {
+            return Ok(None);
+        };
 
         let mut conds = vec![cond];
         loop {

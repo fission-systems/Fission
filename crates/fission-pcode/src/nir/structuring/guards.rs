@@ -27,6 +27,14 @@ pub(super) enum PromotionGateRejection {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn is_nontrivial_internal_target_entry(&self, idx: usize) -> bool {
+        let preds = &self.predecessors[idx];
+        if preds.len() != 1 {
+            return true;
+        }
+        preds[0] + 1 != idx
+    }
+
     fn mark_promotion_shape_rejection(&mut self) {
         self.promotion_rejected_by_shape_count += 1;
     }
@@ -495,7 +503,10 @@ impl<'a> PreviewBuilder<'a> {
         if skip_to <= start_idx + 1 {
             return false;
         }
-        (start_idx + 1..skip_to).any(|idx| targeted.contains(&self.block_target_key(idx)))
+        (start_idx + 1..skip_to).any(|idx| {
+            targeted.contains(&self.block_target_key(idx))
+                && self.is_nontrivial_internal_target_entry(idx)
+        })
     }
 
     fn targeted_internal_entries(
@@ -508,7 +519,10 @@ impl<'a> PreviewBuilder<'a> {
             return Vec::new();
         }
         (start_idx + 1..skip_to)
-            .filter(|idx| targeted.contains(&self.block_target_key(*idx)))
+            .filter(|idx| {
+                targeted.contains(&self.block_target_key(*idx))
+                    && self.is_nontrivial_internal_target_entry(*idx)
+            })
             .collect()
     }
 

@@ -599,14 +599,30 @@ impl<'a> PreviewBuilder<'a> {
         if next_idx <= idx {
             return false;
         }
-        if self.predecessors[next_idx].iter().all(|pred| {
-            *pred == idx
-                || visited.contains(pred)
-                || self.is_trivial_forwarding_block(*pred, next_idx)
-        }) {
+        if self.predecessors[next_idx]
+            .iter()
+            .all(|pred| *pred == idx || visited.contains(pred))
+        {
             return true;
         }
-        self.is_trivial_linear_tail(next_idx)
+        if self.successors[next_idx].len() == 1 {
+            let forwarded = self.successors[next_idx][0];
+            if self
+                .predecessors[next_idx]
+                .iter()
+                .all(|pred| {
+                    *pred == idx
+                        || visited.contains(pred)
+                        || self.is_trivial_forwarding_block(*pred, next_idx)
+                })
+                && self.is_trivial_forwarding_block(next_idx, forwarded)
+            {
+                return true;
+            }
+        }
+        self.predecessors[next_idx].len() == 1
+            && self.predecessors[next_idx][0] == idx
+            && self.is_trivial_linear_tail(next_idx)
     }
 
     fn can_inline_linear_successor_for_region(
@@ -1163,61 +1179,26 @@ impl<'a> PreviewBuilder<'a> {
         window: &HashSet<usize>,
         join_idx: usize,
     ) -> Result<HashMap<usize, HashSet<usize>>, ConditionalTailMismatchSubtype> {
-        if !window.contains(&join_idx) {
+        let Some(postdom_tree) =
+            PostDomTree::analyze_window_with_exit(&self.successors, window, join_idx)
+        else {
             return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
-        }
-        let all_nodes = window.iter().copied().collect::<HashSet<_>>();
-        let mut postdom = HashMap::new();
+        };
+
         for idx in window {
             if *idx == join_idx {
-                postdom.insert(*idx, HashSet::from([join_idx]));
-            } else {
-                postdom.insert(*idx, all_nodes.clone());
+                continue;
+            }
+            let has_window_succ = self.successors[*idx]
+                .iter()
+                .copied()
+                .any(|succ| window.contains(&succ));
+            if !has_window_succ {
+                return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
             }
         }
 
-        let mut changed = true;
-        let mut iterations = 0usize;
-        let max_iterations = window.len().saturating_mul(window.len().max(1));
-        while changed && iterations < max_iterations {
-            changed = false;
-            iterations += 1;
-            for idx in window {
-                if *idx == join_idx {
-                    continue;
-                }
-                let succs = self.successors[*idx]
-                    .iter()
-                    .copied()
-                    .filter(|succ| window.contains(succ))
-                    .collect::<Vec<_>>();
-                if succs.is_empty() {
-                    return Err(ConditionalTailMismatchSubtype::SideEntryOrExit);
-                }
-                let mut intersection = postdom
-                    .get(&succs[0])
-                    .cloned()
-                    .ok_or(ConditionalTailMismatchSubtype::ComplexArmShape)?;
-                for succ in succs.iter().skip(1) {
-                    let succ_set = postdom
-                        .get(succ)
-                        .ok_or(ConditionalTailMismatchSubtype::ComplexArmShape)?;
-                    intersection = intersection
-                        .intersection(succ_set)
-                        .copied()
-                        .collect::<HashSet<_>>();
-                }
-                intersection.insert(*idx);
-                if postdom.get(idx).is_none_or(|current| *current != intersection) {
-                    postdom.insert(*idx, intersection);
-                    changed = true;
-                }
-            }
-        }
-        if iterations >= max_iterations {
-            return Err(ConditionalTailMismatchSubtype::ComplexArmShape);
-        }
-        Ok(postdom)
+        Ok(postdom_tree.postdominators().clone())
     }
 
     fn shared_follow_candidate_has_side_edge(

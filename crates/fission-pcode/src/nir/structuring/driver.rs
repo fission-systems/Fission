@@ -6,6 +6,10 @@ impl<'a> PreviewBuilder<'a> {
         let diag = structuring_diag_enabled();
         let total_start = Instant::now();
         let force_linear = self.should_force_linear_structuring();
+        let scc = self.analyze_cfg_scc();
+        self.structuring_scc_component_count += scc.component_count();
+        self.structuring_irreducible_scc_count += scc.irreducible_count();
+        self.structuring_irreducible_header_count += scc.irreducible_header_total_count();
         if diag {
             eprintln!(
                 "[DIAG] structuring start: blocks={} edges={} force_linear={}",
@@ -25,6 +29,30 @@ impl<'a> PreviewBuilder<'a> {
                 );
             }
             return result;
+        }
+
+        if diag {
+            let cfg = self.analyze_cfg_edges();
+            let dom = self.analyze_cfg_dominators();
+            let postdom = self.analyze_cfg_postdominators();
+            let sample_ncd = if self.pcode.blocks.len() >= 2 {
+                dom.nearest_common_dominator(&[0, self.pcode.blocks.len() - 1])
+            } else {
+                Some(0)
+            };
+            eprintln!(
+                "[DIAG] structuring cfg-analysis: roots={} tree={} back={} forward={} cross={} dom_roots={} postdom_exits={} scc_components={} irreducible_scc={} sample_ncd={:?}",
+                cfg.roots().len(),
+                cfg.count_class(EdgeClass::Tree),
+                cfg.count_class(EdgeClass::Back),
+                cfg.count_class(EdgeClass::Forward),
+                cfg.count_class(EdgeClass::Cross),
+                dom.roots().len(),
+                postdom.exits().len(),
+                scc.component_count(),
+                scc.irreducible_count(),
+                sample_ncd,
+            );
         }
 
         let mut body = Vec::new();
