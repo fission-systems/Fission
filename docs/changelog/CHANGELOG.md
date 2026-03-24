@@ -94,6 +94,38 @@ This patch adds an optional conservative gate for region linearization recovery 
 - `cargo check -p fission-automation` (pass)
 - `cargo check -p fission-static --features native_decomp` (pass)
 
+### Loop Structuring - Conservative Infloop + Loop-Control Goto Rewrites (Ghidra-Referenced)
+
+This patch extends loop structuring with a conservative infinite-loop reducer and safe loop-local `goto` rewriting into `break`/`continue`, aligned with Ghidra `scopeBreak` intent while preserving nested-scope safety.
+
+#### Changed
+
+- added and integrated `try_lower_infloop()` into the main structuring order:
+  - reducer order now keeps `infloop` after `dowhile` and `while` attempts for conservative precedence
+- added single-successor guard for infloop recognition (`successors[idx].len() == 1`)
+- introduced loop-body post-processing in `structuring/loops.rs`:
+  - rewrite `goto(loop_exit_label)` to `break`
+  - rewrite `goto(loop_continue_label)` to `continue`
+  - recurse only through `If`/`Block`
+  - intentionally do **not** recurse into nested `While`/`DoWhile`/`Switch` (avoids outer-loop misrewrites)
+- extended do-while region result metadata to return condition-block index so `continue` targets are resolved correctly
+
+#### Added
+
+- integration regression test:
+  - `infloop_preview_lowers_single_block_self_loop`
+- unit tests for rewrite safety:
+  - `rewrite_loop_control_gotos_converts_break_and_continue_targets`
+  - `rewrite_loop_control_gotos_does_not_rewrite_inside_nested_loop_or_switch`
+
+#### Validation
+
+- `cargo test -p fission-pcode rewrite_loop_control_gotos_` (pass)
+- `cargo test -p fission-pcode structuring_loops` (pass)
+- `cargo test -p fission-pcode structuring_conditionals` (pass)
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+
 ## 2026-03-23
 
 ### Docs - CONTRIBUTING CI/CD Workflow Refresh

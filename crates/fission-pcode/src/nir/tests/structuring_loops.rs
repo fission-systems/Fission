@@ -1,4 +1,65 @@
 use super::*;
+
+#[test]
+fn infloop_preview_lowers_single_block_self_loop() {
+    let ptr = uniq(0x440, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x4300,
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x4300,
+                        output: Some(ptr.clone()),
+                        inputs: vec![reg(0x28, 8), cst(-0x10, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x4301,
+                        output: None,
+                        inputs: vec![cst(0, 4), ptr, cst(9, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x4302,
+                        output: None,
+                        inputs: vec![cst(0x4300, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x4310,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x4310,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "infloop_fn", 0x4300, &preview_options())
+        .expect("preview render");
+    assert!(
+        code.contains("while (true) {") || code.contains("while (1) {"),
+        "{code}"
+    );
+    assert!(code.contains("local_10 = 9;"), "{code}");
+    assert!(!code.contains("goto block_4300;"), "{code}");
+}
+
 #[test]
 fn do_while_preview_is_lowered_without_ghidra_fallback() {
     let ptr = uniq(0x400, 8);
