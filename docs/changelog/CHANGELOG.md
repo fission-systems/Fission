@@ -83,6 +83,63 @@ This increment tightens conditional-tail recovery by aligning shared-follow cand
 - `cargo test -p fission-pcode` (pass)
 - `cargo check -p fission-pcode` (pass)
 
+### Facade Ownership Cleanup - Remove Legacy Duplicate Trees from `fission-analysis`
+
+This change removes stale duplicated implementation trees from `fission-analysis` so the crate remains a compatibility facade and ownership stays with `fission-static` and `fission-dynamic`.
+
+#### Changed
+
+- removed duplicated legacy module trees from `crates/fission-analysis/src/`:
+  - `analysis/`, `debug/`, `plugin/`, `app/`, `unpacker/`, `utils/`
+- updated compatibility prelude debug type re-export to owner crate path:
+  - `crate::debug::types::*` → `fission_dynamic::debug::types::*`
+- added compatibility policy document:
+  - `crates/fission-analysis/COMPATIBILITY.md`
+
+#### Validation
+
+- `cargo check -p fission-analysis --features native_decomp` (pass)
+- `cargo check -p fission-analysis --features "interactive_runtime unpacker_runtime native_decomp"` (pass)
+- `cargo test -p fission-analysis --features native_decomp --no-run` (pass)
+
+### Structuring - Graph-Invariant Promotion Gate + Guarded-Tail Layout Normalization
+
+This increment moves promotion acceptance beyond strict layout order checks by adding conservative graph-invariant fallback guards (dominance/post-dominance/irreducibility) and pre-discovery guarded-tail layout normalization.
+
+#### Changed
+
+- promotion gate update in `structuring/guards.rs`:
+  - kept legacy monotonic predecessor ordering acceptance path
+  - added additive graph-invariant fallback acceptance when legacy path fails:
+    - reject irreducible SCC participation
+    - require header dominance for targeted internal entries
+    - require region-window postdom exit guard when an external exit exists
+- added guarded-tail pre-normalization pipeline:
+  - `normalize_guarded_tail_layout()` in `structuring/cleanup.rs`
+  - applies adjacent-label cleanup + top-level forward alias canonicalization before guarded-tail discovery/promotion scanning
+- discovery/promotion entry points now consume normalized layout views to reduce avoidable noncanonical shape rejections
+
+#### Added
+
+- new unit tests:
+  - `minimal_structured_promotion_accepts_non_monotonic_layout_when_graph_invariants_hold`
+  - `minimal_structured_promotion_rejects_irreducible_region`
+  - `normalize_guarded_tail_layout_collapses_adjacent_labels_before_alias_rewrite`
+  - plus updated guarded-tail discovery regressions for normalized layout/counter semantics
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 40` (pass)
+
+#### Observed lane delta (`nir`, functions-limit 40)
+
+- `promotion_rejected_by_shape_count`: `633 -> 606`
+- `discovery_rejected_noncanonical_layout_count`: `561 -> 533`
+- `canonicalization_failed_interleaved_join_uses`: `170 -> 149`
+- output class mix unchanged on this sample (`structured=32`, `partially_structured=34`, `linear_fallback=8`)
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)

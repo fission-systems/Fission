@@ -165,7 +165,6 @@ impl DomTree {
         &self.roots
     }
 
-    #[cfg(test)]
     pub(crate) fn dominates(&self, dom: usize, node: usize) -> bool {
         self.dominators
             .get(&node)

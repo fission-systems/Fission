@@ -1,6 +1,7 @@
 use super::cleanup::{
     collect_referenced_label_counts, has_non_ignorable_payload, has_top_level_label,
-    is_ignorable_discovery_stmt, single_goto_target, trim_ignorable_stmt_bounds,
+    is_ignorable_discovery_stmt, normalize_guarded_tail_layout, single_goto_target,
+    trim_ignorable_stmt_bounds,
 };
 use super::*;
 
@@ -303,8 +304,10 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         body: &mut Vec<HirStmt>,
     ) -> bool {
+        let (normalized, alias_rewrites) = normalize_guarded_tail_layout(std::mem::take(body));
+        *body = normalized;
         let referenced = collect_referenced_label_counts(body);
-        let mut changed = false;
+        let mut changed = alias_rewrites > 0;
         let mut idx = 0usize;
         while idx < body.len() {
             let HirStmt::If {
@@ -397,7 +400,8 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(crate) fn discover_guarded_tail_candidates(&mut self, body: &[HirStmt]) {
-        self.discover_guarded_tail_candidates_in_body(body);
+        let (normalized, _) = normalize_guarded_tail_layout(body.to_vec());
+        self.discover_guarded_tail_candidates_in_body(&normalized);
     }
 
     fn discover_guarded_tail_candidates_in_body(&mut self, body: &[HirStmt]) {
@@ -526,6 +530,54 @@ impl<'a> PreviewBuilder<'a> {
             .collect()
     }
 
+    fn region_external_exit_nodes(&self, region: &HashSet<usize>) -> Vec<usize> {
+        region
+            .iter()
+            .copied()
+            .filter(|idx| {
+                self.successors[*idx]
+                    .iter()
+                    .any(|succ| !region.contains(succ))
+            })
+            .collect()
+    }
+
+    fn ensure_graph_invariant_promotion_region(
+        &self,
+        start_idx: usize,
+        internal_entries: &[usize],
+        region: &HashSet<usize>,
+    ) -> Result<(), PromotionGateRejection> {
+        let scc = self.analyze_cfg_scc();
+        if region.iter().copied().any(|idx| scc.is_irreducible_node(idx)) {
+            return Err(PromotionGateRejection::NotSinglePredSucc);
+        }
+
+        let dom = self.analyze_cfg_dominators();
+        if !internal_entries
+            .iter()
+            .copied()
+            .all(|idx| dom.dominates(start_idx, idx))
+        {
+            return Err(PromotionGateRejection::NotSinglePredSucc);
+        }
+
+        if let Some(exit_idx) = self.region_external_exit_nodes(region).first().copied() {
+            let Some(postdom) = PostDomTree::analyze_window_with_exit(&self.successors, region, exit_idx) else {
+                return Err(PromotionGateRejection::NotSinglePredSucc);
+            };
+            let start_postdom = postdom
+                .postdominators()
+                .get(&start_idx)
+                .is_some_and(|set| set.contains(&exit_idx));
+            if !start_postdom {
+                return Err(PromotionGateRejection::NotSinglePredSucc);
+            }
+        }
+
+        Ok(())
+    }
+
     fn is_minimal_structured_promotion_candidate(
         &self,
         start_idx: usize,
@@ -547,16 +599,24 @@ impl<'a> PreviewBuilder<'a> {
 
         let single_pred = internal.iter().all(|idx| {
             let preds = &self.predecessors[*idx];
+            !preds.is_empty() && preds.iter().all(|pred| region.contains(pred))
+        });
+        if !single_pred {
+            return Err(PromotionGateRejection::NotSinglePredSucc);
+        }
+
+        let legacy_single_pred_succ = internal.iter().all(|idx| {
+            let preds = &self.predecessors[*idx];
             !preds.is_empty()
                 && preds
                     .iter()
                     .all(|pred| region.contains(pred) && *pred < *idx)
         });
-        if single_pred {
-            Ok(())
-        } else {
-            Err(PromotionGateRejection::NotSinglePredSucc)
+        if legacy_single_pred_succ {
+            return Ok(());
         }
+
+        self.ensure_graph_invariant_promotion_region(start_idx, &internal, &region)
     }
 
     pub(crate) fn accept_structured_region(
@@ -581,5 +641,66 @@ impl<'a> PreviewBuilder<'a> {
             self.promoted_region_count += 1;
         }
         accepted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::PcodeBasicBlock;
+
+    fn test_options() -> MlilPreviewOptions {
+        MlilPreviewOptions {
+            pe_x64_only: true,
+            is_64bit: true,
+            pointer_size: 8,
+            format: "PE".to_string(),
+            image_base: 0,
+            sections: Vec::new(),
+            region_linearize_structuring: false,
+            force_linear_structuring: false,
+            conservative_irreducible_fallback: false,
+        }
+    }
+
+    fn test_pcode_with_blocks(count: usize) -> PcodeFunction {
+        let blocks = (0..count)
+            .map(|idx| PcodeBasicBlock {
+                index: idx as u32,
+                start_address: 0x1000 + (idx as u64) * 0x10,
+                ops: Vec::new(),
+            })
+            .collect();
+        PcodeFunction { blocks }
+    }
+
+    #[test]
+    fn minimal_structured_promotion_accepts_non_monotonic_layout_when_graph_invariants_hold() {
+        let pcode = test_pcode_with_blocks(4);
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let successors = vec![vec![2], vec![3], vec![1], vec![]];
+        builder.successors = successors.clone();
+        builder.predecessors = build_predecessor_index_map(&successors);
+
+        let targeted = HashSet::from([builder.block_target_key(1)]);
+        let result = builder.is_minimal_structured_promotion_candidate(0, 3, &targeted);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn minimal_structured_promotion_rejects_irreducible_region() {
+        let pcode = test_pcode_with_blocks(4);
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&pcode, &options, None);
+
+        let successors = vec![vec![1, 2], vec![2], vec![1, 3], vec![]];
+        builder.successors = successors.clone();
+        builder.predecessors = build_predecessor_index_map(&successors);
+
+        let targeted = HashSet::from([builder.block_target_key(1)]);
+        let result = builder.is_minimal_structured_promotion_candidate(0, 3, &targeted);
+        assert_eq!(result, Err(PromotionGateRejection::NotSinglePredSucc));
     }
 }

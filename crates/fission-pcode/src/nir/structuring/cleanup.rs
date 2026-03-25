@@ -24,6 +24,89 @@ pub(crate) fn cleanup_redundant_labels(body: Vec<HirStmt>) -> Vec<HirStmt> {
     cleaned
 }
 
+pub(super) fn normalize_guarded_tail_layout(body: Vec<HirStmt>) -> (Vec<HirStmt>, usize) {
+    let cleaned = cleanup_redundant_labels(body);
+    let (canonicalized, rewritten_aliases) = canonicalize_top_level_forward_label_aliases(cleaned);
+    let cleaned = cleanup_redundant_labels(canonicalized);
+    (cleaned, rewritten_aliases)
+}
+
+pub(super) fn canonicalize_top_level_forward_label_aliases(
+    body: Vec<HirStmt>,
+) -> (Vec<HirStmt>, usize) {
+    let (aliases, alias_ranges) = top_level_forward_label_aliases_with_ranges(&body);
+    if aliases.is_empty() {
+        return (body, 0);
+    }
+
+    let rewritten = rewrite_stmt_labels(body, &aliases);
+    let mut out = Vec::with_capacity(rewritten.len());
+    let mut idx = 0usize;
+    let mut range_idx = 0usize;
+
+    while idx < rewritten.len() {
+        while range_idx < alias_ranges.len() && alias_ranges[range_idx].1 <= idx {
+            range_idx += 1;
+        }
+        if range_idx < alias_ranges.len() {
+            let (start, end) = alias_ranges[range_idx];
+            if idx >= start && idx < end {
+                idx = end;
+                continue;
+            }
+        }
+        out.push(rewritten[idx].clone());
+        idx += 1;
+    }
+
+    (out, aliases.len())
+}
+
+fn top_level_forward_label_aliases_with_ranges(
+    body: &[HirStmt],
+) -> (HashMap<String, String>, Vec<(usize, usize)>) {
+    let mut aliases = HashMap::new();
+    let mut ranges = Vec::new();
+    let mut idx = 0usize;
+    while idx < body.len() {
+        let HirStmt::Label(alias_label) = &body[idx] else {
+            idx += 1;
+            continue;
+        };
+        let next_label_idx =
+            (idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)));
+        let Some(next_label_idx) = next_label_idx else {
+            idx += 1;
+            continue;
+        };
+        let HirStmt::Label(next_label) = &body[next_label_idx] else {
+            unreachable!();
+        };
+        if is_top_level_forward_alias_segment(&body[idx + 1..next_label_idx], next_label) {
+            aliases.insert(alias_label.clone(), next_label.clone());
+            ranges.push((idx, next_label_idx));
+        }
+        idx = next_label_idx;
+    }
+    (aliases, ranges)
+}
+
+fn is_top_level_forward_alias_segment(segment: &[HirStmt], next_label: &str) -> bool {
+    let mut saw_forward_goto = false;
+    for stmt in segment {
+        if is_ignorable_discovery_stmt(stmt) {
+            continue;
+        }
+        match stmt {
+            HirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
+                saw_forward_goto = true;
+            }
+            _ => return false,
+        }
+    }
+    saw_forward_goto
+}
+
 fn adjacent_label_aliases(body: &[HirStmt]) -> HashMap<String, String> {
     let mut aliases = HashMap::new();
     let mut idx = 0usize;
@@ -237,4 +320,84 @@ pub(super) fn trim_ignorable_stmt_bounds(body: &[HirStmt]) -> Option<(usize, usi
 
 pub(super) fn has_non_ignorable_payload(body: &[HirStmt]) -> bool {
     trim_ignorable_stmt_bounds(body).is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_guarded_tail_layout_collapses_adjacent_labels_before_alias_rewrite() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("block_alias_a".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("block_alias_a".to_string()),
+            HirStmt::Label("block_alias_b".to_string()),
+            HirStmt::Goto("block_tail".to_string()),
+            HirStmt::Label("block_tail".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        let (normalized, _) = normalize_guarded_tail_layout(body);
+        assert_eq!(
+            normalized,
+            vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".to_string()),
+                    then_body: vec![HirStmt::Goto("block_tail".to_string())],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Label("block_tail".to_string()),
+                HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            ]
+        );
+    }
+
+    #[test]
+    fn canonicalize_top_level_forward_aliases_rewrites_and_prunes_alias_segment() {
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("cond".to_string()),
+                then_body: vec![HirStmt::Goto("block_alias".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("block_alias".to_string()),
+            HirStmt::Goto("block_tail".to_string()),
+            HirStmt::Label("block_tail".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        let (normalized, rewritten) = canonicalize_top_level_forward_label_aliases(body);
+        assert_eq!(rewritten, 1);
+        assert_eq!(
+            normalized,
+            vec![
+                HirStmt::If {
+                    cond: HirExpr::Var("cond".to_string()),
+                    then_body: vec![HirStmt::Goto("block_tail".to_string())],
+                    else_body: Vec::new(),
+                },
+                HirStmt::Label("block_tail".to_string()),
+                HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+            ]
+        );
+    }
+
+    #[test]
+    fn canonicalize_top_level_forward_aliases_preserves_nontrivial_alias_payload() {
+        let body = vec![
+            HirStmt::Label("block_alias".to_string()),
+            HirStmt::Expr(HirExpr::Var("work".to_string())),
+            HirStmt::Goto("block_tail".to_string()),
+            HirStmt::Label("block_tail".to_string()),
+            HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        ];
+
+        let (normalized, rewritten) = canonicalize_top_level_forward_label_aliases(body.clone());
+        assert_eq!(rewritten, 0);
+        assert_eq!(normalized, body);
+    }
 }
