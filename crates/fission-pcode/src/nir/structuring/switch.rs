@@ -42,7 +42,7 @@ impl<'a> PreviewBuilder<'a> {
                 body: case_body,
             });
         }
-        merge_adjacent_switch_cases(&mut cases);
+        merge_equivalent_switch_cases(&mut cases);
         let Some((default_body, default_skip)) =
             self.lower_linear_body(parsed.default_idx, exit)?
         else {
@@ -98,6 +98,7 @@ impl<'a> PreviewBuilder<'a> {
             let Some(case_idx) = self.find_block_index_by_address(case_target) else {
                 return Ok(None);
             };
+            let case_idx = self.canonicalize_switch_target(case_idx);
             let Some((case_selector, value)) = extract_eq_const_for_case(&cond, case_on_true)
             else {
                 return Ok(None);
@@ -120,14 +121,35 @@ impl<'a> PreviewBuilder<'a> {
                     let Some(selector) = selector else {
                         return Ok(None);
                     };
+                    let default_idx = self.canonicalize_switch_target(next_idx);
                     return Ok(Some(ParsedSwitch {
                         selector,
                         cases,
-                        default_idx: next_idx,
+                        default_idx,
                     }));
                 }
             }
         }
+    }
+
+    fn canonicalize_switch_target(&self, start_idx: usize) -> usize {
+        const MAX_SWITCH_TARGET_CANON_STEPS: usize = 32;
+        let mut current = start_idx;
+        let mut visited = HashSet::new();
+        for _ in 0..MAX_SWITCH_TARGET_CANON_STEPS {
+            if !visited.insert(current) {
+                break;
+            }
+            if self.successors[current].len() != 1 {
+                break;
+            }
+            let next_idx = self.successors[current][0];
+            if !self.is_trivial_forwarding_block(current, next_idx) {
+                break;
+            }
+            current = next_idx;
+        }
+        current
     }
 }
 
@@ -170,16 +192,64 @@ fn extract_eq_const_operands(lhs: &HirExpr, rhs: &HirExpr) -> Option<(HirExpr, i
     }
 }
 
-fn merge_adjacent_switch_cases(cases: &mut Vec<HirSwitchCase>) {
+fn merge_equivalent_switch_cases(cases: &mut Vec<HirSwitchCase>) {
     let mut merged: Vec<HirSwitchCase> = Vec::with_capacity(cases.len());
     for case in cases.drain(..) {
-        if let Some(prev) = merged.last_mut()
-            && prev.body == case.body
+        if let Some(existing) = merged
+            .iter_mut()
+            .find(|existing| existing.body == case.body)
         {
-            prev.values.extend(case.values);
+            existing.values.extend(case.values);
             continue;
         }
         merged.push(case);
     }
     *cases = merged;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_equivalent_switch_cases_merges_non_adjacent_equal_bodies() {
+        let mut cases = vec![
+            HirSwitchCase {
+                values: vec![1],
+                body: vec![HirStmt::Return(Some(HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )))],
+            },
+            HirSwitchCase {
+                values: vec![2],
+                body: vec![HirStmt::Return(Some(HirExpr::Const(
+                    2,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )))],
+            },
+            HirSwitchCase {
+                values: vec![3],
+                body: vec![HirStmt::Return(Some(HirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )))],
+            },
+        ];
+
+        merge_equivalent_switch_cases(&mut cases);
+
+        assert_eq!(cases.len(), 2);
+        assert_eq!(cases[0].values, vec![1, 3]);
+        assert_eq!(cases[1].values, vec![2]);
+    }
 }

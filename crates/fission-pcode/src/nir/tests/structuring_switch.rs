@@ -95,3 +95,135 @@ fn multi_block_preview_lowers_canonical_switch_chain() {
     assert!(code.contains("case 2:"));
     assert!(code.contains("default:"));
 }
+
+#[test]
+fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case_exit() {
+    let cond0 = uniq(0x530, 1);
+    let cond1 = uniq(0x531, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x5300,
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntEqual,
+                        address: 0x5300,
+                        output: Some(cond0.clone()),
+                        inputs: vec![reg(0x08, 4), cst(1, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5301,
+                        output: None,
+                        inputs: vec![cst(0x5330, 8), cond0],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x5310,
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntEqual,
+                        address: 0x5310,
+                        output: Some(cond1.clone()),
+                        inputs: vec![reg(0x08, 4), cst(2, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x5311,
+                        output: None,
+                        inputs: vec![cst(0x5340, 8), cond1],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x5320,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x5320,
+                    output: None,
+                    inputs: vec![cst(0x5380, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x5330,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x5330,
+                    output: None,
+                    inputs: vec![cst(0x5370, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x5340,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x5340,
+                    output: None,
+                    inputs: vec![cst(0x5370, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0x5350,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x5350,
+                    output: None,
+                    inputs: vec![cst(0x5380, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 6,
+                start_address: 0x5370,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5370,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 7,
+                start_address: 0x5380,
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x5380,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(9, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "switch_skip_guard", 0x5300, &preview_options())
+        .expect("preview render");
+    assert!(!code.contains("switch ("), "{code}");
+    assert!(code.contains("if (param_1 == 1)"), "{code}");
+    assert!(code.contains("if (param_1 == 2)"), "{code}");
+}

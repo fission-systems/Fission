@@ -7,6 +7,37 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-03-25
+
+### Switch Structuring - Ghidra `checkSwitchSkips` Safety Guard Regression
+
+This patch hardens switch lowering safety by adding a negative regression that locks behavior when default and non-default paths do not share a stable exit.
+
+#### Changed
+
+- retained bounded switch target canonicalization for trivial forwarding chains in `structuring/switch.rs`
+- aligned validation target with Ghidra `checkSwitchSkips` intent: avoid unsafe switch formation when default exit diverges
+
+#### Added
+
+- new regression test:
+  - `multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case_exit`
+- test asserts fallback to conditional chain (no unsafe `switch` emission) under non-shared default/case exits
+
+#### Validation
+
+- `cargo test -p fission-pcode structuring_switch` (pass)
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+
+### Docs - Add Fission AI Agent Operating Guide
+
+Added a repository-root `AGENTS.md` that codifies architecture ownership, crate boundaries, NIR structuring rules, telemetry contract, and current CI/testing expectations for AI-assisted engineering workflows.
+
+#### Added
+
+- `AGENTS.md`
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
