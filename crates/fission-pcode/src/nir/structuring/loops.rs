@@ -1,19 +1,29 @@
 use super::*;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct LoopControlRewriteStats {
+    break_rewrites: usize,
+    continue_rewrites: usize,
+    skipped_nested_scope_count: usize,
+}
+
 fn rewrite_loop_control_gotos_in_stmts(
     stmts: &mut [HirStmt],
     continue_label: Option<&str>,
     break_label: Option<&str>,
+    stats: &mut LoopControlRewriteStats,
 ) {
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Goto(label) => {
                 if break_label.is_some_and(|target| label == target) {
                     *stmt = HirStmt::Break;
+                    stats.break_rewrites += 1;
                     continue;
                 }
                 if continue_label.is_some_and(|target| label == target) {
                     *stmt = HirStmt::Continue;
+                    stats.continue_rewrites += 1;
                 }
             }
             HirStmt::If {
@@ -21,16 +31,16 @@ fn rewrite_loop_control_gotos_in_stmts(
                 else_body,
                 ..
             } => {
-                rewrite_loop_control_gotos_in_stmts(then_body, continue_label, break_label);
-                rewrite_loop_control_gotos_in_stmts(else_body, continue_label, break_label);
+                rewrite_loop_control_gotos_in_stmts(then_body, continue_label, break_label, stats);
+                rewrite_loop_control_gotos_in_stmts(else_body, continue_label, break_label, stats);
             }
             HirStmt::Block(body) => {
-                rewrite_loop_control_gotos_in_stmts(body, continue_label, break_label);
+                rewrite_loop_control_gotos_in_stmts(body, continue_label, break_label, stats);
             }
-            HirStmt::While { .. }
-            | HirStmt::DoWhile { .. }
-            | HirStmt::Switch { .. }
-            | HirStmt::Assign { .. }
+            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::Switch { .. } => {
+                stats.skipped_nested_scope_count += 1;
+            }
+            HirStmt::Assign { .. }
             | HirStmt::Expr(_)
             | HirStmt::Label(_)
             | HirStmt::Return(_)
@@ -41,6 +51,62 @@ fn rewrite_loop_control_gotos_in_stmts(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn track_loop_control_rewrite_stats(&mut self, stats: LoopControlRewriteStats) {
+        self.loop_control_rewrite_break_count += stats.break_rewrites;
+        self.loop_control_rewrite_continue_count += stats.continue_rewrites;
+        self.loop_control_rewrite_skipped_nested_scope_count += stats.skipped_nested_scope_count;
+    }
+
+    pub(super) fn try_lower_infloop_with_break(
+        &mut self,
+        idx: usize,
+    ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
+        let block = &self.pcode.blocks[idx];
+        let block_addr = block.start_address;
+        let LoweredTerminator::Cond {
+            cond,
+            true_target,
+            false_target,
+        } = self.lower_block_terminator(idx)?
+        else {
+            return Ok(None);
+        };
+
+        let candidate = if true_target == block_addr {
+            false_target.map(|addr| (negate_expr(cond), addr))
+        } else if false_target == Some(block_addr) {
+            Some((cond, true_target))
+        } else {
+            None
+        };
+        let Some((break_cond, break_addr)) = candidate else {
+            return Ok(None);
+        };
+
+        let Some(exit_idx) = self.find_block_index_by_address(break_addr) else {
+            return Ok(None);
+        };
+        if exit_idx == idx {
+            return Ok(None);
+        }
+
+        let mut body = self.lower_block_stmts(block)?;
+        body.push(HirStmt::If {
+            cond: break_cond,
+            then_body: vec![HirStmt::Break],
+            else_body: Vec::new(),
+        });
+        self.loop_control_explicit_reducer_count += 1;
+
+        Ok(Some((
+            HirStmt::While {
+                cond: HirExpr::Const(1, NirType::Bool),
+                body,
+            },
+            exit_idx,
+        )))
+    }
+
     pub(super) fn try_lower_infloop(
         &mut self,
         idx: usize,
@@ -65,7 +131,9 @@ impl<'a> PreviewBuilder<'a> {
         let body = self.lower_block_stmts(block)?;
         let mut body = body;
         let continue_label = block_label(block_addr);
-        rewrite_loop_control_gotos_in_stmts(&mut body, Some(&continue_label), None);
+        let mut stats = LoopControlRewriteStats::default();
+        rewrite_loop_control_gotos_in_stmts(&mut body, Some(&continue_label), None, &mut stats);
+        self.track_loop_control_rewrite_stats(stats);
         Ok(Some((
             HirStmt::While {
                 cond: HirExpr::Const(1, NirType::Bool),
@@ -84,7 +152,14 @@ impl<'a> PreviewBuilder<'a> {
         };
         let continue_label = block_label(self.block_target_key(cond_idx));
         let break_label = block_label(self.block_target_key(skip_to));
-        rewrite_loop_control_gotos_in_stmts(&mut body, Some(&continue_label), Some(&break_label));
+        let mut stats = LoopControlRewriteStats::default();
+        rewrite_loop_control_gotos_in_stmts(
+            &mut body,
+            Some(&continue_label),
+            Some(&break_label),
+            &mut stats,
+        );
+        self.track_loop_control_rewrite_stats(stats);
         Ok(Some((HirStmt::DoWhile { body, cond }, skip_to)))
     }
 
@@ -172,11 +247,14 @@ impl<'a> PreviewBuilder<'a> {
             let continue_label = block_label(self.block_target_key(idx));
             let break_label = block_label(self.block_target_key(exit_idx));
             let mut body = body;
+            let mut stats = LoopControlRewriteStats::default();
             rewrite_loop_control_gotos_in_stmts(
                 &mut body,
                 Some(&continue_label),
                 Some(&break_label),
+                &mut stats,
             );
+            self.track_loop_control_rewrite_stats(stats);
             if cond_prefix.is_empty() {
                 return Ok(Some((HirStmt::While { cond, body }, exit_idx)));
             }
@@ -284,7 +362,13 @@ mod tests {
             },
         ];
 
-        rewrite_loop_control_gotos_in_stmts(&mut body, Some("block_header"), Some("block_exit"));
+        let mut stats = LoopControlRewriteStats::default();
+        rewrite_loop_control_gotos_in_stmts(
+            &mut body,
+            Some("block_header"),
+            Some("block_exit"),
+            &mut stats,
+        );
 
         assert!(matches!(body[0], HirStmt::Continue));
         assert!(matches!(body[1], HirStmt::Break));
@@ -298,6 +382,9 @@ mod tests {
         };
         assert!(matches!(then_body.as_slice(), [HirStmt::Continue]));
         assert!(matches!(else_body.as_slice(), [HirStmt::Break]));
+        assert_eq!(stats.break_rewrites, 2);
+        assert_eq!(stats.continue_rewrites, 2);
+        assert_eq!(stats.skipped_nested_scope_count, 0);
     }
 
     #[test]
@@ -323,7 +410,13 @@ mod tests {
             },
         ];
 
-        rewrite_loop_control_gotos_in_stmts(&mut body, Some("block_header"), Some("block_exit"));
+        let mut stats = LoopControlRewriteStats::default();
+        rewrite_loop_control_gotos_in_stmts(
+            &mut body,
+            Some("block_header"),
+            Some("block_exit"),
+            &mut stats,
+        );
 
         let HirStmt::While {
             body: nested_while_body,
@@ -343,5 +436,8 @@ mod tests {
             matches!(cases[0].body.as_slice(), [HirStmt::Goto(label)] if label == "block_exit")
         );
         assert!(matches!(default.as_slice(), [HirStmt::Goto(label)] if label == "block_header"));
+        assert_eq!(stats.break_rewrites, 0);
+        assert_eq!(stats.continue_rewrites, 0);
+        assert_eq!(stats.skipped_nested_scope_count, 2);
     }
 }

@@ -133,6 +133,14 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub structuring_irreducible_header_count: usize,
     #[serde(default)]
+    pub loop_control_explicit_reducer_count: usize,
+    #[serde(default)]
+    pub loop_control_rewrite_break_count: usize,
+    #[serde(default)]
+    pub loop_control_rewrite_continue_count: usize,
+    #[serde(default)]
+    pub loop_control_rewrite_skipped_nested_scope_count: usize,
+    #[serde(default)]
     pub promotion_candidate_count: usize,
     #[serde(default)]
     pub promoted_region_count: usize,
@@ -227,6 +235,11 @@ impl NirBuildStats {
         self.structuring_scc_component_count += other.structuring_scc_component_count;
         self.structuring_irreducible_scc_count += other.structuring_irreducible_scc_count;
         self.structuring_irreducible_header_count += other.structuring_irreducible_header_count;
+        self.loop_control_explicit_reducer_count += other.loop_control_explicit_reducer_count;
+        self.loop_control_rewrite_break_count += other.loop_control_rewrite_break_count;
+        self.loop_control_rewrite_continue_count += other.loop_control_rewrite_continue_count;
+        self.loop_control_rewrite_skipped_nested_scope_count +=
+            other.loop_control_rewrite_skipped_nested_scope_count;
         self.promotion_candidate_count += other.promotion_candidate_count;
         self.promoted_region_count += other.promoted_region_count;
         self.promotion_rejected_by_shape_count += other.promotion_rejected_by_shape_count;

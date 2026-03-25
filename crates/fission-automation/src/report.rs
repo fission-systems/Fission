@@ -109,6 +109,10 @@ pub struct SummaryDelta {
     pub structuring_scc_component_count: isize,
     pub structuring_irreducible_scc_count: isize,
     pub structuring_irreducible_header_count: isize,
+    pub loop_control_explicit_reducer_count: isize,
+    pub loop_control_rewrite_break_count: isize,
+    pub loop_control_rewrite_continue_count: isize,
+    pub loop_control_rewrite_skipped_nested_scope_count: isize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,6 +365,22 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
         (
             "structuring_irreducible_header_count",
             stats.structuring_irreducible_header_count,
+        ),
+        (
+            "loop_control_explicit_reducer_count",
+            stats.loop_control_explicit_reducer_count,
+        ),
+        (
+            "loop_control_rewrite_break_count",
+            stats.loop_control_rewrite_break_count,
+        ),
+        (
+            "loop_control_rewrite_continue_count",
+            stats.loop_control_rewrite_continue_count,
+        ),
+        (
+            "loop_control_rewrite_skipped_nested_scope_count",
+            stats.loop_control_rewrite_skipped_nested_scope_count,
         ),
         ("promotion_candidate_count", stats.promotion_candidate_count),
         ("promoted_region_count", stats.promoted_region_count),
@@ -639,6 +659,41 @@ pub fn compute_delta(
                 .aggregate
                 .nir_build_stats_totals
                 .structuring_irreducible_header_count as isize,
+        loop_control_explicit_reducer_count: current
+            .aggregate
+            .nir_build_stats_totals
+            .loop_control_explicit_reducer_count
+            as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .loop_control_explicit_reducer_count as isize,
+        loop_control_rewrite_break_count: current
+            .aggregate
+            .nir_build_stats_totals
+            .loop_control_rewrite_break_count as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .loop_control_rewrite_break_count as isize,
+        loop_control_rewrite_continue_count: current
+            .aggregate
+            .nir_build_stats_totals
+            .loop_control_rewrite_continue_count
+            as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .loop_control_rewrite_continue_count as isize,
+        loop_control_rewrite_skipped_nested_scope_count: current
+            .aggregate
+            .nir_build_stats_totals
+            .loop_control_rewrite_skipped_nested_scope_count
+            as isize
+            - baseline
+                .aggregate
+                .nir_build_stats_totals
+                .loop_control_rewrite_skipped_nested_scope_count as isize,
     })
 }
 
@@ -709,7 +764,7 @@ pub fn render_markdown(
     if let Some(delta) = delta {
         out.push_str("## Baseline Delta\n\n");
         out.push_str(&format!(
-            "- direct_success_count: `{:+}`\n- nir_failure_count: `{:+}`\n- explicit_fact_nonzero_count: `{:+}`\n- strict_explicit_candidate_count: `{:+}`\n- inventory_surface_gap_count: `{:+}`\n- pdb_nonzero_rows: `{:+}`\n- region_linearized_count: `{:+}`\n- forced_linear_count: `{:+}`\n- conditional_tail_exit_mismatch_count: `{:+}`\n- body_lowering_failed_count: `{:+}`\n- successor_inline_rejected_count: `{:+}`\n- revisit_cycle_count: `{:+}`\n- unsupported_terminator_count: `{:+}`\n- rejected_irreducible_cfg_count: `{:+}`\n- structuring_scc_component_count: `{:+}`\n- structuring_irreducible_scc_count: `{:+}`\n- structuring_irreducible_header_count: `{:+}`\n\n",
+            "- direct_success_count: `{:+}`\n- nir_failure_count: `{:+}`\n- explicit_fact_nonzero_count: `{:+}`\n- strict_explicit_candidate_count: `{:+}`\n- inventory_surface_gap_count: `{:+}`\n- pdb_nonzero_rows: `{:+}`\n- region_linearized_count: `{:+}`\n- forced_linear_count: `{:+}`\n- conditional_tail_exit_mismatch_count: `{:+}`\n- body_lowering_failed_count: `{:+}`\n- successor_inline_rejected_count: `{:+}`\n- revisit_cycle_count: `{:+}`\n- unsupported_terminator_count: `{:+}`\n- rejected_irreducible_cfg_count: `{:+}`\n- structuring_scc_component_count: `{:+}`\n- structuring_irreducible_scc_count: `{:+}`\n- structuring_irreducible_header_count: `{:+}`\n- loop_control_explicit_reducer_count: `{:+}`\n- loop_control_rewrite_break_count: `{:+}`\n- loop_control_rewrite_continue_count: `{:+}`\n- loop_control_rewrite_skipped_nested_scope_count: `{:+}`\n\n",
             delta.direct_success_count,
             delta.nir_failure_count,
             delta.explicit_fact_nonzero_count,
@@ -727,6 +782,10 @@ pub fn render_markdown(
             delta.structuring_scc_component_count,
             delta.structuring_irreducible_scc_count,
             delta.structuring_irreducible_header_count,
+            delta.loop_control_explicit_reducer_count,
+            delta.loop_control_rewrite_break_count,
+            delta.loop_control_rewrite_continue_count,
+            delta.loop_control_rewrite_skipped_nested_scope_count,
         ));
     }
 

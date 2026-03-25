@@ -121,6 +121,23 @@ impl<'a> PreviewBuilder<'a> {
             }
             if diag {
                 eprintln!(
+                    "[DIAG] structuring idx={} block=0x{:x} attempt=loop_control elapsed={:.3}s",
+                    idx,
+                    self.pcode.blocks[idx].start_address,
+                    total_start.elapsed().as_secs_f64()
+                );
+            }
+            if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
+                self.try_lower_infloop_with_break(idx),
+                &mut last_structuring_failure,
+            )? && self.accept_structured_region(idx, skip_to, &targeted)
+            {
+                body.push(stmt);
+                idx = skip_to;
+                continue;
+            }
+            if diag {
+                eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=infloop elapsed={:.3}s",
                     idx,
                     self.pcode.blocks[idx].start_address,

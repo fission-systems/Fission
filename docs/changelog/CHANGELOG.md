@@ -38,6 +38,33 @@ Added a repository-root `AGENTS.md` that codifies architecture ownership, crate 
 
 - `AGENTS.md`
 
+### Loop Structuring - Explicit Infloop Break Reducer + Loop-Control Telemetry
+
+This patch adds a conservative explicit infloop-with-break reducer path and wires loop-control rewrite telemetry through `NirBuildStats` and automation deltas so quality runs can track loop-local rewrite behavior directly.
+
+#### Changed
+
+- added `try_lower_infloop_with_break()` in `structuring/loops.rs` for conditional self-loop shapes that can be safely expressed as `while (true)` + guarded `break`
+- integrated a new structuring attempt stage (`attempt=loop_control`) in `structuring/driver.rs`, ordered after `while` and before plain `infloop`
+- extended loop-control rewrite pass with explicit counters:
+  - rewritten `break` gotos
+  - rewritten `continue` gotos
+  - nested-scope rewrite skips (`While`/`DoWhile`/`Switch`)
+- added new `NirBuildStats` fields and propagated them through:
+  - preview builder state/snapshot
+  - stats merge path
+  - automation summary delta and markdown baseline delta rendering
+
+#### Validation
+
+- `cargo test -p fission-pcode rewrite_loop_control_gotos -- --nocapture` (pass)
+- `cargo test -p fission-pcode structuring_loops -- --nocapture` (pass)
+- `cargo test -p fission-pcode` (pass)
+- `cargo test -p fission-automation` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+- `cargo build -p fission-pcode -p fission-automation` (pass)
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
