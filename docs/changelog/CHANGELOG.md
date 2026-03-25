@@ -65,6 +65,24 @@ This patch adds a conservative explicit infloop-with-break reducer path and wire
 - `cargo check -p fission-automation` (pass)
 - `cargo build -p fission-pcode -p fission-automation` (pass)
 
+### P5H3E - Conditional-Tail Shared-Follow Canonical Arm Alignment
+
+This increment tightens conditional-tail recovery by aligning shared-follow candidate search and per-arm lowering to canonicalized region-local arm starts, reducing mismatch opportunities caused by pre-canonical arm divergence.
+
+#### Changed
+
+- in `structuring/linear.rs` `lower_conditional_tail()`:
+  - shared-tail entry discovery now uses `true_arm.canonical_idx` / `false_arm.canonical_idx`
+  - shared-tail arm lowering to intermediate follow entries now starts from canonicalized indices instead of raw effective starts
+- preserved existing one-arm fast-path handling (`reaches_join_trivially`) to keep conservative empty-else lowering behavior unchanged
+
+#### Validation
+
+- `cargo test -p fission-pcode structuring_conditionals -- --nocapture` (pass)
+- `cargo test -p fission-pcode structuring_linear -- --nocapture` (pass)
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)

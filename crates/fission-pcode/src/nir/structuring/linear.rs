@@ -864,8 +864,8 @@ impl<'a> PreviewBuilder<'a> {
             if region_recovery && let LinearExit::Join(join_idx) = exit {
                 let shared_tail_entries = match self.find_shared_tail_entries_for_region(
                     origin_idx,
-                    true_arm.effective_start_idx,
-                    false_arm.effective_start_idx,
+                    true_arm.canonical_idx,
+                    false_arm.canonical_idx,
                     join_idx,
                 ) {
                     Ok(candidates) => candidates,
@@ -880,14 +880,14 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     let shared_exit = LinearExit::Join(shared_tail_entry_idx);
                     let true_branch = self.lower_linear_body_with_depth_detailed(
-                        true_arm.effective_start_idx,
+                        true_arm.canonical_idx,
                         shared_exit,
                         depth + 1,
                         budget.as_deref_mut(),
                         region_recovery,
                     )?;
                     let false_branch = self.lower_linear_body_with_depth_detailed(
-                        false_arm.effective_start_idx,
+                        false_arm.canonical_idx,
                         shared_exit,
                         depth + 1,
                         budget.as_deref_mut(),
