@@ -28,6 +28,12 @@ pub(super) enum PromotionGateRejection {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn find_top_level_label_after(body: &[HirStmt], start_idx: usize, label: &str) -> Option<usize> {
+        (start_idx + 1..body.len()).find(
+            |pos| matches!(body.get(*pos), Some(HirStmt::Label(candidate)) if candidate == label),
+        )
+    }
+
     fn is_nontrivial_internal_target_entry(&self, idx: usize) -> bool {
         let preds = &self.predecessors[idx];
         if preds.len() != 1 {
@@ -107,6 +113,96 @@ impl<'a> PreviewBuilder<'a> {
         saw_forward_goto
     }
 
+    fn is_trivial_join_forward_segment(segment: &[HirStmt], next_label: &str) -> bool {
+        let mut saw_forward_goto = false;
+        for stmt in segment {
+            if is_ignorable_discovery_stmt(stmt) {
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
+                    saw_forward_goto = true;
+                }
+                _ => return false,
+            }
+        }
+        saw_forward_goto
+    }
+
+    fn count_top_level_goto_refs_in_range(
+        body: &[HirStmt],
+        label: &str,
+        start_exclusive: usize,
+        end_exclusive: usize,
+    ) -> usize {
+        if start_exclusive + 1 >= end_exclusive {
+            return 0;
+        }
+        body[start_exclusive + 1..end_exclusive]
+            .iter()
+            .filter(|stmt| matches!(stmt, HirStmt::Goto(target) if target == label))
+            .count()
+    }
+
+    fn resolve_terminal_join_target(
+        &mut self,
+        body: &[HirStmt],
+        anchor_idx: usize,
+        target_label: &str,
+        referenced: &HashMap<String, usize>,
+    ) -> Option<(String, usize)> {
+        let mut current = target_label.to_string();
+        let mut seen = HashSet::new();
+        let mut rewrites = 0usize;
+
+        loop {
+            if !seen.insert(current.clone()) {
+                return None;
+            }
+
+            let label_idx = (anchor_idx + 1..body.len()).find(
+                |pos| matches!(body.get(*pos), Some(HirStmt::Label(label)) if label == &current),
+            )?;
+            let next_label_idx =
+                (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)));
+            let Some(next_label_idx) = next_label_idx else {
+                if rewrites > 0 {
+                    self.canonicalized_guarded_tail_shape_count += rewrites;
+                }
+                return Some((current, label_idx));
+            };
+            let HirStmt::Label(next_label) = &body[next_label_idx] else {
+                unreachable!();
+            };
+            let segment = &body[label_idx + 1..next_label_idx];
+            let top_level_window_refs = Self::count_top_level_goto_refs_in_range(
+                body,
+                &current,
+                anchor_idx,
+                label_idx,
+            );
+            let hop_ref_budget = if rewrites == 0 {
+                top_level_window_refs + 1
+            } else {
+                top_level_window_refs
+            };
+            let no_nonlocal_refs = referenced.get(&current).copied().unwrap_or(0) <= hop_ref_budget;
+            if no_nonlocal_refs
+                && (Self::is_trivial_join_forward_segment(segment, next_label)
+                    || segment.iter().all(is_ignorable_discovery_stmt))
+            {
+                current = next_label.clone();
+                rewrites += 1;
+                continue;
+            }
+
+            if rewrites > 0 {
+                self.canonicalized_guarded_tail_shape_count += rewrites;
+            }
+            return Some((current, label_idx));
+        }
+    }
+
     fn resolve_alias_redirect(
         label: &str,
         redirects: &HashMap<String, Option<String>>,
@@ -123,6 +219,125 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         Some(current)
+    }
+
+    fn count_goto_refs_in_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>) {
+        match stmt {
+            HirStmt::Goto(label) => {
+                *out.entry(label.clone()).or_insert(0) += 1;
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                for nested in then_body {
+                    Self::count_goto_refs_in_stmt(nested, out);
+                }
+                for nested in else_body {
+                    Self::count_goto_refs_in_stmt(nested, out);
+                }
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                for nested in body {
+                    Self::count_goto_refs_in_stmt(nested, out);
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    for nested in &case.body {
+                        Self::count_goto_refs_in_stmt(nested, out);
+                    }
+                }
+                for nested in default {
+                    Self::count_goto_refs_in_stmt(nested, out);
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+
+    fn goto_ref_counts(body: &[HirStmt]) -> HashMap<String, usize> {
+        let mut out = HashMap::new();
+        for stmt in body {
+            Self::count_goto_refs_in_stmt(stmt, &mut out);
+        }
+        out
+    }
+
+    fn rewrite_goto_label_in_stmt(stmt: &mut HirStmt, from: &str, to: &str) {
+        match stmt {
+            HirStmt::Goto(label) => {
+                if label == from {
+                    *label = to.to_string();
+                }
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                for nested in then_body {
+                    Self::rewrite_goto_label_in_stmt(nested, from, to);
+                }
+                for nested in else_body {
+                    Self::rewrite_goto_label_in_stmt(nested, from, to);
+                }
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                for nested in body {
+                    Self::rewrite_goto_label_in_stmt(nested, from, to);
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    for nested in &mut case.body {
+                        Self::rewrite_goto_label_in_stmt(nested, from, to);
+                    }
+                }
+                for nested in default {
+                    Self::rewrite_goto_label_in_stmt(nested, from, to);
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+
+    fn rewrite_goto_label_in_stmts(stmts: &mut [HirStmt], from: &str, to: &str) {
+        for stmt in stmts {
+            Self::rewrite_goto_label_in_stmt(stmt, from, to);
+        }
+    }
+
+    fn terminalizable_join_alias_target(
+        body: &[HirStmt],
+        label_idx: usize,
+    ) -> Option<(String, usize)> {
+        let HirStmt::Label(_) = &body[label_idx] else {
+            return None;
+        };
+        let next_label_idx =
+            (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))?;
+        let HirStmt::Label(next_label) = &body[next_label_idx] else {
+            return None;
+        };
+        let segment = &body[label_idx + 1..next_label_idx];
+        if Self::is_trivial_join_forward_segment(segment, next_label)
+            || segment.iter().all(is_ignorable_discovery_stmt)
+        {
+            return Some((next_label.clone(), next_label_idx));
+        }
+        None
     }
 
     fn canonicalize_interleaved_local_aliases(
@@ -234,11 +449,31 @@ impl<'a> PreviewBuilder<'a> {
         let mut saw_gap_after_payload = false;
         let mut removed_any = start > 0 || end < flattened.len() || flattened.len() != end - start;
         let mut payload_entry_count = 0usize;
+        let segment_ref_counts = Self::goto_ref_counts(&flattened);
+        let mut idx = 0usize;
 
-        for stmt in &flattened {
+        while idx < flattened.len() {
+            let stmt = &flattened[idx];
+            let trailing_has_non_ignorable = flattened[idx + 1..]
+                .iter()
+                .any(|stmt| !is_ignorable_discovery_stmt(stmt));
             match stmt {
                 HirStmt::Label(label) => {
                     if referenced.get(label).copied().unwrap_or(0) > 0 {
+                        let local_ref_count = segment_ref_counts.get(label).copied().unwrap_or(0);
+                        let total_ref_count = referenced.get(label).copied().unwrap_or(0);
+                        if total_ref_count > local_ref_count {
+                            return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
+                        }
+                        if let Some((next_label, next_idx)) =
+                            Self::terminalizable_join_alias_target(&flattened, idx)
+                        {
+                            Self::rewrite_goto_label_in_stmts(&mut canonical, label, &next_label);
+                            removed_any = true;
+                            self.canonicalized_interleaved_join_use_count += 1;
+                            idx = next_idx;
+                            continue;
+                        }
                         return Err(GuardedTailCanonicalizationFailure::InterleavedJoinUses);
                     }
                     removed_any = true;
@@ -252,7 +487,18 @@ impl<'a> PreviewBuilder<'a> {
                         saw_gap_after_payload = true;
                     }
                 }
-                HirStmt::Goto(_) | HirStmt::Return(_) | HirStmt::Break | HirStmt::Continue => {
+                HirStmt::Return(_) => {
+                    if saw_payload {
+                        if trailing_has_non_ignorable {
+                            return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
+                        }
+                    } else {
+                        saw_payload = true;
+                        payload_entry_count += 1;
+                    }
+                    canonical.push(stmt.clone());
+                }
+                HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue => {
                     if saw_payload {
                         return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
                     }
@@ -267,6 +513,7 @@ impl<'a> PreviewBuilder<'a> {
                     canonical.push(other.clone());
                 }
             }
+            idx += 1;
         }
 
         if payload_entry_count > 1 {
@@ -337,13 +584,19 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             };
 
-            let Some(label_idx) = (idx + 1..body.len()).find(|pos| {
-                matches!(body.get(*pos), Some(HirStmt::Label(label)) if label == &target_label)
-            }) else {
-                self.mark_promotion_shape_rejection();
+            let Some((target_label, label_idx)) =
+                self.resolve_terminal_join_target(body, idx, &target_label, &referenced)
+            else {
+                if Self::find_top_level_label_after(body, idx, &target_label).is_some() {
+                    self.mark_promotion_shape_rejection();
+                }
                 idx += 1;
                 continue;
             };
+            if !has_non_ignorable_payload(&body[idx + 1..label_idx]) {
+                idx += 1;
+                continue;
+            }
 
             let middle = match self
                 .canonicalize_guarded_tail_segment(&body[idx + 1..label_idx], &referenced)
@@ -457,16 +710,22 @@ impl<'a> PreviewBuilder<'a> {
             let Some(target_label) = target_label else {
                 continue;
             };
+            if Self::find_top_level_label_after(body, idx, target_label).is_none() {
+                continue;
+            }
             self.discovery_seen_guarded_tail_like_shape_count += 1;
 
-            let Some(label_idx) = (idx + 1..body.len()).find(|pos| {
-                matches!(body.get(*pos), Some(HirStmt::Label(label)) if label == target_label)
-            }) else {
+            let Some((target_label, label_idx)) =
+                self.resolve_terminal_join_target(body, idx, target_label, &referenced)
+            else {
                 self.mark_guarded_tail_canonicalization_failure(
                     GuardedTailCanonicalizationFailure::NonterminalJoinLabel,
                 );
                 continue;
             };
+            if !has_non_ignorable_payload(&body[idx + 1..label_idx]) {
+                continue;
+            }
 
             match self.canonicalize_guarded_tail_segment(&body[idx + 1..label_idx], &referenced) {
                 Ok(_) => {}
@@ -478,7 +737,7 @@ impl<'a> PreviewBuilder<'a> {
 
             self.promotion_candidate_count += 1;
 
-            if referenced.get(target_label).copied().unwrap_or(0) != 1 {
+            if referenced.get(&target_label).copied().unwrap_or(0) != 1 {
                 self.mark_promotion_gate_rejection(PromotionGateRejection::MustEmitLabel);
                 continue;
             }

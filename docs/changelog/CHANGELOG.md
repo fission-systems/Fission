@@ -140,6 +140,42 @@ This increment moves promotion acceptance beyond strict layout order checks by a
 - `canonicalization_failed_interleaved_join_uses`: `170 -> 149`
 - output class mix unchanged on this sample (`structured=32`, `partially_structured=34`, `linear_fallback=8`)
 
+### Structuring - Guarded-Tail Join and Tail-Exit Canonicalization Tightening
+
+This increment further aligns guarded-tail recovery with Ghidra-style conservative exit handling by terminalizing safe forward join chains, filtering non-forward targets out of candidate discovery, and preserving tail-terminal returns without relaxing loop/switch escape safety.
+
+#### Changed
+
+- refined guarded-tail join target handling in `structuring/guards.rs`:
+  - added safe multi-hop terminal join resolution for trivial forward label chains
+  - prefiltered backward/non-forward top-level label targets so they are skipped as non-candidates instead of inflating nonterminal join failures
+  - preserved conservative rejection for ambiguous/nonlocal alias ownership
+- refined guarded-tail segment canonicalization:
+  - accepted a single tail-terminal `return` after payload as a valid terminal exit
+  - continued rejecting true nested tail escapes (`goto`/`break`/`continue` after payload) and ambiguous scoped exits
+- expanded guarded-tail regression coverage in `structuring_misc.rs` for:
+  - nonterminal join forwarding
+  - multi-hop join forwarding
+  - safe interleaved alias stubs
+  - backward-target skip behavior
+  - tail-terminal return preservation
+
+#### Validation
+
+- `cargo test -p fission-pcode structuring_candidate_discovery_ -- --nocapture` (pass)
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 40` (pass)
+
+#### Observed lane delta (`nir`, functions-limit 40)
+
+- `canonicalization_failed_nonterminal_join_label`: `201 -> 0`
+- `promotion_rejected_by_shape_count`: `332 -> 261`
+- `discovery_rejected_noncanonical_layout_count`: `332 -> 259`
+- `structured`: `32 -> 35`
+- `partially_structured`: `34 -> 31`
+- `linear_fallback`: `8 -> 8`
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
