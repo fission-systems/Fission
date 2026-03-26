@@ -31,6 +31,37 @@ pub(super) enum PromotionGateRejection {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn classify_external_alias_ref_sites(
+        full_body: &[HirStmt],
+        segment_start: usize,
+        segment_end: usize,
+        label: &str,
+    ) -> (usize, usize, usize) {
+        let mut top_level_before = 0usize;
+        let mut nested_before = 0usize;
+        let mut refs_after = 0usize;
+
+        for (idx, stmt) in full_body.iter().enumerate() {
+            if idx >= segment_start && idx < segment_end {
+                continue;
+            }
+            let ref_count = Self::stmt_contains_goto_label(stmt, label);
+            if ref_count == 0 {
+                continue;
+            }
+            if idx < segment_start {
+                match stmt {
+                    HirStmt::Goto(target) if target == label => top_level_before += 1,
+                    _ => nested_before += ref_count,
+                }
+            } else {
+                refs_after += ref_count;
+            }
+        }
+
+        (top_level_before, nested_before, refs_after)
+    }
+
     fn stmt_contains_goto_label(stmt: &HirStmt, label: &str) -> usize {
         match stmt {
             HirStmt::Goto(target) => usize::from(target == label),
@@ -118,6 +149,20 @@ impl<'a> PreviewBuilder<'a> {
         (outside_refs, middle_refs)
     }
 
+    fn trailing_middle_fallthrough_equivalent_refs(middle: &[HirStmt], label: &str) -> usize {
+        let mut trailing = 0usize;
+        for stmt in middle.iter().rev() {
+            if is_ignorable_discovery_stmt(stmt) {
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(target) if target == label => trailing += 1,
+                _ => break,
+            }
+        }
+        trailing
+    }
+
     fn outside_refs_preserve_forward_owner(
         body: &[HirStmt],
         if_idx: usize,
@@ -142,15 +187,42 @@ impl<'a> PreviewBuilder<'a> {
         found
     }
 
+    fn outside_refs_are_elidable_next_flow(
+        body: &[HirStmt],
+        if_idx: usize,
+        label_idx: usize,
+        label: &str,
+    ) -> bool {
+        let mut found = false;
+        for (idx, stmt) in body.iter().enumerate() {
+            if idx >= if_idx && idx <= label_idx {
+                continue;
+            }
+            let ref_count = Self::stmt_contains_goto_label(stmt, label);
+            if ref_count == 0 {
+                continue;
+            }
+            found = true;
+            match stmt {
+                HirStmt::Goto(target) if target == label && idx < if_idx => {}
+                _ => return false,
+            }
+        }
+        found
+    }
+
     fn classify_must_emit_label_rejection(
         body: &[HirStmt],
+        middle: &[HirStmt],
         if_idx: usize,
         label_idx: usize,
         label: &str,
         outside_refs: usize,
         middle_refs: usize,
     ) -> Option<PromotionGateRejection> {
-        if middle_refs > 0 {
+        let effective_middle_refs = middle_refs
+            .saturating_sub(Self::trailing_middle_fallthrough_equivalent_refs(middle, label));
+        if effective_middle_refs > 0 {
             return Some(PromotionGateRejection::MustEmitLabelSurvivingMiddleRef);
         }
         if outside_refs > 1 {
@@ -160,6 +232,9 @@ impl<'a> PreviewBuilder<'a> {
             return Some(PromotionGateRejection::MustEmitLabelOwnerConflict);
         }
         if outside_refs == 1 {
+            if Self::outside_refs_are_elidable_next_flow(body, if_idx, label_idx, label) {
+                return None;
+            }
             return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
         }
         None
@@ -480,11 +555,15 @@ impl<'a> PreviewBuilder<'a> {
     fn canonicalize_interleaved_local_aliases(
         &mut self,
         body: &[HirStmt],
+        full_body: &[HirStmt],
+        segment_start: usize,
         referenced: &HashMap<String, usize>,
-    ) -> Result<Vec<HirStmt>, GuardedTailCanonicalizationFailure> {
+    ) -> Result<(Vec<HirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
         let local_refs = Self::local_goto_positions_by_label(body);
         let mut alias_redirects = HashMap::new();
         let mut canonicalized_local_nonfallthrough = 0usize;
+        let mut external_safe_redirect_labels = Vec::new();
+        let segment_end = segment_start + body.len();
 
         for (idx, stmt) in body.iter().enumerate() {
             let HirStmt::Label(label) = stmt else {
@@ -497,9 +576,7 @@ impl<'a> PreviewBuilder<'a> {
             let (top_level_before, nested_before, refs_after) =
                 Self::classify_alias_ref_sites(body, idx, label);
             let local_ref_count = top_level_before + nested_before + refs_after;
-            if total_refs > local_ref_count {
-                return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
-            }
+            let external_ref_count = total_refs.saturating_sub(local_ref_count);
             if refs_after > 0 || goto_positions.iter().any(|pos| *pos >= idx) {
                 return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
             }
@@ -519,6 +596,22 @@ impl<'a> PreviewBuilder<'a> {
                 && let HirStmt::Label(next_label) = &body[next_label_idx]
                 && Self::is_local_alias_forward_segment(segment, next_label)
             {
+                if external_ref_count > 0 {
+                    let (external_top_level_before, external_nested_before, external_refs_after) =
+                        Self::classify_external_alias_ref_sites(
+                            full_body,
+                            segment_start,
+                            segment_end,
+                            label,
+                        );
+                    if external_nested_before > 0 || external_refs_after > 0 {
+                        return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
+                    }
+                    if external_top_level_before != external_ref_count {
+                        return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
+                    }
+                    external_safe_redirect_labels.push(label.clone());
+                }
                 if has_non_ignorable_gap {
                     if goto_positions.len() != 1 {
                         return Err(
@@ -529,6 +622,9 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 alias_redirects.insert(label.clone(), Some(next_label.clone()));
                 continue;
+            }
+            if external_ref_count > 0 {
+                return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
             }
             if has_non_ignorable_gap {
                 if segment.iter().any(|stmt| {
@@ -553,39 +649,55 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         if alias_redirects.is_empty() {
-            return Ok(body.to_vec());
+            return Ok((body.to_vec(), Vec::new()));
         }
 
         self.canonicalized_interleaved_join_use_count += alias_redirects.len();
         self.canonicalized_local_nonfallthrough_alias_count += canonicalized_local_nonfallthrough;
-        Ok(body
-            .iter()
-            .filter_map(|stmt| match stmt {
-                HirStmt::Goto(label) if alias_redirects.contains_key(label) => {
-                    match Self::resolve_alias_redirect(label, &alias_redirects) {
-                        Some(resolved) if resolved != *label => Some(HirStmt::Goto(resolved)),
-                        Some(_) => Some(stmt.clone()),
-                        None => None,
-                    }
-                }
-                HirStmt::Label(label) if alias_redirects.contains_key(label) => None,
-                other => Some(other.clone()),
+        let external_redirects = external_safe_redirect_labels
+            .into_iter()
+            .filter_map(|label| {
+                Self::resolve_alias_redirect(&label, &alias_redirects)
+                    .filter(|resolved| resolved != &label)
+                    .map(|resolved| (label, resolved))
             })
-            .collect())
+            .collect();
+        Ok((
+            body.iter()
+                .filter_map(|stmt| match stmt {
+                    HirStmt::Goto(label) if alias_redirects.contains_key(label) => {
+                        match Self::resolve_alias_redirect(label, &alias_redirects) {
+                            Some(resolved) if resolved != *label => Some(HirStmt::Goto(resolved)),
+                            Some(_) => Some(stmt.clone()),
+                            None => None,
+                        }
+                    }
+                    HirStmt::Label(label) if alias_redirects.contains_key(label) => None,
+                    other => Some(other.clone()),
+                })
+                .collect(),
+            external_redirects,
+        ))
     }
 
     fn canonicalize_guarded_tail_segment(
         &mut self,
         segment: &[HirStmt],
+        full_body: &[HirStmt],
+        segment_start: usize,
         referenced: &HashMap<String, usize>,
-    ) -> Result<Vec<HirStmt>, GuardedTailCanonicalizationFailure> {
+    ) -> Result<(Vec<HirStmt>, Vec<(String, String)>), GuardedTailCanonicalizationFailure> {
         let mut flattened = Vec::new();
         Self::flatten_guarded_tail_segment(segment, &mut flattened);
         let Some((start, end)) = trim_ignorable_stmt_bounds(&flattened) else {
             return Err(GuardedTailCanonicalizationFailure::NonterminalJoinLabel);
         };
-        let flattened =
-            self.canonicalize_interleaved_local_aliases(&flattened[start..end], referenced)?;
+        let (flattened, external_redirects) = self.canonicalize_interleaved_local_aliases(
+            &flattened[start..end],
+            full_body,
+            segment_start,
+            referenced,
+        )?;
 
         let mut canonical = Vec::new();
         let mut saw_payload = false;
@@ -668,7 +780,7 @@ impl<'a> PreviewBuilder<'a> {
         if removed_any {
             self.canonicalized_guarded_tail_shape_count += 1;
         }
-        Ok(canonical)
+        Ok((canonical, external_redirects))
     }
 
     fn flatten_guarded_tail_segment(segment: &[HirStmt], out: &mut Vec<HirStmt>) {
@@ -753,8 +865,12 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
-            let middle = match self
-                .canonicalize_guarded_tail_segment(&body[idx + 1..label_idx], &referenced)
+            let (middle, external_redirects) = match self.canonicalize_guarded_tail_segment(
+                &body[idx + 1..label_idx],
+                body,
+                idx + 1,
+                &referenced,
+            )
             {
                 Ok(middle) => middle,
                 Err(reason) => {
@@ -791,6 +907,7 @@ impl<'a> PreviewBuilder<'a> {
             );
             if let Some(reason) = Self::classify_must_emit_label_rejection(
                 body,
+                &middle,
                 idx,
                 label_idx,
                 &target_label,
@@ -812,6 +929,10 @@ impl<'a> PreviewBuilder<'a> {
                 then_body: middle,
                 else_body: Vec::new(),
             };
+
+            for (from, to) in &external_redirects {
+                Self::rewrite_goto_label_in_stmts(body, from, to);
+            }
 
             body[idx] = replacement;
             body.drain(idx + 1..=label_idx);
@@ -897,7 +1018,12 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
-            let middle = match self.canonicalize_guarded_tail_segment(&body[idx + 1..label_idx], &referenced) {
+            let (middle, _) = match self.canonicalize_guarded_tail_segment(
+                &body[idx + 1..label_idx],
+                body,
+                idx + 1,
+                &referenced,
+            ) {
                 Ok(middle) => middle,
                 Err(reason) => {
                     self.mark_guarded_tail_canonicalization_failure(reason);
@@ -916,6 +1042,7 @@ impl<'a> PreviewBuilder<'a> {
             );
             if let Some(reason) = Self::classify_must_emit_label_rejection(
                 body,
+                &middle,
                 idx,
                 label_idx,
                 &target_label,

@@ -214,6 +214,51 @@ This increment makes guarded-tail promotion gate failures easier to reason about
   - `owner_conflict`: `18`
 - aggregate gate count did not move on this fixed sample, but subtype visibility now makes the next reduction targets explicit
 
+### Structuring - Whole-Body Alias Ownership and Fallthrough Ref Relaxation
+
+This increment refines guarded-tail alias ownership using Ghidra-style front-leaf / copy-block semantics and `gotoPrints`-style fallthrough elision, so safe same-body forwarded-label reuse is no longer treated as truly nonlocal and some middle/external refs stop forcing labels.
+
+#### Changed
+
+- refined guarded-tail alias canonicalization in `structuring/guards.rs` to inspect **whole-body ref sites** when classifying alias ownership
+- preserved `AliasHasNonlocalRef` only for truly unsafe cases:
+  - nested external refs
+  - post-segment refs
+  - unsafe owner crossings
+- allowed safe forwarded-label reuse when refs stay on the same top-level forward/front-owner path
+- connected safe external alias redirects back into promotion so outer-body gotos are rewritten consistently before region drain
+- relaxed label-pressure classification for two conservative fallthrough-equivalent cases:
+  - trailing top-level middle `goto target_label`
+  - single top-level forward external `goto target_label` from before the promoted region
+- kept nested/internal middle refs and post-label external refs conservative
+
+#### Added
+
+- new regressions in `structuring_misc.rs` covering:
+  - safe external alias reuse rewrite
+  - trailing middle goto relaxation
+  - single forward external-ref relaxation
+  - preserved post-label external-ref rejection
+  - preserved true nonlocal alias rejection
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 500` (pass)
+
+#### Observed expanded-sample delta (`nir`)
+
+- 200 functions:
+  - `canonicalization_failed_alias_has_nonlocal_ref_count`: `371 -> 298`
+  - `canonicalization_failed_alias_not_fallthrough_count`: `175 -> 247`
+- 500 functions:
+  - `canonicalization_failed_alias_has_nonlocal_ref_count`: `676 -> 583`
+  - `canonicalization_failed_alias_not_fallthrough_count`: `260 -> 352`
+
+The large-sample runs show the alias-nonlocal bucket dropping substantially, with part of that volume reclassified into the more precise `alias_not_fallthrough` subtype instead of remaining lumped into `nonlocal`.
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
