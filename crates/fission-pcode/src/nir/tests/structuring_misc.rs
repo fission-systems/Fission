@@ -836,6 +836,32 @@ fn structuring_candidate_discovery_keeps_post_label_external_ref_rejected() {
 }
 
 #[test]
+fn structuring_terminal_guarded_tail_promotion_keeps_direct_shape_subtypes_zero() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+    ];
+
+    let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
+
+    assert_eq!(stats.promoted_region_count, 1);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 0);
+    assert_eq!(
+        stats.promotion_rejected_by_shape_missing_terminal_join_target_count,
+        0
+    );
+    assert_eq!(
+        stats.promotion_rejected_by_shape_empty_nonterminal_tail_count,
+        0
+    );
+}
+
+#[test]
 fn structuring_candidate_discovery_allows_leading_label_before_payload() {
     let body = vec![
         HirStmt::If {

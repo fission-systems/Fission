@@ -30,6 +30,12 @@ pub(super) enum PromotionGateRejection {
     LoopOrSwitchTarget,
 }
 
+#[derive(Clone, Copy)]
+enum PromotionShapeRejection {
+    MissingTerminalJoinTarget,
+    EmptyNonterminalTail,
+}
+
 impl<'a> PreviewBuilder<'a> {
     fn expr_is_pure_value(expr: &HirExpr) -> bool {
         match expr {
@@ -275,13 +281,21 @@ impl<'a> PreviewBuilder<'a> {
         preds[0] + 1 != idx
     }
 
-    fn mark_promotion_shape_rejection(&mut self) {
+    fn mark_promotion_shape_rejection(&mut self, reason: PromotionShapeRejection) {
         self.promotion_rejected_by_shape_count += 1;
+        match reason {
+            PromotionShapeRejection::MissingTerminalJoinTarget => {
+                self.promotion_rejected_by_shape_missing_terminal_join_target_count += 1;
+            }
+            PromotionShapeRejection::EmptyNonterminalTail => {
+                self.promotion_rejected_by_shape_empty_nonterminal_tail_count += 1;
+            }
+        }
     }
 
     fn mark_noncanonical_layout_rejection(&mut self) {
         self.discovery_rejected_noncanonical_layout_count += 1;
-        self.mark_promotion_shape_rejection();
+        self.promotion_rejected_by_shape_count += 1;
     }
 
     fn mark_guarded_tail_canonicalization_failure(
@@ -931,7 +945,9 @@ impl<'a> PreviewBuilder<'a> {
                 self.resolve_terminal_join_target(body, idx, &target_label, &referenced)
             else {
                 if Self::find_top_level_label_after(body, idx, &target_label).is_some() {
-                    self.mark_promotion_shape_rejection();
+                    self.mark_promotion_shape_rejection(
+                        PromotionShapeRejection::MissingTerminalJoinTarget,
+                    );
                 }
                 idx += 1;
                 continue;
@@ -969,7 +985,9 @@ impl<'a> PreviewBuilder<'a> {
             let tail = body[label_idx + 1..tail_end].to_vec();
             let terminal_guarded_tail = label_idx + 1 == body.len();
             if tail.is_empty() && !terminal_guarded_tail {
-                self.mark_promotion_shape_rejection();
+                self.mark_promotion_shape_rejection(
+                    PromotionShapeRejection::EmptyNonterminalTail,
+                );
                 idx += 1;
                 continue;
             }
