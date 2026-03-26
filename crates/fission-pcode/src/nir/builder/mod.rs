@@ -148,6 +148,8 @@ impl<'a> PreviewBuilder<'a> {
             canonicalized_interleaved_join_use_count: 0,
             canonicalized_local_nonfallthrough_alias_count: 0,
             canonicalization_failed_alias_not_fallthrough_count: 0,
+            canonicalization_failed_alias_not_fallthrough_top_level_after_label_count: 0,
+            canonicalization_failed_alias_not_fallthrough_nested_after_label_count: 0,
             canonicalization_failed_alias_has_multiple_internal_predecessors_count: 0,
             canonicalization_failed_alias_has_nonlocal_ref_count: 0,
             canonicalization_failed_alias_body_not_trivial_count: 0,
@@ -330,6 +332,10 @@ impl<'a> PreviewBuilder<'a> {
                 .canonicalized_local_nonfallthrough_alias_count,
             canonicalization_failed_alias_not_fallthrough_count: self
                 .canonicalization_failed_alias_not_fallthrough_count,
+            canonicalization_failed_alias_not_fallthrough_top_level_after_label_count: self
+                .canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
+            canonicalization_failed_alias_not_fallthrough_nested_after_label_count: self
+                .canonicalization_failed_alias_not_fallthrough_nested_after_label_count,
             canonicalization_failed_alias_has_multiple_internal_predecessors_count: self
                 .canonicalization_failed_alias_has_multiple_internal_predecessors_count,
             canonicalization_failed_alias_has_nonlocal_ref_count: self

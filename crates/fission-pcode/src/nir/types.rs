@@ -169,6 +169,10 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub canonicalization_failed_alias_not_fallthrough_count: usize,
     #[serde(default)]
+    pub canonicalization_failed_alias_not_fallthrough_top_level_after_label_count: usize,
+    #[serde(default)]
+    pub canonicalization_failed_alias_not_fallthrough_nested_after_label_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_alias_has_multiple_internal_predecessors_count: usize,
     #[serde(default)]
     pub canonicalization_failed_alias_has_nonlocal_ref_count: usize,
@@ -269,6 +273,10 @@ impl NirBuildStats {
             other.canonicalized_local_nonfallthrough_alias_count;
         self.canonicalization_failed_alias_not_fallthrough_count +=
             other.canonicalization_failed_alias_not_fallthrough_count;
+        self.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count +=
+            other.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count;
+        self.canonicalization_failed_alias_not_fallthrough_nested_after_label_count +=
+            other.canonicalization_failed_alias_not_fallthrough_nested_after_label_count;
         self.canonicalization_failed_alias_has_multiple_internal_predecessors_count +=
             other.canonicalization_failed_alias_has_multiple_internal_predecessors_count;
         self.canonicalization_failed_alias_has_nonlocal_ref_count +=

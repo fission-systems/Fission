@@ -155,6 +155,8 @@ struct PreviewBuilder<'a> {
     canonicalized_interleaved_join_use_count: usize,
     canonicalized_local_nonfallthrough_alias_count: usize,
     canonicalization_failed_alias_not_fallthrough_count: usize,
+    canonicalization_failed_alias_not_fallthrough_top_level_after_label_count: usize,
+    canonicalization_failed_alias_not_fallthrough_nested_after_label_count: usize,
     canonicalization_failed_alias_has_multiple_internal_predecessors_count: usize,
     canonicalization_failed_alias_has_nonlocal_ref_count: usize,
     canonicalization_failed_alias_body_not_trivial_count: usize,
@@ -363,6 +365,10 @@ pub fn render_mlil_preview_with_context(
         normalized_discovery_stats.canonicalized_local_nonfallthrough_alias_count;
     build_stats.canonicalization_failed_alias_not_fallthrough_count +=
         normalized_discovery_stats.canonicalization_failed_alias_not_fallthrough_count;
+    build_stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count += normalized_discovery_stats
+        .canonicalization_failed_alias_not_fallthrough_top_level_after_label_count;
+    build_stats.canonicalization_failed_alias_not_fallthrough_nested_after_label_count += normalized_discovery_stats
+        .canonicalization_failed_alias_not_fallthrough_nested_after_label_count;
     build_stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count +=
         normalized_discovery_stats
             .canonicalization_failed_alias_has_multiple_internal_predecessors_count;
