@@ -137,6 +137,8 @@ impl<'a> PreviewBuilder<'a> {
             promotion_candidate_count: 0,
             promoted_region_count: 0,
             promotion_rejected_by_shape_count: 0,
+            promotion_rejected_by_shape_missing_terminal_join_target_count: 0,
+            promotion_rejected_by_shape_empty_nonterminal_tail_count: 0,
             promotion_rejected_by_gate_count: 0,
             discovery_seen_guarded_tail_like_shape_count: 0,
             discovery_rejected_noncanonical_layout_count: 0,
@@ -313,6 +315,10 @@ impl<'a> PreviewBuilder<'a> {
             promotion_candidate_count: self.promotion_candidate_count,
             promoted_region_count: self.promoted_region_count,
             promotion_rejected_by_shape_count: self.promotion_rejected_by_shape_count,
+            promotion_rejected_by_shape_missing_terminal_join_target_count: self
+                .promotion_rejected_by_shape_missing_terminal_join_target_count,
+            promotion_rejected_by_shape_empty_nonterminal_tail_count: self
+                .promotion_rejected_by_shape_empty_nonterminal_tail_count,
             promotion_rejected_by_gate_count: self.promotion_rejected_by_gate_count,
             discovery_seen_guarded_tail_like_shape_count: self
                 .discovery_seen_guarded_tail_like_shape_count,

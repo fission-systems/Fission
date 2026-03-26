@@ -147,6 +147,10 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub promotion_rejected_by_shape_count: usize,
     #[serde(default)]
+    pub promotion_rejected_by_shape_missing_terminal_join_target_count: usize,
+    #[serde(default)]
+    pub promotion_rejected_by_shape_empty_nonterminal_tail_count: usize,
+    #[serde(default)]
     pub promotion_rejected_by_gate_count: usize,
     #[serde(default)]
     pub discovery_seen_guarded_tail_like_shape_count: usize,
@@ -253,6 +257,10 @@ impl NirBuildStats {
         self.promotion_candidate_count += other.promotion_candidate_count;
         self.promoted_region_count += other.promoted_region_count;
         self.promotion_rejected_by_shape_count += other.promotion_rejected_by_shape_count;
+        self.promotion_rejected_by_shape_missing_terminal_join_target_count +=
+            other.promotion_rejected_by_shape_missing_terminal_join_target_count;
+        self.promotion_rejected_by_shape_empty_nonterminal_tail_count +=
+            other.promotion_rejected_by_shape_empty_nonterminal_tail_count;
         self.promotion_rejected_by_gate_count += other.promotion_rejected_by_gate_count;
         self.discovery_seen_guarded_tail_like_shape_count +=
             other.discovery_seen_guarded_tail_like_shape_count;

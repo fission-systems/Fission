@@ -144,6 +144,8 @@ struct PreviewBuilder<'a> {
     promotion_candidate_count: usize,
     promoted_region_count: usize,
     promotion_rejected_by_shape_count: usize,
+    promotion_rejected_by_shape_missing_terminal_join_target_count: usize,
+    promotion_rejected_by_shape_empty_nonterminal_tail_count: usize,
     promotion_rejected_by_gate_count: usize,
     discovery_seen_guarded_tail_like_shape_count: usize,
     discovery_rejected_noncanonical_layout_count: usize,
