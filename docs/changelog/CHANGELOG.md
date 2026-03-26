@@ -176,6 +176,44 @@ This increment further aligns guarded-tail recovery with Ghidra-style conservati
 - `partially_structured`: `34 -> 31`
 - `linear_fallback`: `8 -> 8`
 
+### Structuring - Promotion Gate Subtype Telemetry and Owner-Preserving Conflict Refinement
+
+This increment makes guarded-tail promotion gate failures easier to reason about by splitting must-emit-label pressure into concrete subtypes and refining owner-conflict classification to preserve front-leaf-equivalent forward ownership cases inspired by Ghidra’s label bump-up/front-leaf rules.
+
+#### Changed
+
+- extended guarded-tail promotion gate telemetry with explicit `rejected_must_emit_label` subtypes:
+  - `rejected_must_emit_label_surviving_middle_ref`
+  - `rejected_must_emit_label_surviving_external_ref`
+  - `rejected_must_emit_label_owner_conflict`
+- wired the new counters through:
+  - `NirBuildStats`
+  - preview builder state/snapshot
+  - automation build-stat reporting
+- refined `structuring/guards.rs` must-emit-label classification so:
+  - surviving refs inside canonicalized middle remain `surviving_middle_ref`
+  - single surviving outside refs remain `surviving_external_ref`
+  - multiple outside refs are only treated as `owner_conflict` when they do **not** all preserve the same simple forward top-level owner path
+- added guarded-tail regressions covering:
+  - subtype telemetry for surviving middle refs
+  - subtype telemetry for owner conflicts
+  - safe same-owner forward refs that should no longer be escalated to owner conflict
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 40` (pass)
+
+#### Observed lane telemetry (`nir`, functions-limit 40)
+
+- `promotion_rejected_by_gate_count`: `82`
+- `rejected_must_emit_label`: `77`
+  - `surviving_middle_ref`: `16`
+  - `surviving_external_ref`: `9`
+  - `owner_conflict`: `18`
+- aggregate gate count did not move on this fixed sample, but subtype visibility now makes the next reduction targets explicit
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)

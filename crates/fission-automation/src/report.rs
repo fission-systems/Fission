@@ -454,6 +454,18 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
         ),
         ("rejected_must_emit_label", stats.rejected_must_emit_label),
         (
+            "rejected_must_emit_label_surviving_middle_ref",
+            stats.rejected_must_emit_label_surviving_middle_ref,
+        ),
+        (
+            "rejected_must_emit_label_surviving_external_ref",
+            stats.rejected_must_emit_label_surviving_external_ref,
+        ),
+        (
+            "rejected_must_emit_label_owner_conflict",
+            stats.rejected_must_emit_label_owner_conflict,
+        ),
+        (
             "rejected_not_single_pred_succ",
             stats.rejected_not_single_pred_succ,
         ),
