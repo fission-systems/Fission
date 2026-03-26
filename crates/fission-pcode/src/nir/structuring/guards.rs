@@ -31,6 +31,27 @@ pub(super) enum PromotionGateRejection {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn expr_is_pure_value(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+            HirExpr::Cast { expr, .. } => Self::expr_is_pure_value(expr),
+            HirExpr::Unary { expr, .. } => Self::expr_is_pure_value(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::expr_is_pure_value(lhs) && Self::expr_is_pure_value(rhs)
+            }
+            HirExpr::PtrOffset { base, .. } => Self::expr_is_pure_value(base),
+            HirExpr::Index { base, index, .. } => {
+                Self::expr_is_pure_value(base) && Self::expr_is_pure_value(index)
+            }
+            HirExpr::AggregateCopy { src, .. } => Self::expr_is_pure_value(src),
+            HirExpr::Call { .. } | HirExpr::Load { .. } => false,
+        }
+    }
+
+    fn stmt_is_pure_value_expr(stmt: &HirStmt) -> bool {
+        matches!(stmt, HirStmt::Expr(expr) if Self::expr_is_pure_value(expr))
+    }
+
     fn classify_external_alias_ref_sites(
         full_body: &[HirStmt],
         segment_start: usize,
@@ -325,6 +346,27 @@ impl<'a> PreviewBuilder<'a> {
         saw_forward_goto
     }
 
+    fn is_local_alias_forward_segment_with_after_label_refs(
+        segment: &[HirStmt],
+        label: &str,
+        next_label: &str,
+    ) -> bool {
+        let mut saw_forward_goto = false;
+        for stmt in segment {
+            if is_ignorable_discovery_stmt(stmt) {
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(target) if target == next_label => {
+                    saw_forward_goto = true;
+                }
+                HirStmt::Goto(target) if target == label => {}
+                _ => return false,
+            }
+        }
+        saw_forward_goto
+    }
+
     fn is_trivial_join_forward_segment(segment: &[HirStmt], next_label: &str) -> bool {
         let mut saw_forward_goto = false;
         for stmt in segment {
@@ -577,13 +619,17 @@ impl<'a> PreviewBuilder<'a> {
                 Self::classify_alias_ref_sites(body, idx, label);
             let local_ref_count = top_level_before + nested_before + refs_after;
             let external_ref_count = total_refs.saturating_sub(local_ref_count);
-            if refs_after > 0 || goto_positions.iter().any(|pos| *pos >= idx) {
-                return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
-            }
+            let top_level_after_positions: Vec<usize> = goto_positions
+                .iter()
+                .copied()
+                .filter(|pos| *pos > idx)
+                .collect();
+            let top_level_after_label_count = top_level_after_positions.len();
+            let nested_after_label_count = refs_after.saturating_sub(top_level_after_label_count);
             if nested_before > 0 {
                 return Err(GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors);
             }
-            let has_non_ignorable_gap = goto_positions.iter().any(|pos| {
+            let has_non_ignorable_gap = goto_positions.iter().filter(|pos| **pos < idx).any(|pos| {
                 body[pos + 1..idx]
                     .iter()
                     .any(|stmt| !is_ignorable_discovery_stmt(stmt))
@@ -592,9 +638,33 @@ impl<'a> PreviewBuilder<'a> {
                 (idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)));
             let payload_end = next_label_idx.unwrap_or(body.len());
             let segment = &body[idx + 1..payload_end];
+            let allow_top_level_after_label_redirect = if let Some(next_label_idx) = next_label_idx {
+                if let HirStmt::Label(next_label) = &body[next_label_idx] {
+                    nested_after_label_count == 0
+                        && !top_level_after_positions.is_empty()
+                        && top_level_after_positions
+                            .iter()
+                            .all(|pos| *pos < next_label_idx)
+                        && Self::is_local_alias_forward_segment_with_after_label_refs(
+                            segment, label, next_label,
+                        )
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if nested_after_label_count > 0 || (top_level_after_label_count > 0 && !allow_top_level_after_label_redirect) {
+                self.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count +=
+                    top_level_after_label_count;
+                self.canonicalization_failed_alias_not_fallthrough_nested_after_label_count +=
+                    nested_after_label_count;
+                return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
+            }
             if let Some(next_label_idx) = next_label_idx
                 && let HirStmt::Label(next_label) = &body[next_label_idx]
-                && Self::is_local_alias_forward_segment(segment, next_label)
+                && (Self::is_local_alias_forward_segment(segment, next_label)
+                    || allow_top_level_after_label_redirect)
             {
                 if external_ref_count > 0 {
                     let (external_top_level_before, external_nested_before, external_refs_after) =
@@ -619,6 +689,8 @@ impl<'a> PreviewBuilder<'a> {
                         );
                     }
                     canonicalized_local_nonfallthrough += 1;
+                } else if top_level_after_label_count > 0 {
+                    canonicalized_local_nonfallthrough += 1;
                 }
                 alias_redirects.insert(label.clone(), Some(next_label.clone()));
                 continue;
@@ -634,6 +706,10 @@ impl<'a> PreviewBuilder<'a> {
                     )
                 }) {
                     return Err(GuardedTailCanonicalizationFailure::PayloadCrossesJoin);
+                }
+                if segment.iter().all(|stmt| Self::stmt_is_pure_value_expr(stmt)) {
+                    alias_redirects.insert(label.clone(), None);
+                    continue;
                 }
                 return Err(GuardedTailCanonicalizationFailure::AliasBodyNotTrivial);
             }
@@ -891,7 +967,8 @@ impl<'a> PreviewBuilder<'a> {
                 .find(|pos| matches!(body.get(*pos), Some(HirStmt::Label(_))))
                 .unwrap_or(body.len());
             let tail = body[label_idx + 1..tail_end].to_vec();
-            if tail.is_empty() {
+            let terminal_guarded_tail = label_idx + 1 == body.len();
+            if tail.is_empty() && !terminal_guarded_tail {
                 self.mark_promotion_shape_rejection();
                 idx += 1;
                 continue;

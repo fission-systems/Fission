@@ -603,6 +603,36 @@ fn structuring_promotes_single_entry_guarded_tail_region() {
 }
 
 #[test]
+fn structuring_promotes_terminal_single_entry_guarded_tail_region() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+    ];
+
+    let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
+
+    assert_eq!(stats.promoted_region_count, 1);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 0);
+    assert_eq!(
+        body,
+        vec![HirStmt::If {
+            cond: HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(HirExpr::Var("reg".to_string())),
+                ty: NirType::Bool,
+            },
+            then_body: vec![HirStmt::Expr(HirExpr::Var("middle".to_string()))],
+            else_body: Vec::new(),
+        },]
+    );
+}
+
+#[test]
 fn structuring_promotes_guarded_tail_when_only_deleted_alias_chain_references_join_label() {
     let mut body = vec![
         HirStmt::If {
@@ -1010,6 +1040,48 @@ fn structuring_candidate_discovery_counts_interleaved_referenced_label_use() {
     assert_eq!(stats.promotion_rejected_by_shape_count, 1);
     assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 1);
     assert_eq!(stats.canonicalization_failed_alias_not_fallthrough_count, 1);
+    assert_eq!(
+        stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
+        1
+    );
+    assert_eq!(
+        stats.canonicalization_failed_alias_not_fallthrough_nested_after_label_count,
+        0
+    );
+}
+
+#[test]
+fn structuring_candidate_discovery_counts_nested_after_label_alias_not_fallthrough() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::If {
+            cond: HirExpr::Var("late".to_string()),
+            then_body: vec![HirStmt::Goto("block_mid".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.canonicalization_failed_alias_not_fallthrough_count, 1);
+    assert_eq!(
+        stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
+        0
+    );
+    assert_eq!(
+        stats.canonicalization_failed_alias_not_fallthrough_nested_after_label_count,
+        1
+    );
 }
 
 #[test]
@@ -1087,11 +1159,37 @@ fn structuring_candidate_discovery_canonicalizes_local_nonfallthrough_alias() {
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
     assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
-    assert_eq!(stats.promoted_region_count, 0);
-    assert!(
-        stats.canonicalized_local_nonfallthrough_alias_count >= 1
-            || stats.discovery_rejected_noncanonical_layout_count >= 1
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 0);
+    assert_eq!(stats.canonicalization_failed_alias_not_fallthrough_count, 0);
+}
+
+#[test]
+fn structuring_candidate_discovery_canonicalizes_safe_top_level_after_label_alias() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Goto("block_join".to_string()),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(
+        stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
+        0
     );
+    assert_eq!(stats.canonicalization_failed_alias_not_fallthrough_count, 0);
 }
 
 #[test]
@@ -1212,9 +1310,9 @@ fn structuring_candidate_discovery_counts_alias_multiple_internal_predecessors()
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
     assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
-    assert_eq!(stats.promotion_candidate_count, 0);
-    assert_eq!(stats.promotion_rejected_by_shape_count, 1);
-    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 1);
+    assert_eq!(stats.promotion_rejected_by_shape_count, 0);
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 0);
     assert_eq!(
         stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count,
         0
@@ -1241,12 +1339,47 @@ fn structuring_candidate_discovery_counts_alias_body_not_trivial() {
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
     assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
-    assert_eq!(stats.promotion_candidate_count, 0);
-    assert_eq!(stats.promotion_rejected_by_shape_count, 1);
-    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 1);
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 0);
     assert_eq!(
         stats.canonicalization_failed_alias_body_not_trivial_count,
-        1
+        0
+    );
+}
+
+#[test]
+fn structuring_candidate_discovery_accepts_alias_body_with_pure_value_exprs() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("skip_l".to_string())),
+            rhs: Box::new(HirExpr::Var("skip_r".to_string())),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Var("local_work".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.promotion_candidate_count, 1);
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 0);
+    assert_eq!(
+        stats.canonicalization_failed_alias_body_not_trivial_count,
+        0
     );
 }
 
