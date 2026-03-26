@@ -22,12 +22,149 @@ pub(super) enum GuardedTailCanonicalizationFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PromotionGateRejection {
     MustEmitLabel,
+    MustEmitLabelSurvivingMiddleRef,
+    MustEmitLabelSurvivingExternalRef,
+    MustEmitLabelOwnerConflict,
     NotSinglePredSucc,
     ExternalEntry,
     LoopOrSwitchTarget,
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn stmt_contains_goto_label(stmt: &HirStmt, label: &str) -> usize {
+        match stmt {
+            HirStmt::Goto(target) => usize::from(target == label),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => then_body
+                .iter()
+                .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                .sum::<usize>()
+                + else_body
+                    .iter()
+                    .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                    .sum::<usize>(),
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                body.iter()
+                    .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                    .sum()
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                cases
+                    .iter()
+                    .map(|case| {
+                        case.body
+                            .iter()
+                            .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                            .sum::<usize>()
+                    })
+                    .sum::<usize>()
+                    + default
+                        .iter()
+                        .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                        .sum::<usize>()
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => 0,
+        }
+    }
+
+    fn classify_alias_ref_sites(body: &[HirStmt], label_idx: usize, label: &str) -> (usize, usize, usize) {
+        let mut top_level_before = 0usize;
+        let mut nested_before = 0usize;
+        let mut refs_after = 0usize;
+
+        for (idx, stmt) in body.iter().enumerate() {
+            let ref_count = Self::stmt_contains_goto_label(stmt, label);
+            if ref_count == 0 {
+                continue;
+            }
+            if idx >= label_idx {
+                refs_after += ref_count;
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(target) if target == label => top_level_before += 1,
+                _ => nested_before += ref_count,
+            }
+        }
+
+        (top_level_before, nested_before, refs_after)
+    }
+
+    fn surviving_label_refs_after_guarded_tail_promotion(
+        body: &[HirStmt],
+        middle: &[HirStmt],
+        if_idx: usize,
+        label_idx: usize,
+        label: &str,
+    ) -> (usize, usize) {
+        let outside_refs: usize = body
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| *idx < if_idx || *idx > label_idx)
+            .map(|(_, stmt)| Self::stmt_contains_goto_label(stmt, label))
+            .sum();
+        let middle_refs: usize = middle
+            .iter()
+            .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+            .sum();
+        (outside_refs, middle_refs)
+    }
+
+    fn outside_refs_preserve_forward_owner(
+        body: &[HirStmt],
+        if_idx: usize,
+        label_idx: usize,
+        label: &str,
+    ) -> bool {
+        let mut found = false;
+        for (idx, stmt) in body.iter().enumerate() {
+            if idx >= if_idx && idx <= label_idx {
+                continue;
+            }
+            let ref_count = Self::stmt_contains_goto_label(stmt, label);
+            if ref_count == 0 {
+                continue;
+            }
+            found = true;
+            match stmt {
+                HirStmt::Goto(target) if target == label && idx < label_idx => {}
+                _ => return false,
+            }
+        }
+        found
+    }
+
+    fn classify_must_emit_label_rejection(
+        body: &[HirStmt],
+        if_idx: usize,
+        label_idx: usize,
+        label: &str,
+        outside_refs: usize,
+        middle_refs: usize,
+    ) -> Option<PromotionGateRejection> {
+        if middle_refs > 0 {
+            return Some(PromotionGateRejection::MustEmitLabelSurvivingMiddleRef);
+        }
+        if outside_refs > 1 {
+            if Self::outside_refs_preserve_forward_owner(body, if_idx, label_idx, label) {
+                return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
+            }
+            return Some(PromotionGateRejection::MustEmitLabelOwnerConflict);
+        }
+        if outside_refs == 1 {
+            return Some(PromotionGateRejection::MustEmitLabelSurvivingExternalRef);
+        }
+        None
+    }
+
     fn find_top_level_label_after(body: &[HirStmt], start_idx: usize, label: &str) -> Option<usize> {
         (start_idx + 1..body.len()).find(
             |pos| matches!(body.get(*pos), Some(HirStmt::Label(candidate)) if candidate == label),
@@ -357,11 +494,17 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             };
             let total_refs = referenced.get(label).copied().unwrap_or(0);
-            if total_refs > goto_positions.len() {
+            let (top_level_before, nested_before, refs_after) =
+                Self::classify_alias_ref_sites(body, idx, label);
+            let local_ref_count = top_level_before + nested_before + refs_after;
+            if total_refs > local_ref_count {
                 return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
             }
-            if goto_positions.iter().any(|pos| *pos >= idx) {
+            if refs_after > 0 || goto_positions.iter().any(|pos| *pos >= idx) {
                 return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
+            }
+            if nested_before > 0 {
+                return Err(GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors);
             }
             let has_non_ignorable_gap = goto_positions.iter().any(|pos| {
                 body[pos + 1..idx]
@@ -541,6 +684,18 @@ impl<'a> PreviewBuilder<'a> {
         self.promotion_rejected_by_gate_count += 1;
         match reason {
             PromotionGateRejection::MustEmitLabel => self.rejected_must_emit_label += 1,
+            PromotionGateRejection::MustEmitLabelSurvivingMiddleRef => {
+                self.rejected_must_emit_label += 1;
+                self.rejected_must_emit_label_surviving_middle_ref += 1;
+            }
+            PromotionGateRejection::MustEmitLabelSurvivingExternalRef => {
+                self.rejected_must_emit_label += 1;
+                self.rejected_must_emit_label_surviving_external_ref += 1;
+            }
+            PromotionGateRejection::MustEmitLabelOwnerConflict => {
+                self.rejected_must_emit_label += 1;
+                self.rejected_must_emit_label_owner_conflict += 1;
+            }
             PromotionGateRejection::NotSinglePredSucc => self.rejected_not_single_pred_succ += 1,
             PromotionGateRejection::ExternalEntry => self.rejected_external_entry += 1,
             PromotionGateRejection::LoopOrSwitchTarget => self.rejected_loop_or_switch_target += 1,
@@ -627,8 +782,23 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             self.promotion_candidate_count += 1;
-            if referenced.get(&target_label).copied().unwrap_or(0) != 1 {
-                self.mark_promotion_gate_rejection(PromotionGateRejection::MustEmitLabel);
+            let (outside_refs, middle_refs) = Self::surviving_label_refs_after_guarded_tail_promotion(
+                body,
+                &middle,
+                idx,
+                label_idx,
+                &target_label,
+            );
+            if let Some(reason) = Self::classify_must_emit_label_rejection(
+                body,
+                idx,
+                label_idx,
+                &target_label,
+                outside_refs,
+                middle_refs,
+            )
+            {
+                self.mark_promotion_gate_rejection(reason);
                 idx += 1;
                 continue;
             }
@@ -727,18 +897,33 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
 
-            match self.canonicalize_guarded_tail_segment(&body[idx + 1..label_idx], &referenced) {
-                Ok(_) => {}
+            let middle = match self.canonicalize_guarded_tail_segment(&body[idx + 1..label_idx], &referenced) {
+                Ok(middle) => middle,
                 Err(reason) => {
                     self.mark_guarded_tail_canonicalization_failure(reason);
                     continue;
                 }
-            }
+            };
 
             self.promotion_candidate_count += 1;
 
-            if referenced.get(&target_label).copied().unwrap_or(0) != 1 {
-                self.mark_promotion_gate_rejection(PromotionGateRejection::MustEmitLabel);
+            let (outside_refs, middle_refs) = Self::surviving_label_refs_after_guarded_tail_promotion(
+                body,
+                &middle,
+                idx,
+                label_idx,
+                &target_label,
+            );
+            if let Some(reason) = Self::classify_must_emit_label_rejection(
+                body,
+                idx,
+                label_idx,
+                &target_label,
+                outside_refs,
+                middle_refs,
+            )
+            {
+                self.mark_promotion_gate_rejection(reason);
                 continue;
             }
         }
