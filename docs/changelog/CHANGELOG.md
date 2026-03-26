@@ -313,6 +313,47 @@ This increment splits `AliasNotFallthrough` into concrete after-label categories
 
 These changes materially reduce the large-sample after-label alias bucket while slightly increasing successful guarded-tail promotions and structured output.
 
+### Structuring - Direct Shape Subtype Telemetry and Pure-Expression Discovery Relaxation
+
+This increment separates the remaining direct guarded-tail shape blockers from canonicalization-driven discovery failures and relaxes one discovery-only case where alias bodies contain only pure value expressions.
+
+#### Changed
+
+- added explicit direct shape subtype telemetry:
+  - `promotion_rejected_by_shape_missing_terminal_join_target_count`
+  - `promotion_rejected_by_shape_empty_nonterminal_tail_count`
+- wired these counters through:
+  - `NirBuildStats`
+  - preview builder state/snapshot
+  - automation build-stat reporting
+- refined guarded-tail discovery canonicalization in `structuring/guards.rs`:
+  - accepts alias bodies made only of pure value expressions
+  - still rejects alias bodies with control flow or side-effectful expressions (`Call`, `Load`)
+- added a stable regression asserting terminal guarded-tail promotion leaves the new direct shape subtype counters at zero
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 500` (pass)
+
+#### Observed expanded-sample telemetry (`nir`)
+
+- 200 functions:
+  - `promotion_rejected_by_shape_count`: `908`
+  - `promotion_rejected_by_shape_missing_terminal_join_target_count`: `0`
+  - `promotion_rejected_by_shape_empty_nonterminal_tail_count`: `0`
+  - `discovery_rejected_noncanonical_layout_count`: `908`
+- 500 functions:
+  - `promotion_rejected_by_shape_count`: `1643`
+  - `promotion_rejected_by_shape_missing_terminal_join_target_count`: `0`
+  - `promotion_rejected_by_shape_empty_nonterminal_tail_count`: `0`
+  - `discovery_rejected_noncanonical_layout_count`: `1643`
+
+These measurements show the remaining large shape bucket is overwhelmingly coming from canonicalization-driven discovery failures rather than the two direct shape blockers, which narrows the next optimization target considerably.
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)

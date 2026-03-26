@@ -389,6 +389,14 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.promotion_rejected_by_shape_count,
         ),
         (
+            "promotion_rejected_by_shape_missing_terminal_join_target_count",
+            stats.promotion_rejected_by_shape_missing_terminal_join_target_count,
+        ),
+        (
+            "promotion_rejected_by_shape_empty_nonterminal_tail_count",
+            stats.promotion_rejected_by_shape_empty_nonterminal_tail_count,
+        ),
+        (
             "promotion_rejected_by_gate_count",
             stats.promotion_rejected_by_gate_count,
         ),
