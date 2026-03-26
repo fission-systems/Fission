@@ -154,6 +154,9 @@ impl<'a> PreviewBuilder<'a> {
             canonicalization_failed_join_has_external_ref_count: 0,
             canonicalization_failed_payload_crosses_join_count: 0,
             rejected_must_emit_label: 0,
+            rejected_must_emit_label_surviving_middle_ref: 0,
+            rejected_must_emit_label_surviving_external_ref: 0,
+            rejected_must_emit_label_owner_conflict: 0,
             rejected_not_single_pred_succ: 0,
             rejected_external_entry: 0,
             rejected_loop_or_switch_target: 0,
@@ -338,6 +341,12 @@ impl<'a> PreviewBuilder<'a> {
             canonicalization_failed_payload_crosses_join_count: self
                 .canonicalization_failed_payload_crosses_join_count,
             rejected_must_emit_label: self.rejected_must_emit_label,
+            rejected_must_emit_label_surviving_middle_ref: self
+                .rejected_must_emit_label_surviving_middle_ref,
+            rejected_must_emit_label_surviving_external_ref: self
+                .rejected_must_emit_label_surviving_external_ref,
+            rejected_must_emit_label_owner_conflict: self
+                .rejected_must_emit_label_owner_conflict,
             rejected_not_single_pred_succ: self.rejected_not_single_pred_succ,
             rejected_external_entry: self.rejected_external_entry,
             rejected_loop_or_switch_target: self.rejected_loop_or_switch_target,

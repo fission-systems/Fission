@@ -181,6 +181,12 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub rejected_must_emit_label: usize,
     #[serde(default)]
+    pub rejected_must_emit_label_surviving_middle_ref: usize,
+    #[serde(default)]
+    pub rejected_must_emit_label_surviving_external_ref: usize,
+    #[serde(default)]
+    pub rejected_must_emit_label_owner_conflict: usize,
+    #[serde(default)]
     pub rejected_not_single_pred_succ: usize,
     #[serde(default)]
     pub rejected_external_entry: usize,
@@ -274,6 +280,12 @@ impl NirBuildStats {
         self.canonicalization_failed_payload_crosses_join_count +=
             other.canonicalization_failed_payload_crosses_join_count;
         self.rejected_must_emit_label += other.rejected_must_emit_label;
+        self.rejected_must_emit_label_surviving_middle_ref +=
+            other.rejected_must_emit_label_surviving_middle_ref;
+        self.rejected_must_emit_label_surviving_external_ref +=
+            other.rejected_must_emit_label_surviving_external_ref;
+        self.rejected_must_emit_label_owner_conflict +=
+            other.rejected_must_emit_label_owner_conflict;
         self.rejected_not_single_pred_succ += other.rejected_not_single_pred_succ;
         self.rejected_external_entry += other.rejected_external_entry;
         self.rejected_loop_or_switch_target += other.rejected_loop_or_switch_target;
