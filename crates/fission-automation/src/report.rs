@@ -433,6 +433,14 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.canonicalization_failed_alias_not_fallthrough_count,
         ),
         (
+            "canonicalization_failed_alias_not_fallthrough_top_level_after_label_count",
+            stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
+        ),
+        (
+            "canonicalization_failed_alias_not_fallthrough_nested_after_label_count",
+            stats.canonicalization_failed_alias_not_fallthrough_nested_after_label_count,
+        ),
+        (
             "canonicalization_failed_alias_has_multiple_internal_predecessors_count",
             stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count,
         ),

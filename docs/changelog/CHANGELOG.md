@@ -259,6 +259,60 @@ This increment refines guarded-tail alias ownership using Ghidra-style front-lea
 
 The large-sample runs show the alias-nonlocal bucket dropping substantially, with part of that volume reclassified into the more precise `alias_not_fallthrough` subtype instead of remaining lumped into `nonlocal`.
 
+### Structuring - AliasNotFallthrough Subtypes and Discovery Acceptance Refinement
+
+This increment splits `AliasNotFallthrough` into concrete after-label categories, adds a conservative top-level after-label relaxation using Ghidra `gotoPrints` / `nextFlowAfter`-style equivalence, and accepts terminal guarded tails plus pure-expression alias bodies when they are structurally safe.
+
+#### Changed
+
+- extended `AliasNotFallthrough` telemetry with explicit subtypes:
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`
+  - `canonicalization_failed_alias_not_fallthrough_nested_after_label_count`
+- wired the new subtype counters through:
+  - `NirBuildStats`
+  - preview builder state/snapshot
+  - automation report stat export
+- refined guarded-tail alias canonicalization in `structuring/guards.rs`:
+  - allows a narrow top-level after-label self-goto case when the forwarded alias still follows the same printed front path
+  - keeps nested after-label and other printed-order-divergent refs conservative
+- refined guarded-tail promotion shape handling:
+  - accepts terminal guarded tails (no follow block after the join label) in the same spirit as Ghidra `if-no-exit`
+- refined discovery-time noncanonical-layout handling:
+  - accepts alias bodies composed only of pure value expressions instead of treating them as automatically nontrivial
+  - continues rejecting alias bodies with control flow or side-effectful expression shapes
+
+#### Added
+
+- new regressions in `structuring_misc.rs` covering:
+  - top-level after-label subtype counting
+  - nested after-label subtype counting
+  - safe top-level after-label alias acceptance
+  - terminal guarded-tail promotion
+  - pure-expression alias-body acceptance
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 500` (pass)
+
+#### Observed expanded-sample delta (`nir`)
+
+- 200 functions:
+  - `canonicalization_failed_alias_not_fallthrough_count`: `247 -> 180`
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `361 -> 262`
+  - `promoted_region_count`: `237 -> 239`
+  - `structured`: `84 -> 86`
+- 500 functions:
+  - `canonicalization_failed_alias_not_fallthrough_count`: `352 -> 267`
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `471 -> 354`
+  - `promoted_region_count`: `559 -> 561`
+  - `structured`: `186 -> 188`
+
+These changes materially reduce the large-sample after-label alias bucket while slightly increasing successful guarded-tail promotions and structured output.
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
