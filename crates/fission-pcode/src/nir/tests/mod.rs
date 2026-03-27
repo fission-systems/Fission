@@ -7,6 +7,7 @@ mod normalize_bitstream;
 mod normalize_slots;
 mod relative_branch_targets;
 mod structuring_conditionals;
+mod structuring_guarded_tail;
 mod structuring_linear;
 mod structuring_loops;
 mod structuring_misc;
