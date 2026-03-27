@@ -999,6 +999,32 @@ fn structuring_candidate_discovery_canonicalizes_safe_interleaved_alias_stub() {
 }
 
 #[test]
+fn structuring_candidate_discovery_canonicalizes_interleaved_join_stub_with_multiple_forward_gotos()
+{
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_alias".to_string()),
+        HirStmt::Label("block_alias".to_string()),
+        HirStmt::Goto("block_join".to_string()),
+        HirStmt::Goto("block_join".to_string()),
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Expr(HirExpr::Var("payload".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert!(stats.discovery_seen_guarded_tail_like_shape_count >= 1);
+    assert_eq!(stats.canonicalization_failed_interleaved_join_uses, 0);
+}
+
+#[test]
 fn structuring_candidate_discovery_counts_nested_tail_escape() {
     let body = vec![
         HirStmt::If {
@@ -1009,6 +1035,7 @@ fn structuring_candidate_discovery_counts_nested_tail_escape() {
         HirStmt::Label("block_mid".to_string()),
         HirStmt::Expr(HirExpr::Var("middle".to_string())),
         HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Var("after_escape".to_string())),
         HirStmt::Label("block_tail".to_string()),
         HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
     ];
@@ -1041,6 +1068,26 @@ fn structuring_candidate_discovery_allows_tail_terminal_return_after_payload() {
     assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
     assert_eq!(stats.canonicalization_failed_nested_tail_escape, 0);
     assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 0);
+}
+
+#[test]
+fn structuring_candidate_discovery_allows_tail_terminal_goto_after_payload() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_exit".to_string()),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret_tail".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.canonicalization_failed_nested_tail_escape, 0);
 }
 
 #[test]

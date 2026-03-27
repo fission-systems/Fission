@@ -400,6 +400,49 @@ This increment splits a major remaining alias bucket into concrete subtype count
 
 The new breakdown shows `external_before` is not a meaningful bottleneck, while `nested_before` and especially `post_segment_ref` are the next concrete ownership cases to target.
 
+### Structuring - Conservative Terminal Goto Tail Escape Refinement
+
+This increment reduces one concrete nested-tail escape bucket by accepting only the safest terminal goto form: a post-payload goto is allowed when it is the final meaningful statement in the segment, does not target any label inside the current body, and does not introduce additional in-body structure.
+
+#### Changed
+
+- refined guarded-tail canonicalization in `structuring/guards.rs` so post-payload `goto` is accepted only when all of the following hold:
+  - no non-ignorable statements follow it
+  - no internal labels appear earlier in the canonicalized segment
+  - the goto target label does not appear anywhere in the current body
+- kept `break` / `continue` conservative after payload
+- preserved switch/default-exit safety by continuing to reject in-body structured targets
+
+#### Added
+
+- new regression `structuring_candidate_discovery_allows_tail_terminal_goto_after_payload`
+- tightened negative regression `structuring_candidate_discovery_counts_nested_tail_escape` so it still covers a true nested escape with trailing meaningful work
+- revalidated switch safety with `multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case_exit`
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 500` (pass)
+
+#### Observed expanded-sample delta (`nir`)
+
+- 200 functions:
+  - `canonicalization_failed_nested_tail_escape`: `171 -> 160`
+  - `discovery_rejected_noncanonical_layout_count`: `908 -> 897`
+  - `promotion_rejected_by_shape_count`: `908 -> 897`
+  - `promotion_candidate_count`: `561 -> 564`
+  - `promoted_region_count`: `239 -> 242`
+- 500 functions:
+  - `canonicalization_failed_nested_tail_escape`: `303 -> 292`
+  - `discovery_rejected_noncanonical_layout_count`: `1643 -> 1632`
+  - `promotion_rejected_by_shape_count`: `1643 -> 1632`
+  - `promotion_candidate_count`: `1202 -> 1205`
+  - `promoted_region_count`: `561 -> 564`
+
+This is a small but real large-sample reduction that improves guarded-tail acceptance without regressing the switch safety guard.
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)

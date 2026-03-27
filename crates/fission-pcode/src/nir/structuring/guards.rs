@@ -415,7 +415,7 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             match stmt {
-                HirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
+                HirStmt::Goto(label) if label == next_label => {
                     saw_forward_goto = true;
                 }
                 _ => return false,
@@ -900,7 +900,33 @@ impl<'a> PreviewBuilder<'a> {
                     }
                     canonical.push(stmt.clone());
                 }
-                HirStmt::Goto(_) | HirStmt::Break | HirStmt::Continue => {
+                HirStmt::Goto(_) => {
+                    if saw_payload {
+                        if trailing_has_non_ignorable {
+                            return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
+                        }
+                        let HirStmt::Goto(target) = stmt else {
+                            unreachable!();
+                        };
+                        if flattened[..idx]
+                            .iter()
+                            .any(|stmt| matches!(stmt, HirStmt::Label(_)))
+                        {
+                            return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
+                        }
+                        if full_body
+                            .iter()
+                            .any(|stmt| matches!(stmt, HirStmt::Label(label) if label == target))
+                        {
+                            return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
+                        }
+                        if flattened.iter().any(|stmt| matches!(stmt, HirStmt::Label(label) if label == target)) {
+                            return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
+                        }
+                    }
+                    canonical.push(stmt.clone());
+                }
+                HirStmt::Break | HirStmt::Continue => {
                     if saw_payload {
                         return Err(GuardedTailCanonicalizationFailure::NestedTailEscape);
                     }
