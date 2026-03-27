@@ -1,0 +1,434 @@
+use super::*;
+
+impl<'a> PreviewBuilder<'a> {
+    pub(super) fn mark_alias_nonlocal_external_before(&mut self) {
+        self.canonicalization_failed_alias_has_nonlocal_ref_external_before_count += 1;
+    }
+
+    pub(super) fn mark_alias_nonlocal_nested_before(&mut self) {
+        self.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count += 1;
+    }
+
+    pub(super) fn mark_alias_nonlocal_post_segment_ref(&mut self) {
+        self.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count += 1;
+    }
+
+    pub(super) fn mark_alias_nonlocal_from_external_sites(
+        &mut self,
+        external_top_level_before: usize,
+        external_nested_before: usize,
+        external_refs_after: usize,
+    ) {
+        if external_nested_before > 0 {
+            self.mark_alias_nonlocal_nested_before();
+        } else if external_refs_after > 0 {
+            self.mark_alias_nonlocal_post_segment_ref();
+        } else if external_top_level_before > 0 {
+            self.mark_alias_nonlocal_external_before();
+        }
+    }
+
+    pub(super) fn expr_is_pure_value(expr: &HirExpr) -> bool {
+        match expr {
+            HirExpr::Var(_) | HirExpr::Const(_, _) => true,
+            HirExpr::Cast { expr, .. } => Self::expr_is_pure_value(expr),
+            HirExpr::Unary { expr, .. } => Self::expr_is_pure_value(expr),
+            HirExpr::Binary { lhs, rhs, .. } => {
+                Self::expr_is_pure_value(lhs) && Self::expr_is_pure_value(rhs)
+            }
+            HirExpr::PtrOffset { base, .. } => Self::expr_is_pure_value(base),
+            HirExpr::Index { base, index, .. } => {
+                Self::expr_is_pure_value(base) && Self::expr_is_pure_value(index)
+            }
+            HirExpr::AggregateCopy { src, .. } => Self::expr_is_pure_value(src),
+            HirExpr::Call { .. } | HirExpr::Load { .. } => false,
+        }
+    }
+
+    pub(super) fn stmt_is_pure_value_expr(stmt: &HirStmt) -> bool {
+        matches!(stmt, HirStmt::Expr(expr) if Self::expr_is_pure_value(expr))
+    }
+
+    pub(super) fn classify_external_alias_ref_sites(
+        full_body: &[HirStmt],
+        segment_start: usize,
+        segment_end: usize,
+        label: &str,
+    ) -> (usize, usize, usize) {
+        let mut top_level_before = 0usize;
+        let mut nested_before = 0usize;
+        let mut refs_after = 0usize;
+
+        for (idx, stmt) in full_body.iter().enumerate() {
+            if idx >= segment_start && idx < segment_end {
+                continue;
+            }
+            let ref_count = Self::stmt_contains_goto_label(stmt, label);
+            if ref_count == 0 {
+                continue;
+            }
+            if idx < segment_start {
+                match stmt {
+                    HirStmt::Goto(target) if target == label => top_level_before += 1,
+                    _ => nested_before += ref_count,
+                }
+            } else {
+                refs_after += ref_count;
+            }
+        }
+
+        (top_level_before, nested_before, refs_after)
+    }
+
+    pub(super) fn stmt_contains_goto_label(stmt: &HirStmt, label: &str) -> usize {
+        match stmt {
+            HirStmt::Goto(target) => usize::from(target == label),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                then_body
+                    .iter()
+                    .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                    .sum::<usize>()
+                    + else_body
+                        .iter()
+                        .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                        .sum::<usize>()
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                body.iter()
+                    .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                    .sum()
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                cases
+                    .iter()
+                    .map(|case| {
+                        case.body
+                            .iter()
+                            .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                            .sum::<usize>()
+                    })
+                    .sum::<usize>()
+                    + default
+                        .iter()
+                        .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                        .sum::<usize>()
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => 0,
+        }
+    }
+
+    pub(super) fn classify_alias_ref_sites(
+        body: &[HirStmt],
+        label_idx: usize,
+        label: &str,
+    ) -> (usize, usize, usize) {
+        let mut top_level_before = 0usize;
+        let mut nested_before = 0usize;
+        let mut refs_after = 0usize;
+
+        for (idx, stmt) in body.iter().enumerate() {
+            let ref_count = Self::stmt_contains_goto_label(stmt, label);
+            if ref_count == 0 {
+                continue;
+            }
+            if idx >= label_idx {
+                refs_after += ref_count;
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(target) if target == label => top_level_before += 1,
+                _ => nested_before += ref_count,
+            }
+        }
+
+        (top_level_before, nested_before, refs_after)
+    }
+
+    pub(super) fn local_goto_positions_by_label(body: &[HirStmt]) -> HashMap<String, Vec<usize>> {
+        let mut refs = HashMap::new();
+        for (idx, stmt) in body.iter().enumerate() {
+            if let HirStmt::Goto(label) = stmt {
+                refs.entry(label.clone()).or_insert_with(Vec::new).push(idx);
+            }
+        }
+        refs
+    }
+
+    pub(super) fn is_local_alias_forward_segment(segment: &[HirStmt], next_label: &str) -> bool {
+        let mut saw_forward_goto = false;
+        for stmt in segment {
+            if is_ignorable_discovery_stmt(stmt) {
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(label) if !saw_forward_goto && label == next_label => {
+                    saw_forward_goto = true;
+                }
+                _ => return false,
+            }
+        }
+        saw_forward_goto
+    }
+
+    pub(super) fn is_local_alias_forward_segment_with_after_label_refs(
+        segment: &[HirStmt],
+        label: &str,
+        next_label: &str,
+    ) -> bool {
+        let mut saw_forward_goto = false;
+        for stmt in segment {
+            if is_ignorable_discovery_stmt(stmt) {
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(target) if target == next_label => {
+                    saw_forward_goto = true;
+                }
+                HirStmt::Goto(target) if target == label => {}
+                _ => return false,
+            }
+        }
+        saw_forward_goto
+    }
+
+    pub(super) fn is_trivial_join_forward_segment(segment: &[HirStmt], next_label: &str) -> bool {
+        let mut saw_forward_goto = false;
+        for stmt in segment {
+            if is_ignorable_discovery_stmt(stmt) {
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(label) if label == next_label => {
+                    saw_forward_goto = true;
+                }
+                _ => return false,
+            }
+        }
+        saw_forward_goto
+    }
+
+    pub(super) fn count_top_level_goto_refs_in_range(
+        body: &[HirStmt],
+        label: &str,
+        start_exclusive: usize,
+        end_exclusive: usize,
+    ) -> usize {
+        if start_exclusive + 1 >= end_exclusive {
+            return 0;
+        }
+        body[start_exclusive + 1..end_exclusive]
+            .iter()
+            .filter(|stmt| matches!(stmt, HirStmt::Goto(target) if target == label))
+            .count()
+    }
+
+    pub(super) fn resolve_terminal_join_target(
+        &mut self,
+        body: &[HirStmt],
+        anchor_idx: usize,
+        target_label: &str,
+        referenced: &HashMap<String, usize>,
+    ) -> Option<(String, usize)> {
+        let mut current = target_label.to_string();
+        let mut seen = HashSet::new();
+        let mut rewrites = 0usize;
+
+        loop {
+            if !seen.insert(current.clone()) {
+                return None;
+            }
+
+            let label_idx = (anchor_idx + 1..body.len()).find(
+                |pos| matches!(body.get(*pos), Some(HirStmt::Label(label)) if label == &current),
+            )?;
+            let next_label_idx =
+                (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)));
+            let Some(next_label_idx) = next_label_idx else {
+                if rewrites > 0 {
+                    self.canonicalized_guarded_tail_shape_count += rewrites;
+                }
+                return Some((current, label_idx));
+            };
+            let HirStmt::Label(next_label) = &body[next_label_idx] else {
+                unreachable!();
+            };
+            let segment = &body[label_idx + 1..next_label_idx];
+            let top_level_window_refs =
+                Self::count_top_level_goto_refs_in_range(body, &current, anchor_idx, label_idx);
+            let hop_ref_budget = if rewrites == 0 {
+                top_level_window_refs + 1
+            } else {
+                top_level_window_refs
+            };
+            let no_nonlocal_refs = referenced.get(&current).copied().unwrap_or(0) <= hop_ref_budget;
+            if no_nonlocal_refs
+                && (Self::is_trivial_join_forward_segment(segment, next_label)
+                    || segment.iter().all(is_ignorable_discovery_stmt))
+            {
+                current = next_label.clone();
+                rewrites += 1;
+                continue;
+            }
+
+            if rewrites > 0 {
+                self.canonicalized_guarded_tail_shape_count += rewrites;
+            }
+            return Some((current, label_idx));
+        }
+    }
+
+    pub(super) fn resolve_alias_redirect(
+        label: &str,
+        redirects: &HashMap<String, Option<String>>,
+    ) -> Option<String> {
+        let mut current = label.to_string();
+        let mut seen = HashSet::new();
+        while let Some(next) = redirects.get(&current) {
+            if !seen.insert(current.clone()) {
+                return Some(current);
+            }
+            match next {
+                Some(next_label) => current = next_label.clone(),
+                None => return None,
+            }
+        }
+        Some(current)
+    }
+
+    pub(super) fn count_goto_refs_in_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>) {
+        match stmt {
+            HirStmt::Goto(label) => {
+                *out.entry(label.clone()).or_insert(0) += 1;
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                for nested in then_body {
+                    Self::count_goto_refs_in_stmt(nested, out);
+                }
+                for nested in else_body {
+                    Self::count_goto_refs_in_stmt(nested, out);
+                }
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                for nested in body {
+                    Self::count_goto_refs_in_stmt(nested, out);
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    for nested in &case.body {
+                        Self::count_goto_refs_in_stmt(nested, out);
+                    }
+                }
+                for nested in default {
+                    Self::count_goto_refs_in_stmt(nested, out);
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+
+    pub(super) fn goto_ref_counts(body: &[HirStmt]) -> HashMap<String, usize> {
+        let mut out = HashMap::new();
+        for stmt in body {
+            Self::count_goto_refs_in_stmt(stmt, &mut out);
+        }
+        out
+    }
+
+    pub(super) fn rewrite_goto_label_in_stmt(stmt: &mut HirStmt, from: &str, to: &str) {
+        match stmt {
+            HirStmt::Goto(label) => {
+                if label == from {
+                    *label = to.to_string();
+                }
+            }
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                for nested in then_body {
+                    Self::rewrite_goto_label_in_stmt(nested, from, to);
+                }
+                for nested in else_body {
+                    Self::rewrite_goto_label_in_stmt(nested, from, to);
+                }
+            }
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                for nested in body {
+                    Self::rewrite_goto_label_in_stmt(nested, from, to);
+                }
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    for nested in &mut case.body {
+                        Self::rewrite_goto_label_in_stmt(nested, from, to);
+                    }
+                }
+                for nested in default {
+                    Self::rewrite_goto_label_in_stmt(nested, from, to);
+                }
+            }
+            HirStmt::Assign { .. }
+            | HirStmt::Expr(_)
+            | HirStmt::Label(_)
+            | HirStmt::Return(_)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
+        }
+    }
+
+    pub(super) fn rewrite_goto_label_in_stmts(stmts: &mut [HirStmt], from: &str, to: &str) {
+        for stmt in stmts {
+            Self::rewrite_goto_label_in_stmt(stmt, from, to);
+        }
+    }
+
+    pub(super) fn terminalizable_join_alias_target(
+        body: &[HirStmt],
+        label_idx: usize,
+    ) -> Option<(String, usize)> {
+        let HirStmt::Label(_) = &body[label_idx] else {
+            return None;
+        };
+        let next_label_idx =
+            (label_idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)))?;
+        let HirStmt::Label(next_label) = &body[next_label_idx] else {
+            return None;
+        };
+        let segment = &body[label_idx + 1..next_label_idx];
+        if Self::is_trivial_join_forward_segment(segment, next_label)
+            || segment.iter().all(is_ignorable_discovery_stmt)
+        {
+            return Some((next_label.clone(), next_label_idx));
+        }
+        None
+    }
+
+    pub(super) fn flatten_guarded_tail_segment(segment: &[HirStmt], out: &mut Vec<HirStmt>) {
+        for stmt in segment {
+            match stmt {
+                HirStmt::Block(body) => Self::flatten_guarded_tail_segment(body, out),
+                other => out.push(other.clone()),
+            }
+        }
+    }
+}

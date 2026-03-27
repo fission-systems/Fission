@@ -4,7 +4,7 @@ mod cleanup;
 mod cfg_analysis;
 mod conditionals;
 mod driver;
-mod guards;
+mod guarded_tail;
 mod linear;
 mod loops;
 mod recovery;
