@@ -443,6 +443,37 @@ This increment reduces one concrete nested-tail escape bucket by accepting only 
 
 This is a small but real large-sample reduction that improves guarded-tail acceptance without regressing the switch safety guard.
 
+### Docs and Structure - Hierarchical AGENTS Guides and Guarded-Tail Module Split
+
+This increment improves repository navigation for human/AI contributors and reduces structural risk in the guarded-tail implementation by splitting the overloaded `guards.rs` module and moving its dedicated regression coverage into a separate test file.
+
+#### Changed
+
+- refreshed the repository-root `AGENTS.md` and added focused child guides for the highest-complexity ownership seams:
+  - `crates/fission-pcode/src/nir/AGENTS.md`
+  - `crates/fission-pcode/src/nir/structuring/AGENTS.md`
+  - `crates/fission-automation/src/AGENTS.md`
+  - `crates/fission-static/src/analysis/decomp/postprocess/AGENTS.md`
+- split guarded-tail implementation from the monolithic `structuring/guards.rs` into:
+  - `structuring/guarded_tail/alias_refs.rs`
+  - `structuring/guarded_tail/promotion_graph.rs`
+  - `structuring/guarded_tail/canonicalize.rs`
+  - `structuring/guarded_tail/promotion.rs`
+  - `structuring/guarded_tail/mod.rs`
+- updated `structuring/mod.rs` to route guarded-tail logic through the new folder-tree layout
+- moved guarded-tail-specific regressions out of `structuring_misc.rs` into:
+  - `crates/fission-pcode/src/nir/tests/structuring_guarded_tail.rs`
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+
+#### Notes
+
+- This is a behavior-preserving refactor intended to make future guarded-tail work safer and more local.
+- `structuring_misc.rs` now keeps only genuinely mixed/overflow structuring cases while guarded-tail behavior is co-located with its own test file.
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
