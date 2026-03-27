@@ -354,6 +354,52 @@ This increment separates the remaining direct guarded-tail shape blockers from c
 
 These measurements show the remaining large shape bucket is overwhelmingly coming from canonicalization-driven discovery failures rather than the two direct shape blockers, which narrows the next optimization target considerably.
 
+### Structuring - Alias Nonlocal Ref Subtype Telemetry
+
+This increment splits a major remaining alias bucket into concrete subtype counters so large-sample runs can distinguish whether label ownership escapes are coming from nested pre-entry refs, post-segment refs, or simpler external-before patterns.
+
+#### Changed
+
+- added explicit alias-nonlocal subtype telemetry:
+  - `canonicalization_failed_alias_has_nonlocal_ref_external_before_count`
+  - `canonicalization_failed_alias_has_nonlocal_ref_nested_before_count`
+  - `canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count`
+- wired these counters through:
+  - `NirBuildStats`
+  - preview builder state/snapshot
+  - automation build-stat reporting
+- refined guarded-tail alias classification in `structuring/guards.rs` so generic `AliasHasNonlocalRef` failures are attributed to the concrete external-site cause instead of only incrementing the aggregate counter
+
+#### Added
+
+- new regressions in `structuring_misc.rs` covering:
+  - nested-before nonlocal alias refs
+  - external-before nonlocal alias refs
+  - post-segment nonlocal alias refs
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 500` (pass)
+
+#### Observed expanded-sample telemetry (`nir`)
+
+- 200 functions:
+  - `canonicalization_failed_alias_has_nonlocal_ref_count`: `298`
+  - `external_before`: `0`
+  - `nested_before`: `42`
+  - `post_segment_ref`: `102`
+- 500 functions:
+  - `canonicalization_failed_alias_has_nonlocal_ref_count`: `583`
+  - `external_before`: `0`
+  - `nested_before`: `135`
+  - `post_segment_ref`: `187`
+
+The new breakdown shows `external_before` is not a meaningful bottleneck, while `nested_before` and especially `post_segment_ref` are the next concrete ownership cases to target.
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)

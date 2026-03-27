@@ -457,6 +457,18 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.canonicalization_failed_alias_has_nonlocal_ref_count,
         ),
         (
+            "canonicalization_failed_alias_has_nonlocal_ref_external_before_count",
+            stats.canonicalization_failed_alias_has_nonlocal_ref_external_before_count,
+        ),
+        (
+            "canonicalization_failed_alias_has_nonlocal_ref_nested_before_count",
+            stats.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count,
+        ),
+        (
+            "canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count",
+            stats.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count,
+        ),
+        (
             "canonicalization_failed_alias_body_not_trivial_count",
             stats.canonicalization_failed_alias_body_not_trivial_count,
         ),
