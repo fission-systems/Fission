@@ -37,6 +37,33 @@ enum PromotionShapeRejection {
 }
 
 impl<'a> PreviewBuilder<'a> {
+    fn mark_alias_nonlocal_external_before(&mut self) {
+        self.canonicalization_failed_alias_has_nonlocal_ref_external_before_count += 1;
+    }
+
+    fn mark_alias_nonlocal_nested_before(&mut self) {
+        self.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count += 1;
+    }
+
+    fn mark_alias_nonlocal_post_segment_ref(&mut self) {
+        self.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count += 1;
+    }
+
+    fn mark_alias_nonlocal_from_external_sites(
+        &mut self,
+        external_top_level_before: usize,
+        external_nested_before: usize,
+        external_refs_after: usize,
+    ) {
+        if external_nested_before > 0 {
+            self.mark_alias_nonlocal_nested_before();
+        } else if external_refs_after > 0 {
+            self.mark_alias_nonlocal_post_segment_ref();
+        } else if external_top_level_before > 0 {
+            self.mark_alias_nonlocal_external_before();
+        }
+    }
+
     fn expr_is_pure_value(expr: &HirExpr) -> bool {
         match expr {
             HirExpr::Var(_) | HirExpr::Const(_, _) => true,
@@ -689,9 +716,15 @@ impl<'a> PreviewBuilder<'a> {
                             label,
                         );
                     if external_nested_before > 0 || external_refs_after > 0 {
+                        self.mark_alias_nonlocal_from_external_sites(
+                            external_top_level_before,
+                            external_nested_before,
+                            external_refs_after,
+                        );
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
                     if external_top_level_before != external_ref_count {
+                        self.mark_alias_nonlocal_external_before();
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
                     external_safe_redirect_labels.push(label.clone());
@@ -710,6 +743,18 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             if external_ref_count > 0 {
+                let (external_top_level_before, external_nested_before, external_refs_after) =
+                    Self::classify_external_alias_ref_sites(
+                        full_body,
+                        segment_start,
+                        segment_end,
+                        label,
+                    );
+                self.mark_alias_nonlocal_from_external_sites(
+                    external_top_level_before,
+                    external_nested_before,
+                    external_refs_after,
+                );
                 return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
             }
             if has_non_ignorable_gap {
@@ -808,6 +853,18 @@ impl<'a> PreviewBuilder<'a> {
                         let local_ref_count = segment_ref_counts.get(label).copied().unwrap_or(0);
                         let total_ref_count = referenced.get(label).copied().unwrap_or(0);
                         if total_ref_count > local_ref_count {
+                            let (external_top_level_before, external_nested_before, external_refs_after) =
+                                Self::classify_external_alias_ref_sites(
+                                    full_body,
+                                    segment_start,
+                                    segment_start + flattened.len(),
+                                    label,
+                                );
+                            self.mark_alias_nonlocal_from_external_sites(
+                                external_top_level_before,
+                                external_nested_before,
+                                external_refs_after,
+                            );
                             return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                         }
                         if let Some((next_label, next_idx)) =

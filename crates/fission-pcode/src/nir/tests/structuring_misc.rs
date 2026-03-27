@@ -1286,6 +1286,78 @@ fn structuring_candidate_discovery_counts_true_nonlocal_alias_ref() {
         stats.canonicalization_failed_alias_has_nonlocal_ref_count,
         1
     );
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count,
+        1
+    );
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_external_before_count,
+        0
+    );
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count,
+        0
+    );
+}
+
+#[test]
+fn structuring_candidate_discovery_counts_external_before_alias_nonlocal_ref() {
+    let body = vec![
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_count,
+        1
+    );
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_external_before_count,
+        1
+    );
+}
+
+#[test]
+fn structuring_candidate_discovery_counts_post_segment_alias_nonlocal_ref() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_inner".to_string()),
+        HirStmt::Expr(HirExpr::Var("inner_work".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+        HirStmt::If {
+            cond: HirExpr::Var("late".to_string()),
+            then_body: vec![HirStmt::Goto("block_inner".to_string())],
+            else_body: Vec::new(),
+        },
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_count,
+        1
+    );
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count,
+        1
+    );
 }
 
 #[test]
