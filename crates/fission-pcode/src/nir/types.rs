@@ -181,6 +181,12 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub canonicalization_failed_alias_has_nonlocal_ref_count: usize,
     #[serde(default)]
+    pub canonicalization_failed_alias_has_nonlocal_ref_external_before_count: usize,
+    #[serde(default)]
+    pub canonicalization_failed_alias_has_nonlocal_ref_nested_before_count: usize,
+    #[serde(default)]
+    pub canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_alias_body_not_trivial_count: usize,
     #[serde(default)]
     pub canonicalization_failed_join_has_external_ref_count: usize,
@@ -289,6 +295,12 @@ impl NirBuildStats {
             other.canonicalization_failed_alias_has_multiple_internal_predecessors_count;
         self.canonicalization_failed_alias_has_nonlocal_ref_count +=
             other.canonicalization_failed_alias_has_nonlocal_ref_count;
+        self.canonicalization_failed_alias_has_nonlocal_ref_external_before_count +=
+            other.canonicalization_failed_alias_has_nonlocal_ref_external_before_count;
+        self.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count +=
+            other.canonicalization_failed_alias_has_nonlocal_ref_nested_before_count;
+        self.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count +=
+            other.canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count;
         self.canonicalization_failed_alias_body_not_trivial_count +=
             other.canonicalization_failed_alias_body_not_trivial_count;
         self.canonicalization_failed_join_has_external_ref_count +=

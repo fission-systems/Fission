@@ -154,6 +154,9 @@ impl<'a> PreviewBuilder<'a> {
             canonicalization_failed_alias_not_fallthrough_nested_after_label_count: 0,
             canonicalization_failed_alias_has_multiple_internal_predecessors_count: 0,
             canonicalization_failed_alias_has_nonlocal_ref_count: 0,
+            canonicalization_failed_alias_has_nonlocal_ref_external_before_count: 0,
+            canonicalization_failed_alias_has_nonlocal_ref_nested_before_count: 0,
+            canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count: 0,
             canonicalization_failed_alias_body_not_trivial_count: 0,
             canonicalization_failed_join_has_external_ref_count: 0,
             canonicalization_failed_payload_crosses_join_count: 0,
@@ -346,6 +349,12 @@ impl<'a> PreviewBuilder<'a> {
                 .canonicalization_failed_alias_has_multiple_internal_predecessors_count,
             canonicalization_failed_alias_has_nonlocal_ref_count: self
                 .canonicalization_failed_alias_has_nonlocal_ref_count,
+            canonicalization_failed_alias_has_nonlocal_ref_external_before_count: self
+                .canonicalization_failed_alias_has_nonlocal_ref_external_before_count,
+            canonicalization_failed_alias_has_nonlocal_ref_nested_before_count: self
+                .canonicalization_failed_alias_has_nonlocal_ref_nested_before_count,
+            canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count: self
+                .canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count,
             canonicalization_failed_alias_body_not_trivial_count: self
                 .canonicalization_failed_alias_body_not_trivial_count,
             canonicalization_failed_join_has_external_ref_count: self
