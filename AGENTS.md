@@ -1,291 +1,95 @@
-# Agent Guidelines for Fission
+# Fission Agent Guide
 
-> LLM-focused working notes for contributors and coding agents.
+Generated: 2026-03-27
+Scope: repository root
 
-## Project Summary
+## Overview
 
-Fission is a Rust-first reverse-engineing/decompilation workspace converging on:
+Fission is a Rust-first reverse-engineering/decompilation workspace. Ghidra-native lifting feeds Rust-owned NIR/HIR normalization, structuring, rendering, and automation quality lanes.
 
-- **Ghidra as a lift service** (decode + p-code + CFG skeleton + failure containment)
-- **Rust as the decompiler brain** (NIR/HIR normalization, structuring, rendering)
-- **CLI and Tauri as product surfaces** over the same analysis core
+## Structure
 
-Core direction is documented in:
+```text
+Fission/
+├── crates/
+│   ├── fission-pcode/        # Canonical IR, NIR/HIR, structuring, printer
+│   ├── fission-static/       # Static orchestration, preview routing, fact application
+│   ├── fission-automation/   # Quality lanes, deltas, go/stop signals, artifacts
+│   ├── fission-loader/       # Binary parsing, symbols, sections, strings
+│   ├── fission-signatures/   # FID/signature data and lookup
+│   ├── fission-cli/          # CLI surface
+│   └── fission-tauri/        # Desktop surface
+├── ghidra_decompiler/        # Native lift/decompiler integration, built with CMake
+├── vendor/                   # Ghidra, RetDec, other reference code
+├── scripts/test/             # Smoke / fuzz / automation helpers
+└── .github/workflows/        # CI/CD source of truth
+```
 
-- `README.md`
-- `docs/architecture/ARCHITECTURE.md`
+## Child AGENTS
 
-Treat this repository as one coherent analysis system. Do not solve missing semantics at the UI/surface layer when the right owner is an upstream analysis layer.
+- `crates/fission-pcode/src/nir/AGENTS.md`
+- `crates/fission-pcode/src/nir/structuring/AGENTS.md`
+- `crates/fission-automation/src/AGENTS.md`
+- `crates/fission-static/src/analysis/decomp/postprocess/AGENTS.md`
 
----
+Read the nearest child file before editing those areas.
 
-## Fast Path Rules
+## Where To Look
 
-1. Find the canonical owner of a fact before editing code. Avoid policy duplication.
-2. Keep lift-service logic and Rust decompiler logic separated by responsibility.
-3. `fission-cli` and `fission-tauri` are orchestration/product surfaces, not semantic repair layers.
-4. Prefer typed contracts over string-level patches whenever possible.
-5. For NIR quality changes, wire telemetry (`NirBuildStats`) and automation outputs together.
-6. For control-flow work, prioritize algorithmic invariants (dom/postdom/SCC/CFG facts), not binary-specific heuristics.
-7. If architecture blocks correctness, redesign the seam at the owning layer instead of adding end-stage hacks.
-8. Use current CI/BUILD commands from this file; ignore stale command snippets in older docs.
-9. Keep behavior deterministic (ordering, naming, output) when test snapshots/metrics depend on stable output.
-10. Large refactors are acceptable when they reduce long-term complexity and tighten ownership.
+| Task | Location | Notes |
+|---|---|---|
+| NIR structuring / canonicalization | `crates/fission-pcode/src/nir/structuring/` | Core algorithmic decompiler work lives here |
+| NIR telemetry contract | `crates/fission-pcode/src/nir/types.rs` | `NirBuildStats` is canonical |
+| Automation summaries / deltas | `crates/fission-automation/src/report.rs` | Must stay aligned with `NirBuildStats` |
+| Static orchestration / postprocess | `crates/fission-static/src/analysis/` | Routing and downstream passes |
+| Native lift boundary | `ghidra_decompiler/`, `crates/fission-ffi/` | Keep ownership separate from Rust structuring |
+| Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific heuristics |
 
----
+## Core Rules
 
-## Task-Start Protocol
+1. Fix behavior at the canonical owner, not downstream UI/surface layers.
+2. Prefer algorithmic CFG / dom / postdom / SCC facts over lexical or binary-specific heuristics.
+3. Use typed contracts; do not invent parallel telemetry payloads outside `NirBuildStats`.
+4. Keep behavior deterministic when outputs feed snapshots, metrics, or automation comparisons.
+5. Large refactors are acceptable when they reduce long-term complexity and tighten ownership.
 
-For non-trivial changes:
+## Anti-Patterns
 
-1. Identify user-visible broken behavior or invariant.
-2. Choose the owning layer/crate first.
-3. Extend existing typed contracts before adding parallel ad-hoc payloads.
-4. Push facts upstream to canonical owner; do not reconstruct downstream repeatedly.
-5. Add deterministic regression tests at the layer users actually consume.
-6. Validate with crate-targeted tests first, then broader suite.
+- Do not patch semantic gaps only in printer/UI output.
+- Do not add one-off binary-specific heuristics without invariant-based guards.
+- Do not duplicate the same metric definition across pcode and automation.
+- Do not treat `fission-cli` or `fission-tauri` as semantic repair layers.
+- Do not claim success from one targeted test if crate-level regression remains.
 
----
-
-## Change Placement Guide
-
-- `ghidra_decompiler/` + `crates/fission-ffi/`
-  - lift-service boundary (native extraction, hard-failure isolation)
-- `crates/fission-pcode/`
-  - p-code model, optimizer, NIR/HIR pipeline, structuring, printer
-- `crates/fission-static/`
-  - static analysis orchestration, preview routing, session fact handling
-- `crates/fission-loader/`
-  - binary parsing, symbols/sections/string facts
-- `crates/fission-signatures/`
-  - signature/FID-related fact source
-- `crates/fission-automation/`
-  - quality lanes, baseline deltas, decision gates, artifacts
-- `crates/fission-cli/`, `crates/fission-tauri/`
-  - user-facing orchestration and UX surfaces only
-
-If a fix requires changing ownership between these layers, do it explicitly.
-
----
-
-## Workspace Layout
-
-Primary workspace members (`Cargo.toml`):
-
-- `fission-automation`
-- `fission-core`
-- `fission-disasm`
-- `fission-loader`
-- `fission-pcode`
-- `fission-signatures`
-- `fission-static`
-- `fission-dynamic`
-- `fission-analysis`
-- `fission-cli`
-- `fission-ffi`
-- `fission-tauri/src-tauri`
-
-Other key directories:
-
-- `ghidra_decompiler/` (native decompiler/lift side)
-- `.github/workflows/` (CI/CD source of truth)
-- `scripts/test/` (smoke/comparison/test helpers)
-
----
-
-## Architecture Stance (Fission-specific)
-
-Use `docs/architecture/ARCHITECTURE.md` as source of truth.
-
-Fission has four layers:
-
-1. Lift Service
-2. Canonical IR
-3. Structured IR
-4. Presentation
-
-Additional system contracts:
-
-- Session Fact Store as conflict-resolved fact source
-- Preview-first routing policy with explicit fallback taxonomy
-
-Practical implication:
-
-- If output is ugly but semantically correct, improve in canonical/structured layers first.
-- Do not force invalid high-level constructs to avoid `goto` at all costs.
-
----
-
-## Canonical Contracts
-
-### 1) NIR Build/Quality Telemetry Contract
-
-`NirBuildStats` is the canonical quality telemetry payload for NIR build/structuring signals.
-
-- Add new structuring counters in `crates/fission-pcode/src/nir/types.rs`
-- Wire through builder state/snapshots/merging
-- Surface in automation (`crates/fission-automation/src/report.rs`) for summary/delta/decision gate coherence
-
-### 2) Preview Routing Contract
-
-Preview-first policy and fallback reasons belong to the static orchestration layer (not UI polish layer).
-
-### 3) Structuring Safety Contract
-
-When uncertain, prefer conservative fallback over incorrect structuring.
-
-- Good fallback > wrong high-level reconstruction
-
----
-
-## Rewrite Bias
-
-When architecture blocks correctness:
-
-- Rewrite seams/contracts at owning layer.
-- Move logic to canonical owner instead of piling adapters downstream.
-- Avoid one-off per-binary fixes unless explicitly experimental and isolated.
-
----
-
-## Rust Typing Rules
-
-- Prefer enums/newtypes/typed structs over loose maps.
-- Keep JSON boundary types at I/O edges; keep internal analysis typed.
-- Use deterministic collections/order where output stability matters.
-- Use `TryFrom`/`From` for boundary conversions.
-
----
-
-## Build and Run (Current)
-
-From repository root:
+## Build / Test Commands
 
 ```bash
-# Build native decompiler
+# Native decompiler
 cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
 cmake --build ghidra_decompiler/build --config Release
 
-# Build CLI (native integration)
+# CLI with native integration
 cargo build -p fission-cli --features native_decomp
 
-# Run core tests used in CI fast gate
-cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
-```
+# Common decompiler validation
+cargo test -p fission-pcode
+cargo check -p fission-pcode
+cargo check -p fission-automation
 
-Automation loop:
-
-```bash
+# Quality lane
 cargo run -p fission-automation -- nir-check --lane nir
 ```
 
-Useful quality loops:
+## Workflow Bias
 
-```bash
-cargo run -p fission-automation -- nir-check \
-  --lane nir \
-  --run-profile fast \
-  --focus-top-mismatch 5 \
-  --no-build \
-  --fission-bin ./target/debug/fission_cli \
-  --baseline artifacts/fission-automation/latest/nir/summary.json
-```
-
----
-
-## CI/CD Source of Truth
-
-Use workflow files directly:
-
-- `.github/workflows/ci.yml` (fast gate)
-- `.github/workflows/ci-heavy.yml` (heavy validation + automation artifacts)
-- `.github/workflows/cd.yml` (release)
-
-Current CI expectations include:
-
-- native decompiler build on Linux/macOS/Windows
-- rustfmt + clippy (workspace, tauri excluded in fast gate)
-- focused crate test suites
-- `fission-automation` `nir-check` lanes in heavy CI
-
----
-
-## Testing Policy
-
-### Default sequence for NIR/structuring work
-
-1. Targeted tests (`structuring_*`, focused unit tests)
-2. `cargo test -p fission-pcode`
-3. `cargo check -p fission-pcode`
-4. If telemetry/report touched:
-   - `cargo test -p fission-automation`
-   - `cargo check -p fission-automation`
-5. If static wiring touched:
-   - `cargo check -p fission-static --features native_decomp`
-
-### Rule
-
-Do not claim completion unless modified crates are tested/typechecked.
-
----
-
-## NIR Structuring Workflow Guidance
-
-For control-flow changes under `crates/fission-pcode/src/nir/structuring/`:
-
-1. Prefer algorithmic facts first:
-   - edge classes
-   - dominator/postdominator
-   - SCC/irreducible signals
-2. Keep reducers conservative under uncertainty.
-3. Add both:
-   - positive regression (should structure)
-   - negative regression (must NOT over-structure)
-4. Wire telemetry when behavior class changes.
-
-Reference anchors:
-
-- `structuring/driver.rs`
-- `structuring/linear.rs`
-- `structuring/loops.rs`
-- `structuring/switch.rs`
-- `structuring/recovery.rs`
-- `structuring/cfg_analysis.rs`
-
----
-
-## Automation Ownership Rules
-
-`crates/fission-automation` owns run orchestration and quality reporting surfaces.
-
-If you add NIR quality signals:
-
-1. Add fields to `NirBuildStats` (pcode side)
-2. Merge/snapshot fields correctly
-3. Expose in `build_stats_pairs()`
-4. Include in baseline delta and summary markdown
-5. Decide whether gate logic should consume the new signal
-
-Do not add divergent metric definitions in multiple places.
-
----
-
-## AI Agent Anti-Patterns (Do Not Do)
-
-- Fixing semantic gaps only in printer/UI layer
-- Adding binary-specific heuristic without invariant-based guard
-- Introducing parallel “temporary” telemetry payloads outside `NirBuildStats`
-- Modifying CI behavior without reflecting intended validation policy
-- Declaring success from a single targeted test while full crate regresses
-
----
+- For NIR/structuring changes: targeted tests → `cargo test -p fission-pcode` → `cargo check -p fission-pcode`.
+- If telemetry/reporting changes: also run `cargo check -p fission-automation`.
+- Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 
 ## References
 
-- `README.md`
 - `docs/architecture/ARCHITECTURE.md`
 - `docs/build/BUILD.md`
-- `CONTRIBUTING.md`
-- `crates/fission-automation/README.md`
+- `README.md`
 - `.github/workflows/ci.yml`
 - `.github/workflows/ci-heavy.yml`
