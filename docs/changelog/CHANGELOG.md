@@ -474,6 +474,51 @@ This increment improves repository navigation for human/AI contributors and redu
 - This is a behavior-preserving refactor intended to make future guarded-tail work safer and more local.
 - `structuring_misc.rs` now keeps only genuinely mixed/overflow structuring cases while guarded-tail behavior is co-located with its own test file.
 
+### Structure - NIR Support, Telemetry, and Builder Façade Slimming
+
+This refactor wave makes the NIR layer materially easier to navigate by moving the last large support/state/telemetry/helper responsibilities out of `nir/mod.rs` and `nir/builder/mod.rs` into dedicated internal modules without changing the public NIR surface.
+
+#### Changed
+
+- split shared private NIR support into:
+  - `crates/fission-pcode/src/nir/support.rs`
+    - support types
+    - constants
+    - pure lowering/type/naming helpers
+- split preview telemetry storage and retrieval into:
+  - `crates/fission-pcode/src/nir/telemetry.rs`
+    - thread-local preview stats storage
+    - `take_last_preview_*` / `take_last_nir_*` helpers
+- slimmed `crates/fission-pcode/src/nir/mod.rs` into a thinner façade that now primarily owns:
+  - public render entrypoints
+  - top-level orchestration
+  - telemetry delegation
+- split builder internals into focused modules:
+  - `crates/fission-pcode/src/nir/builder/state.rs` — `PreviewBuilder` state layout
+  - `crates/fission-pcode/src/nir/builder/init.rs` — constructor/state initialization
+  - `crates/fission-pcode/src/nir/builder/debug.rs` — debug / unsupported inventory plumbing
+  - `crates/fission-pcode/src/nir/builder/stats.rs` — `preview_build_stats()` projection
+- kept `crates/fission-pcode/src/nir/builder/mod.rs` as a much thinner façade around:
+  - type-hint wrappers
+  - `build_hir()` orchestration
+  - a small set of orchestration helpers
+
+#### Validation
+
+- priority regression set passed:
+  - `bootstrap_x86`
+  - `structuring_conditionals`
+  - `structuring_linear`
+  - `structuring_loops`
+  - `type_hints_function_hints`
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+
+#### Notes
+
+- This is a behavior-preserving structural refactor only.
+- The `nir/` tree now has clearer ownership boundaries: façade (`mod.rs`), support (`support.rs`), telemetry (`telemetry.rs`), builder state/init/debug/stats, structuring, and tests.
+
 ## 2026-03-24
 
 ### P5H4A/P5H4B/P5H4C/P5H4E - Algorithmic CFG Foundation Expansion (Ghidra-Referenced)
