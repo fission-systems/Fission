@@ -1,0 +1,146 @@
+use super::*;
+
+impl<'a> PreviewBuilder<'a> {
+    pub(crate) fn new(
+        pcode: &'a PcodeFunction,
+        options: &'a MlilPreviewOptions,
+        type_context: Option<&'a PreviewTypeContext>,
+    ) -> Self {
+        let mut defs = HashMap::new();
+        for (block_idx, block) in pcode.blocks.iter().enumerate() {
+            for (op_idx, op) in block.ops.iter().enumerate() {
+                if let Some(output) = &op.output {
+                    defs.insert(
+                        VarnodeKey::from(output),
+                        DefSite {
+                            block_idx,
+                            op_idx,
+                            op,
+                        },
+                    );
+                }
+            }
+        }
+        let address_to_index = build_address_to_index_map(pcode);
+        let block_target_keys = build_block_target_keys(pcode);
+        let target_key_to_index = block_target_keys
+            .iter()
+            .enumerate()
+            .map(|(idx, key)| (*key, idx))
+            .collect();
+        let layout_fallthrough = build_layout_fallthrough_map(pcode);
+        let successors = build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
+        let predecessors = build_predecessor_index_map(&successors);
+        let register_param_aliases = entry_analysis::collect_entry_register_param_aliases(pcode);
+        let stack_frame_size = entry_analysis::infer_entry_stack_frame_size(pcode, options);
+        if preview_builder_diag_enabled() {
+            let duplicate_starts = duplicate_block_start_count(pcode);
+            if duplicate_starts > 0 {
+                eprintln!(
+                    "[DIAG] build_hir duplicate_block_starts={} unique_block_starts={}",
+                    duplicate_starts,
+                    address_to_index.len()
+                );
+            }
+        }
+        Self {
+            pcode,
+            options,
+            type_context,
+            defs,
+            address_to_index,
+            block_target_keys,
+            target_key_to_index,
+            layout_fallthrough,
+            successors,
+            predecessors,
+            params: BTreeMap::new(),
+            locals: BTreeMap::new(),
+            locals_next_id: 0,
+            temps: BTreeMap::new(),
+            temp_next_id: 0,
+            materialized_vns: HashMap::new(),
+            current_lowering_site: None,
+            register_param_aliases,
+            stack_frame_size,
+            linear_exit_cache: HashMap::new(),
+            linear_body_cache: HashMap::new(),
+            active_linear_body_keys: HashSet::new(),
+            active_conditional_tail_keys: HashSet::new(),
+            jump_targets_cache: None,
+            active_trace_id: None,
+            last_trace_id: None,
+            next_trace_id: 1,
+            lowering_site_depth: 0,
+            forced_linear_structuring_count: 0,
+            region_linearize_structuring_count: 0,
+            region_linearize_heuristic_exit_count: 0,
+            region_linearize_rejected_non_structuring_failure_count: 0,
+            region_linearize_rejected_no_exit_count: 0,
+            region_linearize_rejected_body_lowering_failed_count: 0,
+            region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count: 0,
+            region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count:
+                0,
+            region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count: 0,
+            region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count: 0,
+            region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count: 0,
+            region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count:
+                0,
+            region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count:
+                0,
+            region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count:
+                0,
+            region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count:
+                0,
+            region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count:
+                0,
+            region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count:
+                0,
+            region_linearize_rejected_body_lowering_successor_inline_rejected_count: 0,
+            region_linearize_rejected_body_lowering_revisit_cycle_count: 0,
+            region_linearize_rejected_body_lowering_unsupported_terminator_count: 0,
+            region_linearize_rejected_non_advancing_count: 0,
+            region_linearize_rejected_irreducible_cfg_count: 0,
+            structuring_scc_component_count: 0,
+            structuring_irreducible_scc_count: 0,
+            structuring_irreducible_header_count: 0,
+            loop_control_explicit_reducer_count: 0,
+            loop_control_rewrite_break_count: 0,
+            loop_control_rewrite_continue_count: 0,
+            loop_control_rewrite_skipped_nested_scope_count: 0,
+            promotion_candidate_count: 0,
+            promoted_region_count: 0,
+            promotion_rejected_by_shape_count: 0,
+            promotion_rejected_by_shape_missing_terminal_join_target_count: 0,
+            promotion_rejected_by_shape_empty_nonterminal_tail_count: 0,
+            promotion_rejected_by_gate_count: 0,
+            discovery_seen_guarded_tail_like_shape_count: 0,
+            discovery_rejected_noncanonical_layout_count: 0,
+            canonicalized_guarded_tail_shape_count: 0,
+            canonicalization_failed_multiple_payload_entries: 0,
+            canonicalization_failed_interleaved_join_uses: 0,
+            canonicalization_failed_nonterminal_join_label: 0,
+            canonicalization_failed_nested_tail_escape: 0,
+            canonicalized_interleaved_join_use_count: 0,
+            canonicalized_local_nonfallthrough_alias_count: 0,
+            canonicalization_failed_alias_not_fallthrough_count: 0,
+            canonicalization_failed_alias_not_fallthrough_top_level_after_label_count: 0,
+            canonicalization_failed_alias_not_fallthrough_nested_after_label_count: 0,
+            canonicalization_failed_alias_has_multiple_internal_predecessors_count: 0,
+            canonicalization_failed_alias_has_nonlocal_ref_count: 0,
+            canonicalization_failed_alias_has_nonlocal_ref_external_before_count: 0,
+            canonicalization_failed_alias_has_nonlocal_ref_nested_before_count: 0,
+            canonicalization_failed_alias_has_nonlocal_ref_post_segment_ref_count: 0,
+            canonicalization_failed_alias_body_not_trivial_count: 0,
+            canonicalization_failed_join_has_external_ref_count: 0,
+            canonicalization_failed_payload_crosses_join_count: 0,
+            rejected_must_emit_label: 0,
+            rejected_must_emit_label_surviving_middle_ref: 0,
+            rejected_must_emit_label_surviving_external_ref: 0,
+            rejected_must_emit_label_owner_conflict: 0,
+            rejected_not_single_pred_succ: 0,
+            rejected_external_entry: 0,
+            rejected_loop_or_switch_target: 0,
+        }
+    }
+}
