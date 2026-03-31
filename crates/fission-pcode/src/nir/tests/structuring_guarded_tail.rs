@@ -736,6 +736,45 @@ fn structuring_candidate_discovery_canonicalizes_alias_forward_chain() {
 }
 
 #[test]
+fn structuring_candidate_discovery_canonicalizes_pure_multi_goto_alias_chain() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("skip_l".to_string())),
+            rhs: Box::new(HirExpr::Var("skip_r".to_string())),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Goto("block_join".to_string()),
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 1);
+    assert_eq!(stats.discovery_rejected_noncanonical_layout_count, 0);
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count,
+        0
+    );
+    assert_eq!(stats.promotion_rejected_by_shape_count, 0);
+}
+
+#[test]
 fn structuring_candidate_discovery_canonicalizes_local_nonfallthrough_alias() {
     let body = vec![
         HirStmt::If {

@@ -102,7 +102,9 @@ impl<'a> PreviewBuilder<'a> {
                     external_safe_redirect_labels.push(label.clone());
                 }
                 if has_non_ignorable_gap {
-                    if goto_positions.len() != 1 {
+                    if goto_positions.len() != 1
+                        && !Self::is_pure_multi_goto_gap_to_label(body, goto_positions, idx, label)
+                    {
                         return Err(
                             GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors,
                         );

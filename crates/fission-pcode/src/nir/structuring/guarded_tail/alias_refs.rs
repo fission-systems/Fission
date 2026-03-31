@@ -232,6 +232,25 @@ impl<'a> PreviewBuilder<'a> {
         true
     }
 
+    pub(super) fn is_pure_multi_goto_gap_to_label(
+        body: &[HirStmt],
+        goto_positions: &[usize],
+        label_idx: usize,
+        label: &str,
+    ) -> bool {
+        let Some(start) = goto_positions.iter().copied().min() else {
+            return false;
+        };
+        if goto_positions.iter().any(|pos| *pos >= label_idx) {
+            return false;
+        }
+        body[start + 1..label_idx].iter().all(|stmt| {
+            is_ignorable_discovery_stmt(stmt)
+                || Self::stmt_is_pure_value_expr(stmt)
+                || matches!(stmt, HirStmt::Goto(target) if target == label)
+        })
+    }
+
     pub(super) fn count_top_level_goto_refs_in_range(
         body: &[HirStmt],
         label: &str,
