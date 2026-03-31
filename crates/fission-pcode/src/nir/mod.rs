@@ -129,6 +129,10 @@ pub fn render_mlil_preview_with_context(
         normalized_discovery_stats.canonicalization_failed_multiple_payload_entries;
     build_stats.canonicalization_failed_interleaved_join_uses +=
         normalized_discovery_stats.canonicalization_failed_interleaved_join_uses;
+    build_stats.canonicalization_failed_interleaved_join_uses_no_next_label_count +=
+        normalized_discovery_stats.canonicalization_failed_interleaved_join_uses_no_next_label_count;
+    build_stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count +=
+        normalized_discovery_stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count;
     build_stats.canonicalization_failed_nonterminal_join_label +=
         normalized_discovery_stats.canonicalization_failed_nonterminal_join_label;
     build_stats.canonicalization_failed_nested_tail_escape +=

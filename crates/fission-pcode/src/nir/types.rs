@@ -163,6 +163,10 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub canonicalization_failed_interleaved_join_uses: usize,
     #[serde(default)]
+    pub canonicalization_failed_interleaved_join_uses_no_next_label_count: usize,
+    #[serde(default)]
+    pub canonicalization_failed_interleaved_join_uses_nontrivial_segment_count: usize,
+    #[serde(default)]
     pub canonicalization_failed_nonterminal_join_label: usize,
     #[serde(default)]
     pub canonicalization_failed_nested_tail_escape: usize,
@@ -277,6 +281,10 @@ impl NirBuildStats {
             other.canonicalization_failed_multiple_payload_entries;
         self.canonicalization_failed_interleaved_join_uses +=
             other.canonicalization_failed_interleaved_join_uses;
+        self.canonicalization_failed_interleaved_join_uses_no_next_label_count +=
+            other.canonicalization_failed_interleaved_join_uses_no_next_label_count;
+        self.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count +=
+            other.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count;
         self.canonicalization_failed_nonterminal_join_label +=
             other.canonicalization_failed_nonterminal_join_label;
         self.canonicalization_failed_nested_tail_escape +=
