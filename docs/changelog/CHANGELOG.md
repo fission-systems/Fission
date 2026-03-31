@@ -443,6 +443,58 @@ This increment reduces one concrete nested-tail escape bucket by accepting only 
 
 This is a small but real large-sample reduction that improves guarded-tail acceptance without regressing the switch safety guard.
 
+### Structuring - Interleaved Join Subtypes and Pure-Value Guarded-Tail Relaxations
+
+This increment sharpens guarded-tail diagnosis by splitting `InterleavedJoinUses` into concrete causes and accepts a narrow set of front-path-equivalent pure-value alias layouts that previously failed despite preserving the same control-flow target.
+
+#### Changed
+
+- added explicit `InterleavedJoinUses` subtype telemetry:
+  - `canonicalization_failed_interleaved_join_uses_no_next_label_count`
+  - `canonicalization_failed_interleaved_join_uses_nontrivial_segment_count`
+- wired these counters through:
+  - `NirBuildStats`
+  - preview builder state/snapshot
+  - builder stats projection
+  - automation build-stat reporting
+- refined guarded-tail alias canonicalization in `guarded_tail/alias_refs.rs` so pure value expressions are treated as ignorable in two conservative forwarding cases:
+  - next-label terminalization inside interleaved join stubs
+  - top-level after-label forward/self-reference segments
+- refined guarded-tail canonicalization in `guarded_tail/canonicalize.rs` so all-before external refs can remain local when they share the same trivial forward owner path
+
+#### Added
+
+- new guarded-tail regressions covering:
+  - interleaved join subtype counting
+  - pure-value interleaved segment acceptance
+  - side-effectful interleaved segment rejection
+  - pure-value top-level-after-label acceptance
+  - side-effectful top-level-after-label rejection
+  - safe nested-before alias reuse
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 500` (pass)
+
+#### Observed expanded-sample telemetry (`nir`)
+
+- 200 functions:
+  - `canonicalization_failed_interleaved_join_uses`: `170`
+  - `no_next_label`: `69`
+  - `nontrivial_segment`: `101`
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `262`
+- 500 functions:
+  - `canonicalization_failed_interleaved_join_uses`: `376 -> 363`
+  - `no_next_label`: `169 -> 162`
+  - `nontrivial_segment`: `207 -> 201`
+  - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`: `354`
+
+The pure-value interleaved refinement produces a real but modest 500-function reduction, while the new subtype counters show the remaining interleaved failures are still dominated by structurally nontrivial segments rather than opaque layout noise.
+
 ### Docs and Structure - Hierarchical AGENTS Guides and Guarded-Tail Module Split
 
 This increment improves repository navigation for human/AI contributors and reduces structural risk in the guarded-tail implementation by splitting the overloaded `guards.rs` module and moving its dedicated regression coverage into a separate test file.
