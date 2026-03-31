@@ -119,6 +119,8 @@ impl<'a> PreviewBuilder<'a> {
             canonicalized_guarded_tail_shape_count: 0,
             canonicalization_failed_multiple_payload_entries: 0,
             canonicalization_failed_interleaved_join_uses: 0,
+            canonicalization_failed_interleaved_join_uses_no_next_label_count: 0,
+            canonicalization_failed_interleaved_join_uses_nontrivial_segment_count: 0,
             canonicalization_failed_nonterminal_join_label: 0,
             canonicalization_failed_nested_tail_escape: 0,
             canonicalized_interleaved_join_use_count: 0,

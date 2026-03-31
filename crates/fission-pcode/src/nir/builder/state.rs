@@ -80,6 +80,8 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) canonicalized_guarded_tail_shape_count: usize,
     pub(crate) canonicalization_failed_multiple_payload_entries: usize,
     pub(crate) canonicalization_failed_interleaved_join_uses: usize,
+    pub(crate) canonicalization_failed_interleaved_join_uses_no_next_label_count: usize,
+    pub(crate) canonicalization_failed_interleaved_join_uses_nontrivial_segment_count: usize,
     pub(crate) canonicalization_failed_nonterminal_join_label: usize,
     pub(crate) canonicalization_failed_nested_tail_escape: usize,
     pub(crate) canonicalized_interleaved_join_use_count: usize,

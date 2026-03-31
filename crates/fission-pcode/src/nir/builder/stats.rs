@@ -68,6 +68,10 @@ impl<'a> PreviewBuilder<'a> {
                 .canonicalization_failed_multiple_payload_entries,
             canonicalization_failed_interleaved_join_uses: self
                 .canonicalization_failed_interleaved_join_uses,
+            canonicalization_failed_interleaved_join_uses_no_next_label_count: self
+                .canonicalization_failed_interleaved_join_uses_no_next_label_count,
+            canonicalization_failed_interleaved_join_uses_nontrivial_segment_count: self
+                .canonicalization_failed_interleaved_join_uses_nontrivial_segment_count,
             canonicalization_failed_nonterminal_join_label: self
                 .canonicalization_failed_nonterminal_join_label,
             canonicalization_failed_nested_tail_escape: self
