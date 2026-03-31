@@ -495,6 +495,38 @@ This increment sharpens guarded-tail diagnosis by splitting `InterleavedJoinUses
 
 The pure-value interleaved refinement produces a real but modest 500-function reduction, while the new subtype counters show the remaining interleaved failures are still dominated by structurally nontrivial segments rather than opaque layout noise.
 
+### Structuring - Pure Multi-Goto Alias-Chain Relaxation
+
+This increment broadens one guarded-tail alias-chain acceptance boundary by allowing multiple top-level forward gotos to the same local alias label when everything between them is pure/ignorable and the alias still forwards linearly to the same follow.
+
+#### Changed
+
+- refined `guarded_tail/canonicalize.rs` so the `has_non_ignorable_gap && goto_positions.len() != 1` path no longer rejects a purely linear alias chain if all intermediate statements are:
+  - ignorable discovery statements
+  - pure value expressions
+  - gotos to the same alias label
+- added helper `is_pure_multi_goto_gap_to_label()` in `guarded_tail/alias_refs.rs` to keep the acceptance rule narrow and explicit
+
+#### Added
+
+- new guarded-tail regression:
+  - `structuring_candidate_discovery_canonicalizes_pure_multi_goto_alias_chain`
+- preserved existing alias-forward-chain and true-nonlocal regressions
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 500` (pass)
+
+#### Observed expanded-sample telemetry (`nir`)
+
+- 200 functions: no material aggregate movement
+- 500 functions: no material aggregate movement
+
+This is a safe acceptance broadening for a real local alias shape, but it does not materially move the dominant large-sample buckets on its own.
+
 ### Docs and Structure - Hierarchical AGENTS Guides and Guarded-Tail Module Split
 
 This increment improves repository navigation for human/AI contributors and reduces structural risk in the guarded-tail implementation by splitting the overloaded `guards.rs` module and moving its dedicated regression coverage into a separate test file.
