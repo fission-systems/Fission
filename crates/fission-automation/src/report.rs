@@ -421,6 +421,14 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             stats.canonicalization_failed_interleaved_join_uses,
         ),
         (
+            "canonicalization_failed_interleaved_join_uses_no_next_label_count",
+            stats.canonicalization_failed_interleaved_join_uses_no_next_label_count,
+        ),
+        (
+            "canonicalization_failed_interleaved_join_uses_nontrivial_segment_count",
+            stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count,
+        ),
+        (
             "canonicalization_failed_nonterminal_join_label",
             stats.canonicalization_failed_nonterminal_join_label,
         ),
