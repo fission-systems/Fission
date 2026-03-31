@@ -68,11 +68,17 @@ impl<'a> PreviewBuilder<'a> {
                     nested_after_label_count;
                 return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
             }
-            if let Some(next_label_idx) = next_label_idx
+            let next_redirect_label = if let Some(next_label_idx) = next_label_idx
                 && let HirStmt::Label(next_label) = &body[next_label_idx]
                 && (Self::is_local_alias_forward_segment(segment, next_label)
                     || allow_top_level_after_label_redirect)
             {
+                Some(next_label.clone())
+            } else {
+                None
+            };
+
+            if let Some(next_label) = next_redirect_label {
                 if external_ref_count > 0 {
                     let (external_top_level_before, external_nested_before, external_refs_after) =
                         Self::classify_external_alias_ref_sites(
@@ -81,7 +87,7 @@ impl<'a> PreviewBuilder<'a> {
                             segment_end,
                             label,
                         );
-                    if external_nested_before > 0 || external_refs_after > 0 {
+                    if external_refs_after > 0 {
                         self.mark_alias_nonlocal_from_external_sites(
                             external_top_level_before,
                             external_nested_before,
@@ -89,7 +95,7 @@ impl<'a> PreviewBuilder<'a> {
                         );
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
-                    if external_top_level_before != external_ref_count {
+                    if external_top_level_before + external_nested_before != external_ref_count {
                         self.mark_alias_nonlocal_external_before();
                         return Err(GuardedTailCanonicalizationFailure::AliasHasNonlocalRef);
                     }
@@ -241,6 +247,11 @@ impl<'a> PreviewBuilder<'a> {
                             self.canonicalized_interleaved_join_use_count += 1;
                             idx = next_idx;
                             continue;
+                        }
+                        if (idx + 1..flattened.len()).any(|pos| matches!(flattened[pos], HirStmt::Label(_))) {
+                            self.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count += 1;
+                        } else {
+                            self.canonicalization_failed_interleaved_join_uses_no_next_label_count += 1;
                         }
                         return Err(GuardedTailCanonicalizationFailure::InterleavedJoinUses);
                     }

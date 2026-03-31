@@ -186,7 +186,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> bool {
         let mut saw_forward_goto = false;
         for stmt in segment {
-            if is_ignorable_discovery_stmt(stmt) {
+            if is_ignorable_discovery_stmt(stmt) || Self::stmt_is_pure_value_expr(stmt) {
                 continue;
             }
             match stmt {
@@ -214,6 +214,22 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         saw_forward_goto
+    }
+
+    pub(super) fn is_trivial_join_forward_or_pure_segment(
+        segment: &[HirStmt],
+        next_label: &str,
+    ) -> bool {
+        for stmt in segment {
+            if is_ignorable_discovery_stmt(stmt) || Self::stmt_is_pure_value_expr(stmt) {
+                continue;
+            }
+            match stmt {
+                HirStmt::Goto(label) if label == next_label => {}
+                _ => return false,
+            }
+        }
+        true
     }
 
     pub(super) fn count_top_level_goto_refs_in_range(
@@ -272,6 +288,7 @@ impl<'a> PreviewBuilder<'a> {
             let no_nonlocal_refs = referenced.get(&current).copied().unwrap_or(0) <= hop_ref_budget;
             if no_nonlocal_refs
                 && (Self::is_trivial_join_forward_segment(segment, next_label)
+                    || Self::is_trivial_join_forward_or_pure_segment(segment, next_label)
                     || segment.iter().all(is_ignorable_discovery_stmt))
             {
                 current = next_label.clone();
@@ -416,6 +433,7 @@ impl<'a> PreviewBuilder<'a> {
         };
         let segment = &body[label_idx + 1..next_label_idx];
         if Self::is_trivial_join_forward_segment(segment, next_label)
+            || Self::is_trivial_join_forward_or_pure_segment(segment, next_label)
             || segment.iter().all(is_ignorable_discovery_stmt)
         {
             return Some((next_label.clone(), next_label_idx));

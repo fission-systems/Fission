@@ -571,6 +571,84 @@ fn structuring_candidate_discovery_counts_interleaved_referenced_label_use() {
 }
 
 #[test]
+fn structuring_candidate_discovery_counts_interleaved_join_use_with_nontrivial_segment() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Block(vec![
+            HirStmt::If {
+                cond: HirExpr::Var("inner".to_string()),
+                then_body: vec![HirStmt::Goto("block_alias".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("block_alias".to_string()),
+            HirStmt::Expr(HirExpr::Var("payload".to_string())),
+            HirStmt::Label("block_join".to_string()),
+            HirStmt::Expr(HirExpr::Var("after_join".to_string())),
+        ]),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.canonicalization_failed_interleaved_join_uses, 0);
+    assert_eq!(
+        stats.canonicalization_failed_interleaved_join_uses_no_next_label_count,
+        0
+    );
+    assert_eq!(
+        stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count,
+        0
+    );
+}
+
+#[test]
+fn structuring_candidate_discovery_keeps_interleaved_join_use_with_side_effectful_segment_rejected()
+{
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Block(vec![
+            HirStmt::If {
+                cond: HirExpr::Var("inner".to_string()),
+                then_body: vec![HirStmt::Goto("block_alias".to_string())],
+                else_body: Vec::new(),
+            },
+            HirStmt::Label("block_alias".to_string()),
+            HirStmt::Assign {
+                lhs: HirLValue::Var("tmp".to_string()),
+                rhs: HirExpr::Var("payload".to_string()),
+            },
+            HirStmt::Label("block_join".to_string()),
+            HirStmt::Expr(HirExpr::Var("after_join".to_string())),
+        ]),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.canonicalization_failed_interleaved_join_uses, 1);
+    assert_eq!(
+        stats.canonicalization_failed_interleaved_join_uses_no_next_label_count,
+        0
+    );
+    assert_eq!(
+        stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count,
+        1
+    );
+}
+
+#[test]
 fn structuring_candidate_discovery_counts_nested_after_label_alias_not_fallthrough() {
     let body = vec![
         HirStmt::If {
@@ -713,6 +791,75 @@ fn structuring_candidate_discovery_canonicalizes_safe_top_level_after_label_alia
 }
 
 #[test]
+fn structuring_candidate_discovery_canonicalizes_pure_value_top_level_after_label_alias() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Expr(HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("skip_l".to_string())),
+            rhs: Box::new(HirExpr::Var("skip_r".to_string())),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }),
+        HirStmt::Goto("block_join".to_string()),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.canonicalization_failed_alias_not_fallthrough_count, 0);
+    assert_eq!(
+        stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
+        0
+    );
+}
+
+#[test]
+fn structuring_candidate_discovery_keeps_side_effectful_top_level_after_label_alias_rejected() {
+    let body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("tmp".to_string()),
+            rhs: HirExpr::Var("skip".to_string()),
+        },
+        HirStmt::Goto("block_join".to_string()),
+        HirStmt::Goto("block_mid".to_string()),
+        HirStmt::Label("block_join".to_string()),
+        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert_eq!(stats.canonicalization_failed_alias_not_fallthrough_count, 1);
+    assert_eq!(
+        stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count,
+        1
+    );
+}
+
+#[test]
 fn structuring_candidate_discovery_counts_join_external_ref_inside_nested_if() {
     let body = vec![
         HirStmt::If {
@@ -728,7 +875,10 @@ fn structuring_candidate_discovery_counts_join_external_ref_inside_nested_if() {
         },
         HirStmt::Goto("block_mid".to_string()),
         HirStmt::Label("block_mid".to_string()),
-        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("tmp".to_string()),
+            rhs: HirExpr::Var("more".to_string()),
+        },
         HirStmt::Label("block_tail".to_string()),
         HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
     ];
@@ -761,7 +911,10 @@ fn structuring_candidate_discovery_counts_true_nonlocal_alias_ref() {
         HirStmt::Expr(HirExpr::Var("middle".to_string())),
         HirStmt::Goto("block_mid".to_string()),
         HirStmt::Label("block_mid".to_string()),
-        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("tmp".to_string()),
+            rhs: HirExpr::Var("more".to_string()),
+        },
         HirStmt::Label("block_tail".to_string()),
         HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
     ];
@@ -869,6 +1022,38 @@ fn structuring_candidate_discovery_rewrites_safe_external_alias_ref() {
         HirStmt::Label("block_tail".to_string()),
         HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
     ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    assert!(stats.promotion_candidate_count >= 1);
+    assert_eq!(
+        stats.canonicalization_failed_alias_has_nonlocal_ref_count,
+        0
+    );
+}
+
+#[test]
+fn structuring_candidate_discovery_rewrites_safe_nested_before_alias_ref() {
+    let mut body = vec![
+        HirStmt::If {
+            cond: HirExpr::Var("reg".to_string()),
+            then_body: vec![HirStmt::Goto("block_tail".to_string())],
+            else_body: Vec::new(),
+        },
+        HirStmt::Expr(HirExpr::Var("middle".to_string())),
+        HirStmt::Label("block_mid".to_string()),
+        HirStmt::Goto("block_tail".to_string()),
+        HirStmt::Label("block_tail".to_string()),
+        HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
+    ];
+    body.insert(
+        0,
+        HirStmt::If {
+            cond: HirExpr::Var("outer".to_string()),
+            then_body: vec![HirStmt::Goto("block_mid".to_string())],
+            else_body: Vec::new(),
+        },
+    );
 
     let stats = discover_guarded_tail_candidates_for_test(&body);
 
@@ -994,7 +1179,10 @@ fn structuring_candidate_discovery_counts_alias_nonlocal_ref() {
         HirStmt::Label("block_mid".to_string()),
         HirStmt::Goto("block_join".to_string()),
         HirStmt::Label("block_join".to_string()),
-        HirStmt::Expr(HirExpr::Var("more".to_string())),
+        HirStmt::Assign {
+            lhs: HirLValue::Var("tmp".to_string()),
+            rhs: HirExpr::Var("more".to_string()),
+        },
         HirStmt::Label("block_tail".to_string()),
         HirStmt::Return(Some(HirExpr::Var("ret".to_string()))),
     ];
