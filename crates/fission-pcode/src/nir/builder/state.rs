@@ -106,4 +106,7 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) rejected_not_single_pred_succ: usize,
     pub(crate) rejected_external_entry: usize,
     pub(crate) rejected_loop_or_switch_target: usize,
+    pub(crate) condition_fold_and_count: usize,
+    pub(crate) condition_fold_or_count: usize,
+    pub(crate) condition_fold_rejected_side_effect: usize,
 }

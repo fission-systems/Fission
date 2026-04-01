@@ -214,6 +214,12 @@ pub struct NirBuildStats {
     pub rejected_external_entry: usize,
     #[serde(default)]
     pub rejected_loop_or_switch_target: usize,
+    #[serde(default)]
+    pub condition_fold_and_count: usize,
+    #[serde(default)]
+    pub condition_fold_or_count: usize,
+    #[serde(default)]
+    pub condition_fold_rejected_side_effect: usize,
 }
 
 impl NirBuildStats {
@@ -331,6 +337,9 @@ impl NirBuildStats {
         self.rejected_not_single_pred_succ += other.rejected_not_single_pred_succ;
         self.rejected_external_entry += other.rejected_external_entry;
         self.rejected_loop_or_switch_target += other.rejected_loop_or_switch_target;
+        self.condition_fold_and_count += other.condition_fold_and_count;
+        self.condition_fold_or_count += other.condition_fold_or_count;
+        self.condition_fold_rejected_side_effect += other.condition_fold_rejected_side_effect;
     }
 }
 

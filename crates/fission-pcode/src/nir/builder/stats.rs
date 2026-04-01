@@ -113,6 +113,9 @@ impl<'a> PreviewBuilder<'a> {
             rejected_not_single_pred_succ: self.rejected_not_single_pred_succ,
             rejected_external_entry: self.rejected_external_entry,
             rejected_loop_or_switch_target: self.rejected_loop_or_switch_target,
+            condition_fold_and_count: 0,
+            condition_fold_or_count: 0,
+            condition_fold_rejected_side_effect: 0,
         }
     }
 }
