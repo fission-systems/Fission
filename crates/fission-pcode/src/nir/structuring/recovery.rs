@@ -26,12 +26,12 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
-    fn region_linearized_exit_candidates(
+    fn region_linearized_exit_candidates_algorithmic(
         &self,
         start_idx: usize,
         targeted: &HashSet<u64>,
     ) -> Vec<LinearExit> {
-        let search_limit = (start_idx + 24).min(self.pcode.blocks.len());
+        let search_limit = self.pcode.blocks.len();
         let mut candidates = Vec::new();
         for idx in (start_idx + 1)..search_limit {
             let block_key = self.block_target_key(idx);

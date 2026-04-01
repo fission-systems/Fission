@@ -35,6 +35,7 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     }
     normalize_binding_initializers(&mut func.locals);
     cleanup_stmt_list(&mut func.body, &func.name, 0);
+    super::for_loops::apply_for_loop_folding(&mut func.body);
     eliminate_dead_local_clobber_assigns(func);
     prune_unused_temp_bindings(func);
     prune_unused_dead_local_bindings(func);
@@ -62,6 +63,7 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     if changed {
         normalize_binding_initializers(&mut func.locals);
         cleanup_stmt_list(&mut func.body, &func.name, 0);
+    super::for_loops::apply_for_loop_folding(&mut func.body);
         eliminate_dead_local_clobber_assigns(func);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
@@ -80,6 +82,7 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         if changed {
             normalize_binding_initializers(&mut func.locals);
             cleanup_stmt_list(&mut func.body, &func.name, 0);
+    super::for_loops::apply_for_loop_folding(&mut func.body);
             eliminate_dead_local_clobber_assigns(func);
             prune_unused_temp_bindings(func);
             prune_unused_dead_local_bindings(func);
