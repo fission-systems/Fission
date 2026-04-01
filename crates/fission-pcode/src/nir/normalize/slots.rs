@@ -201,7 +201,8 @@ fn collect_memory_slot_candidates_from_stmts(
             }
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => {
+            | HirStmt::DoWhile { body: stmts, .. }
+            | HirStmt::For { body: stmts, .. } => {
                 collect_memory_slot_candidates_from_stmts(stmts, candidates);
             }
             HirStmt::Switch {
@@ -303,7 +304,8 @@ fn rewrite_memory_slot_stmts(
             }
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => {
+            | HirStmt::DoWhile { body: stmts, .. }
+            | HirStmt::For { body: stmts, .. } => {
                 changed |= rewrite_memory_slot_stmts(stmts, aliases);
             }
             HirStmt::Switch {

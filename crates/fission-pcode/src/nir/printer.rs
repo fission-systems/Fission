@@ -67,6 +67,7 @@ pub(super) fn print_stmt(stmt: &HirStmt) -> String {
         HirStmt::If { .. } => "if (...) { ... }".to_string(),
         HirStmt::While { .. } => "while (...) { ... }".to_string(),
         HirStmt::DoWhile { .. } => "do { ... } while (...);".to_string(),
+        HirStmt::For { .. } => "for (...) { ... }".to_string(),
         HirStmt::Return(Some(expr)) => format!("return {};", print_expr(expr_fallback(expr, 0))),
         HirStmt::Return(None) => "return;".to_string(),
         HirStmt::Break => "break;".to_string(),
@@ -186,6 +187,29 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, depth: usize, out: &mut
             }
             out.push_str(&pad);
             out.push_str(&format!("}} while ({});\n", print_expr_prec(cond, 0, 0)));
+        }
+        HirStmt::For { init, cond, update, body } => {
+            out.push_str(&pad);
+            out.push_str("for (");
+            if let Some(i) = init {
+                let init_s = print_stmt(i);
+                out.push_str(init_s.trim_end_matches(';'));
+            }
+            out.push_str("; ");
+            if let Some(c) = cond {
+                out.push_str(&print_expr_prec(c, 0, 0));
+            }
+            out.push_str("; ");
+            if let Some(u) = update {
+                let upd_s = print_stmt(u);
+                out.push_str(upd_s.trim_end_matches(';'));
+            }
+            out.push_str(") {\n");
+            for stmt in body {
+                print_stmt_with_indent(stmt, indent + 1, depth + 1, out);
+            }
+            out.push_str(&pad);
+            out.push_str("}\n");
         }
     }
 }

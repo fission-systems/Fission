@@ -163,7 +163,8 @@ fn collect_call_type_hints(
             }
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => {
+            | HirStmt::DoWhile { body: stmts, .. }
+            | HirStmt::For { body: stmts, .. } => {
                 collect_call_type_hints(stmts, context, pointer_hints);
             }
             HirStmt::Switch { cases, default, .. } => {
@@ -267,7 +268,8 @@ pub(super) fn collect_local_surface_hints(
             }
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => {
+            | HirStmt::DoWhile { body: stmts, .. }
+            | HirStmt::For { body: stmts, .. } => {
                 collect_local_surface_hints(stmts, pointer_hints, func, local_hints);
             }
             HirStmt::Switch { cases, default, .. } => {
@@ -337,7 +339,8 @@ fn rename_vars_in_stmts(body: &mut [HirStmt], renames: &[(String, String)]) {
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => rename_var_in_expr(expr, renames),
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }
-            | HirStmt::DoWhile { body: stmts, .. } => rename_vars_in_stmts(stmts, renames),
+            | HirStmt::DoWhile { body: stmts, .. }
+            | HirStmt::For { body: stmts, .. } => rename_vars_in_stmts(stmts, renames),
             HirStmt::Switch {
                 expr,
                 cases,

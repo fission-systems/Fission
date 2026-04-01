@@ -245,7 +245,8 @@ impl<'a> PreviewBuilder<'a> {
             match stmt {
                 HirStmt::Block(inner)
                 | HirStmt::While { body: inner, .. }
-                | HirStmt::DoWhile { body: inner, .. } => {
+                | HirStmt::DoWhile { body: inner, .. }
+                | HirStmt::For { body: inner, .. } => {
                     self.discover_guarded_tail_candidates_in_body(inner);
                 }
                 HirStmt::If {

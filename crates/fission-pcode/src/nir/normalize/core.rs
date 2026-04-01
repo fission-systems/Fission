@@ -172,6 +172,14 @@ pub(super) fn normalize_stmt(stmt: &mut HirStmt) {
             }
             normalize_condition_expr(cond);
         }
+        HirStmt::For { init, cond, update, body } => {
+            if let Some(i) = init { normalize_stmt(i); }
+            if let Some(c) = cond { normalize_condition_expr(c); }
+            if let Some(u) = update { normalize_stmt(u); }
+            for stmt in body {
+                normalize_stmt(stmt);
+            }
+        }
         HirStmt::Label(_) | HirStmt::Goto(_) => {}
         HirStmt::Return(Some(expr)) => normalize_expr(expr),
         HirStmt::Return(None) | HirStmt::Break | HirStmt::Continue => {}
@@ -199,6 +207,15 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
         normalize_stmt(stmt);
         match stmt {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+                cleanup_stmt_list(body, func_name, depth + 1)
+            }
+            HirStmt::For { init, update, body, .. } => {
+                if let Some(i) = init {
+                    if let HirStmt::Block(b) = &mut **i { cleanup_stmt_list(b, func_name, depth + 1); }
+                }
+                if let Some(u) = update {
+                    if let HirStmt::Block(b) = &mut **u { cleanup_stmt_list(b, func_name, depth + 1); }
+                }
                 cleanup_stmt_list(body, func_name, depth + 1)
             }
             HirStmt::If {

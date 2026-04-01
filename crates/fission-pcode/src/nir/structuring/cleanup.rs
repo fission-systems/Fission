@@ -188,6 +188,12 @@ fn rewrite_stmt_label(stmt: HirStmt, aliases: &HashMap<String, String>) -> HirSt
             body: rewrite_stmt_labels(body, aliases),
             cond,
         },
+        HirStmt::For { init, cond, update, body } => HirStmt::For {
+            init: init.map(|s| Box::new(rewrite_stmt_labels(vec![*s], aliases).into_iter().next().unwrap())),
+            cond,
+            update: update.map(|s| Box::new(rewrite_stmt_labels(vec![*s], aliases).into_iter().next().unwrap())),
+            body: rewrite_stmt_labels(body, aliases),
+        },
         HirStmt::Label(label) => HirStmt::Label(canonicalize_label(&label, aliases)),
         HirStmt::Goto(label) => HirStmt::Goto(canonicalize_label(&label, aliases)),
         other => other,
@@ -212,7 +218,7 @@ pub(super) fn collect_referenced_label_counts(body: &[HirStmt]) -> HashMap<Strin
 
 fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
             for stmt in body {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
@@ -253,7 +259,7 @@ fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<Strin
 
 fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<String, usize>) {
     match stmt {
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
             for stmt in body {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }

@@ -354,6 +354,12 @@ pub enum HirStmt {
         body: Vec<HirStmt>,
         cond: HirExpr,
     },
+    For {
+        init: Option<Box<HirStmt>>,
+        cond: Option<HirExpr>,
+        update: Option<Box<HirStmt>>,
+        body: Vec<HirStmt>,
+    },
     Label(String),
     Goto(String),
     Return(Option<HirExpr>),

@@ -37,7 +37,7 @@ fn rewrite_loop_control_gotos_in_stmts(
             HirStmt::Block(body) => {
                 rewrite_loop_control_gotos_in_stmts(body, continue_label, break_label, stats);
             }
-            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::Switch { .. } => {
+            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } | HirStmt::Switch { .. } => {
                 stats.skipped_nested_scope_count += 1;
             }
             HirStmt::Assign { .. }

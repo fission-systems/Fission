@@ -450,6 +450,7 @@ fn stmt_is_fuseable_linear(stmt: &HirStmt) -> bool {
         HirStmt::Switch { .. }
         | HirStmt::While { .. }
         | HirStmt::DoWhile { .. }
+        | HirStmt::For { .. }
         | HirStmt::Label(_)
         | HirStmt::Goto(_)
         | HirStmt::Return(_)
@@ -476,7 +477,7 @@ fn collect_referenced_label_counts(stmts: &[HirStmt]) -> HashMap<String, usize> 
 
 fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
             for stmt in body {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
@@ -517,7 +518,7 @@ fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<Strin
 
 fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<String, usize>) {
     match stmt {
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
             for stmt in body {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }
@@ -615,7 +616,7 @@ fn eliminate_dead_local_clobber_assigns_in_stmts(
 ) -> bool {
     for stmt in stmts.iter_mut() {
         match stmt {
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
                 eliminate_dead_local_clobber_assigns_in_stmts(body, params, locals);
             }
             HirStmt::If {
@@ -815,6 +816,14 @@ fn count_var_uses_in_stmt(stmt: &HirStmt, name: &str) -> usize {
                 .sum::<usize>()
                 + count_var_uses(cond, name)
         }
+        HirStmt::For { init, cond, update, body } => {
+            let mut total = 0;
+            if let Some(i) = init { total += count_var_uses_in_stmt(i, name); }
+            if let Some(c) = cond { total += count_var_uses(c, name); }
+            if let Some(u) = update { total += count_var_uses_in_stmt(u, name); }
+            total += body.iter().map(|stmt| count_var_uses_in_stmt(stmt, name)).sum::<usize>();
+            total
+        }
         HirStmt::Return(Some(expr)) => count_var_uses(expr, name),
         HirStmt::Label(_)
         | HirStmt::Goto(_)
@@ -937,6 +946,20 @@ fn replace_var_in_stmt(stmt: &mut HirStmt, name: &str, replacement: &HirExpr) {
                 replace_var_in_stmt(stmt, name, replacement);
             }
             replace_var_in_expr(cond, name, replacement);
+        }
+        HirStmt::For { init, cond, update, body } => {
+            if let Some(init_stmt) = init {
+                replace_var_in_stmt(init_stmt, name, replacement);
+            }
+            if let Some(c) = cond {
+                replace_var_in_expr(c, name, replacement);
+            }
+            if let Some(upd_stmt) = update {
+                replace_var_in_stmt(upd_stmt, name, replacement);
+            }
+            for stmt in body {
+                replace_var_in_stmt(stmt, name, replacement);
+            }
         }
         HirStmt::Return(Some(expr)) => replace_var_in_expr(expr, name, replacement),
         HirStmt::Label(_)
