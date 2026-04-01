@@ -7,6 +7,23 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-01
+
+### Algorithmic Loop Structuring and Unbounded Region Recovery
+
+Replaced lexical, position-based heuristics with algorithmic validations for `For` loop synthesis, and lifted artificial search bounds during irreducible CFG region recovery.
+
+#### Changed
+
+- Added `try_collapse_while_to_for_algorithmic` in `crates/fission-pcode/src/nir/normalize/for_loops.rs` to enforce backward dataflow independence for `init` block assignments and perform deep AST scans for `continue` statements, preventing unsafe loop `update` hoisting.
+- Hooked `for_loops.rs` module into `core.rs` normalization passes.
+- Removed the hardcoded `start_idx + 24` lookahead limit in `crates/fission-pcode/src/nir/structuring/recovery.rs` (`region_linearized_exit_candidates`), allowing full CFG scanning for region exits.
+
+#### Validation
+
+- `cargo check -p fission-pcode` (pass)
+- `cargo test -p fission-pcode` (pass)
+
 ## 2026-03-25
 
 ### Switch Structuring - Ghidra `checkSwitchSkips` Safety Guard Regression

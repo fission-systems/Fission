@@ -77,7 +77,7 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(exit) = self.linear_exit(start_idx)? {
             Self::push_unique_region_exit(&mut exits, exit);
         }
-        for exit in self.region_linearized_exit_candidates(start_idx, targeted) {
+        for exit in self.region_linearized_exit_candidates_algorithmic(start_idx, targeted) {
             if !used_heuristic_exit {
                 used_heuristic_exit = true;
             }
