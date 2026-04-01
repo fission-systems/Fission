@@ -25,8 +25,21 @@ impl<'a> PreviewBuilder<'a> {
         let mut conds = Vec::new();
         let mut current_idx = idx;
         let mut join_idx: Option<usize> = None;
+        let mut first_prefix: Vec<HirStmt> = Vec::new();
 
         loop {
+            let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[current_idx])?;
+            if current_idx == idx {
+                if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
+                    self.condition_fold_rejected_side_effect += 1;
+                    return Ok(None);
+                }
+                first_prefix = cond_prefix;
+            } else if !cond_prefix.is_empty() {
+                self.condition_fold_rejected_side_effect += 1;
+                return Ok(None);
+            }
+
             let Some(next_idx) = self.fallthrough_index(current_idx) else {
                 return Ok(None);
             };
@@ -77,14 +90,22 @@ impl<'a> PreviewBuilder<'a> {
             if conds.len() < 2 {
                 return Ok(None);
             }
-            return Ok(Some((
-                HirStmt::If {
-                    cond: fold_logical_chain(conds, HirBinaryOp::LogicalAnd),
-                    then_body,
-                    else_body: Vec::new(),
-                },
-                skip_to,
-            )));
+            
+            self.condition_fold_and_count += conds.len() - 1;
+            
+            let stmt = HirStmt::If {
+                cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalAnd)),
+                then_body,
+                else_body: Vec::new(),
+            };
+            
+            if first_prefix.is_empty() {
+                return Ok(Some((stmt, skip_to)));
+            } else {
+                let mut wrapped = first_prefix;
+                wrapped.push(stmt);
+                return Ok(Some((HirStmt::Block(wrapped), skip_to)));
+            }
         }
     }
 
@@ -96,8 +117,21 @@ impl<'a> PreviewBuilder<'a> {
         let mut conds = Vec::new();
         let mut current_idx = idx;
         let mut else_idx: Option<usize> = None;
+        let mut first_prefix: Vec<HirStmt> = Vec::new();
 
         loop {
+            let cond_prefix = self.lower_block_stmts(&self.pcode.blocks[current_idx])?;
+            if current_idx == idx {
+                if !cond_prefix.iter().all(Self::is_trivial_structuring_stmt) {
+                    self.condition_fold_rejected_side_effect += 1;
+                    return Ok(None);
+                }
+                first_prefix = cond_prefix;
+            } else if !cond_prefix.is_empty() {
+                self.condition_fold_rejected_side_effect += 1;
+                return Ok(None);
+            }
+
             let Some(next_idx) = self.fallthrough_index(current_idx) else {
                 return Ok(None);
             };
@@ -158,14 +192,21 @@ impl<'a> PreviewBuilder<'a> {
                 LinearExit::Join(join_idx) => join_idx,
                 LinearExit::Return | LinearExit::End => then_skip.max(else_skip),
             };
-            return Ok(Some((
-                HirStmt::If {
-                    cond: fold_logical_chain(conds, HirBinaryOp::LogicalAnd),
-                    then_body,
-                    else_body,
-                },
-                skip_to,
-            )));
+            self.condition_fold_and_count += conds.len() - 1;
+            
+            let stmt = HirStmt::If {
+                cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalAnd)),
+                then_body,
+                else_body,
+            };
+            
+            if first_prefix.is_empty() {
+                return Ok(Some((stmt, skip_to)));
+            } else {
+                let mut wrapped = first_prefix;
+                wrapped.push(stmt);
+                return Ok(Some((HirStmt::Block(wrapped), skip_to)));
+            }
         }
     }
 
@@ -174,6 +215,13 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
+        
+        let first_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
+        if !first_prefix.iter().all(Self::is_trivial_structuring_stmt) {
+            self.condition_fold_rejected_side_effect += 1;
+            return Ok(None);
+        }
+
         let LoweredTerminator::Cond {
             cond,
             true_target,
@@ -221,14 +269,20 @@ impl<'a> PreviewBuilder<'a> {
                     else {
                         return Ok(None);
                     };
-                    return Ok(Some((
-                        HirStmt::If {
-                            cond: conds[0].clone(),
-                            then_body,
-                            else_body: Vec::new(),
-                        },
-                        skip_to,
-                    )));
+                    
+                    let stmt = HirStmt::If {
+                        cond: conds[0].clone(),
+                        then_body,
+                        else_body: Vec::new(),
+                    };
+                    
+                    if first_prefix.is_empty() {
+                        return Ok(Some((stmt, skip_to)));
+                    } else {
+                        let mut wrapped = first_prefix;
+                        wrapped.push(stmt);
+                        return Ok(Some((HirStmt::Block(wrapped), skip_to)));
+                    }
                 }
                 let Some(exit) = self.shared_forward_linear_exit(idx, body_idx, false_entry_idx)?
                 else {
@@ -251,14 +305,27 @@ impl<'a> PreviewBuilder<'a> {
                     LinearExit::Join(join_idx) => join_idx,
                     LinearExit::Return | LinearExit::End => then_skip.max(false_skip),
                 };
-                return Ok(Some((
-                    HirStmt::If {
-                        cond: fold_logical_chain(conds, HirBinaryOp::LogicalOr),
-                        then_body,
-                        else_body: Vec::new(),
-                    },
-                    skip_to,
-                )));
+                
+                self.condition_fold_or_count += conds.len() - 1;
+                let stmt = HirStmt::If {
+                    cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalOr)),
+                    then_body,
+                    else_body: Vec::new(),
+                };
+                
+                if first_prefix.is_empty() {
+                    return Ok(Some((stmt, skip_to)));
+                } else {
+                    let mut wrapped = first_prefix;
+                    wrapped.push(stmt);
+                    return Ok(Some((HirStmt::Block(wrapped), skip_to)));
+                }
+            }
+            
+            let next_prefix = self.lower_block_stmts(&self.pcode.blocks[next_idx])?;
+            if !next_prefix.is_empty() {
+                self.condition_fold_rejected_side_effect += 1;
+                return Ok(None);
             }
 
             let LoweredTerminator::Cond {

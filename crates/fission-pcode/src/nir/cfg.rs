@@ -254,3 +254,66 @@ pub(super) fn strip_casts(expr: &HirExpr) -> HirExpr {
         other => other.clone(),
     }
 }
+
+pub(super) fn simplify_logical_expr(expr: HirExpr) -> HirExpr {
+    match expr {
+        HirExpr::Binary {
+            op: HirBinaryOp::LogicalAnd,
+            lhs,
+            rhs,
+            ty,
+        } => {
+            let lhs = Box::new(simplify_logical_expr(*lhs));
+            let rhs = Box::new(simplify_logical_expr(*rhs));
+
+            if let (
+                HirExpr::Unary { op: HirUnaryOp::Not, expr: inner_lhs, .. },
+                HirExpr::Unary { op: HirUnaryOp::Not, expr: inner_rhs, .. },
+            ) = (&*lhs, &*rhs) {
+                return HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::LogicalOr,
+                        lhs: inner_lhs.clone(),
+                        rhs: inner_rhs.clone(),
+                        ty,
+                    }),
+                    ty: NirType::Bool,
+                };
+            }
+
+            HirExpr::Binary { op: HirBinaryOp::LogicalAnd, lhs, rhs, ty }
+        }
+        HirExpr::Binary {
+            op: HirBinaryOp::LogicalOr,
+            lhs,
+            rhs,
+            ty,
+        } => {
+            let lhs = Box::new(simplify_logical_expr(*lhs));
+            let rhs = Box::new(simplify_logical_expr(*rhs));
+
+            if let (
+                HirExpr::Unary { op: HirUnaryOp::Not, expr: inner_lhs, .. },
+                HirExpr::Unary { op: HirUnaryOp::Not, expr: inner_rhs, .. },
+            ) = (&*lhs, &*rhs) {
+                return HirExpr::Unary {
+                    op: HirUnaryOp::Not,
+                    expr: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::LogicalAnd,
+                        lhs: inner_lhs.clone(),
+                        rhs: inner_rhs.clone(),
+                        ty,
+                    }),
+                    ty: NirType::Bool,
+                };
+            }
+
+            HirExpr::Binary { op: HirBinaryOp::LogicalOr, lhs, rhs, ty }
+        }
+        HirExpr::Unary { op, expr, ty } => {
+            HirExpr::Unary { op, expr: Box::new(simplify_logical_expr(*expr)), ty }
+        }
+        other => other,
+    }
+}
