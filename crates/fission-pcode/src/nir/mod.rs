@@ -78,7 +78,9 @@ pub fn render_mlil_preview_with_context(
     debug_log("build_hir_start");
     let mut builder = PreviewBuilder::new(pcode, options, type_context);
     let mut hir = builder.build_hir(name, address).map_err(|err| {
-        telemetry::store_preview_build_stats(builder.preview_build_stats());
+        let mut stats = builder.preview_build_stats();
+        stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
+        telemetry::store_preview_build_stats(stats);
         if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
             eprintln!("[mlil-preview] stage=build_hir error fn=0x{address:x} err={err}");
         }
@@ -164,6 +166,8 @@ pub fn render_mlil_preview_with_context(
     build_stats.rejected_external_entry += normalized_discovery_stats.rejected_external_entry;
     build_stats.rejected_loop_or_switch_target +=
         normalized_discovery_stats.rejected_loop_or_switch_target;
+    build_stats.build_duration_ms = build_start.elapsed().as_millis() as usize;
+    build_stats.normalize_duration_ms = normalize_start.elapsed().as_millis() as usize;
     telemetry::store_preview_build_stats(build_stats);
     if diag {
         eprintln!(

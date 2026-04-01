@@ -283,6 +283,14 @@ fn ratio(count: usize, total: usize) -> f64 {
 fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
     vec![
         (
+            "build_duration_ms",
+            stats.build_duration_ms,
+        ),
+        (
+            "normalize_duration_ms",
+            stats.normalize_duration_ms,
+        ),
+        (
             "forced_linear_structuring_count",
             stats.forced_linear_structuring_count,
         ),

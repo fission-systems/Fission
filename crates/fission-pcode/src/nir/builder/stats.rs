@@ -3,6 +3,8 @@ use super::*;
 impl<'a> PreviewBuilder<'a> {
     pub(crate) fn preview_build_stats(&self) -> PreviewBuildStats {
         PreviewBuildStats {
+            build_duration_ms: self.build_duration_ms,
+            normalize_duration_ms: self.normalize_duration_ms,
             forced_linear_structuring_count: self.forced_linear_structuring_count,
             region_linearize_structuring_count: self.region_linearize_structuring_count,
             region_linearize_heuristic_exit_count: self.region_linearize_heuristic_exit_count,

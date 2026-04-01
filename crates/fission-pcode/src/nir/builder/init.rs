@@ -72,6 +72,8 @@ impl<'a> PreviewBuilder<'a> {
             last_trace_id: None,
             next_trace_id: 1,
             lowering_site_depth: 0,
+            build_duration_ms: 0,
+            normalize_duration_ms: 0,
             forced_linear_structuring_count: 0,
             region_linearize_structuring_count: 0,
             region_linearize_heuristic_exit_count: 0,

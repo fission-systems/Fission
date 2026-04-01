@@ -76,6 +76,10 @@ pub struct HirFunction {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NirBuildStats {
     #[serde(default)]
+    pub build_duration_ms: usize,
+    #[serde(default)]
+    pub normalize_duration_ms: usize,
+    #[serde(default)]
     pub forced_linear_structuring_count: usize,
     #[serde(default)]
     pub region_linearize_structuring_count: usize,
@@ -214,6 +218,8 @@ pub struct NirBuildStats {
 
 impl NirBuildStats {
     pub fn merge_assign(&mut self, other: &Self) {
+        self.build_duration_ms += other.build_duration_ms;
+        self.normalize_duration_ms += other.normalize_duration_ms;
         self.forced_linear_structuring_count += other.forced_linear_structuring_count;
         self.region_linearize_structuring_count += other.region_linearize_structuring_count;
         self.region_linearize_heuristic_exit_count += other.region_linearize_heuristic_exit_count;

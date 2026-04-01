@@ -30,6 +30,8 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) last_trace_id: Option<u64>,
     pub(crate) next_trace_id: u64,
     pub(crate) lowering_site_depth: usize,
+    pub(crate) build_duration_ms: usize,
+    pub(crate) normalize_duration_ms: usize,
     pub(crate) forced_linear_structuring_count: usize,
     pub(crate) region_linearize_structuring_count: usize,
     pub(crate) region_linearize_heuristic_exit_count: usize,
