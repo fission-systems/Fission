@@ -24,6 +24,36 @@ Replaced lexical, position-based heuristics with algorithmic validations for `Fo
 - `cargo check -p fission-pcode` (pass)
 - `cargo test -p fission-pcode` (pass)
 
+### Short-Circuit Folding - Prefix-Aware Condition Canonicalization Telemetry
+
+This increment broadens short-circuit folding to tolerate trivial prefix statements in the first block of a chain, records whether AND/OR folds actually happen, and tracks when side effects correctly block the fold.
+
+#### Changed
+
+- added new `NirBuildStats` counters:
+  - `condition_fold_and_count`
+  - `condition_fold_or_count`
+  - `condition_fold_rejected_side_effect`
+- wired the new counters through preview builder state/init/stats projection and automation report export
+- added `simplify_logical_expr()` in `crates/fission-pcode/src/nir/cfg.rs` to canonicalize nested De Morgan-style logical expressions after fold construction
+- updated `crates/fission-pcode/src/nir/structuring/conditionals/short_circuit.rs` so short-circuit folding:
+  - accepts trivial prefix statements in the first block of a chain
+  - rejects side-effectful prefixes in either the first or subsequent blocks
+  - wraps preserved prefixes around the folded `if` instead of discarding them
+
+#### Validation
+
+- `cargo test -p fission-pcode` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+
+#### Observed sample telemetry
+
+- Current 200-function sample: `condition_fold_and_count=0`, `condition_fold_or_count=0`, `condition_fold_rejected_side_effect=0`
+- Current 500-function sample: `condition_fold_and_count=0`, `condition_fold_or_count=0`, `condition_fold_rejected_side_effect=0`
+
+The new counters are wired and available, but the current fixed samples do not yet hit these newly accepted/rejected short-circuit shapes.
+
 ## 2026-03-25
 
 ### Switch Structuring - Ghidra `checkSwitchSkips` Safety Guard Regression

@@ -518,6 +518,18 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
             "rejected_loop_or_switch_target",
             stats.rejected_loop_or_switch_target,
         ),
+        (
+            "condition_fold_and_count",
+            stats.condition_fold_and_count,
+        ),
+        (
+            "condition_fold_or_count",
+            stats.condition_fold_or_count,
+        ),
+        (
+            "condition_fold_rejected_side_effect",
+            stats.condition_fold_rejected_side_effect,
+        ),
     ]
 }
 
