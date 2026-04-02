@@ -37,6 +37,30 @@ Resolved the arm64 parse blocker in `AARCH64_AppleSilicon` by aligning `sleigh-r
 
 ## 2026-04-02
 
+### fission-sleigh - Folder-Tree Refactor and Converter Responsibility Split
+
+Refactored `fission-sleigh` into a folder-tree module layout for easier long-term ownership and maintenance, then split converter internals by semantic responsibility (`assignment`, `branch`, `memory`, `unary`) while preserving existing behavior.
+
+#### Changed
+
+- converted flat modules into directory modules:
+  - `crates/fission-sleigh/src/converter/mod.rs`
+  - `crates/fission-sleigh/src/lifter/mod.rs`
+  - `crates/fission-sleigh/src/builder/mod.rs`
+- replaced monolithic converter flow with semantic modules:
+  - `crates/fission-sleigh/src/converter/assignment.rs`
+  - `crates/fission-sleigh/src/converter/branch.rs`
+  - `crates/fission-sleigh/src/converter/memory.rs`
+  - `crates/fission-sleigh/src/converter/unary.rs`
+  - kept expression traversal and shared utilities in `expr.rs` and `helpers.rs`
+- retained converter unit tests and validation expectations in:
+  - `crates/fission-sleigh/src/converter/tests.rs`
+
+#### Validation
+
+- `cargo check -p fission-sleigh` (pass)
+- `cargo test -p fission-sleigh` (pass, 7 tests)
+
 ### Graph-Theoretic Loop Structuring (Ghidra LoopBody Integration)
 
 루프 구조화(Loop Structuring) 단계에서 기존의 휴리스틱(`fallthrough_index` 예측)을 제거하고, Ghidra의 `LoopBody` 출구 식별 알고리즘 및 엄밀한 CFG 간선 분류(Edge Classification)를 도입하여 결정론적인 while/do-while 구조화를 달성했습니다.
