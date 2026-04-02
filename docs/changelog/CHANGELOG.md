@@ -7,6 +7,34 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-03
+
+### AARCH64 AppleSilicon Parse Fix - InvalidRef Resolution in sleigh-rs
+
+Resolved the arm64 parse blocker in `AARCH64_AppleSilicon` by aligning `sleigh-rs` execution-time symbol resolution with Ghidra 11.4.2 behavior for produced subtable operands used in constructor execution expressions.
+
+#### Root Cause
+
+- parse failed in `AARCH64neon.sinc` with `Execution(InvalidRef)` when evaluating produced subtable operand references such as `Re_VPR128.H.vIndexHL`
+- `sleigh-rs` previously rejected table reads in execution scope unless the table had an explicit export value
+
+#### Changed
+
+- updated execution read-scope table resolution to allow produced subtable references in constructor execution:
+  - `vendor/sleigh-rs/src/semantic/inner/table/execution.rs`
+- made table-size access non-panicking for no-export tables by treating them as unsized where appropriate:
+  - `vendor/sleigh-rs/src/semantic/inner/execution/expr.rs`
+  - `vendor/sleigh-rs/src/semantic/inner/table/mod.rs`
+- removed a hard `unwrap()` panic path in user-call parameter size speculation when unresolved/no-export table values are present:
+  - `vendor/sleigh-rs/src/semantic/inner/execution/user_call.rs`
+- added/updated arm64 parsing regression validation in fission-sleigh tests:
+  - `crates/fission-sleigh/src/lifter/mod.rs`
+
+#### Validation
+
+- `cargo test -p fission-sleigh` (pass, including `aarch64_apple_silicon_spec_parses`)
+- `cargo check -p fission-cli --features native_decomp` (pass)
+
 ## 2026-04-02
 
 ### fission-sleigh - Folder-Tree Refactor and Converter Responsibility Split
