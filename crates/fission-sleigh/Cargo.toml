@@ -1,0 +1,12 @@
+[package]
+name = "fission-sleigh"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.102"
+fission-pcode = { path = "../fission-pcode" }
+
+# Since sleigh-rs is in vendor, we add it as a path dependency. 
+# Make sure it actually exists in vendor/sleigh-rs.
+sleigh-rs = { path = "../../vendor/sleigh-rs" }
