@@ -7,6 +7,24 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-02
+
+### Graph-Theoretic Loop Structuring (Ghidra LoopBody Integration)
+
+루프 구조화(Loop Structuring) 단계에서 기존의 휴리스틱(`fallthrough_index` 예측)을 제거하고, Ghidra의 `LoopBody` 출구 식별 알고리즘 및 엄밀한 CFG 간선 분류(Edge Classification)를 도입하여 결정론적인 while/do-while 구조화를 달성했습니다.
+
+#### Changed
+- **CFG Analysis 강화**: `crates/fission-pcode/src/nir/structuring/cfg_analysis.rs`에 깊이 우선 탐색(DFS) 기반의 전위 순회(Preorder) 기록 및 간선 클래스 분류 로직 적용.
+- **`LoopBody` 설계**: `crates/fission-pcode/src/nir/structuring/loop_analysis.rs` 모듈을 신설하여 Ghidra의 `findBase`, `findExit`, `extend` 기능을 구현해 루프 바디로 불법적 출구가 병합되는 문제를 예방.
+- **휴리스틱 제거 및 개편**: `crates/fission-pcode/src/nir/structuring/loops.rs`의 `try_lower_while`에서 기존 `fallthrough_index`를 맹목적으로 참조하던 방식을 제거하고, 미리 식별된 정확한 `exit_idx`를 사용하도록 로직 재작성.
+- **상태 연동**: `PreviewBuilder` 객체 내에 `loop_bodies` 상태를 추가하고 `get_loop_body` 접근자를 통해 구조화 모듈 전역에서 루프 구조를 활용하도록 연결.
+
+#### Validation
+- `cargo check -p fission-pcode` (pass)
+- `cargo test -p fission-pcode` (loop tests passed perfectly without fallback)
+
+---
+
 ## 2026-04-01
 
 ### Algorithmic Loop Structuring and Unbounded Region Recovery

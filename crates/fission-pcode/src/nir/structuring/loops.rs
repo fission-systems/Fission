@@ -51,6 +51,10 @@ fn rewrite_loop_control_gotos_in_stmts(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    pub(crate) fn get_loop_body(&self, head_idx: usize) -> Option<&crate::nir::structuring::loop_analysis::LoopBody> {
+        self.loop_bodies.iter().find(|lb| lb.head == head_idx)
+    }
+
     fn track_loop_control_rewrite_stats(&mut self, stats: LoopControlRewriteStats) {
         self.loop_control_rewrite_break_count += stats.break_rewrites;
         self.loop_control_rewrite_continue_count += stats.continue_rewrites;
@@ -205,27 +209,31 @@ impl<'a> PreviewBuilder<'a> {
                 return Ok(None);
             }
 
-            let Some(body_idx) = self.fallthrough_index(idx) else {
-                return Ok(None);
-            };
-            let body_addr = self.block_target_key(body_idx);
+            let loop_body = self.get_loop_body(idx);
 
-            let (cond, exit_idx) = if false_target == Some(body_addr) {
-                let exit_idx = self
-                    .find_block_index_by_address(true_target)
-                    .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
-                (negate_expr(cond), exit_idx)
-            } else if true_target == body_addr {
-                let Some(exit_addr) = false_target else {
-                    return Ok(None);
-                };
-                let exit_idx = self
-                    .find_block_index_by_address(exit_addr)
-                    .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
-                (cond, exit_idx)
-            } else {
+            // While loops should always have an exit target
+            let Some(exit_idx) = loop_body.and_then(|lb| lb.exit_idx) else {
                 return Ok(None);
             };
+
+            let Some(exit_addr) = self.pcode.blocks.get(exit_idx).map(|b| b.start_address) else {
+                return Ok(None);
+            };
+
+            let (cond, body_addr) = if true_target == exit_addr {
+                let Some(body_addr) = false_target else { return Ok(None) };
+                (negate_expr(cond), body_addr)
+            } else if false_target == Some(exit_addr) {
+                let body_addr = true_target;
+                (cond, body_addr)
+            } else {
+                // If neither branch goes to the computed exit edge, this is not a strictly formed while loop tail
+                return Ok(None);
+            };
+
+            let body_idx = self
+                .find_block_index_by_address(body_addr)
+                .ok_or(MlilPreviewError::UnsupportedCfgRegionShape)?;
 
             if budget.checkpoint("body_pre") {
                 return Ok(None);

@@ -11,6 +11,8 @@ pub(crate) enum EdgeClass {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CfgAnalysis {
     roots: Vec<usize>,
+    preorder: Vec<usize>,
+    preorder_index: Vec<usize>,
     edge_classes: HashMap<(usize, usize), EdgeClass>,
 }
 
@@ -45,6 +47,8 @@ impl CfgAnalysis {
         if node_count == 0 {
             return Self {
                 roots: Vec::new(),
+                preorder: Vec::new(),
+                preorder_index: Vec::new(),
                 edge_classes: HashMap::new(),
             };
         }
@@ -59,8 +63,8 @@ impl CfgAnalysis {
         }
 
         let mut color = vec![0u8; node_count];
-        let mut discovery_time = vec![0usize; node_count];
-        let mut time = 0usize;
+        let mut preorder_index = vec![0usize; node_count];
+        let mut preorder = Vec::with_capacity(node_count);
         let mut edge_classes = HashMap::new();
 
         for root in roots.iter().copied() {
@@ -71,8 +75,8 @@ impl CfgAnalysis {
                 root,
                 successors,
                 &mut color,
-                &mut discovery_time,
-                &mut time,
+                &mut preorder_index,
+                &mut preorder,
                 &mut edge_classes,
             );
         }
@@ -86,20 +90,30 @@ impl CfgAnalysis {
                 idx,
                 successors,
                 &mut color,
-                &mut discovery_time,
-                &mut time,
+                &mut preorder_index,
+                &mut preorder,
                 &mut edge_classes,
             );
         }
 
         Self {
             roots,
+            preorder,
+            preorder_index,
             edge_classes,
         }
     }
 
     pub(crate) fn roots(&self) -> &[usize] {
         &self.roots
+    }
+
+    pub(crate) fn preorder(&self) -> &[usize] {
+        &self.preorder
+    }
+
+    pub(crate) fn edge_classes(&self) -> &HashMap<(usize, usize), EdgeClass> {
+        &self.edge_classes
     }
 
     #[cfg(test)]
@@ -112,6 +126,21 @@ impl CfgAnalysis {
             .values()
             .filter(|edge_class| **edge_class == class)
             .count()
+    }
+
+    pub(crate) fn irreducible_edges(&self, dom_tree: &DomTree) -> HashSet<(usize, usize)> {
+        self.edge_classes
+            .iter()
+            .filter_map(|(&(src, dst), class)| {
+                // A graph is reducible IF AND ONLY IF every back-edge's target dominates its source.
+                // Any back-edge where `dst` does not dominate `src` indicates an irreducible loop.
+                if *class == EdgeClass::Back && !dom_tree.dominates(dst, src) {
+                    Some((src, dst))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
@@ -310,9 +339,11 @@ impl SccAnalysis {
     }
 
     pub(crate) fn irreducible_header_total_count(&self) -> usize {
-        self.irreducible.iter().map(|component| component.headers.len()).sum()
+        self.irreducible
+            .iter()
+            .map(|component| component.headers.len())
+            .sum()
     }
-
 }
 
 #[derive(Debug)]
@@ -385,13 +416,13 @@ fn classify_edges_depth_first(
     node: usize,
     successors: &[Vec<usize>],
     color: &mut [u8],
-    discovery_time: &mut [usize],
-    time: &mut usize,
+    preorder_index: &mut [usize],
+    preorder: &mut Vec<usize>,
     edge_classes: &mut HashMap<(usize, usize), EdgeClass>,
 ) {
-    *time += 1;
-    discovery_time[node] = *time;
-    color[node] = 1;
+    preorder_index[node] = preorder.len();
+    preorder.push(node);
+    color[node] = 1; // Visiting
 
     for succ in successors[node].iter().copied() {
         if succ >= successors.len() {
@@ -400,8 +431,8 @@ fn classify_edges_depth_first(
         let class = match color[succ] {
             0 => EdgeClass::Tree,
             1 => EdgeClass::Back,
-            _ => {
-                if discovery_time[node] < discovery_time[succ] {
+            _ => { // 2 = Visited
+                if preorder_index[node] < preorder_index[succ] {
                     EdgeClass::Forward
                 } else {
                     EdgeClass::Cross
@@ -410,11 +441,18 @@ fn classify_edges_depth_first(
         };
         edge_classes.insert((node, succ), class);
         if class == EdgeClass::Tree {
-            classify_edges_depth_first(succ, successors, color, discovery_time, time, edge_classes);
+            classify_edges_depth_first(
+                succ,
+                successors,
+                color,
+                preorder_index,
+                preorder,
+                edge_classes,
+            );
         }
     }
 
-    color[node] = 2;
+    color[node] = 2; // Visited
 }
 
 impl<'a> PreviewBuilder<'a> {

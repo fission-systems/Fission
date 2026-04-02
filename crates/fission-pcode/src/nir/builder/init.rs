@@ -29,8 +29,32 @@ impl<'a> PreviewBuilder<'a> {
             .map(|(idx, key)| (*key, idx))
             .collect();
         let layout_fallthrough = build_layout_fallthrough_map(pcode);
-        let successors = build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
-        let predecessors = build_predecessor_index_map(&successors);
+        let mut successors =
+            build_successor_index_map(pcode, &address_to_index, &layout_fallthrough);
+        let mut predecessors = build_predecessor_index_map(&successors);
+
+        let dom_tree = crate::nir::structuring::DomTree::analyze(&successors, &predecessors);
+        let cfg_analysis =
+            crate::nir::structuring::CfgAnalysis::analyze(&successors, &predecessors);
+        let irreducible_edges = cfg_analysis.irreducible_edges(&dom_tree);
+
+        let loop_bodies = crate::nir::structuring::loop_analysis::LoopBody::identify_loops(
+            &successors,
+            &predecessors,
+            &cfg_analysis,
+            &irreducible_edges,
+        );
+
+        // Remove irreducible edges from downstream structuring passes.
+        for &(src, dst) in &irreducible_edges {
+            if let Some(succs) = successors.get_mut(src) {
+                succs.retain(|&s| s != dst);
+            }
+            if let Some(preds) = predecessors.get_mut(dst) {
+                preds.retain(|&p| p != src);
+            }
+        }
+
         let register_param_aliases = entry_analysis::collect_entry_register_param_aliases(pcode);
         let stack_frame_size = entry_analysis::infer_entry_stack_frame_size(pcode, options);
         if preview_builder_diag_enabled() {
@@ -54,6 +78,9 @@ impl<'a> PreviewBuilder<'a> {
             layout_fallthrough,
             successors,
             predecessors,
+            dom_tree,
+            irreducible_edges,
+            loop_bodies,
             params: BTreeMap::new(),
             locals: BTreeMap::new(),
             locals_next_id: 0,
@@ -76,7 +103,6 @@ impl<'a> PreviewBuilder<'a> {
             normalize_duration_ms: 0,
             forced_linear_structuring_count: 0,
             region_linearize_structuring_count: 0,
-            region_linearize_heuristic_exit_count: 0,
             region_linearize_rejected_non_structuring_failure_count: 0,
             region_linearize_rejected_no_exit_count: 0,
             region_linearize_rejected_body_lowering_failed_count: 0,
@@ -105,6 +131,8 @@ impl<'a> PreviewBuilder<'a> {
             region_linearize_rejected_irreducible_cfg_count: 0,
             structuring_scc_component_count: 0,
             structuring_irreducible_scc_count: 0,
+            rule_block_if_no_exit_count: 0,
+            rule_block_if_no_exit_accepted_count: 0,
             structuring_irreducible_header_count: 0,
             loop_control_explicit_reducer_count: 0,
             loop_control_rewrite_break_count: 0,
