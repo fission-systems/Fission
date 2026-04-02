@@ -68,7 +68,10 @@ fn rewrite_bitstream_stmt_list(
             continue;
         }
         match &mut stmts[idx] {
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
                 changed |= rewrite_bitstream_stmt_list(body, state_roots, default_state);
             }
             HirStmt::Switch { cases, default, .. } => {
@@ -253,7 +256,10 @@ fn infer_state_from_stmt(
         HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
             infer_state_from_expr(expr, state_roots)
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+        HirStmt::Block(body)
+        | HirStmt::While { body, .. }
+        | HirStmt::DoWhile { body, .. }
+        | HirStmt::For { body, .. } => {
             for stmt in body {
                 if let Some(state) = infer_state_from_stmt(stmt, state_roots) {
                     return Some(state);

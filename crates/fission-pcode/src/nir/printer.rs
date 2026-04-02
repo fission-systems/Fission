@@ -188,7 +188,12 @@ fn print_stmt_with_indent(stmt: &HirStmt, indent: usize, depth: usize, out: &mut
             out.push_str(&pad);
             out.push_str(&format!("}} while ({});\n", print_expr_prec(cond, 0, 0)));
         }
-        HirStmt::For { init, cond, update, body } => {
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
             out.push_str(&pad);
             out.push_str("for (");
             if let Some(i) = init {

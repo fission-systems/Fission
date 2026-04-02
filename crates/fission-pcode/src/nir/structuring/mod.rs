@@ -1,8 +1,8 @@
-use super::*;
 pub(super) use super::support::*;
+use super::*;
 
-mod cleanup;
 mod cfg_analysis;
+mod cleanup;
 mod conditionals;
 mod driver;
 mod guarded_tail;
@@ -12,8 +12,8 @@ mod recovery;
 mod surfacing;
 mod switch;
 
+pub(crate) use cfg_analysis::{CfgAnalysis, DomTree, EdgeClass, PostDomTree};
 pub(crate) use cleanup::cleanup_redundant_labels;
-pub(crate) use cfg_analysis::{EdgeClass, PostDomTree};
 pub(crate) use driver::discover_guarded_tail_candidates_for_stats;
 pub(crate) use driver::structuring_diag_enabled;
 pub(crate) use linear::LinearBodyCachedOutcome;
@@ -24,3 +24,4 @@ pub(super) use driver::{
 };
 #[cfg(test)]
 pub(super) use linear::{LinearBodyLoweringOutcome, LinearBodyRejectReason};
+pub(crate) mod loop_analysis;

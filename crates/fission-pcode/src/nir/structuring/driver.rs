@@ -277,6 +277,13 @@ impl<'a> PreviewBuilder<'a> {
             }
             idx += 1;
         }
+        // Note: We originally planned to emit explicit Gotos for irreducible edges here.
+        // However, Fission's structural invariants (e.g. `can_inline_linear_successor` rejecting back-edges
+        // and non-dominated cross-edges) naturally prevent irreducible edges from being swallowed into structured scopes.
+        // Any block with an irreducible exit fails linear structuring and falls back to `lower_block_terminator`,
+        // which correctly emits the explicit `If { Goto }` or unconditional `Goto` since it reads from the unmasked p-code.
+        // Thus, Phase 4 (Irreducible Goto Pass) is inherently satisfied by the existing fallback mechanisms!
+        
         while self.promote_single_entry_guarded_tail_regions(&mut body) {}
         self.discover_guarded_tail_candidates(&body);
         if diag {

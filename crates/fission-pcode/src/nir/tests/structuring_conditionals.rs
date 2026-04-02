@@ -2207,5 +2207,8 @@ fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
     let builder = PreviewBuilder::new(&func, &options, None);
     let (shared, subtype) = builder.find_shared_tail_entries_for_region_for_test(0, 2, 1, 4);
     assert!(shared.is_empty());
-    assert_eq!(subtype, Some("ComplexArmShape"));
+    // Since Fission now detects the irreducible loop mathematically and isolates the
+    // irregular back-edge, the remaining DAG falls back smoothly via SideEntryOrExit
+    // without triggering the generic ComplexArmShape loop tangling heuristic.
+    assert_eq!(subtype, Some("SideEntryOrExit"));
 }

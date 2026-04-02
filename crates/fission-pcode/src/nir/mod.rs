@@ -7,21 +7,20 @@ mod cfg;
 mod normalize;
 mod piece;
 mod printer;
-mod support;
 mod structuring;
+mod support;
 mod telemetry;
 #[cfg(test)]
 mod tests;
 mod types;
 
+pub(super) use self::support::*;
 pub use self::telemetry::{
     take_last_nir_build_stats, take_last_nir_hint_stats, take_last_preview_build_stats,
     take_last_preview_hint_stats,
 };
 pub use self::types::*;
 use self::{builder::*, cfg::*, normalize::*, printer::*, structuring::*};
-pub(super) use self::support::*;
-
 
 pub fn render_mlil_preview(
     pcode: &PcodeFunction,
@@ -132,9 +131,11 @@ pub fn render_mlil_preview_with_context(
     build_stats.canonicalization_failed_interleaved_join_uses +=
         normalized_discovery_stats.canonicalization_failed_interleaved_join_uses;
     build_stats.canonicalization_failed_interleaved_join_uses_no_next_label_count +=
-        normalized_discovery_stats.canonicalization_failed_interleaved_join_uses_no_next_label_count;
+        normalized_discovery_stats
+            .canonicalization_failed_interleaved_join_uses_no_next_label_count;
     build_stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count +=
-        normalized_discovery_stats.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count;
+        normalized_discovery_stats
+            .canonicalization_failed_interleaved_join_uses_nontrivial_segment_count;
     build_stats.canonicalization_failed_nonterminal_join_label +=
         normalized_discovery_stats.canonicalization_failed_nonterminal_join_label;
     build_stats.canonicalization_failed_nested_tail_escape +=
@@ -145,10 +146,12 @@ pub fn render_mlil_preview_with_context(
         normalized_discovery_stats.canonicalized_local_nonfallthrough_alias_count;
     build_stats.canonicalization_failed_alias_not_fallthrough_count +=
         normalized_discovery_stats.canonicalization_failed_alias_not_fallthrough_count;
-    build_stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count += normalized_discovery_stats
-        .canonicalization_failed_alias_not_fallthrough_top_level_after_label_count;
-    build_stats.canonicalization_failed_alias_not_fallthrough_nested_after_label_count += normalized_discovery_stats
-        .canonicalization_failed_alias_not_fallthrough_nested_after_label_count;
+    build_stats.canonicalization_failed_alias_not_fallthrough_top_level_after_label_count +=
+        normalized_discovery_stats
+            .canonicalization_failed_alias_not_fallthrough_top_level_after_label_count;
+    build_stats.canonicalization_failed_alias_not_fallthrough_nested_after_label_count +=
+        normalized_discovery_stats
+            .canonicalization_failed_alias_not_fallthrough_nested_after_label_count;
     build_stats.canonicalization_failed_alias_has_multiple_internal_predecessors_count +=
         normalized_discovery_stats
             .canonicalization_failed_alias_has_multiple_internal_predecessors_count;

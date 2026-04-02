@@ -10,14 +10,14 @@ use fission_static::analysis::decomp::{FactStore, FunctionFacts};
 pub(super) fn heuristic_surface_candidate(entry: &PreviewCandidateEntry) -> bool {
     let hint_stats = entry.preview_hint_stats;
     let heuristic_hits = hint_stats.is_some_and(|stats| {
-        stats.heuristic_pointer_alias_hits > 0
-            || stats.heuristic_local_surface_hits > 0
+        stats.pointer_alias_hits > 0
+            || stats.local_surface_hits > 0
             || stats.derived_origin_type_hits > 0
     });
     let has_reason_tag = entry.reason_tags.iter().any(|tag| {
         matches!(
             tag.as_str(),
-            "heuristic_pointer_alias" | "heuristic_local_surface" | "slot_alias_candidate"
+            "pointer_alias" | "local_surface" | "slot_alias_candidate"
         )
     });
     entry.preview_direct_success

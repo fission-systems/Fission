@@ -7,7 +7,6 @@ impl<'a> PreviewBuilder<'a> {
             normalize_duration_ms: self.normalize_duration_ms,
             forced_linear_structuring_count: self.forced_linear_structuring_count,
             region_linearize_structuring_count: self.region_linearize_structuring_count,
-            region_linearize_heuristic_exit_count: self.region_linearize_heuristic_exit_count,
             region_linearize_rejected_non_structuring_failure_count: self
                 .region_linearize_rejected_non_structuring_failure_count,
             region_linearize_rejected_no_exit_count: self.region_linearize_rejected_no_exit_count,
@@ -47,6 +46,8 @@ impl<'a> PreviewBuilder<'a> {
                 .region_linearize_rejected_irreducible_cfg_count,
             structuring_scc_component_count: self.structuring_scc_component_count,
             structuring_irreducible_scc_count: self.structuring_irreducible_scc_count,
+            rule_block_if_no_exit_count: self.rule_block_if_no_exit_count,
+            rule_block_if_no_exit_accepted_count: self.rule_block_if_no_exit_accepted_count,
             structuring_irreducible_header_count: self.structuring_irreducible_header_count,
             loop_control_explicit_reducer_count: self.loop_control_explicit_reducer_count,
             loop_control_rewrite_break_count: self.loop_control_rewrite_break_count,

@@ -89,7 +89,10 @@ impl<'a> PreviewBuilder<'a> {
             .and_then(|mut file| std::io::Write::write_all(&mut file, message.as_bytes()));
     }
 
-    fn record_conditional_tail_mismatch_subtype(&mut self, subtype: ConditionalTailMismatchSubtype) {
+    fn record_conditional_tail_mismatch_subtype(
+        &mut self,
+        subtype: ConditionalTailMismatchSubtype,
+    ) {
         match subtype {
             ConditionalTailMismatchSubtype::NoCommonFollowInWindow => {
                 self.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count += 1;
@@ -122,12 +125,11 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(crate) fn has_linear_body_cache(&self, start_idx: usize, exit: LinearExit) -> bool {
-        self.linear_body_cache
-            .contains_key(&LinearBodyCacheKey {
-                start_idx,
-                exit,
-                region_recovery: false,
-            })
+        self.linear_body_cache.contains_key(&LinearBodyCacheKey {
+            start_idx,
+            exit,
+            region_recovery: false,
+        })
     }
 
     pub(super) fn build_linear_multiblock_body(
@@ -383,12 +385,7 @@ impl<'a> PreviewBuilder<'a> {
                         return Ok(LinearBodyLoweringOutcome::Lowered((body, next_idx)));
                     }
                     let can_inline = if region_recovery {
-                        self.can_inline_linear_successor_for_region(
-                            idx,
-                            next_idx,
-                            &visited,
-                            exit,
-                        )
+                        self.can_inline_linear_successor_for_region(idx, next_idx, &visited, exit)
                     } else {
                         self.can_inline_linear_successor(idx, next_idx, &visited)
                     };
@@ -466,8 +463,17 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Option<LinearExit>, MlilPreviewError> {
         let lhs = self.linear_exit(lhs_idx)?;
         let rhs = self.linear_exit(rhs_idx)?;
+
         if lhs.is_some() && lhs == rhs {
             Ok(lhs)
+        } else if let (Some(l_exit), Some(r_exit)) = (lhs, rhs) {
+            if l_exit.is_terminal() && r_exit.is_terminal() {
+                self.rule_block_if_no_exit_count += 1;
+                self.rule_block_if_no_exit_accepted_count += 1;
+                Ok(Some(l_exit))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(None)
         }
@@ -486,6 +492,13 @@ impl<'a> PreviewBuilder<'a> {
             let exit = self.linear_exit(idx)?;
             if shared.is_some() && shared == exit {
                 continue;
+            }
+            if let (Some(s_exit), Some(c_exit)) = (shared, exit) {
+                if s_exit.is_terminal() && c_exit.is_terminal() {
+                    self.rule_block_if_no_exit_count += 1;
+                    self.rule_block_if_no_exit_accepted_count += 1;
+                    continue;
+                }
             }
             return Ok(None);
         }
@@ -582,6 +595,14 @@ impl<'a> PreviewBuilder<'a> {
                 )?;
                 if true_exit.is_some() && true_exit == false_exit {
                     Ok(true_exit)
+                } else if let (Some(t_exit), Some(f_exit)) = (true_exit, false_exit) {
+                    if t_exit.is_terminal() && f_exit.is_terminal() {
+                        self.rule_block_if_no_exit_count += 1;
+                        self.rule_block_if_no_exit_accepted_count += 1;
+                        Ok(Some(t_exit))
+                    } else {
+                        Ok(None)
+                    }
                 } else {
                     Ok(None)
                 }
@@ -607,15 +628,11 @@ impl<'a> PreviewBuilder<'a> {
         }
         if self.successors[next_idx].len() == 1 {
             let forwarded = self.successors[next_idx][0];
-            if self
-                .predecessors[next_idx]
-                .iter()
-                .all(|pred| {
-                    *pred == idx
-                        || visited.contains(pred)
-                        || self.is_trivial_forwarding_block(*pred, next_idx)
-                })
-                && self.is_trivial_forwarding_block(next_idx, forwarded)
+            if self.predecessors[next_idx].iter().all(|pred| {
+                *pred == idx
+                    || visited.contains(pred)
+                    || self.is_trivial_forwarding_block(*pred, next_idx)
+            }) && self.is_trivial_forwarding_block(next_idx, forwarded)
             {
                 return true;
             }
@@ -821,8 +838,8 @@ impl<'a> PreviewBuilder<'a> {
 
         let result = (|| {
             if true_arm.reaches_join_trivially
-                && let LinearBodyLoweringOutcome::Lowered((false_body, skip_to)) =
-                    self.lower_linear_body_with_depth_detailed(
+                && let LinearBodyLoweringOutcome::Lowered((false_body, skip_to)) = self
+                    .lower_linear_body_with_depth_detailed(
                         false_arm.effective_start_idx,
                         exit,
                         depth + 1,
@@ -841,8 +858,8 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             if false_arm.reaches_join_trivially
-                && let LinearBodyLoweringOutcome::Lowered((true_body, skip_to)) =
-                    self.lower_linear_body_with_depth_detailed(
+                && let LinearBodyLoweringOutcome::Lowered((true_body, skip_to)) = self
+                    .lower_linear_body_with_depth_detailed(
                         true_arm.effective_start_idx,
                         exit,
                         depth + 1,
@@ -860,7 +877,8 @@ impl<'a> PreviewBuilder<'a> {
                 )));
             }
 
-            let mut fallback_mismatch_subtype = ConditionalTailMismatchSubtype::NoCommonFollowInWindow;
+            let mut fallback_mismatch_subtype =
+                ConditionalTailMismatchSubtype::NoCommonFollowInWindow;
             if region_recovery && let LinearExit::Join(join_idx) = exit {
                 let shared_tail_entries = match self.find_shared_tail_entries_for_region(
                     origin_idx,
@@ -905,7 +923,10 @@ impl<'a> PreviewBuilder<'a> {
                                 budget.as_deref_mut(),
                                 region_recovery,
                             )? {
-                                LinearBodyLoweringOutcome::Lowered((shared_tail_body, shared_skip)) => {
+                                LinearBodyLoweringOutcome::Lowered((
+                                    shared_tail_body,
+                                    shared_skip,
+                                )) => {
                                     let mut block_stmts = vec![HirStmt::If {
                                         cond: cond.clone(),
                                         then_body,
@@ -976,22 +997,18 @@ impl<'a> PreviewBuilder<'a> {
                         fallback_mismatch_subtype
                     },
                 )),
-                (
-                    LinearBodyLoweringOutcome::Rejected(_),
-                    LinearBodyLoweringOutcome::Lowered(_),
-                )
-                | (
-                    LinearBodyLoweringOutcome::Lowered(_),
-                    LinearBodyLoweringOutcome::Rejected(_),
-                ) => Ok(ConditionalTailLoweringResult::Mismatch(
-                    if fallback_mismatch_subtype
-                        == ConditionalTailMismatchSubtype::NoCommonFollowInWindow
-                    {
-                        ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed
-                    } else {
-                        fallback_mismatch_subtype
-                    },
-                )),
+                (LinearBodyLoweringOutcome::Rejected(_), LinearBodyLoweringOutcome::Lowered(_))
+                | (LinearBodyLoweringOutcome::Lowered(_), LinearBodyLoweringOutcome::Rejected(_)) => {
+                    Ok(ConditionalTailLoweringResult::Mismatch(
+                        if fallback_mismatch_subtype
+                            == ConditionalTailMismatchSubtype::NoCommonFollowInWindow
+                        {
+                            ConditionalTailMismatchSubtype::OneArmBodyLoweringFailed
+                        } else {
+                            fallback_mismatch_subtype
+                        },
+                    ))
+                }
             }
         })();
         self.active_conditional_tail_keys.remove(&key);
@@ -1165,9 +1182,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut visiting = HashSet::new();
         let mut visited = HashSet::new();
         for node in window {
-            if !visited.contains(node)
-                && dfs(self, *node, window, &mut visiting, &mut visited)
-            {
+            if !visited.contains(node) && dfs(self, *node, window, &mut visiting, &mut visited) {
                 return true;
             }
         }
@@ -1340,9 +1355,7 @@ impl<'a> PreviewBuilder<'a> {
             } else {
                 break;
             };
-            if !visited.insert(next_idx)
-                || !self.is_trivial_forwarding_block(current, next_idx)
-            {
+            if !visited.insert(next_idx) || !self.is_trivial_forwarding_block(current, next_idx) {
                 break;
             }
             current = next_idx;

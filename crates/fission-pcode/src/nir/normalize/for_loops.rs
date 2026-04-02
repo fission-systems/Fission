@@ -31,18 +31,22 @@ pub(super) fn apply_for_loop_folding(stmts: &mut Vec<HirStmt>) -> bool {
         }
     }
 
-    if stmts.is_empty() { return changed; }
+    if stmts.is_empty() {
+        return changed;
+    }
 
     let mut new_stmts = Vec::new();
     let mut i = 0;
     while i < stmts.len() {
-        if let Some((mut inits, cond, update, body, consumed_init_count)) = try_collapse_while_to_for_algorithmic(stmts, i) {
+        if let Some((mut inits, cond, update, body, consumed_init_count)) =
+            try_collapse_while_to_for_algorithmic(stmts, i)
+        {
             for _ in 0..consumed_init_count {
                 if !new_stmts.is_empty() {
                     new_stmts.pop();
                 }
             }
-            
+
             new_stmts.push(HirStmt::For {
                 init: inits.pop(),
                 cond: Some(cond),
@@ -62,7 +66,13 @@ pub(super) fn apply_for_loop_folding(stmts: &mut Vec<HirStmt>) -> bool {
 fn try_collapse_while_to_for_algorithmic(
     stmts: &[HirStmt],
     idx: usize,
-) -> Option<(Vec<Box<HirStmt>>, HirExpr, Option<HirStmt>, Vec<HirStmt>, usize)> {
+) -> Option<(
+    Vec<Box<HirStmt>>,
+    HirExpr,
+    Option<HirStmt>,
+    Vec<HirStmt>,
+    usize,
+)> {
     let stmt = &stmts[idx];
 
     let (cond, mut body) = match stmt {
@@ -76,10 +86,10 @@ fn try_collapse_while_to_for_algorithmic(
         return None;
     }
 
-    // ALGORITHMIC SAFETY CHECK: 
-    // In Fission AST, a `Continue` statement explicitly bypasses the rest of the loop 
+    // ALGORITHMIC SAFETY CHECK:
+    // In Fission AST, a `Continue` statement explicitly bypasses the rest of the loop
     // and jumps to the condition block. If we extract an `update` statement into the For loop update field,
-    // the semantic effect of `Continue` changes to jump to the `update` block instead! 
+    // the semantic effect of `Continue` changes to jump to the `update` block instead!
     // Thus, an algorithmic check MUST ensure no inner `Continue` statements break the backward dominance of update.
     if stmt_list_contains_continue(&body) {
         return None;
@@ -96,16 +106,16 @@ fn try_collapse_while_to_for_algorithmic(
     // Scan backwards strictly enforcing independence (dataflow preservation).
     let mut inits = Vec::new();
     let mut consumed_idx = 0;
-    
+
     let mut scan_idx = idx;
     while scan_idx > 0 {
         scan_idx -= 1;
         let prev_stmt = &stmts[scan_idx];
-        
+
         if is_var_modification(prev_stmt, &vars) {
             inits.push(Box::new(prev_stmt.clone()));
             consumed_idx += 1;
-            break; 
+            break;
         } else {
             // Block upward reach if the statement contains side effects, control flow, or reads our vars.
             // Since we do not have a robust dependency checker here, breaking early is the only sound algorithmic choice.
@@ -129,8 +139,13 @@ fn stmt_list_contains_continue(stmts: &[HirStmt]) -> bool {
                     return true;
                 }
             }
-            HirStmt::If { then_body, else_body, .. } => {
-                if stmt_list_contains_continue(then_body) || stmt_list_contains_continue(else_body) {
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if stmt_list_contains_continue(then_body) || stmt_list_contains_continue(else_body)
+                {
                     return true;
                 }
             }

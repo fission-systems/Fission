@@ -63,7 +63,7 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     if changed {
         normalize_binding_initializers(&mut func.locals);
         cleanup_stmt_list(&mut func.body, &func.name, 0);
-    super::for_loops::apply_for_loop_folding(&mut func.body);
+        super::for_loops::apply_for_loop_folding(&mut func.body);
         eliminate_dead_local_clobber_assigns(func);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
@@ -82,7 +82,7 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         if changed {
             normalize_binding_initializers(&mut func.locals);
             cleanup_stmt_list(&mut func.body, &func.name, 0);
-    super::for_loops::apply_for_loop_folding(&mut func.body);
+            super::for_loops::apply_for_loop_folding(&mut func.body);
             eliminate_dead_local_clobber_assigns(func);
             prune_unused_temp_bindings(func);
             prune_unused_dead_local_bindings(func);
@@ -175,10 +175,21 @@ pub(super) fn normalize_stmt(stmt: &mut HirStmt) {
             }
             normalize_condition_expr(cond);
         }
-        HirStmt::For { init, cond, update, body } => {
-            if let Some(i) = init { normalize_stmt(i); }
-            if let Some(c) = cond { normalize_condition_expr(c); }
-            if let Some(u) = update { normalize_stmt(u); }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(i) = init {
+                normalize_stmt(i);
+            }
+            if let Some(c) = cond {
+                normalize_condition_expr(c);
+            }
+            if let Some(u) = update {
+                normalize_stmt(u);
+            }
             for stmt in body {
                 normalize_stmt(stmt);
             }
@@ -212,12 +223,18 @@ fn cleanup_stmt_list(stmts: &mut Vec<HirStmt>, func_name: &str, depth: usize) {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
                 cleanup_stmt_list(body, func_name, depth + 1)
             }
-            HirStmt::For { init, update, body, .. } => {
+            HirStmt::For {
+                init, update, body, ..
+            } => {
                 if let Some(i) = init {
-                    if let HirStmt::Block(b) = &mut **i { cleanup_stmt_list(b, func_name, depth + 1); }
+                    if let HirStmt::Block(b) = &mut **i {
+                        cleanup_stmt_list(b, func_name, depth + 1);
+                    }
                 }
                 if let Some(u) = update {
-                    if let HirStmt::Block(b) = &mut **u { cleanup_stmt_list(b, func_name, depth + 1); }
+                    if let HirStmt::Block(b) = &mut **u {
+                        cleanup_stmt_list(b, func_name, depth + 1);
+                    }
                 }
                 cleanup_stmt_list(body, func_name, depth + 1)
             }

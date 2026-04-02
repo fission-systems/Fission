@@ -5,10 +5,10 @@ use super::cleanup::{
 };
 use super::*;
 
-mod canonicalize;
 mod alias_refs;
-mod promotion_graph;
+mod canonicalize;
 mod promotion;
+mod promotion_graph;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GuardedTailCanonicalizationFailure {
@@ -19,7 +19,6 @@ pub(super) enum GuardedTailCanonicalizationFailure {
     AliasNotFallthrough,
     AliasHasMultipleInternalPredecessors,
     AliasHasNonlocalRef,
-    AliasBodyNotTrivial,
     PayloadCrossesJoin,
 }
 

@@ -90,15 +90,15 @@ impl<'a> PreviewBuilder<'a> {
             if conds.len() < 2 {
                 return Ok(None);
             }
-            
+
             self.condition_fold_and_count += conds.len() - 1;
-            
+
             let stmt = HirStmt::If {
                 cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalAnd)),
                 then_body,
                 else_body: Vec::new(),
             };
-            
+
             if first_prefix.is_empty() {
                 return Ok(Some((stmt, skip_to)));
             } else {
@@ -193,13 +193,13 @@ impl<'a> PreviewBuilder<'a> {
                 LinearExit::Return | LinearExit::End => then_skip.max(else_skip),
             };
             self.condition_fold_and_count += conds.len() - 1;
-            
+
             let stmt = HirStmt::If {
                 cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalAnd)),
                 then_body,
                 else_body,
             };
-            
+
             if first_prefix.is_empty() {
                 return Ok(Some((stmt, skip_to)));
             } else {
@@ -215,7 +215,7 @@ impl<'a> PreviewBuilder<'a> {
         idx: usize,
     ) -> Result<Option<(HirStmt, usize)>, MlilPreviewError> {
         let diag = structuring_diag_enabled();
-        
+
         let first_prefix = self.lower_block_stmts(&self.pcode.blocks[idx])?;
         if !first_prefix.iter().all(Self::is_trivial_structuring_stmt) {
             self.condition_fold_rejected_side_effect += 1;
@@ -269,13 +269,13 @@ impl<'a> PreviewBuilder<'a> {
                     else {
                         return Ok(None);
                     };
-                    
+
                     let stmt = HirStmt::If {
                         cond: conds[0].clone(),
                         then_body,
                         else_body: Vec::new(),
                     };
-                    
+
                     if first_prefix.is_empty() {
                         return Ok(Some((stmt, skip_to)));
                     } else {
@@ -305,14 +305,14 @@ impl<'a> PreviewBuilder<'a> {
                     LinearExit::Join(join_idx) => join_idx,
                     LinearExit::Return | LinearExit::End => then_skip.max(false_skip),
                 };
-                
+
                 self.condition_fold_or_count += conds.len() - 1;
                 let stmt = HirStmt::If {
                     cond: simplify_logical_expr(fold_logical_chain(conds, HirBinaryOp::LogicalOr)),
                     then_body,
                     else_body: Vec::new(),
                 };
-                
+
                 if first_prefix.is_empty() {
                     return Ok(Some((stmt, skip_to)));
                 } else {
@@ -321,7 +321,7 @@ impl<'a> PreviewBuilder<'a> {
                     return Ok(Some((HirStmt::Block(wrapped), skip_to)));
                 }
             }
-            
+
             let next_prefix = self.lower_block_stmts(&self.pcode.blocks[next_idx])?;
             if !next_prefix.is_empty() {
                 self.condition_fold_rejected_side_effect += 1;

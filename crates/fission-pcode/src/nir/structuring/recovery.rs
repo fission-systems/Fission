@@ -31,14 +31,29 @@ impl<'a> PreviewBuilder<'a> {
         start_idx: usize,
         targeted: &HashSet<u64>,
     ) -> Vec<LinearExit> {
-        let search_limit = self.pcode.blocks.len();
         let mut candidates = Vec::new();
+        let search_limit = self.pcode.blocks.len();
+
         for idx in (start_idx + 1)..search_limit {
-            let block_key = self.block_target_key(idx);
-            let targeted_join = targeted.contains(&block_key);
-            let multi_pred_join = self.predecessors[idx].len() > 1;
-            if targeted_join || multi_pred_join {
+            if self.dom_tree.dominates(start_idx, idx) {
+                continue;
+            }
+
+            let mut reachable_from_region = false;
+            for &p in &self.predecessors[idx] {
+                if self.dom_tree.dominates(start_idx, p) {
+                    reachable_from_region = true;
+                    break;
+                }
+            }
+
+            if reachable_from_region {
                 candidates.push(LinearExit::Join(idx));
+            } else {
+                let block_key = self.block_target_key(idx);
+                if targeted.contains(&block_key) {
+                    candidates.push(LinearExit::Join(idx));
+                }
             }
         }
         candidates
@@ -72,15 +87,11 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(None);
         }
 
-        let mut used_heuristic_exit = false;
         let mut exits = Vec::new();
         if let Some(exit) = self.linear_exit(start_idx)? {
             Self::push_unique_region_exit(&mut exits, exit);
         }
         for exit in self.region_linearized_exit_candidates_algorithmic(start_idx, targeted) {
-            if !used_heuristic_exit {
-                used_heuristic_exit = true;
-            }
             Self::push_unique_region_exit(&mut exits, exit);
         }
         if exits.is_empty() {
@@ -115,9 +126,6 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         self.region_linearize_structuring_count += 1;
-        if used_heuristic_exit {
-            self.region_linearize_heuristic_exit_count += 1;
-        }
         Ok(Some((cleanup_redundant_labels(body), skip_to)))
     }
 }

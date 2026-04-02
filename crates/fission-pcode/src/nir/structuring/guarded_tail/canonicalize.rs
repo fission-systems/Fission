@@ -34,22 +34,28 @@ impl<'a> PreviewBuilder<'a> {
             let top_level_after_label_count = top_level_after_positions.len();
             let nested_after_label_count = refs_after.saturating_sub(top_level_after_label_count);
             if nested_before > 0 {
-                return Err(GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors);
+                return Err(
+                    GuardedTailCanonicalizationFailure::AliasHasMultipleInternalPredecessors,
+                );
             }
-            let has_non_ignorable_gap = goto_positions.iter().filter(|pos| **pos < idx).any(|pos| {
-                body[pos + 1..idx]
-                    .iter()
-                    .any(|stmt| !is_ignorable_discovery_stmt(stmt))
-            });
+            let has_non_ignorable_gap =
+                goto_positions.iter().filter(|pos| **pos < idx).any(|pos| {
+                    body[pos + 1..idx]
+                        .iter()
+                        .any(|stmt| !is_ignorable_discovery_stmt(stmt))
+                });
             let next_label_idx =
                 (idx + 1..body.len()).find(|pos| matches!(body[*pos], HirStmt::Label(_)));
             let payload_end = next_label_idx.unwrap_or(body.len());
             let segment = &body[idx + 1..payload_end];
-            let allow_top_level_after_label_redirect = if let Some(next_label_idx) = next_label_idx {
+            let allow_top_level_after_label_redirect = if let Some(next_label_idx) = next_label_idx
+            {
                 if let HirStmt::Label(next_label) = &body[next_label_idx] {
                     nested_after_label_count == 0
                         && !top_level_after_positions.is_empty()
-                        && top_level_after_positions.iter().all(|pos| *pos < next_label_idx)
+                        && top_level_after_positions
+                            .iter()
+                            .all(|pos| *pos < next_label_idx)
                         && Self::is_local_alias_forward_segment_with_after_label_refs(
                             segment, label, next_label,
                         )
@@ -140,11 +146,8 @@ impl<'a> PreviewBuilder<'a> {
                 }) {
                     return Err(GuardedTailCanonicalizationFailure::PayloadCrossesJoin);
                 }
-                if segment.iter().all(|stmt| Self::stmt_is_pure_value_expr(stmt)) {
-                    alias_redirects.insert(label.clone(), None);
-                    continue;
-                }
-                return Err(GuardedTailCanonicalizationFailure::AliasBodyNotTrivial);
+                alias_redirects.insert(label.clone(), None);
+                continue;
             }
             if segment.iter().any(|stmt| {
                 matches!(
@@ -227,13 +230,16 @@ impl<'a> PreviewBuilder<'a> {
                         let local_ref_count = segment_ref_counts.get(label).copied().unwrap_or(0);
                         let total_ref_count = referenced.get(label).copied().unwrap_or(0);
                         if total_ref_count > local_ref_count {
-                            let (external_top_level_before, external_nested_before, external_refs_after) =
-                                Self::classify_external_alias_ref_sites(
-                                    full_body,
-                                    segment_start,
-                                    segment_start + flattened.len(),
-                                    label,
-                                );
+                            let (
+                                external_top_level_before,
+                                external_nested_before,
+                                external_refs_after,
+                            ) = Self::classify_external_alias_ref_sites(
+                                full_body,
+                                segment_start,
+                                segment_start + flattened.len(),
+                                label,
+                            );
                             self.mark_alias_nonlocal_from_external_sites(
                                 external_top_level_before,
                                 external_nested_before,
@@ -250,7 +256,9 @@ impl<'a> PreviewBuilder<'a> {
                             idx = next_idx;
                             continue;
                         }
-                        if (idx + 1..flattened.len()).any(|pos| matches!(flattened[pos], HirStmt::Label(_))) {
+                        if (idx + 1..flattened.len())
+                            .any(|pos| matches!(flattened[pos], HirStmt::Label(_)))
+                        {
                             self.canonicalization_failed_interleaved_join_uses_nontrivial_segment_count += 1;
                         } else {
                             self.canonicalization_failed_interleaved_join_uses_no_next_label_count += 1;

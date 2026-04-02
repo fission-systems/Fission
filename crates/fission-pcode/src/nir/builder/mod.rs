@@ -1,5 +1,5 @@
-use super::*;
 pub(super) use super::support::*;
+use super::*;
 mod state;
 pub(super) use state::PreviewBuilder;
 
@@ -31,7 +31,8 @@ pub(super) fn collect_local_surface_hints(
     func: &HirFunction,
     local_hints: &mut HashMap<String, String>,
 ) {
-    type_hints::collect_local_surface_hints(body, pointer_hints, func, local_hints);
+    let alias_collector = type_hints::StackAliasCollector::new(func);
+    type_hints::collect_local_surface_hints(body, pointer_hints, func, &alias_collector, local_hints);
 }
 
 impl<'a> PreviewBuilder<'a> {
@@ -173,5 +174,4 @@ impl<'a> PreviewBuilder<'a> {
         self.temps.insert(name, binding.clone());
         binding
     }
-
 }

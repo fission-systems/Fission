@@ -84,8 +84,6 @@ pub struct NirBuildStats {
     #[serde(default)]
     pub region_linearize_structuring_count: usize,
     #[serde(default)]
-    pub region_linearize_heuristic_exit_count: usize,
-    #[serde(default)]
     pub region_linearize_rejected_non_structuring_failure_count: usize,
     #[serde(default)]
     pub region_linearize_rejected_no_exit_count: usize,
@@ -134,6 +132,10 @@ pub struct NirBuildStats {
     pub structuring_scc_component_count: usize,
     #[serde(default)]
     pub structuring_irreducible_scc_count: usize,
+    #[serde(default)]
+    pub rule_block_if_no_exit_count: usize,
+    #[serde(default)]
+    pub rule_block_if_no_exit_accepted_count: usize,
     #[serde(default)]
     pub structuring_irreducible_header_count: usize,
     #[serde(default)]
@@ -228,7 +230,6 @@ impl NirBuildStats {
         self.normalize_duration_ms += other.normalize_duration_ms;
         self.forced_linear_structuring_count += other.forced_linear_structuring_count;
         self.region_linearize_structuring_count += other.region_linearize_structuring_count;
-        self.region_linearize_heuristic_exit_count += other.region_linearize_heuristic_exit_count;
         self.region_linearize_rejected_non_structuring_failure_count +=
             other.region_linearize_rejected_non_structuring_failure_count;
         self.region_linearize_rejected_no_exit_count +=
@@ -270,6 +271,8 @@ impl NirBuildStats {
             other.region_linearize_rejected_irreducible_cfg_count;
         self.structuring_scc_component_count += other.structuring_scc_component_count;
         self.structuring_irreducible_scc_count += other.structuring_irreducible_scc_count;
+        self.rule_block_if_no_exit_count += other.rule_block_if_no_exit_count;
+        self.rule_block_if_no_exit_accepted_count += other.rule_block_if_no_exit_accepted_count;
         self.structuring_irreducible_header_count += other.structuring_irreducible_header_count;
         self.loop_control_explicit_reducer_count += other.loop_control_explicit_reducer_count;
         self.loop_control_rewrite_break_count += other.loop_control_rewrite_break_count;
@@ -503,8 +506,8 @@ pub struct NirHintStats {
     pub explicit_param_type_hits: usize,
     pub explicit_local_type_hits: usize,
     pub explicit_return_type_hit: usize,
-    pub heuristic_pointer_alias_hits: usize,
-    pub heuristic_local_surface_hits: usize,
+    pub pointer_alias_hits: usize,
+    pub local_surface_hits: usize,
     pub derived_origin_type_hits: usize,
 }
 

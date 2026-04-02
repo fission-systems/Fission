@@ -143,11 +143,11 @@ pub(super) fn build_quality_tags_and_score(
         {
             tags.push("explicit_type_hints".to_string());
         }
-        if stats.heuristic_pointer_alias_hits > 0 {
-            tags.push("heuristic_pointer_alias".to_string());
+        if stats.pointer_alias_hits > 0 {
+            tags.push("pointer_alias".to_string());
         }
-        if stats.heuristic_local_surface_hits > 0 {
-            tags.push("heuristic_local_surface".to_string());
+        if stats.local_surface_hits > 0 {
+            tags.push("local_surface".to_string());
         }
         if stats.derived_origin_type_hits > 0 {
             tags.push("derived_origin_type".to_string());

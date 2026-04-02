@@ -553,7 +553,6 @@ fn normalize_promotes_guarded_jump_target_tail() {
     );
 }
 
-
 #[test]
 fn subpieces_inline_directly_into_call_arguments() {
     let whole = reg(0x08, 8);

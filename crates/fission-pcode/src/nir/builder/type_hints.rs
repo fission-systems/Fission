@@ -1,10 +1,36 @@
 use super::*;
 
+pub(super) struct StackAliasCollector {
+    alias_boundaries: Vec<(i64, i64)>,
+}
+
+impl StackAliasCollector {
+    pub(super) fn new(func: &HirFunction) -> Self {
+        let mut boundaries = Vec::new();
+        for local in &func.locals {
+            if let Some((offset, _)) = stack_origin_offset(local.origin) {
+                if let Some(size) = binding_byte_size(&local.ty) {
+                    boundaries.push((offset, offset + size as i64));
+                }
+            }
+        }
+        Self { alias_boundaries: boundaries }
+    }
+
+    fn might_alias(&self, offset: i64, size: u32) -> bool {
+        let end_offset = offset + size as i64;
+        self.alias_boundaries.iter().any(|&(start, end)| {
+            offset < end && end_offset > start
+        })
+    }
+}
+
 pub(super) fn apply_preview_type_hints(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
 ) -> PreviewHintStats {
     let mut stats = apply_function_name_hints(func, context);
+    let alias_collector = StackAliasCollector::new(func);
 
     let mut pointer_hints: HashMap<String, PreviewCallParamRule> = HashMap::new();
     collect_call_type_hints(&func.body, context, &mut pointer_hints);
@@ -12,15 +38,19 @@ pub(super) fn apply_preview_type_hints(
     for (var_name, hint) in &pointer_hints {
         if let Some(binding) = find_binding_mut(func, var_name)
             && binding.surface_type_name.is_none()
-            && binding_byte_size(&binding.ty) == Some(hint.pointer_size)
         {
-            binding.surface_type_name = Some(hint.pointer_alias.clone());
-            stats.heuristic_pointer_alias_hits += 1;
+            if let Some((offset, is_derived)) = stack_origin_offset(binding.origin) {
+                if is_derived && alias_collector.might_alias(offset, hint.pointer_size) {
+                    binding.surface_type_name = Some(hint.pointer_alias.clone());
+                    stats.pointer_alias_hits += 1;
+                }
+            }
         }
     }
 
     let mut local_hints: HashMap<String, String> = HashMap::new();
-    collect_local_surface_hints(&func.body, &pointer_hints, func, &mut local_hints);
+    collect_local_surface_hints(&func.body, &pointer_hints, func, &alias_collector, &mut local_hints);
+
     for (var_name, surface_type_name) in local_hints {
         if let Some(binding) = func
             .locals
@@ -29,7 +59,7 @@ pub(super) fn apply_preview_type_hints(
             && binding.surface_type_name.is_none()
         {
             binding.surface_type_name = Some(surface_type_name);
-            stats.heuristic_local_surface_hits += 1;
+            stats.local_surface_hits += 1;
         }
     }
 
@@ -242,6 +272,7 @@ pub(super) fn collect_local_surface_hints(
     body: &[HirStmt],
     pointer_hints: &HashMap<String, PreviewCallParamRule>,
     func: &HirFunction,
+    alias_collector: &StackAliasCollector,
     local_hints: &mut HashMap<String, String>,
 ) {
     for stmt in body {
@@ -258,8 +289,9 @@ pub(super) fn collect_local_surface_hints(
                         .locals
                         .iter()
                         .find(|binding| binding.name == local_name)
-                    && let Some(local_size) = binding_byte_size(&local_binding.ty)
-                    && rule.pointee_sizes.contains(&local_size)
+                    && let Some((offset, is_derived)) = stack_origin_offset(local_binding.origin)
+                    && is_derived
+                    && rule.pointee_sizes.iter().any(|&size| alias_collector.might_alias(offset, size))
                 {
                     local_hints
                         .entry(local_name.to_string())
@@ -270,21 +302,21 @@ pub(super) fn collect_local_surface_hints(
             | HirStmt::While { body: stmts, .. }
             | HirStmt::DoWhile { body: stmts, .. }
             | HirStmt::For { body: stmts, .. } => {
-                collect_local_surface_hints(stmts, pointer_hints, func, local_hints);
+                collect_local_surface_hints(stmts, pointer_hints, func, alias_collector, local_hints);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    collect_local_surface_hints(&case.body, pointer_hints, func, local_hints);
+                    collect_local_surface_hints(&case.body, pointer_hints, func, alias_collector, local_hints);
                 }
-                collect_local_surface_hints(default, pointer_hints, func, local_hints);
+                collect_local_surface_hints(default, pointer_hints, func, alias_collector, local_hints);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_local_surface_hints(then_body, pointer_hints, func, local_hints);
-                collect_local_surface_hints(else_body, pointer_hints, func, local_hints);
+                collect_local_surface_hints(then_body, pointer_hints, func, alias_collector, local_hints);
+                collect_local_surface_hints(else_body, pointer_hints, func, alias_collector, local_hints);
             }
             HirStmt::Expr(_)
             | HirStmt::Label(_)

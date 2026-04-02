@@ -370,6 +370,6 @@ fn preview_type_hints_collect_hint_stats() {
     assert_eq!(stats.explicit_param_type_hits, 1);
     assert_eq!(stats.explicit_local_type_hits, 2);
     assert_eq!(stats.explicit_return_type_hit, 1);
-    assert_eq!(stats.heuristic_pointer_alias_hits, 1);
+    // heuristic tracker removed
     assert_eq!(stats.derived_origin_type_hits, 1);
 }

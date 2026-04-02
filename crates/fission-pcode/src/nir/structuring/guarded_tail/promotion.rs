@@ -10,8 +10,9 @@ impl<'a> PreviewBuilder<'a> {
         outside_refs: usize,
         middle_refs: usize,
     ) -> Option<PromotionGateRejection> {
-        let effective_middle_refs = middle_refs
-            .saturating_sub(Self::trailing_middle_fallthrough_equivalent_refs(middle, label));
+        let effective_middle_refs = middle_refs.saturating_sub(
+            Self::trailing_middle_fallthrough_equivalent_refs(middle, label),
+        );
         if effective_middle_refs > 0 {
             return Some(PromotionGateRejection::MustEmitLabelSurvivingMiddleRef);
         }
@@ -73,9 +74,6 @@ impl<'a> PreviewBuilder<'a> {
             }
             GuardedTailCanonicalizationFailure::AliasHasNonlocalRef => {
                 self.canonicalization_failed_alias_has_nonlocal_ref_count += 1;
-            }
-            GuardedTailCanonicalizationFailure::AliasBodyNotTrivial => {
-                self.canonicalization_failed_alias_body_not_trivial_count += 1;
             }
             GuardedTailCanonicalizationFailure::PayloadCrossesJoin => {
                 self.canonicalization_failed_payload_crosses_join_count += 1;
@@ -191,13 +189,14 @@ impl<'a> PreviewBuilder<'a> {
             }
 
             self.promotion_candidate_count += 1;
-            let (outside_refs, middle_refs) = Self::surviving_label_refs_after_guarded_tail_promotion(
-                body,
-                &middle,
-                idx,
-                label_idx,
-                &target_label,
-            );
+            let (outside_refs, middle_refs) =
+                Self::surviving_label_refs_after_guarded_tail_promotion(
+                    body,
+                    &middle,
+                    idx,
+                    label_idx,
+                    &target_label,
+                );
             if let Some(reason) = Self::classify_must_emit_label_rejection(
                 body,
                 &middle,
@@ -326,13 +325,14 @@ impl<'a> PreviewBuilder<'a> {
 
             self.promotion_candidate_count += 1;
 
-            let (outside_refs, middle_refs) = Self::surviving_label_refs_after_guarded_tail_promotion(
-                body,
-                &middle,
-                idx,
-                label_idx,
-                &target_label,
-            );
+            let (outside_refs, middle_refs) =
+                Self::surviving_label_refs_after_guarded_tail_promotion(
+                    body,
+                    &middle,
+                    idx,
+                    label_idx,
+                    &target_label,
+                );
             if let Some(reason) = Self::classify_must_emit_label_rejection(
                 body,
                 &middle,

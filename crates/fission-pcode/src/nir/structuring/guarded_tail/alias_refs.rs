@@ -97,11 +97,13 @@ impl<'a> PreviewBuilder<'a> {
                         .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
                         .sum::<usize>()
             }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
-                body.iter()
-                    .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
-                    .sum()
-            }
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => body
+                .iter()
+                .map(|stmt| Self::stmt_contains_goto_label(stmt, label))
+                .sum(),
             HirStmt::Switch { cases, default, .. } => {
                 cases
                     .iter()
@@ -357,7 +359,10 @@ impl<'a> PreviewBuilder<'a> {
                     Self::count_goto_refs_in_stmt(nested, out);
                 }
             }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
                 for nested in body {
                     Self::count_goto_refs_in_stmt(nested, out);
                 }
@@ -408,7 +413,10 @@ impl<'a> PreviewBuilder<'a> {
                     Self::rewrite_goto_label_in_stmt(nested, from, to);
                 }
             }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } | HirStmt::For { body, .. } => {
+            HirStmt::Block(body)
+            | HirStmt::While { body, .. }
+            | HirStmt::DoWhile { body, .. }
+            | HirStmt::For { body, .. } => {
                 for nested in body {
                     Self::rewrite_goto_label_in_stmt(nested, from, to);
                 }
