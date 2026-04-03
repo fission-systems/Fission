@@ -43,6 +43,8 @@ fn should_use_assembly_fallback(error: &str) -> bool {
         || lower.contains("preview_timeout")
         || lower.contains("could not find op at target address")
         || lower.contains("ghidra lowlevelerror")
+    || lower.contains("unsupported architecture in mlil-preview")
+    || lower.contains("decoded") && lower.contains("zero semantic ops")
 }
 
 pub(super) fn make_assembly_fallback(

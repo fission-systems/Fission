@@ -10,17 +10,17 @@ fn sleigh_language_for_arch_spec(arch_spec: &str) -> Option<&'static str> {
     if arch_spec.starts_with("AARCH64:LE:64") && arch_spec.contains("AppleSilicon") {
         return Some("AARCH64_AppleSilicon");
     }
-    if arch_spec.starts_with("x86:LE:64") {
-        return Some("x86-64");
-    }
-    if arch_spec.starts_with("x86:LE:32") || arch_spec.starts_with("x86:LE:16") {
-        return Some("x86");
-    }
     if arch_spec.starts_with("AARCH64:LE:64") {
         return Some("AARCH64");
     }
     if arch_spec.starts_with("AARCH64:BE:64") {
         return Some("AARCH64BE");
+    }
+    if arch_spec.starts_with("x86:LE:64") {
+        return Some("x86-64");
+    }
+    if arch_spec.starts_with("x86:LE:32") || arch_spec.starts_with("x86:LE:16") {
+        return Some("x86");
     }
     None
 }
@@ -49,14 +49,12 @@ fn decode_rust_sleigh_pcode(
         0x100
     };
 
-    let bytes = binary
-        .view_bytes(func.address, max_bytes)
-        .ok_or_else(|| {
-            FissionError::decompiler(format!(
-                "rust_sleigh: unable to read bytes at 0x{:x}",
-                func.address
-            ))
-        })?;
+    let bytes = binary.view_bytes(func.address, max_bytes).ok_or_else(|| {
+        FissionError::decompiler(format!(
+            "rust_sleigh: unable to read bytes at 0x{:x}",
+            func.address
+        ))
+    })?;
 
     let mut ops = Vec::new();
     let mut offset = 0usize;
@@ -66,42 +64,42 @@ fn decode_rust_sleigh_pcode(
 
     while offset < bytes.len() && instruction_count < 256 {
         let remaining = &bytes[offset..];
-        let probe_limit = remaining.len().min(15);
-        let mut matched = None;
-        let mut last_probe_error: Option<String> = None;
+        let (mut ins_ops, decoded_len) = lifter
+            .decode_and_lift_with_len(remaining, current)
+            .map_err(|err| {
+                FissionError::decompiler(format!(
+                    "rust_sleigh: decode failed at 0x{:x}: {:#}",
+                    current, err
+                ))
+            })?;
 
-        for probe_len in 1..=probe_limit {
-            match lifter.decode_and_lift_with_len(&remaining[..probe_len], current) {
-                Ok((mut ins_ops, decoded_len)) => {
-                    if decoded_len == 0 {
-                        continue;
-                    }
-                    for op in &mut ins_ops {
-                        op.seq_num = global_seq;
-                        global_seq = global_seq.saturating_add(1);
-                    }
-                    matched = Some((ins_ops, decoded_len as usize));
-                    break;
-                }
-                Err(err) => {
-                    last_probe_error = Some(format!("{err:#}"));
-                }
-            }
+        if decoded_len == 0 {
+            return Err(FissionError::decompiler(format!(
+                "rust_sleigh: decoder returned zero length at 0x{:x}",
+                current
+            )));
         }
 
-        let Some((ins_ops, step)) = matched else {
-            if ops.is_empty() {
-                if let Some(err) = last_probe_error {
-                    return Err(FissionError::decompiler(format!(
-                        "rust_sleigh: decode failed at 0x{:x}: {}",
-                        current, err
-                    )));
-                }
-                break;
-            }
+        let step = usize::try_from(decoded_len).map_err(|_| {
+            FissionError::decompiler(format!(
+                "rust_sleigh: decoded length does not fit usize at 0x{:x}",
+                current
+            ))
+        })?;
 
-            break;
-        };
+        if step > remaining.len() {
+            return Err(FissionError::decompiler(format!(
+                "rust_sleigh: decoded length {} exceeds available bytes {} at 0x{:x}",
+                step,
+                remaining.len(),
+                current
+            )));
+        }
+
+        for op in &mut ins_ops {
+            op.seq_num = global_seq;
+            global_seq = global_seq.saturating_add(1);
+        }
 
         let terminates = ins_ops
             .last()
@@ -110,7 +108,7 @@ fn decode_rust_sleigh_pcode(
 
         ops.extend(ins_ops);
         offset = offset.saturating_add(step);
-        current = current.saturating_add(step as u64);
+        current = current.saturating_add(decoded_len);
         instruction_count = instruction_count.saturating_add(1);
 
         if terminates {
@@ -135,6 +133,40 @@ fn decode_rust_sleigh_pcode(
     })
 }
 
+fn format_varnode_for_pcode(vn: &fission_pcode::Varnode) -> String {
+    if vn.is_constant {
+        format!("const(0x{:x}:{} )", vn.constant_val as u64, vn.size)
+    } else {
+        format!("v(space={},off=0x{:x},size={})", vn.space_id, vn.offset, vn.size)
+    }
+}
+
+fn render_pcode_text(func: &FunctionInfo, pcode: &fission_pcode::PcodeFunction) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("// rust_sleigh direct pcode output: {}\n", func.name));
+    for block in &pcode.blocks {
+        out.push_str(&format!("block_{} @ 0x{:x}\n", block.index, block.start_address));
+        for op in &block.ops {
+            let out_vn = op
+                .output
+                .as_ref()
+                .map(format_varnode_for_pcode)
+                .unwrap_or_else(|| "-".to_string());
+            let in_vn = op
+                .inputs
+                .iter()
+                .map(format_varnode_for_pcode)
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!(
+                "  [{:04}] 0x{:x} {:?}  {} <- {}\n",
+                op.seq_num, op.address, op.opcode, out_vn, in_vn
+            ));
+        }
+    }
+    out
+}
+
 fn render_with_rust_sleigh(
     binary: &LoadedBinary,
     func: &FunctionInfo,
@@ -148,17 +180,31 @@ fn render_with_rust_sleigh(
 
     let lifter = fission_sleigh::lifter::SleighLifter::new_for_language(language)
         .map_err(|e| FissionError::decompiler(format!("rust_sleigh: {e:#}")))?;
+
     let pcode = decode_rust_sleigh_pcode(&lifter, binary, func)?;
 
     let options = fission_pcode::NirRenderOptions::from_loaded_binary(binary);
-    let code = fission_pcode::render_nir_with_context(
-        &pcode,
-        &func.name,
-        func.address,
-        &options,
-        None,
-    )
-    .map_err(|e| FissionError::decompiler(format!("rust_sleigh render failed: {e}")))?;
+    let code = match fission_pcode::render_nir_with_context(&pcode, &func.name, func.address, &options, None) {
+        Ok(rendered) => rendered,
+        Err(e) => {
+            let err_text = e.to_string();
+            if err_text
+                .to_ascii_lowercase()
+                .contains("unsupported architecture in mlil-preview")
+            {
+                return Ok(RenderedCode {
+                    code: render_pcode_text(func, &pcode),
+                    postprocess_sec: 0.0,
+                    engine_used: "rust_sleigh",
+                    fell_back: true,
+                    fallback_reason: Some("nir_unsupported_arch:pcode_dump".to_string()),
+                    preview_build_stats: None,
+                    preview_hint_stats: None,
+                });
+            }
+            return Err(FissionError::decompiler(format!("rust_sleigh render failed: {}", err_text)));
+        }
+    };
 
     let build_stats = fission_pcode::take_last_nir_build_stats();
     let hint_stats = fission_pcode::take_last_nir_hint_stats();

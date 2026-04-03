@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-04-04
+
+### Added
+- Dependency-free direct rust-sleigh instruction lifting path is now active for CLI `--engine rust-sleigh`.
+- AArch64 semantic lifting coverage expanded with concrete p-code ops for ALU/memory flows, including move-wide and writeback-addressing forms.
+
+### Changed
+- Reorganized `fission-sleigh` lifter into architecture-oriented module trees.
+- Split AArch64 implementation into facade/semantic/control modules.
+- Split x86 implementation into facade/length/control modules.
+- Updated lifter ownership/structure documentation to match the new folder tree.
+
+### Validation
+- `cargo check -p fission-sleigh`
+- `cargo check -p fission-cli --features native_decomp`
+- `fission_cli samples/hello --decomp 0x000100000460 --engine rust-sleigh --no-header`
+
 ## 2026-04-03
 
 ### Added
