@@ -162,6 +162,7 @@ pub struct QualityMeasurementSnapshot {
     pub linear_fallback_ratio_all_rows: f64,
     pub linear_fallback_ratio_success_rows: f64,
     pub top_build_stats: Vec<(String, usize)>,
+    pub structuring_fallback_reasons: Vec<(String, usize)>,
 }
 
 pub fn build_summary(
@@ -297,10 +298,6 @@ fn build_stats_pairs(stats: &NirBuildStats) -> Vec<(&'static str, usize)> {
         (
             "region_linearize_structuring_count",
             stats.region_linearize_structuring_count,
-        ),
-        (
-            "region_linearize_heuristic_exit_count",
-            stats.region_linearize_heuristic_exit_count,
         ),
         (
             "region_linearize_rejected_non_structuring_failure_count",
@@ -544,6 +541,37 @@ fn top_build_stats(stats: &NirBuildStats, limit: usize) -> Vec<(String, usize)> 
     pairs
 }
 
+fn structuring_fallback_reasons(stats: &NirBuildStats) -> Vec<(String, usize)> {
+    let mut pairs = vec![
+        ("non_structuring_failure", stats.region_linearize_rejected_non_structuring_failure_count),
+        ("no_exit", stats.region_linearize_rejected_no_exit_count),
+        ("body_lowering_failed", stats.region_linearize_rejected_body_lowering_failed_count),
+        ("cond_tail_exit_mismatch", stats.region_linearize_rejected_body_lowering_conditional_tail_exit_mismatch_count),
+        ("cond_tail_no_common_follow", stats.region_linearize_rejected_body_lowering_conditional_tail_no_common_follow_in_window_count),
+        ("cond_tail_follow_beyond", stats.region_linearize_rejected_body_lowering_conditional_tail_follow_beyond_window_count),
+        ("cond_tail_side_entry_or_exit", stats.region_linearize_rejected_body_lowering_conditional_tail_side_entry_or_exit_count),
+        ("cond_tail_complex_shape", stats.region_linearize_rejected_body_lowering_conditional_tail_complex_arm_shape_count),
+        ("cond_tail_depth_budget", stats.region_linearize_rejected_body_lowering_conditional_tail_depth_or_budget_exhausted_count),
+        ("cond_tail_arm_lowering_failed", stats.region_linearize_rejected_body_lowering_conditional_tail_arm_body_lowering_failed_count),
+        ("cond_tail_one_arm_lowering_failed", stats.region_linearize_rejected_body_lowering_conditional_tail_one_arm_body_lowering_failed_count),
+        ("cond_tail_both_arms_lowering_failed", stats.region_linearize_rejected_body_lowering_conditional_tail_both_arms_body_lowering_failed_count),
+        ("cond_tail_follow_lowering_failed", stats.region_linearize_rejected_body_lowering_conditional_tail_follow_tail_lowering_failed_count),
+        ("cond_tail_ambiguous_follows", stats.region_linearize_rejected_body_lowering_conditional_tail_ambiguous_multiple_follows_count),
+        ("successor_inline_rejected", stats.region_linearize_rejected_body_lowering_successor_inline_rejected_count),
+        ("revisit_cycle", stats.region_linearize_rejected_body_lowering_revisit_cycle_count),
+        ("unsupported_terminator", stats.region_linearize_rejected_body_lowering_unsupported_terminator_count),
+        ("non_advancing", stats.region_linearize_rejected_non_advancing_count),
+        ("irreducible_cfg", stats.region_linearize_rejected_irreducible_cfg_count),
+    ]
+    .into_iter()
+    .filter(|(_, count)| *count > 0)
+    .map(|(k, v)| (k.to_string(), v))
+    .collect::<Vec<_>>();
+
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    pairs
+}
+
 pub fn build_quality_measurement(summary: &AutomationSummary) -> QualityMeasurementSnapshot {
     let output_counts = &summary.aggregate.nir_output_class_counts;
     let structured = output_counts.get("structured").copied().unwrap_or(0);
@@ -560,6 +588,7 @@ pub fn build_quality_measurement(summary: &AutomationSummary) -> QualityMeasurem
             summary.aggregate.direct_success_count,
         ),
         top_build_stats: top_build_stats(&summary.aggregate.nir_build_stats_totals, 8),
+        structuring_fallback_reasons: structuring_fallback_reasons(&summary.aggregate.nir_build_stats_totals),
     }
 }
 
@@ -820,13 +849,14 @@ pub fn render_markdown(
     let quality = build_quality_measurement(summary);
     out.push_str("## Output Quality\n\n");
     out.push_str(&format!(
-        "- nir_output_class_counts: `{:?}`\n- structured_ratio_all_rows: `{:.2}%`\n- structured_ratio_success_rows: `{:.2}%`\n- linear_fallback_ratio_all_rows: `{:.2}%`\n- linear_fallback_ratio_success_rows: `{:.2}%`\n- top_build_stats: `{:?}`\n\n",
+        "- nir_output_class_counts: `{:?}`\n- structured_ratio_all_rows: `{:.2}%`\n- structured_ratio_success_rows: `{:.2}%`\n- linear_fallback_ratio_all_rows: `{:.2}%`\n- linear_fallback_ratio_success_rows: `{:.2}%`\n- top_build_stats: `{:?}`\n- structuring_fallbacks: `{:?}`\n\n",
         quality.nir_output_class_counts,
         quality.structured_ratio_all_rows * 100.0,
         quality.structured_ratio_success_rows * 100.0,
         quality.linear_fallback_ratio_all_rows * 100.0,
         quality.linear_fallback_ratio_success_rows * 100.0,
         quality.top_build_stats,
+        quality.structuring_fallback_reasons,
     ));
 
     if let Some(delta) = delta {
@@ -901,7 +931,7 @@ pub fn render_markdown(
     for entry in &diagnosis.binaries {
         out.push_str(&format!("### {}\n\n", entry.binary));
         out.push_str(&format!(
-            "- diagnosis: `{}`\n- next_action: `{}`\n- explicit_nonzero_rows: `{}`\n- strict_explicit_candidate_count: `{}`\n- nir_block_signatures: `{:?}`\n- nir_output_class_counts: `{:?}`\n- top_build_stats: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n\n",
+            "- diagnosis: `{}`\n- next_action: `{}`\n- explicit_nonzero_rows: `{}`\n- strict_explicit_candidate_count: `{}`\n- nir_block_signatures: `{:?}`\n- nir_output_class_counts: `{:?}`\n- top_build_stats: `{:?}`\n- structuring_fallbacks: `{:?}`\n- recovery_attempted_counts: `{:?}`\n- recovery_outcome_counts: `{:?}`\n- recovery_structuring_mode_counts: `{:?}`\n- recovery_quality_flag_counts: `{:?}`\n\n",
             entry.diagnosis_bucket,
             entry.next_action,
             entry.derived_metrics.explicit_nonzero_rows,
@@ -909,6 +939,7 @@ pub fn render_markdown(
             entry.derived_metrics.blocked_nir_block_signature_counts,
             entry.inventory_summary.nir_output_class_counts,
             top_build_stats(&entry.inventory_summary.nir_build_stats_totals, 6),
+            structuring_fallback_reasons(&entry.inventory_summary.nir_build_stats_totals),
             entry.inventory_summary.recovery_strategy_attempted_counts,
             entry.inventory_summary.recovery_outcome_counts,
             entry.inventory_summary.recovery_structuring_mode_counts,
@@ -1219,6 +1250,7 @@ pub fn print_terminal_summary(summary: &AutomationSummary, diagnosis: &Diagnosis
         summary.aggregate.recovery_quality_flag_counts
     );
     println!("  top_build_stats={:?}", quality.top_build_stats);
+    println!("  structuring_fallbacks={:?}", quality.structuring_fallback_reasons);
 }
 
 pub fn update_latest(run_dir: &Path, latest_dir: &Path) -> Result<()> {

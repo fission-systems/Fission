@@ -986,11 +986,9 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
     diag_log("func_ready", elapsed_ms(total_start));
     preview_log("func_ready");
 
-    // Preview p-code extraction does not require high-cost jump-table reconstruction.
-    // Large GUI dispatcher functions can spend most of their time in partial clone /
-    // jump-table recovery before we even have raw p-code to serialize.
-    fd->setJumptableRecovery(false);
-    ctx->arch->flowoptions &= ~ghidra::FlowInfo::record_jumploads;
+    // Enable jump-table recovery so we get BRANCHIND target edges and BasicBlocks
+    fd->setJumptableRecovery(true);
+    ctx->arch->flowoptions |= ghidra::FlowInfo::record_jumploads;
     
     auto serialize_current_pcode = [&]() -> std::string {
         std::ostringstream json;
@@ -1009,6 +1007,14 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
             block_json << "\"index\": " << block->getIndex() << ",";
             block_json << "\"start_addr\": \"0x" << std::hex << block->getStart().getOffset()
                        << "\",";
+            
+            block_json << "\"successors\": [";
+            for (int j = 0; j < block->sizeOut(); ++j) {
+                if (j > 0) block_json << ",";
+                block_json << block->getOut(j)->getIndex();
+            }
+            block_json << "],";
+
             block_json << "\"ops\": [";
 
             bool first_op = true;
@@ -1095,7 +1101,7 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
     };
 
     fd->clear();
-    fd->setJumptableRecovery(false);
+    fd->setJumptableRecovery(true);
 
     const size_t preview_follow_flow_limit = std::min<size_t>(
         compute_follow_flow_limit(ctx, addr),
@@ -1138,7 +1144,7 @@ std::string fission::decompiler::run_decompilation_pcode(DecompContext* ctx, uin
     try {
         // Clear only this function's data for fresh analysis
         fd->clear();
-        fd->setJumptableRecovery(false);
+        fd->setJumptableRecovery(true);
         
         // Follow control flow to discover instructions
         // We use the same aggressively truncated preview limit as the

@@ -7,6 +7,7 @@ fn preview_prints_direct_srem_as_mod() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x2000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,

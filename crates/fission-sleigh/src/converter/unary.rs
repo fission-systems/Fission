@@ -114,7 +114,162 @@ impl IRConverter {
             Unary::Dereference(mem) => {
                 self.lower_dereference(&mem, input, current_address, emitted)
             }
-            _ => anyhow::bail!("Unsupported unary op in converter MVP: {:?}", unary),
+            Unary::Popcount(bits) => {
+                let out_size =
+                    Self::bits_to_bytes(bits.get()).context("Invalid popcount output size")?;
+                let out = self.make_temp_varnode(self.next_seq, out_size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::PopCount,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_POPCOUNT".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::Lzcount(bits) => {
+                let out_size =
+                    Self::bits_to_bytes(bits.get()).context("Invalid lzcount output size")?;
+                let out = self.make_temp_varnode(self.next_seq, out_size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::Unknown,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_LZCOUNT".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::FloatNan(bits) => {
+                let out_size =
+                    Self::bits_to_bytes(bits.get()).context("Invalid floatnan output size")?;
+                let out = self.make_temp_varnode(self.next_seq, out_size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatNan,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_FLOATNAN".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::SignTrunc(bits) => {
+                let out_size =
+                    Self::bits_to_bytes(bits.get()).context("Invalid signtrunc output size")?;
+                let out = self.make_temp_varnode(self.next_seq, out_size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatTrunc,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_SIGNTRUNC".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::Float2Float(bits) => {
+                let out_size =
+                    Self::bits_to_bytes(bits.get()).context("Invalid float2float output size")?;
+                let out = self.make_temp_varnode(self.next_seq, out_size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatFloat2Float,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_FLOAT2FLOAT".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::Int2Float(bits) => {
+                let out_size =
+                    Self::bits_to_bytes(bits.get()).context("Invalid int2float output size")?;
+                let out = self.make_temp_varnode(self.next_seq, out_size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatInt2Float,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_INT2FLOAT".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::FloatNegative => {
+                let out = self.make_temp_varnode(self.next_seq, input.size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatNeg,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_FLOATNEG".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::FloatAbs => {
+                let out = self.make_temp_varnode(self.next_seq, input.size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatAbs,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_FLOATABS".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::FloatSqrt => {
+                let out = self.make_temp_varnode(self.next_seq, input.size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatSqrt,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_FLOATSQRT".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::FloatCeil => {
+                let out = self.make_temp_varnode(self.next_seq, input.size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatCeil,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_FLOATCEIL".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::FloatFloor => {
+                let out = self.make_temp_varnode(self.next_seq, input.size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatFloor,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_FLOATFLOOR".to_string()),
+                });
+                Ok(out)
+            }
+            Unary::FloatRound => {
+                let out = self.make_temp_varnode(self.next_seq, input.size);
+                emitted.push(PcodeOp {
+                    seq_num: self.take_seq(),
+                    opcode: PcodeOpcode::FloatRound,
+                    address: current_address,
+                    output: Some(out.clone()),
+                    inputs: vec![input],
+                    asm_mnemonic: Some("UNARY_FLOATROUND".to_string()),
+                });
+                Ok(out)
+            }
         }
     }
 

@@ -8,6 +8,7 @@ fn lower_linear_body_breaks_recursive_conditional_cycle() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4800,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -20,6 +21,7 @@ fn lower_linear_body_breaks_recursive_conditional_cycle() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4810,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -42,6 +44,7 @@ fn lower_linear_body_breaks_recursive_conditional_cycle() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4820,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -64,6 +67,7 @@ fn lower_linear_body_breaks_recursive_conditional_cycle() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4830,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -76,6 +80,7 @@ fn lower_linear_body_breaks_recursive_conditional_cycle() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x4840,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -88,6 +93,7 @@ fn lower_linear_body_breaks_recursive_conditional_cycle() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x4850,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -116,6 +122,7 @@ fn lower_linear_body_caches_repeated_requests() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4700,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -128,6 +135,7 @@ fn lower_linear_body_caches_repeated_requests() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4710,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -150,6 +158,7 @@ fn lower_linear_body_caches_repeated_requests() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4720,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -183,6 +192,7 @@ fn lower_linear_body_region_cache_preserves_reject_reason_across_retries() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4f80,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -195,6 +205,7 @@ fn lower_linear_body_region_cache_preserves_reject_reason_across_retries() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4f90,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -242,6 +253,7 @@ fn multi_block_preview_absorbs_shared_trivial_forwarding_return_tail() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3650,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -264,6 +276,7 @@ fn multi_block_preview_absorbs_shared_trivial_forwarding_return_tail() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3660,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -294,6 +307,7 @@ fn multi_block_preview_absorbs_shared_trivial_forwarding_return_tail() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3670,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -324,6 +338,7 @@ fn multi_block_preview_absorbs_shared_trivial_forwarding_return_tail() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x3680,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -354,6 +369,7 @@ fn multi_block_preview_absorbs_shared_trivial_forwarding_return_tail() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x3690,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -384,6 +400,7 @@ fn lower_linear_body_lowers_one_arm_forwarding_join_shape() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4a00,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -406,6 +423,7 @@ fn lower_linear_body_lowers_one_arm_forwarding_join_shape() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4a10,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -428,6 +446,7 @@ fn lower_linear_body_lowers_one_arm_forwarding_join_shape() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4a20,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -440,6 +459,7 @@ fn lower_linear_body_lowers_one_arm_forwarding_join_shape() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4a30,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -452,6 +472,7 @@ fn lower_linear_body_lowers_one_arm_forwarding_join_shape() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x4a40,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -464,6 +485,7 @@ fn lower_linear_body_lowers_one_arm_forwarding_join_shape() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x4a50,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -502,6 +524,7 @@ fn lower_linear_body_lowers_trampoline_tail_shape() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4b00,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -524,6 +547,7 @@ fn lower_linear_body_lowers_trampoline_tail_shape() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4b10,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -536,6 +560,7 @@ fn lower_linear_body_lowers_trampoline_tail_shape() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4b20,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -548,6 +573,7 @@ fn lower_linear_body_lowers_trampoline_tail_shape() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4b30,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -560,6 +586,7 @@ fn lower_linear_body_lowers_trampoline_tail_shape() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x4b40,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,

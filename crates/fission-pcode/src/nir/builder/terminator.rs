@@ -71,7 +71,25 @@ impl<'a> PreviewBuilder<'a> {
                         false_target: this.next_block_address(idx),
                     })
                 }
-                PcodeOpcode::BranchInd => Ok(LoweredTerminator::Unsupported),
+                PcodeOpcode::BranchInd => {
+                    let switch_var = &op.inputs[0];
+                    let switch_expr = this.lower_wrapped_varnode(switch_var, &mut HashSet::new())?;
+                    let mut targets = Vec::new();
+                    for succ_idx in &block.successors {
+                        if let Some(succ_block) = this.pcode.blocks.get(*succ_idx as usize) {
+                            targets.push(succ_block.start_address);
+                        }
+                    }
+                    if targets.is_empty() {
+                        Ok(LoweredTerminator::Unsupported)
+                    } else {
+                        Ok(LoweredTerminator::Switch {
+                            expr: switch_expr,
+                            targets,
+                            default_target: None, // We don't have explicit info about which one is default yet, though we might guess the last or Fallthrough
+                        })
+                    }
+                }
                 _ => Ok(LoweredTerminator::Fallthrough(this.next_block_address(idx))),
             },
         )

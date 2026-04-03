@@ -24,6 +24,7 @@ fn test_dead_bit_elimination() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 // Op 0: A = B & 0xFF00
                 PcodeOp {
@@ -127,6 +128,7 @@ fn test_dead_bit_elimination_or() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 // Op 0: A = B | 0x100
                 PcodeOp {

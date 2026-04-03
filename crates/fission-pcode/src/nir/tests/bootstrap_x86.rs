@@ -6,6 +6,7 @@ fn preview_supports_pe_x86_single_block() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x401000,
+            successors: vec![],
             ops: vec![PcodeOp {
                 seq_num: 0,
                 opcode: PcodeOpcode::Return,
@@ -37,6 +38,7 @@ fn preview_supports_pe_x86_multiblock_direct_target_branch() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4000,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -59,6 +61,7 @@ fn preview_supports_pe_x86_multiblock_direct_target_branch() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4010,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -71,6 +74,7 @@ fn preview_supports_pe_x86_multiblock_direct_target_branch() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4020,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -95,6 +99,7 @@ fn preview_names_x86_general_purpose_registers() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x402000,
+            successors: vec![],
             ops: vec![PcodeOp {
                 seq_num: 0,
                 opcode: PcodeOpcode::Return,
@@ -131,6 +136,7 @@ fn preview_recovers_test_reg_reg_jz_as_eq_zero() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x403000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -177,6 +183,7 @@ fn preview_recovers_test_reg_reg_jg_as_gt_zero() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x404000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -258,6 +265,7 @@ fn preview_recovers_cmp_je_as_eq() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x405000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -298,6 +306,7 @@ fn preview_recovers_cmp_jb_as_unsigned_lt() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x406000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -333,6 +342,7 @@ fn preview_recovers_cmp_jl_as_signed_lt() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x407000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -389,6 +399,7 @@ fn preview_leaves_non_exact_branch_shape_as_generic_value() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x408000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,

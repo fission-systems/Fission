@@ -1,7 +1,7 @@
 use super::arith::{
     canonicalize_condition_expr, canonicalize_flag_intrinsics, canonicalize_integer_expr,
     cleanup_arithmetic_wrappers, collapse_zero_offset_cast, normalize_boolean_logic,
-    recognize_hi_lo_extract, recognize_mod_div_power_of_two, recognize_wide_integer_recombine,
+    recognize_hi_lo_extract, recognize_mod_div_power_of_two, recognize_magic_number_division, recognize_wide_integer_recombine,
 };
 use super::bitstream::apply_bitstream_idioms;
 use super::cleanup::{
@@ -359,6 +359,7 @@ pub(super) fn normalize_expr(expr: &mut HirExpr) {
     loop {
         let next = canonicalize_integer_expr(&current)
             .or_else(|| recognize_mod_div_power_of_two(&current))
+            .or_else(|| recognize_magic_number_division(&current))
             .or_else(|| recognize_hi_lo_extract(&current))
             .or_else(|| recognize_wide_integer_recombine(&current))
             .or_else(|| canonicalize_flag_intrinsics(&current))

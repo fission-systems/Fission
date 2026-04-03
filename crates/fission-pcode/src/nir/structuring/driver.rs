@@ -274,6 +274,19 @@ impl<'a> PreviewBuilder<'a> {
                 LoweredTerminator::Unsupported => {
                     return Err(MlilPreviewError::UnsupportedCfgIndirectCallRegion);
                 }
+                LoweredTerminator::Switch { expr, targets, .. } => {
+                    let cases = targets.into_iter().enumerate().map(|(i, t)| {
+                        crate::nir::types::HirSwitchCase {
+                            values: vec![i as i64], // Simplistic indexing for now
+                            body: vec![HirStmt::Goto(block_label(t))],
+                        }
+                    }).collect();
+                    body.push(HirStmt::Switch {
+                        expr,
+                        cases,
+                        default: vec![],
+                    });
+                }
             }
             idx += 1;
         }

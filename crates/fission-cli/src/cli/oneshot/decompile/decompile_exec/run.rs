@@ -6,6 +6,342 @@ use super::super::decompile_targets::collect_target_functions;
 use super::super::*;
 use super::output::{attach_native_timing_if_present, decompile_and_output};
 
+fn sleigh_language_for_arch_spec(arch_spec: &str) -> Option<&'static str> {
+    if arch_spec.starts_with("AARCH64:LE:64") && arch_spec.contains("AppleSilicon") {
+        return Some("AARCH64_AppleSilicon");
+    }
+    if arch_spec.starts_with("x86:LE:64") {
+        return Some("x86-64");
+    }
+    if arch_spec.starts_with("x86:LE:32") || arch_spec.starts_with("x86:LE:16") {
+        return Some("x86");
+    }
+    if arch_spec.starts_with("AARCH64:LE:64") {
+        return Some("AARCH64");
+    }
+    if arch_spec.starts_with("AARCH64:BE:64") {
+        return Some("AARCH64BE");
+    }
+    None
+}
+
+fn is_terminal_control_flow(opcode: fission_pcode::PcodeOpcode) -> bool {
+    matches!(
+        opcode,
+        fission_pcode::PcodeOpcode::Branch
+            | fission_pcode::PcodeOpcode::CBranch
+            | fission_pcode::PcodeOpcode::BranchInd
+            | fission_pcode::PcodeOpcode::Return
+    )
+}
+
+fn decode_rust_sleigh_pcode(
+    lifter: &fission_sleigh::lifter::SleighLifter,
+    binary: &LoadedBinary,
+    func: &FunctionInfo,
+) -> Result<fission_pcode::PcodeFunction, FissionError> {
+    let max_bytes = if func.size > 0 {
+        usize::try_from(func.size)
+            .unwrap_or(0x400)
+            .min(0x1000)
+            .max(1)
+    } else {
+        0x100
+    };
+
+    let bytes = binary
+        .view_bytes(func.address, max_bytes)
+        .ok_or_else(|| {
+            FissionError::decompiler(format!(
+                "rust_sleigh: unable to read bytes at 0x{:x}",
+                func.address
+            ))
+        })?;
+
+    let mut ops = Vec::new();
+    let mut offset = 0usize;
+    let mut current = func.address;
+    let mut global_seq = 0u32;
+    let mut instruction_count = 0usize;
+
+    while offset < bytes.len() && instruction_count < 256 {
+        let remaining = &bytes[offset..];
+        let probe_limit = remaining.len().min(15);
+        let mut matched = None;
+        let mut last_probe_error: Option<String> = None;
+
+        for probe_len in 1..=probe_limit {
+            match lifter.decode_and_lift_with_len(&remaining[..probe_len], current) {
+                Ok((mut ins_ops, decoded_len)) => {
+                    if decoded_len == 0 {
+                        continue;
+                    }
+                    for op in &mut ins_ops {
+                        op.seq_num = global_seq;
+                        global_seq = global_seq.saturating_add(1);
+                    }
+                    matched = Some((ins_ops, decoded_len as usize));
+                    break;
+                }
+                Err(err) => {
+                    last_probe_error = Some(format!("{err:#}"));
+                }
+            }
+        }
+
+        let Some((ins_ops, step)) = matched else {
+            if ops.is_empty() {
+                if let Some(err) = last_probe_error {
+                    return Err(FissionError::decompiler(format!(
+                        "rust_sleigh: decode failed at 0x{:x}: {}",
+                        current, err
+                    )));
+                }
+                break;
+            }
+
+            break;
+        };
+
+        let terminates = ins_ops
+            .last()
+            .map(|op| is_terminal_control_flow(op.opcode))
+            .unwrap_or(false);
+
+        ops.extend(ins_ops);
+        offset = offset.saturating_add(step);
+        current = current.saturating_add(step as u64);
+        instruction_count = instruction_count.saturating_add(1);
+
+        if terminates {
+            break;
+        }
+    }
+
+    if ops.is_empty() {
+        return Err(FissionError::decompiler(format!(
+            "rust_sleigh: failed to decode function {} at 0x{:x}",
+            func.name, func.address
+        )));
+    }
+
+    Ok(fission_pcode::PcodeFunction {
+        blocks: vec![fission_pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: func.address,
+            successors: Vec::new(),
+            ops,
+        }],
+    })
+}
+
+fn render_with_rust_sleigh(
+    binary: &LoadedBinary,
+    func: &FunctionInfo,
+) -> Result<RenderedCode, FissionError> {
+    let language = sleigh_language_for_arch_spec(&binary.arch_spec).ok_or_else(|| {
+        FissionError::decompiler(format!(
+            "rust_sleigh: unsupported arch_spec '{}'",
+            binary.arch_spec
+        ))
+    })?;
+
+    let lifter = fission_sleigh::lifter::SleighLifter::new_for_language(language)
+        .map_err(|e| FissionError::decompiler(format!("rust_sleigh: {e:#}")))?;
+    let pcode = decode_rust_sleigh_pcode(&lifter, binary, func)?;
+
+    let options = fission_pcode::NirRenderOptions::from_loaded_binary(binary);
+    let code = fission_pcode::render_nir_with_context(
+        &pcode,
+        &func.name,
+        func.address,
+        &options,
+        None,
+    )
+    .map_err(|e| FissionError::decompiler(format!("rust_sleigh render failed: {e}")))?;
+
+    let build_stats = fission_pcode::take_last_nir_build_stats();
+    let hint_stats = fission_pcode::take_last_nir_hint_stats();
+
+    Ok(RenderedCode {
+        code,
+        postprocess_sec: 0.0,
+        engine_used: "rust_sleigh",
+        fell_back: false,
+        fallback_reason: None,
+        preview_build_stats: build_stats,
+        preview_hint_stats: hint_stats,
+    })
+}
+
+fn run_rust_sleigh_decompilation(
+    cli: &OneShotArgs,
+    binary: &LoadedBinary,
+    binary_data: &[u8],
+    functions: &[&FunctionInfo],
+    effective_no_header: bool,
+    effective_no_warnings: bool,
+    effective_json: bool,
+    init_start: std::time::Instant,
+) -> io::Result<()> {
+    let mut all_output = String::new();
+    let mut json_results = Vec::new();
+    let mut total_decomp_secs = 0.0;
+    let mut total_postprocess_secs = 0.0;
+
+    for func in functions {
+        let start = std::time::Instant::now();
+        match render_with_rust_sleigh(binary, func) {
+            Ok(rendered) => {
+                let decomp_sec = start.elapsed().as_secs_f64();
+                total_decomp_secs += decomp_sec;
+                total_postprocess_secs += rendered.postprocess_sec;
+
+                let mut filtered = rendered.code.clone();
+                if effective_no_warnings {
+                    filtered = strip_warnings(&filtered);
+                }
+                if cli.ghidra_compat {
+                    filtered = strip_inferred_structs(&filtered);
+                }
+
+                if effective_json {
+                    let mut entry = serde_json::json!({
+                        "address": format!("0x{:x}", func.address),
+                        "name": func.name,
+                        "code": filtered,
+                        "engine_used": rendered.engine_used,
+                        "fell_back": rendered.fell_back,
+                        "fallback_reason": rendered.fallback_reason,
+                    });
+                    if let Some(stats) = rendered.preview_build_stats {
+                        entry["preview_build_stats"] = serde_json::json!(stats);
+                    }
+                    if let Some(stats) = rendered.preview_hint_stats {
+                        entry["preview_hint_stats"] = serde_json::json!(stats);
+                    }
+                    if cli.benchmark {
+                        entry["decomp_sec"] =
+                            serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
+                        entry["postprocess_sec"] = serde_json::json!(
+                            (rendered.postprocess_sec * 1_000_000.0).round() / 1_000_000.0
+                        );
+                    }
+                    json_results.push(entry);
+                } else {
+                    if !effective_no_header {
+                        all_output.push_str("// ============================================\n");
+                        all_output.push_str(&format!(
+                            "// Function: {} @ 0x{:x}\n",
+                            func.name, func.address
+                        ));
+                        all_output.push_str("// ============================================\n\n");
+                    }
+                    all_output.push_str(&filtered);
+                    all_output.push_str("\n\n");
+                }
+            }
+            Err(e) => {
+                let decomp_sec = start.elapsed().as_secs_f64();
+                total_decomp_secs += decomp_sec;
+                let error_text = e.to_string();
+                if let Some(fallback) = make_assembly_fallback(binary, binary_data, func, &error_text)
+                {
+                    if effective_json {
+                        let mut entry = serde_json::json!({
+                            "address": format!("0x{:x}", func.address),
+                            "name": func.name,
+                            "code": fallback,
+                            "engine_used": "rust_sleigh",
+                            "fell_back": true,
+                            "fallback": "assembly",
+                            "fallback_reason": fallback_reason_with_kind("assembly_fallback", &error_text),
+                        });
+                        if cli.benchmark {
+                            entry["decomp_sec"] = serde_json::json!(
+                                (decomp_sec * 1_000_000.0).round() / 1_000_000.0
+                            );
+                        }
+                        json_results.push(entry);
+                    } else {
+                        if !effective_no_header {
+                            all_output.push_str("// ============================================\n");
+                            all_output.push_str(&format!(
+                                "// Function: {} @ 0x{:x}\n",
+                                func.name, func.address
+                            ));
+                            all_output.push_str("// ============================================\n\n");
+                        }
+                        all_output.push_str(&fallback);
+                        all_output.push_str("\n\n");
+                    }
+                } else if effective_json {
+                    let mut entry = serde_json::json!({
+                        "address": format!("0x{:x}", func.address),
+                        "name": func.name,
+                        "engine_used": "rust_sleigh",
+                        "fell_back": true,
+                        "fallback_reason": fallback_reason_with_kind("rust_sleigh", &error_text),
+                        "error": error_text,
+                    });
+                    if cli.benchmark {
+                        entry["decomp_sec"] =
+                            serde_json::json!((decomp_sec * 1_000_000.0).round() / 1_000_000.0);
+                    }
+                    json_results.push(entry);
+                } else {
+                    all_output.push_str(&format!(
+                        "// Error decompiling {} (0x{:x}): {}\n\n",
+                        func.name, func.address, error_text
+                    ));
+                }
+            }
+        }
+    }
+
+    let final_output = if cli.benchmark {
+        let envelope = serde_json::json!({
+            "_meta": {
+                "tool": "fission",
+                "version": env!("CARGO_PKG_VERSION"),
+                "profile": cli.profile.as_deref().unwrap_or("balanced"),
+                "engine": "rust-sleigh",
+                "function_count": functions.len(),
+                "init_sec": 0.0,
+                "total_decomp_sec": (total_decomp_secs * 1_000_000.0).round() / 1_000_000.0,
+                "total_postprocess_sec": (total_postprocess_secs * 1_000_000.0).round() / 1_000_000.0,
+                "wall_clock_sec": (init_start.elapsed().as_secs_f64() * 1_000_000.0).round() / 1_000_000.0,
+            },
+            "functions": json_results,
+        });
+        serde_json::to_string_pretty(&envelope)
+            .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?
+    } else if effective_json {
+        serde_json::to_string_pretty(&json_results)
+            .map_err(|e| io::Error::other(format!("JSON serialization failed: {}", e)))?
+    } else {
+        all_output
+    };
+
+    if let Some(ref output_path) = cli.output {
+        let mut file = fs::File::create(output_path).map_err(|e| {
+            io::Error::other(format!(
+                "Failed to create output file '{}': {}",
+                output_path.display(),
+                e
+            ))
+        })?;
+        file.write_all(final_output.as_bytes())?;
+        if cli.verbose {
+            eprintln!("[✓] Output written to: {}", output_path.display());
+        }
+    } else {
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(final_output.as_bytes())?;
+    }
+    Ok(())
+}
+
 fn run_sequential_decompilation<'a>(
     cli: &OneShotArgs,
     decomp: &mut DecompilerNative,
@@ -467,8 +803,6 @@ pub(crate) fn run_decompilation(
     binary_data: &[u8],
 ) -> io::Result<()> {
     let init_start = std::time::Instant::now();
-    let mut decomp = init_decompiler(cli.verbose);
-
     let (selected_profile, unknown_profile) = resolve_profile(cli.profile.as_deref());
     let (engine_mode, unknown_engine, deprecated_engine_alias, deprecated_profile_alias) =
         resolve_engine_mode(cli.engine.as_deref(), cli.profile.as_deref());
@@ -483,7 +817,10 @@ pub(crate) fn run_decompilation(
         );
     }
     if let Some(other) = unknown_engine {
-        eprintln!("[!] Unknown --engine '{}', using auto (nir|auto)", other);
+        eprintln!(
+            "[!] Unknown --engine '{}', using auto (nir|auto|rust-sleigh)",
+            other
+        );
         warn!(engine = other, "unknown decompilation engine, using auto");
     }
     if matches!(engine_mode, EngineMode::Legacy) && cli.verbose {
@@ -499,12 +836,55 @@ pub(crate) fn run_decompilation(
             "[*] '--profile mlil-preview' is deprecated; use '--engine nir --profile quality'"
         );
     }
-    apply_profile(&mut decomp, selected_profile);
-
     if cli.verbose {
         eprintln!("[*] Decompilation profile = {}", selected_profile);
         eprintln!("[*] Decompilation engine = {:?}", engine_mode);
     }
+
+    let functions = collect_target_functions(binary, cli.address, cli.decomp_all, cli.decomp_limit);
+
+    if matches!(engine_mode, EngineMode::RustSleigh) {
+        let effective_no_header = cli.no_header || cli.ghidra_compat;
+        let effective_no_warnings = cli.no_warnings || cli.ghidra_compat;
+        let effective_json = cli.json || cli.benchmark;
+
+        if functions.is_empty() && cli.address.is_some() {
+            if let Some(addr) = cli.address {
+                let synthetic = FunctionInfo {
+                    name: format!("sub_{:x}", addr),
+                    address: addr,
+                    size: 0,
+                    is_export: false,
+                    is_import: false,
+                };
+                let one = [&synthetic];
+                return run_rust_sleigh_decompilation(
+                    cli,
+                    binary,
+                    binary_data,
+                    &one,
+                    effective_no_header,
+                    effective_no_warnings,
+                    effective_json,
+                    init_start,
+                );
+            }
+        }
+
+        return run_rust_sleigh_decompilation(
+            cli,
+            binary,
+            binary_data,
+            &functions,
+            effective_no_header,
+            effective_no_warnings,
+            effective_json,
+            init_start,
+        );
+    }
+
+    let mut decomp = init_decompiler(cli.verbose);
+    apply_profile(&mut decomp, selected_profile);
 
     let mut prepare_timings = PrepareTimings::default();
     {
@@ -558,8 +938,6 @@ pub(crate) fn run_decompilation(
             init_elapsed.as_secs_f64()
         );
     }
-
-    let functions = collect_target_functions(binary, cli.address, cli.decomp_all, cli.decomp_limit);
 
     if functions.is_empty() && cli.address.is_some() {
         if let Some(addr) = cli.address {

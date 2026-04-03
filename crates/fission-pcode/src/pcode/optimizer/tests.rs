@@ -438,6 +438,7 @@ fn test_shift_bitops_left_zero() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 // V = 0xf000
                 PcodeOp {
@@ -505,6 +506,7 @@ fn test_shift_bitops_right_zero() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 // V = 0x0f
                 PcodeOp {
@@ -572,6 +574,7 @@ fn test_and_mask_always_zero() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 // V = 0x0f
                 PcodeOp {
@@ -639,6 +642,7 @@ fn test_and_mask_noop() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 // V = 0x0f
                 PcodeOp {
@@ -772,6 +776,7 @@ fn test_cse_basic() {
         blocks: vec![crate::pcode::PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![op1, op2],
         }],
     };
@@ -837,6 +842,7 @@ fn test_ptr_arith() {
         blocks: vec![crate::pcode::PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![op1, op2],
         }],
     };
@@ -904,6 +910,7 @@ fn test_pull_sub_indirect() {
         blocks: vec![crate::pcode::PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![op1, op2],
         }],
     };
@@ -970,6 +977,7 @@ fn test_indirect_collapse() {
         blocks: vec![crate::pcode::PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![op1, op2],
         }],
     };
@@ -1018,6 +1026,7 @@ fn test_copy_propagation_single_use_same_block() {
         blocks: vec![crate::pcode::PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -1097,6 +1106,7 @@ fn test_cast_copy_chain_propagation_same_size() {
         blocks: vec![crate::pcode::PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -1177,6 +1187,7 @@ fn test_copy_propagation_does_not_cross_store_boundary() {
         blocks: vec![crate::pcode::PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -1261,6 +1272,7 @@ fn test_loop_header_temp_coalescing_preserves_multiequal() {
         blocks: vec![crate::pcode::PcodeBasicBlock {
             index: 0,
             start_address: 0x2000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,

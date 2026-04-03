@@ -12,6 +12,7 @@ mod dead_code;
 mod def_use;
 mod loop_header;
 mod rules;
+mod subvariable_flow;
 
 #[cfg(test)]
 mod tests;
@@ -26,6 +27,7 @@ pub use dead_code::DeadCodeEliminator;
 pub use def_use::DefUseTracker;
 pub use loop_header::LoopHeaderTempCoalescer;
 pub use rules::OptimizationRules;
+pub use subvariable_flow::SubvariableFlowOptimizer;
 
 /// Configuration for Pcode optimization
 #[derive(Debug, Clone)]
@@ -37,6 +39,7 @@ pub struct PcodeOptimizerConfig {
     pub enable_cse: bool,
     pub enable_copy_propagation: bool,
     pub enable_loop_header_temp_coalescing: bool,
+    pub enable_subvariable_flow: bool,
 }
 
 impl Default for PcodeOptimizerConfig {
@@ -49,6 +52,7 @@ impl Default for PcodeOptimizerConfig {
             enable_cse: true,
             enable_copy_propagation: true,
             enable_loop_header_temp_coalescing: true,
+            enable_subvariable_flow: true,
         }
     }
 }
@@ -63,6 +67,7 @@ pub struct PcodeOptimizer {
     cse: CommonSubexpressionEliminator,
     copy_propagator: CopyPropagator,
     loop_header_temp_coalescer: LoopHeaderTempCoalescer,
+    subvariable_flow: SubvariableFlowOptimizer,
 }
 
 impl PcodeOptimizer {
@@ -76,6 +81,7 @@ impl PcodeOptimizer {
             cse: CommonSubexpressionEliminator::new(),
             copy_propagator: CopyPropagator::new(),
             loop_header_temp_coalescer: LoopHeaderTempCoalescer::new(),
+            subvariable_flow: SubvariableFlowOptimizer::new(),
         }
     }
 
@@ -126,7 +132,15 @@ impl PcodeOptimizer {
                 self.remove_identity_ops(func);
             }
 
-            // Pass 6: Dead code elimination
+            // Pass 6: Subvariable Flow Filtering
+            if self.config.enable_subvariable_flow {
+                self.def_use_tracker.build(func);
+                if self.subvariable_flow.eliminate(func, &self.def_use_tracker) {
+                    self.modified = true;
+                }
+            }
+
+            // Pass 7: Dead code elimination
             if self.config.enable_dead_code_elimination {
                 self.dead_code_eliminator
                     .eliminate(func, &mut self.modified);

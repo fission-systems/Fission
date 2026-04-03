@@ -164,6 +164,7 @@ pub(super) fn decompile_code_with_profile(
         EngineMode::Legacy => NirEngineMode::Legacy,
         EngineMode::Nir => NirEngineMode::Nir,
         EngineMode::Auto => NirEngineMode::Auto,
+        EngineMode::RustSleigh => NirEngineMode::Nir,
     };
     let preview = select_nir_output_with_facts(
         decomp,

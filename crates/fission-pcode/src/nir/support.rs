@@ -79,6 +79,11 @@ pub(crate) enum LoweredTerminator {
         true_target: u64,
         false_target: Option<u64>,
     },
+    Switch {
+        expr: HirExpr,
+        targets: Vec<u64>,
+        default_target: Option<u64>, // Usually the last target or something specific
+    },
     Return(Option<HirExpr>),
     Unsupported,
 }

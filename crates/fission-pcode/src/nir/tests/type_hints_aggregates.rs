@@ -219,6 +219,7 @@ fn preview_type_hints_fold_subpiece_lane_aggregate_store_back_to_local() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x140006260,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -381,6 +382,7 @@ fn preview_type_hints_fold_full_register_aggregate_store_back_to_local() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x140006260,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -511,6 +513,7 @@ fn preview_type_hints_fold_qword_lane_aggregate_store_back_to_local() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x140006260,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,

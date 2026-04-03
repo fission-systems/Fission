@@ -9,6 +9,7 @@ pub(super) enum EngineMode {
     Legacy,
     Nir,
     Auto,
+    RustSleigh,
 }
 
 pub(super) fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
@@ -64,10 +65,17 @@ pub(super) fn resolve_engine_mode(
             "nir" => EngineMode::Nir,
             "mlil-preview" | "mlil_preview" => EngineMode::Nir,
             "auto" => EngineMode::Auto,
+            "rust-sleigh" | "rust_sleigh" => EngineMode::RustSleigh,
             _ => EngineMode::Auto,
         };
         let unknown = match normalized.as_str() {
-            "legacy" | "nir" | "mlil-preview" | "mlil_preview" | "auto" => None,
+            "legacy"
+            | "nir"
+            | "mlil-preview"
+            | "mlil_preview"
+            | "auto"
+            | "rust-sleigh"
+            | "rust_sleigh" => None,
             _ => Some(engine.to_string()),
         };
         let deprecated_engine_alias =

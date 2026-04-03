@@ -212,6 +212,7 @@ The repository has moved through several recent internal milestones. The detaile
   - `*param_2 = local_3c;`
 - v24 recovered direct Fission NIR output on representative x64 targets again and bootstrapped direct Fission NIR output on at least one x86 seed
 - v25 refactored the `nir` implementation into a real module tree for maintainability
+- v26 fixed the `AARCH64_AppleSilicon` parse blocker by resolving `AARCH64neon.sinc` `Execution(InvalidRef)` handling in `sleigh-rs`, unblocking arm64 spec parsing for the Rust-owned path
 
 Important current nuance:
 

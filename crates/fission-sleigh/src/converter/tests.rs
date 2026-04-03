@@ -115,3 +115,23 @@ fn assignment_bitrange_byte_aligned_emits_only_subpiece() {
     assert_eq!(emitted[0].opcode, PcodeOpcode::SubPiece);
     assert_eq!(emitted[0].inputs[1], Varnode::constant(1, 4));
 }
+
+#[test]
+fn read_lsb_bits_extracts_expected_value() {
+    let conv = IRConverter::new();
+    let storage = [0b1010_0101u8, 0b0000_0011u8];
+
+    let value = conv.read_lsb_bits(&storage, 1, 5, "test").unwrap();
+    assert_eq!(value, 0b1_0010);
+
+    let cross_byte = conv.read_lsb_bits(&storage, 7, 3, "test").unwrap();
+    assert_eq!(cross_byte, 0b111);
+}
+
+#[test]
+fn read_lsb_bits_out_of_bounds_is_error() {
+    let conv = IRConverter::new();
+    let storage = [0u8];
+    let err = conv.read_lsb_bits(&storage, 7, 2, "test");
+    assert!(err.is_err());
+}

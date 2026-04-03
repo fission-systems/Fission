@@ -1348,6 +1348,7 @@ dependencies = [
  "fission-ffi",
  "fission-loader",
  "fission-pcode",
+ "fission-sleigh",
  "fission-static",
  "iced-x86",
  "libc",

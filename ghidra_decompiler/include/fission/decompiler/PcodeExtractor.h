@@ -36,6 +36,7 @@ struct PcodeBasicBlock {
     uint32_t index;             // Block index
     uint64_t start_address;     // First instruction address
     std::vector<PcodeOpInfo> ops; // All Pcode operations
+    std::vector<uint32_t> successors; // Outgoing block indices
 };
 
 /// Main class for extracting Pcode from Ghidra decompilation

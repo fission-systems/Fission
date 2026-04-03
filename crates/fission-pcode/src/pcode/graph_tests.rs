@@ -11,6 +11,7 @@ mod tests {
                 PcodeBasicBlock {
                     index: 0,
                     start_address: 0x1000,
+                    successors: vec![],
                     ops: vec![
                         PcodeOp {
                             seq_num: 0,
@@ -39,6 +40,7 @@ mod tests {
                 PcodeBasicBlock {
                     index: 1,
                     start_address: 0x1010,
+                    successors: vec![],
                     ops: vec![PcodeOp {
                         seq_num: 0,
                         opcode: PcodeOpcode::Return,

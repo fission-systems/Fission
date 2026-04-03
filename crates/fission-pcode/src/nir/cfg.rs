@@ -182,24 +182,33 @@ pub(super) fn resolve_branch_target_index(
 
 fn resolve_instruction_local_branch_target_index(
     pcode: &PcodeFunction,
-    block_idx: usize,
+    _block_idx: usize,
     op: &PcodeOp,
     vn: &Varnode,
 ) -> Option<usize> {
     if vn.space_id != 0 || !vn.is_constant {
         return None;
     }
-    let delta = u32::try_from(vn.constant_val).ok()?;
-    if delta == 0 || delta > 8 {
+    // Ghidra snippet emulation interprets relative branch offsets as signed int32.
+    let raw = if vn.offset != 0 {
+        vn.offset as u32
+    } else {
+        vn.constant_val as u32
+    };
+    let delta = i32::from_le_bytes(raw.to_le_bytes());
+    if delta == 0 {
         return None;
     }
-    let target_seq = op.seq_num.checked_add(delta)?;
-    let _ = pcode.blocks.get(block_idx)?;
+    let target_seq = if delta > 0 {
+        op.seq_num.checked_add(delta as u32)?
+    } else {
+        op.seq_num.checked_sub(delta.unsigned_abs())?
+    };
+
     pcode
         .blocks
         .iter()
         .enumerate()
-        .skip(block_idx)
         .find(|(_, block)| {
             block
                 .ops

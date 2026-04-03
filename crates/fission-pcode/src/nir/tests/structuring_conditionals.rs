@@ -7,6 +7,7 @@ fn multi_block_preview_lowers_simple_if_without_failing() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3000,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -29,6 +30,7 @@ fn multi_block_preview_lowers_simple_if_without_failing() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3010,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -41,6 +43,7 @@ fn multi_block_preview_lowers_simple_if_without_failing() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3020,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -68,6 +71,7 @@ fn x86_try_lower_if_still_structures_canonical_if() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4300,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -90,6 +94,7 @@ fn x86_try_lower_if_still_structures_canonical_if() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4310,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -102,6 +107,7 @@ fn x86_try_lower_if_still_structures_canonical_if() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4320,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -131,6 +137,7 @@ fn x86_pathological_try_lower_if_falls_back_without_hanging() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4800,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -153,6 +160,7 @@ fn x86_pathological_try_lower_if_falls_back_without_hanging() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4810,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -175,6 +183,7 @@ fn x86_pathological_try_lower_if_falls_back_without_hanging() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4820,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -205,6 +214,7 @@ fn multi_block_preview_lowers_conditional_goto_style_if() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3400,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -227,6 +237,7 @@ fn multi_block_preview_lowers_conditional_goto_style_if() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3410,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -239,6 +250,7 @@ fn multi_block_preview_lowers_conditional_goto_style_if() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3420,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -267,6 +279,7 @@ fn multi_block_preview_lowers_canonical_if_else() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3500,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -289,6 +302,7 @@ fn multi_block_preview_lowers_canonical_if_else() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3510,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -319,6 +333,7 @@ fn multi_block_preview_lowers_canonical_if_else() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3520,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -341,6 +356,7 @@ fn multi_block_preview_lowers_canonical_if_else() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x3530,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -373,6 +389,7 @@ fn multi_block_preview_prefers_short_circuit_or_over_nested_plain_if() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3540,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -395,6 +412,7 @@ fn multi_block_preview_prefers_short_circuit_or_over_nested_plain_if() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3550,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -417,6 +435,7 @@ fn multi_block_preview_prefers_short_circuit_or_over_nested_plain_if() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3560,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -429,6 +448,7 @@ fn multi_block_preview_prefers_short_circuit_or_over_nested_plain_if() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x3570,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -459,6 +479,7 @@ fn multi_block_preview_prefers_short_circuit_or_over_nested_plain_if() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x3580,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -487,6 +508,7 @@ fn multi_block_preview_lowers_if_else_with_multi_block_then_region() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3600,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -509,6 +531,7 @@ fn multi_block_preview_lowers_if_else_with_multi_block_then_region() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3610,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -531,6 +554,7 @@ fn multi_block_preview_lowers_if_else_with_multi_block_then_region() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3620,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -561,6 +585,7 @@ fn multi_block_preview_lowers_if_else_with_multi_block_then_region() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x3630,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -591,6 +616,7 @@ fn multi_block_preview_lowers_if_else_with_multi_block_then_region() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x3640,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -625,6 +651,7 @@ fn multi_block_preview_folds_short_circuit_and() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3700,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -647,6 +674,7 @@ fn multi_block_preview_folds_short_circuit_and() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3710,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -669,6 +697,7 @@ fn multi_block_preview_folds_short_circuit_and() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3720,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -699,6 +728,7 @@ fn multi_block_preview_folds_short_circuit_and() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x3730,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -728,6 +758,7 @@ fn multi_block_preview_folds_short_circuit_or() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3800,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -750,6 +781,7 @@ fn multi_block_preview_folds_short_circuit_or() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3810,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -772,6 +804,7 @@ fn multi_block_preview_folds_short_circuit_or() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3820,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -784,6 +817,7 @@ fn multi_block_preview_folds_short_circuit_or() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x3830,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -814,6 +848,7 @@ fn multi_block_preview_folds_short_circuit_or() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x3840,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -842,6 +877,7 @@ fn region_recovery_succeeds_on_one_arm_forwarding_join() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4c00,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -864,6 +900,7 @@ fn region_recovery_succeeds_on_one_arm_forwarding_join() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4c10,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -886,6 +923,7 @@ fn region_recovery_succeeds_on_one_arm_forwarding_join() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4c20,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -898,6 +936,7 @@ fn region_recovery_succeeds_on_one_arm_forwarding_join() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4c30,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -910,6 +949,7 @@ fn region_recovery_succeeds_on_one_arm_forwarding_join() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x4c40,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -939,6 +979,7 @@ fn region_recovery_succeeds_on_trampoline_tail_shared_join() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4d00,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -961,6 +1002,7 @@ fn region_recovery_succeeds_on_trampoline_tail_shared_join() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4d10,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -973,6 +1015,7 @@ fn region_recovery_succeeds_on_trampoline_tail_shared_join() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4d20,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -985,6 +1028,7 @@ fn region_recovery_succeeds_on_trampoline_tail_shared_join() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4d30,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -997,6 +1041,7 @@ fn region_recovery_succeeds_on_trampoline_tail_shared_join() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x4d40,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1026,6 +1071,7 @@ fn region_recovery_succeeds_on_two_arm_nearby_join() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4e00,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1048,6 +1094,7 @@ fn region_recovery_succeeds_on_two_arm_nearby_join() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4e10,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1060,6 +1107,7 @@ fn region_recovery_succeeds_on_two_arm_nearby_join() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4e20,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1072,6 +1120,7 @@ fn region_recovery_succeeds_on_two_arm_nearby_join() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4e30,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1101,6 +1150,7 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4f00,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1123,6 +1173,7 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4f10,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1135,6 +1186,7 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4f20,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1147,6 +1199,7 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4f30,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1159,6 +1212,7 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x4f40,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1171,6 +1225,7 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x4f50,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1183,6 +1238,7 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
             PcodeBasicBlock {
                 index: 6,
                 start_address: 0x4f60,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1195,6 +1251,7 @@ fn region_recovery_succeeds_on_multi_hop_trampoline_join() {
             PcodeBasicBlock {
                 index: 7,
                 start_address: 0x4f70,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1223,6 +1280,7 @@ fn region_canonicalization_respects_origin_guard() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x5000,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1235,6 +1293,7 @@ fn region_canonicalization_respects_origin_guard() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x5010,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1247,6 +1306,7 @@ fn region_canonicalization_respects_origin_guard() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x5020,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1259,6 +1319,7 @@ fn region_canonicalization_respects_origin_guard() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x5030,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1271,6 +1332,7 @@ fn region_canonicalization_respects_origin_guard() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x5040,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1306,6 +1368,7 @@ fn region_recovery_lowers_one_arm_join_adjacent_forwarding_chain() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x5100,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1328,6 +1391,7 @@ fn region_recovery_lowers_one_arm_join_adjacent_forwarding_chain() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x5110,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1350,6 +1414,7 @@ fn region_recovery_lowers_one_arm_join_adjacent_forwarding_chain() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x5120,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1362,6 +1427,7 @@ fn region_recovery_lowers_one_arm_join_adjacent_forwarding_chain() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x5130,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1374,6 +1440,7 @@ fn region_recovery_lowers_one_arm_join_adjacent_forwarding_chain() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x5140,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1386,6 +1453,7 @@ fn region_recovery_lowers_one_arm_join_adjacent_forwarding_chain() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x5150,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1418,6 +1486,7 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x5200,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1440,6 +1509,7 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x5210,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1462,6 +1532,7 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x5220,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1484,6 +1555,7 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x5230,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1496,6 +1568,7 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x5240,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1508,6 +1581,7 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x5250,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1530,6 +1604,7 @@ fn region_recovery_lowers_two_arm_shared_tail_entry() {
             PcodeBasicBlock {
                 index: 6,
                 start_address: 0x5260,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1562,6 +1637,7 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x5300,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1584,6 +1660,7 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x5310,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1606,6 +1683,7 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x5320,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1628,6 +1706,7 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x5330,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1650,6 +1729,7 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x5340,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1672,6 +1752,7 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x5350,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -1694,6 +1775,7 @@ fn region_recovery_lowers_two_arm_nontrivial_shared_follow() {
             PcodeBasicBlock {
                 index: 6,
                 start_address: 0x5360,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1722,6 +1804,7 @@ fn region_follow_discovery_selects_immediate_common_postdom() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x6000,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::CBranch,
@@ -1734,6 +1817,7 @@ fn region_follow_discovery_selects_immediate_common_postdom() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x6010,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1746,6 +1830,7 @@ fn region_follow_discovery_selects_immediate_common_postdom() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x6020,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1758,6 +1843,7 @@ fn region_follow_discovery_selects_immediate_common_postdom() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x6030,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1770,6 +1856,7 @@ fn region_follow_discovery_selects_immediate_common_postdom() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x6040,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1782,6 +1869,7 @@ fn region_follow_discovery_selects_immediate_common_postdom() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x6050,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1794,6 +1882,7 @@ fn region_follow_discovery_selects_immediate_common_postdom() {
             PcodeBasicBlock {
                 index: 6,
                 start_address: 0x6060,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1821,6 +1910,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x6100,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::CBranch,
@@ -1833,6 +1923,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x6110,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1845,6 +1936,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x6120,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1857,6 +1949,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x6130,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1869,6 +1962,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x6140,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1881,6 +1975,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x6150,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1893,6 +1988,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
             PcodeBasicBlock {
                 index: 6,
                 start_address: 0x6160,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -1905,6 +2001,7 @@ fn region_follow_discovery_rejects_side_entry_common_follow() {
             PcodeBasicBlock {
                 index: 7,
                 start_address: 0x6170,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1932,6 +2029,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x6200,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::CBranch,
@@ -1944,6 +2042,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x6210,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1956,6 +2055,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x6220,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1968,6 +2068,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x6230,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1980,6 +2081,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x6240,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -1992,6 +2094,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x6250,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2004,6 +2107,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
             PcodeBasicBlock {
                 index: 6,
                 start_address: 0x6260,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2016,6 +2120,7 @@ fn region_follow_discovery_orders_multiple_candidates_closest_to_join_first() {
             PcodeBasicBlock {
                 index: 7,
                 start_address: 0x6270,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -2043,6 +2148,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x6300,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::CBranch,
@@ -2055,6 +2161,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x6310,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2067,6 +2174,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x6320,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2079,6 +2187,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x6330,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2091,6 +2200,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x6340,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2103,6 +2213,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x6350,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2115,6 +2226,7 @@ fn region_follow_discovery_accepts_non_monotonic_acyclic_window() {
             PcodeBasicBlock {
                 index: 6,
                 start_address: 0x6360,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -2142,6 +2254,7 @@ fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x6400,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::CBranch,
@@ -2154,6 +2267,7 @@ fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x6410,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2166,6 +2280,7 @@ fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x6420,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2178,6 +2293,7 @@ fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x6430,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -2190,6 +2306,7 @@ fn region_follow_discovery_rejects_local_cycle_without_index_heuristic() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x6440,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,

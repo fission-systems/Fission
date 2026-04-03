@@ -1225,6 +1225,116 @@ fn wrap_negated_const(value: i64, bits: u32) -> Option<i64> {
     Some(negated as i64)
 }
 
+pub(super) fn recognize_magic_number_division(expr: &HirExpr) -> Option<HirExpr> {
+    let mut current = expr;
+    let mut n = 0u32;
+    let mut x_size_bits = None;
+    let mut ext_ty_bits = None;
+
+    if let HirExpr::Cast { ty, expr: inner } = current {
+        if let Some(bits) = int_type_bits(ty) {
+            ext_ty_bits = Some(bits);
+            current = inner.as_ref();
+        }
+    }
+
+    let mut is_signed_shift = false;
+    if let HirExpr::Binary { op, lhs, rhs, .. } = current {
+        if matches!(op, HirBinaryOp::Shr | HirBinaryOp::Sar) {
+            if let HirExpr::Const(shift_amt, _) = rhs.as_ref() {
+                n += *shift_amt as u32;
+                is_signed_shift = matches!(op, HirBinaryOp::Sar);
+                current = lhs.as_ref();
+            }
+        }
+    }
+
+    if let HirExpr::Binary { op: HirBinaryOp::Mul, lhs, rhs, ty: mul_ty } = current {
+        let (x_ext, y_expr) = if let HirExpr::Const(_, _) = rhs.as_ref() {
+            (lhs.as_ref(), rhs.as_ref())
+        } else if let HirExpr::Const(_, _) = lhs.as_ref() {
+            (rhs.as_ref(), lhs.as_ref())
+        } else {
+            return None;
+        };
+
+        let HirExpr::Const(y_val, _) = y_expr else {
+            return None;
+        };
+
+        if let Some(bits) = int_type_bits(mul_ty) {
+            let mask = if bits == 64 { u64::MAX } else { (1u64 << bits) - 1 };
+            let y_128 = ((*y_val as u64) & mask) as u128;
+            
+            let mut x_val = x_ext;
+            let mut is_sext = false;
+
+            if let HirExpr::Cast { ty: cast_ty, expr: original_x } = x_ext {
+                if let NirType::Int { bits: orig_bits, signed } = expr_type(original_x.as_ref()) {
+                    x_size_bits = Some(orig_bits);
+                    is_sext = signed;
+                }
+                x_val = original_x.as_ref();
+            } else if let NirType::Int { bits: orig_bits, signed } = expr_type(x_ext) {
+                x_size_bits = Some(orig_bits);
+                is_sext = signed;
+            }
+
+            if let Some(x_bits) = x_size_bits {
+                if n <= 127 && x_bits <= 64 && y_128 > 1 {
+                    let y_minus_1 = y_128 - 1;
+                    let power = 1u128 << n;
+                    let mut q = power / y_minus_1;
+                    let mut r = power % y_minus_1;
+                    
+                    if q <= u64::MAX as u128 && y_minus_1 >= q {
+                        let mut diff = 0;
+                        if r >= q {
+                            q += 1;
+                            r = r.wrapping_sub(y_minus_1).wrapping_add(q);
+                            if r >= q {
+                                // invalid magic
+                            } else {
+                                diff = q;
+                            }
+                        } else {
+                            diff = 0;
+                        }
+                        
+                        let mut maxx = if x_bits == 64 { 0 } else { 1u128 << x_bits };
+                        maxx = maxx.wrapping_sub(1);
+                        diff += q - r;
+                        
+                        if diff != 0 {
+                            let tmp = power / diff;
+                            if tmp > maxx {
+                                let divisor = q as u64;
+                                let _out_bits = ext_ty_bits.unwrap_or(x_bits);
+                                // Return the recovered division
+                                let div = HirExpr::Binary {
+                                    op: HirBinaryOp::Div,
+                                    lhs: Box::new(x_val.clone()),
+                                    rhs: Box::new(HirExpr::Const(divisor as i64, expr_type(x_val))),
+                                    ty: expr_type(x_val),
+                                };
+                                return Some(if expr_type(expr) == expr_type(x_val) {
+                                    div
+                                } else {
+                                    HirExpr::Cast {
+                                        ty: expr_type(expr),
+                                        expr: Box::new(div),
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn full_mask_for_type(ty: &NirType) -> Option<i64> {
     int_type_bits(ty).and_then(full_mask_for_bits)
 }

@@ -64,6 +64,7 @@ mod tests {
             .map(|idx| PcodeBasicBlock {
                 index: idx as u32,
                 start_address: 0x1000 + (idx as u64) * 0x10,
+                successors: vec![],
                 ops: Vec::new(),
             })
             .collect();

@@ -137,6 +137,14 @@ std::vector<PcodeBasicBlock> PcodeExtractor::extract_pcode(ghidra::Funcdata* fd)
         block.index = i;
         block.start_address = bb->getStart().getOffset();
         
+        // Extract successors
+        for (int j = 0; j < bb->sizeOut(); ++j) {
+            ghidra::FlowBlock* out_block = bb->getOut(j);
+            if (out_block) {
+                block.successors.push_back(out_block->getIndex());
+            }
+        }
+        
         // Iterate through Pcode operations in this block
         std::list<ghidra::PcodeOp*>::const_iterator iter;
         uint32_t seq = 0;
@@ -180,6 +188,13 @@ std::string PcodeExtractor::pcode_to_json(const std::vector<PcodeBasicBlock>& bl
         
         json << "{\"index\":" << block.index 
              << ",\"start_addr\":\"0x" << std::hex << block.start_address << std::dec << "\""
+             << ",\"successors\":[";
+             
+        for (size_t j = 0; j < block.successors.size(); ++j) {
+            if (j > 0) json << ",";
+            json << block.successors[j];
+        }
+        json << "]"
              << ",\"ops\":[";
         
         for (size_t j = 0; j < block.ops.size(); ++j) {

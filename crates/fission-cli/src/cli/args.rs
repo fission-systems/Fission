@@ -70,7 +70,7 @@ pub struct OneShotArgs {
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
 
-    /// Decompilation engine (auto|nir; mlil-preview is a deprecated alias, legacy is a hidden compat mode)
+    /// Decompilation engine (auto|nir|rust-sleigh; mlil-preview is a deprecated alias, legacy is a hidden compat mode)
     #[arg(long, value_name = "ENGINE")]
     pub engine: Option<String>,
 

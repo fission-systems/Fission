@@ -5,6 +5,7 @@ fn preview_type_hints_name_rsp_aggregate_slot_as_local() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x140006260,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,

@@ -455,6 +455,8 @@ pub struct PcodeOp {
 pub struct PcodeBasicBlock {
     pub index: u32,
     pub start_address: u64,
+    #[serde(default)]
+    pub successors: Vec<u32>,
     pub ops: Vec<PcodeOp>,
 }
 
@@ -476,6 +478,8 @@ impl PcodeFunction {
         struct JsonBlock {
             index: u32,
             start_addr: String,
+            #[serde(default)]
+            successors: Vec<u32>,
             ops: Vec<JsonOp>,
         }
 
@@ -545,6 +549,7 @@ impl PcodeFunction {
                 PcodeBasicBlock {
                     index: jb.index,
                     start_address,
+                    successors: jb.successors,
                     ops,
                 }
             })
@@ -638,7 +643,7 @@ impl PcodeFunction {
             }
             blocks.push(PcodeBasicBlock {
                 index,
-                start_address,
+                start_address, successors: vec![],
                 ops,
             });
         }
@@ -809,6 +814,7 @@ mod tests {
             blocks: vec![PcodeBasicBlock {
                 index: 0,
                 start_address: 0x1000,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::IntXor,

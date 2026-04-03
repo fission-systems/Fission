@@ -8,6 +8,7 @@ fn stack_slot_recovery_names_locals() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x1000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,

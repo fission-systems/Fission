@@ -8,6 +8,7 @@ fn multi_block_preview_lowers_canonical_switch_chain() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x5000,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -30,6 +31,7 @@ fn multi_block_preview_lowers_canonical_switch_chain() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x5010,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -52,6 +54,7 @@ fn multi_block_preview_lowers_canonical_switch_chain() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x5020,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -64,6 +67,7 @@ fn multi_block_preview_lowers_canonical_switch_chain() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x5030,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -76,6 +80,7 @@ fn multi_block_preview_lowers_canonical_switch_chain() {
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x5040,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -105,6 +110,7 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x5300,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -127,6 +133,7 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x5310,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -149,6 +156,7 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x5320,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -161,6 +169,7 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x5330,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -173,6 +182,7 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
             PcodeBasicBlock {
                 index: 4,
                 start_address: 0x5340,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -185,6 +195,7 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
             PcodeBasicBlock {
                 index: 5,
                 start_address: 0x5350,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Branch,
@@ -197,6 +208,7 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
             PcodeBasicBlock {
                 index: 6,
                 start_address: 0x5370,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -209,6 +221,7 @@ fn multi_block_preview_does_not_lower_switch_when_default_exit_differs_from_case
             PcodeBasicBlock {
                 index: 7,
                 start_address: 0x5380,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,

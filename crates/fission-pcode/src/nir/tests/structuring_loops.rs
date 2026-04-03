@@ -8,6 +8,7 @@ fn infloop_preview_lowers_single_block_self_loop() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4300,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -38,6 +39,7 @@ fn infloop_preview_lowers_single_block_self_loop() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4310,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -69,6 +71,7 @@ fn do_while_preview_is_lowered_without_ghidra_fallback() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4000,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -107,6 +110,7 @@ fn do_while_preview_is_lowered_without_ghidra_fallback() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4010,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -136,6 +140,7 @@ fn while_preview_lowers_multi_block_body() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4100,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -158,6 +163,7 @@ fn while_preview_lowers_multi_block_body() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4110,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -180,6 +186,7 @@ fn while_preview_lowers_multi_block_body() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4120,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -210,6 +217,7 @@ fn while_preview_lowers_multi_block_body() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4140,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -240,6 +248,7 @@ fn do_while_preview_lowers_multi_block_body() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x4200,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -262,6 +271,7 @@ fn do_while_preview_lowers_multi_block_body() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x4210,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -284,6 +294,7 @@ fn do_while_preview_lowers_multi_block_body() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x4220,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -306,6 +317,7 @@ fn do_while_preview_lowers_multi_block_body() {
             PcodeBasicBlock {
                 index: 3,
                 start_address: 0x4230,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,

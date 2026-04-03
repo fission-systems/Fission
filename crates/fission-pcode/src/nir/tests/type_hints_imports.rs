@@ -5,6 +5,7 @@ fn preview_type_hints_resolve_indirect_import_call_through_entry_param_alias() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x140006260,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -66,6 +67,7 @@ fn preview_type_hints_recover_indirect_import_args_from_block_register_setup() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x140006260,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -143,6 +145,7 @@ fn preview_type_hints_call_arg_recovery_falls_back_to_param_surface_on_unsupport
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x140006260,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,

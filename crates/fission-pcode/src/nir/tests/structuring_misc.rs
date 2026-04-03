@@ -9,6 +9,7 @@ fn multi_block_preview_lowers_wrapped_branch_condition_without_failing() {
             PcodeBasicBlock {
                 index: 0,
                 start_address: 0x3900,
+                successors: vec![],
                 ops: vec![
                     PcodeOp {
                         seq_num: 0,
@@ -39,6 +40,7 @@ fn multi_block_preview_lowers_wrapped_branch_condition_without_failing() {
             PcodeBasicBlock {
                 index: 1,
                 start_address: 0x3910,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -51,6 +53,7 @@ fn multi_block_preview_lowers_wrapped_branch_condition_without_failing() {
             PcodeBasicBlock {
                 index: 2,
                 start_address: 0x3920,
+                successors: vec![],
                 ops: vec![PcodeOp {
                     seq_num: 0,
                     opcode: PcodeOpcode::Return,
@@ -76,6 +79,7 @@ fn malformed_store_is_skipped_without_preview_failure() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x3a00,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -119,6 +123,7 @@ fn multiequal_with_identical_inputs_does_not_fail_preview() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x5000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -161,6 +166,7 @@ fn piece_and_subpiece_lower_without_preview_failure() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x6000,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -206,6 +212,7 @@ fn piece_recombines_matching_subpieces_back_to_source_value() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x6100,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -562,6 +569,7 @@ fn subpieces_inline_directly_into_call_arguments() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x6200,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -614,6 +622,7 @@ fn trap_like_unknown_producer_can_surface_as_opaque_callind_target() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x6a00,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
@@ -656,6 +665,7 @@ fn non_trap_unknown_callind_target_still_fails_preview() {
         blocks: vec![PcodeBasicBlock {
             index: 0,
             start_address: 0x6b00,
+            successors: vec![],
             ops: vec![
                 PcodeOp {
                     seq_num: 0,
