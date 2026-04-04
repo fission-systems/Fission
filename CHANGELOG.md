@@ -10,10 +10,13 @@
 - Reorganized `fission-sleigh` lifter into architecture-oriented module trees.
 - Split AArch64 implementation into facade/semantic/control modules.
 - Split x86 implementation into facade/length/control modules.
+- Refactored AArch64 semantic decoding into focused submodules (`arithmetic`, `logical`, `memory`, `misc`) and kept `semantic.rs` as a thin dispatcher.
+- Split semantic unit tests by submodule file and normalized test names with a `decode_` prefix for consistent per-file coverage.
 - Updated lifter ownership/structure documentation to match the new folder tree.
 
 ### Validation
 - `cargo check -p fission-sleigh`
+- `cargo test -p fission-sleigh`
 - `cargo check -p fission-cli --features native_decomp`
 - `fission_cli samples/hello --decomp 0x000100000460 --engine rust-sleigh --no-header`
 

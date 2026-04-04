@@ -3,6 +3,7 @@ use fission_pcode::Varnode;
 pub(super) const UNIQUE_SPACE_ID: u64 = 3;
 pub(super) const RAM_SPACE_ID: u64 = 2;
 pub(super) const A64_REG_BASE: u64 = 0xA640_0000;
+pub(super) const A64_NZCV_BASE: u64 = 0xA64F_0000;
 
 #[derive(Debug, Clone)]
 pub(super) struct A64TempFactory {
@@ -37,6 +38,32 @@ pub(super) fn a64_reg(reg: u32, size: u32) -> Varnode {
         is_constant: false,
         constant_val: 0,
     }
+}
+
+fn a64_flag(off: u64) -> Varnode {
+    Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: A64_NZCV_BASE + off,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+pub(super) fn a64_flag_n() -> Varnode {
+    a64_flag(0)
+}
+
+pub(super) fn a64_flag_z() -> Varnode {
+    a64_flag(1)
+}
+
+pub(super) fn a64_flag_c() -> Varnode {
+    a64_flag(2)
+}
+
+pub(super) fn a64_flag_v() -> Varnode {
+    a64_flag(3)
 }
 
 pub(super) fn const_u64(val: u64, size: u32) -> Varnode {

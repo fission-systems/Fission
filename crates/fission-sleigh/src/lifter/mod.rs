@@ -89,14 +89,14 @@ impl SleighLifter {
                 });
                 ops.append(&mut sem);
                 if !has_cf {
-                    if let Some(flow) = self.decode_control_flow(insn, address, decoded_len)? {
-                        ops.push(flow);
+                    if let Some(mut flow) = self.decode_control_flow(insn, address, decoded_len)? {
+                        ops.append(&mut flow);
                     }
                 }
             }
             ArchKind::X86 => {
-                if let Some(flow) = self.decode_control_flow(insn, address, decoded_len)? {
-                    ops.push(flow);
+                if let Some(mut flow) = self.decode_control_flow(insn, address, decoded_len)? {
+                    ops.append(&mut flow);
                 }
             }
         }
@@ -144,10 +144,10 @@ impl SleighLifter {
         }
     }
 
-    fn decode_control_flow(&self, insn: &[u8], address: u64, decoded_len: u64) -> Result<Option<PcodeOp>> {
+    fn decode_control_flow(&self, insn: &[u8], address: u64, decoded_len: u64) -> Result<Option<Vec<PcodeOp>>> {
         match self.arch {
             ArchKind::Aarch64 => Ok(aarch64::decode_control(insn, address)),
-            ArchKind::X86 => Ok(x86::decode_control(insn, address, decoded_len)),
+            ArchKind::X86 => Ok(x86::decode_control(insn, address, decoded_len).map(|op| vec![op])),
         }
     }
 }
