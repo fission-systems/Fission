@@ -7,9 +7,13 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
 
     let mut i = 0usize;
     let mut operand_size_override = false;
+    let mut rex = 0u8;
     while i < bytes.len() && is_prefix(bytes[i]) {
         if bytes[i] == 0x66 {
             operand_size_override = true;
+        }
+        if (0x40..=0x4F).contains(&bytes[i]) {
+            rex = bytes[i];
         }
         i += 1;
     }
@@ -67,7 +71,13 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
         }
     }
 
-    i = i.saturating_add(imm_len(opcode, ext, modrm, operand_size_override));
+    i = i.saturating_add(imm_len(
+        opcode,
+        ext,
+        modrm,
+        operand_size_override,
+        (rex & 0x08) != 0,
+    ));
     if i > bytes.len() {
         bail!(
             "x86 instruction truncated: need {} bytes, have {}",
@@ -88,6 +98,7 @@ fn needs_modrm(opcode: u8, ext: Option<u8>) -> bool {
         opcode,
         0x6A
             | 0x68
+            | 0x50..=0x5F
             | 0x90
             | 0xC3
             | 0xCB
@@ -107,7 +118,13 @@ fn needs_modrm(opcode: u8, ext: Option<u8>) -> bool {
     )
 }
 
-fn imm_len(opcode: u8, ext: Option<u8>, modrm: Option<u8>, operand_size_override: bool) -> usize {
+fn imm_len(
+    opcode: u8,
+    ext: Option<u8>,
+    modrm: Option<u8>,
+    operand_size_override: bool,
+    rex_w: bool,
+) -> usize {
     let full_operand_imm = if operand_size_override { 2 } else { 4 };
 
     if let Some(second) = ext {
@@ -122,9 +139,18 @@ fn imm_len(opcode: u8, ext: Option<u8>, modrm: Option<u8>, operand_size_override
         0x83 => 1,
         0xC0 => 1,
         0xC1 => 1,
+        0xC6 => 1,
+        0xC7 => full_operand_imm,
         0xF7 => {
             if modrm.map(|m| ((m >> 3) & 0x7) == 0).unwrap_or(false) {
                 full_operand_imm
+            } else {
+                0
+            }
+        }
+        0xF6 => {
+            if modrm.map(|m| ((m >> 3) & 0x7) == 0).unwrap_or(false) {
+                1
             } else {
                 0
             }
@@ -133,8 +159,16 @@ fn imm_len(opcode: u8, ext: Option<u8>, modrm: Option<u8>, operand_size_override
         0xA9 => full_operand_imm,
         0xC2 | 0xCA => 2,
         0x6A | 0xEB | 0x70..=0x7F | 0xCD => 1,
-        0x68 | 0xE8 | 0xE9 | 0xA0 | 0xA1 | 0xA2 | 0xA3 => 4,
-        0xB8..=0xBF => 4,
+        0x68 => full_operand_imm,
+        0xE8 | 0xE9 | 0xA0 | 0xA1 | 0xA2 | 0xA3 => 4,
+        0xB0..=0xB7 => 1,
+        0xB8..=0xBF => {
+            if rex_w {
+                8
+            } else {
+                full_operand_imm
+            }
+        }
         _ => 0,
     }
 }
@@ -174,6 +208,12 @@ mod tests {
     }
 
     #[test]
+    fn decode_len_handles_f6_test_immediate_only_for_group0() {
+        assert_eq!(decode_len(&[0xF6, 0xC0, 0x7F]).unwrap(), 3);
+        assert_eq!(decode_len(&[0xF6, 0xD8]).unwrap(), 2);
+    }
+
+    #[test]
     fn decode_len_handles_a9_and_operand_override() {
         assert_eq!(decode_len(&[0xA9, 0x01, 0x00, 0x00, 0x00]).unwrap(), 5);
         assert_eq!(decode_len(&[0x66, 0xA9, 0x34, 0x12]).unwrap(), 4);
@@ -196,5 +236,37 @@ mod tests {
         assert_eq!(decode_len(&[0xD0, 0xE0]).unwrap(), 2);
         assert_eq!(decode_len(&[0xD2, 0xE0]).unwrap(), 2);
         assert_eq!(decode_len(&[0xC0, 0xE8, 0x03]).unwrap(), 3);
+    }
+
+    #[test]
+    fn decode_len_handles_mov_imm_opcodes() {
+        assert_eq!(decode_len(&[0xB0, 0x7F]).unwrap(), 2);
+        assert_eq!(decode_len(&[0xB8, 0x78, 0x56, 0x34, 0x12]).unwrap(), 5);
+        assert_eq!(decode_len(&[0x49, 0xB8, 1, 2, 3, 4, 5, 6, 7, 8]).unwrap(), 10);
+    }
+
+    #[test]
+    fn decode_len_handles_mov_group11_immediates() {
+        assert_eq!(decode_len(&[0xC6, 0x00, 0x12]).unwrap(), 3);
+        assert_eq!(decode_len(&[0xC7, 0x00, 0x78, 0x56, 0x34, 0x12]).unwrap(), 6);
+    }
+
+    #[test]
+    fn decode_len_handles_push_pop_register_opcodes() {
+        assert_eq!(decode_len(&[0x53]).unwrap(), 1);
+        assert_eq!(decode_len(&[0x5B]).unwrap(), 1);
+        assert_eq!(decode_len(&[0x41, 0x50]).unwrap(), 2);
+    }
+
+    #[test]
+    fn decode_len_handles_push_immediate_with_operand_override() {
+        assert_eq!(decode_len(&[0x68, 0x78, 0x56, 0x34, 0x12]).unwrap(), 5);
+        assert_eq!(decode_len(&[0x66, 0x68, 0x34, 0x12]).unwrap(), 4);
+    }
+
+    #[test]
+    fn decode_len_handles_pop_rm_and_push_rm_groups() {
+        assert_eq!(decode_len(&[0x8F, 0x00]).unwrap(), 2);
+        assert_eq!(decode_len(&[0xFF, 0x30]).unwrap(), 2);
     }
 }

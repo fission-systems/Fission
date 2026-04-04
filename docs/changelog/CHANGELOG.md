@@ -7,6 +7,32 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-05
+
+### x86 Lifter - Semantic Module Split and Byte-Group Arithmetic Expansion
+
+This increment continues the x86-first lifting track by reducing semantic-module complexity and expanding arithmetic coverage for byte-width group operations.
+
+#### Changed
+
+- split x86 semantic extended-opcode logic into a dedicated module to improve ownership boundaries and maintainability:
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext.rs`
+  - `crates/fission-sleigh/src/lifter/x86/semantic.rs` (dispatcher wiring)
+- completed x86 `F6` group semantic coverage (`/0,/3,/4,/5,/6,/7`) by reusing existing `F7` one-operand arithmetic flows with `size=1`:
+  - `TEST`, `NEG`, `MUL`, `IMUL`, `DIV`, `IDIV`
+  - implemented in `crates/fission-sleigh/src/lifter/x86/semantic.rs`
+- aligned x86 length decode for `F6` immediate handling so only `/0` consumes `imm8`:
+  - `crates/fission-sleigh/src/lifter/x86/length.rs`
+- added byte-group regression tests for semantic/length consistency:
+  - `crates/fission-sleigh/src/lifter/x86/semantic/tests.rs`
+  - `crates/fission-sleigh/src/lifter/x86/length.rs`
+
+#### Validation
+
+- `cargo test -p fission-sleigh --lib lifter::x86::semantic::tests::decode_f6` (pass)
+- `cargo test -p fission-sleigh --lib lifter::x86::length::tests::decode_len_handles_f6_test_immediate_only_for_group0` (pass)
+- `cargo test -p fission-sleigh` (pass, 92 tests)
+
 ## 2026-04-03
 
 ### AARCH64 AppleSilicon Parse Fix - InvalidRef Resolution in sleigh-rs

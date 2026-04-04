@@ -35,6 +35,14 @@ crates/fission-sleigh/
 │   └── lifter/
 │       ├── mod.rs
 │       ├── common.rs
+│       ├── arm32/
+│       │   └── README.md      # planned scaffold
+│       ├── mips/
+│       │   └── README.md      # planned scaffold
+│       ├── riscv/
+│       │   └── README.md      # planned scaffold
+│       ├── powerpc/
+│       │   └── README.md      # planned scaffold
 │       ├── aarch64/
 │       │   ├── mod.rs
 │       │   ├── control.rs

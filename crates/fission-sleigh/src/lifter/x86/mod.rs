@@ -1,5 +1,6 @@
 mod control;
 mod length;
+mod predicate;
 mod semantic;
 
 pub(super) use control::decode_control;

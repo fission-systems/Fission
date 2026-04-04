@@ -434,6 +434,18 @@ pub(super) fn decode_immediate(insn: &[u8], idx: usize, width: usize, out_size: 
             };
             (v, 4usize)
         }
+        8 => {
+            let b0 = *insn.get(idx)?;
+            let b1 = *insn.get(idx + 1)?;
+            let b2 = *insn.get(idx + 2)?;
+            let b3 = *insn.get(idx + 3)?;
+            let b4 = *insn.get(idx + 4)?;
+            let b5 = *insn.get(idx + 5)?;
+            let b6 = *insn.get(idx + 6)?;
+            let b7 = *insn.get(idx + 7)?;
+            let raw = i64::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7]);
+            (raw, 8usize)
+        }
         _ => return None,
     };
     Some(Varnode::constant(val, out_size))
