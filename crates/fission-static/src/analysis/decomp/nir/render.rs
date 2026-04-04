@@ -80,12 +80,76 @@ pub(crate) fn nir_options_with_recovery(
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> NirRenderOptions {
-    let mut options = NirRenderOptions::from_loaded_binary(binary);
+    let options = NirRenderOptions::from_loaded_binary(binary);
+    apply_nir_recovery_flags(
+        options,
+        region_linearize_structuring,
+        force_linear_structuring,
+    )
+}
+
+fn apply_nir_recovery_flags(
+    mut options: NirRenderOptions,
+    region_linearize_structuring: bool,
+    force_linear_structuring: bool,
+) -> NirRenderOptions {
     options.region_linearize_structuring = region_linearize_structuring;
     options.force_linear_structuring = force_linear_structuring;
-    options.conservative_irreducible_fallback =
-        std::env::var_os("FISSION_NIR_CONSERVATIVE_IRREDUCIBLE_FALLBACK").is_some();
+    options.conservative_irreducible_fallback = options.conservative_irreducible_fallback
+        || std::env::var_os("FISSION_NIR_CONSERVATIVE_IRREDUCIBLE_FALLBACK").is_some();
     options
+}
+
+pub(crate) fn render_nir_from_pcode_with_type_context_and_options(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    enforce_auto_gate: bool,
+    _timeout_ms: Option<u64>,
+    type_context: NirTypeContext,
+    base_options: NirRenderOptions,
+    region_linearize_structuring: bool,
+    force_linear_structuring: bool,
+) -> Result<Option<(String, Option<NirBuildStats>, Option<NirHintStats>)>, String> {
+    if enforce_auto_gate
+        && !(binary.is_64bit
+            && binary.format.to_ascii_uppercase().starts_with("PE")
+            && pcode.blocks.len() <= 12
+            && pcode_total_ops(pcode) <= 600
+            && !contains_indirect_control_flow(pcode)
+            && max_multiequal_fanin(pcode) <= 4)
+    {
+        return Ok(None);
+    }
+
+    let options = apply_nir_recovery_flags(
+        base_options,
+        region_linearize_structuring,
+        force_linear_structuring,
+    );
+    let render_start = Instant::now();
+    match render_nir_with_context(pcode, name, address, &options, Some(&type_context)) {
+        Ok(code) => {
+            let build_stats = take_last_nir_build_stats();
+            let hint_stats = take_last_nir_hint_stats();
+            nir_diag_stage(address, "render_preview_done", render_start);
+            Ok(Some((code, build_stats, hint_stats)))
+        }
+        Err(err) => {
+            let surfaced_error = err
+                .structuring_failure_kind()
+                .map(|kind| {
+                    format!(
+                        "nir_structuring_failure[{}]: {err}",
+                        kind.preview_block_signature()
+                    )
+                })
+                .unwrap_or_else(|| format!("Fission NIR unavailable: {err}"));
+            nir_diag_stage(address, "render_preview_error", render_start);
+            Err(surfaced_error)
+        }
+    }
 }
 
 pub(crate) fn render_nir_request(

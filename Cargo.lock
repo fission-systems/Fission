@@ -1345,6 +1345,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "fission-core",
+ "fission-decompiler-core",
  "fission-ffi",
  "fission-loader",
  "fission-pcode",
@@ -1373,6 +1374,15 @@ dependencies = [
  "toml 0.8.2",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "fission-decompiler-core"
+version = "0.1.0"
+dependencies = [
+ "fission-loader",
+ "fission-pcode",
+ "fission-static",
 ]
 
 [[package]]

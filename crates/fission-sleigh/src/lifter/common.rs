@@ -4,6 +4,8 @@ pub(super) const UNIQUE_SPACE_ID: u64 = 3;
 pub(super) const RAM_SPACE_ID: u64 = 2;
 pub(super) const A64_REG_BASE: u64 = 0xA640_0000;
 pub(super) const A64_NZCV_BASE: u64 = 0xA64F_0000;
+pub(super) const X86_REG_BASE: u64 = 0xA860_0000;
+pub(super) const X86_EFLAGS_BASE: u64 = 0xA86F_0000;
 
 #[derive(Debug, Clone)]
 pub(super) struct A64TempFactory {
@@ -64,6 +66,46 @@ pub(super) fn a64_flag_c() -> Varnode {
 
 pub(super) fn a64_flag_v() -> Varnode {
     a64_flag(3)
+}
+
+fn x86_flag(bit: u64) -> Varnode {
+    Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: X86_EFLAGS_BASE + bit,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+pub(super) fn x86_flag_cf() -> Varnode {
+    x86_flag(0)
+}
+
+pub(super) fn x86_flag_pf() -> Varnode {
+    x86_flag(2)
+}
+
+pub(super) fn x86_flag_zf() -> Varnode {
+    x86_flag(6)
+}
+
+pub(super) fn x86_flag_sf() -> Varnode {
+    x86_flag(7)
+}
+
+pub(super) fn x86_flag_of() -> Varnode {
+    x86_flag(11)
+}
+
+pub(super) fn x86_reg(reg: u32, size: u32) -> Varnode {
+    Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: X86_REG_BASE + (u64::from(reg) * 8),
+        size,
+        is_constant: false,
+        constant_val: 0,
+    }
 }
 
 pub(super) fn const_u64(val: u64, size: u32) -> Varnode {

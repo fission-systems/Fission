@@ -69,7 +69,8 @@ pub use nir_engine::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource, NirSurfaceKind,
     auto_nir_eligible, classify_native_failure_kind, native_failure_routing_decision,
     nir_fallback_reason_with_kind, rescue_nir_output, rescue_nir_output_with_facts,
-    select_nir_output, select_nir_output_with_facts,
+    select_nir_output, select_nir_output_from_pcode, select_nir_output_from_pcode_with_facts,
+    select_nir_output_with_facts,
 };
 #[cfg(feature = "native_decomp")]
 pub use nir_taxonomy::{

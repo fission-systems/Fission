@@ -326,3 +326,207 @@ fn emit_bcond_predicate(
 	})
 }
 
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn decode(word: u32, address: u64) -> Vec<PcodeOp> {
+		let bytes = word.to_le_bytes();
+		decode_control(&bytes, address).expect("expected control decode")
+	}
+
+	#[test]
+	fn decode_ret_register_path() {
+		let word = 0xD65F_0000u32;
+		let ops = decode(word, 0x1000);
+		assert_eq!(ops.len(), 1);
+		assert_eq!(ops[0].opcode, PcodeOpcode::Return);
+		assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("RET"));
+	}
+
+	#[test]
+	fn decode_b_direct_target() {
+		let imm26 = 4u32;
+		let word = 0x1400_0000u32 | imm26;
+		let address = 0x2000u64;
+		let ops = decode(word, address);
+
+		assert_eq!(ops.len(), 1);
+		assert_eq!(ops[0].opcode, PcodeOpcode::Branch);
+		assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("B"));
+		assert_eq!(ops[0].inputs[0].constant_val as u64, address + ((imm26 as u64) << 2));
+	}
+
+	#[test]
+	fn decode_bl_direct_target() {
+		let imm26 = 8u32;
+		let word = 0x9400_0000u32 | imm26;
+		let address = 0x3000u64;
+		let ops = decode(word, address);
+
+		assert_eq!(ops.len(), 1);
+		assert_eq!(ops[0].opcode, PcodeOpcode::Call);
+		assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("BL"));
+		assert_eq!(ops[0].inputs[0].constant_val as u64, address + ((imm26 as u64) << 2));
+	}
+
+	#[test]
+	fn decode_cbz_and_cbnz_predicate_shape() {
+		let address = 0x4000u64;
+		let imm19 = 2u32;
+		let rt = 1u32;
+
+		let cbz = 0x3400_0000u32 | (imm19 << 5) | rt;
+		let cbz_ops = decode(cbz, address);
+		assert_eq!(cbz_ops.len(), 2);
+		assert_eq!(cbz_ops[0].opcode, PcodeOpcode::IntEqual);
+		assert_eq!(cbz_ops[1].opcode, PcodeOpcode::CBranch);
+		assert_eq!(cbz_ops[1].inputs[0].constant_val as u64, address + ((imm19 as u64) << 2));
+		assert_eq!(cbz_ops[1].asm_mnemonic.as_deref(), Some("CBZ"));
+
+		let cbnz = 0x3500_0000u32 | (imm19 << 5) | rt;
+		let cbnz_ops = decode(cbnz, address);
+		assert_eq!(cbnz_ops.len(), 2);
+		assert_eq!(cbnz_ops[0].opcode, PcodeOpcode::IntNotEqual);
+		assert_eq!(cbnz_ops[1].opcode, PcodeOpcode::CBranch);
+		assert_eq!(cbnz_ops[1].inputs[0].constant_val as u64, address + ((imm19 as u64) << 2));
+		assert_eq!(cbnz_ops[1].asm_mnemonic.as_deref(), Some("CBNZ"));
+	}
+
+	#[test]
+	fn decode_tbz_and_tbnz_predicate_shape() {
+		let address = 0x5000u64;
+		let imm14 = 2u32;
+		let rt = 3u32;
+		let bit_pos = 7u32;
+		let bit_imm = (bit_pos & 0x1F) << 19;
+
+		let tbz = 0x3600_0000u32 | bit_imm | (imm14 << 5) | rt;
+		let tbz_ops = decode(tbz, address);
+		assert_eq!(tbz_ops.len(), 4);
+		assert_eq!(tbz_ops[0].opcode, PcodeOpcode::IntRight);
+		assert_eq!(tbz_ops[1].opcode, PcodeOpcode::IntAnd);
+		assert_eq!(tbz_ops[2].opcode, PcodeOpcode::IntEqual);
+		assert_eq!(tbz_ops[3].opcode, PcodeOpcode::CBranch);
+		assert_eq!(tbz_ops[3].inputs[0].constant_val as u64, address + ((imm14 as u64) << 2));
+		assert_eq!(tbz_ops[3].asm_mnemonic.as_deref(), Some("TBZ"));
+
+		let tbnz = 0x3700_0000u32 | bit_imm | (imm14 << 5) | rt;
+		let tbnz_ops = decode(tbnz, address);
+		assert_eq!(tbnz_ops.len(), 4);
+		assert_eq!(tbnz_ops[2].opcode, PcodeOpcode::IntNotEqual);
+		assert_eq!(tbnz_ops[3].opcode, PcodeOpcode::CBranch);
+		assert_eq!(tbnz_ops[3].inputs[0].constant_val as u64, address + ((imm14 as u64) << 2));
+		assert_eq!(tbnz_ops[3].asm_mnemonic.as_deref(), Some("TBNZ"));
+	}
+
+	#[test]
+	fn decode_bcond_eq_references_z_flag() {
+		let address = 0x6000u64;
+		let imm19 = 3u32;
+		let cond_eq = 0u32;
+		let word = 0x5400_0000u32 | (imm19 << 5) | cond_eq;
+		let ops = decode(word, address);
+
+		assert_eq!(ops.len(), 1);
+		assert_eq!(ops[0].opcode, PcodeOpcode::CBranch);
+		assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("B.cond"));
+		assert_eq!(ops[0].inputs[0].constant_val as u64, address + ((imm19 as u64) << 2));
+		assert_eq!(ops[0].inputs[1].space_id, UNIQUE_SPACE_ID);
+		assert_eq!(ops[0].inputs[1].offset, 0xA64F_0001);
+		assert_eq!(ops[0].inputs[1].size, 1);
+	}
+
+	#[test]
+	fn decode_bcond_al_is_unconditional_branch() {
+		let address = 0x7000u64;
+		let imm19 = 1u32;
+		let cond_al = 0xEu32;
+		let word = 0x5400_0000u32 | (imm19 << 5) | cond_al;
+		let ops = decode(word, address);
+
+		assert_eq!(ops.len(), 1);
+		assert_eq!(ops[0].opcode, PcodeOpcode::Branch);
+		assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("B.AL"));
+		assert_eq!(ops[0].inputs[0].constant_val as u64, address + ((imm19 as u64) << 2));
+	}
+
+	#[test]
+	fn decode_bcond_nv_is_rejected() {
+		let imm19 = 1u32;
+		let cond_nv = 0xFu32;
+		let word = 0x5400_0000u32 | (imm19 << 5) | cond_nv;
+		let bytes = word.to_le_bytes();
+		assert!(decode_control(&bytes, 0x8000).is_none());
+	}
+
+	fn decode_bcond_ops(cond: u32) -> Vec<PcodeOp> {
+		let imm19 = 1u32;
+		let word = 0x5400_0000u32 | (imm19 << 5) | cond;
+		decode(word, 0x9000)
+	}
+
+	#[test]
+	fn decode_bcond_ge_lt_core_shapes() {
+		let ge_ops = decode_bcond_ops(0xA);
+		assert_eq!(ge_ops.len(), 2);
+		assert_eq!(ge_ops[0].opcode, PcodeOpcode::IntEqual);
+		assert_eq!(ge_ops[1].opcode, PcodeOpcode::CBranch);
+		assert_eq!(ge_ops[0].inputs[0].offset, 0xA64F_0000); // N
+		assert_eq!(ge_ops[0].inputs[1].offset, 0xA64F_0003); // V
+
+		let lt_ops = decode_bcond_ops(0xB);
+		assert_eq!(lt_ops.len(), 2);
+		assert_eq!(lt_ops[0].opcode, PcodeOpcode::IntNotEqual);
+		assert_eq!(lt_ops[1].opcode, PcodeOpcode::CBranch);
+		assert_eq!(lt_ops[0].inputs[0].offset, 0xA64F_0000); // N
+		assert_eq!(lt_ops[0].inputs[1].offset, 0xA64F_0003); // V
+	}
+
+	#[test]
+	fn decode_bcond_gt_le_composed_shapes() {
+		let gt_ops = decode_bcond_ops(0xC);
+		assert_eq!(gt_ops.len(), 4);
+		assert_eq!(gt_ops[0].opcode, PcodeOpcode::IntEqual);
+		assert_eq!(gt_ops[1].opcode, PcodeOpcode::BoolNegate);
+		assert_eq!(gt_ops[2].opcode, PcodeOpcode::BoolAnd);
+		assert_eq!(gt_ops[3].opcode, PcodeOpcode::CBranch);
+		assert_eq!(gt_ops[1].inputs[0].offset, 0xA64F_0001); // Z
+
+		let le_ops = decode_bcond_ops(0xD);
+		assert_eq!(le_ops.len(), 3);
+		assert_eq!(le_ops[0].opcode, PcodeOpcode::IntNotEqual);
+		assert_eq!(le_ops[1].opcode, PcodeOpcode::BoolOr);
+		assert_eq!(le_ops[2].opcode, PcodeOpcode::CBranch);
+		assert!(le_ops[1]
+			.inputs
+			.iter()
+			.any(|vn| vn.space_id == UNIQUE_SPACE_ID && vn.offset == 0xA64F_0001)); // Z
+	}
+
+	#[test]
+	fn decode_bcond_hi_ls_composed_shapes() {
+		let hi_ops = decode_bcond_ops(0x8);
+		assert_eq!(hi_ops.len(), 3);
+		assert_eq!(hi_ops[0].opcode, PcodeOpcode::BoolNegate);
+		assert_eq!(hi_ops[1].opcode, PcodeOpcode::BoolAnd);
+		assert_eq!(hi_ops[2].opcode, PcodeOpcode::CBranch);
+		assert_eq!(hi_ops[0].inputs[0].offset, 0xA64F_0001); // Z
+		assert!(hi_ops[1]
+			.inputs
+			.iter()
+			.any(|vn| vn.space_id == UNIQUE_SPACE_ID && vn.offset == 0xA64F_0002)); // C
+
+		let ls_ops = decode_bcond_ops(0x9);
+		assert_eq!(ls_ops.len(), 3);
+		assert_eq!(ls_ops[0].opcode, PcodeOpcode::BoolNegate);
+		assert_eq!(ls_ops[1].opcode, PcodeOpcode::BoolOr);
+		assert_eq!(ls_ops[2].opcode, PcodeOpcode::CBranch);
+		assert_eq!(ls_ops[0].inputs[0].offset, 0xA64F_0002); // C
+		assert!(ls_ops[1]
+			.inputs
+			.iter()
+			.any(|vn| vn.space_id == UNIQUE_SPACE_ID && vn.offset == 0xA64F_0001)); // Z
+	}
+}
+

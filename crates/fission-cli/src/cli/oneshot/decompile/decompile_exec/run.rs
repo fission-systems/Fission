@@ -25,14 +25,14 @@ fn sleigh_language_for_arch_spec(arch_spec: &str) -> Option<&'static str> {
     None
 }
 
+#[cfg(test)]
 fn is_terminal_control_flow(opcode: fission_pcode::PcodeOpcode) -> bool {
-    matches!(
-        opcode,
-        fission_pcode::PcodeOpcode::Branch
-            | fission_pcode::PcodeOpcode::CBranch
-            | fission_pcode::PcodeOpcode::BranchInd
-            | fission_pcode::PcodeOpcode::Return
-    )
+    fission_sleigh::lifter::is_terminal_control_flow(opcode)
+}
+
+#[cfg(test)]
+fn build_cfg_blocks(entry_address: u64, ops: Vec<fission_pcode::PcodeOp>) -> Vec<fission_pcode::PcodeBasicBlock> {
+    fission_sleigh::lifter::build_cfg_blocks(entry_address, ops)
 }
 
 fn decode_rust_sleigh_pcode(
@@ -56,81 +56,16 @@ fn decode_rust_sleigh_pcode(
         ))
     })?;
 
-    let mut ops = Vec::new();
-    let mut offset = 0usize;
-    let mut current = func.address;
-    let mut global_seq = 0u32;
-    let mut instruction_count = 0usize;
-
-    while offset < bytes.len() && instruction_count < 256 {
-        let remaining = &bytes[offset..];
-        let (mut ins_ops, decoded_len) = lifter
-            .decode_and_lift_with_len(remaining, current)
-            .map_err(|err| {
-                FissionError::decompiler(format!(
-                    "rust_sleigh: decode failed at 0x{:x}: {:#}",
-                    current, err
-                ))
-            })?;
-
-        if decoded_len == 0 {
-            return Err(FissionError::decompiler(format!(
-                "rust_sleigh: decoder returned zero length at 0x{:x}",
-                current
-            )));
-        }
-
-        let step = usize::try_from(decoded_len).map_err(|_| {
+    let lifted = lifter
+        .lift_raw_pcode_function_with_contract(&bytes, func.address, 512)
+        .map_err(|err| {
             FissionError::decompiler(format!(
-                "rust_sleigh: decoded length does not fit usize at 0x{:x}",
-                current
+                "rust_sleigh: function lift failed for {} at 0x{:x}: {:#}",
+                func.name, func.address, err
             ))
         })?;
 
-        if step > remaining.len() {
-            return Err(FissionError::decompiler(format!(
-                "rust_sleigh: decoded length {} exceeds available bytes {} at 0x{:x}",
-                step,
-                remaining.len(),
-                current
-            )));
-        }
-
-        for op in &mut ins_ops {
-            op.seq_num = global_seq;
-            global_seq = global_seq.saturating_add(1);
-        }
-
-        let terminates = ins_ops
-            .last()
-            .map(|op| is_terminal_control_flow(op.opcode))
-            .unwrap_or(false);
-
-        ops.extend(ins_ops);
-        offset = offset.saturating_add(step);
-        current = current.saturating_add(decoded_len);
-        instruction_count = instruction_count.saturating_add(1);
-
-        if terminates {
-            break;
-        }
-    }
-
-    if ops.is_empty() {
-        return Err(FissionError::decompiler(format!(
-            "rust_sleigh: failed to decode function {} at 0x{:x}",
-            func.name, func.address
-        )));
-    }
-
-    Ok(fission_pcode::PcodeFunction {
-        blocks: vec![fission_pcode::PcodeBasicBlock {
-            index: 0,
-            start_address: func.address,
-            successors: Vec::new(),
-            ops,
-        }],
-    })
+    Ok(lifted.function)
 }
 
 fn format_varnode_for_pcode(vn: &fission_pcode::Varnode) -> String {
@@ -183,40 +118,56 @@ fn render_with_rust_sleigh(
 
     let pcode = decode_rust_sleigh_pcode(&lifter, binary, func)?;
 
-    let options = fission_pcode::NirRenderOptions::from_loaded_binary(binary);
-    let code = match fission_pcode::render_nir_with_context(&pcode, &func.name, func.address, &options, None) {
-        Ok(rendered) => rendered,
-        Err(e) => {
-            let err_text = e.to_string();
-            if err_text
-                .to_ascii_lowercase()
-                .contains("unsupported architecture in mlil-preview")
-            {
-                return Ok(RenderedCode {
-                    code: render_pcode_text(func, &pcode),
-                    postprocess_sec: 0.0,
-                    engine_used: "rust_sleigh",
-                    fell_back: true,
-                    fallback_reason: Some("nir_unsupported_arch:pcode_dump".to_string()),
-                    preview_build_stats: None,
-                    preview_hint_stats: None,
-                });
-            }
-            return Err(FissionError::decompiler(format!("rust_sleigh render failed: {}", err_text)));
-        }
-    };
+    let mut options = fission_pcode::NirRenderOptions::from_loaded_binary(binary);
+    // rust-sleigh may target non-PE or non-x64 binaries (e.g., AArch64 Mach-O).
+    // Keep the NIR pipeline open and let semantic/structuring checks decide support.
+    options.pe_x64_only = false;
+    options.conservative_irreducible_fallback = true;
+    let selection = fission_decompiler_core::select_nir_output_from_prebuilt_pcode(
+        &pcode,
+        binary,
+        func.address,
+        &func.name,
+        fission_decompiler_core::NirEngineMode::Nir,
+        None,
+        options,
+    )
+    .map_err(|e| FissionError::decompiler(format!("rust_sleigh routing failed: {e}")))?;
 
-    let build_stats = fission_pcode::take_last_nir_build_stats();
-    let hint_stats = fission_pcode::take_last_nir_hint_stats();
+    let code = if let Some(code) = selection.nir_code {
+        code
+    } else {
+        let fallback_reason = selection
+            .fallback_reason
+            .unwrap_or_else(|| "nir skipped: function not supported by Fission NIR builder".to_string());
+        let lower = fallback_reason.to_ascii_lowercase();
+        let is_unsupported_arch = lower.contains("unsupported architecture in mlil-preview")
+            || matches!(selection.fallback_kind_refined, Some("preview_architecture_unsupported"));
+        if is_unsupported_arch {
+            return Ok(RenderedCode {
+                code: render_pcode_text(func, &pcode),
+                postprocess_sec: 0.0,
+                engine_used: "rust_sleigh",
+                fell_back: true,
+                fallback_reason: Some("nir_unsupported_arch:pcode_dump".to_string()),
+                preview_build_stats: None,
+                preview_hint_stats: None,
+            });
+        }
+        return Err(FissionError::decompiler(format!(
+            "rust_sleigh render failed: {}",
+            fallback_reason
+        )));
+    };
 
     Ok(RenderedCode {
         code,
         postprocess_sec: 0.0,
         engine_used: "rust_sleigh",
-        fell_back: false,
-        fallback_reason: None,
-        preview_build_stats: build_stats,
-        preview_hint_stats: hint_stats,
+        fell_back: selection.fell_back,
+        fallback_reason: selection.fallback_reason,
+        preview_build_stats: selection.build_stats,
+        preview_hint_stats: selection.hint_stats,
     })
 }
 
@@ -1081,4 +1032,173 @@ pub(crate) fn run_decompilation(
         stdout.write_all(final_output.as_bytes())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
+
+    fn var(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 3,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn op(
+        seq_num: u32,
+        address: u64,
+        opcode: PcodeOpcode,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+    ) -> PcodeOp {
+        PcodeOp {
+            seq_num,
+            opcode,
+            address,
+            output,
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    #[test]
+    fn cfg_blocks_conditional_branch_has_target_and_fallthrough() {
+        let ops = vec![
+            op(
+                0,
+                0x100,
+                PcodeOpcode::IntAdd,
+                Some(var(0x10, 4)),
+                vec![Varnode::constant(1, 4), Varnode::constant(2, 4)],
+            ),
+            op(
+                1,
+                0x104,
+                PcodeOpcode::CBranch,
+                None,
+                vec![Varnode::constant(0x110, 8), Varnode::constant(1, 1)],
+            ),
+            op(
+                2,
+                0x108,
+                PcodeOpcode::IntAdd,
+                Some(var(0x20, 4)),
+                vec![Varnode::constant(3, 4), Varnode::constant(4, 4)],
+            ),
+            op(3, 0x10c, PcodeOpcode::Return, None, vec![]),
+            op(
+                4,
+                0x110,
+                PcodeOpcode::IntAdd,
+                Some(var(0x30, 4)),
+                vec![Varnode::constant(5, 4), Varnode::constant(6, 4)],
+            ),
+        ];
+
+        let blocks = build_cfg_blocks(0x100, ops);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].start_address, 0x100);
+        assert_eq!(blocks[1].start_address, 0x108);
+        assert_eq!(blocks[2].start_address, 0x110);
+        assert_eq!(blocks[0].successors, vec![2, 1]);
+        assert!(blocks[1].successors.is_empty());
+        assert!(blocks[2].successors.is_empty());
+        assert_eq!(blocks[0].ops[0].seq_num, 0);
+        assert_eq!(blocks[1].ops[0].seq_num, 0);
+    }
+
+    #[test]
+    fn cfg_blocks_back_edge_branch_creates_self_loop() {
+        let ops = vec![
+            op(
+                0,
+                0x100,
+                PcodeOpcode::IntAdd,
+                Some(var(0x40, 4)),
+                vec![Varnode::constant(1, 4), Varnode::constant(1, 4)],
+            ),
+            op(
+                1,
+                0x104,
+                PcodeOpcode::Branch,
+                None,
+                vec![Varnode::constant(0x100, 8)],
+            ),
+            op(2, 0x108, PcodeOpcode::Return, None, vec![]),
+        ];
+
+        let blocks = build_cfg_blocks(0x100, ops);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].successors, vec![0]);
+        assert!(blocks[1].successors.is_empty());
+    }
+
+    #[test]
+    fn cfg_blocks_branch_to_unknown_target_has_no_successor() {
+        let ops = vec![
+            op(
+                0,
+                0x100,
+                PcodeOpcode::IntAdd,
+                Some(var(0x50, 4)),
+                vec![Varnode::constant(1, 4), Varnode::constant(2, 4)],
+            ),
+            op(
+                1,
+                0x104,
+                PcodeOpcode::Branch,
+                None,
+                vec![Varnode::constant(0x200, 8)],
+            ),
+            op(
+                2,
+                0x108,
+                PcodeOpcode::IntAdd,
+                Some(var(0x60, 4)),
+                vec![Varnode::constant(3, 4), Varnode::constant(4, 4)],
+            ),
+        ];
+
+        let blocks = build_cfg_blocks(0x100, ops);
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[0].successors.is_empty());
+    }
+
+    #[test]
+    fn cfg_blocks_conditional_branch_deduplicates_same_target_and_fallthrough() {
+        let ops = vec![
+            op(
+                0,
+                0x100,
+                PcodeOpcode::IntAdd,
+                Some(var(0x70, 4)),
+                vec![Varnode::constant(1, 4), Varnode::constant(2, 4)],
+            ),
+            op(
+                1,
+                0x104,
+                PcodeOpcode::CBranch,
+                None,
+                vec![Varnode::constant(0x108, 8), Varnode::constant(1, 1)],
+            ),
+            op(2, 0x108, PcodeOpcode::Return, None, vec![]),
+        ];
+
+        let blocks = build_cfg_blocks(0x100, ops);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].successors, vec![1]);
+    }
+
+    #[test]
+    fn terminal_control_flow_only_stops_on_return_or_indirect_branch() {
+        assert!(!is_terminal_control_flow(PcodeOpcode::Branch));
+        assert!(!is_terminal_control_flow(PcodeOpcode::CBranch));
+        assert!(is_terminal_control_flow(PcodeOpcode::BranchInd));
+        assert!(is_terminal_control_flow(PcodeOpcode::Return));
+    }
 }

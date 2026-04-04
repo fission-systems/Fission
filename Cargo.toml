@@ -14,6 +14,7 @@ members = [
     "crates/fission-dynamic",
     "crates/fission-analysis",
     "crates/fission-cli",
+    "crates/fission-decompiler-core",
     "crates/fission-ffi",
     "crates/fission-tauri/src-tauri",
     "crates/fission-sleigh",

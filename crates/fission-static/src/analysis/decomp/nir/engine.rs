@@ -1,11 +1,12 @@
 use crate::analysis::decomp::FactStore;
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::PcodeFunction;
+use fission_pcode::{NirRenderOptions, PcodeFunction};
 
 pub use super::nir_recovery::{PreviewRoutingDecision, PreviewSelection};
 pub use super::nir_routing::{
     auto_nir_eligible, native_failure_routing_decision, rescue_nir_output,
-    rescue_nir_output_with_facts, select_nir_output, select_nir_output_with_facts,
+    rescue_nir_output_with_facts, select_nir_output, select_nir_output_from_pcode,
+    select_nir_output_from_pcode_with_facts, select_nir_output_with_facts,
 };
 pub use super::nir_taxonomy::{
     classified_nir_error, classify_native_failure_kind, classify_nir_failure,
@@ -49,6 +50,40 @@ pub fn select_preview_output_with_facts<S: NirSource>(
     select_nir_output_with_facts(source, binary, fact_store, address, name, mode, timeout_ms)
 }
 
+pub fn select_preview_output_from_pcode(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+    options: NirRenderOptions,
+) -> Result<NirSelection, String> {
+    select_nir_output_from_pcode(pcode, binary, address, name, mode, timeout_ms, options)
+}
+
+pub fn select_preview_output_from_pcode_with_facts(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+    options: NirRenderOptions,
+) -> Result<NirSelection, String> {
+    select_nir_output_from_pcode_with_facts(
+        pcode,
+        binary,
+        fact_store,
+        address,
+        name,
+        mode,
+        timeout_ms,
+        options,
+    )
+}
+
 pub fn rescue_preview_output<S: NirSource>(
     source: &mut S,
     binary: &LoadedBinary,
@@ -83,7 +118,7 @@ mod tests {
         DwarfFunctionInfo, DwarfLocalVar, DwarfLocation, DwarfParamInfo,
     };
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
-    use fission_pcode::{NirRenderOptions, NirTypeContext, PreviewCallParamRule};
+    use fission_pcode::{NirRenderOptions, NirTypeContext, PcodeFunction, PreviewCallParamRule};
     use std::collections::HashMap;
 
     struct MockNirSource;
@@ -360,6 +395,56 @@ mod tests {
 
         assert_eq!(selection.engine_used, NirEngineMode::Legacy);
         assert!(!selection.fell_back);
+        assert!(selection.nir_code.is_none());
+    }
+
+    #[test]
+    fn select_nir_output_from_pcode_wrapper_keeps_legacy_mode_behavior() {
+        let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
+            .format("PE")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        let pcode = PcodeFunction { blocks: vec![] };
+
+        let selection = select_nir_output_from_pcode(
+            &pcode,
+            &binary,
+            0x401000,
+            "sub_401000",
+            NirEngineMode::Legacy,
+            None,
+            NirRenderOptions::from_loaded_binary(&binary),
+        )
+        .expect("legacy preview selection from pcode");
+
+        assert_eq!(selection.engine_used, NirEngineMode::Legacy);
+        assert!(!selection.fell_back);
+        assert!(selection.nir_code.is_none());
+    }
+
+    #[test]
+    fn select_nir_output_from_pcode_auto_gate_falls_back_for_non_pe_binary() {
+        let binary = LoadedBinaryBuilder::new("sample.bin".to_string(), DataBuffer::Heap(vec![]))
+            .format("ELF")
+            .is_64bit(true)
+            .build()
+            .expect("build test binary");
+        let pcode = PcodeFunction { blocks: vec![] };
+
+        let selection = select_nir_output_from_pcode(
+            &pcode,
+            &binary,
+            0x401000,
+            "sub_401000",
+            NirEngineMode::Auto,
+            None,
+            NirRenderOptions::from_loaded_binary(&binary),
+        )
+        .expect("auto preview selection from pcode");
+
+        assert_eq!(selection.engine_used, NirEngineMode::Legacy);
+        assert!(selection.fell_back);
         assert!(selection.nir_code.is_none());
     }
 

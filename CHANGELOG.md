@@ -5,6 +5,8 @@
 ### Added
 - Dependency-free direct rust-sleigh instruction lifting path is now active for CLI `--engine rust-sleigh`.
 - AArch64 semantic lifting coverage expanded with concrete p-code ops for ALU/memory flows, including move-wide and writeback-addressing forms.
+- New `fission-decompiler-core` crate added as a decompiler orchestration boundary, starting with prebuilt p-code -> shared NIR routing entrypoint.
+- Added crate-level `crates/fission-sleigh/README.md` documenting ownership, API surface, usage examples, and validation workflow.
 
 ### Changed
 - Reorganized `fission-sleigh` lifter into architecture-oriented module trees.
@@ -12,12 +14,44 @@
 - Split x86 implementation into facade/length/control modules.
 - Refactored AArch64 semantic decoding into focused submodules (`arithmetic`, `logical`, `memory`, `misc`) and kept `semantic.rs` as a thin dispatcher.
 - Split semantic unit tests by submodule file and normalized test names with a `decode_` prefix for consistent per-file coverage.
+- rust-sleigh one-shot decode path now reconstructs multi-block p-code CFG (branch/cond-branch targets + fallthrough successors) instead of flattening all ops into one block.
+- rust-sleigh render path now disables the PE-x64-only NIR gate for this engine and enables conservative irreducible fallback, allowing non-PE/non-x64 binaries to flow through NIR->C print.
+- Integrated rust-sleigh render flow with shared `fission-static` NIR routing/recovery layer via a new prebuilt-pcode routing entrypoint, keeping fallback classification and recovery policy centralized.
+- Added prebuilt-pcode routing wrapper tests in `fission-static` (`select_nir_output_from_pcode_*`) to lock engine facade behavior.
+- rust-sleigh CLI path now calls the new `fission-decompiler-core` API instead of invoking `fission-static` routing directly.
+- Shifted function-level Raw p-code ownership into `fission-sleigh`: lifter now provides a contract API (`lift_raw_pcode_function_with_contract`) that returns block/successor-aware `PcodeFunction` plus stop reason diagnostics.
+- CLI rust-sleigh decompile path now consumes Sleigh's function-level lift contract directly instead of rebuilding CFG blocks in `run.rs`.
+- Expanded AArch64 control-flow decoder test coverage in `fission-sleigh` with focused checks for `RET`, `B`, `BL`, `B.cond`, `CBZ/CBNZ`, and `TBZ/TBNZ` predicate/target semantics.
+- Upgraded x86 `Jcc` lifting to emit flag-based predicates (including composed `CF/ZF` and `SF/OF/ZF` forms) instead of constant-true branches, and added focused x86 control decoder tests for predicate shape/target handling.
+- Added x86 semantic lifting for register-form `CMP/TEST` and base ALU/logical group (`ADD/SUB/AND/OR/XOR`), including explicit EFLAGS writes (`CF/OF/ZF/SF/PF`) so branch predicates consume real upstream flag dataflow.
+- Added integration coverage proving `CMP`-produced `ZF` feeds `JNE` predicate construction in function-level lift output.
+- Expanded x86 semantic coverage for immediate forms (`81/83/F7/A9`) and r/m memory operand forms (load/store-backed arithmetic/compare/test), and widened PF regression sampling to include register, immediate, and memory paths.
+- Extended x86 semantic lifting with carry/shift/sign-sensitive op families (`ADC`, `SBB`, `INC`, `DEC`, `NEG`, `SHL`, `SHR`, `SAR`) including flag-write behavior and memory r/m paths.
+- Extended x86 shift/address handling with `D3` (`* r/m, CL`) count lowering and `0x67` address-size override effective-address decoding in semantic lift paths.
+- Extended x86 Group2 shift coverage with byte-sized forms (`C0`, `D0`, `D2`) using width-correct semantic lowering.
+- Refined dynamic x86 shift semantics so runtime `count==0` preserves destination/`CF/ZF/SF/PF` via conditional writeback (instead of unconditional flag/result overwrite).
+- Refined `0x67` address-size override semantics to compute effective addresses with 32-bit arithmetic (including disp/index/base composition) and then zero-extend to 64-bit for memory access.
+- Extended x86 length decoding for shift-immediate opcode `C1` and added regressions for the new length rule.
+- Added x86 length regressions for `D3` and `0x67` forms.
+- Added x86 length regressions for byte shift forms (`C0`, `D0`, `D2`).
 - Updated lifter ownership/structure documentation to match the new folder tree.
 
 ### Validation
 - `cargo check -p fission-sleigh`
 - `cargo test -p fission-sleigh`
+- `cargo check -p fission-static --features native_decomp`
+- `cargo test -p fission-static --features native_decomp select_nir_output_from_pcode_`
+- `cargo test -p fission-sleigh`
+- `cargo test -p fission-sleigh lifter::aarch64::control::tests::`
+- `cargo test -p fission-sleigh lifter::x86::control::tests::`
+- `cargo test -p fission-sleigh lifter::x86::semantic::tests::`
+- `cargo test -p fission-sleigh lifter::tests::x86_cmp_flags_feed_jcc_predicate_path`
+- `cargo test -p fission-sleigh lifter::x86::length::tests::`
+- `cargo test -p fission-sleigh`
 - `cargo check -p fission-cli --features native_decomp`
+- `cargo test -p fission-cli --features native_decomp cfg_blocks_`
+- `cargo test -p fission-cli --features native_decomp terminal_control_flow_only_stops_on_return_or_indirect_branch`
+- `cargo run -p fission-cli --features native_decomp -- samples/hello --decomp 0x000100000460 --engine rust-sleigh --no-header`
 - `fission_cli samples/hello --decomp 0x000100000460 --engine rust-sleigh --no-header`
 
 ## 2026-04-03

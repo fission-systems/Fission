@@ -1,0 +1,23 @@
+[package]
+name = "fission-decompiler-core"
+version = "0.1.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Fission decompiler core orchestration layer"
+repository = "https://github.com/sjkim1127/Fission"
+license = "AGPL-3.0-or-later"
+readme = "../../README.md"
+keywords = ["fission", "decompiler", "reverse-engineering", "ghidra"]
+categories = ["development-tools::debugging"]
+
+[features]
+default = []
+native_decomp = ["fission-static/native_decomp"]
+
+[dependencies]
+fission-loader = { path = "../fission-loader" }
+fission-pcode = { path = "../fission-pcode" }
+fission-static = { path = "../fission-static" }
+
+[dev-dependencies]
+fission-loader = { path = "../fission-loader" }

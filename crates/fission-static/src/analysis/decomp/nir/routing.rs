@@ -1,15 +1,19 @@
 use super::FactStore;
-use super::nir_recovery::{is_type_failure_for_nir_rescue, try_structuring_recovery};
+use super::nir_recovery::{
+    is_type_failure_for_nir_rescue, try_structuring_recovery,
+    try_structuring_recovery_from_pcode,
+};
 use super::nir_render::{
     build_nir_type_context_from_facts, contains_indirect_control_flow, max_multiequal_fanin,
     pcode_total_ops, render_nir_from_json_with_type_context,
+    render_nir_from_pcode_with_type_context_and_options,
 };
 use super::nir_taxonomy::classify_native_failure_kind;
 use super::nir_types::{
     NirEngineMode, NirRoutingDecision, NirRoutingResolver, NirSelection, NirSource,
 };
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::PcodeFunction;
+use fission_pcode::{NirRenderOptions, PcodeFunction};
 use std::time::Instant;
 
 pub fn auto_nir_eligible(binary: &LoadedBinary, pcode: &PcodeFunction) -> bool {
@@ -143,6 +147,127 @@ pub fn select_nir_output_with_facts<S: NirSource>(
                         name,
                         timeout_ms,
                         build_nir_type_context_from_facts(binary, fact_store, address),
+                        &err,
+                    )? {
+                        Ok(selection)
+                    } else {
+                        Ok(NirRoutingResolver::nir_fallback(&err))
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn select_nir_output_from_pcode(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+    options: NirRenderOptions,
+) -> Result<NirSelection, String> {
+    let fact_store = FactStore::from_binary(binary);
+    select_nir_output_from_pcode_with_facts(
+        pcode,
+        binary,
+        &fact_store,
+        address,
+        name,
+        mode,
+        timeout_ms,
+        options,
+    )
+}
+
+pub fn select_nir_output_from_pcode_with_facts(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    fact_store: &FactStore,
+    address: u64,
+    name: &str,
+    mode: NirEngineMode,
+    timeout_ms: Option<u64>,
+    options: NirRenderOptions,
+) -> Result<NirSelection, String> {
+    match mode {
+        NirEngineMode::Legacy => Ok(NirRoutingResolver::legacy_mode()),
+        NirEngineMode::Nir => {
+            let type_context = build_nir_type_context_from_facts(binary, fact_store, address);
+            match render_nir_from_pcode_with_type_context_and_options(
+                pcode,
+                binary,
+                address,
+                name,
+                false,
+                timeout_ms,
+                type_context,
+                options.clone(),
+                false,
+                false,
+            ) {
+                Ok(Some((code, build_stats, hint_stats))) => Ok(NirRoutingResolver::nir_success(
+                    code,
+                    build_stats,
+                    hint_stats,
+                    false,
+                    None,
+                )),
+                Ok(None) => Ok(NirRoutingResolver::nir_fallback(
+                    "nir skipped: function not supported by Fission NIR builder",
+                )),
+                Err(err) => {
+                    if let Some(selection) = try_structuring_recovery_from_pcode(
+                        pcode,
+                        binary,
+                        address,
+                        name,
+                        timeout_ms,
+                        build_nir_type_context_from_facts(binary, fact_store, address),
+                        options,
+                        &err,
+                    )? {
+                        Ok(selection)
+                    } else {
+                        Ok(NirRoutingResolver::nir_fallback(&err))
+                    }
+                }
+            }
+        }
+        NirEngineMode::Auto => {
+            let type_context = build_nir_type_context_from_facts(binary, fact_store, address);
+            match render_nir_from_pcode_with_type_context_and_options(
+                pcode,
+                binary,
+                address,
+                name,
+                true,
+                timeout_ms,
+                type_context,
+                options.clone(),
+                false,
+                false,
+            ) {
+                Ok(Some((code, build_stats, hint_stats))) => Ok(NirRoutingResolver::nir_success(
+                    code,
+                    build_stats,
+                    hint_stats,
+                    false,
+                    None,
+                )),
+                Ok(None) => Ok(NirRoutingResolver::nir_fallback(
+                    "nir skipped: function not supported by Fission NIR builder",
+                )),
+                Err(err) => {
+                    if let Some(selection) = try_structuring_recovery_from_pcode(
+                        pcode,
+                        binary,
+                        address,
+                        name,
+                        timeout_ms,
+                        build_nir_type_context_from_facts(binary, fact_store, address),
+                        options,
                         &err,
                     )? {
                         Ok(selection)

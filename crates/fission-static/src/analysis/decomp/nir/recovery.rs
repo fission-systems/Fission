@@ -1,8 +1,12 @@
-use super::nir_render::render_nir_from_json_with_type_context;
+use super::nir_render::{
+    render_nir_from_json_with_type_context, render_nir_from_pcode_with_type_context_and_options,
+};
 use super::nir_taxonomy::{classify_nir_failure_refined, structuring_failure_signature};
 use super::nir_types::{NirRoutingResolver, NirSelection};
 use fission_loader::loader::LoadedBinary;
-use fission_pcode::{NirBuildStats, NirTypeContext, take_last_nir_build_stats};
+use fission_pcode::{
+    take_last_nir_build_stats, NirBuildStats, NirRenderOptions, NirTypeContext, PcodeFunction,
+};
 
 const RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY: &str = "linearized_structuring_retry";
 
@@ -87,6 +91,104 @@ pub(crate) fn try_structuring_recovery(
         false,
         timeout_ms,
         type_context,
+        false,
+        true,
+    ) {
+        Ok(Some((code, build_stats, hint_stats))) => {
+            let merged_build_stats =
+                merge_optional_build_stats(build_stats, region_retry_build_stats);
+            Ok(Some(NirRoutingResolver::nir_success_with_recovery(
+                code,
+                merged_build_stats,
+                hint_stats,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                "recovered",
+                Some(signature.to_string()),
+                "forced_linear",
+            )))
+        }
+        Ok(None) => Ok(Some(NirRoutingResolver::nir_fallback_with_recovery(
+            error,
+            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+            None,
+            "retry_skipped",
+            Some(signature.to_string()),
+            Some("forced_linear"),
+        ))),
+        Err(retry_err) => Ok(Some(NirRoutingResolver::nir_fallback_with_recovery(
+            format!("{error}; recovery failed: {retry_err}"),
+            RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+            None,
+            "retry_failed",
+            Some(signature.to_string()),
+            Some("forced_linear"),
+        ))),
+    }
+}
+
+pub(crate) fn try_structuring_recovery_from_pcode(
+    pcode: &PcodeFunction,
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    timeout_ms: Option<u64>,
+    type_context: NirTypeContext,
+    base_options: NirRenderOptions,
+    error: &str,
+) -> Result<Option<NirSelection>, String> {
+    if classify_nir_failure_refined(error) != "nir_structuring_failure" {
+        return Ok(None);
+    }
+    let Some(signature) = structuring_failure_signature(error) else {
+        return Ok(None);
+    };
+    if !matches!(
+        signature,
+        "unsupported_cfg_region_shape"
+            | "unsupported_cfg_phi_join"
+            | "unsupported_cfg_indirect_call_region"
+    ) {
+        return Ok(None);
+    }
+
+    let region_retry = render_nir_from_pcode_with_type_context_and_options(
+        pcode,
+        binary,
+        address,
+        name,
+        false,
+        timeout_ms,
+        type_context.clone(),
+        base_options.clone(),
+        true,
+        false,
+    );
+    let region_retry_build_stats = match region_retry {
+        Ok(Some((code, build_stats, hint_stats))) => {
+            return Ok(Some(NirRoutingResolver::nir_success_with_recovery(
+                code,
+                build_stats,
+                hint_stats,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                RECOVERY_STRATEGY_LINEAR_STRUCTURING_RETRY,
+                "recovered",
+                Some(signature.to_string()),
+                "region_linearized",
+            )));
+        }
+        Ok(None) | Err(_) => take_last_nir_build_stats(),
+    };
+
+    match render_nir_from_pcode_with_type_context_and_options(
+        pcode,
+        binary,
+        address,
+        name,
+        false,
+        timeout_ms,
+        type_context,
+        base_options,
         false,
         true,
     ) {
