@@ -5,6 +5,7 @@ pub(super) const RAM_SPACE_ID: u64 = 2;
 pub(super) const A64_REG_BASE: u64 = 0xA640_0000;
 pub(super) const A64_NZCV_BASE: u64 = 0xA64F_0000;
 pub(super) const X86_REG_BASE: u64 = 0xA860_0000;
+pub(super) const X86_XMM_BASE: u64 = 0xA868_0000;
 pub(super) const X86_EFLAGS_BASE: u64 = 0xA86F_0000;
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,10 @@ pub(super) fn x86_flag_sf() -> Varnode {
     x86_flag(7)
 }
 
+pub(super) fn x86_flag_df() -> Varnode {
+    x86_flag(10)
+}
+
 pub(super) fn x86_flag_of() -> Varnode {
     x86_flag(11)
 }
@@ -102,6 +107,16 @@ pub(super) fn x86_reg(reg: u32, size: u32) -> Varnode {
     Varnode {
         space_id: UNIQUE_SPACE_ID,
         offset: X86_REG_BASE + (u64::from(reg) * 8),
+        size,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+pub(super) fn x86_xmm_reg(reg: u32, size: u32) -> Varnode {
+    Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: X86_XMM_BASE + (u64::from(reg) * 16),
         size,
         is_constant: false,
         constant_val: 0,

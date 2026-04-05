@@ -100,6 +100,65 @@ impl<'a> PreviewBuilder<'a> {
         )
     }
 
+    pub(super) fn debug_branch_target_resolution_failure(
+        &self,
+        stage: &str,
+        block_idx: usize,
+        block_addr: u64,
+        op: &PcodeOp,
+        target_vn: &Varnode,
+        succ_addrs: &[u64],
+    ) {
+        let guessed_target = branch_target_address(target_vn)
+            .map(|v| format!("0x{v:x}"))
+            .unwrap_or_else(|| "<none>".to_string());
+        let target_fmt = self.format_varnode(target_vn);
+        let succ_fmt = if succ_addrs.is_empty() {
+            "<none>".to_string()
+        } else {
+            succ_addrs
+                .iter()
+                .map(|addr| format!("0x{addr:x}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+
+        if preview_builder_diag_enabled() {
+            eprintln!(
+                "[DIAG] stage={} block_idx={} block=0x{:x} seq=0x{:x} opcode={:?} target={} guessed_target={} succs=[{}]",
+                stage,
+                block_idx,
+                block_addr,
+                op.seq_num,
+                op.opcode,
+                target_fmt,
+                guessed_target,
+                succ_fmt
+            );
+        }
+
+        if std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
+            let message = format!(
+                "[mlil-preview] stage={} block_idx={} block=0x{:x} seq=0x{:x} opcode={:?} target={} guessed_target={} succs=[{}]",
+                stage,
+                block_idx,
+                block_addr,
+                op.seq_num,
+                op.opcode,
+                target_fmt,
+                guessed_target,
+                succ_fmt
+            );
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.preview_log_path())
+                .and_then(|mut f| {
+                    std::io::Write::write_all(&mut f, format!("{message}\n").as_bytes())
+                });
+        }
+    }
+
     pub(crate) fn record_unsupported_inventory_event(
         &self,
         stage: &str,

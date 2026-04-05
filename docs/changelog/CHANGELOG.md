@@ -9,6 +9,41 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-05
 
+### rust-sleigh x86 0F3A Semantic Expansion and Branch-Target CFG Diagnostics
+
+Extended the rust-sleigh x86 three-byte semantic ownership for SSE4 string/extract opcodes and added CFG-construction diagnostics to narrow unresolved branch-target fallback causes before NIR lowering.
+
+#### Changed
+
+- expanded x86 `0F 3A` dataflow semantic handlers in `fission-sleigh`:
+  - `0x61` `PCMPESTRI` (`ECX` write path)
+  - `0x62` `PCMPISTRM` (`XMM0` write path)
+  - `0x17` `EXTRACTPS` (`r/m` write path)
+  - implementation: `crates/fission-sleigh/src/lifter/x86/semantic/ext.rs`
+- added regression coverage for the new handlers (reg/mem forms) in:
+  - `crates/fission-sleigh/src/lifter/x86/semantic/tests.rs`
+- added branch-target resolution diagnostics in NIR terminator lowering to log:
+  - input varnode, seq, block index/address, guessed target, and successor list on resolve failure
+  - implementation: `crates/fission-pcode/src/nir/builder/debug.rs`, `crates/fission-pcode/src/nir/builder/terminator.rs`
+- added CFG-construction diagnostics in rust-sleigh block building to log:
+  - `branch_target_unmapped`
+  - `control_block_no_successors`
+  - per-block successor finalization summaries
+  - implementation: `crates/fission-sleigh/src/lifter/mod.rs`
+
+#### Validation
+
+- `cargo test -p fission-sleigh` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-sleigh` (pass)
+
+#### Measurement Notes
+
+- putty rust-sleigh `--decomp-limit 200` baseline/post measurement completed.
+- fallback addresses were traced in isolated debug lanes; common root signature was observed at CFG build time:
+  - constant `Branch` target not present in current function op-address map
+  - unresolved target produced empty successor set prior to NIR terminator lowering
+
 ### x86 Lifter - Semantic Module Split and Byte-Group Arithmetic Expansion
 
 This increment continues the x86-first lifting track by reducing semantic-module complexity and expanding arithmetic coverage for byte-width group operations.

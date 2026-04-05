@@ -34,6 +34,26 @@ impl<'a> PreviewBuilder<'a> {
                             input,
                         )
                     }) else {
+                        if let Some(target_vn) = op.inputs.first() {
+                            let succ_addrs = block
+                                .successors
+                                .iter()
+                                .filter_map(|succ_idx| {
+                                    this.pcode
+                                        .blocks
+                                        .get(*succ_idx as usize)
+                                        .map(|succ| succ.start_address)
+                                })
+                                .collect::<Vec<_>>();
+                            this.debug_branch_target_resolution_failure(
+                                "terminator_branch_target_resolve_fail",
+                                idx,
+                                block.start_address,
+                                op,
+                                target_vn,
+                                &succ_addrs,
+                            );
+                        }
                         return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                     };
                     Ok(LoweredTerminator::Goto(this.block_target_key(target_idx)))
@@ -46,6 +66,24 @@ impl<'a> PreviewBuilder<'a> {
                         op,
                         &op.inputs[0],
                     ) else {
+                        let succ_addrs = block
+                            .successors
+                            .iter()
+                            .filter_map(|succ_idx| {
+                                this.pcode
+                                    .blocks
+                                    .get(*succ_idx as usize)
+                                    .map(|succ| succ.start_address)
+                            })
+                            .collect::<Vec<_>>();
+                        this.debug_branch_target_resolution_failure(
+                            "terminator_cbranch_target_resolve_fail",
+                            idx,
+                            block.start_address,
+                            op,
+                            &op.inputs[0],
+                            &succ_addrs,
+                        );
                         return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                     };
                     let true_target = this.block_target_key(true_target_idx);

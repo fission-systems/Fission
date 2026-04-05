@@ -4,6 +4,41 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-04-05
+
+### rust-sleigh x86 0F3A 시맨틱 확장 + Branch Target CFG 진단 강화
+
+이번 라운드는 두 축으로 진행했다. 첫째는 rust-sleigh x86 `0F 3A` 계열 중 남아 있던 `PCMPESTRI/M`, `EXTRACTPS`를 기존 intrinsic 데이터플로우 패턴으로 승격해 semantic ownership을 확장하는 작업이다. 둘째는 `unsupported branch target` fallback의 실제 원인을 더 좁히기 위해 NIR terminator 단계뿐 아니라 CFG 블록/후속 엣지 구성 시점에도 진단 로그를 추가하는 작업이다.
+
+#### Changed
+
+- x86 `0F 3A` 시맨틱 확장 (`crates/fission-sleigh/src/lifter/x86/semantic/ext.rs`)
+  - `0x61` `PCMPESTRI`: `CallOther` + `ECX` write
+  - `0x62` `PCMPISTRM`: `CallOther` + `XMM0` write
+  - `0x17` `EXTRACTPS`: `CallOther` + `r/m` write
+- 회귀 테스트 추가 (`crates/fission-sleigh/src/lifter/x86/semantic/tests.rs`)
+  - reg/mem form 포함 케이스로 신규 opcode 검증
+- NIR terminator branch-target resolve 실패 로그 확장
+  - 입력 varnode, seq, block index/address, guessed target, successors를 직접 기록
+  - 파일: `crates/fission-pcode/src/nir/builder/debug.rs`, `crates/fission-pcode/src/nir/builder/terminator.rs`
+- rust-sleigh CFG 구성 단계 로그 추가 (`crates/fission-sleigh/src/lifter/mod.rs`)
+  - `branch_target_unmapped`
+  - `control_block_no_successors`
+  - `block_finalize` successor summary
+
+#### Validation
+
+- `cargo test -p fission-sleigh` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-sleigh` (pass)
+
+#### Measurement / Debug Lane
+
+- putty rust-sleigh `--decomp-limit 200` baseline/post 계측 완료
+- fallback 주소를 개별 debug lane으로 재수집해 공통 시그니처를 확인
+  - CFG build 시점에서 constant `Branch` target이 현재 function op-address map에 없어 unmapped 처리
+  - 그 결과 해당 control block의 successors가 비고, 이후 NIR terminator lowering에서 동일하게 resolve 실패
+
 ## 2026-03-15
 
 ## 2026-03-16

@@ -1,6 +1,27 @@
 use super::*;
 use super::super::predicate::emit_jcc_predicate_with_allocator;
 
+const X86_RDTSC_POLICY_ID: u64 = 0x0F31;
+const X86_CLFLUSH_POLICY_ID: u64 = 0x0FAE07;
+const X86_SYSCALL_POLICY_ID: u64 = 0x0F05;
+const X86_SYSRET_POLICY_ID: u64 = 0x0F07;
+const X86_CLTS_POLICY_ID: u64 = 0x0F06;
+const X86_INVD_POLICY_ID: u64 = 0x0F08;
+const X86_WBINVD_POLICY_ID: u64 = 0x0F09;
+const X86_UD2_POLICY_ID: u64 = 0x0F0B;
+const X86_WRMSR_POLICY_ID: u64 = 0x0F30;
+const X86_RDMSR_POLICY_ID: u64 = 0x0F32;
+const X86_SYSENTER_POLICY_ID: u64 = 0x0F34;
+const X86_SYSEXIT_POLICY_ID: u64 = 0x0F35;
+const X86_EMMS_POLICY_ID: u64 = 0x0F77;
+const X86_PUSH_FS_POLICY_ID: u64 = 0x0FA0;
+const X86_POP_FS_POLICY_ID: u64 = 0x0FA1;
+const X86_CPUID_POLICY_ID: u64 = 0x0FA2;
+const X86_SIMD_POLICY_BASE_ID: u64 = 0x0F00_00;
+const X86_X87_POLICY_BASE_ID: u64 = 0x0FD8_00;
+const X86_3BYTE_0F38_POLICY_BASE_ID: u64 = 0x0F38_00;
+const X86_3BYTE_0F3A_POLICY_BASE_ID: u64 = 0x0F3A_00;
+
 pub(super) fn decode_extended_semantic(
     insn: &[u8],
     op_idx: usize,
@@ -16,6 +37,30 @@ pub(super) fn decode_extended_semantic(
     };
 
     match ext {
+        0x05 => decode_system_policy(address, seq, X86_SYSCALL_POLICY_ID, "SYSCALL_POLICY"),
+        0x06 => decode_system_policy(address, seq, X86_CLTS_POLICY_ID, "CLTS_POLICY"),
+        0x07 => decode_system_policy(address, seq, X86_SYSRET_POLICY_ID, "SYSRET_POLICY"),
+        0x08 => decode_system_policy(address, seq, X86_INVD_POLICY_ID, "INVD_POLICY"),
+        0x09 => decode_system_policy(address, seq, X86_WBINVD_POLICY_ID, "WBINVD_POLICY"),
+        0x0B => decode_system_policy(address, seq, X86_UD2_POLICY_ID, "UD2_POLICY"),
+        0x1F => decode_nop_extended(insn, op_idx, prefix, size, address, temp, seq),
+        0x30 => decode_system_policy(address, seq, X86_WRMSR_POLICY_ID, "WRMSR_POLICY"),
+        0x31 => decode_rdtsc_policy(address, seq),
+        0x32 => decode_system_policy(address, seq, X86_RDMSR_POLICY_ID, "RDMSR_POLICY"),
+        0x34 => decode_system_policy(address, seq, X86_SYSENTER_POLICY_ID, "SYSENTER_POLICY"),
+        0x35 => decode_system_policy(address, seq, X86_SYSEXIT_POLICY_ID, "SYSEXIT_POLICY"),
+        0x38 => decode_three_byte_escape_semantic(insn, op_idx, prefix, size, address, temp, seq, false),
+        0x3A => decode_three_byte_escape_semantic(insn, op_idx, prefix, size, address, temp, seq, true),
+        0x77 => decode_system_policy(address, seq, X86_EMMS_POLICY_ID, "EMMS_POLICY"),
+        0xA2 => decode_system_policy(address, seq, X86_CPUID_POLICY_ID, "CPUID_POLICY"),
+        0xA0 => decode_system_policy(address, seq, X86_PUSH_FS_POLICY_ID, "PUSH_FS_POLICY"),
+        0xA1 => decode_system_policy(address, seq, X86_POP_FS_POLICY_ID, "POP_FS_POLICY"),
+        0xAE => decode_clflush_policy(insn, op_idx, prefix, address, temp, seq),
+        0xA3 => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Bt),
+        0xAB => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Bts),
+        0xB3 => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Btr),
+        0xBB => decode_bt_family(insn, op_idx, prefix, size, address, temp, seq, BitTestKind::Btc),
+        0xC8..=0xCF => decode_bswap(prefix, size, ext, address, temp, seq),
         0xB6 | 0xB7 | 0xBE | 0xBF => {
             let src_size = if matches!(ext, 0xB6 | 0xBE) { 1 } else { 2 };
             let is_sign_extend = matches!(ext, 0xBE | 0xBF);
@@ -25,9 +70,800 @@ pub(super) fn decode_extended_semantic(
         0xBC => decode_bsf_bsr(insn, op_idx, prefix, size, address, temp, seq, false),
         0xBD => decode_bsf_bsr(insn, op_idx, prefix, size, address, temp, seq, true),
         0x40..=0x4F => decode_cmovcc(insn, op_idx, prefix, size, address, temp, seq, ext - 0x40),
+        0x10..=0x17 | 0x28..=0x2F | 0x50..=0x76 | 0x78..=0x7F => {
+            decode_simd_policy(address, seq, ext)
+        }
         0x90..=0x9F => decode_setcc(insn, op_idx, prefix, address, temp, seq, ext - 0x90),
+        0xD8..=0xDF => decode_x87_policy(address, seq, ext),
         _ => Vec::new(),
     }
+}
+
+fn decode_simd_policy(address: u64, seq: &mut u32, ext: u8) -> Vec<PcodeOp> {
+    vec![PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: None,
+        inputs: vec![const_u64(X86_SIMD_POLICY_BASE_ID + u64::from(ext), 8)],
+        asm_mnemonic: Some("SIMD_POLICY".to_string()),
+    }]
+}
+
+fn decode_x87_policy(address: u64, seq: &mut u32, ext: u8) -> Vec<PcodeOp> {
+    vec![PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: None,
+        inputs: vec![const_u64(X86_X87_POLICY_BASE_ID + u64::from(ext), 8)],
+        asm_mnemonic: Some("X87_POLICY".to_string()),
+    }]
+}
+
+fn decode_three_byte_escape_semantic(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    map_0f3a: bool,
+) -> Vec<PcodeOp> {
+    let ext3 = match insn.get(op_idx + 2) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+
+    if map_0f3a {
+        match ext3 {
+            0x16 => return decode_pextrd_pinsrd_family(insn, op_idx, prefix, size, address, temp, seq, true),
+            0x17 => return decode_extractps_semantic(insn, op_idx, prefix, size, address, temp, seq),
+            0x22 => {
+                return decode_pextrd_pinsrd_family(insn, op_idx, prefix, size, address, temp, seq, false)
+            }
+            0x61 => return decode_pcmpstrx_semantic(insn, op_idx, prefix, address, temp, seq, 0x61),
+            0x62 => return decode_pcmpstrx_semantic(insn, op_idx, prefix, address, temp, seq, 0x62),
+            0x63 => return decode_pcmpistri_semantic(insn, op_idx, prefix, address, temp, seq),
+            _ => {}
+        }
+    }
+
+    let selected = if map_0f3a {
+        match ext3 {
+            0x44 => Some(("PCLMULQDQ", true)),
+            0xCC => Some(("SHA1RNDS4", true)),
+            0x0F => Some(("PALIGNR", true)),
+            0x0E => Some(("PBLENDW", true)),
+            _ => None,
+        }
+    } else {
+        match ext3 {
+            0x00 => Some(("PSHUFB", false)),
+            0xC8 => Some(("SHA1NEXTE", false)),
+            0xC9 => Some(("SHA1MSG1", false)),
+            0xCA => Some(("SHA1MSG2", false)),
+            0xCB => Some(("SHA256RNDS2", false)),
+            0xCC => Some(("SHA256MSG1", false)),
+            0xCD => Some(("SHA256MSG2", false)),
+            0xDD => Some(("AESENCLAST", false)),
+            0xDE => Some(("AESDEC", false)),
+            _ => None,
+        }
+    };
+
+    if let Some((tag, has_imm8)) = selected {
+        return decode_three_byte_xmm_intrinsic(
+            insn, op_idx, prefix, address, temp, seq, map_0f3a, ext3, tag, has_imm8,
+        );
+    }
+
+    let base = if map_0f3a {
+        X86_3BYTE_0F3A_POLICY_BASE_ID
+    } else {
+        X86_3BYTE_0F38_POLICY_BASE_ID
+    };
+    vec![PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: None,
+        inputs: vec![const_u64(base + u64::from(ext3), 8)],
+        asm_mnemonic: Some(if map_0f3a {
+            "0F3A_POLICY".to_string()
+        } else {
+            "0F38_POLICY".to_string()
+        }),
+    }]
+}
+
+fn decode_pextrd_pinsrd_family(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    is_extract: bool,
+) -> Vec<PcodeOp> {
+    let elem_size = if size == 8 { 8 } else { 4 };
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, elem_size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let opcode_id = if is_extract { 0x16u64 } else { 0x22u64 };
+    let policy_id = const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + opcode_id, 8);
+
+    if is_extract {
+        let src_xmm = x86_xmm_reg(decoded.reg_index, 16);
+        let out = temp.alloc(elem_size);
+        let tag = if elem_size == 8 { "PEXTRQ" } else { "PEXTRD" };
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: Some(out.clone()),
+            inputs: vec![policy_id, src_xmm, imm8],
+            asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+        });
+        write_rm_value(&decoded.rm, out, address, &mut ops, seq, tag)
+    } else {
+        let dst_xmm = x86_xmm_reg(decoded.reg_index, 16);
+        let src = materialize_rm_value(&decoded.rm, elem_size, address, &mut ops, temp, seq);
+        let out = temp.alloc(16);
+        let tag = if elem_size == 8 { "PINSRQ" } else { "PINSRD" };
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: Some(out.clone()),
+            inputs: vec![policy_id, dst_xmm.clone(), src, imm8],
+            asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+        });
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::Copy,
+            address,
+            output: Some(dst_xmm),
+            inputs: vec![out],
+            asm_mnemonic: Some(format!("{tag}_WRITE")),
+        });
+        ops
+    }
+}
+
+fn decode_pcmpistri_semantic(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let modrm = match insn.get(op_idx + 3) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let mode = (modrm >> 6) & 0x3;
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+
+    let lhs = x86_xmm_reg(decoded.reg_index, 16);
+    let rhs = if mode == 0x3 {
+        x86_xmm_reg(rm_index, 16)
+    } else {
+        match &decoded.rm {
+            RmOperand::Mem(_) => materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq),
+            RmOperand::Reg(_) => return Vec::new(),
+        }
+    };
+
+    let out = temp.alloc(4);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + 0x63, 8), lhs, rhs, imm8],
+        asm_mnemonic: Some("PCMPISTRI_INTRINSIC".to_string()),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(x86_reg(1, 4)),
+        inputs: vec![out],
+        asm_mnemonic: Some("PCMPISTRI_ECX_WRITE".to_string()),
+    });
+
+    ops
+}
+
+fn decode_pcmpstrx_semantic(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    ext3: u8,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let modrm = match insn.get(op_idx + 3) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let mode = (modrm >> 6) & 0x3;
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+
+    let lhs = x86_xmm_reg(decoded.reg_index, 16);
+    let rhs = if mode == 0x3 {
+        x86_xmm_reg(rm_index, 16)
+    } else {
+        match &decoded.rm {
+            RmOperand::Mem(_) => materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq),
+            RmOperand::Reg(_) => return Vec::new(),
+        }
+    };
+
+    let (tag, out_size, out_target, write_mnemonic) = match ext3 {
+        0x61 => (
+            "PCMPESTRI",
+            4,
+            x86_reg(1, 4),
+            "PCMPESTRI_ECX_WRITE".to_string(),
+        ),
+        0x62 => (
+            "PCMPISTRM",
+            16,
+            x86_xmm_reg(0, 16),
+            "PCMPISTRM_XMM0_WRITE".to_string(),
+        ),
+        _ => return Vec::new(),
+    };
+
+    let out = temp.alloc(out_size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + u64::from(ext3), 8), lhs, rhs, imm8],
+        asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(out_target),
+        inputs: vec![out],
+        asm_mnemonic: Some(write_mnemonic),
+    });
+
+    ops
+}
+
+fn decode_extractps_semantic(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let rm_size = if size == 8 { 8 } else { 4 };
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, rm_size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let src_xmm = x86_xmm_reg(decoded.reg_index, 16);
+    let out = temp.alloc(rm_size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![const_u64(X86_3BYTE_0F3A_POLICY_BASE_ID + 0x17, 8), src_xmm, imm8],
+        asm_mnemonic: Some("EXTRACTPS_INTRINSIC".to_string()),
+    });
+    write_rm_value(&decoded.rm, out, address, &mut ops, seq, "EXTRACTPS")
+}
+
+fn decode_three_byte_xmm_intrinsic(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    map_0f3a: bool,
+    ext3: u8,
+    tag: &str,
+    has_imm8: bool,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, 16, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let modrm = match insn.get(op_idx + 3) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let mode = (modrm >> 6) & 0x3;
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+
+    let dst = x86_xmm_reg(decoded.reg_index, 16);
+    let src = if mode == 0x3 {
+        x86_xmm_reg(rm_index, 16)
+    } else {
+        match &decoded.rm {
+            RmOperand::Mem(_) => materialize_rm_value(&decoded.rm, 16, address, &mut ops, temp, seq),
+            RmOperand::Reg(_) => return Vec::new(),
+        }
+    };
+
+    let base = if map_0f3a {
+        X86_3BYTE_0F3A_POLICY_BASE_ID
+    } else {
+        X86_3BYTE_0F38_POLICY_BASE_ID
+    };
+    let mut inputs = vec![const_u64(base + u64::from(ext3), 8), dst.clone(), src];
+    if has_imm8 {
+        let imm8 = match decode_immediate(insn, decoded.next_idx, 1, 1, false) {
+            Some(v) => v,
+            None => return Vec::new(),
+        };
+        inputs.push(imm8);
+    }
+
+    let out = temp.alloc(16);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs,
+        asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![out],
+        asm_mnemonic: Some(format!("{tag}_WRITE")),
+    });
+
+    ops
+}
+
+fn decode_system_policy(address: u64, seq: &mut u32, policy_id: u64, mnemonic: &str) -> Vec<PcodeOp> {
+    vec![PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: None,
+        inputs: vec![const_u64(policy_id, 8)],
+        asm_mnemonic: Some(mnemonic.to_string()),
+    }]
+}
+
+fn decode_rdtsc_policy(address: u64, seq: &mut u32) -> Vec<PcodeOp> {
+    vec![PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: None,
+        inputs: vec![const_u64(X86_RDTSC_POLICY_ID, 8)],
+        asm_mnemonic: Some("RDTSC_POLICY".to_string()),
+    }]
+}
+
+fn decode_clflush_policy(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 1, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    if decoded.reg_field != 7 {
+        return Vec::new();
+    }
+
+    let addr_vn = match decoded.rm {
+        RmOperand::Mem(addr) => addr,
+        RmOperand::Reg(_) => return Vec::new(),
+    };
+
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: None,
+        inputs: vec![const_u64(X86_CLFLUSH_POLICY_ID, 8), addr_vn],
+        asm_mnemonic: Some("CLFLUSH_POLICY".to_string()),
+    });
+
+    ops
+}
+
+fn decode_nop_extended(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    if decoded.reg_field != 0 {
+        return Vec::new();
+    }
+
+    // Treat 0F 1F /0 as a semantic no-op hint; keep address-side decoding deterministic.
+    if matches!(decoded.rm, RmOperand::Reg(_)) {
+        return Vec::new();
+    }
+
+    let hint = temp.alloc(8);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(hint),
+        inputs: vec![const_u64(0x0F1F, 8)],
+        asm_mnemonic: Some("NOP_EXT_HINT".to_string()),
+    });
+
+    ops
+}
+
+fn decode_bswap(
+    prefix: &PrefixState,
+    size: u32,
+    ext: u8,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let reg_size = if size == 8 { 8 } else { 4 };
+    let reg_index = u32::from(ext.saturating_sub(0xC8)) + rex_b(prefix);
+    let reg = x86_reg(reg_index, reg_size);
+
+    let mut ops = Vec::new();
+    let mut reversed: Option<Varnode> = None;
+    for byte_idx in (0..reg_size).rev() {
+        let byte = temp.alloc(1);
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::SubPiece,
+            address,
+            output: Some(byte.clone()),
+            inputs: vec![reg.clone(), const_u64(u64::from(byte_idx), 4)],
+            asm_mnemonic: Some("BSWAP_EXTRACT".to_string()),
+        });
+        reversed = Some(match reversed {
+            Some(low) => {
+                let combined = temp.alloc(low.size.saturating_add(1));
+                ops.push(PcodeOp {
+                    seq_num: next_seq(seq),
+                    opcode: PcodeOpcode::Piece,
+                    address,
+                    output: Some(combined.clone()),
+                    inputs: vec![byte, low],
+                    asm_mnemonic: Some("BSWAP_PIECE".to_string()),
+                });
+                combined
+            }
+            None => byte,
+        });
+    }
+
+    let result = match reversed {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(reg),
+        inputs: vec![result],
+        asm_mnemonic: Some("BSWAP_WRITE".to_string()),
+    });
+    ops
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BitTestKind {
+    Bt,
+    Bts,
+    Btr,
+    Btc,
+}
+
+#[derive(Debug, Clone)]
+enum BitTestTarget {
+    Reg(Varnode),
+    Mem(Varnode),
+}
+
+fn bt_tag(kind: BitTestKind) -> &'static str {
+    match kind {
+        BitTestKind::Bt => "BT",
+        BitTestKind::Bts => "BTS",
+        BitTestKind::Btr => "BTR",
+        BitTestKind::Btc => "BTC",
+    }
+}
+
+fn bt_word_shift(size: u32) -> u64 {
+    let bits = u64::from(size.saturating_mul(8).max(1));
+    u64::from(bits.trailing_zeros())
+}
+
+fn decode_bt_family(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    kind: BitTestKind,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let tag = bt_tag(kind);
+    let bit_index = x86_reg(decoded.reg_index, size);
+    let bits_per_word = u64::from(size.saturating_mul(8));
+    let local_index = temp.alloc(size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntAnd,
+        address,
+        output: Some(local_index.clone()),
+        inputs: vec![bit_index.clone(), const_u64(bits_per_word.saturating_sub(1), size)],
+        asm_mnemonic: Some(format!("{tag}_BIT_INDEX")),
+    });
+
+    let (base_value, target) = match decoded.rm {
+        RmOperand::Reg(dst) => (dst.clone(), BitTestTarget::Reg(dst)),
+        RmOperand::Mem(base_addr) => {
+            let word_index = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntSRight,
+                address,
+                output: Some(word_index.clone()),
+                inputs: vec![bit_index, const_u64(bt_word_shift(size), size)],
+                asm_mnemonic: Some(format!("{tag}_MEM_WORD_INDEX")),
+            });
+
+            let byte_delta = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntMult,
+                address,
+                output: Some(byte_delta.clone()),
+                inputs: vec![word_index, const_u64(u64::from(size), size)],
+                asm_mnemonic: Some(format!("{tag}_MEM_BYTE_DELTA")),
+            });
+
+            let addr_delta = if byte_delta.size < base_addr.size {
+                let extended = temp.alloc(base_addr.size);
+                ops.push(PcodeOp {
+                    seq_num: next_seq(seq),
+                    opcode: PcodeOpcode::IntSExt,
+                    address,
+                    output: Some(extended.clone()),
+                    inputs: vec![byte_delta],
+                    asm_mnemonic: Some(format!("{tag}_MEM_ADDR_DELTA_EXT")),
+                });
+                extended
+            } else if byte_delta.size > base_addr.size {
+                let truncated = temp.alloc(base_addr.size);
+                ops.push(PcodeOp {
+                    seq_num: next_seq(seq),
+                    opcode: PcodeOpcode::SubPiece,
+                    address,
+                    output: Some(truncated.clone()),
+                    inputs: vec![byte_delta, const_u64(0, 4)],
+                    asm_mnemonic: Some(format!("{tag}_MEM_ADDR_DELTA_TRUNC")),
+                });
+                truncated
+            } else {
+                byte_delta
+            };
+
+            let effective_addr = temp.alloc(base_addr.size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntAdd,
+                address,
+                output: Some(effective_addr.clone()),
+                inputs: vec![base_addr, addr_delta],
+                asm_mnemonic: Some(format!("{tag}_MEM_ADDR")),
+            });
+
+            let loaded = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::Load,
+                address,
+                output: Some(loaded.clone()),
+                inputs: vec![const_u64(RAM_SPACE_ID, 8), effective_addr.clone()],
+                asm_mnemonic: Some(format!("{tag}_MEM_LOAD")),
+            });
+            (loaded, BitTestTarget::Mem(effective_addr))
+        }
+    };
+
+    let bit_mask = temp.alloc(size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntLeft,
+        address,
+        output: Some(bit_mask.clone()),
+        inputs: vec![const_u64(1, size), local_index],
+        asm_mnemonic: Some(format!("{tag}_MASK")),
+    });
+
+    let bit_value = temp.alloc(size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntAnd,
+        address,
+        output: Some(bit_value.clone()),
+        inputs: vec![base_value.clone(), bit_mask.clone()],
+        asm_mnemonic: Some(format!("{tag}_BIT")),
+    });
+
+    let cf = temp.alloc(1);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntNotEqual,
+        address,
+        output: Some(cf.clone()),
+        inputs: vec![bit_value, const_u64(0, size)],
+        asm_mnemonic: Some(format!("{tag}_CF")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(x86_flag_cf()),
+        inputs: vec![cf],
+        asm_mnemonic: Some(format!("{tag}_CF_WRITE")),
+    });
+
+    let updated = match kind {
+        BitTestKind::Bt => None,
+        BitTestKind::Bts => {
+            let out = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntOr,
+                address,
+                output: Some(out.clone()),
+                inputs: vec![base_value, bit_mask],
+                asm_mnemonic: Some(format!("{tag}_SET")),
+            });
+            Some(out)
+        }
+        BitTestKind::Btr => {
+            let inv_mask = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntNegate,
+                address,
+                output: Some(inv_mask.clone()),
+                inputs: vec![bit_mask],
+                asm_mnemonic: Some(format!("{tag}_MASK_INV")),
+            });
+            let out = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntAnd,
+                address,
+                output: Some(out.clone()),
+                inputs: vec![base_value, inv_mask],
+                asm_mnemonic: Some(format!("{tag}_RESET")),
+            });
+            Some(out)
+        }
+        BitTestKind::Btc => {
+            let out = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntXor,
+                address,
+                output: Some(out.clone()),
+                inputs: vec![base_value, bit_mask],
+                asm_mnemonic: Some(format!("{tag}_TOGGLE")),
+            });
+            Some(out)
+        }
+    };
+
+    if let Some(value) = updated {
+        match target {
+            BitTestTarget::Reg(dst) => {
+                ops.push(PcodeOp {
+                    seq_num: next_seq(seq),
+                    opcode: PcodeOpcode::Copy,
+                    address,
+                    output: Some(dst),
+                    inputs: vec![value],
+                    asm_mnemonic: Some(format!("{tag}_WRITE")),
+                });
+            }
+            BitTestTarget::Mem(addr_vn) => {
+                ops.push(PcodeOp {
+                    seq_num: next_seq(seq),
+                    opcode: PcodeOpcode::Store,
+                    address,
+                    output: None,
+                    inputs: vec![const_u64(RAM_SPACE_ID, 8), addr_vn, value],
+                    asm_mnemonic: Some(format!("{tag}_STORE")),
+                });
+            }
+        }
+    }
+
+    ops
 }
 
 fn decode_movx(
