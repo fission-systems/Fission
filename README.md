@@ -12,14 +12,16 @@ This repository is still an **early-stage** and **immature public codebase**. Th
 
 Fission is converging on a simple architecture:
 
-- **Ghidra as a lift service**
+- **Fission Sleigh as the primary lift engine**
 - **Rust as the decompiler brain**
+- **Native/Ghidra as a compatibility lane, not the architectural center**
 - **CLI and Tauri as product surfaces over the same core**
 
 Its long-term direction goes beyond single-function pseudocode. Fission is aimed at **project-level software restoration**: recovering structure, behavior, and intent from compiled artifacts, while growing toward a unified platform that combines static, dynamic, and network analysis and absorbs the strengths of traditionally fragmented reverse-engineering tools into one workflow. AI is intended to sit on top of that stack as a deeply tool-coupled workflow layer.
 
 The repository currently includes:
 
+- a Fission-owned Sleigh lifting engine in [`crates/fission-sleigh`](./crates/fission-sleigh)
 - a native Ghidra-backed decompiler bridge in [`ghidra_decompiler`](./ghidra_decompiler) and [`crates/fission-ffi`](./crates/fission-ffi)
 - a Rust analysis/decompilation stack in [`crates`](./crates)
 - a Rust-owned Fission NIR decompiler core under [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir)
@@ -28,8 +30,8 @@ The repository currently includes:
 
 Current engine status:
 
-- `legacy`: native Ghidra decompilation + Rust postprocess, still the stable path
-- `Fission NIR`: Ghidra p-code -> Rust NIR/HIR -> structuring -> printer, the forward architecture path
+- `legacy`: native Ghidra decompilation + Rust postprocess, compatibility path
+- `Fission NIR`: Fission Sleigh p-code -> Rust NIR/HIR -> structuring -> printer, the primary forward architecture path
 
 Fission NIR currently supports real PE x64 work, bootstrap-level PE x86 coverage on selected seeds, stack-slot recovery, multi-block control flow reconstruction, short-circuit folding, and Rust-owned pseudocode printing. It is still experimental, and the repository should still be treated as an evolving engineering codebase rather than a mature end-user product.
 
@@ -60,26 +62,30 @@ If you are evaluating Fission today, the most accurate short version is:
 - the repository is real, buildable, and under active development
 - the CLI and analysis crates are the most mature parts of the workspace
 - the Tauri desktop app is real and wired into the same engine stack
-- `legacy` is still the stable default path for serious use
-- `Fission NIR` is the forward architecture path and already useful on covered functions
+- `Fission NIR` is the primary architecture path and already useful on covered functions
+- `legacy` remains available as a compatibility and fallback lane
 - PE x64 currently has the strongest Fission NIR coverage
 - PE x86 Fission NIR coverage exists, but it is still limited and seed-driven
 - broader dynamic-analysis, network-analysis, and AI workflow layers are part of the long-term direction, not the fully realized present-day state
 
 ## Quick Start
 
-Build the native decompiler first, then build the CLI:
+Build the CLI first. The native backend is optional and can be built for compatibility testing:
 
 ```bash
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
+cargo build --release --bin fission_cli
+```
+
+Optional native compatibility backend:
+
+```bash
 cd ghidra_decompiler
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 cd ..
-
-cargo build --release --bin fission_cli
 ```
 
 Basic CLI usage:
@@ -102,13 +108,13 @@ For CLI examples, see [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_
 
 | Engine | Role today | Notes |
 |---|---|---|
-| `legacy` | Stable default | Native Ghidra decompilation with Rust-side cleanup and enrichment |
-| `nir` | Forward architecture path | Fission NIR: Ghidra p-code lift into Rust-owned NIR/HIR, structuring, normalization, and printing |
+| `legacy` | Compatibility lane | Native Ghidra decompilation with Rust-side cleanup and enrichment |
+| `nir` | Primary architecture path | Fission NIR: Fission Sleigh lift into Rust-owned NIR/HIR, structuring, normalization, and printing |
 
 In practical terms:
 
-- use `legacy` when you want the safest current path
-- use `nir` when evaluating the future Rust-owned decompiler direction
+- use `nir` as the primary Fission-owned direction
+- use `legacy` for compatibility checks and fallback behavior
 - expect the two paths to differ in type surfacing, readability, and large-function coverage
 
 ## Where To Look First
@@ -120,7 +126,7 @@ If you are new to the repository, start here:
 2. [`docs/ROADMAP.md`](./docs/ROADMAP.md)  
    Current direction and priority areas.
 3. [`docs/build/BUILD.md`](./docs/build/BUILD.md)  
-   How to build the native core and Rust workspace.
+  How to build the Rust workspace and optional native compatibility backend.
 4. [`docs/cli/CLI_ONE_SHOT_MODE.md`](./docs/cli/CLI_ONE_SHOT_MODE.md)  
    Practical CLI usage.
 5. [`docs/changelog/CHANGELOG.md`](./docs/changelog/CHANGELOG.md)  
@@ -149,15 +155,16 @@ That means going beyond questions like "what does this function do?" and moving 
 
 The current architecture is converging on:
 
-- Ghidra/native C++ as the lifting, CFG, and hard-failure containment backend
+- Fission Sleigh as the primary lifting, CFG, and decode backend
 - Fission-owned Rust IR as the place where high-level control flow, data abstraction, type surfacing, and pseudocode cleanup happen
+- native/Ghidra C++ as an optional compatibility and differential-check backend
 - CLI/Tauri as product surfaces over the same analysis core
 - AI as a future workflow layer that is tightly integrated with decompilation, analysis artifacts, and project-wide context rather than acting as a generic chatbot on the side
 
 In practical terms:
 
-- the `legacy` engine is still the stable default path
-- the `Fission NIR` engine is the forward architecture path
+- the `Fission NIR` engine is the primary architecture path
+- the `legacy` engine remains as a compatibility lane
 - the `nir` code under [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir) is not a string post-processor; it is the start of a separate decompiler core
 
 ## Current Snapshot
@@ -166,18 +173,18 @@ As of March 14, 2026, the repository has two real decompilation paths:
 
 ### 1. `legacy`
 
-This is the mature path:
+This is the compatibility path:
 
 - native Ghidra decompilation
 - Fission post-processing and cleanup
 - broadest type surface coverage today
-- current regression guard and stable default
+- current regression guard and compatibility fallback baseline
 
 ### 2. `Fission NIR`
 
 This is the Fission-owned experimental path:
 
-- native Ghidra p-code extraction
+- Fission Sleigh decode and p-code extraction
 - Rust-side NIR/HIR reconstruction
 - Rust-side CFG structuring
 - Rust-side normalization and idiom recognition
@@ -226,8 +233,8 @@ If you are trying to use Fission today, the most accurate status is:
 
 - the CLI and analysis crates are the most mature part of the repository
 - the Tauri frontend is real, buildable, and connected to the same engine stack
-- `legacy` is still the stable default for serious use
-- `Fission NIR` is the architecture path under active investment
+- `Fission NIR` is the primary architecture path under active investment
+- `legacy` is maintained as a compatibility and fallback lane
 - `nir` is already large enough that it should be thought of as a decompiler subsystem, not a convenience helper
 
 Current `Fission NIR` strengths:
@@ -325,7 +332,7 @@ This matters because Fission is no longer just appending small helpers around na
 At a high level, the decompilation stack looks like this:
 
 1. load binary
-2. initialize native backend and analysis context
+2. initialize analysis context and selected backend
 3. choose engine
 4. decompile or lift
 5. apply engine-specific high-level reconstruction
@@ -346,7 +353,7 @@ This path is still the strongest for broad type recovery and default stability.
 
 The Fission NIR path is roughly:
 
-1. native p-code extraction
+1. Fission Sleigh decode + p-code extraction
 2. build HIR through [`crates/fission-pcode/src/nir/builder`](./crates/fission-pcode/src/nir/builder)
 3. normalize through [`crates/fission-pcode/src/nir/normalize`](./crates/fission-pcode/src/nir/normalize)
 4. structure through [`crates/fission-pcode/src/nir/structuring`](./crates/fission-pcode/src/nir/structuring)
@@ -475,8 +482,8 @@ What exists today:
 
 Important policy:
 
-- `legacy` is the stable default
-- `Fission NIR` is the experimental Fission-owned path
+- `Fission NIR` is the primary Fission-owned path
+- `legacy` is a compatibility and fallback path
 - `auto` exists to try Fission NIR first and fall back safely
 
 The older GUI guide at [`docs/gui/GUI_GUIDE.md`](./docs/gui/GUI_GUIDE.md) documents an earlier egui-based UI and is not the source of truth for the current Tauri frontend.
@@ -590,7 +597,7 @@ In concrete terms, the most important active areas are:
 
 The most important limitations today are:
 
-- `legacy` is still the only engine that should be treated as the stable default
+- `legacy` still has broader compatibility coverage on part of the corpus
 - `Fission NIR` still has incomplete large-function coverage
 - x86 Fission NIR support exists, but it is bootstrap-level, not parity with x64
 - Fission NIR body readability still lags the desired end state on large state-machine/table-driven code

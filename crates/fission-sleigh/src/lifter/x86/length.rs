@@ -1,5 +1,14 @@
 use anyhow::{bail, Context, Result};
 
+#[derive(Clone, Copy)]
+enum OpcodeMap {
+    Primary,
+    Map0F,
+    Map0F38,
+    Map0F3A,
+    VexUnknown,
+}
+
 pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
     if bytes.is_empty() {
         bail!("x86 decode received empty bytes");
@@ -23,35 +32,63 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
 
     let mut opcode = bytes[i];
     i += 1;
-    let mut ext: Option<u8> = None;
-    let mut ext3: Option<u8> = None;
+    let mut opcode_map = OpcodeMap::Primary;
 
-    if opcode == 0x0F {
+    if opcode == 0xC5 {
+        if i >= bytes.len() {
+            bail!("x86 truncated 2-byte VEX prefix");
+        }
+        // Consume VEX.vvvv/L/pp.
+        i += 1;
+        opcode_map = OpcodeMap::Map0F;
+        if i >= bytes.len() {
+            bail!("x86 missing opcode after 2-byte VEX prefix");
+        }
+        opcode = bytes[i];
+        i += 1;
+    } else if opcode == 0xC4 {
+        if i + 1 >= bytes.len() {
+            bail!("x86 truncated 3-byte VEX prefix");
+        }
+        let vex_map = bytes[i] & 0x1F;
+        // Consume VEX m-mmmm and W/vvvv/L/pp bytes.
+        i += 2;
+        opcode_map = match vex_map {
+            0x01 => OpcodeMap::Map0F,
+            0x02 => OpcodeMap::Map0F38,
+            0x03 => OpcodeMap::Map0F3A,
+            _ => OpcodeMap::VexUnknown,
+        };
+        if i >= bytes.len() {
+            bail!("x86 missing opcode after 3-byte VEX prefix");
+        }
+        opcode = bytes[i];
+        i += 1;
+    } else if opcode == 0x0F {
         if i >= bytes.len() {
             bail!("x86 truncated 0x0F escape opcode");
         }
         let second = bytes[i];
-        ext = Some(second);
         i += 1;
 
         if matches!(second, 0x38 | 0x3A) {
+            opcode_map = if second == 0x38 {
+                OpcodeMap::Map0F38
+            } else {
+                OpcodeMap::Map0F3A
+            };
             if i >= bytes.len() {
                 bail!("x86 truncated 0x0F {:02X} escape opcode", second);
             }
-            let third = bytes[i];
-            ext3 = Some(third);
-            opcode = third;
+            opcode = bytes[i];
             i += 1;
         } else {
+            opcode_map = OpcodeMap::Map0F;
             opcode = second;
         }
     }
 
-    let needs_modrm = if matches!(ext, Some(0x38 | 0x3A)) {
-        true
-    } else {
-        needs_modrm(opcode, ext)
-    };
+    let needs_modrm = needs_modrm(opcode, opcode_map);
     let mut modrm: Option<u8> = None;
     if needs_modrm {
         if i >= bytes.len() {
@@ -90,8 +127,7 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
 
     i = i.saturating_add(imm_len(
         opcode,
-        ext,
-        ext3,
+        opcode_map,
         modrm,
         operand_size_override,
         (rex & 0x08) != 0,
@@ -107,10 +143,11 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
     u64::try_from(i).context("x86 decoded length does not fit u64")
 }
 
-fn needs_modrm(opcode: u8, ext: Option<u8>) -> bool {
-    if let Some(second) = ext {
-        return !matches!(
-            second,
+fn needs_modrm(opcode: u8, map: OpcodeMap) -> bool {
+    match map {
+        OpcodeMap::Map0F => {
+            !matches!(
+                opcode,
             0x05
                 | 0x06
                 | 0x07
@@ -131,66 +168,70 @@ fn needs_modrm(opcode: u8, ext: Option<u8>) -> bool {
                 | 0xA9
                 | 0xAA
                 | 0xC8..=0xCF
-        );
+            )
+        }
+        OpcodeMap::Map0F38 | OpcodeMap::Map0F3A | OpcodeMap::VexUnknown => true,
+        OpcodeMap::Primary => {
+            !matches!(
+                opcode,
+                0x6A
+                    | 0x68
+                    | 0x50..=0x5F
+                    | 0x90
+                    | 0xCC
+                    | 0xCD
+                    | 0xC3
+                    | 0xCB
+                    | 0xC2
+                    | 0xCA
+                    | 0xE8
+                    | 0xE9
+                    | 0xEB
+                    | 0x70..=0x7F
+                    | 0x98
+                    | 0x99
+                    | 0xA0
+                    | 0xA1
+                    | 0xA2
+                    | 0xA3
+                    | 0xA4
+                    | 0xA5
+                    | 0xA6
+                    | 0xA7
+                    | 0xA8
+                    | 0xA9
+                    | 0xAA
+                    | 0xAB
+                    | 0xAC
+                    | 0xAD
+                    | 0xAE
+                    | 0xAF
+                    | 0xB0..=0xBF
+            )
+        }
     }
-
-    !matches!(
-        opcode,
-        0x6A
-            | 0x68
-            | 0x50..=0x5F
-            | 0x90
-            | 0xCC
-            | 0xCD
-            | 0xC3
-            | 0xCB
-            | 0xC2
-            | 0xCA
-            | 0xE8
-            | 0xE9
-            | 0xEB
-            | 0x70..=0x7F
-            | 0xA0
-            | 0xA1
-            | 0xA2
-            | 0xA3
-            | 0xA4
-            | 0xA5
-            | 0xA6
-            | 0xA7
-            | 0xA8
-            | 0xA9
-            | 0xAA
-            | 0xAB
-            | 0xAC
-            | 0xAD
-            | 0xAE
-            | 0xAF
-            | 0xB0..=0xBF
-    )
 }
 
 fn imm_len(
     opcode: u8,
-    ext: Option<u8>,
-    ext3: Option<u8>,
+    map: OpcodeMap,
     modrm: Option<u8>,
     operand_size_override: bool,
     rex_w: bool,
 ) -> usize {
     let full_operand_imm = if operand_size_override { 2 } else { 4 };
 
-    if let Some(second) = ext {
-        if second == 0x3A && ext3.is_some() {
-            return 1;
-        }
-        if second == 0x38 && ext3.is_some() {
+    match map {
+        OpcodeMap::Map0F3A => return 1,
+        OpcodeMap::Map0F38 => return 0,
+        OpcodeMap::Map0F => {
+            if (0x80..=0x8F).contains(&opcode) {
+                return 4;
+            }
             return 0;
         }
-        if (0x80..=0x8F).contains(&second) {
-            return 4;
-        }
-        return 0;
+        OpcodeMap::VexUnknown => return 0,
+        OpcodeMap::Primary => {}
     }
 
     match opcode {
@@ -379,6 +420,14 @@ mod tests {
     }
 
     #[test]
+    fn decode_len_handles_convert_sign_extension_opcodes_without_modrm() {
+        assert_eq!(decode_len(&[0x98]).unwrap(), 1); // cwde
+        assert_eq!(decode_len(&[0x99]).unwrap(), 1); // cdq
+        assert_eq!(decode_len(&[0x66, 0x98]).unwrap(), 2); // cbw
+        assert_eq!(decode_len(&[0x48, 0x99]).unwrap(), 2); // cqo
+    }
+
+    #[test]
     fn decode_len_handles_0f_three_byte_escape_maps() {
         assert_eq!(decode_len(&[0x0F, 0x38, 0xF1, 0xC0]).unwrap(), 4); // 0f38 + modrm
         assert_eq!(decode_len(&[0x0F, 0x38, 0x00, 0x44, 0x24, 0x10]).unwrap(), 6); // sib+disp8
@@ -402,5 +451,25 @@ mod tests {
     fn decode_len_handles_pop_rm_and_push_rm_groups() {
         assert_eq!(decode_len(&[0x8F, 0x00]).unwrap(), 2);
         assert_eq!(decode_len(&[0xFF, 0x30]).unwrap(), 2);
+    }
+
+    #[test]
+    fn decode_len_handles_vex_two_byte_prefix_variants() {
+        assert_eq!(decode_len(&[0xC5, 0xF8, 0x77]).unwrap(), 3); // vzeroupper
+        assert_eq!(decode_len(&[0xC5, 0xF9, 0x6E, 0xC0]).unwrap(), 4); // vmovd xmm0, eax
+    }
+
+    #[test]
+    fn decode_len_handles_vex_three_byte_map_variants() {
+        assert_eq!(decode_len(&[0xC4, 0xE2, 0x79, 0x00, 0x44, 0x24, 0x10]).unwrap(), 7); // 0f38 map
+        assert_eq!(decode_len(&[0xC4, 0xE3, 0x79, 0x0F, 0xC0, 0x04]).unwrap(), 6); // 0f3a map + imm8
+    }
+
+    #[test]
+    fn decode_len_rejects_truncated_vex_prefixes() {
+        assert!(decode_len(&[0xC5]).is_err());
+        assert!(decode_len(&[0xC5, 0xF8]).is_err());
+        assert!(decode_len(&[0xC4, 0xE3]).is_err());
+        assert!(decode_len(&[0xC4, 0xE3, 0x79]).is_err());
     }
 }

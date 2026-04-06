@@ -31,6 +31,7 @@ const X86_NOP_HINT_ID: u64 = 0x90;
 const X86_PAUSE_HINT_ID: u64 = 0xF390;
 const X86_INT3_TRAP_ID: u64 = 0xCC;
 const X86_INT_IMM_TRAP_ID: u64 = 0xCD;
+const X86_ROTATE_INTRINSIC_BASE_ID: u64 = 0xF0D0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AluKind {
@@ -73,10 +74,13 @@ enum Destination {
 }
 
 impl X86TempFactory {
-    fn new(address: u64) -> Self {
-        Self {
-            next: 0xE100_0000_0000_0000u64.wrapping_add(address.wrapping_shl(6)),
-        }
+    #[cfg(test)]
+    fn base_for_address(address: u64) -> u64 {
+        0xE100_0000_0000_0000u64.wrapping_add(address.wrapping_shl(6))
+    }
+
+    fn with_base(base: u64) -> Self {
+        Self { next: base }
     }
 
     fn alloc(&mut self, size: u32) -> Varnode {
@@ -92,7 +96,17 @@ impl X86TempFactory {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn decode_semantic(insn: &[u8], address: u64) -> Vec<PcodeOp> {
+    decode_semantic_with_state(insn, address, 1, X86TempFactory::base_for_address(address))
+}
+
+pub(crate) fn decode_semantic_with_state(
+    insn: &[u8],
+    address: u64,
+    seq_start: u32,
+    temp_base: u64,
+) -> Vec<PcodeOp> {
     if insn.is_empty() {
         return Vec::new();
     }
@@ -104,8 +118,8 @@ pub(crate) fn decode_semantic(insn: &[u8], address: u64) -> Vec<PcodeOp> {
 
     let op = insn[op_idx];
     let size = operand_size(&prefix);
-    let mut seq = 1u32;
-    let mut temp = X86TempFactory::new(address);
+    let mut seq = seq_start;
+    let mut temp = X86TempFactory::with_base(temp_base);
 
     if op == 0x0F {
         return decode_extended_semantic(insn, op_idx, &prefix, size, address, &mut temp, &mut seq);
@@ -334,6 +348,8 @@ pub(crate) fn decode_semantic(insn: &[u8], address: u64) -> Vec<PcodeOp> {
         0xA4 | 0xA5 | 0xA6 | 0xA7 | 0xAA | 0xAB | 0xAC | 0xAD | 0xAE | 0xAF => {
             decode_string_semantic(op, &prefix, size, address, &mut temp, &mut seq)
         }
+        0x98 => decode_op_98_sign_extend_accumulator(size, address, &mut temp, &mut seq),
+        0x99 => decode_op_99_sign_extend_high_half(size, address, &mut temp, &mut seq),
         0x04 | 0x05 | 0x0C | 0x0D | 0x14 | 0x15 | 0x1C | 0x1D | 0x24 | 0x25 | 0x2C | 0x2D
         | 0x34 | 0x35 | 0x3C | 0x3D => {
             let is_byte = matches!(
@@ -381,9 +397,13 @@ pub(crate) fn decode_semantic(insn: &[u8], address: u64) -> Vec<PcodeOp> {
                 &mut seq,
             )
         }
-        0x88 | 0x89 | 0x8A | 0x8B | 0x8D | 0xC6 | 0xC7 => {
+        0x86 | 0x87 | 0x88 | 0x89 | 0x8A | 0x8B | 0x8D | 0xC6 | 0xC7 => {
             let mut pre_ops = Vec::new();
-            let modrm_size = if matches!(op, 0x88 | 0x8A | 0xC6) { 1 } else { size };
+            let modrm_size = if matches!(op, 0x86 | 0x88 | 0x8A | 0xC6) {
+                1
+            } else {
+                size
+            };
             let decoded = match decode_modrm_operand(
                 insn,
                 op_idx,
@@ -400,6 +420,29 @@ pub(crate) fn decode_semantic(insn: &[u8], address: u64) -> Vec<PcodeOp> {
 
             let mut ops = pre_ops;
             match op {
+                0x86 | 0x87 => {
+                    let reg = x86_reg(decoded.reg_index, modrm_size);
+                    let rm_value =
+                        materialize_rm_value(&decoded.rm, modrm_size, address, &mut ops, &mut temp, &mut seq);
+                    let reg_saved = temp.alloc(modrm_size);
+                    ops.push(PcodeOp {
+                        seq_num: next_seq(&mut seq),
+                        opcode: PcodeOpcode::Copy,
+                        address,
+                        output: Some(reg_saved.clone()),
+                        inputs: vec![reg.clone()],
+                        asm_mnemonic: Some("XCHG_REG_SAVE".to_string()),
+                    });
+                    ops.push(PcodeOp {
+                        seq_num: next_seq(&mut seq),
+                        opcode: PcodeOpcode::Copy,
+                        address,
+                        output: Some(reg),
+                        inputs: vec![rm_value],
+                        asm_mnemonic: Some("XCHG_REG_WRITE".to_string()),
+                    });
+                    write_rm_value(&decoded.rm, reg_saved, address, &mut ops, &mut seq, "XCHG")
+                }
                 0x88 | 0x89 => {
                     let src = x86_reg(decoded.reg_index, modrm_size);
                     write_rm_value(&decoded.rm, src, address, &mut ops, &mut seq, "MOV")
@@ -860,12 +903,6 @@ pub(crate) fn decode_semantic(insn: &[u8], address: u64) -> Vec<PcodeOp> {
                     ops
                 }
                 0xC0 | 0xD0 | 0xD1 | 0xD2 | 0xC1 | 0xD3 => {
-                    let kind = match decoded.reg_field {
-                        4 => AluKind::Shl,
-                        5 => AluKind::Shr,
-                        7 => AluKind::Sar,
-                        _ => return Vec::new(),
-                    };
                     let shift_size = if matches!(op, 0xC0 | 0xD0 | 0xD2) {
                         1
                     } else {
@@ -889,16 +926,39 @@ pub(crate) fn decode_semantic(insn: &[u8], address: u64) -> Vec<PcodeOp> {
                         &mut temp,
                         &mut seq,
                     );
-                    ops.extend(emit_alu_ops(
-                        address,
-                        shift_size,
-                        lhs,
-                        count,
-                        destination_from_rm(&decoded.rm),
-                        kind,
-                        &mut temp,
-                        &mut seq,
-                    ));
+                    match decoded.reg_field {
+                        0 | 1 => {
+                            ops.extend(emit_rotate_intrinsic_ops(
+                                address,
+                                shift_size,
+                                lhs,
+                                count,
+                                destination_from_rm(&decoded.rm),
+                                decoded.reg_field == 0,
+                                &mut temp,
+                                &mut seq,
+                            ));
+                        }
+                        4 | 5 | 7 => {
+                            let kind = match decoded.reg_field {
+                                4 => AluKind::Shl,
+                                5 => AluKind::Shr,
+                                7 => AluKind::Sar,
+                                _ => unreachable!("checked above"),
+                            };
+                            ops.extend(emit_alu_ops(
+                                address,
+                                shift_size,
+                                lhs,
+                                count,
+                                destination_from_rm(&decoded.rm),
+                                kind,
+                                &mut temp,
+                                &mut seq,
+                            ));
+                        }
+                        _ => return Vec::new(),
+                    }
                     ops
                 }
                 _ => Vec::new(),
@@ -991,6 +1051,187 @@ fn write_rm_value(
     }
 
     std::mem::take(ops)
+}
+
+fn decode_op_98_sign_extend_accumulator(
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let src_size = match size {
+        2 => 1,
+        4 => 2,
+        8 => 4,
+        _ => return Vec::new(),
+    };
+
+    let src = x86_reg(0, src_size);
+    let mut ops = Vec::new();
+    if src_size == size {
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::Copy,
+            address,
+            output: Some(x86_reg(0, size)),
+            inputs: vec![src],
+            asm_mnemonic: Some("CBW_CWDE_CDQE_WRITE".to_string()),
+        });
+        return ops;
+    }
+
+    let extended = temp.alloc(size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntSExt,
+        address,
+        output: Some(extended.clone()),
+        inputs: vec![src],
+        asm_mnemonic: Some("CBW_CWDE_CDQE_SEXT".to_string()),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(x86_reg(0, size)),
+        inputs: vec![extended],
+        asm_mnemonic: Some("CBW_CWDE_CDQE_WRITE".to_string()),
+    });
+    ops
+}
+
+fn decode_op_99_sign_extend_high_half(
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let src = x86_reg(0, size);
+    let wide_size = size.saturating_mul(2);
+    if wide_size == 0 {
+        return Vec::new();
+    }
+
+    let mut ops = Vec::new();
+    let extended = temp.alloc(wide_size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntSExt,
+        address,
+        output: Some(extended.clone()),
+        inputs: vec![src],
+        asm_mnemonic: Some("CWD_CDQ_CQO_SEXT".to_string()),
+    });
+
+    let high = temp.alloc(size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::SubPiece,
+        address,
+        output: Some(high.clone()),
+        inputs: vec![extended, const_u64(u64::from(size), 4)],
+        asm_mnemonic: Some("CWD_CDQ_CQO_HIGH".to_string()),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(x86_reg(2, size)),
+        inputs: vec![high],
+        asm_mnemonic: Some("CWD_CDQ_CQO_WRITE".to_string()),
+    });
+    ops
+}
+
+fn emit_rotate_intrinsic_ops(
+    address: u64,
+    size: u32,
+    lhs: Varnode,
+    count: Varnode,
+    dst: Destination,
+    is_left: bool,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let count_mask = if size == 8 { 0x3F } else { 0x1F };
+    let count_input = if count.is_constant {
+        let masked = (count.constant_val as u64) & count_mask;
+        if masked == 0 {
+            return Vec::new();
+        }
+        const_u64(masked, size)
+    } else if count.size == size {
+        count
+    } else {
+        let mut ops = Vec::new();
+        let ext = temp.alloc(size);
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::IntZExt,
+            address,
+            output: Some(ext.clone()),
+            inputs: vec![count],
+            asm_mnemonic: Some("ROT_COUNT_ZEXT".to_string()),
+        });
+        let result = match &dst {
+            Destination::Reg(v) => v.clone(),
+            Destination::Mem(_) | Destination::None => temp.alloc(size),
+        };
+        let policy_id = X86_ROTATE_INTRINSIC_BASE_ID + if is_left { 0 } else { 1 };
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::CallOther,
+            address,
+            output: Some(result.clone()),
+            inputs: vec![const_u64(policy_id, 8), lhs, ext],
+            asm_mnemonic: Some(if is_left {
+                "ROL_INTRINSIC".to_string()
+            } else {
+                "ROR_INTRINSIC".to_string()
+            }),
+        });
+        if let Destination::Mem(addr_vn) = dst {
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::Store,
+                address,
+                output: None,
+                inputs: vec![const_u64(RAM_SPACE_ID, 8), addr_vn, result],
+                asm_mnemonic: Some("ROT_STORE".to_string()),
+            });
+        }
+        return ops;
+    };
+
+    let mut ops = Vec::new();
+    let result = match &dst {
+        Destination::Reg(v) => v.clone(),
+        Destination::Mem(_) | Destination::None => temp.alloc(size),
+    };
+    let policy_id = X86_ROTATE_INTRINSIC_BASE_ID + if is_left { 0 } else { 1 };
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(result.clone()),
+        inputs: vec![const_u64(policy_id, 8), lhs, count_input],
+        asm_mnemonic: Some(if is_left {
+            "ROL_INTRINSIC".to_string()
+        } else {
+            "ROR_INTRINSIC".to_string()
+        }),
+    });
+    if let Destination::Mem(addr_vn) = dst {
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::Store,
+            address,
+            output: None,
+            inputs: vec![const_u64(RAM_SPACE_ID, 8), addr_vn, result],
+            asm_mnemonic: Some("ROT_STORE".to_string()),
+        });
+    }
+    ops
 }
 
 fn stack_operand_size(prefix: &PrefixState) -> u32 {

@@ -14,10 +14,20 @@ pub(super) struct A64TempFactory {
 }
 
 impl A64TempFactory {
+    #[cfg(test)]
+    pub(super) fn base_for_address(address: u64) -> u64 {
+        0xC000_0000_0000_0000u64.wrapping_add(address.wrapping_shl(6))
+    }
+
+    #[cfg(test)]
     pub(super) fn new(address: u64) -> Self {
         Self {
-            next: 0xC000_0000_0000_0000u64.wrapping_add(address.wrapping_shl(6)),
+            next: Self::base_for_address(address),
         }
+    }
+
+    pub(super) fn with_base(base: u64) -> Self {
+        Self { next: base }
     }
 
     pub(super) fn alloc(&mut self, size: u32) -> Varnode {

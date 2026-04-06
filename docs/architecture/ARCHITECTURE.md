@@ -1,13 +1,13 @@
 # Architecture
 
 This document is the **current architectural source of truth** for Fission.  
-As of March 2026, the target model is no longer “keep fixing Ghidra as the final decompiler.” The project is converging on a structure where **Ghidra is constrained to a lift service and Rust owns the decompiler brain**.
+As of April 2026, the target model is no longer "use native Ghidra as the architectural center." The project is converging on a structure where **Fission-owned Sleigh lifting + Rust-owned decompiler core** define the primary path, while native/Ghidra remains a compatibility lane.
 
 ## Top-Level Contract
 
 Fission is organized around four primary layers:
 
-1. **Lift Service**
+1. **Instruction Semantics & Lifting**
 2. **Canonical IR**
 3. **Structured IR**
 4. **Presentation**
@@ -16,28 +16,29 @@ Alongside those layers, the product also relies on a **Session Fact Store** and 
 
 Core direction:
 
-- native/Ghidra provides **decode + p-code + CFG skeleton + baseline ABI/type facts + failure isolation**
+- Fission-owned Sleigh engine provides **decode + p-code + CFG skeleton + deterministic lift contracts**
 - Rust owns **normalization, structuring, higher-level representation, and the final printer**
 - type/name/FID/cross-image facts are consumed only after conflicts are resolved in the **Fact Store**
+- native/Ghidra remains a **compatibility and cross-check lane**, not the semantic ownership center
 - giant or unsupported functions must terminate safely through **unstructured preview output or explicit fallback**
 
 ## Layer Responsibilities
 
-### 1. Lift Service
+### 1. Instruction Semantics & Lifting
 
 Components:
 
-- `ghidra_decompiler`
-- `fission-ffi`
-- native prepare / timeout / p-code extraction
+- `crates/fission-sleigh`
+- `crates/fission-pcode` (p-code surface and handoff)
+- optional compatibility bridge: `ghidra_decompiler`, `fission-ffi`
 
 Responsibilities:
 
 - instruction semantics
 - p-code generation
 - CFG skeleton
-- baseline ABI/type facts
-- native timeout / payload / failure containment
+- baseline lift-level facts and invariants
+- lift payload / failure containment contracts
 
 Non-responsibilities:
 
@@ -46,7 +47,7 @@ Non-responsibilities:
 - naming polish
 - expression beautification
 
-In other words, native is **not a quality layer**. It is a stable input-contract layer.
+In other words, lifting is an input-contract layer; quality ownership starts in canonical and structured IR.
 
 ### 2. Canonical IR
 
@@ -199,8 +200,10 @@ Main crate responsibilities:
   - symbols / strings / inferred loader facts
 - `fission-signatures`
   - FID / signature DB
+- `fission-sleigh`
+  - Sleigh decode/lift engine and ISA semantics
 - `fission-ffi`
-  - native boundary
+  - optional native compatibility boundary
 - `fission-static`
   - prepare
   - preview routing
@@ -226,12 +229,12 @@ Principles:
 
 Fission's long-term direction can be summarized in one sentence:
 
-**Fission is not converging on “post-process Ghidra as the final decompiler.” It is converging on “use Ghidra as a lift service while Rust owns the decompiler brain.”**
+**Fission is not converging on "post-process Ghidra as the final decompiler." It is converging on "Fission-owned Sleigh lifting plus Rust-owned decompiler core as the primary engine."**
 
 Current priorities:
 
 1. Establish the Session Fact Store
 2. Unify preview-first routing
 3. Reclassify ownership across canonical / idiom / polish tiers
-4. Reduce legacy to compat/fallback only
+4. Keep native/Ghidra as compat/fallback and differential-check lane only
 5. Then move on to the Windows ARM64 spike

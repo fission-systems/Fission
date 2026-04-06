@@ -1,24 +1,19 @@
 use std::path::{Path, PathBuf};
 use std::collections::{BTreeSet, HashMap};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 
 mod aarch64;
+mod backend;
 mod common;
 mod x86;
 
 use common::UNIQUE_SPACE_ID;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArchKind {
-    Aarch64,
-    X86,
-}
-
 #[derive(Debug, Clone)]
 pub struct SleighLifter {
-    arch: ArchKind,
+    backend: backend::BackendKind,
 }
 
 const DEFAULT_FUNCTION_INSTRUCTION_LIMIT: usize = 512;
@@ -39,24 +34,6 @@ pub struct LiftedPcodeFunction {
 
 pub fn is_terminal_control_flow(opcode: PcodeOpcode) -> bool {
     matches!(opcode, PcodeOpcode::BranchInd | PcodeOpcode::Return)
-}
-
-fn is_control_flow_opcode(opcode: PcodeOpcode) -> bool {
-    matches!(
-        opcode,
-        PcodeOpcode::Branch | PcodeOpcode::CBranch | PcodeOpcode::BranchInd | PcodeOpcode::Return
-    )
-}
-
-fn control_target_address(op: &PcodeOp) -> Option<u64> {
-    match op.opcode {
-        PcodeOpcode::Branch | PcodeOpcode::CBranch => op
-            .inputs
-            .first()
-            .filter(|vn| vn.is_constant)
-            .map(|vn| vn.constant_val as u64),
-        _ => None,
-    }
 }
 
 fn cfg_build_diag_enabled() -> bool {
@@ -121,11 +98,11 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
     block_starts.insert(0);
 
     for (idx, op) in ops.iter().enumerate() {
-        if is_control_flow_opcode(op.opcode) {
+        if backend::is_cfg_split_opcode(op.opcode) {
             if idx + 1 < ops.len() {
                 block_starts.insert(idx + 1);
             }
-            if let Some(target) = control_target_address(op) {
+            if let Some(target) = backend::direct_control_target(op) {
                 if let Some(&target_idx) = addr_to_op_idx.get(&target) {
                     block_starts.insert(target_idx);
                 }
@@ -157,7 +134,7 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
             match last.opcode {
                 PcodeOpcode::Branch => {
                     branch_input = last.inputs.first().map(format_varnode_diag);
-                    if let Some(target) = control_target_address(last) {
+                    if let Some(target) = backend::direct_control_target(last) {
                         branch_target = Some(target);
                         if let Some(&target_idx) = addr_to_op_idx.get(&target) {
                             push_successor(&mut successors, op_to_block[target_idx]);
@@ -189,7 +166,7 @@ pub fn build_cfg_blocks(entry_address: u64, ops: Vec<PcodeOp>) -> Vec<PcodeBasic
                 }
                 PcodeOpcode::CBranch => {
                     branch_input = last.inputs.first().map(format_varnode_diag);
-                    if let Some(target) = control_target_address(last) {
+                    if let Some(target) = backend::direct_control_target(last) {
                         branch_target = Some(target);
                         if let Some(&target_idx) = addr_to_op_idx.get(&target) {
                             push_successor(&mut successors, op_to_block[target_idx]);
@@ -299,14 +276,9 @@ impl SleighLifter {
             );
         }
 
-        let arch = if language_name.starts_with("AARCH64") {
-            ArchKind::Aarch64
-        } else {
-            // Keep x86-family as the default fallback path for now.
-            ArchKind::X86
-        };
+        let backend = backend::BackendKind::for_language(language_name);
 
-        Ok(Self { arch })
+        Ok(Self { backend })
     }
 
     pub fn new(spec_path: &Path) -> Result<Self> {
@@ -338,136 +310,26 @@ impl SleighLifter {
         entry_address: u64,
         instruction_limit: usize,
     ) -> Result<LiftedPcodeFunction> {
-        if bytes.is_empty() {
-            bail!("No function bytes available at 0x{:x}", entry_address);
-        }
-        if instruction_limit == 0 {
-            bail!("instruction_limit must be > 0");
-        }
-
-        let mut ops = Vec::new();
-        let mut offset = 0usize;
-        let mut current = entry_address;
-        let mut global_seq = 0u32;
-        let mut instruction_count = 0usize;
-        let mut stop_reason = LiftStopReason::InputExhausted;
-
-        while offset < bytes.len() && instruction_count < instruction_limit {
-            let remaining = &bytes[offset..];
-            let (mut ins_ops, decoded_len) = self.decode_and_lift_with_len(remaining, current).map_err(|err| {
-                anyhow!("decode failed at 0x{:x}: {:#}", current, err)
-            })?;
-
-            if decoded_len == 0 {
-                bail!("decoder returned zero length at 0x{:x}", current);
-            }
-
-            let step = usize::try_from(decoded_len)
-                .context("decoded length does not fit usize")?;
-            if step > remaining.len() {
-                bail!(
-                    "decoded length {} exceeds available bytes {} at 0x{:x}",
-                    step,
-                    remaining.len(),
-                    current
-                );
-            }
-
-            for op in &mut ins_ops {
-                op.seq_num = global_seq;
-                global_seq = global_seq.saturating_add(1);
-            }
-
-            let terminates = ins_ops
-                .last()
-                .map(|op| is_terminal_control_flow(op.opcode))
-                .unwrap_or(false);
-
-            ops.extend(ins_ops);
-            offset = offset.saturating_add(step);
-            current = current.saturating_add(decoded_len);
-            instruction_count = instruction_count.saturating_add(1);
-
-            if terminates {
-                stop_reason = LiftStopReason::TerminalControlFlow;
-                break;
-            }
-        }
-
-        if instruction_count >= instruction_limit && offset < bytes.len() {
-            stop_reason = LiftStopReason::InstructionLimit;
-        }
-
-        if ops.is_empty() {
-            bail!("failed to decode any instruction at 0x{:x}", entry_address);
-        }
+        let lifted = self
+            .backend
+            .lift_ops_with_contract(bytes, entry_address, instruction_limit, Self::emit_trace_copy)?;
+        debug_assert!(lifted.consumed_bytes <= bytes.len());
 
         Ok(LiftedPcodeFunction {
             function: PcodeFunction {
-                blocks: build_cfg_blocks(entry_address, ops),
+                blocks: build_cfg_blocks(entry_address, lifted.ops),
             },
-            decoded_instructions: instruction_count,
-            stop_reason,
+            decoded_instructions: lifted.decoded_instructions,
+            stop_reason: lifted.stop_reason,
         })
     }
 
     pub fn decode_and_lift_with_len(&self, bytes: &[u8], address: u64) -> Result<(Vec<PcodeOp>, u64)> {
-        if bytes.is_empty() {
-            bail!("No instruction bytes available at 0x{:x}", address);
-        }
-
-        let decoded_len = self.decode_len(bytes)?;
-        let decoded_len_usize = usize::try_from(decoded_len).context("decoded_len does not fit usize")?;
-        let insn = &bytes[..decoded_len_usize];
-
-        let mut ops = Vec::with_capacity(8);
-        ops.push(self.emit_trace_copy(insn, address));
-        match self.arch {
-            ArchKind::Aarch64 => {
-                let mut sem = aarch64::decode_semantic(insn, address);
-                let has_cf = sem.iter().any(|op| {
-                    matches!(
-                        op.opcode,
-                        PcodeOpcode::Branch
-                            | PcodeOpcode::CBranch
-                            | PcodeOpcode::BranchInd
-                            | PcodeOpcode::Return
-                            | PcodeOpcode::Call
-                            | PcodeOpcode::CallInd
-                    )
-                });
-                ops.append(&mut sem);
-                if !has_cf {
-                    if let Some(mut flow) = self.decode_control_flow(insn, address, decoded_len)? {
-                        ops.append(&mut flow);
-                    }
-                }
-            }
-            ArchKind::X86 => {
-                let mut sem = x86::decode_semantic(insn, address);
-                ops.append(&mut sem);
-                if let Some(mut flow) = self.decode_control_flow(insn, address, decoded_len)? {
-                    ops.append(&mut flow);
-                }
-            }
-        }
-
-        Ok((ops, decoded_len))
+        self.backend
+            .decode_and_lift_with_len(bytes, address, Self::emit_trace_copy)
     }
 
-    fn decode_len(&self, bytes: &[u8]) -> Result<u64> {
-        match self.arch {
-            ArchKind::Aarch64 => {
-                if bytes.len() < 4 {
-                    bail!("AArch64 needs 4 bytes, got {}", bytes.len());
-                }
-                Ok(4)
-            }
-            ArchKind::X86 => x86::decode_len(bytes),
-        }
-    }
-
-    fn emit_trace_copy(&self, insn: &[u8], address: u64) -> PcodeOp {
+    fn emit_trace_copy(insn: &[u8], address: u64) -> PcodeOp {
         let mut raw = 0u64;
         for (idx, b) in insn.iter().take(8).enumerate() {
             raw |= (*b as u64) << (idx * 8);
@@ -492,13 +354,6 @@ impl SleighLifter {
             }),
             inputs: vec![Varnode::constant(const_raw, 8)],
             asm_mnemonic: Some("INSN_RAW".to_string()),
-        }
-    }
-
-    fn decode_control_flow(&self, insn: &[u8], address: u64, decoded_len: u64) -> Result<Option<Vec<PcodeOp>>> {
-        match self.arch {
-            ArchKind::Aarch64 => Ok(aarch64::decode_control(insn, address)),
-            ArchKind::X86 => Ok(x86::decode_control(insn, address, decoded_len)),
         }
     }
 }
@@ -608,6 +463,45 @@ mod tests {
             .ops
             .iter()
             .any(|op| op.opcode == PcodeOpcode::Return));
+    }
+
+    #[test]
+    fn backend_lift_contract_keeps_trace_order_and_consumed_bytes() {
+        let backend = super::backend::BackendKind::X86;
+        let bytes = [0x90, 0x90];
+        let lifted = backend
+            .lift_ops_with_contract(&bytes, 0x4100, 16, super::SleighLifter::emit_trace_copy)
+            .expect("lift ops through backend contract");
+
+        assert_eq!(lifted.decoded_instructions, 2);
+        assert_eq!(lifted.stop_reason, LiftStopReason::InputExhausted);
+        assert_eq!(lifted.consumed_bytes, 2);
+
+        let trace_ops = lifted
+            .ops
+            .iter()
+            .filter(|op| op.asm_mnemonic.as_deref() == Some("INSN_RAW"))
+            .collect::<Vec<_>>();
+        assert_eq!(trace_ops.len(), 2);
+        assert_eq!(trace_ops[0].address, 0x4100);
+        assert_eq!(trace_ops[1].address, 0x4101);
+
+        assert!(lifted
+            .ops
+            .windows(2)
+            .all(|w| w[0].seq_num < w[1].seq_num));
+    }
+
+    #[test]
+    fn backend_lift_contract_reports_decode_failure_address() {
+        let backend = super::backend::BackendKind::X86;
+        let err = backend
+            .lift_ops_with_contract(&[0x90, 0x0F], 0x4200, 16, super::SleighLifter::emit_trace_copy)
+            .expect_err("expected decode failure on truncated 0x0F escape");
+
+        let msg = format!("{err:#}");
+        assert!(msg.contains("decode failed at 0x4201"));
+        assert!(msg.contains("truncated 0x0F escape opcode"));
     }
 
     #[test]

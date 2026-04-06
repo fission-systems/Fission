@@ -9,6 +9,59 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-06
 
+### rust-sleigh Backend Orchestration Consolidation + x86 Semantic/Length Expansion
+
+This update consolidates function-level lifting orchestration into the shared backend path, expands x86 semantic ownership for additional instruction families, and validates the change set through sleigh unit gates and automation lanes.
+
+#### Changed
+
+- consolidated function-level decode/lift orchestration under the backend layer while preserving `SleighLifter` public API behavior:
+  - added backend-owned contract loop (`lift_ops_with_contract`) and instruction decode entry (`decode_and_lift_with_len`)
+  - implementation: `crates/fission-sleigh/src/lifter/backend/mod.rs`, `crates/fission-sleigh/src/lifter/mod.rs`
+- unified backend state plumbing for semantic decode through context-aware entrypoints:
+  - switched AArch64/x86 module exports to `decode_semantic_with_state`
+  - implementation: `crates/fission-sleigh/src/lifter/aarch64/mod.rs`, `crates/fission-sleigh/src/lifter/aarch64/semantic.rs`, `crates/fission-sleigh/src/lifter/x86/mod.rs`, `crates/fission-sleigh/src/lifter/x86/semantic.rs`, `crates/fission-sleigh/src/lifter/common.rs`
+- centralized CFG split/target helpers for block construction:
+  - `is_cfg_split_opcode`, `direct_control_target`
+  - implementation: `crates/fission-sleigh/src/lifter/backend/mod.rs`, `crates/fission-sleigh/src/lifter/mod.rs`
+- expanded x86 semantic/length coverage and modular ownership:
+  - split `0F` extended semantic handling into dedicated modules (`bitops`, `bitshift`, `cond`, `escape3byte`, `imul`, `movmuldiv`, `simd`, `system`)
+  - added semantics for rotate intrinsics, sign-extension convert family (`0x98`/`0x99`), `xchg` reg/mem variants, and `shld`/`shrd`
+  - improved x86 length decoding with explicit opcode map handling, including VEX map variants and truncated-VEX guards
+  - implementation: `crates/fission-sleigh/src/lifter/x86/semantic/ext.rs`, `crates/fission-sleigh/src/lifter/x86/semantic.rs`, `crates/fission-sleigh/src/lifter/x86/length.rs`
+
+#### Added
+
+- new backend module and lift contract result type:
+  - `crates/fission-sleigh/src/lifter/backend/mod.rs`
+- new x86 extended semantic submodules:
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext/bitops.rs`
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext/bitshift.rs`
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext/cond.rs`
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext/escape3byte.rs`
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext/imul.rs`
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext/movmuldiv.rs`
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext/simd.rs`
+  - `crates/fission-sleigh/src/lifter/x86/semantic/ext/system.rs`
+- contract and semantic regression coverage:
+  - backend sequencing/consumed-bytes contract tests
+  - decode failure address mapping test
+  - x86 semantic regressions for rotate/xchg/shld-shrd/scalar-simd families
+  - implementations: `crates/fission-sleigh/src/lifter/mod.rs`, `crates/fission-sleigh/src/lifter/x86/semantic/tests.rs`, `crates/fission-sleigh/src/lifter/x86/length.rs`
+
+#### Validation
+
+- `cargo test -p fission-sleigh --lib lifter::tests::backend_lift_contract_keeps_trace_order_and_consumed_bytes` (pass)
+- `cargo test -p fission-sleigh --lib lifter::tests::backend_lift_contract_reports_decode_failure_address` (pass)
+- `cargo test -p fission-sleigh --lib lifter::tests::lift_contract_reports_instruction_limit_stop` (pass)
+- `cargo test -p fission-sleigh --lib lifter::tests::lift_contract_reports_terminal_control_flow_stop` (pass)
+- `cargo test -p fission-sleigh --lib lifter::x86::semantic::tests` (pass)
+- `cargo test -p fission-sleigh --lib` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+- `cargo run -p fission-automation -- nir-check --lane nir --run-profile fast --no-build` (pass, `changed_rows=0`)
+- `cargo run -p fission-automation -- nir-check --lane nir --run-profile full` (pass, `changed_rows=0`)
+
 ### NIR Branch-Target Recovery Hardening + Limit-200 Baseline/Post/Delta Automation
 
 This update focuses on making indirect/partially unresolved control-flow lowering more robust in Rust NIR and packaging the repeated limit-200 measurement workflow into a single reproducible command.
