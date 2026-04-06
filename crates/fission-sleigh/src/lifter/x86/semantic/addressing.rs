@@ -6,6 +6,7 @@ pub(super) fn parse_prefixes(insn: &[u8]) -> (usize, PrefixState) {
         operand_size_override: false,
         address_size_override: false,
         rex: 0,
+        rep_prefix: None,
     };
 
     while idx < insn.len() && is_prefix(insn[idx]) {
@@ -15,6 +16,12 @@ pub(super) fn parse_prefixes(insn: &[u8]) -> (usize, PrefixState) {
         }
         if byte == 0x67 {
             state.address_size_override = true;
+        }
+        if byte == 0xF3 {
+            state.rep_prefix = Some(RepPrefix::Rep);
+        }
+        if byte == 0xF2 {
+            state.rep_prefix = Some(RepPrefix::Repne);
         }
         if (0x40..=0x4F).contains(&byte) {
             state.rex = byte;

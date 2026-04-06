@@ -161,6 +161,9 @@ fn decode_ff_indirect_control(
         let mut inputs = Vec::new();
         if let Some(id) = unsupported_id {
             inputs.push(const_u64(id, 8));
+            // Keep FAR unsupported CallOther schema stable across reg/mem forms:
+            // [policy_id, target_addr_or_zero, target_value]
+            inputs.push(const_u64(0, 8));
         }
         inputs.push(x86_reg(rm_idx, 8));
         return Some(vec![PcodeOp {
@@ -215,6 +218,7 @@ fn decode_ff_indirect_control(
     if let Some(id) = unsupported_id {
         inputs.push(const_u64(id, 8));
         inputs.push(addr_vn);
+        inputs.push(target);
     } else {
         inputs.push(target);
     }
@@ -656,26 +660,62 @@ mod tests {
     #[test]
     fn decode_ff_far_call_is_explicitly_unsupported() {
         let ops = decode(&[0xFF, 0x18], 0x7040); // far call m16:64
+        let load = ops
+            .iter()
+            .find(|op| op.asm_mnemonic.as_deref() == Some("INDIRECT_TARGET_LOAD"))
+            .expect("expected indirect target load");
         let unsupported = ops
             .iter()
             .find(|op| op.asm_mnemonic.as_deref() == Some("FAR_CALL_UNSUPPORTED"))
             .expect("expected explicit far call unsupported op");
         assert_eq!(unsupported.opcode, PcodeOpcode::CallOther);
-        assert_eq!(unsupported.inputs.len(), 2);
+        assert_eq!(unsupported.inputs.len(), 3);
         assert!(unsupported.inputs[0].is_constant);
         assert_eq!(unsupported.inputs[0].constant_val as u64, X86_FAR_CALL_UNSUPPORTED_ID);
+        assert_eq!(unsupported.inputs[2], load.output.clone().expect("load output"));
     }
 
     #[test]
     fn decode_ff_far_jmp_is_explicitly_unsupported() {
         let ops = decode(&[0xFF, 0x28], 0x7050); // far jmp m16:64
+        let load = ops
+            .iter()
+            .find(|op| op.asm_mnemonic.as_deref() == Some("INDIRECT_TARGET_LOAD"))
+            .expect("expected indirect target load");
         let unsupported = ops
             .iter()
             .find(|op| op.asm_mnemonic.as_deref() == Some("FAR_JMP_UNSUPPORTED"))
             .expect("expected explicit far jmp unsupported op");
         assert_eq!(unsupported.opcode, PcodeOpcode::CallOther);
-        assert_eq!(unsupported.inputs.len(), 2);
+        assert_eq!(unsupported.inputs.len(), 3);
         assert!(unsupported.inputs[0].is_constant);
         assert_eq!(unsupported.inputs[0].constant_val as u64, X86_FAR_JMP_UNSUPPORTED_ID);
+        assert_eq!(unsupported.inputs[2], load.output.clone().expect("load output"));
+    }
+
+    #[test]
+    fn decode_ff_far_call_reg_uses_explicit_unsupported_marker() {
+        let ops = decode(&[0xFF, 0xD8], 0x7060); // far call rax
+        assert_eq!(ops.len(), 1);
+        let unsupported = &ops[0];
+        assert_eq!(unsupported.opcode, PcodeOpcode::CallOther);
+        assert_eq!(unsupported.asm_mnemonic.as_deref(), Some("FAR_CALL_UNSUPPORTED"));
+        assert_eq!(unsupported.inputs.len(), 3);
+        assert_eq!(unsupported.inputs[0].constant_val as u64, X86_FAR_CALL_UNSUPPORTED_ID);
+        assert_eq!(unsupported.inputs[1].constant_val as u64, 0);
+        assert_eq!(unsupported.inputs[2], x86_reg(0, 8));
+    }
+
+    #[test]
+    fn decode_ff_far_jmp_reg_uses_explicit_unsupported_marker() {
+        let ops = decode(&[0xFF, 0xE8], 0x7070); // far jmp rax
+        assert_eq!(ops.len(), 1);
+        let unsupported = &ops[0];
+        assert_eq!(unsupported.opcode, PcodeOpcode::CallOther);
+        assert_eq!(unsupported.asm_mnemonic.as_deref(), Some("FAR_JMP_UNSUPPORTED"));
+        assert_eq!(unsupported.inputs.len(), 3);
+        assert_eq!(unsupported.inputs[0].constant_val as u64, X86_FAR_JMP_UNSUPPORTED_ID);
+        assert_eq!(unsupported.inputs[1].constant_val as u64, 0);
+        assert_eq!(unsupported.inputs[2], x86_reg(0, 8));
     }
 }

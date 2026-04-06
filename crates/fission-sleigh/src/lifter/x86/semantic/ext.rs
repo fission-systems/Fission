@@ -132,6 +132,10 @@ fn decode_three_byte_escape_semantic(
 
     let selected = if map_0f3a {
         match ext3 {
+            0x08 => Some(("ROUNDPS", true)),
+            0x09 => Some(("ROUNDPD", true)),
+            0x0A => Some(("ROUNDSS", true)),
+            0x0B => Some(("ROUNDSD", true)),
             0x44 => Some(("PCLMULQDQ", true)),
             0xCC => Some(("SHA1RNDS4", true)),
             0x0F => Some(("PALIGNR", true)),
@@ -145,10 +149,12 @@ fn decode_three_byte_escape_semantic(
             0xC9 => Some(("SHA1MSG1", false)),
             0xCA => Some(("SHA1MSG2", false)),
             0xCB => Some(("SHA256RNDS2", false)),
+            0xDC => Some(("AESENC", false)),
             0xCC => Some(("SHA256MSG1", false)),
             0xCD => Some(("SHA256MSG2", false)),
             0xDD => Some(("AESENCLAST", false)),
             0xDE => Some(("AESDEC", false)),
+            0xDF => Some(("AESDECLAST", false)),
             _ => None,
         }
     };
@@ -1336,6 +1342,11 @@ pub(super) fn emit_mul_one_operand(
     temp: &mut X86TempFactory,
     seq: &mut u32,
 ) {
+    let implicit_hi = if size == 1 {
+        x86_reg(4, 1)
+    } else {
+        x86_reg(2, size)
+    };
     let lhs = x86_reg(0, size);
     let rhs = materialize_rm_value(rm, size, address, ops, temp, seq);
     let full_size = size.saturating_mul(2);
@@ -1403,7 +1414,7 @@ pub(super) fn emit_mul_one_operand(
         seq_num: next_seq(seq),
         opcode: PcodeOpcode::Copy,
         address,
-        output: Some(x86_reg(2, size)),
+        output: Some(implicit_hi),
         inputs: vec![high.clone()],
         asm_mnemonic: Some(format!("{mul_mnemonic}_HI_WRITE")),
     });
@@ -1464,6 +1475,12 @@ pub(super) fn emit_div_one_operand(
     temp: &mut X86TempFactory,
     seq: &mut u32,
 ) {
+    let dividend_hi = if size == 1 {
+        x86_reg(4, 1)
+    } else {
+        x86_reg(2, size)
+    };
+    let dividend_lo = x86_reg(0, size);
     let divisor = materialize_rm_value(rm, size, address, ops, temp, seq);
     let policy_id = if is_signed {
         X86_IDIV_EXCEPTION_POLICY_ID
@@ -1480,7 +1497,13 @@ pub(super) fn emit_div_one_operand(
         opcode: PcodeOpcode::CallOther,
         address,
         output: None,
-        inputs: vec![const_u64(policy_id, 8), divisor.clone()],
+        inputs: vec![
+            const_u64(policy_id, 8),
+            divisor.clone(),
+            dividend_hi.clone(),
+            dividend_lo.clone(),
+            const_u64(u64::from(size), 4),
+        ],
         asm_mnemonic: Some(policy_tag.to_string()),
     });
 
@@ -1491,7 +1514,7 @@ pub(super) fn emit_div_one_operand(
         opcode: PcodeOpcode::Piece,
         address,
         output: Some(dividend.clone()),
-        inputs: vec![x86_reg(2, size), x86_reg(0, size)],
+        inputs: vec![dividend_hi, dividend_lo],
         asm_mnemonic: Some(if is_signed {
             "IDIV_DIVIDEND"
         } else {
@@ -1578,7 +1601,7 @@ pub(super) fn emit_div_one_operand(
         seq_num: next_seq(seq),
         opcode: PcodeOpcode::Copy,
         address,
-        output: Some(x86_reg(2, size)),
+        output: Some(if size == 1 { x86_reg(4, 1) } else { x86_reg(2, size) }),
         inputs: vec![remainder],
         asm_mnemonic: Some(if is_signed { "IDIV_REM_WRITE" } else { "DIV_REM_WRITE" }.to_string()),
     });

@@ -24,17 +24,34 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
     let mut opcode = bytes[i];
     i += 1;
     let mut ext: Option<u8> = None;
+    let mut ext3: Option<u8> = None;
 
     if opcode == 0x0F {
         if i >= bytes.len() {
             bail!("x86 truncated 0x0F escape opcode");
         }
-        opcode = bytes[i];
-        ext = Some(opcode);
+        let second = bytes[i];
+        ext = Some(second);
         i += 1;
+
+        if matches!(second, 0x38 | 0x3A) {
+            if i >= bytes.len() {
+                bail!("x86 truncated 0x0F {:02X} escape opcode", second);
+            }
+            let third = bytes[i];
+            ext3 = Some(third);
+            opcode = third;
+            i += 1;
+        } else {
+            opcode = second;
+        }
     }
 
-    let needs_modrm = needs_modrm(opcode, ext);
+    let needs_modrm = if matches!(ext, Some(0x38 | 0x3A)) {
+        true
+    } else {
+        needs_modrm(opcode, ext)
+    };
     let mut modrm: Option<u8> = None;
     if needs_modrm {
         if i >= bytes.len() {
@@ -74,6 +91,7 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
     i = i.saturating_add(imm_len(
         opcode,
         ext,
+        ext3,
         modrm,
         operand_size_override,
         (rex & 0x08) != 0,
@@ -91,7 +109,29 @@ pub(crate) fn decode_len(bytes: &[u8]) -> Result<u64> {
 
 fn needs_modrm(opcode: u8, ext: Option<u8>) -> bool {
     if let Some(second) = ext {
-        return !matches!(second, 0x80..=0x8F | 0x05 | 0x34 | 0x35);
+        return !matches!(
+            second,
+            0x05
+                | 0x06
+                | 0x07
+                | 0x08
+                | 0x09
+                | 0x0B
+                | 0x30
+                | 0x31
+                | 0x32
+                | 0x34
+                | 0x35
+                | 0x77
+                | 0x80..=0x8F
+                | 0xA0
+                | 0xA1
+                | 0xA2
+                | 0xA8
+                | 0xA9
+                | 0xAA
+                | 0xC8..=0xCF
+        );
     }
 
     !matches!(
@@ -100,6 +140,8 @@ fn needs_modrm(opcode: u8, ext: Option<u8>) -> bool {
             | 0x68
             | 0x50..=0x5F
             | 0x90
+            | 0xCC
+            | 0xCD
             | 0xC3
             | 0xCB
             | 0xC2
@@ -112,8 +154,18 @@ fn needs_modrm(opcode: u8, ext: Option<u8>) -> bool {
             | 0xA1
             | 0xA2
             | 0xA3
+            | 0xA4
+            | 0xA5
+            | 0xA6
+            | 0xA7
             | 0xA8
             | 0xA9
+            | 0xAA
+            | 0xAB
+            | 0xAC
+            | 0xAD
+            | 0xAE
+            | 0xAF
             | 0xB0..=0xBF
     )
 }
@@ -121,6 +173,7 @@ fn needs_modrm(opcode: u8, ext: Option<u8>) -> bool {
 fn imm_len(
     opcode: u8,
     ext: Option<u8>,
+    ext3: Option<u8>,
     modrm: Option<u8>,
     operand_size_override: bool,
     rex_w: bool,
@@ -128,6 +181,12 @@ fn imm_len(
     let full_operand_imm = if operand_size_override { 2 } else { 4 };
 
     if let Some(second) = ext {
+        if second == 0x3A && ext3.is_some() {
+            return 1;
+        }
+        if second == 0x38 && ext3.is_some() {
+            return 0;
+        }
         if (0x80..=0x8F).contains(&second) {
             return 4;
         }
@@ -214,6 +273,14 @@ mod tests {
     }
 
     #[test]
+    fn decode_len_handles_bit_test_family_extended_opcodes() {
+        assert_eq!(decode_len(&[0x0F, 0xA3, 0xC8]).unwrap(), 3);
+        assert_eq!(decode_len(&[0x0F, 0xAB, 0xD8]).unwrap(), 3);
+        assert_eq!(decode_len(&[0x0F, 0xB3, 0x18]).unwrap(), 3);
+        assert_eq!(decode_len(&[0x48, 0x0F, 0xBB, 0x18]).unwrap(), 4);
+    }
+
+    #[test]
     fn decode_len_handles_a9_and_operand_override() {
         assert_eq!(decode_len(&[0xA9, 0x01, 0x00, 0x00, 0x00]).unwrap(), 5);
         assert_eq!(decode_len(&[0x66, 0xA9, 0x34, 0x12]).unwrap(), 4);
@@ -249,6 +316,73 @@ mod tests {
     fn decode_len_handles_mov_group11_immediates() {
         assert_eq!(decode_len(&[0xC6, 0x00, 0x12]).unwrap(), 3);
         assert_eq!(decode_len(&[0xC7, 0x00, 0x78, 0x56, 0x34, 0x12]).unwrap(), 6);
+    }
+
+    #[test]
+    fn decode_len_handles_pause_and_nop_extended_forms() {
+        assert_eq!(decode_len(&[0x90]).unwrap(), 1);
+        assert_eq!(decode_len(&[0xF3, 0x90]).unwrap(), 2);
+        assert_eq!(decode_len(&[0x0F, 0x1F, 0x00]).unwrap(), 3);
+        assert_eq!(decode_len(&[0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00]).unwrap(), 8);
+    }
+
+    #[test]
+    fn decode_len_handles_int3_and_int_immediates_without_modrm() {
+        assert_eq!(decode_len(&[0xCC]).unwrap(), 1);
+        assert_eq!(decode_len(&[0xCD, 0x80]).unwrap(), 2);
+    }
+
+    #[test]
+    fn decode_len_handles_rdtsc_and_clflush_forms() {
+        assert_eq!(decode_len(&[0x0F, 0x31]).unwrap(), 2);
+        assert_eq!(decode_len(&[0x0F, 0xAE, 0x38]).unwrap(), 3);
+        assert_eq!(decode_len(&[0x0F, 0xAE, 0xBC, 0x00, 0x10, 0x00, 0x00, 0x00]).unwrap(), 8);
+    }
+
+    #[test]
+    fn decode_len_handles_system_no_modrm_0f_opcodes() {
+        assert_eq!(decode_len(&[0x0F, 0x05]).unwrap(), 2); // syscall
+        assert_eq!(decode_len(&[0x0F, 0x07]).unwrap(), 2); // sysret
+        assert_eq!(decode_len(&[0x0F, 0x06]).unwrap(), 2); // clts
+        assert_eq!(decode_len(&[0x0F, 0x08]).unwrap(), 2); // invd
+        assert_eq!(decode_len(&[0x0F, 0x09]).unwrap(), 2); // wbinvd
+        assert_eq!(decode_len(&[0x0F, 0x0B]).unwrap(), 2); // ud2
+        assert_eq!(decode_len(&[0x0F, 0x30]).unwrap(), 2); // wrmsr
+        assert_eq!(decode_len(&[0x0F, 0x32]).unwrap(), 2); // rdmsr
+        assert_eq!(decode_len(&[0x0F, 0x34]).unwrap(), 2); // sysenter
+        assert_eq!(decode_len(&[0x0F, 0x35]).unwrap(), 2); // sysexit
+        assert_eq!(decode_len(&[0x0F, 0x77]).unwrap(), 2); // emms
+        assert_eq!(decode_len(&[0x0F, 0xA0]).unwrap(), 2); // push fs
+        assert_eq!(decode_len(&[0x0F, 0xA1]).unwrap(), 2); // pop fs
+        assert_eq!(decode_len(&[0x0F, 0xA2]).unwrap(), 2); // cpuid
+        assert_eq!(decode_len(&[0x0F, 0xA8]).unwrap(), 2); // push gs
+        assert_eq!(decode_len(&[0x0F, 0xA9]).unwrap(), 2); // pop gs
+        assert_eq!(decode_len(&[0x0F, 0xAA]).unwrap(), 2); // rsm
+        assert_eq!(decode_len(&[0x0F, 0xC8]).unwrap(), 2); // bswap eax
+        assert_eq!(decode_len(&[0x49, 0x0F, 0xC8]).unwrap(), 3); // bswap r8d
+    }
+
+    #[test]
+    fn decode_len_handles_string_opcodes_without_modrm() {
+        assert_eq!(decode_len(&[0xA4]).unwrap(), 1); // movsb
+        assert_eq!(decode_len(&[0xA5]).unwrap(), 1); // movsd/movsq (size by prefixes)
+        assert_eq!(decode_len(&[0xA6]).unwrap(), 1); // cmpsb
+        assert_eq!(decode_len(&[0xA7]).unwrap(), 1); // cmpsd/cmpsq
+        assert_eq!(decode_len(&[0xAA]).unwrap(), 1); // stosb
+        assert_eq!(decode_len(&[0xAB]).unwrap(), 1); // stosd/stosq
+        assert_eq!(decode_len(&[0xAC]).unwrap(), 1); // lodsb
+        assert_eq!(decode_len(&[0xAD]).unwrap(), 1); // lodsd/lodsq
+        assert_eq!(decode_len(&[0xAE]).unwrap(), 1); // scasb
+        assert_eq!(decode_len(&[0xAF]).unwrap(), 1); // scasd/scasq
+        assert_eq!(decode_len(&[0xF3, 0xA4]).unwrap(), 2); // rep movsb
+        assert_eq!(decode_len(&[0xF2, 0xA7]).unwrap(), 2); // repne cmpsd/cmpsq
+    }
+
+    #[test]
+    fn decode_len_handles_0f_three_byte_escape_maps() {
+        assert_eq!(decode_len(&[0x0F, 0x38, 0xF1, 0xC0]).unwrap(), 4); // 0f38 + modrm
+        assert_eq!(decode_len(&[0x0F, 0x38, 0x00, 0x44, 0x24, 0x10]).unwrap(), 6); // sib+disp8
+        assert_eq!(decode_len(&[0x66, 0x0F, 0x3A, 0x0F, 0xC0, 0x04]).unwrap(), 6); // 0f3a + modrm + imm8
     }
 
     #[test]
