@@ -83,11 +83,18 @@ pub(super) fn decode_extended_semantic(
         0xBC => decode_bsf_bsr(insn, op_idx, prefix, size, address, temp, seq, false),
         0xBD => decode_bsf_bsr(insn, op_idx, prefix, size, address, temp, seq, true),
         0x40..=0x4F => decode_cmovcc(insn, op_idx, prefix, size, address, temp, seq, ext - 0x40),
-        0x10..=0x17 | 0x28..=0x2F | 0x50..=0x76 | 0x78..=0x7F => {
+        0x10..=0x17 | 0x28..=0x2F | 0x50..=0x76 | 0x78..=0x7F | 0xD4 | 0xD5 | 0xEB | 0xEF
+        | 0xF8..=0xFE => {
             simd::decode_simd_semantic(insn, op_idx, prefix, size, address, temp, seq, ext)
         }
         0x90..=0x9F => decode_setcc(insn, op_idx, prefix, address, temp, seq, ext - 0x90),
-        0xD8..=0xDF => system::decode_x87_policy(address, seq, ext),
+        0xD8..=0xDF => {
+            if prefix.operand_size_override || prefix.rep_prefix.is_some() {
+                simd::decode_simd_semantic(insn, op_idx, prefix, size, address, temp, seq, ext)
+            } else {
+                system::decode_x87_policy(address, seq, ext)
+            }
+        }
         _ => Vec::new(),
     }
 }

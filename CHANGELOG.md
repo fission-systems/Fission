@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-04-06
+
+### Changed
+- Extended rust-sleigh x86 SIMD follow-up semantic ownership by promoting additional `66 0F` packed ops to intrinsic-backed dataflow (including `PUNPCKLQDQ/HQDQ`, `PSHUFD`, `PADDQ`, `PMULLW`, `PSUB*`, and `PADD*` forms).
+- Expanded x86 extended-opcode dispatch coverage so newly promoted SIMD ext bytes are routed to SIMD semantics instead of falling through to policy paths.
+- Added additional 3-byte `0F 3A` intrinsic mappings for `BLENDPS` and `BLENDPD` while preserving `AESKEYGENASSIST` coverage.
+- Updated x86 semantic regressions to validate new SIMD/3-byte intrinsic outputs and immediate propagation behavior.
+
+### Validation
+- `cargo test -p fission-sleigh decode_simd_p1_followup_queue_instructions_emit_intrinsics -- --nocapture`
+- `cargo test -p fission-sleigh decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow -- --nocapture`
+- `cargo test -p fission-sleigh --lib`
+- `cargo check -p fission-pcode`
+- `cargo check -p fission-automation`
+
 ## 2026-04-04
 
 ### Added

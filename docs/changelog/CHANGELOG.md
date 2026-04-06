@@ -9,6 +9,32 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ## 2026-04-06
 
+### x86 SIMD/3-byte Follow-up Intrinsic Expansion
+
+This update continues the rust-sleigh x86 semantic ownership expansion by replacing additional SIMD/3-byte policy fallbacks with intrinsic-backed p-code dataflow and extending regression coverage.
+
+#### Changed
+
+- expanded two-byte `66 0F` SIMD follow-up handlers in the x86 semantic path:
+  - added intrinsic/write lowering for `PUNPCKLQDQ`, `PUNPCKHQDQ`, `PSHUFD(imm8)`, `PADDQ`, `PMULLW`, `PSUBB/W/D/Q`, and `PADDB/W/D`
+  - implementations: `crates/fission-sleigh/src/lifter/x86/semantic/ext/simd.rs`
+- widened extended opcode dispatch coverage so newly promoted SIMD ext bytes route into SIMD semantics:
+  - added routing for `0xD4`, `0xD5`, `0xF8..=0xFE` (while preserving prefix-aware `0xD8..=0xDF` behavior)
+  - implementation: `crates/fission-sleigh/src/lifter/x86/semantic/ext.rs`
+- extended `0F 3A` intrinsic selection with immediate forms for:
+  - `BLENDPS` (`0x0C`), `BLENDPD` (`0x0D`)
+  - implementation: `crates/fission-sleigh/src/lifter/x86/semantic/ext/escape3byte.rs`
+- expanded regression tests for newly promoted follow-up opcodes and immediate forwarding checks:
+  - implementation: `crates/fission-sleigh/src/lifter/x86/semantic/tests.rs`
+
+#### Validation
+
+- `cargo test -p fission-sleigh decode_simd_p1_followup_queue_instructions_emit_intrinsics -- --nocapture` (pass)
+- `cargo test -p fission-sleigh decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow -- --nocapture` (pass)
+- `cargo test -p fission-sleigh --lib` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+
 ### rust-sleigh Backend Orchestration Consolidation + x86 Semantic/Length Expansion
 
 This update consolidates function-level lifting orchestration into the shared backend path, expands x86 semantic ownership for additional instruction families, and validates the change set through sleigh unit gates and automation lanes.

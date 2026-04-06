@@ -6,6 +6,32 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ## 2026-04-06
 
+### rust-sleigh x86 SIMD/3-byte 후속 배치 확장
+
+이번 라운드는 기존 policy fallback으로 남아 있던 x86 SIMD/3-byte 일부 opcode를 intrinsic 기반 데이터플로우로 승격하고, 디스패치/회귀 테스트를 함께 확장하는 데 초점을 맞췄다.
+
+#### Changed
+
+- `66 0F` SIMD 후속 opcode를 intrinsic 경로로 확장
+  - `PUNPCKLQDQ/HQDQ`, `PSHUFD(imm8)`, `PADDQ`, `PMULLW`, `PSUBB/W/D/Q`, `PADDB/W/D`
+  - 구현: `crates/fission-sleigh/src/lifter/x86/semantic/ext/simd.rs`
+- ext 디스패치 범위 확장으로 신규 opcode가 policy로 빠지지 않도록 보강
+  - `0xD4`, `0xD5`, `0xF8..=0xFE` SIMD 라우팅 추가
+  - 구현: `crates/fission-sleigh/src/lifter/x86/semantic/ext.rs`
+- `0F 3A` 후속 immediate 계열 intrinsic 추가
+  - `BLENDPS`(`0x0C`), `BLENDPD`(`0x0D`)
+  - 구현: `crates/fission-sleigh/src/lifter/x86/semantic/ext/escape3byte.rs`
+- 신규 opcode 회귀 테스트 추가/확장
+  - 구현: `crates/fission-sleigh/src/lifter/x86/semantic/tests.rs`
+
+#### Validation
+
+- `cargo test -p fission-sleigh decode_simd_p1_followup_queue_instructions_emit_intrinsics -- --nocapture` (pass)
+- `cargo test -p fission-sleigh decode_high_frequency_0f38_0f3a_intrinsics_emit_xmm_dataflow -- --nocapture` (pass)
+- `cargo test -p fission-sleigh --lib` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo check -p fission-automation` (pass)
+
 ### NIR Branch Target 복구 강화 + limit-200 baseline/post/delta 자동화
 
 이번 변경은 Rust NIR 제어흐름 하향(lowering)에서 간접/부분 미해결 분기 처리의 복원력을 높이고, 반복적으로 수행하던 limit-200 계측 절차를 단일 명령으로 재현 가능하게 묶는 데 초점을 맞췄다.

@@ -1,5 +1,27 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EscapeMandatoryPrefix {
+    None,
+    P66,
+    F2,
+    F3,
+}
+
+fn classify_escape_prefix(prefix: &PrefixState) -> EscapeMandatoryPrefix {
+    match prefix.rep_prefix {
+        Some(RepPrefix::Repne) => EscapeMandatoryPrefix::F2,
+        Some(RepPrefix::Rep) => EscapeMandatoryPrefix::F3,
+        None => {
+            if prefix.operand_size_override {
+                EscapeMandatoryPrefix::P66
+            } else {
+                EscapeMandatoryPrefix::None
+            }
+        }
+    }
+}
+
 pub(super) fn decode_three_byte_escape_semantic(
     insn: &[u8],
     op_idx: usize,
@@ -14,6 +36,21 @@ pub(super) fn decode_three_byte_escape_semantic(
         Some(v) => *v,
         None => return Vec::new(),
     };
+    let mandatory = classify_escape_prefix(prefix);
+
+    if !map_0f3a {
+        match (mandatory, ext3) {
+            (EscapeMandatoryPrefix::F2, 0xF0) | (EscapeMandatoryPrefix::F2, 0xF1) => {
+                return decode_crc32_semantic(insn, op_idx, prefix, size, address, temp, seq, ext3)
+            }
+            (EscapeMandatoryPrefix::P66, 0xDB) => {
+                return decode_three_byte_xmm_intrinsic(
+                    insn, op_idx, prefix, address, temp, seq, false, ext3, "AESIMC", false,
+                )
+            }
+            _ => {}
+        }
+    }
 
     if map_0f3a {
         match ext3 {
@@ -31,6 +68,8 @@ pub(super) fn decode_three_byte_escape_semantic(
 
     let selected = if map_0f3a {
         match ext3 {
+            0x0C => Some(("BLENDPS", true)),
+            0x0D => Some(("BLENDPD", true)),
             0x08 => Some(("ROUNDPS", true)),
             0x09 => Some(("ROUNDPD", true)),
             0x0A => Some(("ROUNDSS", true)),
@@ -39,6 +78,7 @@ pub(super) fn decode_three_byte_escape_semantic(
             0xCC => Some(("SHA1RNDS4", true)),
             0x0F => Some(("PALIGNR", true)),
             0x0E => Some(("PBLENDW", true)),
+            0xDF => Some(("AESKEYGENASSIST", true)),
             _ => None,
         }
     } else {
@@ -81,6 +121,59 @@ pub(super) fn decode_three_byte_escape_semantic(
             "0F38_POLICY".to_string()
         }),
     }]
+}
+
+fn decode_crc32_semantic(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    ext3: u8,
+) -> Vec<PcodeOp> {
+    let dst_size = if (prefix.rex & 0x08) != 0 { 8 } else { 4 };
+    let src_size = if ext3 == 0xF0 {
+        1
+    } else if prefix.operand_size_override {
+        2
+    } else if size == 8 {
+        8
+    } else {
+        4
+    };
+
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 2, prefix, src_size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let dst = x86_reg(decoded.reg_index, dst_size);
+    let src = materialize_rm_value(&decoded.rm, src_size, address, &mut ops, temp, seq);
+    let out = temp.alloc(dst_size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![
+            const_u64(X86_3BYTE_0F38_POLICY_BASE_ID + u64::from(ext3), 8),
+            dst.clone(),
+            src,
+        ],
+        asm_mnemonic: Some("CRC32_INTRINSIC".to_string()),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![out],
+        asm_mnemonic: Some("CRC32_WRITE".to_string()),
+    });
+    ops
 }
 
 pub(super) fn decode_pextrd_pinsrd_family(
