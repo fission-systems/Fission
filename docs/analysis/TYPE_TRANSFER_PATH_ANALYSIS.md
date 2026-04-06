@@ -55,7 +55,7 @@ char* decomp_function(DecompContext* ctx, uint64_t addr) {
 ### 1.3 Rust 측 (수신 & 사용)
 
 ```rust
-// fission-ffi wrapper.rs
+// legacy-ffi-bridge-crate wrapper.rs
 decomp.decompile(addr)  // → String (C 코드만)
 
 // fission-analysis decomp
@@ -130,10 +130,10 @@ let processor = PostProcessor::new()
 
 | 역할 | 파일 |
 |------|------|
-| C++ 타입 추론 | `ghidra_decompiler/src/types/StructureAnalyzer.cc` |
-| C++ 후처리 (offset→field) | `ghidra_decompiler/src/processing/passes/CodeCleanupPasses.cc` (`annotate_structure_offsets`) |
-| FFI 반환 | `ghidra_decompiler/src/ffi/libdecomp_ffi.cpp` (`decomp_function`) |
-| Rust 수신 | `crates/fission-ffi/src/decomp/wrapper.rs` (`decompile`) |
+| C++ 타입 추론 | `legacy-native-decompiler-tree/src/types/StructureAnalyzer.cc` |
+| C++ 후처리 (offset→field) | `legacy-native-decompiler-tree/src/processing/passes/CodeCleanupPasses.cc` (`annotate_structure_offsets`) |
+| FFI 반환 | `legacy-native-decompiler-tree/src/ffi/libdecomp_ffi.cpp` (`decomp_function`) |
+| Rust 수신 | `crates/legacy-ffi-bridge-crate/src/decomp/wrapper.rs` (`decompile`) |
 | Rust 타입 사용 | `crates/fission-analysis/src/analysis/decomp/postprocess/naming.rs` (`replace_field_offsets`) |
 | PassContext 정의 | `crates/fission-analysis/src/analysis/decomp/postprocess/pass.rs` |
 | 로더 inferred_types | `crates/fission-loader/src/loader/mod.rs`, `types.rs` |

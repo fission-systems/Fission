@@ -109,7 +109,7 @@ cargo test -p fission-sleigh
 When changes may affect decompilation routing behavior:
 
 ```bash
-cargo check -p fission-cli --features native_decomp
+cargo check -p fission-cli
 ```
 
 ## Notes

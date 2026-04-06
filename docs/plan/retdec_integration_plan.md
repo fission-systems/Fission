@@ -39,7 +39,7 @@ Binary -> Ghidra P-code lifter -> CFG -> [RetDec-enhanced CFG optimizer] -> C co
 
 ### Phase 2: P-code → LLVM IR Conversion
 
-- add `ghidra_decompiler/src/ir/PcodeToLLVM.cc`
+- add `legacy-native-decompiler-tree/src/ir/PcodeToLLVM.cc`
 - map Ghidra P-code ops into LLVM IR instructions
 - provide a per-function LLVM module construction API
 
@@ -121,4 +121,4 @@ std::string decompileWithRetDec(llvm::Module& module) {
 
 - RetDec GitHub: <https://github.com/avast/retdec>
 - LLVM IR reference: <https://llvm.org/docs/LangRef.html>
-- Ghidra P-code reference: `ghidra_decompiler/decompile/cpp/opbehavior.hh`
+- Ghidra P-code reference: `legacy-native-decompiler-tree/decompile/cpp/opbehavior.hh`

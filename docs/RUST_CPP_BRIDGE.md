@@ -16,7 +16,7 @@ It is kept as a historical reference, not as current source of truth.
 
 ## 1. FFI Surface That Is Already Bound on the Rust Side
 
-The following native FFI functions are implemented in `ghidra_decompiler` and are already exposed in `crates/fission-ffi/src/decomp.rs` through safe `DecompilerNative` methods:
+The following native FFI functions are implemented in `legacy-native-decompiler-tree` and are already exposed in `crates/legacy-ffi-bridge-crate/src/decomp.rs` through safe `DecompilerNative` methods:
 
 | C++ FFI function | Purpose | Rust method |
 |------------------|---------|-------------|
@@ -29,9 +29,9 @@ The following native FFI functions are implemented in `ghidra_decompiler` and ar
 
 Relevant locations:
 
-- `ghidra_decompiler/include/fission/ffi/libdecomp_ffi.h`
-- `ghidra_decompiler/src/ffi/libdecomp_ffi.cpp`
-- `crates/fission-ffi/src/decomp.rs`
+- `legacy-native-decompiler-tree/include/fission/ffi/libdecomp_ffi.h`
+- `legacy-native-decompiler-tree/src/ffi/libdecomp_ffi.cpp`
+- `crates/legacy-ffi-bridge-crate/src/decomp.rs`
 
 ---
 
@@ -39,7 +39,7 @@ Relevant locations:
 
 ### 2.1 Path / Resource Configuration
 
-- **C++**: `ghidra_decompiler/src/config/PathConfig.cc`, `include/fission/config/PathConfig.h`
+- **C++**: `legacy-native-decompiler-tree/src/config/PathConfig.cc`, `include/fission/config/PathConfig.h`
   - FID search directories, MSVC/GCC/LIBC/CRYPTO/EL FID file lists, GDT prefixes, `find_fid_file`, `get_all_fid_paths`
 - **Rust**: `crates/fission-core/src/core/path_config.rs`
   - same overall intent and similar filename/path logic
@@ -48,7 +48,7 @@ Relevant locations:
 
 ### 2.2 PE Section Parsing
 
-- **C++**: `ghidra_decompiler/src/decompiler/DecompilationPipeline.cc`
+- **C++**: `legacy-native-decompiler-tree/src/decompiler/DecompilationPipeline.cc`
   - inline PE section parsing used to locate data sections for native-side scanning
 - **Rust**: `crates/fission-loader/src/loader/pe/mod.rs`
   - full PE parsing that produces `SectionInfo`
@@ -94,10 +94,10 @@ At one point:
 
 ## 5. References
 
-- FFI declarations: `ghidra_decompiler/include/fission/ffi/libdecomp_ffi.h`
-- FFI implementation: `ghidra_decompiler/src/ffi/libdecomp_ffi.cpp`
-- Rust FFI: `crates/fission-ffi/src/decomp.rs`
-- C++ path config: `ghidra_decompiler/src/config/PathConfig.cc`
+- FFI declarations: `legacy-native-decompiler-tree/include/fission/ffi/libdecomp_ffi.h`
+- FFI implementation: `legacy-native-decompiler-tree/src/ffi/libdecomp_ffi.cpp`
+- Rust FFI: `crates/legacy-ffi-bridge-crate/src/decomp.rs`
+- C++ path config: `legacy-native-decompiler-tree/src/config/PathConfig.cc`
 - Rust path config: `crates/fission-core/src/core/path_config.rs`
 - Rust signatures: `crates/fission-signatures/src/database.rs`
-- C++ FID: `ghidra_decompiler/src/analysis/FidDatabase.*`, `InternalMatcher.*`
+- C++ FID: `legacy-native-decompiler-tree/src/analysis/FidDatabase.*`, `InternalMatcher.*`

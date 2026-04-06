@@ -159,17 +159,11 @@ cargo install cargo-audit  # Security audits
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
-# Build decompiler
-cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cd ..
-
 # Build Fission
 cargo build
 
-# Build fission-cli with native decompiler integration
-cargo build -p fission-cli --features native_decomp
+# Build fission-cli
+cargo build -p fission-cli --release
 
 # Run tests
 cargo test
@@ -412,7 +406,7 @@ git commit -m "feat(cli): add --strings flag"
    cargo fmt -- --check
    cargo clippy --workspace --exclude fission-tauri -- -D warnings
    cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
-   cargo build -p fission-cli --features native_decomp
+    cargo build -p fission-cli --release
    ```
 
 6. **Update documentation**
@@ -497,15 +491,6 @@ Runs on `main`, nightly schedule, and manual dispatch:
 - automation nir-check lanes (`nir`, `regression`) with artifact upload
 
 Heavy checks may take longer and are intentionally offloaded to GitHub.
-
-### Decompiler build in CI
-
-CI uses direct CMake invocation (no build helper script path assumption):
-
-```bash
-cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
-cmake --build ghidra_decompiler/build --config Release
-```
 
 ### Automation artifacts
 

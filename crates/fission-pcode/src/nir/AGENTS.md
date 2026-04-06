@@ -47,6 +47,6 @@ nir/
 ```bash
 cargo test -p fission-pcode
 cargo check -p fission-pcode
-cargo build -p fission-cli --features native_decomp
+cargo build -p fission-cli --release
 cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200
 ```

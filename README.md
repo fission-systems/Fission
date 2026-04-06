@@ -22,7 +22,6 @@ Its long-term direction goes beyond single-function pseudocode. Fission is aimed
 The repository currently includes:
 
 - a Fission-owned Sleigh lifting engine in [`crates/fission-sleigh`](./crates/fission-sleigh)
-- a native Ghidra-backed decompiler bridge in [`ghidra_decompiler`](./ghidra_decompiler) and [`crates/fission-ffi`](./crates/fission-ffi)
 - a Rust analysis/decompilation stack in [`crates`](./crates)
 - a Rust-owned Fission NIR decompiler core under [`crates/fission-pcode/src/nir`](./crates/fission-pcode/src/nir)
 - a buildable CLI in [`crates/fission-cli`](./crates/fission-cli)
@@ -77,15 +76,6 @@ git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
 cargo build --release --bin fission_cli
-```
-
-Optional native compatibility backend:
-
-```bash
-cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cd ..
 ```
 
 Basic CLI usage:
@@ -271,8 +261,6 @@ Workspace members are declared in [`Cargo.toml`](./Cargo.toml). The important cr
   - debugger/runtime/plugin infrastructure
 - [`crates/fission-analysis`](./crates/fission-analysis)
   - compatibility facade over split analysis crates
-- [`crates/fission-ffi`](./crates/fission-ffi)
-  - Rust/C++ bridge into the native decompiler
 - [`crates/fission-cli`](./crates/fission-cli)
   - CLI entrypoint
 - [`crates/fission-tauri/src-tauri`](./crates/fission-tauri/src-tauri)
@@ -280,8 +268,6 @@ Workspace members are declared in [`Cargo.toml`](./Cargo.toml). The important cr
 
 Important top-level directories:
 
-- [`ghidra_decompiler`](./ghidra_decompiler)
-  - native decompiler sources and build tree
 - [`crates/fission-automation`](./crates/fission-automation)
   - canonical Fission NIR quality runner and report generator
 - [`docs`](./docs)
@@ -388,18 +374,13 @@ For fuller details, see [`docs/build/BUILD.md`](./docs/build/BUILD.md).
 
 ## Build
 
-### Native backend + CLI
+### CLI
 
 ```bash
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
-cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cd ..
-
-cargo build --release --bin fission_cli --features native_decomp
+cargo build --release --bin fission_cli
 ```
 
 ### Tauri desktop app

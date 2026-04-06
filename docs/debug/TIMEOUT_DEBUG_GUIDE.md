@@ -94,7 +94,7 @@ For each decompiled function, verify whether the following work is being repeate
 - [ ] **Serialization**: how often is JSON serialized/deserialized across the Ghidra ↔ Rust boundary?
 
 Relevant code:
-- `fission-ffi/src/decomp/` — FFI boundary
+- `crates/fission-static/src/analysis/decomp/` — decomp orchestration boundary
 - `fission-analysis/src/analysis/decomp/prepare.rs` — initialization and prepare options
 
 ---

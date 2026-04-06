@@ -50,26 +50,16 @@ jobs:
             build-essential \
             file
 
-      - name: Build Decompiler
-        run: |
-          cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build ghidra_decompiler/build --config Release
-
       - name: Full Rust test suite (excluding tauri crate)
         run: |
           cargo test --workspace --exclude fission-tauri --exclude fission-static --verbose
-          cargo test -p fission-static --features native_decomp --verbose
+          cargo test -p fission-static --verbose
 
       - name: Build Tauri frontend
         run: |
           cd crates/fission-tauri
           npm ci
           npm run build
-
-      - name: Fission decompilation smoke test
-        run: |
-          chmod +x scripts/test/decomp_smoke_ci.sh
-          ./scripts/test/decomp_smoke_ci.sh
 
   windows-heavy-build:
     name: Windows Heavy Build/Test
@@ -86,18 +76,8 @@ jobs:
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
 
-      - name: Build Decompiler (Windows)
-        shell: pwsh
-        run: |
-          vcpkg install zlib:x64-windows
-          cd ghidra_decompiler
-          if (!(Test-Path build)) { New-Item -ItemType Directory -Path build | Out-Null }
-          cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-          cmake --build . --config Release --target decomp fission_decomp
-
       - name: Build fission-cli (release)
-        run: cargo build -p fission-cli --features native_decomp --release
+        run: cargo build -p fission-cli --release
 
       - name: Run Windows core tests
         run: cargo test -p fission-pcode -p fission-automation --release --verbose
@@ -128,29 +108,11 @@ jobs:
             build-essential \
             file
 
-      - name: Build Decompiler
-        run: |
-          cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build ghidra_decompiler/build --config Release
-
       - name: Build fission-cli (release)
-        run: cargo build -p fission-cli --features native_decomp --release
+        run: cargo build -p fission-cli --release
 
-      - name: Run nir-check lane=nir (mid)
-        run: |
-          cargo run -p fission-automation -- nir-check \
-            --lane nir \
-            --run-profile mid \
-            --no-build \
-            --fission-bin target/release/fission_cli
-
-      - name: Run nir-check lane=regression (full)
-        run: |
-          cargo run -p fission-automation -- nir-check \
-            --lane regression \
-            --run-profile full \
-            --no-build \
-            --fission-bin target/release/fission_cli
+      - name: Run automation crate tests
+        run: cargo test -p fission-automation --verbose
 
       - name: Upload automation artifacts
         uses: actions/upload-artifact@v4

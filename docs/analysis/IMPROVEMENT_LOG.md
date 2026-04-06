@@ -40,7 +40,7 @@ Modified `printc.cc` default case (lines 1806-1835) to:
 3. Validate if result is reasonable (not NaN, not infinity, reasonable magnitude)
 4. If valid, use `push_float()` instead of hex literal
 
-**Changed File:** `ghidra_decompiler/decompile/printc.cc`
+**Changed File:** `legacy-native-decompiler-tree/decompile/printc.cc`
 
 ### Results
 
@@ -139,7 +139,7 @@ This matches Ghidra's approach and should fully resolve the issue.
 
 ### Files Modified
 ```
-ghidra_decompiler/decompile/printc.cc
+legacy-native-decompiler-tree/decompile/printc.cc
   - Lines 1806-1835: Added floating-point detection in default case
 ```
 
@@ -214,14 +214,14 @@ Floating-point constants were appearing as hex literals even after the heuristic
 - Modified `fillinReadOnly` to preserve symbols (skip inlining if symbol exists)
 
 **Changed Files:**
-- `ghidra_decompiler/decompile/coreaction.cc`
-- `ghidra_decompiler/decompile/funcdata_varnode.cc`
-- `ghidra_decompiler/include/fission/loaders/DataSectionScanner.h`
-- `ghidra_decompiler/src/loaders/DataSectionScanner.cc`
-- `ghidra_decompiler/src/core/DataSymbolRegistry.cc`
-- `ghidra_decompiler/src/decompiler/DecompilationPipeline.cc`
-- `ghidra_decompiler/include/fission/core/DecompilerContext.h`
-- `ghidra_decompiler/CMakeLists.txt`
+- `legacy-native-decompiler-tree/decompile/coreaction.cc`
+- `legacy-native-decompiler-tree/decompile/funcdata_varnode.cc`
+- `legacy-native-decompiler-tree/include/fission/loaders/DataSectionScanner.h`
+- `legacy-native-decompiler-tree/src/loaders/DataSectionScanner.cc`
+- `legacy-native-decompiler-tree/src/core/DataSymbolRegistry.cc`
+- `legacy-native-decompiler-tree/src/decompiler/DecompilationPipeline.cc`
+- `legacy-native-decompiler-tree/include/fission/core/DecompilerContext.h`
+- `legacy-native-decompiler-tree/CMakeLists.txt`
 
 ### Results
 ✅ **Complete Success**
@@ -249,9 +249,9 @@ Enhanced `DataSectionScanner` to:
 3. Let Ghidra's `pushPtrCharConstant` automatically inline them
 
 **Changed Files:**
-- `ghidra_decompiler/include/fission/loaders/DataSectionScanner.h`
-- `ghidra_decompiler/src/loaders/DataSectionScanner.cc`
-- `ghidra_decompiler/src/core/DataSymbolRegistry.cc`
+- `legacy-native-decompiler-tree/include/fission/loaders/DataSectionScanner.h`
+- `legacy-native-decompiler-tree/src/loaders/DataSectionScanner.cc`
+- `legacy-native-decompiler-tree/src/core/DataSymbolRegistry.cc`
 
 ### Results
 ✅ **Complete Success**
@@ -293,7 +293,7 @@ Modified `printc.cc` `pushConstant()` function (lines 1806-1831) to:
 2. **Exclude pointer-like values**: Skip values > 0x10000 (likely addresses)
 3. **Exclude `FloatFormat::zero`**: Only convert normalized/denormalized floats
 
-**Changed File:** `ghidra_decompiler/decompile/printc.cc`
+**Changed File:** `legacy-native-decompiler-tree/decompile/printc.cc`
 
 ### Results
 ✅ **Complete Success**
@@ -375,9 +375,9 @@ PostProcessors에 regex 기반 표준화 함수를 추가:
    - Windows 타입 변환 제거 (Ghidra 표준 유지)
 
 **Changed Files:**
-- `ghidra_decompiler/src/processing/PostProcessors.cc`
-- `ghidra_decompiler/include/fission/processing/PostProcessors.h`
-- `ghidra_decompiler/src/decompiler/PostProcessPipeline.cpp`
+- `legacy-native-decompiler-tree/src/processing/PostProcessors.cc`
+- `legacy-native-decompiler-tree/include/fission/processing/PostProcessors.h`
+- `legacy-native-decompiler-tree/src/decompiler/PostProcessPipeline.cpp`
 
 ### Results
 ✅ **극적인 개선!**

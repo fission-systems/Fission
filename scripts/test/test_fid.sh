@@ -22,12 +22,12 @@ ls -lh "$FID_DIR"/*.fidbf 2>/dev/null || echo "  None found"
 echo ""
 
 # Build test binary
-echo "Building Fission with native decompiler..."
-cargo build --release --features native_decomp
+echo "Building Fission CLI..."
+cargo build --release --bin fission_cli
 
 echo ""
 echo "FID databases ready for testing!"
 echo ""
 echo "To test FID matching, use:"
-echo "  cargo run --release --features native_decomp --bin fission -- \\"
+echo "  cargo run --release --bin fission_cli -- \\"
 echo "    --headless examples/your_binary.exe 0x140001000"

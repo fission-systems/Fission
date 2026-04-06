@@ -30,7 +30,6 @@ Components:
 
 - `crates/fission-sleigh`
 - `crates/fission-pcode` (p-code surface and handoff)
-- optional compatibility bridge: `ghidra_decompiler`, `fission-ffi`
 
 Responsibilities:
 
@@ -202,8 +201,6 @@ Main crate responsibilities:
   - FID / signature DB
 - `fission-sleigh`
   - Sleigh decode/lift engine and ISA semantics
-- `fission-ffi`
-  - optional native compatibility boundary
 - `fission-static`
   - prepare
   - preview routing
@@ -223,7 +220,7 @@ Principles:
 
 - CLI/GUI own only policy and orchestration
 - quality logic belongs in `fission-static` and `fission-pcode`
-- unsafe/native changes should be isolated to `fission-ffi` or the prepare boundary
+- compatibility-only handling should stay isolated to the prepare/routing boundary
 
 ## Current Direction
 

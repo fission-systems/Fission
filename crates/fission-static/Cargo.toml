@@ -13,13 +13,12 @@ build = "build.rs"
 
 [features]
 default = []
-native_decomp = ["dep:fission-ffi", "fission-ffi/native_decomp"]
+native_decomp = []
 
 [dependencies]
 fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 fission-pcode = { path = "../fission-pcode" }
-fission-ffi = { path = "../fission-ffi", optional = true }
 fission-signatures = { path = "../fission-signatures" }
 object = "0.32"
 iced-x86 = { version = "1.21", features = ["std"] }

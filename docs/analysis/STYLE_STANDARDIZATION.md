@@ -90,14 +90,14 @@ if (options.xunknown_types) {
 
 ## 변경된 파일
 
-1. `ghidra_decompiler/src/processing/PostProcessors.cc`
+1. `legacy-native-decompiler-tree/src/processing/PostProcessors.cc`
    - 변수 이름 표준화 함수 추가
    - 타입 이름 표준화 함수 재작성
 
-2. `ghidra_decompiler/include/fission/processing/PostProcessors.h`
+2. `legacy-native-decompiler-tree/include/fission/processing/PostProcessors.h`
    - `standardize_variable_names()` 선언 추가
 
-3. `ghidra_decompiler/src/decompiler/PostProcessPipeline.cpp`
+3. `legacy-native-decompiler-tree/src/decompiler/PostProcessPipeline.cpp`
    - 변수 이름 표준화 통합
 
 ## 비교 결과

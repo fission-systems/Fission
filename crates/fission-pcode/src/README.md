@@ -14,19 +14,15 @@ Instead of parsing and optimizing generated C code (string manipulation), this o
 ## Architecture
 
 ```
-Binary → Ghidra Decompiler → Pcode IR → Rust Optimizer → Optimized Pcode → C Code
-                                ↑                              ↓
-                          PcodeExtractor.cc          PcodeOptimizationBridge.cc
-                                                              ↓
-                                                      (Runtime dlsym FFI)
+Binary → Lift/Decode → Pcode IR → Rust Optimizer → Optimized Pcode → C Code
 ```
 
 ### Components
 
-1. **C++ Side** ([PcodeExtractor.cc](../../ghidra_decompiler/src/decompiler/PcodeExtractor.cc))
-   - Extracts Pcode operations from `Funcdata`
+1. **Pcode extraction layer**
+   - Extracts Pcode operations from the decompilation pipeline
    - Serializes to JSON for Rust consumption
-   - ~250 lines, handles 90+ opcodes
+   - Handles broad opcode coverage for optimization input
 
 2. **Rust Side** ([pcode.rs](./pcode.rs))
    - `PcodeFunction` - complete function representation
@@ -40,7 +36,7 @@ Binary → Ghidra Decompiler → Pcode IR → Rust Optimizer → Optimized Pcode
    - Identity operation removal
    - Dead code elimination
 
-4. **FFI Bridge** ([pcode/ffi.rs](./pcode/ffi.rs) + [PcodeOptimizationBridge.cc](../../ghidra_decompiler/src/decompiler/PcodeOptimizationBridge.cc))
+4. **FFI Bridge** ([pcode/ffi.rs](./pcode/ffi.rs))
    - C-ABI compatible functions for cross-language calls
    - Runtime symbol loading via `dlsym()` (avoids link-time dependency)
    - Automatic fallback if Rust optimizer unavailable

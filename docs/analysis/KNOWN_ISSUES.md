@@ -25,8 +25,8 @@
 3. **run_analysis_passes**: 해당 단계에서 발생 시 빈 `AnalysisArtifacts`로 계속 진행하여 기본 디컴파일 결과 유지
 
 ### 수정된 파일
-- `ghidra_decompiler/src/decompiler/DecompilationCore.cpp` — 재시도 로직, `run_analysis_passes` 예외 처리
-- `ghidra_decompiler/src/ffi/libdecomp_ffi.cpp` — `LowlevelError` catch 추가
+- `legacy-native-decompiler-tree/src/decompiler/DecompilationCore.cpp` — 재시도 로직, `run_analysis_passes` 예외 처리
+- `legacy-native-decompiler-tree/src/ffi/libdecomp_ffi.cpp` — `LowlevelError` catch 추가
 
 ### 향후 개선 아이디어
 - **Assembly Fallback**: Duplicate VariablePiece 발생 시 해당 함수는 디컴파일을 건너뛰고, 디스어셈블리(Assembly)로 폴백하여 사용자에게 보여주는 기능 검토
@@ -57,7 +57,7 @@
    - **Fix**: Added try-catch around `setFields()` to gracefully handle this case.
 
 ### Files Modified
-- `ghidra_decompiler/src/analysis/TypePropagator.cc`
+- `legacy-native-decompiler-tree/src/analysis/TypePropagator.cc`
   - Added exception handling for high variable access
   - Added exception handling for structure field modification
 

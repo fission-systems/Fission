@@ -1346,7 +1346,6 @@ dependencies = [
  "clap",
  "fission-core",
  "fission-decompiler-core",
- "fission-ffi",
  "fission-loader",
  "fission-pcode",
  "fission-sleigh",
@@ -1430,19 +1429,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows 0.54.0",
-]
-
-[[package]]
-name = "fission-ffi"
-version = "0.1.0"
-dependencies = [
- "fission-core",
- "fission-loader",
- "fission-pcode",
- "libloading 0.8.9",
- "serde",
- "serde_json",
- "tracing",
 ]
 
 [[package]]
@@ -1534,7 +1520,6 @@ dependencies = [
  "crossbeam-channel",
  "dirs 5.0.1",
  "fission-core",
- "fission-ffi",
  "fission-loader",
  "fission-pcode",
  "fission-signatures",
@@ -1564,7 +1549,6 @@ dependencies = [
  "crossbeam-channel",
  "fission-core",
  "fission-dynamic",
- "fission-ffi",
  "fission-loader",
  "fission-pcode",
  "fission-signatures",

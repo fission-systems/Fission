@@ -29,10 +29,9 @@ fission-static = { path = "../../fission-static" }
 fission-dynamic = { path = "../../fission-dynamic", features = ["interactive_runtime"] }  # needed for plugin/debug/runtime UI
 fission-pcode = { path = "../../fission-pcode" }
 fission-signatures = { path = "../../fission-signatures" }
-fission-ffi = { path = "../../fission-ffi", optional = true }
 tracing = "0.1"
 crossbeam-channel = "0.5"
 
 [features]
-default = ["native_decomp"]
-native_decomp = ["fission-static/native_decomp", "dep:fission-ffi"]
+default = []
+native_decomp = ["fission-static/native_decomp"]

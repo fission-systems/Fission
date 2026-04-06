@@ -120,15 +120,15 @@ Review result: the oneshot decompile path already used per-worker independent `D
 ### 1. Build `libdecomp` With ASAN
 
 ```bash
-cd ghidra_decompiler/build
+cd legacy-native-decompiler-tree/build
 cmake -S .. -B . --fresh \
   -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
   -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address"
 cmake --build . --target decomp -j8
 
 cd ../..
-RUSTFLAGS="-L $(pwd)/ghidra_decompiler/build" \
-  cargo build -p fission-cli --features native_decomp --release
+RUSTFLAGS="-L $(pwd)/legacy-native-decompiler-tree/build" \
+  cargo build -p fission-cli --features legacy_native_feature --release
 ```
 
 ### 2. Run an 8-Thread Benchmark
@@ -145,7 +145,7 @@ RAYON_NUM_THREADS=8 ./target/release/fission_cli samples/windows/x64/putty.exe \
 ### 3. If Needed, Rebuild Manually
 
 ```bash
-cd ghidra_decompiler
+cd legacy-native-decompiler-tree
 rm -rf build && mkdir build && cd build
 
 cmake .. \

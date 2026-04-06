@@ -19,7 +19,6 @@ Fission/
 │   ├── fission-signatures/   # FID/signature data and lookup
 │   ├── fission-cli/          # CLI surface
 │   └── fission-tauri/        # Desktop surface
-├── ghidra_decompiler/        # Native lift/decompiler integration, built with CMake
 ├── vendor/                   # Ghidra, RetDec, other reference code
 ├── scripts/test/             # Smoke / fuzz / automation helpers
 └── .github/workflows/        # CI/CD source of truth
@@ -42,7 +41,7 @@ Read the nearest child file before editing those areas.
 | NIR telemetry contract | `crates/fission-pcode/src/nir/types.rs` | `NirBuildStats` is canonical |
 | Automation summaries / deltas | `crates/fission-automation/src/report.rs` | Must stay aligned with `NirBuildStats` |
 | Static orchestration / postprocess | `crates/fission-static/src/analysis/` | Routing and downstream passes |
-| Native lift boundary | `ghidra_decompiler/`, `crates/fission-ffi/` | Keep ownership separate from Rust structuring |
+| Legacy compatibility boundary | `crates/fission-static/src/analysis/decomp/` | Keep compatibility-only logic separate from canonical Rust structuring |
 | Reference algorithms | `vendor/ghidra/`, `vendor/retdec-5.0/` | Use for invariants, not binary-specific heuristics |
 
 ## Core Rules
@@ -64,12 +63,8 @@ Read the nearest child file before editing those areas.
 ## Build / Test Commands
 
 ```bash
-# Native decompiler
-cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
-cmake --build ghidra_decompiler/build --config Release
-
-# CLI with native integration
-cargo build -p fission-cli --features native_decomp
+# CLI
+cargo build -p fission-cli --release
 
 # Common decompiler validation
 cargo test -p fission-pcode

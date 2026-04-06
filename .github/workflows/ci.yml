@@ -61,11 +61,6 @@ jobs:
             build-essential \
             file
 
-      - name: Build Decompiler
-        run: |
-          cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build ghidra_decompiler/build --config Release
-
       - name: Check Formatting
         run: cargo fmt -- --check
 
@@ -74,11 +69,6 @@ jobs:
 
       - name: Run Tests
         run: cargo test -p fission-pcode -p fission-automation -p fission-loader --verbose
-
-      - name: Fission decompilation smoke test
-        run: |
-          chmod +x scripts/test/decomp_smoke_ci.sh
-          ./scripts/test/decomp_smoke_ci.sh
 
   windows-build-test:
     name: Windows Build/Test
@@ -95,18 +85,8 @@ jobs:
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
 
-      - name: Build Decompiler (Windows)
-        shell: pwsh
-        run: |
-          vcpkg install zlib:x64-windows
-          cd ghidra_decompiler
-          if (!(Test-Path build)) { New-Item -ItemType Directory -Path build | Out-Null }
-          cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-          cmake --build . --config Release --target decomp fission_decomp
-
       - name: Build fission-cli (release)
-        run: cargo build -p fission-cli --features native_decomp --release
+        run: cargo build -p fission-cli --release
 
       - name: Run Windows core tests
         run: cargo test -p fission-pcode -p fission-automation --release --verbose
@@ -127,11 +107,6 @@ jobs:
 
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
-
-      - name: Build Decompiler
-        run: |
-          cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build ghidra_decompiler/build --config Release
 
       - name: Check Formatting
         run: cargo fmt -- --check

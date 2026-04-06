@@ -41,26 +41,6 @@ jobs:
               with:
                   targets: ${{ matrix.target }}
 
-            # --- C++ Decompiler Build Steps (Same as CI) ---
-
-            # [Linux/MacOS] Build Decompiler
-            - name: Build Decompiler (Unix)
-              if: runner.os != 'Windows'
-              run: |
-                  cmake -S ghidra_decompiler -B ghidra_decompiler/build -DCMAKE_BUILD_TYPE=Release
-                  cmake --build ghidra_decompiler/build --config Release --target decomp fission_decomp
-
-            # [Windows] Build Decompiler with Vcpkg
-            - name: Build Decompiler (Windows)
-              if: runner.os == 'Windows'
-              run: |
-                  vcpkg install zlib:x64-windows
-                  cd ghidra_decompiler
-                  mkdir build
-                  cd build
-                  cmake .. -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-                  cmake --build . --config Release
-
             # --- Rust Build Steps ---
 
             - name: Build Rust Binary (Release)
@@ -74,13 +54,6 @@ jobs:
                   mkdir -p release_pkg
                   # Copy Rust binary
                   cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release_pkg/
-
-                  # Copy C++ Decompiler binary
-                  if [ "${{ runner.os }}" == "Windows" ]; then
-                    cp ghidra_decompiler/build/Release/fission_decomp.exe release_pkg/
-                  else
-                    cp ghidra_decompiler/build/fission_decomp release_pkg/
-                  fi
 
                   # Copy Resources (Ghidra data)
                   cp -r ghidra release_pkg/

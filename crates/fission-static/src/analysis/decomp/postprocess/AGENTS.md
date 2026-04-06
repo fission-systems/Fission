@@ -43,5 +43,5 @@ postprocess/
 ## Validation
 
 ```bash
-cargo check -p fission-static --features native_decomp
+cargo check -p fission-static
 ```

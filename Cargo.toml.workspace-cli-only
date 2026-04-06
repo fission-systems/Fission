@@ -18,7 +18,6 @@ members = [
     "crates/fission-ai",
     "crates/fission-analysis",
     "crates/fission-cli",
-    "crates/fission-ffi",
 ]
 
 [profile.release]

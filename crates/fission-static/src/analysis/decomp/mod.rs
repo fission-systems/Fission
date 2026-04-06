@@ -33,7 +33,6 @@ pub mod cache;
 #[cfg(feature = "native_decomp")]
 mod caching_decompiler;
 pub mod facts;
-#[cfg(feature = "native_decomp")]
 #[path = "nir/context.rs"]
 pub(crate) mod nir_context;
 #[cfg(feature = "native_decomp")]
@@ -75,13 +74,17 @@ pub use nir_engine::{
 #[cfg(feature = "native_decomp")]
 pub use nir_taxonomy::{
     classified_nir_error, classify_nir_failure, classify_nir_failure_refined,
-    fallback_reason_with_kind,
 };
 #[cfg(feature = "native_decomp")]
 pub use nir_types::{NirWorkerRequest, NirWorkerResponse};
 #[cfg(feature = "native_decomp")]
 pub use nir_worker::execute_nir_worker;
 pub use postprocess::RustPostProcessOptions;
+
+pub fn fallback_reason_with_kind(kind: &str, detail: impl AsRef<str>) -> String {
+    format!("{kind}: {}", detail.as_ref())
+}
+
 #[cfg(feature = "native_decomp")]
 pub use prepare::{
     PrepareOptions, PrepareTimings, prepare_native_decompiler_for_binary,

@@ -3,9 +3,9 @@
 This directory is the canonical home for SLEIGH language specs used by `fission-sleigh`.
 
 - Primary path: `crates/fission-sleigh/specs/languages/`
-- Initial contents were migrated from `ghidra_decompiler/languages/`.
+- Initial contents were migrated from a legacy external language-spec tree.
 
 Migration note:
 - This is a compatibility-first migration step.
-- Legacy `ghidra_decompiler/languages/` is intentionally kept for now.
-- After all call sites are switched and validated, legacy C++/Ghidra coupled paths can be retired.
+- Legacy spec call sites have been switched to this directory.
+- This directory is now the single maintained source for local SLEIGH specs.

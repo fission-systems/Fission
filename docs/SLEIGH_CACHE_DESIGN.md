@@ -129,5 +129,5 @@ void Sleigh::initialize(DocumentStorage &store) {
 
 ## 6. .cursorrules 준수
 
-- **`ghidra_decompiler/decompile/`**: 업스트림 수정. `sleigh_arch.cc`는 FISSION 패치 적용됨.
+- **`legacy-native-decompiler-tree/decompile/`**: 업스트림 수정. `sleigh_arch.cc`는 FISSION 패치 적용됨.
 - 변경은 `inject_sleigh.cc` 또는 Fission 래퍼(`src/`)로 한정하거나, `decompile/` 내 최소 변경으로 제한.

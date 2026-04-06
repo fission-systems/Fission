@@ -22,7 +22,6 @@ default = []
 native_decomp = [
     "dep:fission-decompiler-core",
     "fission-static/native_decomp",
-    "dep:fission-ffi",
     "dep:rayon",
 ]
 
@@ -33,7 +32,6 @@ fission-static = { path = "../fission-static" }
 fission-decompiler-core = { path = "../fission-decompiler-core", optional = true, features = ["native_decomp"] }
 fission-pcode = { path = "../fission-pcode" }
 fission-sleigh = { path = "../fission-sleigh" }
-fission-ffi = { path = "../fission-ffi", optional = true }
 rayon = { version = "1.10", optional = true }
 tracing = "0.1"
 clap = { version = "4.5", features = ["derive"] }

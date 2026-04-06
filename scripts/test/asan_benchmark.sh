@@ -12,7 +12,7 @@ LIMIT="${2:-100}"
 
 echo "[*] Building with ASAN (FISSION_ASAN=1)..."
 export FISSION_ASAN=1
-cargo build -p fission-cli --features native_decomp --release
+cargo build -p fission-cli --release
 
 echo "[*] Running benchmark (RAYON_NUM_THREADS=8)..."
 export DYLD_LIBRARY_PATH="$ROOT/target/release${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"

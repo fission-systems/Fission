@@ -50,16 +50,10 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
-# 3. Build decompiler
-cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cd ..
-
-# 4. Build Fission
+# 3. Build Fission CLI
 cargo build --release --bin fission_cli
 
-# 5. Run
+# 4. Run
 ./target/release/fission_cli                    # CLI
 # GUI: cd crates/fission-tauri && npm install && npm run tauri dev
 ```
@@ -130,14 +124,8 @@ $env:VCPKG_ROOT = "C:\vcpkg"
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
-# Build Ghidra decompiler
-cd ghidra_decompiler
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
-cmake --build build --config Release
-cd ..
-
 # Build Fission
-cargo build --release
+cargo build --release --bin fission_cli
 ```
 
 #### Step 6: Run Fission
@@ -154,13 +142,7 @@ npm run tauri dev
 
 #### Windows-Specific Notes
 
-**Dynamic Library Path**: The decompiler library (`libdecomp.dll`) must be in the same directory as `fission_cli.exe` or in PATH.
-
-```powershell
-# Copy DLL to output directory
-copy ghidra_decompiler\build\Release\libdecomp.dll target\release\
-# CLI binary name: fission_cli.exe
-```
+No extra native runtime copy step is required for the default Rust-only CLI build.
 
 **Antivirus**: Some antivirus software may flag Fission. Add exclusion for the `target/` directory.
 
@@ -208,12 +190,6 @@ source $HOME/.cargo/env
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
-# Build decompiler
-cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-cd ..
-
 # Build Fission (with all features)
 cargo build --release
 
@@ -236,16 +212,7 @@ sudo cp target/release/fission_cli /usr/local/bin/
 
 #### Ubuntu/Debian-Specific Notes
 
-**Library Path**: The decompiler library is automatically found via rpath. If you move the binary:
-
-```bash
-# Set LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/ghidra_decompiler/build
-
-# Or copy library
-sudo cp ghidra_decompiler/build/libdecomp.so /usr/local/lib/
-sudo ldconfig
-```
+For the default Rust-only CLI build, extra `LD_LIBRARY_PATH` setup is not required.
 
 ---
 
@@ -296,11 +263,6 @@ source $HOME/.cargo/env
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
 
-cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-cd ..
-
 cargo build --release
 ```
 
@@ -338,11 +300,6 @@ source $HOME/.cargo/env
 ```bash
 git clone https://github.com/sjkim1127/Fission.git
 cd Fission
-
-cd ghidra_decompiler
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(sysctl -n hw.ncpu)
-cd ..
 
 cargo build --release
 ```
@@ -383,13 +340,10 @@ Customize the build with Cargo features:
 # CLI (recommended for first build)
 cargo build --release --bin fission_cli
 
-# CLI with native decompiler
-cargo build --release --bin fission_cli --features native_decomp
-
 # GUI (Tauri): build from Tauri crate
 cd crates/fission-tauri && npm run tauri build
 
-# Without native decompiler
+# Without default feature set
 cargo build --release --bin fission_cli --no-default-features
 ```
 
@@ -397,7 +351,6 @@ cargo build --release --bin fission_cli --no-default-features
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `native_decomp` | Built-in Ghidra decompiler (fission-cli, fission-ffi) | ✅ in fission-cli |
 | `gui` | Tauri 2.x + React 19 desktop GUI — build with `cd crates/fission-tauri && npm run tauri build` | Separate app |
 | `cli` | CLI binary: `fission_cli` | `cargo build --bin fission_cli` |
 | `tui` | Terminal UI (ratatui) | ❌ No |
@@ -471,24 +424,11 @@ $env:VCPKG_ROOT = "C:\vcpkg"
 
 ### Linker Errors
 
-**Error**: `cannot find -ldecomp`
+If you see linker errors, make sure toolchains and system dependencies are installed correctly, then run a clean rebuild:
 
-**Solution**: Ensure decompiler was built:
 ```bash
-cd ghidra_decompiler
-cmake --build build
-ls build/libdecomp.*  # Should exist
-```
-
-**Error**: `library not loaded: libdecomp.so`
-
-**Solution**: Set library path:
-```bash
-# Linux
-export LD_LIBRARY_PATH=$(pwd)/ghidra_decompiler/build:$LD_LIBRARY_PATH
-
-# macOS
-export DYLD_LIBRARY_PATH=$(pwd)/ghidra_decompiler/build:$DYLD_LIBRARY_PATH
+cargo clean
+cargo build --release --bin fission_cli
 ```
 
 ### Rust Version Too Old
@@ -712,13 +652,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
-          sudo apt install -y cmake zlib1g-dev
-      
-      - name: Build decompiler
-        run: |
-          cd ghidra_decompiler
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
+          sudo apt install -y zlib1g-dev
       
       - name: Build Fission
         run: cargo build --release
@@ -793,7 +727,7 @@ dumpbin /dependents target\release\fission_cli.exe
 
 ## Decompiler logging
 
-Decompiler preparation (binary load, sections, symbols, FID, and related setup) now flows through a single path: `prepare_native_decompiler_for_binary` in `fission-analysis`. Both the CLI and GUI call the same entry point. See [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) for the per-binary preparation contract. Initialization cost can be inspected step-by-step through JSON `_meta.prepare_timings` when `--benchmark` is enabled. Performance priorities are also documented in [ARCHITECTURE.md](../architecture/ARCHITECTURE.md).
+Decompiler preparation (binary load, sections, symbols, FID, and related setup) now flows through a single path in `fission-analysis`. Both the CLI and GUI call the same entry point. See [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) for the per-binary preparation contract. Initialization cost can be inspected step-by-step through JSON `_meta.prepare_timings` when `--benchmark` is enabled. Performance priorities are also documented in [ARCHITECTURE.md](../architecture/ARCHITECTURE.md).
 
 Decompiler (C++) diagnostic logging is controlled only through the following paths:
 
@@ -825,16 +759,15 @@ See [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) for the detailed logging 
 ## Summary
 
 **Minimum steps**:
-1. Install Rust + CMake + C++ compiler + zlib
-2. Build decompiler: `cd ghidra_decompiler && cmake -B build && cmake --build build && cd ..`
-3. Build Fission CLI: `cargo build --release --bin fission_cli`
-4. Run: `./target/release/fission_cli` (for the GUI, run `npm run tauri dev` in `crates/fission-tauri`)
+1. Install Rust + platform dependencies
+2. Build Fission CLI: `cargo build --release --bin fission_cli`
+3. Run: `./target/release/fission_cli` (for the GUI, run `npm run tauri dev` in `crates/fission-tauri`)
 
 **Most common issues**:
-- ❌ CMake not found → Install CMake
+- ❌ Rust toolchain mismatch → `rustup update stable`
 - ❌ zlib not found → Install zlib-dev package
-- ❌ libdecomp not found → Build decompiler first
-- ❌ Linker errors → Set LD_LIBRARY_PATH
+- ❌ GUI dependency mismatch → install GTK/WebKit/Tauri deps
+- ❌ Linker errors → `cargo clean && cargo build --release --bin fission_cli`
 
 **Build time**: ~5-10 minutes (first build), ~30s (incremental)  
 **Disk space**: ~2 GB (with debug info)

@@ -40,7 +40,7 @@ if (ct->getSize() == 8 || ct->getSize() == 4) {
 ## 해결 방법
 
 ### 1. 부동소수점 휴리스틱 개선
-`ghidra_decompiler/decompile/printc.cc`의 `pushConstant()` 함수를 수정하여:
+`legacy-native-decompiler-tree/decompile/printc.cc`의 `pushConstant()` 함수를 수정하여:
 
 1. **값 `0` 제외**: 정수 0은 부동소수점으로 변환하지 않음
 2. **포인터 값 제외**: 높은 주소 값(0x10000 이상)은 포인터로 간주
@@ -104,8 +104,8 @@ if (pvStack_18 != (void *)0x0) {  // ✅ 수정됨
 이러한 차이는 기능적으로 동일하며, 주로 명명 규칙과 타입 정의의 차이입니다.
 
 ## 관련 파일
-- `ghidra_decompiler/decompile/printc.cc` - 상수 출력 로직
-- `ghidra_decompiler/decompile/typeop.cc` - 비교 연산자 타입 처리
+- `legacy-native-decompiler-tree/decompile/printc.cc` - 상수 출력 로직
+- `legacy-native-decompiler-tree/decompile/typeop.cc` - 비교 연산자 타입 처리
 - `docs/analysis/STRING_INLINING.md` - 문자열 인라인 개선
 - `docs/analysis/TYPE_PROPAGATION_STATUS.md` - 타입 전파 개선
 - `docs/analysis/IMPROVEMENT_LOG.md` - 전체 개선 기록
