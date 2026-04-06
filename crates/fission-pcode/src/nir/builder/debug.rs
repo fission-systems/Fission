@@ -156,6 +156,17 @@ impl<'a> PreviewBuilder<'a> {
                 .and_then(|mut f| {
                     std::io::Write::write_all(&mut f, format!("{message}\n").as_bytes())
                 });
+
+            self.record_unsupported_inventory_event(
+                stage,
+                Some(target_vn),
+                Some(op),
+                Some(op.opcode),
+                Some(block_addr),
+                Some(u64::from(op.seq_num)),
+                true,
+                "branch_target_resolve",
+            );
         }
     }
 

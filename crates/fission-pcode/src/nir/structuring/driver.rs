@@ -272,19 +272,46 @@ impl<'a> PreviewBuilder<'a> {
                 }
                 LoweredTerminator::Fallthrough(_) => {}
                 LoweredTerminator::Unsupported => {
-                    return Err(MlilPreviewError::UnsupportedCfgIndirectCallRegion);
+                    self.record_unsupported_inventory_event(
+                        "build_hir_multiblock_unsupported_terminator",
+                        None,
+                        None,
+                        None,
+                        Some(block.start_address),
+                        None,
+                        false,
+                        "hir_unsupported_emit",
+                    );
+                    body.push(HirStmt::Expr(HirExpr::Call {
+                        target: "__fission_indirect_cf_unsupported".to_string(),
+                        args: Vec::new(),
+                        ty: NirType::Unknown,
+                    }));
                 }
-                LoweredTerminator::Switch { expr, targets, .. } => {
-                    let cases = targets.into_iter().enumerate().map(|(i, t)| {
+                LoweredTerminator::Switch {
+                    expr,
+                    targets,
+                    default_target,
+                } => {
+                    let cases = targets
+                        .into_iter()
+                        .filter(|target| Some(*target) != default_target)
+                        .enumerate()
+                        .map(|(i, t)| {
                         crate::nir::types::HirSwitchCase {
                             values: vec![i as i64], // Simplistic indexing for now
                             body: vec![HirStmt::Goto(block_label(t))],
                         }
-                    }).collect();
+                        })
+                        .collect();
                     body.push(HirStmt::Switch {
                         expr,
                         cases,
-                        default: vec![],
+                        default: default_target
+                            .map(block_label)
+                            .map(HirStmt::Goto)
+                            .into_iter()
+                            .collect(),
                     });
                 }
             }

@@ -1303,7 +1303,7 @@ pub(super) fn recognize_magic_number_division(expr: &HirExpr) -> Option<HirExpr>
                         
                         let mut maxx = if x_bits == 64 { 0 } else { 1u128 << x_bits };
                         maxx = maxx.wrapping_sub(1);
-                        diff += q - r;
+                        diff += q.saturating_sub(r);
                         
                         if diff != 0 {
                             let tmp = power / diff;

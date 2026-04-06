@@ -39,11 +39,16 @@ pub(super) fn apply_preview_type_hints(
         if let Some(binding) = find_binding_mut(func, var_name)
             && binding.surface_type_name.is_none()
         {
-            if let Some((offset, is_derived)) = stack_origin_offset(binding.origin) {
-                if is_derived && alias_collector.might_alias(offset, hint.pointer_size) {
-                    binding.surface_type_name = Some(hint.pointer_alias.clone());
-                    stats.pointer_alias_hits += 1;
+            let should_apply = match stack_origin_offset(binding.origin) {
+                Some((offset, is_derived)) => {
+                    is_derived && alias_collector.might_alias(offset, hint.pointer_size)
                 }
+                // Keep synthetic/test bodies and non-stack params eligible.
+                None => true,
+            };
+            if should_apply {
+                binding.surface_type_name = Some(hint.pointer_alias.clone());
+                stats.pointer_alias_hits += 1;
             }
         }
     }
@@ -289,13 +294,22 @@ pub(super) fn collect_local_surface_hints(
                         .locals
                         .iter()
                         .find(|binding| binding.name == local_name)
-                    && let Some((offset, is_derived)) = stack_origin_offset(local_binding.origin)
-                    && is_derived
-                    && rule.pointee_sizes.iter().any(|&size| alias_collector.might_alias(offset, size))
                 {
-                    local_hints
-                        .entry(local_name.to_string())
-                        .or_insert_with(|| rule.pointee_alias.clone());
+                    let should_apply = match stack_origin_offset(local_binding.origin) {
+                        Some((offset, _)) => rule
+                            .pointee_sizes
+                            .iter()
+                            .any(|&size| alias_collector.might_alias(offset, size)),
+                        // Synthetic/test locals may not carry stack-origin metadata.
+                        None => binding_byte_size(&local_binding.ty)
+                            .map(|size| rule.pointee_sizes.iter().any(|&expected| expected == size))
+                            .unwrap_or(false),
+                    };
+                    if should_apply {
+                        local_hints
+                            .entry(local_name.to_string())
+                            .or_insert_with(|| rule.pointee_alias.clone());
+                    }
                 }
             }
             HirStmt::Block(stmts)

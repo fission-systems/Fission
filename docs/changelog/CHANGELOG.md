@@ -7,6 +7,48 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-06
+
+### NIR Branch-Target Recovery Hardening + Limit-200 Baseline/Post/Delta Automation
+
+This update focuses on making indirect/partially unresolved control-flow lowering more robust in Rust NIR and packaging the repeated limit-200 measurement workflow into a single reproducible command.
+
+#### Changed
+
+- strengthened NIR terminator recovery in `fission-pcode` for `Branch`, `CBranch`, and `BranchInd`:
+  - route target resolution through a recovery path that combines passthrough peel + one-step arithmetic address inference (`IntAdd` / `IntSub` with const)
+  - add Branch/CBranch fallback target inference from CFG successors when direct target resolution fails
+  - add BranchInd target inference from simple `Load`-address forms
+  - infer `switch` default target from fallthrough when available
+  - implementation: `crates/fission-pcode/src/nir/builder/terminator.rs`
+- changed unsupported terminator handling to emit explicit marker calls instead of aborting render for single-block/multi-block/linear paths:
+  - emits `__fission_indirect_cf_unsupported()` call expression
+  - implementations: `crates/fission-pcode/src/nir/builder/mod.rs`, `crates/fission-pcode/src/nir/structuring/driver.rs`, `crates/fission-pcode/src/nir/structuring/linear.rs`
+- extended unsupported inventory recording on branch-target resolve failures for diagnostics:
+  - implementation: `crates/fission-pcode/src/nir/builder/debug.rs`
+- broadened type-hint application in synthetic/non-stack-origin paths and tightened local hint eligibility fallback logic:
+  - implementation: `crates/fission-pcode/src/nir/builder/type_hints.rs`
+- hardened arithmetic normalization edge case by replacing subtraction with saturating subtraction in magic-division recognition:
+  - implementation: `crates/fission-pcode/src/nir/normalize/arith.rs`
+
+#### Added
+
+- new x86 bootstrap regressions for branch-target recovery and unsupported lowering behavior:
+  - Branch/CBranch wrapped-target recovery (copy + one-step arithmetic)
+  - BranchInd no-target tolerance and load-address target recovery
+  - unresolved branch fallback behavior via successor inference
+  - implementation: `crates/fission-pcode/src/nir/tests/bootstrap_x86.rs`
+- one-command local automation script for baseline/post/summary/delta generation on putty/everything (`--decomp-limit 200`):
+  - snapshots unsupported inventory files per run
+  - generates summary/delta json+md artifacts and putty unmapped cluster reports
+  - includes baseline auto-resolution fallback (`rebuilt`, `after_term`, `after_passthrough`)
+  - implementation: `scripts/test/run_limit200_baseline_post_delta.py`
+
+#### Validation
+
+- `cargo test -p fission-pcode --lib bootstrap_x86::preview_` (pass)
+- `cargo test -p fission-pcode --lib` (pass)
+
 ## 2026-04-05
 
 ### rust-sleigh x86 0F3A Semantic Expansion and Branch-Target CFG Diagnostics
@@ -403,11 +445,11 @@ This increment refines guarded-tail alias ownership using Ghidra-style front-lea
   - nested external refs
   - post-segment refs
   - unsafe owner crossings
-- allowed safe forwarded-label reuse when refs stay on the same top-level forward/front-owner path
+   Extended the rust-sleigh x86 three-byte semantic ownership for SSE4 string/extract opcodes and added CFG-construction diagnostics to narrow unresolved branch-target fallback causes before NIR lowering.
 - connected safe external alias redirects back into promotion so outer-body gotos are rewritten consistently before region drain
 - relaxed label-pressure classification for two conservative fallthrough-equivalent cases:
   - trailing top-level middle `goto target_label`
-  - single top-level forward external `goto target_label` from before the promoted region
+   - expanded x86 `0F 3A` dataflow semantic handlers in `fission-sleigh`:
 - kept nested/internal middle refs and post-label external refs conservative
 
 #### Added
@@ -415,7 +457,7 @@ This increment refines guarded-tail alias ownership using Ghidra-style front-lea
 - new regressions in `structuring_misc.rs` covering:
   - safe external alias reuse rewrite
   - trailing middle goto relaxation
-  - single forward external-ref relaxation
+   - `cargo test -p fission-sleigh` (pass)
   - preserved post-label external-ref rejection
   - preserved true nonlocal alias rejection
 
@@ -423,30 +465,30 @@ This increment refines guarded-tail alias ownership using Ghidra-style front-lea
 
 - `cargo test -p fission-pcode` (pass)
 - `cargo check -p fission-pcode` (pass)
-- `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 200` (pass)
+   - strengthened NIR terminator recovery in `fission-pcode` for `Branch`, `CBranch`, and `BranchInd`:
 - `cargo run -p fission-automation -- nir-check --lane nir --no-build --fission-bin ./target/debug/fission_cli --functions-limit 500` (pass)
 
 #### Observed expanded-sample delta (`nir`)
 
 - 200 functions:
-  - `canonicalization_failed_alias_has_nonlocal_ref_count`: `371 -> 298`
+   - changed unsupported terminator handling to emit explicit marker calls instead of aborting render for single-block/multi-block/linear paths:
   - `canonicalization_failed_alias_not_fallthrough_count`: `175 -> 247`
 - 500 functions:
-  - `canonicalization_failed_alias_has_nonlocal_ref_count`: `676 -> 583`
+   - extended unsupported inventory recording on branch-target resolve failures for diagnostics:
   - `canonicalization_failed_alias_not_fallthrough_count`: `260 -> 352`
-
+   - broadened type-hint application in synthetic/non-stack-origin paths and tightened local hint eligibility fallback logic:
 The large-sample runs show the alias-nonlocal bucket dropping substantially, with part of that volume reclassified into the more precise `alias_not_fallthrough` subtype instead of remaining lumped into `nonlocal`.
-
+   - hardened arithmetic normalization edge case by replacing subtraction with saturating subtraction in magic-division recognition:
 ### Structuring - AliasNotFallthrough Subtypes and Discovery Acceptance Refinement
 
 This increment splits `AliasNotFallthrough` into concrete after-label categories, adds a conservative top-level after-label relaxation using Ghidra `gotoPrints` / `nextFlowAfter`-style equivalence, and accepts terminal guarded tails plus pure-expression alias bodies when they are structurally safe.
 
-#### Changed
+   - new x86 bootstrap regressions for branch-target recovery and unsupported lowering behavior:
 
 - extended `AliasNotFallthrough` telemetry with explicit subtypes:
   - `canonicalization_failed_alias_not_fallthrough_top_level_after_label_count`
   - `canonicalization_failed_alias_not_fallthrough_nested_after_label_count`
-- wired the new subtype counters through:
+   - one-command local automation script for baseline/post/summary/delta generation on putty/everything (`--decomp-limit 200`):
   - `NirBuildStats`
   - preview builder state/snapshot
   - automation report stat export
@@ -454,8 +496,8 @@ This increment splits `AliasNotFallthrough` into concrete after-label categories
   - allows a narrow top-level after-label self-goto case when the forwarded alias still follows the same printed front path
   - keeps nested after-label and other printed-order-divergent refs conservative
 - refined guarded-tail promotion shape handling:
-  - accepts terminal guarded tails (no follow block after the join label) in the same spirit as Ghidra `if-no-exit`
-- refined discovery-time noncanonical-layout handling:
+   - `cargo test -p fission-pcode --lib bootstrap_x86::preview_` (pass)
+   - `cargo test -p fission-pcode --lib` (pass)
   - accepts alias bodies composed only of pure value expressions instead of treating them as automatically nontrivial
   - continues rejecting alias bodies with control flow or side-effectful expression shapes
 

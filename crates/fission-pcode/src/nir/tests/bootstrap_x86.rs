@@ -116,6 +116,644 @@ fn preview_names_x86_general_purpose_registers() {
     assert!(code.contains("return eax;"), "{code}");
 }
 
+#[test]
+fn preview_tolerates_branchind_without_targets() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x405000,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::BranchInd,
+                address: 0x405000,
+                output: None,
+                inputs: vec![reg(0x00, 4)],
+                asm_mnemonic: Some("JMP EAX".to_string()),
+            }],
+        }],
+    };
+
+    let code = render_mlil_preview(&func, "x86_branchind_unsupported", 0x405000, &preview_options_x86())
+        .expect("preview render");
+    assert!(code.contains("__fission_indirect_cf_unsupported()"), "{code}");
+}
+
+#[test]
+fn preview_branchind_with_successors_sets_default_target() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x405010,
+                successors: vec![1, 2],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x405010,
+                    output: None,
+                    inputs: vec![reg(0x00, 4)],
+                    asm_mnemonic: Some("JMP EAX".to_string()),
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x405020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x405020,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x405030,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x405030,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Switch {
+            targets,
+            default_target,
+            ..
+        } => {
+            assert_eq!(targets, vec![0x405020, 0x405030]);
+            assert_eq!(default_target, Some(0x405020));
+        }
+        other => panic!("expected switch terminator, got {other:?}"),
+    }
+}
+
+#[test]
+fn preview_branchind_without_successors_recovers_constant_target() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x405100,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x405100,
+                    output: None,
+                    inputs: vec![cst(0x405120, 8)],
+                    asm_mnemonic: Some("JMP [CONST]".to_string()),
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x405120,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x405120,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(2, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Switch {
+            targets,
+            default_target,
+            ..
+        } => {
+            assert_eq!(targets, vec![0x405120]);
+            assert_eq!(default_target, Some(0x405120));
+        }
+        other => panic!("expected switch terminator, got {other:?}"),
+    }
+}
+
+#[test]
+fn preview_tolerates_unresolved_direct_branch_target() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x406000,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Branch,
+                address: 0x406000,
+                output: None,
+                inputs: vec![cst(0x405000, 8)],
+                asm_mnemonic: Some("JMP 0x405000".to_string()),
+            }],
+        }],
+    };
+
+    let code = render_mlil_preview(
+        &func,
+        "x86_unresolved_direct_branch",
+        0x406000,
+        &preview_options_x86(),
+    )
+    .expect("preview render");
+    assert!(code.contains("__fission_indirect_cf_unsupported()"), "{code}");
+}
+
+#[test]
+fn preview_unresolved_direct_branch_with_single_successor_uses_successor_target() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x406100,
+                successors: vec![1],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Branch,
+                    address: 0x406100,
+                    output: None,
+                    inputs: vec![cst(0x499999, 8)],
+                    asm_mnemonic: Some("JMP unresolved".to_string()),
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x406110,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x406110,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(3, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Goto(target) => assert_eq!(target, 0x406110),
+        other => panic!("expected goto terminator, got {other:?}"),
+    }
+}
+
+#[test]
+fn preview_branch_target_copy_wrapper_recovers_direct_target() {
+    let wrapped_target = reg(0x00, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x406200,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x406200,
+                        output: Some(wrapped_target.clone()),
+                        inputs: vec![cst(0x406220, 8)],
+                        asm_mnemonic: Some("MOV target, 0x406220".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x406201,
+                        output: None,
+                        inputs: vec![wrapped_target],
+                        asm_mnemonic: Some("JMP wrapped_target".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x406220,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x406220,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(4, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Goto(target) => assert_eq!(target, 0x406220),
+        other => panic!("expected goto terminator, got {other:?}"),
+    }
+}
+
+#[test]
+fn preview_cbranch_target_copy_wrapper_recovers_direct_target() {
+    let wrapped_target = reg(0x00, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x407100,
+                successors: vec![1, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x407100,
+                        output: Some(wrapped_target.clone()),
+                        inputs: vec![cst(0x407120, 8)],
+                        asm_mnemonic: Some("MOV target, 0x407120".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x407101,
+                        output: None,
+                        inputs: vec![wrapped_target, reg(0x206, 1)],
+                        asm_mnemonic: Some("JNZ wrapped_target".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x407110,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x407110,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x407120,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x407120,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Cond {
+            true_target,
+            false_target,
+            ..
+        } => {
+            assert_eq!(true_target, 0x407120);
+            assert_eq!(false_target, Some(0x407110));
+        }
+        other => panic!("expected conditional terminator, got {other:?}"),
+    }
+}
+
+#[test]
+fn preview_branch_target_intadd_wrapper_recovers_direct_target() {
+    let wrapped_target = Varnode {
+        space_id: 3,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let base_target = Varnode {
+        space_id: 1,
+        offset: 0x406300,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x4062e0,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x4062e0,
+                        output: Some(wrapped_target.clone()),
+                        inputs: vec![base_target, cst(0x20, 8)],
+                        asm_mnemonic: Some("LEA target, base+0x20".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x4062e1,
+                        output: None,
+                        inputs: vec![wrapped_target],
+                        asm_mnemonic: Some("JMP target".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x406320,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x406320,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(5, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Goto(target) => assert_eq!(target, 0x406320),
+        other => panic!("expected goto terminator, got {other:?}"),
+    }
+}
+
+#[test]
+fn preview_cbranch_target_intadd_wrapper_recovers_direct_target() {
+    let wrapped_target = Varnode {
+        space_id: 3,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let base_target = Varnode {
+        space_id: 1,
+        offset: 0x407300,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x4072e0,
+                successors: vec![1, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x4072e0,
+                        output: Some(wrapped_target.clone()),
+                        inputs: vec![base_target, cst(0x20, 8)],
+                        asm_mnemonic: Some("LEA target, base+0x20".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x4072e1,
+                        output: None,
+                        inputs: vec![wrapped_target, reg(0x206, 1)],
+                        asm_mnemonic: Some("JNZ target".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x4072f0,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x4072f0,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x407320,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x407320,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Cond {
+            true_target,
+            false_target,
+            ..
+        } => {
+            assert_eq!(true_target, 0x407320);
+            assert_eq!(false_target, Some(0x4072f0));
+        }
+        other => panic!("expected conditional terminator, got {other:?}"),
+    }
+}
+
+#[test]
+fn preview_branchind_load_address_recovers_direct_target() {
+    let switch_var = Varnode {
+        space_id: 3,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let target_addr = Varnode {
+        space_id: 1,
+        offset: 0x405220,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x405200,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x405200,
+                        output: Some(switch_var.clone()),
+                        inputs: vec![cst(0, 8), target_addr],
+                        asm_mnemonic: Some("LOAD target from table".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::BranchInd,
+                        address: 0x405201,
+                        output: None,
+                        inputs: vec![switch_var],
+                        asm_mnemonic: Some("JMP_IND".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x405220,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x405220,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(6, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Switch {
+            targets,
+            default_target,
+            ..
+        } => {
+            assert_eq!(targets, vec![0x405220]);
+            assert_eq!(default_target, Some(0x405220));
+        }
+        other => panic!("expected switch terminator, got {other:?}"),
+    }
+}
+
+#[test]
+fn preview_unresolved_cbranch_uses_unique_non_fallthrough_successor() {
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x407000,
+                successors: vec![1, 2],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x407000,
+                    output: None,
+                    inputs: vec![cst(0x4AAAAA, 8), reg(0x206, 1)],
+                    asm_mnemonic: Some("JNZ unresolved".to_string()),
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x407010,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x407010,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x407020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x407020,
+                    output: None,
+                    inputs: vec![cst(0, 4), cst(1, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(0)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Cond {
+            true_target,
+            false_target,
+            ..
+        } => {
+            assert_eq!(true_target, 0x407020);
+            assert_eq!(false_target, Some(0x407010));
+        }
+        other => panic!("expected conditional terminator, got {other:?}"),
+    }
+}
+
 fn lower_x86_cond_expr(func: &PcodeFunction) -> HirExpr {
     let options = preview_options_x86();
     let mut builder = PreviewBuilder::new(func, &options, None);

@@ -25,15 +25,54 @@ impl<'a> PreviewBuilder<'a> {
                     Ok(LoweredTerminator::Return(expr))
                 }
                 PcodeOpcode::Branch if op.inputs.len() == 1 => {
-                    let Some(target_idx) = op.inputs.first().and_then(|input| {
-                        resolve_branch_target_index(
-                            this.pcode,
-                            &this.address_to_index,
+                    let target_idx = op
+                        .inputs
+                        .first()
+                        .and_then(|input| {
+                            this.resolve_branch_target_index_with_recovery(idx, op, input)
+                        });
+                    if let Some(target_idx) = target_idx {
+                        return Ok(LoweredTerminator::Goto(this.block_target_key(target_idx)));
+                    }
+                    if let Some(target_vn) = op.inputs.first() {
+                        let succ_addrs = block
+                            .successors
+                            .iter()
+                            .filter_map(|succ_idx| {
+                                this.pcode
+                                    .blocks
+                                    .get(*succ_idx as usize)
+                                    .map(|succ| succ.start_address)
+                            })
+                            .collect::<Vec<_>>();
+                        this.debug_branch_target_resolution_failure(
+                            "terminator_branch_target_resolve_fail",
                             idx,
+                            block.start_address,
                             op,
-                            input,
-                        )
-                    }) else {
+                            target_vn,
+                            &succ_addrs,
+                        );
+
+                        if let Some(fallback_target) = this.infer_unconditional_branch_successor_target(idx)
+                        {
+                            return Ok(LoweredTerminator::Goto(fallback_target));
+                        }
+
+                        // If the branch target points outside the current p-code slice,
+                        // degrade to explicit unsupported marker instead of aborting render.
+                        if branch_target_address(target_vn).is_some() {
+                            return Ok(LoweredTerminator::Unsupported);
+                        }
+                    }
+                    Err(MlilPreviewError::UnsupportedCfgBranchTarget)
+                }
+                PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
+                    let true_target = if let Some(true_target_idx) =
+                        this.resolve_branch_target_index_with_recovery(idx, op, &op.inputs[0])
+                    {
+                        this.block_target_key(true_target_idx)
+                    } else {
                         if let Some(target_vn) = op.inputs.first() {
                             let succ_addrs = block
                                 .successors
@@ -46,47 +85,31 @@ impl<'a> PreviewBuilder<'a> {
                                 })
                                 .collect::<Vec<_>>();
                             this.debug_branch_target_resolution_failure(
-                                "terminator_branch_target_resolve_fail",
+                                "terminator_cbranch_target_resolve_fail",
                                 idx,
                                 block.start_address,
                                 op,
                                 target_vn,
                                 &succ_addrs,
                             );
+
+                            if let Some(fallback_target) =
+                                this.infer_cbranch_true_target_from_successors(idx)
+                            {
+                                // Keep conditional structure if CFG successors provide a unique
+                                // non-fallthrough edge even when direct target resolution fails.
+                                fallback_target
+                            } else if branch_target_address(target_vn).is_some() {
+                                // Same policy as Branch: keep rendering by degrading to explicit
+                                // unsupported marker when target resolution is external/unknown.
+                                return Ok(LoweredTerminator::Unsupported);
+                            } else {
+                                return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
+                            }
+                        } else {
+                            return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                         }
-                        return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                     };
-                    Ok(LoweredTerminator::Goto(this.block_target_key(target_idx)))
-                }
-                PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
-                    let Some(true_target_idx) = resolve_branch_target_index(
-                        this.pcode,
-                        &this.address_to_index,
-                        idx,
-                        op,
-                        &op.inputs[0],
-                    ) else {
-                        let succ_addrs = block
-                            .successors
-                            .iter()
-                            .filter_map(|succ_idx| {
-                                this.pcode
-                                    .blocks
-                                    .get(*succ_idx as usize)
-                                    .map(|succ| succ.start_address)
-                            })
-                            .collect::<Vec<_>>();
-                        this.debug_branch_target_resolution_failure(
-                            "terminator_cbranch_target_resolve_fail",
-                            idx,
-                            block.start_address,
-                            op,
-                            &op.inputs[0],
-                            &succ_addrs,
-                        );
-                        return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
-                    };
-                    let true_target = this.block_target_key(true_target_idx);
                     let cond = this
                         .try_recover_x86_branch_condition(&op.inputs[1])?
                         .map(Ok)
@@ -114,17 +137,38 @@ impl<'a> PreviewBuilder<'a> {
                     let switch_expr = this.lower_wrapped_varnode(switch_var, &mut HashSet::new())?;
                     let mut targets = Vec::new();
                     for succ_idx in &block.successors {
-                        if let Some(succ_block) = this.pcode.blocks.get(*succ_idx as usize) {
-                            targets.push(succ_block.start_address);
+                        let succ_idx = *succ_idx as usize;
+                        if succ_idx < this.pcode.blocks.len() {
+                            let target = this.block_target_key(succ_idx);
+                            if !targets.contains(&target) {
+                                targets.push(target);
+                            }
                         }
                     }
+                    if targets.is_empty()
+                        && let Some(inferred_target) =
+                            this.infer_branchind_target_from_input(idx, op, switch_var)
+                    {
+                        targets.push(inferred_target);
+                    }
                     if targets.is_empty() {
+                        this.record_unsupported_inventory_event(
+                            "terminator_branchind_no_targets",
+                            Some(switch_var),
+                            Some(op),
+                            Some(op.opcode),
+                            Some(block.start_address),
+                            Some(u64::from(op.seq_num)),
+                            true,
+                            "branchind_targets_missing",
+                        );
                         Ok(LoweredTerminator::Unsupported)
                     } else {
+                        let default_target = this.infer_switch_default_target(idx, &targets);
                         Ok(LoweredTerminator::Switch {
                             expr: switch_expr,
                             targets,
-                            default_target: None, // We don't have explicit info about which one is default yet, though we might guess the last or Fallthrough
+                            default_target,
                         })
                     }
                 }
@@ -321,6 +365,130 @@ impl<'a> PreviewBuilder<'a> {
             return Some(X86BranchPredicate::SLeZero(value));
         }
         None
+    }
+
+    fn infer_switch_default_target(&self, idx: usize, targets: &[u64]) -> Option<u64> {
+        let fallthrough = self.next_block_address(idx)?;
+        targets.contains(&fallthrough).then_some(fallthrough)
+    }
+
+    fn infer_unconditional_branch_successor_target(&self, idx: usize) -> Option<u64> {
+        let block = self.pcode.blocks.get(idx)?;
+        if block.successors.len() != 1 {
+            return None;
+        }
+        let succ_idx = block.successors[0] as usize;
+        (succ_idx < self.pcode.blocks.len()).then(|| self.block_target_key(succ_idx))
+    }
+
+    fn infer_cbranch_true_target_from_successors(&self, idx: usize) -> Option<u64> {
+        let block = self.pcode.blocks.get(idx)?;
+        let fallthrough = self.next_block_address(idx);
+        let mut candidates = Vec::new();
+        for succ_idx in &block.successors {
+            let succ_idx = *succ_idx as usize;
+            if succ_idx >= self.pcode.blocks.len() {
+                continue;
+            }
+            let target = self.block_target_key(succ_idx);
+            if Some(target) == fallthrough {
+                continue;
+            }
+            if !candidates.contains(&target) {
+                candidates.push(target);
+            }
+        }
+        (candidates.len() == 1).then_some(candidates[0])
+    }
+
+    fn infer_branchind_target_from_input(
+        &self,
+        idx: usize,
+        op: &PcodeOp,
+        switch_var: &Varnode,
+    ) -> Option<u64> {
+        self.resolve_branch_target_index_with_recovery(idx, op, switch_var)
+            .or_else(|| self.infer_branchind_target_from_load_address(switch_var))
+        .map(|target_idx| self.block_target_key(target_idx))
+    }
+
+    fn resolve_branch_target_index_with_recovery(
+        &self,
+        idx: usize,
+        op: &PcodeOp,
+        vn: &Varnode,
+    ) -> Option<usize> {
+        resolve_branch_target_index(self.pcode, &self.address_to_index, idx, op, vn).or_else(|| {
+            let peeled = self.peel_passthrough_varnode(vn);
+            if peeled != *vn {
+                if let Some(target_idx) =
+                    resolve_branch_target_index(self.pcode, &self.address_to_index, idx, op, &peeled)
+                {
+                    return Some(target_idx);
+                }
+            }
+
+            let target_addr = self.infer_branch_target_address_one_step(vn)?;
+            canonical_block_index_for_address(self.pcode, &self.address_to_index, target_addr)
+        })
+    }
+
+    fn infer_branch_target_address_one_step(&self, vn: &Varnode) -> Option<u64> {
+        if let Some(addr) = branch_target_address(vn) {
+            return Some(addr);
+        }
+
+        let peeled = self.peel_passthrough_varnode(vn);
+        if let Some(addr) = branch_target_address(&peeled) {
+            return Some(addr);
+        }
+
+        let (_, def) = self.lookup_def_site(&peeled)?;
+        match def.opcode {
+            PcodeOpcode::IntAdd | PcodeOpcode::IntSub if def.inputs.len() == 2 => {
+                self.eval_one_step_address_expr(def.opcode, &def.inputs[0], &def.inputs[1])
+            }
+            _ => None,
+        }
+    }
+
+    fn eval_one_step_address_expr(
+        &self,
+        opcode: PcodeOpcode,
+        lhs: &Varnode,
+        rhs: &Varnode,
+    ) -> Option<u64> {
+        let lhs_const = const_offset(lhs);
+        let rhs_const = const_offset(rhs);
+        let (base_vn, delta) = match (lhs_const, rhs_const) {
+            (Some(delta), None) => (rhs, delta),
+            (None, Some(delta)) => (lhs, delta),
+            _ => return None,
+        };
+
+        let base_addr = branch_target_address(&self.peel_passthrough_varnode(base_vn))?;
+        let base = i128::from(base_addr);
+        let delta = i128::from(delta);
+        let value = match opcode {
+            PcodeOpcode::IntAdd => base + delta,
+            PcodeOpcode::IntSub => base - delta,
+            _ => return None,
+        };
+        (0..=i128::from(u64::MAX)).contains(&value).then_some(value as u64)
+    }
+
+    fn infer_branchind_target_from_load_address(&self, switch_var: &Varnode) -> Option<usize> {
+        let peeled = self.peel_passthrough_varnode(switch_var);
+        let (_, def) = self.lookup_def_site(&peeled)?;
+        if def.opcode != PcodeOpcode::Load || def.inputs.len() < 2 {
+            return None;
+        }
+
+        // For simple jump-table like forms, treat the computed LOAD address itself as
+        // candidate target when it already lands inside the current CFG slice.
+        let load_addr_vn = def.inputs.last()?;
+        let load_addr = self.infer_branch_target_address_one_step(load_addr_vn)?;
+        canonical_block_index_for_address(self.pcode, &self.address_to_index, load_addr)
     }
 
     fn match_cmp_branch_predicate(&self, vn: &Varnode) -> Option<X86BranchPredicate> {

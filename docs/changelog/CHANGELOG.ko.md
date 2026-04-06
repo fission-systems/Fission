@@ -4,6 +4,48 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-04-06
+
+### NIR Branch Target 복구 강화 + limit-200 baseline/post/delta 자동화
+
+이번 변경은 Rust NIR 제어흐름 하향(lowering)에서 간접/부분 미해결 분기 처리의 복원력을 높이고, 반복적으로 수행하던 limit-200 계측 절차를 단일 명령으로 재현 가능하게 묶는 데 초점을 맞췄다.
+
+#### Changed
+
+- `fission-pcode` terminator 복구 경로 강화 (`Branch`, `CBranch`, `BranchInd`)
+  - passthrough peel + 1단계 산술 주소 추론(`IntAdd`/`IntSub` + const) 결합
+  - 직접 타깃 해석 실패 시 CFG successor 기반 fallback 타깃 추론 추가
+  - 단순 `Load` 주소 형태에서 `BranchInd` 타깃 추론 추가
+  - 가능할 경우 fallthrough를 `switch default`로 자동 추론
+  - 구현: `crates/fission-pcode/src/nir/builder/terminator.rs`
+- unsupported terminator 처리 정책 변경
+  - single/multi/linear 경로에서 렌더 중단 대신 `__fission_indirect_cf_unsupported()` 호출식을 명시적으로 방출
+  - 구현: `crates/fission-pcode/src/nir/builder/mod.rs`, `crates/fission-pcode/src/nir/structuring/driver.rs`, `crates/fission-pcode/src/nir/structuring/linear.rs`
+- branch target resolve 실패 이벤트를 unsupported inventory에 추가 기록
+  - 구현: `crates/fission-pcode/src/nir/builder/debug.rs`
+- synthetic/non-stack-origin 경로에서 type-hint 적용 범위 보강 및 local hint fallback 조건 정교화
+  - 구현: `crates/fission-pcode/src/nir/builder/type_hints.rs`
+- magic-division 인식 경계조건 보강(`q - r` -> `q.saturating_sub(r)`)
+  - 구현: `crates/fission-pcode/src/nir/normalize/arith.rs`
+
+#### Added
+
+- x86 bootstrap 회귀 테스트 확장
+  - Branch/CBranch wrapped-target 복구(copy + 1단계 산술)
+  - BranchInd no-target 허용 + load-address 기반 타깃 복구
+  - unresolved branch에서 successor 기반 fallback 동작 검증
+  - 구현: `crates/fission-pcode/src/nir/tests/bootstrap_x86.rs`
+- putty/everything limit-200 baseline/post/summary/delta 생성 원커맨드 스크립트 추가
+  - run별 `/tmp` unsupported inventory 스냅샷
+  - summary/delta json+md, putty unmapped cluster 아티팩트 생성
+  - baseline 자동 해석 fallback(`rebuilt`, `after_term`, `after_passthrough`) 포함
+  - 구현: `scripts/test/run_limit200_baseline_post_delta.py`
+
+#### Validation
+
+- `cargo test -p fission-pcode --lib bootstrap_x86::preview_` (pass)
+- `cargo test -p fission-pcode --lib` (pass)
+
 ## 2026-04-05
 
 ### rust-sleigh x86 0F3A 시맨틱 확장 + Branch Target CFG 진단 강화
