@@ -5,6 +5,12 @@
 //! 2. Sets up linker paths for Rust to find the library
 
 fn main() {
+    if std::env::var("CARGO_FEATURE_NATIVE_DECOMP").is_ok() {
+        panic!(
+            "feature 'native_decomp' is deprecated and blocked; use the Rust-only decompiler pipeline"
+        );
+    }
+
     // Only run cmake build when native_decomp feature is enabled
     #[cfg(feature = "native_decomp")]
     build_libdecomp();

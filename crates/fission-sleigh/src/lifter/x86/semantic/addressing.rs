@@ -7,24 +7,24 @@ pub(super) fn parse_prefixes(insn: &[u8]) -> (usize, PrefixState) {
         address_size_override: false,
         rex: 0,
         rep_prefix: None,
+        segment_override: None,
     };
 
     while idx < insn.len() && is_prefix(insn[idx]) {
         let byte = insn[idx];
-        if byte == 0x66 {
-            state.operand_size_override = true;
-        }
-        if byte == 0x67 {
-            state.address_size_override = true;
-        }
-        if byte == 0xF3 {
-            state.rep_prefix = Some(RepPrefix::Rep);
-        }
-        if byte == 0xF2 {
-            state.rep_prefix = Some(RepPrefix::Repne);
-        }
-        if (0x40..=0x4F).contains(&byte) {
-            state.rex = byte;
+        match byte {
+            0x66 => state.operand_size_override = true,
+            0x67 => state.address_size_override = true,
+            0xF3 => state.rep_prefix = Some(RepPrefix::Rep),
+            0xF2 => state.rep_prefix = Some(RepPrefix::Repne),
+            0x2E => state.segment_override = Some(1), // CS
+            0x3E => state.segment_override = Some(3), // DS
+            0x26 => state.segment_override = Some(0), // ES
+            0x36 => state.segment_override = Some(2), // SS
+            0x64 => state.segment_override = Some(4), // FS
+            0x65 => state.segment_override = Some(5), // GS
+            0x40..=0x4F => state.rex = byte,
+            _ => {}
         }
         idx += 1;
     }
@@ -153,7 +153,7 @@ pub(super) fn decode_modrm_operand(
         disp = d;
     }
 
-    let addr = compose_effective_address(base, index, disp, address, temp, ops, seq)?;
+    let addr = compose_effective_address(prefix, base, index, disp, address, temp, ops, seq)?;
 
     Some(DecodedModrm {
         reg_index,
@@ -233,7 +233,7 @@ fn decode_modrm_operand_addr32(
         disp = d;
     }
 
-    let addr = compose_effective_address_addr32(base, index, disp, address, temp, ops, seq)?;
+    let addr = compose_effective_address_addr32(prefix, base, index, disp, address, temp, ops, seq)?;
 
     Some(DecodedModrm {
         reg_index,
@@ -261,6 +261,7 @@ fn read_i32(insn: &[u8], idx: usize) -> Option<i32> {
 }
 
 fn compose_effective_address(
+    prefix: &PrefixState,
     base: Option<Varnode>,
     index: Option<(Varnode, u8)>,
     disp: i64,
@@ -327,10 +328,43 @@ fn compose_effective_address(
         };
     }
 
-    cur.or(Some(const_u64(0, 8)))
+    let mut ea = cur.unwrap_or_else(|| const_u64(0, 8));
+
+    if let Some(seg) = prefix.segment_override {
+        use super::super::super::common::x86_seg;
+        let seg_base = x86_seg(seg as u32);
+        
+        let mut addr64 = ea;
+        if addr64.size < 8 {
+            let expanded = temp.alloc(8);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntZExt,
+                address,
+                output: Some(expanded.clone()),
+                inputs: vec![addr64],
+                asm_mnemonic: Some("EA_ZEXT".to_string()),
+            });
+            addr64 = expanded;
+        }
+        
+        let out = temp.alloc(8);
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::IntAdd,
+            address,
+            output: Some(out.clone()),
+            inputs: vec![seg_base, addr64],
+            asm_mnemonic: Some("EA_SEGMENT_OVERRIDE".to_string()),
+        });
+        ea = out;
+    }
+
+    Some(ea)
 }
 
 fn compose_effective_address_addr32(
+    prefix: &PrefixState,
     base: Option<Varnode>,
     index: Option<(Varnode, u8)>,
     disp: i64,
@@ -407,7 +441,26 @@ fn compose_effective_address_addr32(
         inputs: vec![ea32],
         asm_mnemonic: Some("EA32_FINAL_ZEXT".to_string()),
     });
-    Some(ea64)
+
+    let mut ea = ea64;
+
+    if let Some(seg) = prefix.segment_override {
+        use super::super::super::common::x86_seg;
+        let seg_base = x86_seg(seg as u32);
+        
+        let out = temp.alloc(8);
+        ops.push(PcodeOp {
+            seq_num: next_seq(seq),
+            opcode: PcodeOpcode::IntAdd,
+            address,
+            output: Some(out.clone()),
+            inputs: vec![seg_base, ea],
+            asm_mnemonic: Some("EA32_SEGMENT_OVERRIDE".to_string()),
+        });
+        ea = out;
+    }
+
+    Some(ea)
 }
 
 pub(super) fn decode_immediate(insn: &[u8], idx: usize, width: usize, out_size: u32, sign_extend: bool) -> Option<Varnode> {

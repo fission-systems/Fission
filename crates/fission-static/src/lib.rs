@@ -7,6 +7,11 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::multiple_crate_versions)]
 
+#[cfg(feature = "native_decomp")]
+compile_error!(
+    "feature 'native_decomp' is deprecated and blocked. Use the Rust-only NIR pipeline."
+);
+
 #[allow(
     clippy::too_many_lines,
     clippy::cognitive_complexity,

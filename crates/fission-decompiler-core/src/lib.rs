@@ -1,10 +1,8 @@
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::{NirRenderOptions, PcodeFunction};
 
-#[cfg(feature = "native_decomp")]
 pub use fission_static::analysis::decomp::{NirEngineMode, NirSelection};
 
-#[cfg(feature = "native_decomp")]
 pub fn select_nir_output_from_prebuilt_pcode(
     pcode: &PcodeFunction,
     binary: &LoadedBinary,
@@ -27,7 +25,7 @@ pub fn select_nir_output_from_prebuilt_pcode(
     )
 }
 
-#[cfg(all(test, feature = "native_decomp"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};

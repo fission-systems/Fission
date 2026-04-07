@@ -7,6 +7,8 @@ mod binary_info;
 mod common;
 #[cfg(feature = "native_decomp")]
 mod decompile;
+#[cfg(not(feature = "native_decomp"))]
+mod decompile_rust_sleigh;
 mod disasm;
 mod functions;
 #[cfg(feature = "native_decomp")]
@@ -18,6 +20,8 @@ use binary_info::{print_binary_info, print_exports, print_imports, print_section
 use decompile::{
     emit_preview_candidate_inventory, emit_preview_candidate_scan_batch, run_decompilation,
 };
+#[cfg(not(feature = "native_decomp"))]
+use decompile_rust_sleigh::run_decompilation_rust_sleigh;
 use disasm::{disassemble, disassemble_function};
 use functions::print_function_list;
 #[cfg(feature = "native_decomp")]
@@ -114,7 +118,9 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
         #[cfg(not(feature = "native_decomp"))]
         {
-            eprintln!("Error: preview candidate inventory requires native_decomp feature");
+            eprintln!(
+                "Error: preview candidate inventory is deprecated with native_decomp removal"
+            );
             std::process::exit(1);
         }
     }
@@ -127,7 +133,9 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
         #[cfg(not(feature = "native_decomp"))]
         {
-            eprintln!("Error: preview candidate scan batch requires native_decomp feature");
+            eprintln!(
+                "Error: preview candidate scan batch is deprecated with native_decomp removal"
+            );
             std::process::exit(1);
         }
     }
@@ -140,7 +148,7 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
         #[cfg(not(feature = "native_decomp"))]
         {
-            eprintln!("Error: function facts inventory requires native_decomp feature");
+            eprintln!("Error: function facts inventory is deprecated with native_decomp removal");
             std::process::exit(1);
         }
     }
@@ -166,9 +174,8 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
 
         #[cfg(not(feature = "native_decomp"))]
         {
-            eprintln!("Error: Decompilation requires native_decomp feature");
-            eprintln!("Run with: cargo run --bin fission_cli --features native_decomp -- ...");
-            std::process::exit(1);
+            run_decompilation_rust_sleigh(cli, &binary, &binary_data)?;
+            return Ok(());
         }
     }
 

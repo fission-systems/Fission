@@ -184,6 +184,7 @@ fn needs_modrm(opcode: u8, map: OpcodeMap) -> bool {
                     | 0xCB
                     | 0xC2
                     | 0xCA
+                    | 0xE0..=0xE3
                     | 0xE8
                     | 0xE9
                     | 0xEB
@@ -225,10 +226,11 @@ fn imm_len(
         OpcodeMap::Map0F3A => return 1,
         OpcodeMap::Map0F38 => return 0,
         OpcodeMap::Map0F => {
-            if (0x80..=0x8F).contains(&opcode) {
-                return 4;
+            match opcode {
+                0x80..=0x8F => return full_operand_imm,
+                0x70..=0x73 | 0xA4 | 0xAC | 0xBA | 0xC2 | 0xC4..=0xC6 => return 1,
+                _ => return 0,
             }
-            return 0;
         }
         OpcodeMap::VexUnknown => return 0,
         OpcodeMap::Primary => {}
@@ -258,7 +260,7 @@ fn imm_len(
         0xA8 => 1,
         0xA9 => full_operand_imm,
         0xC2 | 0xCA => 2,
-        0x6A | 0xEB | 0x70..=0x7F | 0xCD => 1,
+        0x6A | 0xE0..=0xE3 | 0xEB | 0x70..=0x7F | 0xCD => 1,
         0x68 => full_operand_imm,
         0xE8 | 0xE9 | 0xA0 | 0xA1 | 0xA2 | 0xA3 => 4,
         0xB0..=0xB7 => 1,
@@ -371,6 +373,15 @@ mod tests {
     fn decode_len_handles_int3_and_int_immediates_without_modrm() {
         assert_eq!(decode_len(&[0xCC]).unwrap(), 1);
         assert_eq!(decode_len(&[0xCD, 0x80]).unwrap(), 2);
+    }
+
+    #[test]
+    fn decode_len_handles_loop_and_jcxz_family_without_modrm() {
+        assert_eq!(decode_len(&[0xE0, 0xFE]).unwrap(), 2); // loopne rel8
+        assert_eq!(decode_len(&[0xE1, 0x02]).unwrap(), 2); // loope rel8
+        assert_eq!(decode_len(&[0xE2, 0x7F]).unwrap(), 2); // loop rel8
+        assert_eq!(decode_len(&[0xE3, 0x80]).unwrap(), 2); // jrcxz/jecxz rel8
+        assert_eq!(decode_len(&[0x67, 0xE3, 0x01]).unwrap(), 3); // address-size prefixed jecxz
     }
 
     #[test]

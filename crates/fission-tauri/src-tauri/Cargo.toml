@@ -28,10 +28,10 @@ fission-loader = { path = "../../fission-loader" }
 fission-static = { path = "../../fission-static" }
 fission-dynamic = { path = "../../fission-dynamic", features = ["interactive_runtime"] }  # needed for plugin/debug/runtime UI
 fission-pcode = { path = "../../fission-pcode" }
+fission-sleigh = { path = "../../fission-sleigh" }
 fission-signatures = { path = "../../fission-signatures" }
 tracing = "0.1"
 crossbeam-channel = "0.5"
 
 [features]
 default = []
-native_decomp = ["fission-static/native_decomp"]

@@ -5,6 +5,11 @@ pub(crate) const REGISTER_SPACE_ID: u64 = 1;
 
 pub(crate) const X86_TRY_LOWER_IF_BUDGET_MS: f64 = 10.0;
 pub(crate) const X86_TRY_LOWER_IF_SUBCALL_LIMIT: usize = 512;
+pub(crate) const X86_BRANCH_RECOVERY_BUDGET_MIN: usize = 48;
+pub(crate) const X86_BRANCH_RECOVERY_BUDGET_PER_BLOCK: usize = 4;
+pub(crate) const X86_BRANCH_RECOVERY_BUDGET_MAX: usize = 1024;
+pub(crate) const X86_PASSTHROUGH_PEEL_MAX_STEPS: usize = 48;
+pub(crate) const SWITCH_CHAIN_PARSE_BUDGET_MAX: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StackBase {
@@ -61,7 +66,7 @@ impl MaterializedVarnodeKey {
 pub(crate) struct DefSite<'a> {
     pub(crate) block_idx: usize,
     pub(crate) op_idx: usize,
-    pub(crate) op: &'a PcodeOp,
+    pub(crate) _marker: std::marker::PhantomData<&'a PcodeOp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

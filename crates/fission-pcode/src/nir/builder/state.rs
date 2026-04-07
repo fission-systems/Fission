@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::RefCell;
 
 #[derive(Debug)]
 pub(crate) struct PreviewBuilder<'a> {
@@ -6,6 +7,12 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) options: &'a MlilPreviewOptions,
     pub(crate) type_context: Option<&'a PreviewTypeContext>,
     pub(crate) defs: HashMap<VarnodeKey, DefSite<'a>>,
+    pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,
+    pub(crate) lookup_site_cache:
+        RefCell<HashMap<(Option<LoweringSite>, VarnodeKey), Option<LoweringSite>>>,
+    pub(crate) peel_cache: RefCell<HashMap<(Option<LoweringSite>, VarnodeKey), Varnode>>,
+    pub(crate) terminator_cache: HashMap<usize, LoweredTerminator>,
+    pub(crate) x86_branch_recovery_attempts: usize,
     pub(crate) address_to_index: HashMap<u64, usize>,
     pub(crate) block_target_keys: Vec<u64>,
     pub(crate) target_key_to_index: HashMap<u64, usize>,

@@ -13,6 +13,11 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::multiple_crate_versions)]
 
+#[cfg(feature = "native_decomp")]
+compile_error!(
+	"feature 'native_decomp' is deprecated and blocked. Use fission-static Rust-only paths."
+);
+
 pub mod prelude;
 
 pub use fission_core as core;

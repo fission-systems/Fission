@@ -79,7 +79,7 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
 
     // Collect everything we need from `binary` inside a block so the immutable
     // borrow of `inner` ends before further mutable work.
-    let (data, image_base, is_64bit, func_list, func_lengths, prev_names) = {
+    let (data, image_base, func_list, prev_names) = {
         let inner = state.inner.lock().await;
         let binary = inner
             .loaded_binary
@@ -87,8 +87,6 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
             .ok_or_else(|| CmdError::other("No binary loaded"))?;
 
         let mut prev_names: std::collections::HashMap<u64, String> =
-            std::collections::HashMap::new();
-        let mut func_lengths: std::collections::HashMap<u64, usize> =
             std::collections::HashMap::new();
 
         let func_list: Vec<(u64, String)> = binary
@@ -101,23 +99,14 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
                     .cloned()
                     .unwrap_or_else(|| f.name.clone());
                 prev_names.insert(f.address, current.clone());
-                func_lengths.insert(f.address, f.size as usize);
                 (f.address, current)
             })
             .collect();
 
         let data: Vec<u8> = binary.inner().data.as_slice().to_vec();
         let image_base = binary.image_base;
-        let is_64bit = binary.is_64bit;
 
-        (
-            data,
-            image_base,
-            is_64bit,
-            func_list,
-            func_lengths,
-            prev_names,
-        )
+        (data, image_base, func_list, prev_names)
     };
 
     let total_scanned = func_list.len();
@@ -132,56 +121,10 @@ pub async fn run_fid(state: State<'_, AppState>) -> CmdResult<FidResultDto> {
     .await
     .map_err(|e| CmdError::other(format!("FID task failed: {e}")))?;
 
-    // Optionally augment with native Ghidra FID matching backed by .fidbf databases.
-    #[cfg(feature = "native_decomp")]
-    let (identified, fidbf_attempted, fidbf_loaded, fidbf_failed) = {
-        use fission_signatures::discover_fidbf_paths;
-
-        let fid_paths = discover_fidbf_paths(is_64bit);
-        let fidbf_attempted = fid_paths.len();
-        let mut fidbf_loaded = 0usize;
-        let mut fidbf_failed = 0usize;
-        let mut identified = identified;
-        let mut decomp_lock = state.decompiler.lock().await;
-        if let Some(decomp) = decomp_lock.as_mut() {
-            let native = decomp.inner_mut();
-
-            for path in &fid_paths {
-                match native.load_fid_database(&path.to_string_lossy()) {
-                    Ok(_) => fidbf_loaded += 1,
-                    Err(_) => fidbf_failed += 1,
-                }
-            }
-
-            for (addr, _name) in &func_list {
-                if identified.contains_key(addr) {
-                    continue;
-                }
-
-                let mut len = *func_lengths.get(addr).unwrap_or(&0);
-                if len == 0 {
-                    len = 64;
-                }
-
-                if let Some(fid_name) = native.match_function_by_fid(*addr, len) {
-                    identified.insert(*addr, fid_name);
-                }
-            }
-
-            if !identified.is_empty() {
-                native.add_symbols(&identified);
-                native.add_global_symbols(&identified);
-            }
-        }
-        (identified, fidbf_attempted, fidbf_loaded, fidbf_failed)
-    };
-
-    #[cfg(not(feature = "native_decomp"))]
-    let (identified, fidbf_attempted, fidbf_loaded, fidbf_failed) = {
-        let _ = is_64bit;
-        let _ = &func_lengths;
-        (identified, 0usize, 0usize, 0usize)
-    };
+    // Native `.fidbf` augmentation was removed with the native decompiler path.
+    let fidbf_attempted = 0usize;
+    let fidbf_loaded = 0usize;
+    let fidbf_failed = 0usize;
 
     // Apply renames to the state and collect match details.
     let mut inner = state.inner.lock().await;

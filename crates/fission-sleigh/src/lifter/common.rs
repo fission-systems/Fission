@@ -152,3 +152,13 @@ pub(super) fn sign_extend(val: i64, bits: u32) -> i64 {
     let shift = 64u32.saturating_sub(bits);
     (val << shift) >> shift
 }
+pub(super) const X86_SEG_BASE: u64 = 0xA86A_0000;
+pub(super) fn x86_seg(reg: u32) -> Varnode {
+    Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: X86_SEG_BASE + (u64::from(reg) * 8),
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    }
+}

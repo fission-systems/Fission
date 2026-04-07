@@ -1,14 +1,15 @@
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use super::predicate::emit_jcc_predicate_with_allocator;
-use super::super::common::{const_u64, x86_reg, RAM_SPACE_ID, UNIQUE_SPACE_ID};
+use super::super::common::{const_u64, x86_flag_zf, x86_reg, RAM_SPACE_ID, UNIQUE_SPACE_ID};
 #[cfg(test)]
-use super::super::common::{x86_flag_cf, x86_flag_of, x86_flag_sf, x86_flag_zf};
+use super::super::common::{x86_flag_cf, x86_flag_of, x86_flag_sf};
 
 #[derive(Debug, Clone, Copy)]
 struct PrefixState {
     address_size_override: bool,
     rex: u8,
+    segment_override: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -126,9 +127,129 @@ pub(crate) fn decode_control(insn: &[u8], address: u64, decoded_len: u64) -> Opt
             let target = next.wrapping_add_signed(rel as i64);
             build_jcc_ops(address, target, ext? & 0x0F)
         }
+        (0xE0..=0xE3, _) => decode_loop_jcxz_control(insn, op_idx, op, &prefix, address, next),
         (0xFF, _) => decode_ff_indirect_control(insn, op_idx, &prefix, address),
         _ => None,
     }
+}
+
+fn decode_loop_jcxz_control(
+    insn: &[u8],
+    op_idx: usize,
+    op: u8,
+    prefix: &PrefixState,
+    address: u64,
+    next: u64,
+) -> Option<Vec<PcodeOp>> {
+    let rel = *insn.get(op_idx + 1)? as i8;
+    let target = next.wrapping_add_signed(rel as i64);
+
+    let mut seq = 1u32;
+    let mut temp = X86CtrlTempFactory::new(address);
+    let mut ops = Vec::new();
+    let counter_size = if prefix.address_size_override { 4 } else { 8 };
+    let counter_reg = x86_reg(1, counter_size);
+
+    let cond = match op {
+        0xE3 => {
+            let is_zero = temp.alloc(1);
+            ops.push(PcodeOp {
+                seq_num: next_seq(&mut seq),
+                opcode: PcodeOpcode::IntEqual,
+                address,
+                output: Some(is_zero.clone()),
+                inputs: vec![counter_reg.clone(), const_u64(0, counter_size)],
+                asm_mnemonic: Some("JCXZ_COUNT_ZERO".to_string()),
+            });
+            is_zero
+        }
+        0xE0..=0xE2 => {
+            let dec = temp.alloc(counter_size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(&mut seq),
+                opcode: PcodeOpcode::IntSub,
+                address,
+                output: Some(dec.clone()),
+                inputs: vec![counter_reg.clone(), const_u64(1, counter_size)],
+                asm_mnemonic: Some("LOOP_COUNT_DEC".to_string()),
+            });
+            ops.push(PcodeOp {
+                seq_num: next_seq(&mut seq),
+                opcode: PcodeOpcode::Copy,
+                address,
+                output: Some(counter_reg),
+                inputs: vec![dec.clone()],
+                asm_mnemonic: Some("LOOP_COUNT_WRITE".to_string()),
+            });
+
+            let nz = temp.alloc(1);
+            ops.push(PcodeOp {
+                seq_num: next_seq(&mut seq),
+                opcode: PcodeOpcode::IntNotEqual,
+                address,
+                output: Some(nz.clone()),
+                inputs: vec![dec, const_u64(0, counter_size)],
+                asm_mnemonic: Some("LOOP_COUNT_NONZERO".to_string()),
+            });
+
+            match op {
+                0xE2 => nz,
+                0xE1 => {
+                    let cond = temp.alloc(1);
+                    ops.push(PcodeOp {
+                        seq_num: next_seq(&mut seq),
+                        opcode: PcodeOpcode::BoolAnd,
+                        address,
+                        output: Some(cond.clone()),
+                        inputs: vec![nz, x86_flag_zf()],
+                        asm_mnemonic: Some("LOOPE_COND".to_string()),
+                    });
+                    cond
+                }
+                0xE0 => {
+                    let not_zf = temp.alloc(1);
+                    ops.push(PcodeOp {
+                        seq_num: next_seq(&mut seq),
+                        opcode: PcodeOpcode::BoolNegate,
+                        address,
+                        output: Some(not_zf.clone()),
+                        inputs: vec![x86_flag_zf()],
+                        asm_mnemonic: Some("LOOPNE_NOT_ZF".to_string()),
+                    });
+                    let cond = temp.alloc(1);
+                    ops.push(PcodeOp {
+                        seq_num: next_seq(&mut seq),
+                        opcode: PcodeOpcode::BoolAnd,
+                        address,
+                        output: Some(cond.clone()),
+                        inputs: vec![nz, not_zf],
+                        asm_mnemonic: Some("LOOPNE_COND".to_string()),
+                    });
+                    cond
+                }
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+
+    ops.push(PcodeOp {
+        seq_num: next_seq(&mut seq),
+        opcode: PcodeOpcode::CBranch,
+        address,
+        output: None,
+        inputs: vec![Varnode::constant(target as i64, 8), cond],
+        asm_mnemonic: Some(match op {
+            0xE0 => "LOOPNE",
+            0xE1 => "LOOPE",
+            0xE2 => "LOOP",
+            0xE3 => "JCXZ",
+            _ => "LOOP_JCXZ",
+        }
+        .to_string()),
+    });
+
+    Some(ops)
 }
 
 fn decode_ff_indirect_control(
@@ -464,13 +585,19 @@ fn prefix_state(insn: &[u8], op_idx: usize) -> PrefixState {
     let mut state = PrefixState {
         address_size_override: false,
         rex: 0,
+        segment_override: None,
     };
     for &b in &insn[..op_idx] {
-        if b == 0x67 {
-            state.address_size_override = true;
-        }
-        if (0x40..=0x4F).contains(&b) {
-            state.rex = b;
+        match b {
+            0x67 => state.address_size_override = true,
+            0x2E => state.segment_override = Some(1), // CS
+            0x3E => state.segment_override = Some(3), // DS
+            0x26 => state.segment_override = Some(0), // ES
+            0x36 => state.segment_override = Some(2), // SS
+            0x64 => state.segment_override = Some(4), // FS
+            0x65 => state.segment_override = Some(5), // GS
+            0x40..=0x4F => state.rex = b,
+            _ => {}
         }
     }
     state
@@ -672,5 +799,36 @@ mod tests {
         assert_eq!(ops[0].opcode, PcodeOpcode::BranchInd);
         assert_eq!(ops[0].asm_mnemonic.as_deref(), Some("JMP_IND"));
         assert_eq!(ops[0].inputs, vec![x86_reg(0, 8)]);
+    }
+
+    #[test]
+    fn decode_loop_ne_updates_counter_and_branches() {
+        let address = 0x8000u64;
+        let ops = decode(&[0xE0, 0xFE], address);
+        assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::CBranch));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntNotEqual));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::BoolNegate));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::BoolAnd));
+        assert_eq!(ops.last().expect("cbranch").inputs[0].constant_val as u64, address);
+    }
+
+    #[test]
+    fn decode_loop_uses_ecx_when_address_override_present() {
+        let ops = decode(&[0x67, 0xE2, 0x02], 0x8100); // addr-size override => ecx
+        let sub = ops
+            .iter()
+            .find(|op| op.opcode == PcodeOpcode::IntSub)
+            .expect("loop decrement");
+        assert_eq!(sub.inputs[0], x86_reg(1, 4));
+        assert_eq!(sub.inputs[1], const_u64(1, 4));
+    }
+
+    #[test]
+    fn decode_jcxz_family_does_not_decrement_counter() {
+        let ops = decode(&[0xE3, 0x05], 0x8200);
+        assert_eq!(ops.last().map(|op| op.opcode), Some(PcodeOpcode::CBranch));
+        assert!(!ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+        assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntEqual));
     }
 }

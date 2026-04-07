@@ -5,74 +5,37 @@ impl<'a> PreviewBuilder<'a> {
         &mut self,
         idx: usize,
     ) -> Result<LoweredTerminator, MlilPreviewError> {
+        if let Some(cached) = self.terminator_cache.get(&idx) {
+            return Ok(cached.clone());
+        }
+
         let block = &self.pcode.blocks[idx];
-        let Some(term_idx) = self.block_terminator_index(block) else {
-            return Ok(LoweredTerminator::Fallthrough(self.next_block_address(idx)));
-        };
-        let op = &block.ops[term_idx];
-        self.with_lowering_site(
-            LoweringSite {
-                block_idx: idx,
-                op_idx: term_idx,
-            },
-            |this| match op.opcode {
-                PcodeOpcode::Return => {
-                    let expr = op
-                        .inputs
-                        .last()
-                        .map(|input| this.lower_wrapped_varnode(input, &mut HashSet::new()))
-                        .transpose()?;
-                    Ok(LoweredTerminator::Return(expr))
-                }
-                PcodeOpcode::Branch if op.inputs.len() == 1 => {
-                    let target_idx = op
-                        .inputs
-                        .first()
-                        .and_then(|input| {
-                            this.resolve_branch_target_index_with_recovery(idx, op, input)
-                        });
-                    if let Some(target_idx) = target_idx {
-                        return Ok(LoweredTerminator::Goto(this.block_target_key(target_idx)));
+        let lowered = if let Some(term_idx) = self.block_terminator_index(block) {
+            let op = &block.ops[term_idx];
+            self.with_lowering_site(
+                LoweringSite {
+                    block_idx: idx,
+                    op_idx: term_idx,
+                },
+                |this| match op.opcode {
+                    PcodeOpcode::Return => {
+                        let expr = op
+                            .inputs
+                            .last()
+                            .map(|input| this.lower_wrapped_varnode(input, &mut HashSet::new()))
+                            .transpose()?;
+                        Ok(LoweredTerminator::Return(expr))
                     }
-                    if let Some(target_vn) = op.inputs.first() {
-                        let succ_addrs = block
-                            .successors
-                            .iter()
-                            .filter_map(|succ_idx| {
-                                this.pcode
-                                    .blocks
-                                    .get(*succ_idx as usize)
-                                    .map(|succ| succ.start_address)
-                            })
-                            .collect::<Vec<_>>();
-                        this.debug_branch_target_resolution_failure(
-                            "terminator_branch_target_resolve_fail",
-                            idx,
-                            block.start_address,
-                            op,
-                            target_vn,
-                            &succ_addrs,
-                        );
-
-                        if let Some(fallback_target) = this.infer_unconditional_branch_successor_target(idx)
-                        {
-                            return Ok(LoweredTerminator::Goto(fallback_target));
+                    PcodeOpcode::Branch if op.inputs.len() == 1 => {
+                        let target_idx = op
+                            .inputs
+                            .first()
+                            .and_then(|input| {
+                                this.resolve_branch_target_index_with_recovery(idx, op, input)
+                            });
+                        if let Some(target_idx) = target_idx {
+                            return Ok(LoweredTerminator::Goto(this.block_target_key(target_idx)));
                         }
-
-                        // If the branch target points outside the current p-code slice,
-                        // degrade to explicit unsupported marker instead of aborting render.
-                        if branch_target_address(target_vn).is_some() {
-                            return Ok(LoweredTerminator::Unsupported);
-                        }
-                    }
-                    Err(MlilPreviewError::UnsupportedCfgBranchTarget)
-                }
-                PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
-                    let true_target = if let Some(true_target_idx) =
-                        this.resolve_branch_target_index_with_recovery(idx, op, &op.inputs[0])
-                    {
-                        this.block_target_key(true_target_idx)
-                    } else {
                         if let Some(target_vn) = op.inputs.first() {
                             let succ_addrs = block
                                 .successors
@@ -85,7 +48,7 @@ impl<'a> PreviewBuilder<'a> {
                                 })
                                 .collect::<Vec<_>>();
                             this.debug_branch_target_resolution_failure(
-                                "terminator_cbranch_target_resolve_fail",
+                                "terminator_branch_target_resolve_fail",
                                 idx,
                                 block.start_address,
                                 op,
@@ -93,88 +56,133 @@ impl<'a> PreviewBuilder<'a> {
                                 &succ_addrs,
                             );
 
-                            if let Some(fallback_target) =
-                                this.infer_cbranch_true_target_from_successors(idx)
+                            if let Some(fallback_target) = this.infer_unconditional_branch_successor_target(idx)
                             {
-                                // Keep conditional structure if CFG successors provide a unique
-                                // non-fallthrough edge even when direct target resolution fails.
-                                fallback_target
-                            } else if branch_target_address(target_vn).is_some() {
-                                // Same policy as Branch: keep rendering by degrading to explicit
-                                // unsupported marker when target resolution is external/unknown.
+                                return Ok(LoweredTerminator::Goto(fallback_target));
+                            }
+
+                            // If the branch target points outside the current p-code slice,
+                            // degrade to explicit unsupported marker instead of aborting render.
+                            if branch_target_address(target_vn).is_some() {
                                 return Ok(LoweredTerminator::Unsupported);
+                            }
+                        }
+                        Err(MlilPreviewError::UnsupportedCfgBranchTarget)
+                    }
+                    PcodeOpcode::CBranch | PcodeOpcode::Branch if op.inputs.len() >= 2 => {
+                        let true_target = if let Some(true_target_idx) =
+                            this.resolve_branch_target_index_with_recovery(idx, op, &op.inputs[0])
+                        {
+                            this.block_target_key(true_target_idx)
+                        } else {
+                            if let Some(target_vn) = op.inputs.first() {
+                                let succ_addrs = block
+                                    .successors
+                                    .iter()
+                                    .filter_map(|succ_idx| {
+                                        this.pcode
+                                            .blocks
+                                            .get(*succ_idx as usize)
+                                            .map(|succ| succ.start_address)
+                                    })
+                                    .collect::<Vec<_>>();
+                                this.debug_branch_target_resolution_failure(
+                                    "terminator_cbranch_target_resolve_fail",
+                                    idx,
+                                    block.start_address,
+                                    op,
+                                    target_vn,
+                                    &succ_addrs,
+                                );
+
+                                if let Some(fallback_target) =
+                                    this.infer_cbranch_true_target_from_successors(idx)
+                                {
+                                    // Keep conditional structure if CFG successors provide a unique
+                                    // non-fallthrough edge even when direct target resolution fails.
+                                    fallback_target
+                                } else if branch_target_address(target_vn).is_some() {
+                                    // Same policy as Branch: keep rendering by degrading to explicit
+                                    // unsupported marker when target resolution is external/unknown.
+                                    return Ok(LoweredTerminator::Unsupported);
+                                } else {
+                                    return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
+                                }
                             } else {
                                 return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
                             }
-                        } else {
-                            return Err(MlilPreviewError::UnsupportedCfgBranchTarget);
-                        }
-                    };
-                    let cond = this
-                        .try_recover_x86_branch_condition(&op.inputs[1])?
-                        .map(Ok)
-                        .unwrap_or_else(|| {
-                            this.lower_wrapped_varnode(&op.inputs[1], &mut HashSet::new())
+                        };
+                        let cond = this
+                            .try_recover_x86_branch_condition(&op.inputs[1])?
+                            .map(Ok)
+                            .unwrap_or_else(|| {
+                                this.lower_wrapped_varnode(&op.inputs[1], &mut HashSet::new())
+                            })
+                            .map_err(|err| {
+                                this.debug_lowering_error(
+                                    "terminator_cond",
+                                    block.start_address,
+                                    u64::from(op.seq_num),
+                                    op.opcode,
+                                    &err,
+                                );
+                                err
+                            })?;
+                        Ok(LoweredTerminator::Cond {
+                            cond,
+                            true_target,
+                            false_target: this.next_block_address(idx),
                         })
-                        .map_err(|err| {
-                            this.debug_lowering_error(
-                                "terminator_cond",
-                                block.start_address,
-                                u64::from(op.seq_num),
-                                op.opcode,
-                                &err,
-                            );
-                            err
-                        })?;
-                    Ok(LoweredTerminator::Cond {
-                        cond,
-                        true_target,
-                        false_target: this.next_block_address(idx),
-                    })
-                }
-                PcodeOpcode::BranchInd => {
-                    let switch_var = &op.inputs[0];
-                    let switch_expr = this.lower_wrapped_varnode(switch_var, &mut HashSet::new())?;
-                    let mut targets = Vec::new();
-                    for succ_idx in &block.successors {
-                        let succ_idx = *succ_idx as usize;
-                        if succ_idx < this.pcode.blocks.len() {
-                            let target = this.block_target_key(succ_idx);
-                            if !targets.contains(&target) {
-                                targets.push(target);
+                    }
+                    PcodeOpcode::BranchInd => {
+                        let switch_var = &op.inputs[0];
+                        let switch_expr = this.lower_wrapped_varnode(switch_var, &mut HashSet::new())?;
+                        let mut targets = Vec::new();
+                        for succ_idx in &block.successors {
+                            let succ_idx = *succ_idx as usize;
+                            if succ_idx < this.pcode.blocks.len() {
+                                let target = this.block_target_key(succ_idx);
+                                if !targets.contains(&target) {
+                                    targets.push(target);
+                                }
                             }
                         }
+                        if targets.is_empty()
+                            && let Some(inferred_target) =
+                                this.infer_branchind_target_from_input(idx, op, switch_var)
+                        {
+                            targets.push(inferred_target);
+                        }
+                        if targets.is_empty() {
+                            this.record_unsupported_inventory_event(
+                                "terminator_branchind_no_targets",
+                                Some(switch_var),
+                                Some(op),
+                                Some(op.opcode),
+                                Some(block.start_address),
+                                Some(u64::from(op.seq_num)),
+                                true,
+                                "branchind_targets_missing",
+                            );
+                            Ok(LoweredTerminator::Unsupported)
+                        } else {
+                            let default_target = this.infer_switch_default_target(idx, &targets);
+                            Ok(LoweredTerminator::Switch {
+                                expr: switch_expr,
+                                targets,
+                                default_target,
+                            })
+                        }
                     }
-                    if targets.is_empty()
-                        && let Some(inferred_target) =
-                            this.infer_branchind_target_from_input(idx, op, switch_var)
-                    {
-                        targets.push(inferred_target);
-                    }
-                    if targets.is_empty() {
-                        this.record_unsupported_inventory_event(
-                            "terminator_branchind_no_targets",
-                            Some(switch_var),
-                            Some(op),
-                            Some(op.opcode),
-                            Some(block.start_address),
-                            Some(u64::from(op.seq_num)),
-                            true,
-                            "branchind_targets_missing",
-                        );
-                        Ok(LoweredTerminator::Unsupported)
-                    } else {
-                        let default_target = this.infer_switch_default_target(idx, &targets);
-                        Ok(LoweredTerminator::Switch {
-                            expr: switch_expr,
-                            targets,
-                            default_target,
-                        })
-                    }
-                }
-                _ => Ok(LoweredTerminator::Fallthrough(this.next_block_address(idx))),
-            },
-        )
+                    _ => Ok(LoweredTerminator::Fallthrough(this.next_block_address(idx))),
+                },
+            )?
+        } else {
+            LoweredTerminator::Fallthrough(self.next_block_address(idx))
+        };
+
+        self.terminator_cache.insert(idx, lowered.clone());
+        Ok(lowered)
     }
 
     fn try_recover_x86_branch_condition(
@@ -184,9 +192,35 @@ impl<'a> PreviewBuilder<'a> {
         if self.options.is_64bit {
             return Ok(None);
         }
+
+        let recovery_budget = X86_BRANCH_RECOVERY_BUDGET_MIN
+            .max(self.pcode.blocks.len() * X86_BRANCH_RECOVERY_BUDGET_PER_BLOCK)
+            .min(X86_BRANCH_RECOVERY_BUDGET_MAX);
+        if self.x86_branch_recovery_attempts >= recovery_budget {
+            return Ok(None);
+        }
+        self.x86_branch_recovery_attempts += 1;
+
+        let peeled = self.peel_passthrough_varnode(vn);
+        let Some((_, root_op)) = self.lookup_def_site(&peeled) else {
+            return Ok(None);
+        };
+        if !matches!(
+            root_op.opcode,
+            PcodeOpcode::BoolNegate
+                | PcodeOpcode::BoolAnd
+                | PcodeOpcode::BoolOr
+                | PcodeOpcode::IntEqual
+                | PcodeOpcode::IntNotEqual
+                | PcodeOpcode::IntLess
+                | PcodeOpcode::IntSLess
+        ) {
+            return Ok(None);
+        }
+
         let predicate = self
-            .match_test_branch_predicate(vn)
-            .or_else(|| self.match_cmp_branch_predicate(vn));
+            .match_test_branch_predicate(&peeled)
+            .or_else(|| self.match_cmp_branch_predicate(&peeled));
         predicate
             .map(|predicate| self.lower_x86_branch_predicate(predicate))
             .transpose()
@@ -336,13 +370,14 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn match_test_branch_predicate(&self, vn: &Varnode) -> Option<X86BranchPredicate> {
-        if let Some((value, mask)) = self.match_test_zero_flag(vn) {
+        let peeled = self.peel_passthrough_varnode(vn);
+        if let Some((value, mask)) = self.match_test_zero_flag(&peeled) {
             return Some(match mask {
                 Some(mask) => X86BranchPredicate::MaskEqZero { value, mask },
                 None => X86BranchPredicate::EqZero(value),
             });
         }
-        if let Some(inner) = self.match_bool_negate(vn)
+        if let Some(inner) = self.match_bool_negate_from_peeled(&peeled)
             && let Some((value, mask)) = self.match_test_zero_flag(&inner)
         {
             return Some(match mask {
@@ -350,18 +385,18 @@ impl<'a> PreviewBuilder<'a> {
                 None => X86BranchPredicate::NeZero(value),
             });
         }
-        if let Some(value) = self.match_test_sign_flag(vn) {
+        if let Some(value) = self.match_test_sign_flag(&peeled) {
             return Some(X86BranchPredicate::SLtZero(value));
         }
-        if let Some(inner) = self.match_bool_negate(vn)
+        if let Some(inner) = self.match_bool_negate_from_peeled(&peeled)
             && let Some(value) = self.match_test_sign_flag(&inner)
         {
             return Some(X86BranchPredicate::SGeZero(value));
         }
-        if let Some(value) = self.match_test_gt_zero(vn) {
+        if let Some(value) = self.match_test_gt_zero(&peeled) {
             return Some(X86BranchPredicate::SGtZero(value));
         }
-        if let Some(value) = self.match_test_le_zero(vn) {
+        if let Some(value) = self.match_test_le_zero(&peeled) {
             return Some(X86BranchPredicate::SLeZero(value));
         }
         None
@@ -492,24 +527,26 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn match_cmp_branch_predicate(&self, vn: &Varnode) -> Option<X86BranchPredicate> {
-        if let Some((lhs, rhs)) = self.match_cmp_zero_flag(vn) {
+        let peeled = self.peel_passthrough_varnode(vn);
+
+        if let Some((lhs, rhs)) = self.match_cmp_zero_flag_from_peeled(&peeled) {
             if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
                 return Some(X86BranchPredicate::Eq(lhs, rhs));
             }
         }
-        if let Some(inner) = self.match_bool_negate(vn)
+        if let Some(inner) = self.match_bool_negate_from_peeled(&peeled)
             && let Some((lhs, rhs)) = self.match_cmp_zero_flag(&inner)
         {
             if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
                 return Some(X86BranchPredicate::Ne(lhs, rhs));
             }
         }
-        if let Some((lhs, rhs)) = self.match_cmp_carry_flag(vn) {
+        if let Some((lhs, rhs)) = self.match_cmp_carry_flag_from_peeled(&peeled) {
             if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
                 return Some(X86BranchPredicate::ULt(lhs, rhs));
             }
         }
-        if let Some(inner) = self.match_bool_negate(vn)
+        if let Some(inner) = self.match_bool_negate_from_peeled(&peeled)
             && let Some((lhs, rhs)) = self.match_cmp_carry_flag(&inner)
         {
             if self.is_simple_branch_value(&lhs) && self.is_simple_branch_value(&rhs) {
@@ -550,8 +587,27 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn peel_passthrough_varnode(&self, vn: &Varnode) -> Varnode {
+        let scope = self.current_lowering_site;
+        let start_key = VarnodeKey::from(vn);
+        let cache_key = (scope, start_key.clone());
+        let mut peel_cache = self.peel_cache.borrow_mut();
+        if let Some(cached) = peel_cache.get(&cache_key).cloned() {
+            return cached;
+        }
+
         let mut current = vn.clone();
-        while let Some((_, op)) = self.lookup_def_site(&current) {
+        let mut visited: Vec<VarnodeKey> = Vec::new();
+        for _ in 0..X86_PASSTHROUGH_PEEL_MAX_STEPS {
+            let Some((_, op)) = self.lookup_def_site(&current) else {
+                break;
+            };
+            let current_key = VarnodeKey::from(&current);
+            if let Some(cached) = peel_cache.get(&(scope, current_key.clone())).cloned() {
+                current = cached;
+                break;
+            }
+            visited.push(current_key);
+
             match op.opcode {
                 PcodeOpcode::Copy
                 | PcodeOpcode::Cast
@@ -573,17 +629,36 @@ impl<'a> PreviewBuilder<'a> {
                 _ => break,
             }
         }
+
+        let final_value = current.clone();
+        peel_cache.insert(cache_key, final_value.clone());
+        for visited_key in visited {
+            peel_cache.insert((scope, visited_key), final_value.clone());
+        }
+
         current
     }
 
     fn match_bool_negate(&self, vn: &Varnode) -> Option<Varnode> {
         let peeled = self.peel_passthrough_varnode(vn);
+        self.match_bool_negate_from_peeled(&peeled)
+    }
+
+    fn match_bool_negate_from_peeled(&self, peeled: &Varnode) -> Option<Varnode> {
         let (_, op) = self.lookup_def_site(&peeled)?;
         (op.opcode == PcodeOpcode::BoolNegate && op.inputs.len() == 1).then(|| op.inputs[0].clone())
     }
 
     fn match_bool_binary(&self, vn: &Varnode, opcode: PcodeOpcode) -> Option<(Varnode, Varnode)> {
         let peeled = self.peel_passthrough_varnode(vn);
+        self.match_bool_binary_from_peeled(&peeled, opcode)
+    }
+
+    fn match_bool_binary_from_peeled(
+        &self,
+        peeled: &Varnode,
+        opcode: PcodeOpcode,
+    ) -> Option<(Varnode, Varnode)> {
         let (_, op) = self.lookup_def_site(&peeled)?;
         (op.opcode == opcode && op.inputs.len() == 2)
             .then(|| (op.inputs[0].clone(), op.inputs[1].clone()))
@@ -591,13 +666,26 @@ impl<'a> PreviewBuilder<'a> {
 
     fn match_compare_pair(&self, vn: &Varnode, opcode: PcodeOpcode) -> Option<(Varnode, Varnode)> {
         let peeled = self.peel_passthrough_varnode(vn);
+        self.match_compare_pair_from_peeled(&peeled, opcode)
+    }
+
+    fn match_compare_pair_from_peeled(
+        &self,
+        peeled: &Varnode,
+        opcode: PcodeOpcode,
+    ) -> Option<(Varnode, Varnode)> {
         let (_, op) = self.lookup_def_site(&peeled)?;
         (op.opcode == opcode && op.inputs.len() == 2)
             .then(|| (op.inputs[0].clone(), op.inputs[1].clone()))
     }
 
     fn match_zero_compare_input(&self, vn: &Varnode) -> Option<Varnode> {
-        let (lhs, rhs) = self.match_compare_pair(vn, PcodeOpcode::IntEqual)?;
+        let peeled = self.peel_passthrough_varnode(vn);
+        self.match_zero_compare_input_from_peeled(&peeled)
+    }
+
+    fn match_zero_compare_input_from_peeled(&self, peeled: &Varnode) -> Option<Varnode> {
+        let (lhs, rhs) = self.match_compare_pair_from_peeled(peeled, PcodeOpcode::IntEqual)?;
         if lhs.is_zero() {
             return Some(rhs);
         }
@@ -608,7 +696,12 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn match_signed_less_than_zero_input(&self, vn: &Varnode) -> Option<Varnode> {
-        let (lhs, rhs) = self.match_compare_pair(vn, PcodeOpcode::IntSLess)?;
+        let peeled = self.peel_passthrough_varnode(vn);
+        self.match_signed_less_than_zero_input_from_peeled(&peeled)
+    }
+
+    fn match_signed_less_than_zero_input_from_peeled(&self, peeled: &Varnode) -> Option<Varnode> {
+        let (lhs, rhs) = self.match_compare_pair_from_peeled(peeled, PcodeOpcode::IntSLess)?;
         if rhs.is_zero() {
             return Some(lhs);
         }
@@ -698,6 +791,10 @@ impl<'a> PreviewBuilder<'a> {
 
     fn match_cmp_diff(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
         let peeled = self.peel_passthrough_varnode(vn);
+        self.match_cmp_diff_from_peeled(&peeled)
+    }
+
+    fn match_cmp_diff_from_peeled(&self, peeled: &Varnode) -> Option<(Varnode, Varnode)> {
         let (_, op) = self.lookup_def_site(&peeled)?;
         if op.opcode != PcodeOpcode::IntSub || op.inputs.len() != 2 {
             return None;
@@ -710,8 +807,17 @@ impl<'a> PreviewBuilder<'a> {
         self.match_cmp_diff(&source)
     }
 
+    fn match_cmp_zero_flag_from_peeled(&self, peeled: &Varnode) -> Option<(Varnode, Varnode)> {
+        let source = self.match_zero_compare_input_from_peeled(peeled)?;
+        self.match_cmp_diff(&source)
+    }
+
     fn match_cmp_carry_flag(&self, vn: &Varnode) -> Option<(Varnode, Varnode)> {
         let peeled = self.peel_passthrough_varnode(vn);
+        self.match_cmp_carry_flag_from_peeled(&peeled)
+    }
+
+    fn match_cmp_carry_flag_from_peeled(&self, peeled: &Varnode) -> Option<(Varnode, Varnode)> {
         let (_, op) = self.lookup_def_site(&peeled)?;
         if op.opcode != PcodeOpcode::IntLess || op.inputs.len() != 2 {
             return None;

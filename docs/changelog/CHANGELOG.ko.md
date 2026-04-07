@@ -4,6 +4,34 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-04-07
+
+### EverPlanet 처리량 최적화 (DIE 매처 캐시 + NIR 핫패스 가드)
+
+이번 업데이트는 EverPlanet 벤치마크 구간의 장시간 정체를 줄이는 데 초점을 맞췄다. `fission-loader`에서는 반복 탐지 스캔을 제거하고, `fission-pcode` NIR 경로에서는 고비용 복구 체인에 캐시/예산 가드를 적용했다.
+
+#### Changed
+
+- `crates/fission-loader/src/detector/die_engine.rs` 최적화
+  - `StringMatch` 룰을 사전 수집해 `RegexSet` 1회 매칭으로 평가
+  - 문자열 매칭 결과 캐시를 도입해 동일 텍스트 재스캔 제거
+  - EP pattern 파싱 결과 캐시를 도입해 동일 패턴 재파싱 제거
+- `fission-pcode` NIR 핫패스 비용 완화
+  - block-local def index 및 def-site lookup 재사용 캐시 도입
+  - passthrough peel/terminator 캐시 추가
+  - x86 branch recovery 및 switch chain 파싱에 deterministic budget 상한 추가
+
+#### Validation
+
+- `cargo check -p fission-loader` (pass)
+- `cargo test -p fission-loader detector::die_engine -- --nocapture` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo build -p fission-cli --release` (pass)
+
+#### Measurement
+
+- rust-sleigh 기준 EverPlanet `--decomp-all --decomp-limit 20 --benchmark` 구간이 비정상 장기 정체 없이 빠르게 완료됨을 확인.
+
 ## 2026-04-06
 
 ### rust-sleigh x86 SIMD/3-byte 후속 배치 확장

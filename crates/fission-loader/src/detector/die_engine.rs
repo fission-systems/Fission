@@ -4,7 +4,7 @@
 //! Supports: section names, strings, entry point patterns, imports, rich headers.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -105,6 +105,7 @@ pub struct DieMatcher {
     database: SignatureDatabase,
     section_cache: HashMap<String, bool>,
     string_cache: HashMap<String, bool>,
+    ep_pattern_cache: HashMap<String, Vec<Option<u8>>>,
 }
 
 impl DieMatcher {
@@ -113,6 +114,7 @@ impl DieMatcher {
             database,
             section_cache: HashMap::new(),
             string_cache: HashMap::new(),
+            ep_pattern_cache: HashMap::new(),
         }
     }
 
@@ -123,6 +125,7 @@ impl DieMatcher {
         // Pre-build caches for faster matching
         self.build_section_cache(binary);
         self.build_string_cache(binary);
+        self.build_ep_pattern_cache();
 
         for sig in &self.database.signatures {
             if let Some(detection) = self.match_signature(binary, sig) {
@@ -143,7 +146,61 @@ impl DieMatcher {
 
     fn build_string_cache(&mut self, _binary: &LoadedBinary) {
         self.string_cache.clear();
-        // We'll do lazy string matching instead of pre-caching all strings
+        let mut unique_needles = Vec::new();
+        let mut seen = HashSet::new();
+
+        for sig in &self.database.signatures {
+            for rule in &sig.rules {
+                if let SignatureRule::StringMatch { value } = rule
+                    && !value.is_empty()
+                    && seen.insert(value.clone())
+                {
+                    unique_needles.push(value.clone());
+                }
+            }
+        }
+
+        if unique_needles.is_empty() {
+            return;
+        }
+
+        // Evaluate all DIE string rules against the binary in one pass.
+        let data = _binary.data.as_slice();
+        let escaped = unique_needles
+            .iter()
+            .map(|needle| regex::escape(needle))
+            .collect::<Vec<_>>();
+
+        match regex::bytes::RegexSet::new(&escaped) {
+            Ok(set) => {
+                let matches = set.matches(data);
+                for (idx, needle) in unique_needles.into_iter().enumerate() {
+                    self.string_cache.insert(needle, matches.matched(idx));
+                }
+            }
+            Err(_) => {
+                // Fallback keeps behavior correct if regex-set compilation fails.
+                for needle in unique_needles {
+                    self.string_cache.insert(
+                        needle.clone(),
+                        Self::contains_string(data, &needle),
+                    );
+                }
+            }
+        }
+    }
+
+    fn build_ep_pattern_cache(&mut self) {
+        self.ep_pattern_cache.clear();
+        for sig in &self.database.signatures {
+            for rule in &sig.rules {
+                if let SignatureRule::EpPattern { pattern, .. } = rule {
+                    self.ep_pattern_cache
+                        .entry(pattern.clone())
+                        .or_insert_with(|| Self::parse_pattern(pattern));
+                }
+            }
+        }
     }
 
     fn match_signature(&self, binary: &LoadedBinary, sig: &Signature) -> Option<Detection> {
@@ -200,8 +257,10 @@ impl DieMatcher {
             }
 
             SignatureRule::StringMatch { value } => {
-                // Search in binary data
-                Self::contains_string(binary.data.as_slice(), value)
+                self.string_cache
+                    .get(value)
+                    .copied()
+                    .unwrap_or_else(|| Self::contains_string(binary.data.as_slice(), value))
             }
 
             SignatureRule::EpPattern { arch, pattern } => {
@@ -245,7 +304,11 @@ impl DieMatcher {
     fn match_ep_pattern(&self, binary: &LoadedBinary, pattern: &str) -> bool {
         // Convert pattern string to bytes with wildcards
         // Pattern format: "60 BE ?? ?? ?? ?? 8D BE"
-        let pattern_bytes = Self::parse_pattern(pattern);
+        let pattern_bytes = self
+            .ep_pattern_cache
+            .get(pattern)
+            .cloned()
+            .unwrap_or_else(|| Self::parse_pattern(pattern));
         if pattern_bytes.is_empty() {
             return false;
         }

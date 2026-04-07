@@ -12,7 +12,6 @@ categories = ["development-tools::debugging"]
 
 [features]
 default = []
-native_decomp = ["fission-static/native_decomp"]
 
 [dependencies]
 fission-loader = { path = "../fission-loader" }

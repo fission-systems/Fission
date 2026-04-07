@@ -7,19 +7,26 @@ impl<'a> PreviewBuilder<'a> {
         type_context: Option<&'a PreviewTypeContext>,
     ) -> Self {
         let mut defs = HashMap::new();
+        let mut block_defs = Vec::with_capacity(pcode.blocks.len());
         for (block_idx, block) in pcode.blocks.iter().enumerate() {
+            let mut block_def_map: HashMap<VarnodeKey, Vec<usize>> = HashMap::new();
             for (op_idx, op) in block.ops.iter().enumerate() {
                 if let Some(output) = &op.output {
+                    block_def_map
+                        .entry(VarnodeKey::from(output))
+                        .or_default()
+                        .push(op_idx);
                     defs.insert(
                         VarnodeKey::from(output),
                         DefSite {
                             block_idx,
                             op_idx,
-                            op,
+                            _marker: std::marker::PhantomData,
                         },
                     );
                 }
             }
+            block_defs.push(block_def_map);
         }
         let address_to_index = build_address_to_index_map(pcode);
         let block_target_keys = build_block_target_keys(pcode);
@@ -72,6 +79,11 @@ impl<'a> PreviewBuilder<'a> {
             options,
             type_context,
             defs,
+            block_defs,
+            lookup_site_cache: std::cell::RefCell::new(HashMap::new()),
+            peel_cache: std::cell::RefCell::new(HashMap::new()),
+            terminator_cache: HashMap::new(),
+            x86_branch_recovery_attempts: 0,
             address_to_index,
             block_target_keys,
             target_key_to_index,

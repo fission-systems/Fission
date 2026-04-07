@@ -4,12 +4,13 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::services::cross_image::{apply_propagated_renames, collect_folder_propagated_renames};
 use crate::state::AppState;
-use fission_core::{find_sla_dir, format_addr};
+use fission_core::format_addr;
 use fission_loader::loader::LoadedBinary;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
-use tracing::{error, warn};
+use tracing::warn;
 
 // ============================================================================
 // Commands
@@ -21,9 +22,9 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
     let binary = tokio::task::spawn_blocking(move || {
         let mut binary = LoadedBinary::from_file(&path)
             .map_err(|e| CmdError::other(format!("Failed to load binary: {e}")))?;
-        // Automatic multi-pass function discovery (runs in the worker thread)
+        // Keep open_file responsive: run only the lightweight pass on initial load.
+        // The heavier prologue scan is available via `deep_scan_functions`.
         binary.discover_internal_functions(); // Pass 1: CALL target scan
-        binary.discover_functions_by_prologue(); // Pass 2: prologue pattern scan
         Ok::<LoadedBinary, CmdError>(binary)
     })
     .await
@@ -36,61 +37,24 @@ pub async fn open_file(path: String, state: State<'_, AppState>) -> CmdResult<Bi
         .map(|path| path.to_path_buf());
     let propagated_renames = if let Some(folder) = propagation_folder {
         let binary_for_propagation = binary_arc.clone();
-        tokio::task::spawn_blocking(move || {
-            collect_folder_propagated_renames(binary_for_propagation.as_ref(), &folder)
-        })
+        match tokio::time::timeout(
+            Duration::from_secs(2),
+            tokio::task::spawn_blocking(move || {
+                collect_folder_propagated_renames(binary_for_propagation.as_ref(), &folder)
+            }),
+        )
         .await
-        .map_err(|e| CmdError::other(format!("Propagation task failed: {e}")))?
+        {
+            Ok(joined) => joined
+                .map_err(|e| CmdError::other(format!("Propagation task failed: {e}")))?,
+            Err(_) => {
+                warn!("cross-image propagation timed out during open_file; skipping for responsiveness");
+                Default::default()
+            }
+        }
     } else {
         Default::default()
     };
-
-    // Initialize decompiler if native_decomp feature is enabled
-    #[cfg(feature = "native_decomp")]
-    {
-        use fission_static::analysis::decomp::{
-            prepare_native_decompiler_for_binary, PrepareOptions,
-        };
-
-        let sla_dir = find_sla_dir();
-        match fission_static::analysis::decomp::CachingDecompiler::new(&binary_arc, &sla_dir, 200) {
-            Ok(mut decomp) => {
-                let bin_ref = binary_arc.clone();
-                let compiler_id = bin_ref.get_ghidra_compiler_id();
-                let config = fission_core::config::Config::default();
-                let gdt_path_owned = fission_core::PATHS
-                    .get_gdt_path(bin_ref.is_64bit)
-                    .and_then(|p| p.to_str().map(String::from));
-                let mut options = PrepareOptions {
-                    verbose: false,
-                    compiler_id: compiler_id.as_deref(),
-                    gdt_path: gdt_path_owned.as_deref(),
-                    timeout_ms: Some(config.decompiler.timeout_ms),
-                    timings: None,
-                    signatures_json: None,
-                };
-
-                if let Err(e) = prepare_native_decompiler_for_binary(
-                    decomp.inner_mut(),
-                    &bin_ref,
-                    bin_ref.data.as_slice(),
-                    &mut options,
-                ) {
-                    warn!(error = %e, "failed to prepare decompiler for binary");
-                } else {
-                    // Store decompiler in its own separate Mutex
-                    let mut decomp_lock = state.decompiler.lock().await;
-                    *decomp_lock = Some(decomp);
-                    drop(decomp_lock);
-                    let mut inner = state.inner.lock().await;
-                    inner.decompiler_loaded = true;
-                }
-            }
-            Err(e) => {
-                error!(error = %e, "failed to initialize decompiler");
-            }
-        }
-    }
 
     // Store the binary and reset user state
     let mut inner = state.inner.lock().await;

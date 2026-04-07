@@ -1552,6 +1552,7 @@ dependencies = [
  "fission-loader",
  "fission-pcode",
  "fission-signatures",
+ "fission-sleigh",
  "fission-static",
  "iced-x86",
  "serde",

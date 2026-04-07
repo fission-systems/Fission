@@ -17,30 +17,46 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         vn: &Varnode,
     ) -> Option<(LoweringSite, &'a PcodeOp)> {
-        if let Some(site) = self.current_lowering_site {
-            let block = &self.pcode.blocks[site.block_idx];
-            if let Some((def_idx, op)) =
-                aggregate_recovery::find_prior_def_in_block(block, site.op_idx, vn)
+        let scope = self.current_lowering_site;
+        let key = VarnodeKey::from(vn);
+        let cache_key = (scope, key.clone());
+        if let Some(cached_site) = self.lookup_site_cache.borrow().get(&cache_key).copied() {
+            return cached_site.map(|site| {
+                let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+                (site, op)
+            });
+        }
+
+        let mut resolved_site: Option<LoweringSite> = None;
+        if let Some(site) = scope {
+            if let Some(defs_in_block) = self.block_defs.get(site.block_idx)
+                && let Some(def_indices) = defs_in_block.get(&key)
             {
-                return Some((
-                    LoweringSite {
+                let prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
+                if prior_count > 0 {
+                    let def_idx = def_indices[prior_count - 1];
+                    resolved_site = Some(LoweringSite {
                         block_idx: site.block_idx,
                         op_idx: def_idx,
-                    },
-                    op,
-                ));
+                    });
+                }
             }
         }
 
-        let key = VarnodeKey::from(vn);
-        self.defs.get(&key).map(|def| {
-            (
-                LoweringSite {
-                    block_idx: def.block_idx,
-                    op_idx: def.op_idx,
-                },
-                def.op,
-            )
+        if resolved_site.is_none() {
+            resolved_site = self.defs.get(&key).map(|def| LoweringSite {
+                block_idx: def.block_idx,
+                op_idx: def.op_idx,
+            });
+        }
+
+        self.lookup_site_cache
+            .borrow_mut()
+            .insert(cache_key, resolved_site);
+
+        resolved_site.map(|site| {
+            let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+            (site, op)
         })
     }
 

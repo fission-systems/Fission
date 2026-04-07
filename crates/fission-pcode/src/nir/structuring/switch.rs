@@ -69,15 +69,26 @@ impl<'a> PreviewBuilder<'a> {
         start_idx: usize,
     ) -> Result<Option<ParsedSwitch>, MlilPreviewError> {
         let mut current_idx = start_idx;
+        let mut current_term = self.lower_block_terminator(current_idx)?;
         let mut selector: Option<HirExpr> = None;
         let mut cases = Vec::new();
+        let mut visited = HashSet::new();
+        let max_chain_steps = self
+            .successors
+            .len()
+            .min(SWITCH_CHAIN_PARSE_BUDGET_MAX)
+            .max(1);
 
-        loop {
+        for _ in 0..max_chain_steps {
+            if !visited.insert(current_idx) {
+                return Ok(None);
+            }
+
             let LoweredTerminator::Cond {
                 cond,
                 true_target,
                 false_target,
-            } = self.lower_block_terminator(current_idx)?
+            } = current_term
             else {
                 return Ok(None);
             };
@@ -112,9 +123,11 @@ impl<'a> PreviewBuilder<'a> {
             }
             cases.push((value, case_idx));
 
-            match self.lower_block_terminator(next_idx)? {
+            let next_term = self.lower_block_terminator(next_idx)?;
+            match next_term {
                 LoweredTerminator::Cond { .. } => {
                     current_idx = next_idx;
+                    current_term = next_term;
                     continue;
                 }
                 _ => {
@@ -130,6 +143,8 @@ impl<'a> PreviewBuilder<'a> {
                 }
             }
         }
+
+        Ok(None)
     }
 
     fn canonicalize_switch_target(&self, start_idx: usize) -> usize {

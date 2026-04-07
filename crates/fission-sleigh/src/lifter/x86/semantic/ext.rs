@@ -10,6 +10,8 @@ mod movmuldiv;
 mod simd;
 mod system;
 
+pub(super) use self::system::decode_x87_policy;
+
 const X86_RDTSC_POLICY_ID: u64 = 0x0F31;
 const X86_CLFLUSH_POLICY_ID: u64 = 0x0FAE07;
 const X86_SYSCALL_POLICY_ID: u64 = 0x0F05;
@@ -92,7 +94,7 @@ pub(super) fn decode_extended_semantic(
             if prefix.operand_size_override || prefix.rep_prefix.is_some() {
                 simd::decode_simd_semantic(insn, op_idx, prefix, size, address, temp, seq, ext)
             } else {
-                system::decode_x87_policy(address, seq, ext)
+                Vec::new() // MMX unsupported for now
             }
         }
         _ => Vec::new(),

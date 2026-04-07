@@ -25,6 +25,32 @@ This update focuses on bridging missing FPU arithmetic instructions and refining
 - validated cleanly via `cargo check -p fission-sleigh` indicating perfect object lifespans with zero Rust compiler warnings.
 - regression tested 238 internal modules via `cargo test -p fission-pcode` without faults.
 
+### EverPlanet Throughput Optimization (DIE Matcher Caching + NIR Hot-Path Guards)
+
+This update reduces pathological runtime on the EverPlanet lane by removing repeated detector work in `fission-loader` and bounding expensive recovery chains in `fission-pcode` NIR lowering.
+
+#### Changed
+
+- optimized DIE signature matching in `crates/fission-loader/src/detector/die_engine.rs`:
+  - pre-collected all `StringMatch` rules and evaluated them in one pass with `RegexSet`
+  - introduced match-result caching so repeated rule checks avoid rescanning the same text corpus
+  - cached EP-pattern parse results to avoid reparsing identical patterns across rules
+- reduced repeated expression/terminator recovery cost in `fission-pcode` NIR hot paths:
+  - added block-local def indexing and cached def-site lookup reuse
+  - added passthrough-peel and terminator-level caches
+  - introduced deterministic budgets for x86 branch-recovery and switch-chain parsing paths
+
+#### Validation
+
+- `cargo check -p fission-loader` (pass)
+- `cargo test -p fission-loader detector::die_engine -- --nocapture` (pass)
+- `cargo check -p fission-pcode` (pass)
+- `cargo build -p fission-cli --release` (pass)
+
+#### Measurement Notes
+
+- EverPlanet benchmark lane with rust-sleigh (`--decomp-all --decomp-limit 20 --benchmark`) completed in a fast, non-stalling profile after the optimization set.
+
 ---
 
 ## 2026-04-06

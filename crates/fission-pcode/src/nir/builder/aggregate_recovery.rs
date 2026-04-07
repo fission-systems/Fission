@@ -340,7 +340,16 @@ pub(in crate::nir::builder) fn find_prior_def_in_block<'a>(
         .enumerate()
         .take(scan_end)
         .rev()
-        .find(|(_, op)| op.output.as_ref().map(VarnodeKey::from) == Some(key.clone()))
+        .find(|(_, op)| {
+            let Some(output) = op.output.as_ref() else {
+                return false;
+            };
+            output.space_id == key.space_id
+                && output.offset == key.offset
+                && output.size == key.size
+                && output.is_constant == key.is_constant
+                && output.constant_val == key.constant_val
+        })
 }
 
 pub(in crate::nir::builder) fn recover_wide_register_source_from_block(
