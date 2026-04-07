@@ -12,6 +12,7 @@ struct PrefixState {
     address_size_override: bool,
     rex: u8,
     rep_prefix: Option<RepPrefix>,
+    segment_override: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +127,9 @@ pub(crate) fn decode_semantic_with_state(
     }
 
     match op {
+        0xD8..=0xDF => {
+            self::ext::decode_x87_policy(insn, op_idx, &prefix, address, &mut temp, &mut seq, op - 0xD8)
+        }
         0xCC => {
             vec![PcodeOp {
                 seq_num: next_seq(&mut seq),
@@ -863,6 +867,7 @@ pub(crate) fn decode_semantic_with_state(
                     ops
                 }
                 0xFF => {
+                    let group_size = if op == 0xF6 { 1 } else { size };
                     if decoded.reg_field == 6 {
                         let slot_size = stack_operand_size(&prefix);
                         let src = materialize_rm_value(
@@ -882,18 +887,60 @@ pub(crate) fn decode_semantic_with_state(
                             &mut seq,
                             "PUSH_RM",
                         );
+                    } else if decoded.reg_field == 2 || decoded.reg_field == 4 || decoded.reg_field == 3 || decoded.reg_field == 5 {
+                        // CALL/JMP indirect (near/far)
+                        let target = materialize_rm_value(
+                            &decoded.rm,
+                            group_size,
+                            address,
+                            &mut ops,
+                            &mut temp,
+                            &mut seq,
+                        );
+                        if decoded.reg_field == 2 || decoded.reg_field == 3 {
+                            // CALL: push return address
+                            let slot_size = stack_operand_size(&prefix);
+                            let ret_addr = const_u64(address + insn.len() as u64, slot_size);
+                            emit_stack_push(
+                                address,
+                                ret_addr,
+                                slot_size,
+                                &mut ops,
+                                &mut temp,
+                                &mut seq,
+                                "CALL_RET",
+                            );
+                            ops.push(PcodeOp {
+                                seq_num: next_seq(&mut seq),
+                                opcode: PcodeOpcode::CallInd,
+                                address,
+                                output: None,
+                                inputs: vec![target],
+                                asm_mnemonic: Some("CALL_IND".to_string()),
+                            });
+                        } else {
+                            // JMP near indirect
+                            ops.push(PcodeOp {
+                                seq_num: next_seq(&mut seq),
+                                opcode: PcodeOpcode::BranchInd,
+                                address,
+                                output: None,
+                                inputs: vec![target],
+                                asm_mnemonic: Some("JMP_IND".to_string()),
+                            });
+                        }
                     } else {
                         let kind = match decoded.reg_field {
                             0 => AluKind::Inc,
                             1 => AluKind::Dec,
                             _ => return Vec::new(),
                         };
-                        let lhs = materialize_rm_value(&decoded.rm, size, address, &mut ops, &mut temp, &mut seq);
+                        let lhs = materialize_rm_value(&decoded.rm, group_size, address, &mut ops, &mut temp, &mut seq);
                         ops.extend(emit_alu_ops(
                             address,
-                            size,
+                            group_size,
                             lhs,
-                            const_u64(1, size),
+                            const_u64(1, group_size),
                             destination_from_rm(&decoded.rm),
                             kind,
                             &mut temp,

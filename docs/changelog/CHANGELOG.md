@@ -7,6 +7,26 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-07
+
+### x86 FPU Precise Mapping and Advanced Indirect Control Flow Structuring
+
+This update focuses on bridging missing FPU arithmetic instructions and refining indirect jumps within the `fission-sleigh` x86 lifter, avoiding legacy emulation hacks.
+
+#### Changed
+
+- replaced the blanket `FPU_HACK` (`FloatAdd`) inside `crates/fission-sleigh/src/lifter/x86/semantic/ext/system.rs`'s `decode_x87_policy` to accurately distinguish `FloatAdd`, `FloatMult`, `FloatLess`, `FloatLessEqual`, `FloatSub`, and `FloatDiv` based on instruction extension offsets (`0xD8..=0xDF`) and ModRM `reg_field` encodings.
+- adjusted indirect branch and call translation for `0xFF` instructions in `crates/fission-sleigh/src/lifter/x86/semantic.rs`, explicitly routing far calls (`reg_field == 3`) and far jumps (`reg_field == 5`) to target `CallInd` and `BranchInd` constructs natively.
+- resolved ownership conflicts (`E0382`) and variable borrowing issues inside P-Code definitions by strictly tracking `Varnode` instances (`ST(0)` stack mappings) within the decoded outputs.
+- updated FPU placeholder mnemonics to `FPU_SCALED` indicating explicitly evaluated operands.
+
+#### Validation
+
+- validated cleanly via `cargo check -p fission-sleigh` indicating perfect object lifespans with zero Rust compiler warnings.
+- regression tested 238 internal modules via `cargo test -p fission-pcode` without faults.
+
+---
+
 ## 2026-04-06
 
 ### x86 SIMD/3-byte Follow-up Intrinsic Expansion

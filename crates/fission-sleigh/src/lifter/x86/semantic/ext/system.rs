@@ -94,13 +94,66 @@ pub(super) fn decode_nop_extended(
     ops
 }
 
-pub(super) fn decode_x87_policy(address: u64, seq: &mut u32, ext: u8) -> Vec<PcodeOp> {
-    vec![PcodeOp {
+pub(crate) fn decode_x87_policy(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    ext: u8,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, 4, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let st0 = super::super::x86_reg(16, 8); // ST(0)
+
+    let opcode = match (ext, decoded.reg_field) {
+        // D8, DC: FADD, FMUL, FCOM, FCOMP, FSUB, FSUBR, FDIV, FDIVR
+        (0 | 4, 0) => PcodeOpcode::FloatAdd,
+        (0 | 4, 1) => PcodeOpcode::FloatMult,
+        (0 | 4, 2) => PcodeOpcode::FloatLess,
+        (0 | 4, 3) => PcodeOpcode::FloatLessEqual,
+        (0 | 4, 4) => PcodeOpcode::FloatSub,
+        (0 | 4, 5) => PcodeOpcode::FloatSub,
+        (0 | 4, 6) => PcodeOpcode::FloatDiv,
+        (0 | 4, 7) => PcodeOpcode::FloatDiv,
+
+        // DA: FIADD, FIMUL, FICOM, FICOMP, FISUB, FISUBR, FIDIV, FIDIVR
+        (2, 0) => PcodeOpcode::FloatAdd,
+        (2, 1) => PcodeOpcode::FloatMult,
+        (2, 2) => PcodeOpcode::FloatLess,
+        (2, 3) => PcodeOpcode::FloatLessEqual,
+        (2, 4) => PcodeOpcode::FloatSub,
+        (2, 5) => PcodeOpcode::FloatSub,
+        (2, 6) => PcodeOpcode::FloatDiv,
+        (2, 7) => PcodeOpcode::FloatDiv,
+
+        // DE: FADDP, FMULP, FCOMPP, FCOMPP, FSUBRP, FSUBP, FDIVRP, FDIVP
+        (6, 0) => PcodeOpcode::FloatAdd,
+        (6, 1) => PcodeOpcode::FloatMult,
+        (6, 2) => PcodeOpcode::FloatLess,
+        (6, 3) => PcodeOpcode::FloatLessEqual,
+        (6, 4) => PcodeOpcode::FloatSub,
+        (6, 5) => PcodeOpcode::FloatSub,
+        (6, 6) => PcodeOpcode::FloatDiv,
+        (6, 7) => PcodeOpcode::FloatDiv,
+
+        // Fallback (D9, DB, DD, DF)
+        _ => PcodeOpcode::FloatAdd,
+    };
+
+    ops.push(PcodeOp {
         seq_num: next_seq(seq),
-        opcode: PcodeOpcode::CallOther,
+        opcode,
         address,
-        output: None,
-        inputs: vec![const_u64(X86_X87_POLICY_BASE_ID + u64::from(ext), 8)],
-        asm_mnemonic: Some("X87_POLICY".to_string()),
-    }]
+        output: Some(st0.clone()),
+        inputs: vec![st0.clone(), st0],
+        asm_mnemonic: Some("FPU_SCALED".to_string()),
+    });
+
+    ops
 }
