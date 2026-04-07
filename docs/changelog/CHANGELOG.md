@@ -7,6 +7,33 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-08
+
+### Rust-sleigh Full-Decompile Stability Hardening (Root-Cause Fixes)
+
+This update removes root causes behind full-decompile crashes on large x86 binaries instead of relying on temporary guards.
+
+#### Changed
+
+- hardened Rust-only decompile execution in `fission-cli`:
+  - introduced explicit worker stack sizing via `FISSION_RUST_DECOMP_STACK_MB` (default `32MB`, clamped `8..256MB`)
+  - applied stack sizing to both single-function rendering workers and fan-out worker pool threads
+  - converted spawn/join failures into structured per-function fallback results instead of process-level aborts
+  - implementation: `crates/fission-cli/src/cli/oneshot/decompile_rust_sleigh.rs`
+- fixed recursive cycle tracking in NIR call argument lowering:
+  - reused the shared `visiting` set for call arg lowering instead of creating fresh per-arg sets
+  - prevents recursion blowups on cyclic varnode chains
+  - implementation: `crates/fission-pcode/src/nir/builder/lower_expr.rs`
+- fixed BranchInd candidate selection panic in terminator lowering:
+  - replaced eager indexing logic with a guarded `len()==1` branch
+  - implementation: `crates/fission-pcode/src/nir/builder/terminator.rs`
+
+#### Validation
+
+- EverPlanet rust-sleigh `--decomp-all` lane completed end-to-end without crash after these fixes.
+
+---
+
 ## 2026-04-07
 
 ### x86 FPU Precise Mapping and Advanced Indirect Control Flow Structuring

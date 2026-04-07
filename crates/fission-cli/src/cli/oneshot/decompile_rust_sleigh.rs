@@ -9,6 +9,8 @@ use std::io::{self, Write};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
+const DEFAULT_DECOMP_STACK_MB: usize = 32;
+
 #[derive(Clone, Copy)]
 struct RenderConfig {
     benchmark: bool,
@@ -293,22 +295,38 @@ fn run_with_functions(
         ghidra_compat: cli.ghidra_compat,
         effective_no_warnings: cli.no_warnings || cli.ghidra_compat,
     };
+    let stack_size_bytes = resolve_decomp_stack_size_bytes();
 
     let use_worker_fanout = cli.decomp_all && functions.len() > 1;
     let mut results = if use_worker_fanout {
         let workers = resolve_worker_count(functions.len());
         if cli.verbose {
             eprintln!(
-                "[*] Rust-only decomp-all worker fan-out/fan-in: workers={}, functions={}",
+                "[*] Rust-only decomp-all worker fan-out/fan-in: workers={}, functions={}, stack_mb={}",
                 workers,
-                functions.len()
+                functions.len(),
+                stack_size_bytes / (1024 * 1024)
             );
         }
-        run_worker_fanout_fanin(Arc::new(binary.clone()), functions, config, workers)
+        run_worker_fanout_fanin(
+            Arc::new(binary.clone()),
+            functions,
+            config,
+            workers,
+            stack_size_bytes,
+        )
     } else {
+        let binary_arc = Arc::new(binary.clone());
         functions
             .iter()
-            .map(|func| render_one_function(binary, func, config))
+            .map(|func| {
+                render_one_function_on_large_stack(
+                    Arc::clone(&binary_arc),
+                    func,
+                    config,
+                    stack_size_bytes,
+                )
+            })
             .collect::<Vec<_>>()
     };
 
@@ -393,22 +411,88 @@ fn resolve_worker_count(total_functions: usize) -> usize {
     min(total_functions, cpu.clamp(1, 8))
 }
 
+fn resolve_decomp_stack_size_bytes() -> usize {
+    let mb = std::env::var("FISSION_RUST_DECOMP_STACK_MB")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_DECOMP_STACK_MB)
+        .clamp(8, 256);
+    mb * 1024 * 1024
+}
+
+fn make_internal_error_result(func: &FunctionInfo, message: String) -> FunctionRenderResult {
+    let plain = format!(
+        "// Error decompiling {} (0x{:x}): {}",
+        func.name, func.address, message
+    );
+    let entry = serde_json::json!({
+        "address": format!("0x{:x}", func.address),
+        "name": func.name,
+        "engine_used": "rust_sleigh",
+        "fell_back": true,
+        "fallback_reason": "rust_sleigh:worker_internal_error",
+        "error": message,
+    });
+
+    FunctionRenderResult {
+        address: func.address,
+        decomp_sec: 0.0,
+        postprocess_sec: 0.0,
+        plain_output: plain,
+        json_entry: entry,
+    }
+}
+
+fn render_one_function_on_large_stack(
+    binary: Arc<LoadedBinary>,
+    func: &FunctionInfo,
+    config: RenderConfig,
+    stack_size_bytes: usize,
+) -> FunctionRenderResult {
+    let func_owned = func.clone();
+    let func_for_error = func.clone();
+    let binary_for_thread = Arc::clone(&binary);
+
+    let spawn = thread::Builder::new()
+        .name(format!("fission-rust-decomp-0x{:x}", func.address))
+        .stack_size(stack_size_bytes)
+        .spawn(move || render_one_function(binary_for_thread.as_ref(), &func_owned, config));
+
+    match spawn {
+        Ok(handle) => match handle.join() {
+            Ok(result) => result,
+            Err(_) => make_internal_error_result(
+                &func_for_error,
+                "worker thread panicked while rendering function".to_string(),
+            ),
+        },
+        Err(err) => make_internal_error_result(
+            &func_for_error,
+            format!("failed to spawn render worker: {err}"),
+        ),
+    }
+}
+
 fn run_worker_fanout_fanin(
     binary: Arc<LoadedBinary>,
     functions: &[FunctionInfo],
     config: RenderConfig,
     worker_count: usize,
+    stack_size_bytes: usize,
 ) -> Vec<FunctionRenderResult> {
     let (task_tx, task_rx) = mpsc::channel::<FunctionInfo>();
     let task_rx = Arc::new(Mutex::new(task_rx));
     let (result_tx, result_rx) = mpsc::channel::<FunctionRenderResult>();
 
     let mut worker_handles = Vec::with_capacity(worker_count);
-    for _ in 0..worker_count {
+    for worker_idx in 0..worker_count {
         let rx = Arc::clone(&task_rx);
         let tx = result_tx.clone();
         let binary = Arc::clone(&binary);
-        worker_handles.push(thread::spawn(move || loop {
+        let spawn = thread::Builder::new()
+            .name(format!("fission-rust-decomp-worker-{worker_idx}"))
+            .stack_size(stack_size_bytes)
+            .spawn(move || loop {
             let task = match rx.lock() {
                 Ok(locked) => locked.recv(),
                 Err(_) => return,
@@ -421,7 +505,11 @@ fn run_worker_fanout_fanin(
             if tx.send(rendered).is_err() {
                 return;
             }
-        }));
+        });
+
+        if let Ok(handle) = spawn {
+            worker_handles.push(handle);
+        }
     }
     drop(result_tx);
 

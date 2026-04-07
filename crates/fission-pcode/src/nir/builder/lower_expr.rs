@@ -158,7 +158,7 @@ impl<'a> PreviewBuilder<'a> {
             op.inputs
                 .iter()
                 .skip(1)
-                .map(|input| self.lower_varnode(input, &mut HashSet::new()))
+                .map(|input| self.lower_varnode(input, visiting))
                 .collect::<Result<Vec<_>, _>>()?
         };
         Ok(HirExpr::Call {

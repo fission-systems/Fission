@@ -4,6 +4,34 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-04-08
+
+### Rust-sleigh 전체 디컴파일 안정화 (루트 원인 수정)
+
+이번 변경은 임시 가드가 아니라 실제 크래시 원인을 제거해, 대형 x86 바이너리 전체 디컴파일이 중단 없이 완료되도록 안정성을 높이는 데 초점을 맞췄다.
+
+#### Changed
+
+- `fission-cli` Rust-only 디컴파일 실행 안정성 보강
+  - 함수 렌더를 명시적 스택 크기 워커에서 실행하도록 변경
+  - `FISSION_RUST_DECOMP_STACK_MB` 환경변수(기본 32MB, 범위 8~256MB) 추가
+  - fan-out/fan-in 워커에도 동일 스택 정책 적용
+  - worker spawn/join 실패 시 프로세스 중단 대신 함수 단위 fallback 결과 생성
+  - 구현: `crates/fission-cli/src/cli/oneshot/decompile_rust_sleigh.rs`
+- NIR call-arg lowering 재귀 사이클 추적 수정
+  - call 인자 lowering에서 매번 새 visit set을 만들지 않고 기존 `visiting` set을 재사용
+  - 순환 varnode 체인에서 재귀 폭주/stack overflow를 방지
+  - 구현: `crates/fission-pcode/src/nir/builder/lower_expr.rs`
+- BranchInd 후보 선택 panic 수정
+  - eager index 접근을 제거하고 `len()==1` 조건 분기로 안전화
+  - 구현: `crates/fission-pcode/src/nir/builder/terminator.rs`
+
+#### Validation
+
+- EverPlanet rust-sleigh `--decomp-all` 전체 구간이 크래시 없이 완주됨.
+
+---
+
 ## 2026-04-07
 
 ### EverPlanet 처리량 최적화 (DIE 매처 캐시 + NIR 핫패스 가드)

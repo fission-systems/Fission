@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-04-08
+
+### Changed
+- Hardened Rust-only decompile execution in `fission-cli` by running function rendering on explicitly sized worker stacks (`FISSION_RUST_DECOMP_STACK_MB`, default 32MB), applying the same stack sizing to fan-out workers, and converting spawn/join failures into structured per-function fallback results instead of hard aborts.
+- Fixed recursive NIR expression lowering cycle tracking in `fission-pcode` by reusing the existing `visiting` set for call argument lowering rather than creating per-argument fresh sets, preventing recursion blowups on cyclic varnode chains.
+- Fixed branch-indirect candidate selection panic in `fission-pcode` terminator lowering by replacing eager indexing logic with a guarded `len()==1` branch.
+
+### Validation
+- Full EverPlanet rust-sleigh decompile-all lane completed without crash after the above fixes.
+
 ## 2026-04-06
 
 ### Changed

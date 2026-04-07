@@ -433,7 +433,11 @@ impl<'a> PreviewBuilder<'a> {
                 candidates.push(target);
             }
         }
-        (candidates.len() == 1).then_some(candidates[0])
+        if candidates.len() == 1 {
+            Some(candidates[0])
+        } else {
+            None
+        }
     }
 
     fn infer_branchind_target_from_input(
