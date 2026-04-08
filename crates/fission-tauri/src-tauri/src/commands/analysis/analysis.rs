@@ -4,6 +4,7 @@ use crate::dto::*;
 use crate::error::{CmdError, CmdResult};
 use crate::services::cross_image::AutoRenameKind;
 use crate::state::AppState;
+use fission_loader::loader::FunctionDiscoveryProfile;
 use tauri::State;
 
 // ============================================================================
@@ -25,7 +26,7 @@ pub async fn analyze_functions(state: State<'_, AppState>) -> CmdResult<Vec<Func
         .clone();
 
     let before = binary.functions.len();
-    binary.discover_internal_functions();
+    binary.discover_internal_functions_with_profile(FunctionDiscoveryProfile::Balanced);
     let found = binary.functions.len().saturating_sub(before);
 
     // Snapshot renames before we move the binary back into the Arc
@@ -56,7 +57,7 @@ pub async fn deep_scan_functions(state: State<'_, AppState>) -> CmdResult<Vec<Fu
         .as_ref()
         .clone();
 
-    binary.discover_functions_by_prologue();
+    binary.discover_functions_by_prologue_with_profile(FunctionDiscoveryProfile::Aggressive);
 
     let renames = inner.renamed_functions.clone();
     let binary_arc = std::sync::Arc::new(binary);

@@ -1,6 +1,6 @@
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
-use super::super::common::{
+use super::common::{
 	a64_flag_c, a64_flag_n, a64_flag_v, a64_flag_z, a64_reg, const_u64, UNIQUE_SPACE_ID,
 };
 

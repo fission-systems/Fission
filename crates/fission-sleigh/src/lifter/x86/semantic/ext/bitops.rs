@@ -245,6 +245,314 @@ pub(super) fn decode_bt_family(
     ops
 }
 
+/// 0F BA /4-/7: BT/BTS/BTR/BTC r/m, imm8
+/// Bit-test family with immediate bit index — reg field selects the operation.
+pub(super) fn decode_bt_imm8(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+
+    let kind = match decoded.reg_field {
+        4 => BitTestKind::Bt,
+        5 => BitTestKind::Bts,
+        6 => BitTestKind::Btr,
+        7 => BitTestKind::Btc,
+        _ => return Vec::new(),
+    };
+    let tag = bt_tag(kind);
+
+    // imm8 comes immediately after the ModRM (and SIB/disp)
+    let imm8_byte = match insn.get(decoded.next_idx) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    // Mask to valid range for the operand size
+    let bits_per_word = size.saturating_mul(8);
+    let raw_index = u64::from(imm8_byte) & u64::from(bits_per_word.saturating_sub(1));
+    let local_index = const_u64(raw_index, size);
+
+    let base_value = match &decoded.rm {
+        RmOperand::Reg(dst) => dst.clone(),
+        RmOperand::Mem(base_addr) => {
+            let loaded = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::Load,
+                address,
+                output: Some(loaded.clone()),
+                inputs: vec![const_u64(RAM_SPACE_ID, 8), base_addr.clone()],
+                asm_mnemonic: Some(format!("{tag}_IMM8_MEM_LOAD")),
+            });
+            loaded
+        }
+    };
+
+    let bit_mask = temp.alloc(size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntLeft,
+        address,
+        output: Some(bit_mask.clone()),
+        inputs: vec![const_u64(1, size), local_index],
+        asm_mnemonic: Some(format!("{tag}_IMM8_MASK")),
+    });
+
+    let bit_value = temp.alloc(size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntAnd,
+        address,
+        output: Some(bit_value.clone()),
+        inputs: vec![base_value.clone(), bit_mask.clone()],
+        asm_mnemonic: Some(format!("{tag}_IMM8_BIT")),
+    });
+
+    let cf = temp.alloc(1);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntNotEqual,
+        address,
+        output: Some(cf.clone()),
+        inputs: vec![bit_value, const_u64(0, size)],
+        asm_mnemonic: Some(format!("{tag}_IMM8_CF")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(x86_flag_cf()),
+        inputs: vec![cf],
+        asm_mnemonic: Some(format!("{tag}_IMM8_CF_WRITE")),
+    });
+
+    let updated = match kind {
+        BitTestKind::Bt => None,
+        BitTestKind::Bts => {
+            let out = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntOr,
+                address,
+                output: Some(out.clone()),
+                inputs: vec![base_value, bit_mask],
+                asm_mnemonic: Some(format!("{tag}_IMM8_SET")),
+            });
+            Some(out)
+        }
+        BitTestKind::Btr => {
+            let inv_mask = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntNegate,
+                address,
+                output: Some(inv_mask.clone()),
+                inputs: vec![bit_mask],
+                asm_mnemonic: Some(format!("{tag}_IMM8_MASK_INV")),
+            });
+            let out = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntAnd,
+                address,
+                output: Some(out.clone()),
+                inputs: vec![base_value, inv_mask],
+                asm_mnemonic: Some(format!("{tag}_IMM8_RESET")),
+            });
+            Some(out)
+        }
+        BitTestKind::Btc => {
+            let out = temp.alloc(size);
+            ops.push(PcodeOp {
+                seq_num: next_seq(seq),
+                opcode: PcodeOpcode::IntXor,
+                address,
+                output: Some(out.clone()),
+                inputs: vec![base_value, bit_mask],
+                asm_mnemonic: Some(format!("{tag}_IMM8_TOGGLE")),
+            });
+            Some(out)
+        }
+    };
+
+    if let Some(value) = updated {
+        match &decoded.rm {
+            RmOperand::Reg(dst) => {
+                ops.push(PcodeOp {
+                    seq_num: next_seq(seq),
+                    opcode: PcodeOpcode::Copy,
+                    address,
+                    output: Some(dst.clone()),
+                    inputs: vec![value],
+                    asm_mnemonic: Some(format!("{tag}_IMM8_WRITE")),
+                });
+            }
+            RmOperand::Mem(addr_vn) => {
+                ops.push(PcodeOp {
+                    seq_num: next_seq(seq),
+                    opcode: PcodeOpcode::Store,
+                    address,
+                    output: None,
+                    inputs: vec![const_u64(RAM_SPACE_ID, 8), addr_vn.clone(), value],
+                    asm_mnemonic: Some(format!("{tag}_IMM8_STORE")),
+                });
+            }
+        }
+    }
+
+    ops
+}
+
+/// TZCNT r, r/m (F3 0F BC): count trailing zeros — ZF=1 if src==0, CF=1 if src==0.
+fn decode_tzcnt(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
+    let dst = x86_reg(decoded.reg_index, size);
+
+    // ZF = (src == 0); CF = (src == 0)
+    let is_zero = temp.alloc(1);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntEqual,
+        address,
+        output: Some(is_zero.clone()),
+        inputs: vec![src.clone(), const_u64(0, size)],
+        asm_mnemonic: Some("TZCNT_IS_ZERO".to_string()),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(x86_flag_zf()),
+        inputs: vec![is_zero.clone()],
+        asm_mnemonic: Some("TZCNT_ZF".to_string()),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(x86_flag_cf()),
+        inputs: vec![is_zero],
+        asm_mnemonic: Some("TZCNT_CF".to_string()),
+    });
+
+    // TZCNT = PopCount(src & -src) - 1, but use BSF index helper
+    let idx = emit_bsf_index(&mut ops, address, size, src, temp, seq);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![idx],
+        asm_mnemonic: Some("TZCNT_WRITE".to_string()),
+    });
+    ops
+}
+
+/// LZCNT r, r/m (F3 0F BD): count leading zeros — ZF=1 if result==0, CF=1 if src==0.
+fn decode_lzcnt(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let src = materialize_rm_value(&decoded.rm, size, address, &mut ops, temp, seq);
+    let dst = x86_reg(decoded.reg_index, size);
+    let width_bits = u64::from(size.saturating_mul(8));
+
+    // CF = (src == 0) [src was zero before leading-zero count]
+    let src_zero = temp.alloc(1);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntEqual,
+        address,
+        output: Some(src_zero.clone()),
+        inputs: vec![src.clone(), const_u64(0, size)],
+        asm_mnemonic: Some("LZCNT_SRC_ZERO".to_string()),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(x86_flag_cf()),
+        inputs: vec![src_zero],
+        asm_mnemonic: Some("LZCNT_CF".to_string()),
+    });
+
+    // LZCNT = (width - 1) - BSR(src) when src != 0; = width when src == 0.
+    // Emit BSR-based index then compute: lzcnt = (width-1) - bsr_idx
+    let bsr_idx = emit_bsr_index(&mut ops, address, size, src.clone(), temp, seq);
+    let lzcnt_nonzero = temp.alloc(size);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntSub,
+        address,
+        output: Some(lzcnt_nonzero.clone()),
+        inputs: vec![const_u64(width_bits - 1, size), bsr_idx],
+        asm_mnemonic: Some("LZCNT_NONZERO".to_string()),
+    });
+    let width_const = const_u64(width_bits, size);
+    let is_nonzero = temp.alloc(1);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntNotEqual,
+        address,
+        output: Some(is_nonzero.clone()),
+        inputs: vec![src, const_u64(0, size)],
+        asm_mnemonic: Some("LZCNT_SRC_NONZERO".to_string()),
+    });
+    let result = emit_conditional_value_merge(
+        &mut ops, address, size, lzcnt_nonzero, width_const, &is_nonzero, temp, seq, "LZCNT",
+    );
+    // ZF = (result == 0) → i.e. result == 0 only when src had MSB set (BSR = width-1)
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::IntEqual,
+        address,
+        output: Some(x86_flag_zf()),
+        inputs: vec![result.clone(), const_u64(0, size)],
+        asm_mnemonic: Some("LZCNT_ZF".to_string()),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![result],
+        asm_mnemonic: Some("LZCNT_WRITE".to_string()),
+    });
+    ops
+}
+
 pub(super) fn decode_bsf_bsr(
     insn: &[u8],
     op_idx: usize,
@@ -255,6 +563,14 @@ pub(super) fn decode_bsf_bsr(
     seq: &mut u32,
     is_reverse: bool,
 ) -> Vec<PcodeOp> {
+    // F3 prefix changes BSF→TZCNT and BSR→LZCNT
+    if prefix.rep_prefix == Some(RepPrefix::Rep) {
+        return if is_reverse {
+            decode_lzcnt(insn, op_idx, prefix, size, address, temp, seq)
+        } else {
+            decode_tzcnt(insn, op_idx, prefix, size, address, temp, seq)
+        };
+    }
     let mut ops = Vec::new();
     let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, size, address, temp, &mut ops, seq) {
         Some(v) => v,

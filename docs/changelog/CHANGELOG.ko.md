@@ -4,6 +4,59 @@ All notable changes to the Fission project (November 2025 – Present).
 
 ---
 
+## 2026-04-09
+
+### x86 Lifter 4차 보강 — 완성도 ~87% → ~93%
+
+이번 업데이트는 `fission-sleigh` x86 lifter의 5개 명령어 카테고리에 걸쳐 광범위한 완성도 보강을 진행했다. 전체 추정 완성도가 ~87%에서 ~93%로 향상됐다. 모든 작업은 Fission Sleigh 엔진 내부로 한정되며 Ghidra 런타임 의존성은 도입하지 않았다.
+
+#### Changed
+
+- **Phase A — 1-byte 잔여 opcode 보완** (`crates/fission-sleigh/src/lifter/x86/semantic.rs`)
+  - `0xF4` HLT → `CallOther` `HLT_POLICY`
+  - `0x8E` MOV Sreg, r/m16 → ModRM 디코딩 후 `x86_seg(reg_field)`에 `Copy`
+  - `0x27/0x2F/0x37/0x3F` DAA / DAS / AAA / AAS → opcode별 정책 ID `CallOther`
+  - `0x6C/0x6D` INSB/INSW/INSD, `0x6E/0x6F` OUTSB/OUTSW/OUTSD → `CallOther` `INS_POLICY` / `OUTS_POLICY`
+  - 관련 상수 7개 추가: `X86_HLT_POLICY_ID`, `X86_DAA_POLICY_ID`, `X86_DAS_POLICY_ID`, `X86_AAA_POLICY_ID`, `X86_AAS_POLICY_ID`, `X86_INS_POLICY_ID`, `X86_OUTS_POLICY_ID`
+
+- **Phase B — 0x0F 시스템·MMX 공백 보완** (`crates/fission-sleigh/src/lifter/x86/semantic/ext.rs`)
+  - `0x0F 0x01` 디스크립터 그룹(SGDT/LGDT/SIDT/LIDT/SMSW/LMSW/INVLPG) → ModRM `reg_field` 분기 `CallOther`, 새 `decode_0f01_group` 함수 추가
+  - `0x0F 0x20/0x22` MOV CR0–7, `0x0F 0x21/0x23` MOV DR0–7 → `CallOther` `MOV_CR_POLICY` / `MOV_DR_POLICY`
+  - `0x0F 0x33` RDPMC → `CallOther` `RDPMC_POLICY`
+  - mandatory prefix 없는 `0xD8–0xDF`(MMX 범위): 빈 `Vec` 반환에서 `simd::decode_simd_semantic`을 통한 `SIMD_POLICY` CallOther 스텁으로 전환
+  - 관련 상수 10개 추가
+
+- **Phase C — SSE packed 명령 match 암 추가** (`crates/fission-sleigh/src/lifter/x86/semantic/ext/simd.rs`)
+  - NP(None prefix) packed SSE 15쌍 추가: MOVUPS/MOVAPS load/store, SQRTPS, ANDPS/ANDNPS/ORPS/XORPS, ADDPS/MULPS/SUBPS/MINPS/DIVPS/MAXPS
+  - P66 packed SSE2 9쌍 추가: MOVUPD load/store, SQRTPD/ADDPD/MULPD/SUBPD/MINPD/DIVPD/MAXPD
+  - P66 추가 ops: PCMPGTB/W/D, PUNPCKLBW/WD/DQ/PACKSSWB, PACKUSWB, PUNPCKHBW/WD/DQ, PACKSSDW
+  - P66 포화/평균 연산: PSUBUSB/W, PMINUB, PADDUSB/W, PMAXUB, PAVGB/W, PMULHUW/W, PMINSW, PMAXSW, PSUBSB/W, PADDSB/W
+  - MOVMSKPS/MOVMSKPD 전용 헬퍼 `decode_two_byte_xmm_movmsk` 신규 추가
+
+- **Phase D — x87 FPU 완성도 보강** (`crates/fission-sleigh/src/lifter/x86/semantic/ext/system.rs`)
+  - D9 상수 로드(레지스터 형, `reg_field==5`): FLD1 → `FloatInt2Float`, FLDZ → `Copy 0`, 초월 상수(FLDL2T/FLDL2E/FLDPI/FLDLG2/FLDLN2) → `CallOther`
+  - D9 초월함수(레지스터 형, `reg_field==6/7`): F2XM1/FYL2X/FPTAN/FPATAN/FXTRACT/FPREM1/FPREM/FYL2XP1/FRNDINT/FSCALE/FSIN/FCOS → `CallOther`; FSQRT는 `reg_field==7, rm_low==2`에서 `FloatSqrt`로 정확히 배치
+  - D9 메모리 형 제어워드(`reg_field 4–7`): FLDENV/FLDCW/FNSTENV/FNSTCW → 주소 인수 포함 `CallOther`
+  - DA 레지스터 형: FCMOVcc → `CallOther` `FCMOV_POLICY`
+  - DB 레지스터 형: FINIT(E3) → `CallOther`; FCOMI/FUCOMI → `FloatEqual`(ZF) + `FloatLess`(CF) + PF=0 P-code 직접 방출
+  - DF 레지스터 형: FUCOMIP/FCOMIP → `FloatEqual`(ZF) + `FloatLess`(CF) + PF=0
+  - 정책 ID 상수 21개 추가
+
+- **Phase E — TZCNT/LZCNT 분기 처리** (`crates/fission-sleigh/src/lifter/x86/semantic/ext/bitops.rs`)
+  - `decode_bsf_bsr`에서 `prefix.rep_prefix == Some(Rep)` 확인 후 분기
+  - `F3 0F BC` → 신규 `decode_tzcnt`: BSF 인덱스 기반 trailing-zero count, ZF·CF를 `src == 0`에서 설정
+  - `F3 0F BD` → 신규 `decode_lzcnt`: BSR 인덱스 기반 leading-zero count, CF를 `src == 0`, ZF를 `result == 0`에서 설정
+  - F3 없는 BSF/BSR은 기존 동작 그대로 유지
+
+- **`x86_seg` 가시성 확대** (`crates/fission-sleigh/src/lifter/x86/common.rs`): `pub(super)` → `pub(in super::super)` 로 확장해 `semantic.rs`에서 직접 import 가능
+
+#### Validation
+
+- `cargo check -p fission-sleigh` — 오류 0, 신규 경고 0
+- `cargo test -p fission-sleigh` — **202개 통과, 0개 실패** (4차 보강 전 176개 → 202개)
+
+---
+
 ## 2026-04-08
 
 ### Rust-sleigh 전체 디컴파일 안정화 (루트 원인 수정)

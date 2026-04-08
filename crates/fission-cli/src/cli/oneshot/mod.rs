@@ -28,11 +28,19 @@ use functions::print_function_list;
 use inventory::emit_function_facts_inventory;
 use strings::print_strings;
 
-use crate::cli::args::OneShotArgs;
+use crate::cli::args::{FunctionDiscoveryProfileArg, OneShotArgs};
 use clap::Parser;
-use fission_loader::loader::LoadedBinary;
+use fission_loader::loader::{FunctionDiscoveryProfile, LoadedBinary};
 use std::fs;
 use std::io;
+
+fn map_discovery_profile_arg(profile: FunctionDiscoveryProfileArg) -> FunctionDiscoveryProfile {
+    match profile {
+        FunctionDiscoveryProfileArg::Conservative => FunctionDiscoveryProfile::Conservative,
+        FunctionDiscoveryProfileArg::Balanced => FunctionDiscoveryProfile::Balanced,
+        FunctionDiscoveryProfileArg::Aggressive => FunctionDiscoveryProfile::Aggressive,
+    }
+}
 
 /// Entry point for one-shot CLI mode
 pub fn run_oneshot() -> io::Result<()> {
@@ -70,7 +78,7 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
         }
     };
 
-    let binary = match LoadedBinary::from_bytes(
+    let mut binary = match LoadedBinary::from_bytes(
         binary_data.clone(),
         cli.binary.to_string_lossy().to_string(),
     ) {
@@ -80,6 +88,20 @@ fn execute_command(cli: &OneShotArgs) -> io::Result<()> {
             std::process::exit(1);
         }
     };
+
+    if let Some(profile_arg) = cli.function_discovery_profile {
+        let profile = map_discovery_profile_arg(profile_arg);
+        let before = binary.functions.len();
+        binary.discover_internal_functions_with_profile(profile);
+        binary.discover_functions_by_prologue_with_profile(profile);
+        let discovered = binary.functions.len().saturating_sub(before);
+        if cli.verbose {
+            eprintln!(
+                "[*] Function discovery profile {:?}: +{} functions",
+                profile, discovered
+            );
+        }
+    }
 
     if cli.verbose {
         eprintln!(
@@ -216,6 +238,9 @@ fn print_help() {
     println!("      --no-warnings          Suppress WARNING/NOTICE lines");
     println!("      --benchmark            Add timing metadata to JSON output");
     println!("      --decomp-limit <N>     Limit --decomp-all to first N functions");
+    println!(
+        "      --function-discovery-profile <P>   conservative|balanced|aggressive"
+    );
     println!();
     println!("Examples:");
     println!("  fission_cli app.exe --info");

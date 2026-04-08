@@ -331,7 +331,7 @@ fn compose_effective_address(
     let mut ea = cur.unwrap_or_else(|| const_u64(0, 8));
 
     if let Some(seg) = prefix.segment_override {
-        use super::super::super::common::x86_seg;
+        use super::super::common::x86_seg;
         let seg_base = x86_seg(seg as u32);
         
         let mut addr64 = ea;
@@ -445,7 +445,7 @@ fn compose_effective_address_addr32(
     let mut ea = ea64;
 
     if let Some(seg) = prefix.segment_override {
-        use super::super::super::common::x86_seg;
+        use super::super::common::x86_seg;
         let seg_base = x86_seg(seg as u32);
         
         let out = temp.alloc(8);

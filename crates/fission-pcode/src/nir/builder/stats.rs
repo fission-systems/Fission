@@ -54,6 +54,9 @@ impl<'a> PreviewBuilder<'a> {
             loop_control_rewrite_continue_count: self.loop_control_rewrite_continue_count,
             loop_control_rewrite_skipped_nested_scope_count: self
                 .loop_control_rewrite_skipped_nested_scope_count,
+            loop_while_subgraph_lowered_count: self.loop_while_subgraph_lowered_count,
+            loop_multi_exit_break_count: self.loop_multi_exit_break_count,
+            loop_for_lowered_count: self.loop_for_lowered_count,
             promotion_candidate_count: self.promotion_candidate_count,
             promoted_region_count: self.promoted_region_count,
             promotion_rejected_by_shape_count: self.promotion_rejected_by_shape_count,

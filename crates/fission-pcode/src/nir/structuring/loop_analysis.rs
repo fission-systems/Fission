@@ -6,7 +6,13 @@ pub(crate) struct LoopBody {
     pub head: usize,
     pub tails: Vec<usize>,
     pub body: Vec<usize>,
+    /// Canonical exit: the successor of a tail block (or body block) that lies outside the loop
+    /// body. Used by while-structuring as the exit arm of the head's conditional branch.
     pub exit_idx: Option<usize>,
+    /// All blocks reachable immediately outside the loop body (targets of body→exit edges).
+    /// Each element is a block index that is NOT inside `body`. Multiple exits means multiple
+    /// potential break targets.
+    pub all_exits: Vec<usize>,
 }
 
 impl LoopBody {
@@ -26,17 +32,22 @@ impl LoopBody {
         }
 
         let mut bodies = Vec::new();
-        // Ghidra processes loops inside out.
+        // Process loops inside out (innermost first).
         for (head, tails) in loops {
             let mut loop_body = LoopBody {
                 head,
                 tails: tails.clone(),
                 body: Vec::new(),
                 exit_idx: None,
+                all_exits: Vec::new(),
             };
             loop_body.find_base(predecessors, irreducible_edges);
-            loop_body.find_exit(successors, irreducible_edges);
+            // Phase A: find initial exit_idx from tails so that `extend` has a boundary.
+            loop_body.find_initial_exit(successors, irreducible_edges);
+            // Phase B: grow body with the boundary in place.
             loop_body.extend(predecessors, successors, irreducible_edges);
+            // Phase C: re-scan the full body (after extend) to collect all exits.
+            loop_body.find_all_exits(successors, irreducible_edges);
             bodies.push(loop_body);
         }
         bodies
@@ -74,41 +85,80 @@ impl LoopBody {
         }
     }
 
-    fn find_exit(
+    /// Quick pre-extend scan: finds the first exit reachable from tail blocks so that
+    /// `extend` has a known boundary and does not pull the exit into the body.
+    fn find_initial_exit(
         &mut self,
         successors: &[Vec<usize>],
         irreducible_edges: &HashSet<(usize, usize)>,
     ) {
-        let marked: HashSet<usize> = self.body.iter().copied().collect();
-        // Look for an exit from tails
+        let body_set: HashSet<usize> = self.body.iter().copied().collect();
+
         for &tail in &self.tails {
+            if tail >= successors.len() {
+                continue;
+            }
             for &succ in &successors[tail] {
                 if irreducible_edges.contains(&(tail, succ)) {
                     continue;
                 }
-                if !marked.contains(&succ) {
+                if !body_set.contains(&succ) {
                     self.exit_idx = Some(succ);
-                    return; // Since we don't have container info yet, return first
+                    return;
                 }
             }
         }
 
-        // Look for an exit from anywhere else in the body
         for &bl in &self.body {
-            // we already did tails. (Technically in Fission we can just filter out tails).
             if self.tails.contains(&bl) {
+                continue;
+            }
+            if bl >= successors.len() {
                 continue;
             }
             for &succ in &successors[bl] {
                 if irreducible_edges.contains(&(bl, succ)) {
                     continue;
                 }
-                if !marked.contains(&succ) {
+                if !body_set.contains(&succ) {
                     self.exit_idx = Some(succ);
                     return;
                 }
             }
         }
+    }
+
+    /// Collect all exits after the body has been fully extended.
+    /// Scans every body block's successors and records those outside the body into `all_exits`.
+    /// Does NOT modify `exit_idx` (already set by `find_initial_exit`).
+    fn find_all_exits(
+        &mut self,
+        successors: &[Vec<usize>],
+        irreducible_edges: &HashSet<(usize, usize)>,
+    ) {
+        let body_set: HashSet<usize> = self.body.iter().copied().collect();
+        let mut seen = HashSet::new();
+
+        for &bl in &self.body {
+            if bl >= successors.len() {
+                continue;
+            }
+            for &succ in &successors[bl] {
+                if irreducible_edges.contains(&(bl, succ)) {
+                    continue;
+                }
+                if !body_set.contains(&succ) && seen.insert(succ) {
+                    self.all_exits.push(succ);
+                }
+            }
+        }
+
+        self.all_exits.sort_unstable();
+    }
+
+    /// Returns true if `block_idx` is a recognized exit destination (break target) for this loop.
+    pub(crate) fn is_exit(&self, block_idx: usize) -> bool {
+        self.all_exits.binary_search(&block_idx).is_ok()
     }
 
     fn extend(

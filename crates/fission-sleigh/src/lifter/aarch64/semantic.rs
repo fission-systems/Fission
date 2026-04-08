@@ -1,6 +1,6 @@
 use fission_pcode::PcodeOp;
 
-use super::super::common::A64TempFactory;
+use super::common::A64TempFactory;
 
 mod arithmetic;
 mod logical;

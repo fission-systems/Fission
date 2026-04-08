@@ -7,6 +7,59 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
+## 2026-04-09
+
+### x86 Lifter 4th Reinforcement Pass — Coverage ~87% → ~93%
+
+This update is a broad completeness sweep across five instruction categories in the `fission-sleigh` x86 lifter, bringing the estimated overall coverage from ~87% to ~93%.  All work is confined to the Fission Sleigh engine; no Ghidra runtime dependency is introduced.
+
+#### Changed
+
+- **Phase A — remaining 1-byte opcodes** (`crates/fission-sleigh/src/lifter/x86/semantic.rs`)
+  - `0xF4` HLT → `CallOther` `HLT_POLICY`
+  - `0x8E` MOV Sreg, r/m16 → ModRM decode + `Copy` to the appropriate segment register via `x86_seg(reg_field)`
+  - `0x27/0x2F/0x37/0x3F` DAA / DAS / AAA / AAS → `CallOther` per-opcode policy IDs
+  - `0x6C/0x6D` INSB/INSW/INSD and `0x6E/0x6F` OUTSB/OUTSW/OUTSD → `CallOther` `INS_POLICY` / `OUTS_POLICY`
+  - added `X86_HLT_POLICY_ID`, `X86_DAA_POLICY_ID`, `X86_DAS_POLICY_ID`, `X86_AAA_POLICY_ID`, `X86_AAS_POLICY_ID`, `X86_INS_POLICY_ID`, `X86_OUTS_POLICY_ID` constants
+
+- **Phase B — 0x0F system and MMX gaps** (`crates/fission-sleigh/src/lifter/x86/semantic/ext.rs`)
+  - `0x0F 0x01` descriptor group (SGDT/LGDT/SIDT/LIDT/SMSW/LMSW/INVLPG) → `CallOther` with ModRM `reg_field`-based dispatch via new `decode_0f01_group`
+  - `0x0F 0x20/0x22` MOV CR0–7 and `0x0F 0x21/0x23` MOV DR0–7 → `CallOther` `MOV_CR_POLICY` / `MOV_DR_POLICY`
+  - `0x0F 0x33` RDPMC → `CallOther` `RDPMC_POLICY`
+  - `0xD8–0xDF` (MMX range without mandatory prefix) previously fell to empty `Vec`; now routes uniformly through `simd::decode_simd_semantic` so every MMX opcode receives a `SIMD_POLICY` `CallOther` stub
+  - added `X86_LGDT_POLICY_ID`, `X86_SGDT_POLICY_ID`, `X86_LIDT_POLICY_ID`, `X86_SIDT_POLICY_ID`, `X86_LMSW_POLICY_ID`, `X86_SMSW_POLICY_ID`, `X86_INVLPG_POLICY_ID`, `X86_MOV_CR_POLICY_ID`, `X86_MOV_DR_POLICY_ID`, `X86_RDPMC_POLICY_ID` constants
+
+- **Phase C — SSE packed instruction coverage** (`crates/fission-sleigh/src/lifter/x86/semantic/ext/simd.rs`)
+  - added 15 `None`-prefix (`NP`) packed SSE match arms: MOVUPS load/store (0x10/0x11), MOVAPS load/store (0x28/0x29), SQRTPS (0x51), ANDPS/ANDNPS/ORPS/XORPS (0x54–0x57), ADDPS/MULPS/SUBPS/MINPS/DIVPS/MAXPS (0x58–0x5F)
+  - added 9 `P66`-prefix SSE2 packed match arms: MOVUPD load/store (0x10/0x11), SQRTPD/ADDPD/MULPD/SUBPD/MINPD/DIVPD/MAXPD (0x51–0x5F range)
+  - added PCMPGTB/W/D (0x64–0x66), PUNPCKLBW/WD/DQ/PACKSSWB (0x60–0x63), PACKUSWB (0x67), PUNPCKHBW/WD/DQ (0x68–0x6A), PACKSSDW (0x6B)
+  - added PSUBUSB/W (0xD8/0xD9), PMINUB (0xDA), PADDUSB/W (0xDC/0xDD), PMAXUB (0xDE), PAVGB/W (0xE0/0xE3), PMULHUW/W (0xE4/0xE5), PMINSW (0xEA), PMAXSW (0xEE), PSUBSB/W (0xE8/0xE9), PADDSB/W (0xEC/0xED)
+  - added `decode_two_byte_xmm_movmsk` helper; wired MOVMSKPS (NP 0x50) and MOVMSKPD (P66 0x50) as `CallOther` intrinsics that write to a GPR destination
+
+- **Phase D — x87 FPU completeness** (`crates/fission-sleigh/src/lifter/x86/semantic/ext/system.rs`)
+  - D9 constant loads (register form, `reg_field==5`): FLD1 → `FloatInt2Float`, FLDZ → `Copy 0`, transcendental constants (FLDL2T/FLDL2E/FLDPI/FLDLG2/FLDLN2) → dedicated `CallOther` policy stubs
+  - D9 transcendental group (register form, `reg_field==6/7`): F2XM1, FYL2X, FPTAN, FPATAN, FXTRACT, FPREM1, FPREM, FYL2XP1, FRNDINT, FSCALE, FSIN, FCOS → `CallOther` per-function policy IDs; FSQRT correctly placed at `reg_field==7, rm_low==2` (`FloatSqrt`)
+  - D9 memory form control-word group (`reg_field 4–7`): FLDENV / FLDCW / FNSTENV / FNSTCW → `CallOther` with effective address argument
+  - DA register form: FCMOVcc (FCMOVB/E/BE/U) → `CallOther` `FCMOV_POLICY`
+  - DB register form: `FINIT` (E3) → `CallOther`; FCOMI (`reg_field==6`) / FUCOMI (`reg_field==7`) → `FloatEqual` (ZF) + `FloatLess` (CF) + PF=0; other DB register forms → `CallOther`
+  - DF register form: FUCOMIP (`reg_field==5`) / FCOMIP (`reg_field==7`) → `FloatEqual` (ZF) + `FloatLess` (CF) + PF=0
+  - added 21 new policy-ID constants (`X86_FLDCW_POLICY_ID`, `X86_FNSTCW_POLICY_ID`, `X86_FSIN_POLICY_ID`, `X86_FCOS_POLICY_ID`, `X86_FPTAN_POLICY_ID`, `X86_FPATAN_POLICY_ID`, `X86_F2XM1_POLICY_ID`, `X86_FYL2X_POLICY_ID`, `X86_FYL2XP1_POLICY_ID`, `X86_FXTRACT_POLICY_ID`, `X86_FPREM_POLICY_ID`, `X86_FPREM1_POLICY_ID`, `X86_FSCALE_POLICY_ID`, `X86_FCMOV_POLICY_BASE_ID`, `X86_FINIT_POLICY_ID`, etc.)
+
+- **Phase E — TZCNT / LZCNT disambiguation** (`crates/fission-sleigh/src/lifter/x86/semantic/ext/bitops.rs`)
+  - `decode_bsf_bsr` now checks `prefix.rep_prefix == Some(Rep)` (F3 prefix) before dispatching
+  - `F3 0F BC` → new `decode_tzcnt`: BSF-index-based trailing-zero count, sets ZF and CF from `src == 0`
+  - `F3 0F BD` → new `decode_lzcnt`: BSR-index-based leading-zero count, sets CF from `src == 0` and ZF from `result == 0`
+  - BSF / BSR without F3 prefix continue to operate exactly as before
+
+- **`x86_seg` visibility widened** (`crates/fission-sleigh/src/lifter/x86/common.rs`): changed from `pub(super)` to `pub(in super::super)` so `semantic.rs` can import and use it directly
+
+#### Validation
+
+- `cargo check -p fission-sleigh` — 0 errors, 0 new warnings
+- `cargo test -p fission-sleigh` — **202 tests passed, 0 failed** (up from 176 before the 4th pass)
+
+---
+
 ## 2026-04-08
 
 ### Rust-sleigh Full-Decompile Stability Hardening (Root-Cause Fixes)

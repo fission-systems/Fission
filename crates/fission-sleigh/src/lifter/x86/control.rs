@@ -1,9 +1,9 @@
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
 use super::predicate::emit_jcc_predicate_with_allocator;
-use super::super::common::{const_u64, x86_flag_zf, x86_reg, RAM_SPACE_ID, UNIQUE_SPACE_ID};
+use super::common::{const_u64, x86_flag_zf, x86_reg, RAM_SPACE_ID, UNIQUE_SPACE_ID};
 #[cfg(test)]
-use super::super::common::{x86_flag_cf, x86_flag_of, x86_flag_sf};
+use super::common::{x86_flag_cf, x86_flag_of, x86_flag_sf};
 
 #[derive(Debug, Clone, Copy)]
 struct PrefixState {

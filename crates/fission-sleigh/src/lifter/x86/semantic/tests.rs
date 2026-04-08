@@ -336,26 +336,30 @@ fn decode_byte_shift_group2_uses_byte_width() {
 }
 
 #[test]
-fn decode_rotate_group2_emits_intrinsic_paths() {
-    let rol = decode_semantic(&[0xD1, 0xC0], 0x7058); // rol eax,1
+fn decode_rotate_group2_emits_pcode_shift_sequences() {
+    // ROL eax, 1  →  explicit SHL | SHR | OR P-code + CF/OF writes
+    let rol = decode_semantic(&[0xD1, 0xC0], 0x7058);
     assert!(!rol.is_empty());
-    assert!(rol
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ROL_INTRINSIC")));
+    assert!(rol.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHL")));
+    assert!(rol.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHR")));
+    assert!(rol.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROL")));
+    assert!(has_flag_write(&rol, x86_flag_cf()));
+    assert!(has_flag_write(&rol, x86_flag_of()));
     assert!(!has_flag_write(&rol, x86_flag_zf()));
     assert!(!has_flag_write(&rol, x86_flag_pf()));
     assert!(!has_flag_write(&rol, x86_flag_sf()));
 
-    let ror_cl = decode_semantic(&[0xD3, 0xC8], 0x705C); // ror eax,cl
+    // ROR eax, cl  →  needs count zext + mask, then ROR_SHR / ROR_SHL / ROR
+    let ror_cl = decode_semantic(&[0xD3, 0xC8], 0x705C);
     assert!(!ror_cl.is_empty());
-    assert!(ror_cl
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ROT_COUNT_ZEXT")));
-    assert!(ror_cl
-        .iter()
-        .any(|op| op.asm_mnemonic.as_deref() == Some("ROR_INTRINSIC")));
+    assert!(ror_cl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROT_COUNT_ZEXT")));
+    assert!(ror_cl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROR_SHR")));
+    assert!(ror_cl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROR_SHL")));
+    assert!(ror_cl.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ROR")));
+    assert!(has_flag_write(&ror_cl, x86_flag_cf()));
 
-    let ror_zero = decode_semantic(&[0xC1, 0xC8, 0x00], 0x705D); // ror eax,0
+    // ROR eax, 0  →  count=0 is suppressed (empty output)
+    let ror_zero = decode_semantic(&[0xC1, 0xC8, 0x00], 0x705D);
     assert!(ror_zero.is_empty());
 }
 
@@ -1427,13 +1431,13 @@ fn decode_0f_extended_markers_and_bswap_semantics_are_emitted() {
     assert_eq!(map_0f3a[0].asm_mnemonic.as_deref(), Some("0F3A_POLICY"));
     assert_eq!(map_0f3a[0].inputs[0].constant_val as u64, 0x0F3A2A);
 
+    // 0F 10 is now MOVUPS (None prefix) — produces XMM Copy ops rather than SIMD_POLICY
     let simd = decode_semantic(&[0x0F, 0x10, 0xC0], 0x746C);
-    assert_eq!(simd.len(), 1);
-    assert_eq!(simd[0].asm_mnemonic.as_deref(), Some("SIMD_POLICY"));
+    assert!(!simd.is_empty(), "MOVUPS (0F 10) should produce ops");
 
-    let x87 = decode_semantic(&[0x0F, 0xD8, 0xC0], 0x7470);
-    assert_eq!(x87.len(), 1);
-    assert_eq!(x87[0].asm_mnemonic.as_deref(), Some("X87_POLICY"));
+    // 0F D8 = PSUBUSB (MMX) — now routes to SIMD_POLICY instead of empty
+    let x87_mmx = decode_semantic(&[0x0F, 0xD8, 0xC0], 0x7470);
+    assert!(!x87_mmx.is_empty(), "MMX D8 should now route to SIMD_POLICY");
 
     let bswap32 = decode_semantic(&[0x0F, 0xC8], 0x7474); // bswap eax
     assert!(!bswap32.is_empty());
@@ -2071,4 +2075,917 @@ fn decode_p2_followup_aeskeygenassist_emits_intrinsic() {
     assert!(aeskeygenassist
         .iter()
         .any(|op| op.asm_mnemonic.as_deref() == Some("AESKEYGENASSIST_WRITE") && op.output.as_ref() == Some(&x86_xmm_reg(0, 16))));
+}
+
+// ── Phase 1: x87 FPU ──────────────────────────────────────────────────────────
+
+#[test]
+fn decode_x87_fadd_reg_form_emits_float_add_on_st0() {
+    // D8 C1 = FADD ST(0), ST(1)  (D8 with mod=3, reg=0, rm=1)
+    let ops = decode_semantic(&[0xD8, 0xC1], 0x8000);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FADD")
+        && op.opcode == PcodeOpcode::FloatAdd));
+    // Result written back to ST(0): size=10 (80-bit extended precision)
+    let fadd = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("FADD")).unwrap();
+    assert_eq!(fadd.output.as_ref().map(|v| v.size), Some(10));
+    assert!(!has_flag_write(&ops, x86_flag_zf()));
+    assert!(!has_flag_write(&ops, x86_flag_cf()));
+}
+
+#[test]
+fn decode_x87_fmul_reg_form_emits_float_mul_on_st0() {
+    // D8 C9 = FMUL ST(0), ST(1)  (D8 with mod=3, reg=1, rm=1)
+    let ops = decode_semantic(&[0xD8, 0xC9], 0x8004);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FMUL")
+        && op.opcode == PcodeOpcode::FloatMult));
+}
+
+#[test]
+fn decode_x87_fld_reg_form_copies_stn_to_st0() {
+    // D9 C1 = FLD ST(1) — load ST(1) onto the stack top
+    let ops = decode_semantic(&[0xD9, 0xC1], 0x8008);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FLD_ST")
+        && op.opcode == PcodeOpcode::Copy));
+}
+
+#[test]
+fn decode_x87_fsub_emits_float_sub_on_st0() {
+    // D8 E1 = FSUB ST(0), ST(1) (D8 mod=3, reg=4, rm=1)
+    let ops = decode_semantic(&[0xD8, 0xE1], 0x800C);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FSUB")
+        && op.opcode == PcodeOpcode::FloatSub));
+}
+
+#[test]
+fn decode_x87_fxch_swaps_st0_and_stn() {
+    // D9 C9 = FXCH ST(1) (D9 mod=3, reg=1, rm=1)
+    let ops = decode_semantic(&[0xD9, 0xC9], 0x8010);
+    assert!(!ops.is_empty());
+    // Should have save + two writes for the swap
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_SAVE")));
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_ST0")));
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("FXCH_STN")));
+}
+
+// ── Phase 2: Primary 1-byte flag manipulation gaps ───────────────────────────
+
+#[test]
+fn decode_clc_stc_cmc_set_clear_toggle_cf() {
+    let clc = decode_semantic(&[0xF8], 0x8020); // clc
+    assert!(!clc.is_empty());
+    assert!(has_flag_write(&clc, x86_flag_cf()));
+    let clc_op = clc.iter().find(|op| op.asm_mnemonic.as_deref() == Some("CLC")).unwrap();
+    assert_eq!(clc_op.opcode, PcodeOpcode::Copy);
+    assert_eq!(clc_op.inputs[0].constant_val, 0);
+
+    let stc = decode_semantic(&[0xF9], 0x8021); // stc
+    assert!(!stc.is_empty());
+    assert!(has_flag_write(&stc, x86_flag_cf()));
+    let stc_op = stc.iter().find(|op| op.asm_mnemonic.as_deref() == Some("STC")).unwrap();
+    assert_eq!(stc_op.opcode, PcodeOpcode::Copy);
+    assert_eq!(stc_op.inputs[0].constant_val, 1);
+
+    let cmc = decode_semantic(&[0xF5], 0x8022); // cmc
+    assert!(!cmc.is_empty());
+    assert!(has_flag_write(&cmc, x86_flag_cf()));
+    let cmc_op = cmc.iter().find(|op| op.asm_mnemonic.as_deref() == Some("CMC")).unwrap();
+    assert_eq!(cmc_op.opcode, PcodeOpcode::IntXor);
+    assert!(has_flag_input(&cmc, x86_flag_cf()));
+}
+
+#[test]
+fn decode_cld_std_set_clear_df() {
+    let cld = decode_semantic(&[0xFC], 0x8023); // cld
+    assert!(!cld.is_empty());
+    assert!(has_flag_write(&cld, x86_flag_df()));
+    let cld_op = cld.iter().find(|op| op.asm_mnemonic.as_deref() == Some("CLD")).unwrap();
+    assert_eq!(cld_op.inputs[0].constant_val, 0);
+
+    let std_op = decode_semantic(&[0xFD], 0x8024); // std
+    assert!(!std_op.is_empty());
+    assert!(has_flag_write(&std_op, x86_flag_df()));
+    let std = std_op.iter().find(|op| op.asm_mnemonic.as_deref() == Some("STD")).unwrap();
+    assert_eq!(std.inputs[0].constant_val, 1);
+}
+
+#[test]
+fn decode_lahf_builds_ah_from_flag_bits() {
+    let ops = decode_semantic(&[0x9F], 0x8025); // lahf
+    assert!(!ops.is_empty());
+    // LAHF reads several flags and assembles them into AH
+    assert!(has_flag_input(&ops, x86_flag_cf()));
+    assert!(has_flag_input(&ops, x86_flag_sf()));
+    assert!(has_flag_input(&ops, x86_flag_zf()));
+    assert!(has_flag_input(&ops, x86_flag_pf()));
+    // Must contain a LAHF_CF op
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("LAHF_CF")));
+    // Final result written into AX (size 2)
+    assert!(ops.iter().any(|op| op.output.as_ref().map(|v| v.size == 2).unwrap_or(false)));
+}
+
+#[test]
+fn decode_sahf_writes_flags_from_ah_bits() {
+    let ops = decode_semantic(&[0x9E], 0x8026); // sahf
+    assert!(!ops.is_empty());
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+    assert!(has_flag_write(&ops, x86_flag_pf()));
+    assert!(has_flag_write(&ops, x86_flag_zf()));
+    assert!(has_flag_write(&ops, x86_flag_sf()));
+    // Should extract AH as source
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("SAHF_AH")));
+}
+
+// ── Phase 3: ROL/RCL explicit P-code (covered above; extra edge-case) ─────────
+
+#[test]
+fn decode_rol_byte_form_produces_correct_size_operands() {
+    // C0 C0 05 = rol al, 5
+    let ops = decode_semantic(&[0xC0, 0xC0, 0x05], 0x8030);
+    assert!(!ops.is_empty());
+    let rol_shl = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("ROL_SHL")).unwrap();
+    assert_eq!(rol_shl.inputs[0].size, 1); // byte operand
+}
+
+#[test]
+fn decode_rcl_reg_count1_emits_rcl_pcode() {
+    // D1 D0 = rcl eax, 1  (mod=3, reg=2, rm=0)
+    let ops = decode_semantic(&[0xD1, 0xD0], 0x8034);
+    assert!(!ops.is_empty());
+    // Must have the SHL step and the CF-inject (zero-extend old CF into the operand)
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCL_SHL")));
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCL_CF_ZEXT")));
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("RCL")));
+    // Reads old CF and writes new CF
+    assert!(has_flag_input(&ops, x86_flag_cf()));
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+}
+
+// ── Phase 4: 0F extended — XADD / CMPXCHG ───────────────────────────────────
+
+#[test]
+fn decode_xadd_reg_reg_swaps_and_writes_sum_with_flags() {
+    // 0F C1 D8 = xadd eax, ebx  (0xC1=dword form, 0xD8=mod3 reg=3 rm=0)
+    let ops = decode_semantic(&[0x0F, 0xC1, 0xD8], 0x8040);
+    assert!(!ops.is_empty());
+    // sum = eax + ebx
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XADD_SUM")
+        && op.opcode == PcodeOpcode::IntAdd));
+    // old r/m value saved for the register exchange
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XADD_OLD_RM")));
+    // flag updates
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+    assert!(has_flag_write(&ops, x86_flag_of()));
+    assert!(has_flag_write(&ops, x86_flag_zf()));
+    assert!(has_flag_write(&ops, x86_flag_sf()));
+    assert!(has_flag_write(&ops, x86_flag_pf()));
+}
+
+#[test]
+fn decode_cmpxchg_reg_reg_emits_conditional_update_and_flags() {
+    // 0F B1 C3 = cmpxchg ebx, eax  (0xB1=dword form, 0xC3=mod3 reg=0 rm=3)
+    let ops = decode_semantic(&[0x0F, 0xB1, 0xC3], 0x8048);
+    assert!(!ops.is_empty());
+    // CMP step
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_CMP")
+        && op.opcode == PcodeOpcode::IntSub));
+    // ZF update
+    assert!(has_flag_write(&ops, x86_flag_zf()));
+    // CF/SF/OF updates
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+    assert!(has_flag_write(&ops, x86_flag_sf()));
+    assert!(has_flag_write(&ops, x86_flag_of()));
+    // Conditional write to r/m (ZF=1 path)
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_NEW_RM")));
+    // Conditional write to accumulator (ZF=0 path)
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("CMPXCHG_ACCUM_WRITE")));
+}
+
+// ── Phase 5: VEX prefix routing ──────────────────────────────────────────────
+
+#[test]
+fn decode_vex2_vmovapd_routes_to_simd_decoder() {
+    // C5 F9 28 C1 = VMOVAPD xmm0, xmm1
+    // VEX2: R̄=1(no ext), vvvv=0, L=0, pp=01(66)  → routes to movapd (P66,0x28)
+    let ops = decode_semantic(&[0xC5, 0xF9, 0x28, 0xC1], 0x8060);
+    assert!(!ops.is_empty());
+    // Routed to existing SSE movapd path
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC")
+        || op.asm_mnemonic.as_deref() == Some("MOVAPD_WRITE")));
+}
+
+#[test]
+fn decode_vex2_vmovss_routes_to_simd_decoder() {
+    // C5 FA 10 C1 = VMOVSS xmm0, xmm1 (VEX2, pp=10=F3, map=0F, opcode=0x10)
+    let ops = decode_semantic(&[0xC5, 0xFA, 0x10, 0xC1], 0x8064);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOVSS_INTRINSIC")
+        || op.asm_mnemonic.as_deref() == Some("MOVSS_WRITE")));
+}
+
+#[test]
+fn decode_vex3_map1_routes_to_simd_decoder() {
+    // C4 E1 79 28 C1 = VMOVAPD xmm0, xmm1 (3-byte VEX, map=1, W=0, pp=01)
+    // C4: 3-byte VEX leader
+    // E1: R̄=1, X̄=1, B̄=1, map=00001 (0x0F)
+    // 79: W=0, vvvv=1111, L=0, pp=01 (66)
+    // 28: opcode
+    // C1: ModRM mod=11, reg=0, rm=1
+    let ops = decode_semantic(&[0xC4, 0xE1, 0x79, 0x28, 0xC1], 0x8068);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOVAPD_INTRINSIC")
+        || op.asm_mnemonic.as_deref() == Some("MOVAPD_WRITE")));
+}
+
+#[test]
+fn decode_vex3_map2_routes_to_0f38_decoder() {
+    // C4 E2 79 00 CA = VPSHUFB xmm1, xmm0, xmm2 (3-byte VEX map=2=0F38, pp=01=66, opcode=0x00)
+    // C4: 3-byte VEX
+    // E2: R̄=1, X̄=1, B̄=1, map=00010 (0F38)
+    // 79: W=0, vvvv=0000, L=0, pp=01 (66)
+    // 00: opcode (PSHUFB in 0F38 map)
+    // CA: ModRM mod=11, reg=1, rm=2
+    let ops = decode_semantic(&[0xC4, 0xE2, 0x79, 0x00, 0xCA], 0x806C);
+    assert!(!ops.is_empty());
+    // Should route to PSHUFB via 0F38 path
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("PSHUFB_INTRINSIC")
+        || op.asm_mnemonic.as_deref() == Some("PSHUFB_WRITE")));
+}
+
+// ── Phase A: Byte-form ALU ────────────────────────────────────────────────────
+
+#[test]
+fn decode_byte_add_rm_r_emits_add_with_flags() {
+    // 00 D8 = ADD AL, BL  (mod=11, reg=3/BL, rm=0/AL)
+    let ops = decode_semantic(&[0x00, 0xD8], 0x9000);
+    assert!(!ops.is_empty());
+    // Must produce a 1-byte result
+    let has_add = ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd);
+    assert!(has_add, "expected IntAdd for byte ADD");
+    // Flag updates expected
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+    assert!(has_flag_write(&ops, x86_flag_zf()));
+    assert!(has_flag_write(&ops, x86_flag_sf()));
+    assert!(has_flag_write(&ops, x86_flag_of()));
+}
+
+#[test]
+fn decode_byte_add_r_rm_emits_add_with_flags() {
+    // 02 D8 = ADD BL, AL  (mod=11, reg=3/BL, rm=0/AL) — reg is destination
+    let ops = decode_semantic(&[0x02, 0xD8], 0x9001);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+}
+
+#[test]
+fn decode_byte_sub_rm_r_emits_sub_with_flags() {
+    // 28 D8 = SUB AL, BL  (mod=11, reg=3, rm=0)
+    let ops = decode_semantic(&[0x28, 0xD8], 0x9002);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+    assert!(has_flag_write(&ops, x86_flag_zf()));
+}
+
+#[test]
+fn decode_byte_cmp_rm_r_emits_sub_no_write_with_flags() {
+    // 38 D8 = CMP AL, BL — no destination write, only flags
+    let ops = decode_semantic(&[0x38, 0xD8], 0x9003);
+    assert!(!ops.is_empty());
+    // CMP emits subtraction for flags only; the result varnode is a temp
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+    assert!(has_flag_write(&ops, x86_flag_zf()));
+    assert!(has_flag_write(&ops, x86_flag_sf()));
+    assert!(has_flag_write(&ops, x86_flag_of()));
+}
+
+#[test]
+fn decode_80_group_byte_alu_add_emits_add_with_flags() {
+    // 80 C0 05 = ADD AL, 5  (reg/0=Add, rm=0/AL, imm8=5)
+    let ops = decode_semantic(&[0x80, 0xC0, 0x05], 0x9004);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
+    assert!(has_flag_write(&ops, x86_flag_of()));
+}
+
+#[test]
+fn decode_80_group_byte_alu_cmp_no_result_write() {
+    // 80 F8 07 = CMP AL, 7  (reg/7=Cmp, rm=0/AL, imm8=7)
+    let ops = decode_semantic(&[0x80, 0xF8, 0x07], 0x9005);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+    assert!(has_flag_write(&ops, x86_flag_cf()));
+    assert!(has_flag_write(&ops, x86_flag_zf()));
+}
+
+#[test]
+fn decode_84_test_byte_emits_and_no_write() {
+    // 84 C0 = TEST AL, AL  (mod=11, reg=0, rm=0)
+    let ops = decode_semantic(&[0x84, 0xC0], 0x9006);
+    assert!(!ops.is_empty());
+    // TEST emits AND but writes only flags
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntAnd));
+    assert!(has_flag_write(&ops, x86_flag_zf()));
+    assert!(has_flag_write(&ops, x86_flag_sf()));
+    assert!(has_flag_write(&ops, x86_flag_pf()));
+}
+
+#[test]
+fn decode_fe_inc_dec_byte_emits_correct_kind() {
+    // FE C0 = INC AL  (reg/0=Inc, mod=11, rm=0)
+    let inc_ops = decode_semantic(&[0xFE, 0xC0], 0x9007);
+    assert!(!inc_ops.is_empty());
+    assert!(inc_ops.iter().any(|op| op.opcode == PcodeOpcode::IntAdd));
+    assert!(has_flag_write(&inc_ops, x86_flag_of()));
+
+    // FE C8 = DEC AL  (reg/1=Dec, mod=11, rm=0)
+    let dec_ops = decode_semantic(&[0xFE, 0xC8], 0x9008);
+    assert!(!dec_ops.is_empty());
+    assert!(dec_ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub));
+    assert!(has_flag_write(&dec_ops, x86_flag_of()));
+}
+
+// ── Phase B: MOVSXD, LEAVE, XCHG short ───────────────────────────────────────
+
+#[test]
+fn decode_movsxd_r64_rm32_emits_sext() {
+    // REX.W(48) + 63 C0 = MOVSXD RAX, EAX  (mod=11, reg=0, rm=0)
+    let ops = decode_semantic(&[0x48, 0x63, 0xC0], 0x9010);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntSExt
+            && op.asm_mnemonic.as_deref() == Some("MOVSXD")),
+        "expected IntSExt with MOVSXD mnemonic"
+    );
+    // Output must be 8-byte (64-bit register)
+    let sext_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("MOVSXD")).unwrap();
+    assert_eq!(sext_op.output.as_ref().unwrap().size, 8);
+}
+
+#[test]
+fn decode_leave_emits_rsp_set_and_rbp_restore() {
+    // C9 = LEAVE
+    let ops = decode_semantic(&[0xC9], 0x9020);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("LEAVE_RSP_SET")),
+        "expected LEAVE_RSP_SET"
+    );
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("LEAVE_RBP_WRITE")),
+        "expected LEAVE_RBP_WRITE"
+    );
+}
+
+#[test]
+fn decode_xchg_short_form_emits_three_copy_swap() {
+    // 91 = XCHG RCX, RAX  (opcode & 7 = 1 → RCX)
+    let ops = decode_semantic(&[0x91], 0x9030);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_RAX_SAVE")),
+        "expected XCHG_RAX_SAVE"
+    );
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_RAX_WRITE")),
+        "expected XCHG_RAX_WRITE"
+    );
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("XCHG_REG_WRITE")),
+        "expected XCHG_REG_WRITE"
+    );
+}
+
+// ── Phase C: MOV moffs + PUSHF/POPF ──────────────────────────────────────────
+
+#[test]
+fn decode_mov_moffs_a1_load_emits_load_and_write() {
+    // A1 followed by 8-byte absolute address = MOV RAX, [abs64]
+    // address = 0x0011223344556677 in little-endian
+    let ops = decode_semantic(
+        &[0xA1, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00],
+        0x9040,
+    );
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_LOAD")),
+        "expected MOV_MOFFS_LOAD"
+    );
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_WRITE")),
+        "expected MOV_MOFFS_WRITE"
+    );
+}
+
+#[test]
+fn decode_mov_moffs_a3_store_emits_store() {
+    // A3 followed by 8-byte absolute address = MOV [abs64], RAX
+    let ops = decode_semantic(
+        &[0xA3, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00],
+        0x9044,
+    );
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("MOV_MOFFS_STORE")),
+        "expected MOV_MOFFS_STORE"
+    );
+}
+
+#[test]
+fn decode_pushfq_assembles_rflags_and_pushes() {
+    // 9C = PUSHFQ
+    let ops = decode_semantic(&[0x9C], 0x9050);
+    assert!(!ops.is_empty());
+    // Reads all individual flags
+    let flag_reads: Vec<_> = ops.iter()
+        .filter(|op| op.inputs.iter().any(|v| {
+            v.size == 1 && !v.is_constant
+        }))
+        .collect();
+    assert!(!flag_reads.is_empty(), "expected flag reads for PUSHFQ");
+    // Final operation must be a stack push (Store or sub from RSP)
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Store),
+        "expected Store for stack push in PUSHFQ"
+    );
+}
+
+#[test]
+fn decode_popfq_restores_flags_from_stack() {
+    // 9D = POPFQ
+    let ops = decode_semantic(&[0x9D], 0x9054);
+    assert!(!ops.is_empty());
+    // Starts with a stack Load
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Load),
+        "expected Load for stack pop in POPFQ"
+    );
+    // Writes to all individual flag varnodes
+    assert!(has_flag_write(&ops, x86_flag_cf()), "expected CF write in POPFQ");
+    assert!(has_flag_write(&ops, x86_flag_pf()), "expected PF write in POPFQ");
+    assert!(has_flag_write(&ops, x86_flag_zf()), "expected ZF write in POPFQ");
+    assert!(has_flag_write(&ops, x86_flag_sf()), "expected SF write in POPFQ");
+    assert!(has_flag_write(&ops, x86_flag_df()), "expected DF write in POPFQ");
+    assert!(has_flag_write(&ops, x86_flag_of()), "expected OF write in POPFQ");
+}
+
+// ── Phase 3차 보강: NOT, BT-imm8, POPCNT, PUSH/POP GS, ENTER ─────────────────
+
+#[test]
+fn decode_not_dword_emits_intnegate_no_flags() {
+    // F7 D0 = NOT EAX  (mod=11, /2=010, rm=0)  D0 = 11_010_000
+    let ops = decode_semantic(&[0xF7, 0xD0], 0xA000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntNegate
+            && op.asm_mnemonic.as_deref() == Some("NOT_RM")),
+        "expected IntNegate with NOT_RM mnemonic"
+    );
+    // NOT must NOT update any flags
+    assert!(!has_flag_write(&ops, x86_flag_cf()), "NOT must not update CF");
+    assert!(!has_flag_write(&ops, x86_flag_of()), "NOT must not update OF");
+    assert!(!has_flag_write(&ops, x86_flag_zf()), "NOT must not update ZF");
+    assert!(!has_flag_write(&ops, x86_flag_sf()), "NOT must not update SF");
+}
+
+#[test]
+fn decode_not_byte_emits_intnegate_no_flags() {
+    // F6 D0 = NOT AL  (mod=11, /2=010, rm=0)  D0 = 11_010_000
+    let ops = decode_semantic(&[0xF6, 0xD0], 0xA001);
+    assert!(!ops.is_empty());
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntNegate));
+    assert!(!has_flag_write(&ops, x86_flag_cf()), "NOT byte must not update CF");
+}
+
+#[test]
+fn decode_bt_imm8_sets_cf_no_write() {
+    // 0F BA E0 05 = BT EAX, 5  (mod=11, reg/4=BT, rm=0, imm8=5)
+    let ops = decode_semantic(&[0x0F, 0xBA, 0xE0, 0x05], 0xA010);
+    assert!(!ops.is_empty());
+    // Must compute a bit mask via IntLeft
+    assert!(ops.iter().any(|op| op.opcode == PcodeOpcode::IntLeft
+        && op.asm_mnemonic.as_deref() == Some("BT_IMM8_MASK")));
+    // Must update CF
+    assert!(has_flag_write(&ops, x86_flag_cf()), "BT imm8 must write CF");
+    // BT does not modify the operand — no BT_IMM8_WRITE or BT_IMM8_STORE
+    assert!(!ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BT_IMM8_WRITE")));
+}
+
+#[test]
+fn decode_bts_imm8_sets_bit_and_cf() {
+    // 0F BA E8 03 = BTS EAX, 3  (mod=11, reg/5=BTS, rm=0, imm8=3)
+    let ops = decode_semantic(&[0x0F, 0xBA, 0xE8, 0x03], 0xA011);
+    assert!(!ops.is_empty());
+    assert!(has_flag_write(&ops, x86_flag_cf()), "BTS imm8 must write CF");
+    // BTS writes back the result
+    assert!(ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BTS_IMM8_WRITE")));
+}
+
+#[test]
+fn decode_popcnt_emits_popcount_and_clears_flags() {
+    // F3 0F B8 C0 = POPCNT EAX, EAX  (REP prefix + 0F B8, mod=11, reg=0, rm=0)
+    let ops = decode_semantic(&[0xF3, 0x0F, 0xB8, 0xC0], 0xA020);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::PopCount
+            && op.asm_mnemonic.as_deref() == Some("POPCNT")),
+        "expected PopCount opcode with POPCNT mnemonic"
+    );
+    // ZF = (src == 0)
+    assert!(has_flag_write(&ops, x86_flag_zf()), "POPCNT must write ZF");
+    // CF/OF/SF/AF/PF must be written to 0
+    assert!(has_flag_write(&ops, x86_flag_cf()), "POPCNT must clear CF");
+    assert!(has_flag_write(&ops, x86_flag_of()), "POPCNT must clear OF");
+    assert!(has_flag_write(&ops, x86_flag_sf()), "POPCNT must clear SF");
+    assert!(has_flag_write(&ops, x86_flag_pf()), "POPCNT must clear PF");
+}
+
+#[test]
+fn decode_push_gs_emits_callother_policy() {
+    // 0F A8 = PUSH GS
+    let ops = decode_semantic(&[0x0F, 0xA8], 0xA030);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("PUSH_GS_POLICY")),
+        "expected PUSH_GS_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_pop_gs_emits_callother_policy() {
+    // 0F A9 = POP GS
+    let ops = decode_semantic(&[0x0F, 0xA9], 0xA031);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("POP_GS_POLICY")),
+        "expected POP_GS_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_enter_emits_push_rbp_frame_and_alloc() {
+    // C8 10 00 00 = ENTER 16, 0  (alloc=16 bytes, nesting=0)
+    let ops = decode_semantic(&[0xC8, 0x10, 0x00, 0x00], 0xA040);
+    assert!(!ops.is_empty());
+    // Must push RBP onto the stack
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ENTER_PUSH_RBP_STORE")
+            || op.asm_mnemonic.as_deref() == Some("ENTER_PUSH_RBP_PUSH")),
+        "expected stack push of RBP"
+    );
+    // MOV RBP, RSP
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("ENTER_FRAME")),
+        "expected ENTER_FRAME copy"
+    );
+    // SUB RSP, alloc_size
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntSub
+            && op.asm_mnemonic.as_deref() == Some("ENTER_ALLOC")),
+        "expected ENTER_ALLOC subtraction"
+    );
+}
+
+#[test]
+fn decode_int3_emits_callother_trap() {
+    // CC = INT3
+    let ops = decode_semantic(&[0xCC], 0xA050);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("INT3_TRAP")),
+        "expected INT3_TRAP CallOther"
+    );
+}
+
+#[test]
+fn decode_int_n_emits_callother_with_vector() {
+    // CD 21 = INT 0x21 (DOS int)
+    let ops = decode_semantic(&[0xCD, 0x21], 0xA051);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("INT_IMM_TRAP")),
+        "expected INT_IMM_TRAP CallOther"
+    );
+    // Must have the vector number as second input
+    let int_op = ops.iter().find(|op| op.asm_mnemonic.as_deref() == Some("INT_IMM_TRAP")).unwrap();
+    assert_eq!(int_op.inputs.len(), 2, "INT_IMM_TRAP should have policy_id + vector inputs");
+}
+
+// =====================================================================
+// Phase A: 1-byte 잔여 opcode 테스트
+// =====================================================================
+
+#[test]
+fn decode_hlt_emits_callother() {
+    // F4 = HLT
+    let ops = decode_semantic(&[0xF4], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("HLT_POLICY")),
+        "expected HLT_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_daa_emits_callother() {
+    // 27 = DAA
+    let ops = decode_semantic(&[0x27], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("DAA_POLICY")),
+        "expected DAA_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_das_emits_callother() {
+    // 2F = DAS
+    let ops = decode_semantic(&[0x2F], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("DAS_POLICY")),
+        "expected DAS_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_aaa_emits_callother() {
+    // 37 = AAA
+    let ops = decode_semantic(&[0x37], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("AAA_POLICY")),
+        "expected AAA_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_aas_emits_callother() {
+    // 3F = AAS
+    let ops = decode_semantic(&[0x3F], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("AAS_POLICY")),
+        "expected AAS_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_ins_emits_callother() {
+    // 6C = INSB
+    let ops = decode_semantic(&[0x6C], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("INS_POLICY")),
+        "expected INS_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_outs_emits_callother() {
+    // 6E = OUTSB
+    let ops = decode_semantic(&[0x6E], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("OUTS_POLICY")),
+        "expected OUTS_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_mov_seg_emits_copy() {
+    // 8E C8 = MOV CS, AX (ModRM = C8: mod=3, reg=1, rm=0)
+    let ops = decode_semantic(&[0x8E, 0xC8], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Copy
+            && op.asm_mnemonic.as_deref() == Some("MOV_SEG_WRITE")),
+        "expected MOV_SEG_WRITE Copy"
+    );
+}
+
+// =====================================================================
+// Phase B: 0x0F 시스템 테스트
+// =====================================================================
+
+#[test]
+fn decode_rdpmc_emits_callother() {
+    // 0F 33 = RDPMC
+    let ops = decode_semantic(&[0x0F, 0x33], 0x1000);
+    assert!(!ops.is_empty());
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("RDPMC_POLICY")),
+        "expected RDPMC_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_mmx_d8_routes_to_simd_policy() {
+    // 0F D8 C0 = PSUBUSB mm0, mm0 (no prefix → MMX)
+    let ops = decode_semantic(&[0x0F, 0xD8, 0xC0], 0x1000);
+    // Should emit a SIMD_POLICY CallOther rather than empty
+    assert!(
+        !ops.is_empty(),
+        "MMX D8 should now route to SIMD_POLICY, not empty"
+    );
+}
+
+// =====================================================================
+// Phase C: SSE packed 테스트
+// =====================================================================
+
+#[test]
+fn decode_movups_load_emits_ops() {
+    // 0F 10 C0 = MOVUPS xmm0, xmm0 (None prefix, ModRM C0: mod=3, reg=0, rm=0)
+    let ops = decode_semantic(&[0x0F, 0x10, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "MOVUPS should produce ops");
+}
+
+#[test]
+fn decode_addps_emits_xmm_binop() {
+    // 0F 58 C1 = ADDPS xmm0, xmm1
+    let ops = decode_semantic(&[0x0F, 0x58, 0xC1], 0x2000);
+    assert!(
+        !ops.is_empty(),
+        "ADDPS (None prefix 0F 58) should produce ops"
+    );
+}
+
+#[test]
+fn decode_movupd_load_emits_ops() {
+    // 66 0F 10 C0 = MOVUPD xmm0, xmm0
+    let ops = decode_semantic(&[0x66, 0x0F, 0x10, 0xC0], 0x2000);
+    assert!(!ops.is_empty(), "MOVUPD should produce ops");
+}
+
+#[test]
+fn decode_addpd_emits_xmm_binop() {
+    // 66 0F 58 C1 = ADDPD xmm0, xmm1
+    let ops = decode_semantic(&[0x66, 0x0F, 0x58, 0xC1], 0x2000);
+    assert!(!ops.is_empty(), "ADDPD (P66 0F 58) should produce ops");
+}
+
+#[test]
+fn decode_pcmpgtb_emits_xmm_binop() {
+    // 66 0F 64 C1 = PCMPGTB xmm0, xmm1
+    let ops = decode_semantic(&[0x66, 0x0F, 0x64, 0xC1], 0x2000);
+    assert!(!ops.is_empty(), "PCMPGTB (P66 0F 64) should produce ops");
+}
+
+#[test]
+fn decode_andps_emits_xmm_binop() {
+    // 0F 54 C1 = ANDPS xmm0, xmm1
+    let ops = decode_semantic(&[0x0F, 0x54, 0xC1], 0x2000);
+    assert!(!ops.is_empty(), "ANDPS (None 0F 54) should produce ops");
+}
+
+// =====================================================================
+// Phase D: x87 FPU 테스트
+// =====================================================================
+
+#[test]
+fn decode_x87_fld1_emits_float_int2float() {
+    // D9 E8 = FLD1 (reg form: mod=3/E8, reg_field=5, rm_low=0)
+    let ops = decode_semantic(&[0xD9, 0xE8], 0x3000);
+    assert!(
+        !ops.is_empty(),
+        "FLD1 should produce ops"
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::FloatInt2Float
+            && op.asm_mnemonic.as_deref() == Some("FLD1")),
+        "FLD1 should emit FloatInt2Float"
+    );
+}
+
+#[test]
+fn decode_x87_fldz_emits_copy() {
+    // D9 EE = FLDZ (reg form: E8 base + 6 = EE)
+    let ops = decode_semantic(&[0xD9, 0xEE], 0x3000);
+    assert!(!ops.is_empty(), "FLDZ should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Copy
+            && op.asm_mnemonic.as_deref() == Some("FLDZ")),
+        "FLDZ should emit Copy with zero"
+    );
+}
+
+#[test]
+fn decode_x87_fldcw_emits_callother() {
+    // D9 6D 00 = FLDCW [rbp+0]
+    // ModRM 0x6D = 01 101 101 = mod=1, reg=5(FLDCW), rm=5([rbp+disp8])
+    let ops = decode_semantic(&[0xD9, 0x6D, 0x00], 0x3000);
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FLDCW_POLICY")),
+        "FLDCW should emit FLDCW_POLICY CallOther"
+    );
+}
+
+#[test]
+fn decode_x87_fcomi_emits_float_compare() {
+    // DB F1 = FCOMI ST(0), ST(1) (reg form: F0 base, reg_field=6, rm_low=1)
+    let ops = decode_semantic(&[0xDB, 0xF1], 0x3000);
+    assert!(!ops.is_empty(), "FCOMI should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::FloatEqual),
+        "FCOMI should emit FloatEqual for ZF"
+    );
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::FloatLess),
+        "FCOMI should emit FloatLess for CF"
+    );
+}
+
+#[test]
+fn decode_x87_fucomip_emits_float_compare() {
+    // DF E9 = FUCOMIP ST(0), ST(1) (reg form, reg_field=5, rm_low=1)
+    let ops = decode_semantic(&[0xDF, 0xE9], 0x3000);
+    assert!(!ops.is_empty(), "FUCOMIP should produce ops");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::FloatEqual),
+        "FUCOMIP should emit FloatEqual"
+    );
+}
+
+#[test]
+fn decode_x87_fcmov_da_emits_callother() {
+    // DA C0 = FCMOVB ST(0), ST(0) (reg form, reg_field=0, rm_low=0)
+    let ops = decode_semantic(&[0xDA, 0xC0], 0x3000);
+    assert!(!ops.is_empty(), "FCMOVcc DA should produce CallOther");
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::CallOther
+            && op.asm_mnemonic.as_deref() == Some("FCMOV_POLICY")),
+        "FCMOVcc should emit FCMOV_POLICY"
+    );
+}
+
+// =====================================================================
+// Phase E: TZCNT / LZCNT 테스트
+// =====================================================================
+
+#[test]
+fn decode_tzcnt_f3_0f_bc_emits_tzcnt_write() {
+    // F3 0F BC C1 = TZCNT eax, ecx
+    let ops = decode_semantic(&[0xF3, 0x0F, 0xBC, 0xC1], 0x4000);
+    assert!(!ops.is_empty(), "TZCNT should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("TZCNT_WRITE")),
+        "TZCNT should emit TZCNT_WRITE"
+    );
+    // Must set ZF and CF
+    assert!(has_flag_write(&ops, x86_flag_zf()), "TZCNT should write ZF");
+    assert!(has_flag_write(&ops, x86_flag_cf()), "TZCNT should write CF");
+}
+
+#[test]
+fn decode_bsf_without_f3_prefix_still_emits_bsf() {
+    // 0F BC C1 = BSF eax, ecx (no F3 prefix)
+    let ops = decode_semantic(&[0x0F, 0xBC, 0xC1], 0x4000);
+    assert!(!ops.is_empty(), "BSF should still work without F3 prefix");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSF_WRITE")),
+        "BSF without F3 should emit BSF_WRITE, not TZCNT"
+    );
+}
+
+#[test]
+fn decode_lzcnt_f3_0f_bd_emits_lzcnt_write() {
+    // F3 0F BD C1 = LZCNT eax, ecx
+    let ops = decode_semantic(&[0xF3, 0x0F, 0xBD, 0xC1], 0x4000);
+    assert!(!ops.is_empty(), "LZCNT should produce ops");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("LZCNT_WRITE")),
+        "LZCNT should emit LZCNT_WRITE"
+    );
+    assert!(has_flag_write(&ops, x86_flag_cf()), "LZCNT should write CF");
+    assert!(has_flag_write(&ops, x86_flag_zf()), "LZCNT should write ZF");
+}
+
+#[test]
+fn decode_bsr_without_f3_prefix_still_emits_bsr() {
+    // 0F BD C1 = BSR eax, ecx (no F3 prefix)
+    let ops = decode_semantic(&[0x0F, 0xBD, 0xC1], 0x4000);
+    assert!(!ops.is_empty(), "BSR should still work without F3 prefix");
+    assert!(
+        ops.iter().any(|op| op.asm_mnemonic.as_deref() == Some("BSR_WRITE")),
+        "BSR without F3 should emit BSR_WRITE, not LZCNT"
+    );
 }

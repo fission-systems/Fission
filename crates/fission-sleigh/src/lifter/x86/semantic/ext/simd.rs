@@ -222,6 +222,173 @@ pub(super) fn decode_simd_semantic(
         (SimdMandatoryPrefix::P66, 0xEF) => {
             decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PXOR")
         }
+
+        // Phase C1: None prefix SSE packed
+        (SimdMandatoryPrefix::None, 0x10) => {
+            decode_two_byte_xmm_mov_load(insn, op_idx, prefix, address, temp, seq, "MOVUPS")
+        }
+        (SimdMandatoryPrefix::None, 0x11) => {
+            decode_two_byte_xmm_mov_store(insn, op_idx, prefix, address, temp, seq, "MOVUPS")
+        }
+        (SimdMandatoryPrefix::None, 0x28) => {
+            decode_two_byte_xmm_mov_load(insn, op_idx, prefix, address, temp, seq, "MOVAPS")
+        }
+        (SimdMandatoryPrefix::None, 0x29) => {
+            decode_two_byte_xmm_mov_store(insn, op_idx, prefix, address, temp, seq, "MOVAPS")
+        }
+        (SimdMandatoryPrefix::None, 0x51) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "SQRTPS")
+        }
+        (SimdMandatoryPrefix::None, 0x54) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "ANDPS")
+        }
+        (SimdMandatoryPrefix::None, 0x55) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "ANDNPS")
+        }
+        (SimdMandatoryPrefix::None, 0x56) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "ORPS")
+        }
+        (SimdMandatoryPrefix::None, 0x57) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "XORPS")
+        }
+        (SimdMandatoryPrefix::None, 0x58) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "ADDPS")
+        }
+        (SimdMandatoryPrefix::None, 0x59) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "MULPS")
+        }
+        (SimdMandatoryPrefix::None, 0x5C) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "SUBPS")
+        }
+        (SimdMandatoryPrefix::None, 0x5D) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "MINPS")
+        }
+        (SimdMandatoryPrefix::None, 0x5E) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "DIVPS")
+        }
+        (SimdMandatoryPrefix::None, 0x5F) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "MAXPS")
+        }
+        // Phase C2: P66 prefix SSE2 packed 보완
+        (SimdMandatoryPrefix::P66, 0x10) => {
+            decode_two_byte_xmm_mov_load(insn, op_idx, prefix, address, temp, seq, "MOVUPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x11) => {
+            decode_two_byte_xmm_mov_store(insn, op_idx, prefix, address, temp, seq, "MOVUPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x51) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "SQRTPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x58) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "ADDPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x59) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "MULPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5C) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "SUBPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5D) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "MINPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5E) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "DIVPD")
+        }
+        (SimdMandatoryPrefix::P66, 0x5F) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "MAXPD")
+        }
+        // Phase C3: 자주 쓰이는 추가 SSE2 ops
+        (SimdMandatoryPrefix::P66, 0x60) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PUNPCKLBW")
+        }
+        (SimdMandatoryPrefix::P66, 0x61) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PUNPCKLWD")
+        }
+        (SimdMandatoryPrefix::P66, 0x62) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PUNPCKLDQ")
+        }
+        (SimdMandatoryPrefix::P66, 0x63) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PACKSSWB")
+        }
+        (SimdMandatoryPrefix::P66, 0x64) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PCMPGTB")
+        }
+        (SimdMandatoryPrefix::P66, 0x65) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PCMPGTW")
+        }
+        (SimdMandatoryPrefix::P66, 0x66) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PCMPGTD")
+        }
+        (SimdMandatoryPrefix::P66, 0x67) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PACKUSWB")
+        }
+        (SimdMandatoryPrefix::P66, 0x68) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PUNPCKHBW")
+        }
+        (SimdMandatoryPrefix::P66, 0x69) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PUNPCKHWD")
+        }
+        (SimdMandatoryPrefix::P66, 0x6A) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PUNPCKHDQ")
+        }
+        (SimdMandatoryPrefix::P66, 0x6B) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PACKSSDW")
+        }
+        (SimdMandatoryPrefix::P66, 0xD8) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PSUBUSB")
+        }
+        (SimdMandatoryPrefix::P66, 0xD9) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PSUBUSW")
+        }
+        (SimdMandatoryPrefix::P66, 0xDA) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PMINUB")
+        }
+        (SimdMandatoryPrefix::P66, 0xDC) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PADDUSB")
+        }
+        (SimdMandatoryPrefix::P66, 0xDD) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PADDUSW")
+        }
+        (SimdMandatoryPrefix::P66, 0xDE) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PMAXUB")
+        }
+        (SimdMandatoryPrefix::P66, 0xE0) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PAVGB")
+        }
+        (SimdMandatoryPrefix::P66, 0xE3) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PAVGW")
+        }
+        (SimdMandatoryPrefix::P66, 0xE4) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PMULHUW")
+        }
+        (SimdMandatoryPrefix::P66, 0xE5) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PMULHW")
+        }
+        (SimdMandatoryPrefix::P66, 0xEA) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PMINSW")
+        }
+        (SimdMandatoryPrefix::P66, 0xEE) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PMAXSW")
+        }
+        (SimdMandatoryPrefix::P66, 0xE8) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PSUBSB")
+        }
+        (SimdMandatoryPrefix::P66, 0xE9) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PSUBSW")
+        }
+        (SimdMandatoryPrefix::P66, 0xEC) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PADDSB")
+        }
+        (SimdMandatoryPrefix::P66, 0xED) => {
+            decode_two_byte_xmm_binop(insn, op_idx, prefix, address, temp, seq, "PADDSW")
+        }
+        // MOVMSKPS/MOVMSKPD
+        (SimdMandatoryPrefix::None, 0x50) => {
+            decode_two_byte_xmm_movmsk(insn, op_idx, prefix, size, address, temp, seq, "MOVMSKPS")
+        }
+        (SimdMandatoryPrefix::P66, 0x50) => {
+            decode_two_byte_xmm_movmsk(insn, op_idx, prefix, size, address, temp, seq, "MOVMSKPD")
+        }
         _ => decode_simd_policy(address, seq, ext),
     }
 }
@@ -808,6 +975,51 @@ pub(super) fn decode_two_byte_cvtt_scalar_to_si(
         output: Some(dst),
         inputs: vec![const_u64(policy_id, 8), src],
         asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+    });
+    ops
+}
+
+/// MOVMSKPS / MOVMSKPD: extract sign-mask bits from XMM → GPR (via CallOther intrinsic).
+fn decode_two_byte_xmm_movmsk(
+    insn: &[u8],
+    op_idx: usize,
+    prefix: &PrefixState,
+    gpr_size: u32,
+    address: u64,
+    temp: &mut X86TempFactory,
+    seq: &mut u32,
+    tag: &str,
+) -> Vec<PcodeOp> {
+    let mut ops = Vec::new();
+    let decoded = match decode_modrm_operand(insn, op_idx + 1, prefix, gpr_size, address, temp, &mut ops, seq) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let modrm = match insn.get(op_idx + 2) {
+        Some(v) => *v,
+        None => return Vec::new(),
+    };
+    let rm_index = u32::from(modrm & 0x7) + rex_b(prefix);
+    let src = x86_xmm_reg(rm_index, 16);
+    let dst = x86_reg(decoded.reg_index, gpr_size);
+    let out = temp.alloc(gpr_size);
+    let ext = insn[op_idx + 1];
+    let policy_id = simd_intrinsic_policy_id(classify_simd_prefix(prefix), ext);
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::CallOther,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![const_u64(policy_id, 8), src],
+        asm_mnemonic: Some(format!("{tag}_INTRINSIC")),
+    });
+    ops.push(PcodeOp {
+        seq_num: next_seq(seq),
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(dst),
+        inputs: vec![out],
+        asm_mnemonic: Some(format!("{tag}_WRITE")),
     });
     ops
 }

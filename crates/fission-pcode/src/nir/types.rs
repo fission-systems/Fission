@@ -146,6 +146,15 @@ pub struct NirBuildStats {
     pub loop_control_rewrite_continue_count: usize,
     #[serde(default)]
     pub loop_control_rewrite_skipped_nested_scope_count: usize,
+    /// How many while loops used the subgraph body lowering path (complex body with branches).
+    #[serde(default)]
+    pub loop_while_subgraph_lowered_count: usize,
+    /// How many Break statements were emitted via multi-exit CFG path (mid-body break).
+    #[serde(default)]
+    pub loop_multi_exit_break_count: usize,
+    /// How many for-loop patterns were recognised and emitted as HirStmt::For.
+    #[serde(default)]
+    pub loop_for_lowered_count: usize,
     #[serde(default)]
     pub promotion_candidate_count: usize,
     #[serde(default)]
@@ -279,6 +288,9 @@ impl NirBuildStats {
         self.loop_control_rewrite_continue_count += other.loop_control_rewrite_continue_count;
         self.loop_control_rewrite_skipped_nested_scope_count +=
             other.loop_control_rewrite_skipped_nested_scope_count;
+        self.loop_while_subgraph_lowered_count += other.loop_while_subgraph_lowered_count;
+        self.loop_multi_exit_break_count += other.loop_multi_exit_break_count;
+        self.loop_for_lowered_count += other.loop_for_lowered_count;
         self.promotion_candidate_count += other.promotion_candidate_count;
         self.promoted_region_count += other.promoted_region_count;
         self.promotion_rejected_by_shape_count += other.promotion_rejected_by_shape_count;

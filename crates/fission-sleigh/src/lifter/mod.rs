@@ -6,10 +6,9 @@ use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnod
 
 mod aarch64;
 mod backend;
-mod common;
 mod x86;
 
-use common::UNIQUE_SPACE_ID;
+use backend::common::UNIQUE_SPACE_ID;
 
 #[derive(Debug, Clone)]
 pub struct SleighLifter {
@@ -517,7 +516,7 @@ mod tests {
             all_ops.extend(block.ops.iter());
         }
 
-        let zf_offset = super::common::X86_EFLAGS_BASE + 6;
+        let zf_offset = x86::common::X86_EFLAGS_BASE + 6;
         assert!(all_ops.iter().any(|op| {
             op.address == 0x3000
                 && op

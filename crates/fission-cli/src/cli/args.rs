@@ -1,7 +1,14 @@
 //! Common CLI argument parsing utilities
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum FunctionDiscoveryProfileArg {
+    Conservative,
+    Balanced,
+    Aggressive,
+}
 
 /// Parse hexadecimal address string (supports 0x prefix)
 pub fn parse_hex_address(s: &str) -> Result<u64, String> {
@@ -121,6 +128,11 @@ pub struct OneShotArgs {
     /// Affects sleigh ID selection for architecture-specific analysis
     #[arg(long, value_name = "FORMAT")]
     pub format: Option<String>,
+
+    /// Function discovery profile (conservative|balanced|aggressive)
+    /// Applies additional function recovery passes after initial load.
+    #[arg(long, value_enum, value_name = "PROFILE")]
+    pub function_discovery_profile: Option<FunctionDiscoveryProfileArg>,
 
     /// Emit preview candidate inventory JSON for quality-corpus curation
     #[arg(long, hide = true)]

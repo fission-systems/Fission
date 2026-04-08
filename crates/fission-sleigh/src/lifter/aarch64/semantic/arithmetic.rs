@@ -1,6 +1,6 @@
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
-use super::super::super::common::{
+use super::super::common::{
 	a64_flag_c, a64_flag_n, a64_flag_v, a64_flag_z, a64_reg, const_u64, A64TempFactory,
 };
 
@@ -299,7 +299,7 @@ fn emit_nzcv_from_arith(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use super::super::super::super::common::A64_NZCV_BASE;
+	use super::super::super::common::A64_NZCV_BASE;
 
 	#[test]
 	fn decode_addi_without_flag_writes() {

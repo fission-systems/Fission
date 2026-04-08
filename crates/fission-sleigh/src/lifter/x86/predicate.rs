@@ -1,6 +1,6 @@
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
-use super::super::common::{x86_flag_cf, x86_flag_of, x86_flag_pf, x86_flag_sf, x86_flag_zf};
+use super::common::{x86_flag_cf, x86_flag_of, x86_flag_pf, x86_flag_sf, x86_flag_zf};
 
 pub(super) fn emit_jcc_predicate_with_allocator<F>(
     ops: &mut Vec<PcodeOp>,

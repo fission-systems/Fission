@@ -1,6 +1,6 @@
 use fission_pcode::{PcodeOp, PcodeOpcode};
 
-use super::super::super::common::{a64_reg, const_u64, sign_extend, A64TempFactory};
+use super::super::common::{a64_reg, const_u64, sign_extend, A64TempFactory};
 
 pub(super) fn decode_move_wide(
 	word: u32,

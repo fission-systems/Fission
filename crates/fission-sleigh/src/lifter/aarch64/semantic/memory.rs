@@ -1,6 +1,6 @@
 use fission_pcode::{PcodeOp, PcodeOpcode, Varnode};
 
-use super::super::super::common::{
+use super::super::common::{
 	a64_reg, const_u64, sign_extend, A64TempFactory, RAM_SPACE_ID,
 };
 

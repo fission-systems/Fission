@@ -1,3 +1,5 @@
+pub(super) mod common;
+
 use anyhow::{anyhow, bail, Context, Result};
 use fission_pcode::{PcodeOp, PcodeOpcode};
 
