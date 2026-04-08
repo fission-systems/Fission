@@ -7,13 +7,29 @@ use super::support::CallingConvention;
 pub type NirValueId = u32;
 pub type StackSlotId = u32;
 
+/// A single field in a recovered struct layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructField {
+    /// Byte offset from the start of the aggregate.
+    pub offset: u32,
+    /// Inferred type of the field (best-effort; may be Unknown).
+    pub ty: NirType,
+    /// Generated or surface name (e.g. "field_8", or from win_types lookup).
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NirType {
     Unknown,
     Bool,
     Int { bits: u32, signed: bool },
     Ptr(Box<NirType>),
-    Aggregate { size: u32 },
+    /// An opaque aggregate (struct/array-like) region.
+    ///
+    /// `size` is the total byte size.  `fields` is populated by
+    /// `aggregate_fields.rs` after pointer-arithmetic recovery; it is empty
+    /// until that pass runs.
+    Aggregate { size: u32, fields: Vec<StructField> },
     Float { bits: u32 },
 }
 

@@ -1435,8 +1435,9 @@ fn single_pred_label_inline_in_stmt(stmt: &mut HirStmt) -> bool {
 /// Core flat-list transformation: inline single-predecessor forward labels.
 fn single_pred_label_inline_flat(stmts: &mut Vec<HirStmt>) -> bool {
     let mut changed = false;
-    // Repeat until stable — each inlining may expose new opportunities.
-    loop {
+    // Each round removes at least one goto+label pair, so the loop terminates
+    // in at most O(label_count) iterations.  We cap at 512 as a safety guard.
+    for _ in 0..512 {
         // Build the global reference count for all labels.
         let ref_counts = collect_referenced_label_counts(stmts);
 

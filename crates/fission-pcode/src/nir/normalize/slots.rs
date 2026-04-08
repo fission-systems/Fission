@@ -666,7 +666,7 @@ pub(super) fn type_byte_size(ty: &NirType) -> Option<u32> {
         NirType::Bool => Some(1),
         NirType::Int { bits, .. } => Some(bits / 8),
         NirType::Ptr(_) => Some(8),
-        NirType::Aggregate { size } => Some(*size),
+        NirType::Aggregate { size, .. } => Some(*size),
         NirType::Float { bits } => Some(bits / 8),
         NirType::Unknown => None,
     }

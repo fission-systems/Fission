@@ -37,6 +37,20 @@ pub(super) fn collect_local_surface_hints(
 }
 
 impl<'a> PreviewBuilder<'a> {
+    /// Resolve a block index (which may be a virtual split node) to the
+    /// corresponding P-code block index.  Virtual blocks (index ≥ pcode.blocks.len())
+    /// are created by node-splitting and share content with the original block.
+    #[inline]
+    pub(crate) fn pcode_block_idx(&self, idx: usize) -> usize {
+        let original_count = self.pcode.blocks.len();
+        if idx < original_count {
+            idx
+        } else {
+            let v_idx = idx - original_count;
+            self.virtual_block_map.get(v_idx).copied().unwrap_or(idx % original_count.max(1))
+        }
+    }
+
     pub(super) fn build_hir(
         &mut self,
         name: &str,

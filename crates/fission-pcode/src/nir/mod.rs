@@ -13,6 +13,7 @@ mod telemetry;
 #[cfg(test)]
 mod tests;
 mod types;
+mod vsa;
 
 pub(super) use self::support::*;
 pub use self::support::CallingConvention;

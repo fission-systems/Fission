@@ -1,4 +1,5 @@
 use super::cleanup::{cleanup_redundant_labels, eliminate_redundant_gotos};
+use super::irreducible::compute_node_splits;
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
@@ -10,6 +11,36 @@ impl<'a> PreviewBuilder<'a> {
         self.structuring_scc_component_count += scc.component_count();
         self.structuring_irreducible_scc_count += scc.irreducible_count();
         self.structuring_irreducible_header_count += scc.irreducible_header_total_count();
+
+        // Node-splitting for irreducible CFGs: when the SCC analysis shows
+        // irreducible SCCs, attempt to make the CFG reducible by splitting
+        // the extra header nodes into virtual clones.  This allows the
+        // structured-code reducer to succeed where it would otherwise fall
+        // back to goto-based linearisation.
+        if scc.irreducible_count() > 0 && !force_linear {
+            let block_stmt_counts: Vec<usize> = self
+                .pcode
+                .blocks
+                .iter()
+                .map(|b| b.ops.len())
+                .collect();
+            if let Some(split) = compute_node_splits(
+                &self.successors,
+                &self.predecessors,
+                &block_stmt_counts,
+            ) {
+                if diag {
+                    eprintln!(
+                        "[DIAG] node-splitting: applied {} splits, virtual_blocks={}",
+                        split.splits_applied,
+                        split.virtual_to_original.len()
+                    );
+                }
+                self.successors = split.new_successors;
+                self.predecessors = split.new_predecessors;
+                self.virtual_block_map = split.virtual_to_original;
+            }
+        }
         if diag {
             eprintln!(
                 "[DIAG] structuring start: blocks={} edges={} force_linear={}",
@@ -33,13 +64,15 @@ impl<'a> PreviewBuilder<'a> {
 
         // Dom and postdom are computed unconditionally and used by the primary reducer to
         // determine follow blocks.  The diag path additionally logs edge-class statistics.
+        // NOTE: These are computed AFTER node-splitting so they reflect the augmented CFG.
         let dom = self.analyze_cfg_dominators();
         let postdom = self.analyze_cfg_postdominators();
 
         if diag {
             let cfg = self.analyze_cfg_edges();
-            let sample_ncd = if self.pcode.blocks.len() >= 2 {
-                dom.nearest_common_dominator(&[0, self.pcode.blocks.len() - 1])
+            let total_b = self.pcode.blocks.len() + self.virtual_block_map.len();
+            let sample_ncd = if total_b >= 2 {
+                dom.nearest_common_dominator(&[0, total_b - 1])
             } else {
                 Some(0)
             };
@@ -63,12 +96,12 @@ impl<'a> PreviewBuilder<'a> {
         // O(depth) LCA queries.
         let imm_postdom = self.analyze_cfg_imm_postdominators();
 
-        // Pre-compute nearest common postdominator ("follow block") for each block.
-        // For 2-way conditional branches this is the join point of the two arms.
-        // Blocks with < 2 successors have no follow candidate, so `None` is stored.
-        let follow_blocks: Vec<Option<usize>> = (0..self.pcode.blocks.len())
+        // Pre-compute nearest common postdominator ("follow block") for each block,
+        // including any virtual blocks created by node-splitting.
+        let total_blocks_for_follow = self.pcode.blocks.len() + self.virtual_block_map.len();
+        let follow_blocks: Vec<Option<usize>> = (0..total_blocks_for_follow)
             .map(|i| {
-                let succs = &self.successors[i];
+                let succs = self.successors.get(i)?;
                 if succs.len() < 2 {
                     return None;
                 }
@@ -87,7 +120,9 @@ impl<'a> PreviewBuilder<'a> {
         let mut emitted_labels = HashSet::new();
         let mut last_structuring_failure = None;
         let mut idx = 0usize;
-        while idx < self.pcode.blocks.len() {
+        // Total blocks = original pcode blocks + any virtual split nodes.
+        let total_blocks = self.pcode.blocks.len() + self.virtual_block_map.len();
+        while idx < total_blocks {
             if diag && idx > 0 && idx % 32 == 0 {
                 eprintln!(
                     "[DIAG] structuring progress: idx={} elapsed={:.3}s",
@@ -95,11 +130,12 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
+            let pcode_idx = self.pcode_block_idx(idx);
             if diag {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=switch elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -116,7 +152,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=for elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -133,7 +169,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=dowhile elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -150,7 +186,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=while elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -167,7 +203,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=loop_control elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -184,7 +220,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=infloop elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -201,7 +237,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=multiblock_infloop elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -218,7 +254,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=short_if elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -235,13 +271,13 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=if_else_follow elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
             // Postdominance-guided if-then-else: try before the heuristic variant.
             if let Some((stmt, skip_to)) = Self::capture_structuring_failure(
-                self.try_reduce_if_else_with_follow(idx, follow_blocks[idx]),
+                self.try_reduce_if_else_with_follow(idx, follow_blocks.get(idx).copied().flatten()),
                 &mut last_structuring_failure,
             )? && self.accept_structured_region(idx, skip_to, &targeted)
             {
@@ -253,7 +289,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=if_else elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -270,7 +306,7 @@ impl<'a> PreviewBuilder<'a> {
                 eprintln!(
                     "[DIAG] structuring idx={} block=0x{:x} attempt=if elapsed={:.3}s",
                     idx,
-                    self.pcode.blocks[idx].start_address,
+                    self.pcode.blocks[pcode_idx].start_address,
                     total_start.elapsed().as_secs_f64()
                 );
             }
@@ -297,7 +333,8 @@ impl<'a> PreviewBuilder<'a> {
                 return Err(err);
             }
 
-            let block = &self.pcode.blocks[idx];
+            let pcode_idx_fallback = self.pcode_block_idx(idx);
+            let block = &self.pcode.blocks[pcode_idx_fallback];
             let block_key = self.block_target_key(idx);
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
                 body.push(HirStmt::Label(block_label(block_key)));
@@ -319,7 +356,7 @@ impl<'a> PreviewBuilder<'a> {
                     total_start.elapsed().as_secs_f64()
                 );
             }
-            match self.lower_block_terminator(idx)? {
+            match self.lower_block_terminator(pcode_idx_fallback)? {
                 LoweredTerminator::Return(expr) => body.push(HirStmt::Return(expr)),
                 LoweredTerminator::Goto(target) => {
                     if self.next_block_address(idx) != Some(target) {

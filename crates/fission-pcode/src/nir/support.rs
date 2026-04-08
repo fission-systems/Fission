@@ -188,7 +188,7 @@ pub(crate) fn type_from_size(size: u32, signed: bool) -> NirType {
         2 => NirType::Int { bits: 16, signed },
         4 => NirType::Int { bits: 32, signed },
         8 => NirType::Int { bits: 64, signed },
-        16 | 24 | 32 => NirType::Aggregate { size },
+        16 | 24 | 32 => NirType::Aggregate { size, fields: vec![] },
         _ => NirType::Unknown,
     }
 }
@@ -401,6 +401,6 @@ pub(crate) fn expr_type(expr: &HirExpr) -> NirType {
         | HirExpr::Index { elem_ty: ty, .. } => ty.clone(),
         HirExpr::Cast { ty, .. } => ty.clone(),
         HirExpr::PtrOffset { .. } => NirType::Ptr(Box::new(NirType::Unknown)),
-        HirExpr::AggregateCopy { size, .. } => NirType::Aggregate { size: *size },
+        HirExpr::AggregateCopy { size, .. } => NirType::Aggregate { size: *size, fields: vec![] },
     }
 }

@@ -17,6 +17,11 @@ use super::defuse::{constant_folding_pass, defuse_dead_assignment_pass};
 use super::phi_recovery::{copy_propagation_pass, join_coalescing_pass};
 use super::flag_recovery::apply_flag_recovery_pass;
 use super::prologue::remove_callee_save_prologue_epilogue;
+use super::aggregate_fields::apply_aggregate_fields_pass;
+use super::callsite_type_prop::apply_callsite_type_prop_pass;
+use super::dead_store::apply_dead_store_elimination;
+use super::iv_recovery::{apply_break_continue_pass, apply_iv_recovery_pass};
+use crate::nir::vsa::apply_jump_resolver_pass;
 use super::type_infer::apply_type_inference_pass;
 use super::use_type_infer::apply_use_driven_type_infer_pass;
 use super::ptr_arith::apply_ptr_arith_recovery_pass;
@@ -97,6 +102,13 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
     // Binary, …) to NirBinding.ty for locals/params that are still Unknown,
     // and re-derive the function return type for `return <var>` patterns.
     apply_type_inference_pass(func);
+    // Call-site inter-procedural type propagation: look up callee signatures
+    // in the Windows API database and constrain argument / return-value bindings.
+    // Runs right after def-driven inference so that the API-derived types
+    // become seeds for the subsequent use-driven backward pass.
+    if apply_callsite_type_prop_pass(func) {
+        apply_type_inference_pass(func);
+    }
     // Use-driven backward type propagation: infer pointer/sign types from
     // use-sites (Load/Store/signed comparisons/Return context).  Runs after
     // def-driven inference so its results can seed additional constraints.
@@ -168,6 +180,17 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         cleanup_stmt_list(&mut func.body, &func.name, 0);
         defuse_dead_assignment_pass(func);
     }
+    // Memory SSA dead store elimination: remove stack-slot stores that are
+    // never observed by any subsequent load.  Must run after ptr_arith_recovery
+    // so Deref/PtrOffset patterns are normalised, and before aggregate_fields.
+    if apply_dead_store_elimination(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        defuse_dead_assignment_pass(func);
+    }
+    // Aggregate field layout recovery: collect PtrOffset access offsets on
+    // Ptr(Aggregate) variables and annotate the aggregate type with named
+    // StructFields.  Must run after ptr_arith_recovery so PtrOffset nodes exist.
+    apply_aggregate_fields_pass(func);
     // Single-predecessor label inlining: reduce goto/label pairs by inlining
     // blocks that are targeted by exactly one forward unconditional goto.
     // Runs last so all other structural passes have already had their say.
@@ -176,6 +199,28 @@ pub(super) fn normalize_hir_function(func: &mut HirFunction) {
         super::for_loops::apply_for_loop_folding(&mut func.body);
         prune_unused_temp_bindings(func);
         prune_unused_dead_local_bindings(func);
+    }
+    // Loop IV recovery (SCEV-lite): upgrade While → For for linear induction
+    // variables.  Runs after label inlining so the loop body is maximally
+    // simplified first.
+    if apply_iv_recovery_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // Break/Continue recovery: replace single-predecessor Goto-to-exit-label
+    // patterns inside loops with explicit break/continue statements.
+    if apply_break_continue_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        prune_unused_temp_bindings(func);
+        prune_unused_dead_local_bindings(func);
+    }
+    // Value Set Analysis: use range information to eliminate dead switch
+    // cases and constant-condition branches.  Runs last so all structural
+    // passes have already simplified the body.
+    if apply_jump_resolver_pass(func) {
+        cleanup_stmt_list(&mut func.body, &func.name, 0);
+        prune_unused_temp_bindings(func);
     }
     if diag {
         eprintln!(

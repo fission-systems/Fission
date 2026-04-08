@@ -130,6 +130,10 @@ fn try_collapse_while_to_for_algorithmic(
     Some((inits, cond, update, body, consumed_idx))
 }
 
+pub(super) fn stmt_list_contains_continue_pub(stmts: &[HirStmt]) -> bool {
+    stmt_list_contains_continue(stmts)
+}
+
 fn stmt_list_contains_continue(stmts: &[HirStmt]) -> bool {
     for stmt in stmts {
         match stmt {

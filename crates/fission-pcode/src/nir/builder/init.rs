@@ -93,6 +93,7 @@ impl<'a> PreviewBuilder<'a> {
             predecessors,
             dom_tree,
             irreducible_edges,
+            virtual_block_map: Vec::new(),
             loop_bodies,
             params: BTreeMap::new(),
             locals: BTreeMap::new(),

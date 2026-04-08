@@ -16,7 +16,7 @@ fn preview_type_hints_surface_known_pointer_alias_on_param() {
             },
             NirBinding {
                 name: "param_2".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
@@ -71,7 +71,7 @@ fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
             },
             NirBinding {
                 name: "param_2".to_string(),
-                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
                 surface_type_name: None,
                 origin: None,
                 initializer: None,
@@ -85,7 +85,7 @@ fn preview_type_hints_surface_known_pointer_alias_through_wrapper_cast() {
             args: vec![
                 HirExpr::Var("param_1".to_string()),
                 HirExpr::Cast {
-                    ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16 })),
+                    ty: NirType::Ptr(Box::new(NirType::Aggregate { size: 16, fields: vec![] })),
                     expr: Box::new(HirExpr::PtrOffset {
                         base: Box::new(HirExpr::Var("param_2".to_string())),
                         offset: 0,

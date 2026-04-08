@@ -1471,6 +1471,7 @@ dependencies = [
  "fission-core",
  "fission-disasm",
  "fission-loader",
+ "fission-signatures",
  "iced-x86",
  "log",
  "lru",

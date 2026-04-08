@@ -6,6 +6,7 @@ mod cleanup;
 mod conditionals;
 mod driver;
 mod guarded_tail;
+pub(super) mod irreducible;
 mod linear;
 mod loops;
 mod recovery;

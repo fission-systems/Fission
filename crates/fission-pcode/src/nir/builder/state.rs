@@ -21,6 +21,9 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) predecessors: Vec<Vec<usize>>,
     pub(crate) dom_tree: crate::nir::structuring::DomTree,
     pub(crate) irreducible_edges: HashSet<(usize, usize)>,
+    /// For virtual blocks created by node-splitting: maps virtual_idx → original pcode block idx.
+    /// Empty when no splitting has been applied (all blocks are genuine pcode blocks).
+    pub(crate) virtual_block_map: Vec<usize>,
     pub(crate) loop_bodies: Vec<crate::nir::structuring::loop_analysis::LoopBody>,
     pub(crate) params: BTreeMap<usize, NirBinding>,
     pub(crate) locals: BTreeMap<i64, StackSlot>,

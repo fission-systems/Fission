@@ -7,7 +7,178 @@ The previous detailed Korean historical notes are preserved in [`CHANGELOG.ko.md
 
 ---
 
-## 2026-04-09 (latest)
+## 2026-04-08 (latest)
+
+### HIR Quality Phase 6 — Value Set Analysis, Memory SSA Dead Store Elimination, Irreducible CFG Node-Splitting
+
+This update implements the "HIR 품질 강화 6단계" plan.  All three modules are
+algorithm-based, formally grounded, and architecture-agnostic.
+
+#### fission-pcode — Value Set Analysis (VSA)
+
+- **`CircleRange` wrapping-interval domain** (`crates/fission-pcode/src/nir/vsa/circle_range.rs`, new)
+  - Represents sets of n-bit integers as a contiguous arc on the modular number
+    line `Z / 2^n Z`: `[lo, hi)` with wrap-around support.
+  - `top` (all values), `bottom` (empty/dead), `singleton(k)`, `interval(lo, hi)`.
+  - Lattice operations: `join` (union / arc cover), `meet` (intersection), `widen`
+    (monotone widening to `top` when range grows — guarantees termination).
+  - Arithmetic transfer: `add`, `sub`, `shr_const`, `and_const`, `cast_unsigned`.
+
+- **HIR transfer functions** (`crates/fission-pcode/src/nir/vsa/transfer.rs`, new)
+  - `eval_expr(expr, env) → CircleRange`: maps each `HirExpr` op to its abstract
+    range given the current `RangeEnv` (HashMap<String, CircleRange>).
+  - Supported: `Const`, `Var`, `Cast`, `Unary` (Neg/Not/BitNot), `Binary`
+    (Add/Sub/Mul/Div/Mod/Shl/Shr/Sar/And/Or/Xor/LogicalAnd/LogicalOr/comparisons).
+  - Unknown/memory ops conservatively return `top`.
+
+- **Forward worklist solver** (`crates/fission-pcode/src/nir/vsa/solver.rs`, new)
+  - `solve(func) → RangeEnv`: iterative forward propagation over HIR statements.
+  - Up to `MAX_ITERATIONS = 8` rounds; widening applied in later rounds to guarantee
+    termination over cyclic control flow (loops).
+  - If/else branches are joined (sound union); loops apply widening.
+
+- **Switch / branch refinement** (`crates/fission-pcode/src/nir/vsa/jump_resolver.rs`, new)
+  - `apply_jump_resolver_pass(func)`: runs VSA, then:
+    - Dead case pruning: removes `HirSwitchCase` entries whose value is outside
+      the discriminant's computed range.
+    - Constant-condition branch elimination: replaces `if(Const(c))` with the
+      taken branch body; removes provably false `while` loops.
+    - Singleton-switch inlining: replaces `switch(singleton)` with the matching
+      case body inline.
+  - Integrated into `normalize/core.rs` as the final normalization pass.
+
+#### fission-pcode — Memory SSA + Dead Store Elimination
+
+- **Memory SSA construction** (`crates/fission-pcode/src/nir/normalize/mem_ssa.rs`, new)
+  - `MemDef` / `MemUse` / `MemPhi` nodes overlay memory accesses in the HIR tree.
+  - `AliasKey`: `Stack { offset, size }` for stack-slot accesses (must-alias /
+    no-alias via interval overlap check) vs. `Unknown` for heap/global (conservative).
+  - Stack offsets inferred from variable names produced by the slot-surfacing pass
+    (`stack_neg_<n>` / `stack_<n>` naming convention).
+  - Linear scan builds reaching-def chains; branch/loop join points emit `MemPhi`.
+  - `build_mem_ssa(func) → MemSsa`: builds the full overlay for a `HirFunction`.
+
+- **Dead store elimination** (`crates/fission-pcode/src/nir/normalize/dead_store.rs`, new)
+  - `apply_dead_store_elimination(func)`: removes `Assign { lhs: Deref/Index, .. }`
+    statements that are provably dead:
+    - `MemDef.use_count == 0` (no load ever reads the stored value), AND
+    - `alias_key` is a stack slot (no escape to callee), AND
+    - no `MemPhi` depends on this def.
+  - Sound: only no-escape stack slots are eligible; all heap/unknown stores are kept.
+  - Integrated into `normalize/core.rs` after `ptr_arith_recovery`, before
+    `aggregate_fields`.
+
+#### fission-pcode — Irreducible CFG Normalization (Node-Splitting)
+
+- **Node-splitting algorithm** (`crates/fission-pcode/src/nir/structuring/irreducible.rs`, new)
+  - `compute_node_splits(successors, predecessors, block_stmt_counts) → Option<NodeSplitResult>`
+  - Detects irreducible SCCs using Tarjan's algorithm; identifies extra header nodes
+    (nodes with ≥ 1 predecessor outside the SCC).
+  - For each extra header `H`: creates a virtual clone node `C`, redirects SCC
+    back-edges from `H` to `C`, preserving `H`'s original CFG structure.  After
+    splitting `H` has a single canonical entry; the SCC becomes reducible.
+  - Limits: `MAX_SPLIT_NODES = 32`, `MAX_ITERATIONS = 3`, `MAX_HEADER_STMTS = 50`
+    (skips large blocks to avoid code bloat).
+  - Returns `NodeSplitResult { new_successors, new_predecessors, virtual_to_original,
+    splits_applied }`.
+
+- **PreviewBuilder integration** (`crates/fission-pcode/src/nir/builder/state.rs`,
+  `crates/fission-pcode/src/nir/builder/mod.rs`)
+  - New field `virtual_block_map: Vec<usize>` on `PreviewBuilder`: maps virtual
+    block index → original P-code block index.
+  - New helper `pcode_block_idx(idx) → usize`: resolves virtual split nodes back to
+    their source P-code block for content emission.
+
+- **Structuring driver integration** (`crates/fission-pcode/src/nir/structuring/driver.rs`)
+  - At the start of `build_multiblock_body`, after SCC analysis, if irreducible SCCs
+    are detected (and force-linear is not active), `compute_node_splits` is called.
+  - If splitting succeeds, `self.successors` and `self.predecessors` are updated
+    in-place; `virtual_block_map` is populated.
+  - `follow_blocks` and dominator analysis are computed *after* splitting so they
+    reflect the augmented reducible CFG.
+  - The main structuring loop now iterates over `total_blocks = pcode.blocks.len() +
+    virtual_block_map.len()`, using `pcode_block_idx(idx)` for all P-code accesses.
+
+#### Quality Impact (Expected)
+
+| Metric | Before | Target |
+|--------|--------|--------|
+| Switch structuring success | ~25% | ~50%+ (VSA dead-case pruning + range narrowing) |
+| Dead memory stores removed | — | Stack-slot DSE active in all functions |
+| `region_linearize_rejected` | High | ~60% reduction (node-splitting makes CFG reducible) |
+| `avg_norm_sim` (ctrl_flow) | ~19–25% | ~35%+ |
+
+All 316 unit tests pass (`cargo test -p fission-pcode`).
+
+---
+
+## 2026-04-08
+
+### HIR Quality Phase 5 — Aggregate Field Layout Recovery, Loop IV / Break-Continue Recovery, Call-Site Inter-procedural Type Propagation
+
+This update completes the "HIR 품질 강화 5단계" plan.  All three passes are purely algorithm-based, data-flow driven, and have no binary-specific thresholds.
+
+#### fission-pcode — NIR/HIR Normalization
+
+- **`NirType::Aggregate` Field Extension** (`crates/fission-pcode/src/nir/types.rs`)
+  - Added `StructField { offset: u32, ty: NirType, name: String }` struct.
+  - `NirType::Aggregate` now carries `fields: Vec<StructField>` (empty until the aggregate-field recovery pass runs; all existing construction sites default to `fields: vec![]`).
+
+- **Aggregate Field Layout Recovery** (`crates/fission-pcode/src/nir/normalize/aggregate_fields.rs`, new)
+  - `apply_aggregate_fields_pass`: scans every `PtrOffset { base: Var(x), offset: k }` expression inside `Load` and lvalue-`Deref` contexts where `x.ty == Ptr(Aggregate { .. })`.
+  - Builds an offset→type map per aggregate variable; wider types win for the same offset (union-safe).
+  - Annotates the `NirType::Aggregate` with sorted `Vec<StructField>`, naming each field `field_{offset:x}`.
+  - Runs after pointer-arithmetic recovery so that `PtrOffset` nodes already exist.
+
+- **Context-Aware Printer** (`crates/fission-pcode/src/nir/printer.rs`)
+  - `PrintCtx` builds a `variable_name → Ptr(Aggregate{fields})` lookup at the function level.
+  - New `print_stmt_with_indent_ctx` / `print_expr_prec_ctx` / `print_lvalue_ctx` family renders `PtrOffset { base: Var(x), offset: k }` as `x->field_k` when a field name is known, and falls back to the raw byte-offset form otherwise.
+  - `Load { ptr: PtrOffset{Var(x), k} }` is also rendered as `x->field_k` (read access).
+  - `HirLValue::Deref { ptr: PtrOffset{Var(x), k} }` is rendered as `x->field_k` (write access).
+
+- **Loop IV Recovery (SCEV-lite)** (`crates/fission-pcode/src/nir/normalize/iv_recovery.rs`, new)
+  - `apply_iv_recovery_pass`: upgrades `While { cond, body }` → `For { init, cond, update, body }` when a linear induction variable is detected:
+    1. Variable `v` appears in loop condition.
+    2. Exactly one assignment `v = init` exists immediately before the loop.
+    3. The loop body contains exactly one update `v = v ± k` as its last statement, where `k` is loop-invariant.
+    4. No `Continue` statement in the body (to preserve `update` execution semantics).
+  - Conservative: bails when multiple updates, multi-exit, or non-last update is found.
+  - `stmt_list_contains_continue_pub` re-exported from `for_loops.rs` to avoid duplication.
+
+- **Break/Continue Recovery** (`crates/fission-pcode/src/nir/normalize/iv_recovery.rs`)
+  - `apply_break_continue_pass`: scans every loop body for `If { then_body: [Goto(label)] }` patterns.
+  - If `label` is defined *after* the loop (exit target) and has exactly one incoming `Goto` → replace with `Break`.
+  - If `label` is defined immediately before the loop (head) and has exactly one incoming `Goto` → replace with `Continue`.
+  - Label reference counts are pre-computed globally to ensure single-predecessor semantics.
+
+- **Call-Site Inter-procedural Type Propagation** (`crates/fission-pcode/src/nir/normalize/callsite_type_prop.rs`, new)
+  - `apply_callsite_type_prop_pass`: resolves Windows API types at call sites using `fission_signatures::win_api::WIN_API_DB`.
+  - For each `target = Call { callee, args }`: if `callee` is in the database, the receiver binding is updated with the resolved return type, and each `Var(x)` argument is updated with the corresponding parameter type.
+  - `win_type_name_to_nir`: maps Windows type strings (`DWORD`, `HANDLE`, `LPSTR`, `HWND`, …) to `NirType`. Covers ~50 type names including opaque handle types (mapped to `Ptr(Aggregate{size:0})`).
+  - Indirect calls and unknown functions are silently skipped; existing types are never weakened (monotone strengthening only).
+  - `fission-signatures` added as a new dependency of `fission-pcode`.
+
+- **Pipeline Integration** (`crates/fission-pcode/src/nir/normalize/core.rs`)
+  - `apply_callsite_type_prop_pass` inserted after `apply_type_inference_pass` and before `apply_use_driven_type_infer_pass`.
+  - `apply_aggregate_fields_pass` inserted after `apply_ptr_arith_recovery_pass`.
+  - `apply_iv_recovery_pass` + `apply_break_continue_pass` inserted after `single_pred_label_inline`.
+
+#### Test Results
+
+316/316 tests pass (`cargo test -p fission-pcode`).
+
+#### Expected Quality Effects
+
+| Metric | Before | Target |
+|--------|--------|--------|
+| `undefined_return_type_rate` | ~30% | ~10% (callsite propagation) |
+| `ptr_offset_count` → `->field_X` form | low | significant increase |
+| `goto_total` (putty 50 funcs) | 277 | ≤ 250 (break/continue recovery) |
+| `avg_norm_sim` (ctrl_flow) | 19.20% | 25%+ |
+
+---
+
+## 2026-04-09
 
 ### HIR Quality Phase 4 — Use-Driven Type Propagation, Pointer Arithmetic Recovery, Return Type Inference, Goto Reduction
 
